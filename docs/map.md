@@ -40,6 +40,7 @@ Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.m
 | `push.ts` | Web Push without dependencies (RFC 8291, 8292) |
 | `export.ts` | A session as Markdown |
 | `errors.ts`, `paths.ts` | `HttpError` and input checks; `~` paths |
+| `omarchy.ts` | The Omarchy desktop's current theme and wallpaper, read-only, for Follow desktop (`/api/theme`) |
 
 ## Extensions: `src/server/extensions/`
 
@@ -50,16 +51,19 @@ Each default-exports `(host: PocketHost) => Extension | Extension[]` and is inst
 | File | Owns |
 | --- | --- |
 | `store.js` | State, the event stream (SSE, or long polling when a tunnel holds it back), `api()`, `actions` |
-| `app.js` | Layout, top bar, routing |
+| `app.js` | Layout (tiled windows), top bar, notices, keyboard shortcuts, routing |
 | `transcript.js` | Messages, tool cards, approvals, breadcrumbs |
 | `composer.js` | Message box, chips, plan and goal bars |
 | `commands.js` | Slash commands and prompt templates |
 | `sheets.js` | The menu and every sheet |
 | `chat.js` | People panel: chat, pins, notes |
-| `sessions.js` | Session list, sign-in |
+| `sessions.js` | Session list (sidebar, drawer), the folded rail, the wide home screen, sign-in |
 | `notify.js`, `sw.js` | Push, the icon badge, approvals from notifications, shares |
 | `share.js` | Share to Pi |
-| `ui.js` | htm binding, Markdown, icons, `Sheet`, `Diff` |
+| `ui.js` | htm binding, Markdown, icons, `Sheet`, `Diff`, `usePresence` (animate out), `useSlide` (sliding indicators) |
+| `theme.js` | Appearance: palettes as CSS variables, Follow desktop, tiling, motion, text size, sidebar shape, pins; the theme reveal |
+| `themes.js` | Omarchy's themes as palettes, generated from `/usr/share/omarchy/themes/*/colors.toml` |
+| `launcher.js` | The Ctrl/⌘+K launcher: sessions, actions, and themes, with live theme previews |
 
 ## How a message travels
 

@@ -6,7 +6,8 @@ import { actions, attempt, canSteer, closeSheet, collab, drafts, insertIntoCompo
 import { copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
-const COLORS = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#f7768e", "#ff9e64", "#73daca"];
+// The theme's own colors, so people keep their colors in every theme and each one fits it.
+const COLORS = ["var(--o-blue)", "var(--o-green)", "var(--o-yellow)", "var(--o-magenta)", "var(--o-cyan)", "var(--o-red)", "var(--o-orange)", "var(--o-fg-bright)"];
 
 /** A steady color per person, so the same person looks the same on every device. */
 export function personColor(id) {
@@ -333,7 +334,9 @@ function NotesTab() {
 }
 
 export function ChatSheet() {
-	const { sheet, view } = store.state;
+	// While the sheet animates out, the store has no sheet any more.
+	const sheet = store.state.sheet ?? {};
+	const { view } = store.state;
 	const [tab, setTab] = useState(sheet.tab ?? "chat");
 	const [highlight, setHighlight] = useState(sheet.highlight ?? null);
 	const pins = view.pins?.length ?? 0;

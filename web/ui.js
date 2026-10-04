@@ -1,8 +1,8 @@
 // Shared bits: htm binding, markdown, formatting, icons, and the bottom sheet.
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { h } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { Component, h } from "preact";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import htm from "htm";
 import { notify, openSheet, store } from "./store.js";
 
@@ -291,6 +291,16 @@ const ICONS = {
 	sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z",
 	chat: "M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z",
 	fork: "M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM18 9a9 9 0 01-9 9",
+	command: "M9 6a3 3 0 10-3 3h12a3 3 0 10-3-3v12a3 3 0 103-3H6a3 3 0 103 3z",
+	sidebar: "M4 4h16v16H4zM9 4v16",
+	pin: "M9 4h6M10 4v6l-3 4h10l-3-4V4M12 14v6",
+	palette: "M12 3a9 9 0 100 18c1 0 1.5-.8 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.8.7-1.5 1.5-1.5H16a5 5 0 005-5c0-4.4-4-7.8-9-7.8zM7.5 12.5h.01M9.5 8h.01M14.5 8h.01M17 11.5h.01",
+	pulse: "M3 12h4l2-6 4 12 2-6h6",
+	keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
+	swatch: "M4 4h7v16H4zM11 9l6-4 3 5-9 6M11 16h9v4h-9",
+	home: "M3 11l9-7 9 7M5 10v10h14V10",
+	archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
+	logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
 };
 
 export function Icon({ name, size = 20, class: className = "" }) {
@@ -331,6 +341,111 @@ export function Diff({ diff }) {
 		const kind = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
 		return html`<span class=${kind}>${line}\n</span>`;
 	})}</pre>`;
+}
+
+/**
+ * Keep showing a value for `ms` after it goes away (null or undefined), so what it shows can animate out. Returns the
+ * value to show and whether it is leaving.
+ */
+export function usePresence(value, ms = 200) {
+	const [kept, setKept] = useState(value ?? null);
+	const [leaving, setLeaving] = useState(false);
+	const timer = useRef(0);
+	useEffect(() => {
+		clearTimeout(timer.current);
+		if (value !== null && value !== undefined) {
+			setKept(value);
+			setLeaving(false);
+		} else if (kept !== null) {
+			if (document.documentElement.dataset.motion === "reduced") {
+				setKept(null);
+				return;
+			}
+			setLeaving(true);
+			timer.current = setTimeout(() => {
+				setKept(null);
+				setLeaving(false);
+			}, ms);
+		}
+	}, [value]);
+	useEffect(() => () => clearTimeout(timer.current), []);
+	return value !== null && value !== undefined ? [value, false] : [kept, leaving || kept !== null];
+}
+
+/**
+ * Where a sliding indicator goes: the offset and size of the element matching `selector` inside `ref`, measured after
+ * every render. null when there is none, or it is in a folded group. `instant` is true the first time it shows, so it
+ * appears in place instead of sliding in from the top.
+ */
+export function useSlide(ref, selector, axis = "y") {
+	const [box, setBox] = useState(null);
+	const hidden = useRef(true);
+	const measure = () => {
+		const target = ref.current?.querySelector(selector);
+		const next =
+			target && !target.closest(".closed")
+				? axis === "y"
+					? { at: target.offsetTop, size: target.offsetHeight }
+					: { at: target.offsetLeft, size: target.offsetWidth }
+				: null;
+		setBox((box) => (next?.at === box?.at && next?.size === box?.size ? box : next));
+	};
+	useLayoutEffect(measure);
+	// Rows move without a render while a group folds, or the window resizes: measure again when they settle.
+	useEffect(() => {
+		const host = ref.current;
+		if (!host) return;
+		const settle = (event) => event.target !== host && measure();
+		host.addEventListener("transitionend", settle);
+		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => measure()) : null;
+		observer?.observe(host);
+		return () => {
+			host.removeEventListener("transitionend", settle);
+			observer?.disconnect();
+		};
+	}, [ref.current]);
+	const instant = hidden.current;
+	useEffect(() => {
+		hidden.current = box === null;
+	});
+	return box === null ? null : { ...box, instant };
+}
+
+/** The bar a `useSlide` box draws. */
+export function Slide({ box, axis = "y" }) {
+	if (!box) return null;
+	const style = axis === "y" ? `transform:translateY(${box.at}px);height:${box.size}px` : `transform:translateX(${box.at}px);width:${box.size}px`;
+	return html`<span class=${`slide-${axis} ${box.instant ? "instant" : ""}`} style=${style} aria-hidden="true"></span>`;
+}
+
+/** Keys as they are on this device: ⌘ on Apple keyboards, Ctrl elsewhere. */
+export const APPLE = /Mac|iPhone|iPad/.test(navigator.platform ?? "");
+export const MOD = APPLE ? "⌘" : "Ctrl";
+
+/** A keyboard shortcut as key caps: `Keys keys="Mod K"`. */
+export function Keys({ keys }) {
+	return keys.split(" ").map((key) => html`<kbd>${key === "Mod" ? MOD : key}</kbd>`);
+}
+
+/**
+ * Something inside failed to render: show nothing there instead of taking the whole app down. A new `reset` value (the
+ * sheet opened again) tries again.
+ */
+export class Boundary extends Component {
+	state = { failed: false };
+
+	componentDidCatch(error) {
+		console.error(error);
+		this.setState({ failed: true });
+	}
+
+	componentDidUpdate(previous) {
+		if (this.state.failed && previous.reset !== this.props.reset) this.setState({ failed: false });
+	}
+
+	render({ children }, { failed }) {
+		return failed ? null : children;
+	}
 }
 
 /** A bottom sheet on phones, a centered dialog on wide screens. */

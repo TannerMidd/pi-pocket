@@ -41,6 +41,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Works while you're away.** Schedule messages to Pi (`/schedule every weekday 8:00 summarize CI`), and `/until npm test` keeps Pi going until the check passes.
 - **Plan mode.** Pi reads and proposes a plan; nothing changes until someone approves it.
 - **Any provider, any model.** Uses Pi's own model runtime and sign-ins, skills, and prompt templates, with the model and thinking level chosen per session.
+- **Omarchy themes.** Every Omarchy theme, or follow your desktop's live; tiled Hyprland-style windows, a Walker-style launcher (Ctrl/⌘+K) with live theme previews, and Hyprland's motion.
 - **Built for phones.** Streaming answers, tool cards with diffs and live output, a Changes sheet with git diffs, push notifications you can allow or deny from, sharing into Pi from other apps, and a home-screen app.
 - **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.
 - **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
