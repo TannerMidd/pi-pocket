@@ -264,6 +264,46 @@ test("the owner turns extensions off and on, the guard follows its switch, and t
 	assert.ok(app.loader.extensionNames().includes("pocket-guard"));
 });
 
+test("everyone signed in gets the desktop's theme colors; only the owner gets its wallpaper", async () => {
+	const { createServer } = await import("node:http");
+	const { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { createHandler } = await import("../src/server/http.ts");
+	const home = mkdtempSync(join(tmpdir(), "pocket-desktop-"));
+	const current = join(home, ".local/state/omarchy/current");
+	mkdirSync(join(current, "theme"), { recursive: true });
+	writeFileSync(join(current, "theme", "colors.toml"), 'background = "#111111"\nforeground = "#eeeeee"\n');
+	writeFileSync(join(current, "theme.name"), "gruvbox\n");
+	// A real PNG header, so the image check accepts it.
+	writeFileSync(join(current, "theme", "wall.png"), Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"));
+	symlinkSync(join(current, "theme", "wall.png"), join(current, "background"));
+	const server = createServer(createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }));
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = (server.address() as { port: number }).port;
+	const guest = app.config.addUser("Guest", "guest");
+	const call = (token: string, path: string) => fetch(`http://127.0.0.1:${port}/api/${path}`, { headers: { authorization: `Bearer ${token}` } });
+	const realHome = process.env.HOME;
+	process.env.HOME = home;
+	try {
+		type Theme = { theme: { name: string; wallpaper: boolean; stamp: string } };
+		const owner = (await (await call(app.config.ownerToken, "theme")).json()) as Theme;
+		assert.equal(owner.theme.name, "gruvbox");
+		assert.equal(owner.theme.wallpaper, true);
+		assert.ok(!owner.theme.stamp.includes(home), "the stamp names no paths");
+		const theirs = (await (await call(guest.token, "theme")).json()) as Theme;
+		assert.equal(theirs.theme.name, "gruvbox");
+		assert.equal(theirs.theme.wallpaper, false);
+		assert.equal((await call(guest.token, "theme/wallpaper")).status, 403);
+		assert.equal((await call(app.config.ownerToken, "theme/wallpaper")).status, 200);
+	} finally {
+		process.env.HOME = realHome;
+		app.config.removeUser(guest.user.id);
+		server.closeAllConnections();
+		server.close();
+	}
+});
+
 test("anyone signed in can list extensions; only the owner can change them", async () => {
 	const { createServer } = await import("node:http");
 	const { createHandler } = await import("../src/server/http.ts");

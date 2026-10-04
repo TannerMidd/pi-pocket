@@ -12,6 +12,7 @@ import { Auth, COOKIE, clearAuthCookie, type InviteGrant, origin, parseCookies, 
 import type { Attachment, SubmitRequest } from "./commands.ts";
 import { APP_ROOT, type User } from "./config.ts";
 import { HttpError } from "./errors.ts";
+import { desktopTheme, wallpaperFile } from "./omarchy.ts";
 import type { Client } from "./room.ts";
 import { runningNow } from "./running.ts";
 
@@ -468,6 +469,18 @@ export function createHandler(options: HttpOptions) {
 			return json(response, 200, { ok: true });
 		}
 		if (first === "push") return pushRoute(request, response, user, second);
+		// The Omarchy desktop's theme, for the app's "Follow desktop" look: colors say nothing about the sessions here, so
+		// everyone signed in gets them. The wallpaper may be a personal photo: only the owner gets that.
+		if (first === "theme" && second === undefined && method === "GET") {
+			const theme = await desktopTheme();
+			return json(response, 200, { theme: theme === null ? null : { ...theme, wallpaper: theme.wallpaper && user.role === "owner" } });
+		}
+		if (first === "theme" && second === "wallpaper" && method === "GET") {
+			if (user.role !== "owner") throw new HttpError(403, "Only the owner sees the desktop's wallpaper");
+			const file = await wallpaperFile();
+			if (file === undefined) throw new HttpError(404, "No wallpaper");
+			return serveImage(request, response, file);
+		}
 		if (first === "running" && method === "GET") return json(response, 200, await runningNow(app, user));
 		if (first === "spend" && method === "GET") return json(response, 200, app.spend.summary(user));
 		if (first === "spend" && method === "POST") {

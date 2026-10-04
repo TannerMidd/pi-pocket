@@ -1,5 +1,6 @@
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
 import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
+import { chooseTheme, THEMES } from "./theme.js";
 import { copyText, formatTokens, formatWhen, modelLabel, replyText, shortPath } from "./ui.js";
 
 const agent = () => store.state.view.agent;
@@ -168,7 +169,19 @@ export const COMMANDS = [
 	{ name: "artifacts", description: "Show artifacts", run: () => openSheet({ type: "artifacts" }) },
 	{ name: "login", description: "Sign in to a model provider", run: () => openSheet({ type: "providers" }) },
 	{ name: "settings", description: "Open the menu", run: () => openSheet({ type: "menu" }) },
+	{ name: "theme", args: "[name]", description: "Change the theme: an Omarchy theme, or desktop to follow yours", run: setTheme },
 ];
+
+/** `/theme gruvbox`, `/theme rose`, `/theme desktop`; without a name, the Appearance sheet. */
+function setTheme(arg) {
+	if (arg === "") return openSheet({ type: "appearance" });
+	const needle = arg.toLowerCase().replace(/\s+/g, "-");
+	const ids = ["desktop", ...Object.keys(THEMES)];
+	const id = ids.find((each) => each === needle) ?? ids.find((each) => each.startsWith(needle) || THEMES[each]?.name.toLowerCase().startsWith(arg.toLowerCase()));
+	if (!id) throw new Error(`No theme called “${arg}”. Try ${Object.keys(THEMES).slice(0, 4).join(", ")}, or desktop.`);
+	chooseTheme(id);
+	notify("info", `Theme: ${id === "desktop" ? "follows your desktop" : THEMES[id].name}.`);
+}
 
 const available = () => COMMANDS.filter((command) => command.available?.() ?? true);
 

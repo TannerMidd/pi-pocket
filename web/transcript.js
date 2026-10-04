@@ -42,12 +42,19 @@ function openMessage(event, entryId) {
 	openSheet({ type: "message", entryId });
 }
 
+/**
+ * The conversation whose first rows have rendered: rows that mount after that are new (a message sent, a report
+ * arriving) and slide into place. Rows already there when a session opens just appear.
+ */
+let settledFor = null;
+
 function UserEntry({ entry, view, users }) {
+	const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 	const report = REPORT.exec(entry.text);
 	if (report) {
 		const [, name, verb, , text] = report;
 		const child = view.subagents.find((agent) => agent.name === name);
-		return html`<div class=${`report ${verb === "failed" ? "failed" : ""}`}>
+		return html`<div class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}>
 			<div class="report-head">
 				<span class="report-name">${name}</span> ${verb}
 				${child && html`<button class="link" onClick=${() => navigate(child.conversationId)}>Open →</button>`}
@@ -71,7 +78,7 @@ function UserEntry({ entry, view, users }) {
 	const files = attachments ? parseAttachments(attachments) : [];
 	const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
 	const others = files.filter((file) => !pictures.includes(file));
-	return html`<div class="user-row" id=${`entry-${entry.id}`}>
+	return html`<div class=${`user-row ${fresh ? "enter" : ""}`} id=${`entry-${entry.id}`}>
 		<div class="bubble tappable" title="Edit, send again, or copy" onClick=${(event) => openMessage(event, entry.id)}>
 			${(author || scheduled) &&
 			html`<div class="author" style=${view.authors?.[entry.id] ? `color:${personColor(view.authors[entry.id])}` : ""}>${author ?? "Pi"}${scheduled && html`<span class="muted"> · scheduled</span>`}</div>`}
@@ -97,7 +104,7 @@ function Thought({ block, streaming }) {
 	return html`<div class=${`thought ${open ? "open" : ""}`}>
 		<button class="thought-head" onClick=${() => setOpen(!open)}>
 			<${Icon} name="sparkle" size=${14} /> ${streaming ? "Thinking…" : block.redacted ? "Thought (redacted)" : "Thought"}
-			<${Icon} name=${open ? "down" : "chevron"} size=${14} />
+			<${Icon} name="chevron" size=${14} class=${`chev ${open ? "open" : ""}`} />
 		</button>
 		${open && html`<div class="thought-body">${block.text}</div>`}
 	</div>`;
@@ -149,6 +156,17 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 	const view = store.state.view;
 	const meta = describeCall(full?.call ?? call);
 	const status = approval ? "approval" : result ? (result.isError ? "error" : "done") : (slot?.status ?? "pending");
+	// A call that finishes while on screen flashes once.
+	const [settled, setSettled] = useState(false);
+	const was = useRef(status);
+	useEffect(() => {
+		const before = was.current;
+		was.current = status;
+		if (status !== "done" || (before !== "running" && before !== "pending")) return;
+		setSettled(true);
+		const timer = setTimeout(() => setSettled(false), 900);
+		return () => clearTimeout(timer);
+	}, [status]);
 	const details = result?.details ?? slot?.details;
 	const args = (full?.call ?? call).args ?? {};
 	const resultText = full?.result?.text ?? result?.text;
@@ -206,7 +224,7 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 	const artifactSrc = artifact ? `/a/${view.conversation.id}/${encodeURIComponent(artifact.id)}/${artifact.version}` : null;
 	const child = call.name === "subagent" ? (details?.conversationId ?? view.subagents.find((agent) => agent.name === args.name)?.conversationId) : undefined;
 	const decision = view.decisions?.[call.id];
-	return html`<div class=${`tool ${status}`}>
+	return html`<div class=${`tool ${status} ${settled ? "settled" : ""}`}>
 		<button class="tool-head" onClick=${() => setOpen(!open)}>
 			<span class="tool-icon">${meta.icon}</span>
 			${meta.label && html`<span class="tool-label">${meta.label}</span>`}
@@ -214,7 +232,7 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 			<span class="tool-status">
 				${status === "running" || status === "pending" ? html`<${Spinner} />` : status === "approval" ? html`<${Icon} name="shield" size=${15} />` : status === "error" ? "!" : "✓"}
 			</span>
-			<${Icon} name=${open ? "down" : "chevron"} size=${14} class="tool-chevron" />
+			<${Icon} name="chevron" size=${14} class=${`tool-chevron chev ${open ? "open" : ""}`} />
 		</button>
 		${decision &&
 		html`<div class=${`decision ${decision.allow ? "allowed" : "denied"}`} title=${new Date(decision.at).toLocaleString()}><${Icon} name="shield" size=${12} /> ${decision.allow ? "Allowed" : "Denied"} by ${decision.by}</div>`}
@@ -424,6 +442,16 @@ export function Transcript() {
 		else if (grew && stick.current && rows.length - start > 2 * TRANSCRIPT_ROWS) store.set({ transcriptFrom: rows[rows.length - TRANSCRIPT_ROWS].id });
 	});
 
+	// Once the rows a session opens with are on screen, rows that mount later are new and animate in.
+	const conversationId = view.conversation?.id;
+	const hasRows = rows.length > 0;
+	useEffect(() => {
+		settledFor = null;
+		if (conversationId === undefined) return;
+		const timer = setTimeout(() => (settledFor = conversationId), hasRows ? 350 : 0);
+		return () => clearTimeout(timer);
+	}, [conversationId, hasRows]);
+
 	// Images finish loading after the transcript renders and make it taller: stay at the bottom if we were there.
 	useEffect(() => {
 		const element = scroller.current;
@@ -451,6 +479,10 @@ export function Transcript() {
 	}
 
 	const keepPlace = () => {
+		// Earlier rows arriving above are not new: they appear without sliding in.
+		const id = view.conversation?.id;
+		settledFor = null;
+		setTimeout(() => (settledFor = id), 400);
 		const element = scroller.current;
 		if (!element) return;
 		keep.current = element.scrollHeight - element.scrollTop;
