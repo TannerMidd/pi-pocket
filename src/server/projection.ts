@@ -53,7 +53,7 @@ export type ClientLive = {
 };
 
 /** The speaker prefix Pi Pocket adds to messages when several people share the server. */
-const FROM = /^\[from: ([^\]\n]{1,60})\] /;
+export const FROM_PREFIX = /^\[from: ([^\]\n]{1,60})\] /;
 const ARG_LIMIT = 1500;
 const OUTPUT_LIMIT = 8000;
 const LIVE_OUTPUT_LIMIT = 4000;
@@ -135,7 +135,15 @@ function projectDetails(details: unknown, full: boolean): unknown {
 		return full ? rest : { ...rest, diff: clip(record.diff, 20000).text };
 	}
 	const json = JSON.stringify(details);
-	return full || json.length < 4000 ? details : undefined;
+	if (full || json.length < 4000) return details;
+	// A long codemode script keeps its list of calls, without their errors: the transcript shows it, and the Changes
+	// sheet finds the script's writes in it.
+	if (Array.isArray(record.calls)) {
+		return {
+			calls: (record.calls as Record<string, unknown>[]).map(({ name, status, path }) => ({ name, status, ...(typeof path === "string" ? { path } : {}) })),
+		};
+	}
+	return undefined;
 }
 
 /** One entry for the browser, or undefined for bookkeeping entries the UI does not show. */
@@ -147,7 +155,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
 			const content = message?.content;
 			const images = countImages(content);
 			const text = textOfContent(content);
-			const prefixed = FROM.exec(text);
+			const prefixed = FROM_PREFIX.exec(text);
 			return prefixed === null
 				? { id, kind: "user", text, images }
 				: { id, kind: "user", text: text.slice(prefixed[0].length), images, from: prefixed[1]! };
@@ -237,16 +245,20 @@ export type ClientStats = {
 
 type UsageNumbers = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
 
-export function projectStats(usage: UsageState | undefined, entries: readonly EntryRecord[]): ClientStats {
+/** What a conversation's model responses and tools cost, in dollars, from its `pi.usage`. */
+export function usageCost(usage: UsageState | undefined): number {
 	let cost = 0;
+	for (const bucket of [usage?.models ?? {}, usage?.tools ?? {}]) {
+		for (const value of Object.values(bucket) as UsageNumbers[]) cost += value.cost?.total ?? 0;
+	}
+	return cost;
+}
+
+export function projectStats(usage: UsageState | undefined, entries: readonly EntryRecord[]): ClientStats {
+	const cost = usageCost(usage);
 	let input = 0;
 	let cacheRead = 0;
 	let cacheWrite = 0;
-	for (const bucket of [usage?.models ?? {}, usage?.tools ?? {}]) {
-		for (const value of Object.values(bucket) as UsageNumbers[]) {
-			cost += value.cost?.total ?? 0;
-		}
-	}
 	for (const value of Object.values(usage?.models ?? {}) as UsageNumbers[]) {
 		input += value.input ?? 0;
 		cacheRead += value.cacheRead ?? 0;
@@ -282,4 +294,20 @@ export function plainText(markdown: string): string {
 		.replace(/(\*\*|__)(.+?)\1/g, "$2")
 		.replace(/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,!?:;]|$)/gm, "$1$2")
 		.replace(/^[ \t]{0,3}(#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+\.[ \t]+)/gm, "");
+}
+
+/** A short single-line snippet of a message. */
+export function snippet(text: string, max = 280): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** What separates a message from the list of files attached to it. The web app splits messages on it too. */
+export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n";
+
+/** The visible text of a projected entry, as plain text: what a person or Pi wrote. */
+export function entryText(entry: ClientEntry): string {
+	if (entry.kind === "user") return entry.text.split(ATTACHMENTS_HEADING)[0] ?? "";
+	if (entry.kind === "assistant") return plainText(entry.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n"));
+	return "";
 }

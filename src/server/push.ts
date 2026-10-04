@@ -15,7 +15,14 @@ export type VapidKeys = { publicKey: string; privateKey: string };
 export type PushPrefs = { done: boolean; approval: boolean; chat: boolean; mention: boolean };
 export const DEFAULT_PREFS: PushPrefs = Object.freeze({ done: true, approval: true, chat: true, mention: true });
 export type StoredSubscription = PushSubscriptionJson & { userId: string; createdAt: number; userAgent?: string };
-export type PushMessage = { title: string; body: string; url: string; tag?: string };
+export type PushMessage = {
+	title: string;
+	body: string;
+	url: string;
+	tag?: string;
+	/** The tool call this notification asks about; `allow`: whether it may be allowed from the notification itself. */
+	approval?: { id: string; allow: boolean };
+};
 export type Urgency = "very-low" | "low" | "normal" | "high";
 
 const DEFAULT_SUBJECT = "mailto:pi-pocket@example.com";
@@ -137,6 +144,7 @@ export async function sendPush(
 		url: message.url,
 	};
 	if (message.tag !== undefined) payload.tag = message.tag;
+	if (message.approval !== undefined) payload.approval = message.approval;
 	const body = encryptPayload(JSON.stringify(payload), subscription.keys);
 	const headers: Record<string, string> = {
 		"Content-Encoding": "aes128gcm",

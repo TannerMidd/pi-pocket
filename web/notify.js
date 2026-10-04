@@ -1,6 +1,6 @@
 // Phone notifications: this device subscribes to the server's pushes, and each person picks what they hear about.
 import { useEffect, useState } from "preact/hooks";
-import { api, attempt, closeSheet, notify } from "./store.js";
+import { api, attempt, closeSheet, notify, sessionUnread } from "./store.js";
 import { html, Loader, Sheet } from "./ui.js";
 
 const supported = "serviceWorker" in navigator && "PushManager" in globalThis && "Notification" in globalThis;
@@ -12,6 +12,22 @@ export function registerWorker() {
 	if (!supported || !isSecureContext) return Promise.resolve(null);
 	registering ??= navigator.serviceWorker.register("/sw.js").catch(() => null);
 	return registering;
+}
+
+/** The count on the icon, null until this page sets it: the service worker may have set one meanwhile. */
+let badged = null;
+/** What the count was worked out from: it changes only with these, while streaming updates the store many times a second. */
+let countedFrom = null;
+
+/** The home-screen icon counts the sessions that need you: a call waits for approval, or the chat has news. */
+export function updateBadge(state) {
+	if (!("setAppBadge" in navigator) || !state.me) return;
+	if (countedFrom?.sessions === state.sessions && countedFrom.chatRead === state.chatRead && countedFrom.conversationId === state.conversationId) return;
+	countedFrom = { sessions: state.sessions, chatRead: state.chatRead, conversationId: state.conversationId };
+	const count = state.sessions.filter((session) => session.waiting || sessionUnread(session, state)).length;
+	if (count === badged) return;
+	badged = count;
+	(count === 0 ? navigator.clearAppBadge() : navigator.setAppBadge(count)).catch(() => {});
 }
 
 function keyBytes(base64url) {
@@ -37,7 +53,7 @@ function blocker() {
 
 const KINDS = [
 	["done", "Pi finished", "when a run you took part in ends"],
-	["approval", "Approvals", "when Lancet Guard asks before a command"],
+	["approval", "Approvals", "when Lancet Guard asks before a command; allow or deny it from the notification"],
 	["mention", "Mentions", "when someone writes @your name in a chat"],
 	["chat", "Chat messages", "in sessions you take part in"],
 ];

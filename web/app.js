@@ -3,10 +3,11 @@ import { render } from "preact";
 import { useEffect } from "preact/hooks";
 import { PeopleButton } from "./chat.js";
 import { Composer } from "./composer.js";
-import { registerWorker } from "./notify.js";
+import { registerWorker, updateBadge } from "./notify.js";
 import { Drawer, SessionList, SignIn } from "./sessions.js";
+import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
-import { dismiss, openSheet, start, store } from "./store.js";
+import { dismiss, notify, openSheet, start, store } from "./store.js";
 import { Transcript } from "./transcript.js";
 import { Boot, html, Icon, shortPath } from "./ui.js";
 
@@ -15,7 +16,12 @@ function Topbar() {
 	const { view, server } = store.state;
 	const conversation = view.conversation;
 	const artifacts = view.artifacts?.length ?? 0;
-	const subtitle = conversation?.kind === "subagent" ? `subagent of ${conversation.parent?.title ?? "?"}` : shortPath(view.agent?.cwd ?? conversation?.cwd, server?.home);
+	const subtitle =
+		conversation?.kind === "subagent"
+			? `subagent of ${conversation.parent?.title ?? "?"}`
+			: conversation?.worktree
+				? `⎇ ${conversation.worktree.branch}`
+				: shortPath(view.agent?.cwd ?? conversation?.cwd, server?.home);
 	const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
 	return html`<header class="topbar">
 		<button class="icon-button" aria-label="Sessions" onClick=${() => store.set({ drawer: true })}><${Icon} name="menu" /></button>
@@ -81,6 +87,16 @@ if (new URLSearchParams(location.search).has("chat")) {
 	history.replaceState({}, "", location.pathname);
 	store.set({ sheet: { type: "chat" } });
 }
-// With notifications allowed, keep the worker running so tapping one opens the right session.
-if ("Notification" in globalThis && Notification.permission === "granted") registerWorker();
+// The worker shows notifications and receives what other apps share; it needs a secure page (https or localhost).
+registerWorker();
+store.subscribe(updateBadge);
 start();
+// Something shared from another app: the service worker kept it, and redirected here to choose where it goes.
+const shared = new URLSearchParams(location.search).get("share");
+if (shared !== null) {
+	history.replaceState({}, "", location.pathname);
+	takeShare(shared).then(
+		(share) => (share ? store.set({ sheet: { type: "share", share } }) : notify("error", "What was shared did not arrive. Share it again.")),
+		() => notify("error", "What was shared could not be read. Share it again."),
+	);
+}

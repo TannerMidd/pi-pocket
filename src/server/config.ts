@@ -30,6 +30,8 @@ export interface User {
 	 * cookie works only there, and each tunnel gets a new address, so they are removed once that tunnel is gone.
 	 */
 	tunnel?: string;
+	/** The most Pi may spend for this person, in dollars; never for the owner. */
+	budget?: number;
 }
 
 export interface ModelChoice {
@@ -48,7 +50,12 @@ interface PocketConfig {
 	disabledExtensions?: string[];
 	/** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
 	enabledExtensions?: string[];
+	/** "others": a guest cannot allow a risky call that their own message led to. Absent: anyone who can steer may. */
+	approvals?: ApprovalRule;
 }
+
+/** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
+export type ApprovalRule = "anyone" | "others";
 
 export function newToken(): string {
 	return randomBytes(24).toString("base64url");
@@ -99,6 +106,16 @@ export class ConfigStore {
 
 	set lastModel(choice: ModelChoice | undefined) {
 		this.#config.lastModel = choice;
+		this.save();
+	}
+
+	get approvalRule(): ApprovalRule {
+		return this.#config.approvals ?? "anyone";
+	}
+
+	set approvalRule(rule: ApprovalRule) {
+		if (rule === "anyone") delete this.#config.approvals;
+		else this.#config.approvals = rule;
 		this.save();
 	}
 
@@ -158,14 +175,16 @@ export class ConfigStore {
 		return { user, token };
 	}
 
-	updateUser(id: string, patch: Partial<Pick<User, "name" | "lastSeen" | "role" | "sessions" | "tunnel">>): void {
+	updateUser(id: string, patch: Partial<Pick<User, "name" | "lastSeen" | "role" | "sessions" | "tunnel" | "budget">>): void {
 		const user = this.userById(id);
 		if (user === undefined) return;
 		// The owner stays the owner, and nobody else becomes one.
 		if (patch.role !== undefined && (user.role === "owner" || patch.role === "owner")) delete patch.role;
 		if ("sessions" in patch && user.role === "owner") delete patch.sessions;
+		if ("budget" in patch && user.role === "owner") delete patch.budget;
 		Object.assign(user, patch);
 		if (user.sessions === undefined) delete user.sessions;
+		if (user.budget === undefined) delete user.budget;
 		this.save();
 	}
 

@@ -48,7 +48,8 @@ Globals:
 - \`store(key, value)\` and \`load(key)\` keep JSON values across codemode calls in this conversation.
 - \`ALL_TOOLS\` lists the tools a script can call.`;
 
-type CallRecord = { name: string; status: "running" | "ok" | "error" | "cancelled"; durationMs?: number; error?: string };
+/** One call a script made. `path`: the file it worked on, when it names one; the Changes sheet looks for writes. */
+type CallRecord = { name: string; status: "running" | "ok" | "error" | "cancelled"; path?: string; durationMs?: number; error?: string };
 type CodemodeDetails = { calls: CallRecord[]; fullOutputPath?: string };
 
 type BeforeTool = ToolHooks["beforeTool"];
@@ -174,6 +175,7 @@ export default function createCodemode(_host: PocketHost) {
 						if (decision?.arguments !== undefined) callArgs = decision.arguments;
 					}
 					callArgs = check(callArgs);
+					if (typeof callArgs.path === "string") record.path = callArgs.path;
 					const decoder = new TextDecoder();
 					const output: string[] = [];
 					const diagnostics: ToolDiagnostic[] = [];

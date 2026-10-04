@@ -3,9 +3,13 @@ import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { personColor } from "./chat.js";
 import { actions, attempt, canSteer, collab, discuss, isRow, navigate, openSheet, store, TRANSCRIPT_ROWS } from "./store.js";
-import { Boot, entryImageUrl, fileUrl, html, Icon, Markdown, plainText, Spinner, Thinking, Thumb } from "./ui.js";
+import { ATTACHMENTS_HEADING, Boot, Diff, entryImageUrl, fileUrl, html, Icon, Markdown, plainText, replyText, Spinner, Thinking, Thumb } from "./ui.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
+/** How a scheduled message starts (see src/server/schedules.ts). */
+const SCHEDULED = "[scheduled] ";
+/** A goal's check that did not pass, as Pi is told about it (see src/server/extensions/goals.ts): what, then its output. */
+const GOAL_CHECK = /^\[goal\] `([\s\S]*?)` (still fails|was cut off by a server restart) \(([^)]*)\)\. ([\s\S]*)$/;
 /** One line of the attachment list the server adds to a message: `- path (name, mime, size bytes)`. */
 const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)$/;
 
@@ -32,6 +36,12 @@ function authorName(entryId, view, users) {
 	return undefined;
 }
 
+/** Tapping a message opens what can be done with it, unless the tap was on a link, an image, or a button in it, or ended a text selection. */
+function openMessage(event, entryId) {
+	if (event.target.closest("a, button") || getSelection()?.toString()) return;
+	openSheet({ type: "message", entryId });
+}
+
 function UserEntry({ entry, view, users }) {
 	const report = REPORT.exec(entry.text);
 	if (report) {
@@ -45,14 +55,26 @@ function UserEntry({ entry, view, users }) {
 			${text && html`<${Collapsible} text=${text} />`}
 		</div>`;
 	}
+	const check = GOAL_CHECK.exec(entry.text);
+	if (check) {
+		const [, command, what, how, output] = check;
+		return html`<div class="report failed">
+			<div class="report-head"><span class="report-name mono">${command}</span> ${what} · ${how}</div>
+			<${Collapsible} text=${output} limit=${300} />
+		</div>`;
+	}
 	const author = authorName(entry.id, view, users) ?? entry.from ?? (view.conversation?.kind === "subagent" ? "Main agent" : undefined);
-	const [body, attachments] = entry.text.split("\n\nAttached files (saved on the server):\n");
+	const [written, attachments] = entry.text.split(ATTACHMENTS_HEADING);
+	// Set up earlier to go out now: by a person (who shows as its author) or by Pi.
+	const scheduled = written.startsWith(SCHEDULED);
+	const body = scheduled ? written.slice(SCHEDULED.length) : written;
 	const files = attachments ? parseAttachments(attachments) : [];
 	const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
 	const others = files.filter((file) => !pictures.includes(file));
 	return html`<div class="user-row" id=${`entry-${entry.id}`}>
-		<div class="bubble">
-			${author && html`<div class="author" style=${view.authors?.[entry.id] ? `color:${personColor(view.authors[entry.id])}` : ""}>${author}</div>`}
+		<div class="bubble tappable" title="Edit, send again, or copy" onClick=${(event) => openMessage(event, entry.id)}>
+			${(author || scheduled) &&
+			html`<div class="author" style=${view.authors?.[entry.id] ? `color:${personColor(view.authors[entry.id])}` : ""}>${author ?? "Pi"}${scheduled && html`<span class="muted"> · scheduled</span>`}</div>`}
 			${body && html`<div class="user-text">${body}</div>`}
 			${pictures.length > 0 && html`<div class="thumbs">${pictures.map((file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`)}</div>`}
 			${others.length > 0 && html`<div class="attachments">${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}</div>`}
@@ -119,13 +141,6 @@ function describeCall(call) {
 		default:
 			return { icon: "⚙", label: call.name, subject: short(JSON.stringify(args), 100), mono: true };
 	}
-}
-
-function Diff({ diff }) {
-	return html`<pre class="diff">${diff.split("\n").map((line) => {
-		const kind = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
-		return html`<span class=${kind}>${line}\n</span>`;
-	})}</pre>`;
 }
 
 function ToolCard({ call, result, slot, approval, entryId }) {
@@ -218,21 +233,25 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 }
 
 function ApprovalCard({ approval }) {
+	const { me, server } = store.state;
 	const [busy, setBusy] = useState(false);
 	const answer = (allow) => {
 		setBusy(true);
 		attempt(() => actions.approve(approval.id, allow)).finally(() => setBusy(false));
 	};
+	// With approvals that need someone else, a guest cannot allow a call their own message led to (the server checks too).
+	const ownCall = server?.approvalRule === "others" && me?.role !== "owner" && approval.requestedBy === me?.id;
 	return html`<div class="approval">
 		<div class="approval-head"><${Icon} name="shield" size=${16} /> Lancet Guard asks before this ${approval.tool} call</div>
 		<div class="approval-reason">${approval.reason}</div>
 		<pre class="cmd">${approval.subject}</pre>
-		${canSteer()
-			? html`<div class="approval-actions">
-					<button class="button" disabled=${busy} onClick=${() => answer(false)}>Deny</button>
-					<button class="button primary" disabled=${busy} onClick=${() => answer(true)}>Allow</button>
-				</div>`
-			: html`<div class="muted small">Waiting for someone who can steer to answer.</div>`}
+		${!canSteer()
+			? html`<div class="muted small">Waiting for someone who can steer to answer.</div>`
+			: html`${ownCall && html`<div class="muted small">Someone else has to allow this: it came from your message. You can deny it.</div>`}
+					<div class="approval-actions">
+						<button class="button" disabled=${busy} onClick=${() => answer(false)}>Deny</button>
+						${!ownCall && html`<button class="button primary" disabled=${busy} onClick=${() => answer(true)}>Allow</button>`}
+					</div>`}
 	</div>`;
 }
 
@@ -259,7 +278,7 @@ function AnswerActions({ entry }) {
 	const [picking, setPicking] = useState(false);
 	const reactions = view.reactions?.[entry.id] ?? {};
 	const pinned = (view.pins ?? []).some((pin) => pin.entryId === entry.id);
-	const text = entry.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+	const text = replyText(entry);
 	const names = (ids) => ids.map((id) => (id === me?.id ? "you" : (users.find((user) => user.id === id)?.name ?? "someone"))).join(", ");
 	const react = (emoji) => {
 		setPicking(false);
@@ -275,6 +294,7 @@ function AnswerActions({ entry }) {
 		</span>
 		<button class="link small" onClick=${() => discuss(entry.id, plainText(text).replace(/\s+/g, " ").slice(0, 280))}>Discuss</button>
 		<button class="link small" onClick=${() => attempt(() => actions.pin({ entryId: entry.id }))}>${pinned ? "📌 Pinned" : "Pin"}</button>
+		<button class="link small" title="Fork, retry, or copy" onClick=${() => openSheet({ type: "message", entryId: entry.id })}>More</button>
 	</div>`;
 }
 
@@ -452,11 +472,19 @@ export function Transcript() {
 	const retry = view.live.generation?.retry;
 	const compactions = view.live.compactions ?? [];
 	const conversation = view.conversation;
+	// Only a session this person can see is in their list.
+	const { sessions, sessionsLoaded } = store.state;
+	const source = conversation.forkedFrom && sessions.find((each) => each.id === conversation.forkedFrom.id);
 
 	return html`<main class="scroller" ref=${scroller} onScroll=${onScroll}>
 		<div class="transcript">
 			${conversation.parent &&
 			html`<button class="breadcrumb" onClick=${() => navigate(conversation.parent.id)}><${Icon} name="back" size=${14} /> ${conversation.parent.title}</button>`}
+			${conversation.forkedFrom &&
+			sessionsLoaded &&
+			(source
+				? html`<button class="breadcrumb" onClick=${() => navigate(source.id)}><${Icon} name="fork" size=${14} /> Forked from ${source.title ?? "New session"}</button>`
+				: html`<p class="muted small"><${Icon} name="fork" size=${14} /> Forked from another session</p>`)}
 			${start > 0
 				? html`<div class="divider"><button class="link" onClick=${showEarlier}>Show earlier messages</button></div>`
 				: first && (first.kind === "compaction" || first.kind === "reset") && html`<${History} firstId=${first.id} results=${results} keepPlace=${keepPlace} />`}

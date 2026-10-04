@@ -133,10 +133,6 @@ a {
 	font-size: 0.8rem;
 }
 
-.center {
-	text-align: center;
-}
-
 .pad {
 	padding: 1rem;
 }
@@ -151,6 +147,10 @@ a {
 
 .ok {
 	color: var(--ok);
+}
+
+.err {
+	color: var(--err);
 }
 
 .pi {
@@ -317,6 +317,7 @@ a {
 	.thinking span,
 	.typing-dots span,
 	.pulse,
+	.session-placeholder span,
 	.sheet,
 	.overlay,
 	.lightbox {
@@ -536,6 +537,10 @@ a {
 	padding: 0.55rem 0.8rem;
 	color: var(--text);
 	max-width: min(88%, 620px);
+}
+
+.bubble.tappable {
+	cursor: pointer;
 }
 
 .author {
@@ -1351,6 +1356,32 @@ pre.diff .del {
 	gap: 0.2rem;
 }
 
+/* A session row's shape while the list loads: a title bar and a shorter detail bar, pulsing one row after another. */
+.session-placeholder {
+	display: flex;
+	flex-direction: column;
+	gap: 0.45rem;
+	padding: 0.75rem 0.65rem;
+}
+
+.session-placeholder span {
+	height: 0.6rem;
+	width: var(--width);
+	background: var(--line);
+	animation: placeholder 1.4s ease-in-out var(--delay) infinite;
+}
+
+.session-placeholder span + span {
+	height: 0.45rem;
+	width: calc(var(--width) * 0.6);
+}
+
+@keyframes placeholder {
+	50% {
+		opacity: 0.35;
+	}
+}
+
 .sessions-foot {
 	border-top: 1px solid var(--line);
 	padding-top: 0.4rem;
@@ -1486,6 +1517,7 @@ pre.diff .del {
 	background: var(--card);
 	border: 1px solid var(--line);
 	color: var(--text);
+	text-decoration: none;
 	margin-bottom: 0.25rem;
 }
 
@@ -2408,7 +2440,10 @@ textarea.notes {
 	color: var(--err);
 }
 
-.driver-bar {
+/* Bars above the message box: who drives (take turns), plan mode, and a goal. The left edge says which. */
+.driver-bar,
+.plan-bar,
+.goal-bar {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -2419,6 +2454,11 @@ textarea.notes {
 	padding: 0.4rem 0.6rem;
 	margin-bottom: 0.35rem;
 	font-size: 0.82rem;
+}
+
+.plan-bar,
+.goal-bar {
+	border-left-color: var(--accent);
 }
 
 .driver-bar.mine {
@@ -2514,4 +2554,136 @@ textarea.notes {
 		background: var(--accent-soft);
 		outline: 1px solid var(--accent-line);
 	}
+}
+
+/* Share to Pi: what another app shared, before it goes into a message box. */
+.share-text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 9rem;
+	overflow-y: auto;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	padding: 0.5rem 0.65rem;
+	margin: 0 0 0.5rem;
+	font-size: 0.86rem;
+}
+
+/* A switch with its label, inside a card such as an extension's. */
+.setting {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	margin-top: 0.4rem;
+}
+
+/* A scheduled message in its sheet: what Pi gets, when, and who set it. */
+.schedule {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.6rem 0;
+	border-bottom: 1px solid var(--line);
+}
+
+.schedule:last-child {
+	border-bottom: 0;
+}
+
+/* Done when: a goal met, or one Pi gave up on. */
+.goal-bar.met {
+	border-left-color: var(--ok);
+}
+
+.goal-bar.gave-up {
+	border-left-color: var(--warn);
+}
+
+/* Running now: a session, then what is at work in it. */
+.running {
+	padding: 0.5rem 0;
+	border-bottom: 1px solid var(--line);
+}
+
+.running:last-child {
+	border-bottom: 0;
+}
+
+.running-head,
+.running-task {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.running-head .link {
+	text-align: left;
+	font-size: 0.95rem;
+}
+
+.running-task {
+	font-size: 0.84rem;
+	padding: 0.25rem 0 0 0.6rem;
+}
+
+/* Changes: one row per changed file, with its diff under it once tapped. */
+.changed {
+	border-bottom: 1px solid var(--line);
+}
+
+.changed:last-child {
+	border-bottom: 0;
+}
+
+.changed-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	text-align: left;
+	padding: 0.5rem 0;
+	font-size: 0.84rem;
+}
+
+.changed-head .mono {
+	overflow-wrap: anywhere;
+}
+
+.change-kind {
+	width: 1.3rem;
+	text-align: center;
+	font-family: var(--mono);
+	font-size: 0.75rem;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+}
+
+.change-kind.added,
+.change-kind.new {
+	color: var(--ok);
+}
+
+.change-kind.deleted {
+	color: var(--err);
+}
+
+/* Spend: a person or a session, what Pi spent for it, and its limit. */
+.spend-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.3rem 0.6rem;
+	padding: 0.45rem 0;
+	border-bottom: 1px solid var(--line);
+	font-size: 0.86rem;
+}
+
+.limit-edit {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+}
+
+.limit-edit input {
+	width: 6rem;
 }

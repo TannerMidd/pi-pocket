@@ -37,13 +37,16 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Durable.** Every model call, tool call, and subagent is stored as it happens. Restart the server mid-run and the work continues; a cut-off tool call reruns only if that is safe.
 - **Multiplayer.** Share a live session: presence, a side chat Pi does not see, @mentions, pins, reactions, shared notes, and take turns.
 - **Steer or queue.** Redirect Pi while it works, queue follow-ups, or stop it.
-- **Any provider, any model.** Uses Pi's own model runtime and sign-ins, with the model and thinking level chosen per session.
-- **Built for phones.** Streaming answers, tool cards with diffs and live output, push notifications, a home-screen app, and long sessions that stay fast.
+- **Forks.** Fork from any reply, edit a message and send it again, or retry it with another model. Each fork is a session of its own, optionally in a git worktree of its own.
+- **Works while you're away.** Schedule messages to Pi (`/schedule every weekday 8:00 summarize CI`), and `/until npm test` keeps Pi going until the check passes.
+- **Plan mode.** Pi reads and proposes a plan; nothing changes until someone approves it.
+- **Any provider, any model.** Uses Pi's own model runtime and sign-ins, skills, and prompt templates, with the model and thinking level chosen per session.
+- **Built for phones.** Streaming answers, tool cards with diffs and live output, a Changes sheet with git diffs, push notifications you can allow or deny from, sharing into Pi from other apps, and a home-screen app.
 - **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.
 - **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
 - **Lancet Guard.** Off by default; turn it on in Menu → Extensions. With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
-- **Roles and invites.** Steer or view-only access, to every session or just one, through one-time links and QR codes.
-- **Live-editable.** No build step: edit the web app or an extension and it reloads in place.
+- **Roles, invites, and limits.** Steer or view-only access, to every session or just one, through one-time links and QR codes, with spend limits per person and per session.
+- **Live-editable.** No build step: edit the web app or an extension and it reloads in place. Add your own extensions in `~/.pi-pocket/extensions/`.
 
 The full tour is in [docs/features.md](docs/features.md).
 
@@ -98,15 +101,19 @@ Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_DIR`, `PI_POCKET_HOST`, `P
 | --- | --- |
 | `bin/pi-pocket.js` | Entry point: checks the Node version, starts the launcher |
 | `src/launcher/` | Access menu, server supervisor, Cloudflare tunnel, keys, QR code |
-| `src/server/app.ts` | Durable harness over `pocket.sqlite`, sessions, shared live views, commands |
+| `src/server/app.ts` | Durable harness over `pocket.sqlite`, connected tabs, access, and the session list |
+| `src/server/room.ts` | One conversation's shared live view, sent to every tab watching it |
+| `src/server/commands.ts` | What people ask of Pi: messages, forks, models, plan mode, goals, schedules, worktrees |
+| `src/server/collab.ts` | The people's side: chat, activity lines, reactions, pins, notes, take turns |
 | `src/server/http.ts` | Web files, JSON API, server-sent events, uploads, artifacts, invites |
 | `src/server/projection.ts` | Turns committed conversation state into compact JSON for browsers |
-| `src/server/docs.ts` | Durable documents: sessions, chat, pins, notes, artifacts, subagents, guard decisions |
-| `src/server/push.ts` | Dependency-free Web Push (RFC 8291 and RFC 8292) |
-| `src/server/extensions/` | Live-reloaded extensions: system prompt, artifacts, subagents, Lancet Guard, codemode |
+| `src/server/docs.ts` | Durable documents: sessions, chat, pins, notes, artifacts, subagents, schedules, goals, spend |
+| `src/server/schedules.ts`, `goals.ts`, `spend.ts`, `changes.ts`, `worktrees.ts` | One feature each, with its durable tasks or git calls |
+| `src/server/push.ts`, `alerts.ts` | Dependency-free Web Push (RFC 8291 and RFC 8292), and who gets which notification |
+| `src/server/extensions/` | Live-reloaded extensions: system prompt, artifacts, subagents, schedules, goals, plan mode, Lancet Guard, codemode |
 | `web/` | The app: Preact and htm as plain ES modules |
 
-Browsers render only committed state. Each session's Pi Durable view is coalesced and sent as small updates over server-sent events, so a device that reconnects or joins late sees exactly what everyone else sees.
+Browsers render only committed state. Each session's Pi Durable view is coalesced and sent as small updates over server-sent events, so a device that reconnects or joins late sees exactly what everyone else sees. The [engineering page](https://tannermidd.github.io/pi-pocket/engineering.html) explains the design; [docs/map.md](docs/map.md) is a short map of the code.
 
 ## Development
 
@@ -121,7 +128,9 @@ Changes to `web/` reload every open browser. Changes to `src/server/extensions/`
 
 - Pi Durable is experimental, and its API can change between releases. Versions are pinned in `package.json`.
 - Only one server process can use the database at a time.
-- There are no forks or branch navigation yet. Pi's own extensions, prompt templates, and their slash commands are not supported: Pi Pocket runs its own extensions on Pi Durable, with built-in commands such as `/compact` and `/model`.
+- Forks are separate sessions; there is no branch tree to switch between inside one session.
+- Pi's own extensions are not supported: Pi Pocket runs its own extensions on Pi Durable, and drop-ins from `~/.pi-pocket/extensions/`. Pi's prompt templates work as slash commands.
+- A git worktree keeps a session's files apart; it is not a sandbox. Pi can still reach everything you can.
 - Artifacts run in an opaque-origin sandbox, so `localStorage` and cookies are unavailable inside them.
 
 ## Credits

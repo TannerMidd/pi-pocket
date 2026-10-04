@@ -21,6 +21,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
+import { requestFor } from "../requests.ts";
 
 function textOf(message: AssistantMessage | undefined): string {
 	return (message?.content ?? []).flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
@@ -44,7 +45,8 @@ const Anchor = defineTask<null, { phase: "done" }, null>({
 		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 
-type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean };
+/** `requestedBy`: whom the parent worked for when it sent the message, whose work the subagent's then is. */
+type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; requestedBy?: string };
 type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
 
 /** Delivers one message to a subagent, waits for the answer, and reports it to the parent. */
@@ -54,10 +56,11 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 	initial: () => ({ phase: "deliver" }),
 	phases: {
 		deliver: async (reporter, runtime, context) => {
-			const { name, conversationId, message, followUp } = reporter.input;
+			const { name, conversationId, message, followUp, requestedBy } = reporter.input;
 			const subagent = (await runtime.conversation(conversationId, context))!;
 			const request = { type: "input", content: message, whenBusy: followUp ? "followUp" : "steer" } as const;
-			const submission = await subagent.submit({ ...request, requestId: `subagent:${reporter.id}` }, context);
+			const requestId = requestedBy === undefined ? `subagent:${reporter.id}` : requestFor(requestedBy, `subagent-${reporter.id}`);
+			const submission = await subagent.submit({ ...request, requestId }, context);
 			const settled = await submission.wait(context);
 			await runtime.commit(async (tx) => {
 				const next = (report?: string) => ({ status: "running", checkpoint: { phase: "report", report } }) as const;
@@ -173,7 +176,8 @@ export default function createSubagents(host: PocketHost) {
 					state.agents[name] = { conversationId: child.id, reported: [] };
 				}
 				const conversationId = state.agents[name]!.conversationId;
-				const input = { name, conversationId, message, followUp: action === "send" && followUp === true };
+				const requestedBy = host.requesterOf(api.conversationId);
+				const input = { name, conversationId, message, followUp: action === "send" && followUp === true, ...(requestedBy === undefined ? {} : { requestedBy }) };
 				state.reporters[api.taskId] = await tx.createTask(Reporter, input, background);
 				return action === "send" ? `Sent to ${name}.` : `Started ${name}.`;
 			}, context);

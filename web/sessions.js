@@ -1,15 +1,21 @@
 // Session list (drawer and home screen) and the sign-in screen.
 import { useState } from "preact/hooks";
 import { Avatar } from "./chat.js";
-import { canSteer, chatReadOf, collab, navigate, openSheet, scoped, store } from "./store.js";
+import { canSteer, collab, navigate, openSheet, scoped, sessionUnread, store } from "./store.js";
 import { html, Icon, shortPath, timeAgo } from "./ui.js";
 
+/** The session list on its way: rows shaped like sessions, lit in turn. */
+function LoadingSessions() {
+	return html`<div role="status" aria-label="Loading sessions">
+		${[72, 54, 64, 46, 58].map(
+			(width, index) => html`<div class="session-placeholder" aria-hidden="true" style=${`--width: ${width}%; --delay: ${index * 0.12}s`}><span></span><span></span></div>`,
+		)}
+	</div>`;
+}
+
 export function SessionList({ compact = false }) {
-	const { sessions, conversationId, server, me, chatRead } = store.state;
+	const { sessions, sessionsLoaded, conversationId, server, me } = store.state;
 	const canStart = canSteer() && !scoped();
-	// Unread: someone else chatted after this browser last read that session's chat.
-	const unread = (session) =>
-		session.chatAt !== undefined && session.chatBy !== me?.id && session.chatAt > (session.id === conversationId ? chatRead : chatReadOf(session.id));
 	const [query, setQuery] = useState("");
 	const [archived, setArchived] = useState(false);
 	const needle = query.trim().toLowerCase();
@@ -25,7 +31,8 @@ export function SessionList({ compact = false }) {
 		</div>
 		<label class="search"><${Icon} name="search" size=${16} /><input placeholder="Search sessions" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)} /></label>
 		<div class="session-items">
-			${shown.length === 0 && html`<div class="muted pad">${archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}</div>`}
+			${!sessionsLoaded && html`<${LoadingSessions} />`}
+			${sessionsLoaded && shown.length === 0 && html`<div class="muted pad">${archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}</div>`}
 			${shown.map(
 				(session) => html`<button class=${`session ${session.id === conversationId ? "active" : ""}`} onClick=${() => navigate(session.id)}>
 					<div class="session-title">${session.title ?? "New session"}</div>
@@ -35,7 +42,7 @@ export function SessionList({ compact = false }) {
 					</div>
 					<div class="session-side">
 						${session.waiting ? html`<span class="badge warn" title="Waiting for approval">!</span>` : session.busy ? html`<span class="pulse" title="Working"></span>` : null}
-						${collab() && unread(session) && html`<span class="unread-dot" title="New chat messages"></span>`}
+						${collab() && sessionUnread(session) && html`<span class="unread-dot" title="New chat messages"></span>`}
 						<span class="muted small">${timeAgo(session.updatedAt)}</span>
 					</div>
 					${collab() && session.people?.length > 0 &&
@@ -45,6 +52,7 @@ export function SessionList({ compact = false }) {
 		</div>
 		<div class="sessions-foot">
 			<button class="foot-item" onClick=${() => setArchived(!archived)}>${archived ? "← Active sessions" : "Archived"}</button>
+			<button class="foot-item" onClick=${() => openSheet({ type: "running" })}>Running now</button>
 			<button class="foot-item" onClick=${() => openSheet({ type: "providers" })}><${Icon} name="key" size=${16} /> Providers</button>
 			${collab()
 				? html`<button class="foot-item" onClick=${() => openSheet({ type: "people" })}><${Icon} name="users" size=${16} /> People${canStart ? " & invites" : ""}</button>`

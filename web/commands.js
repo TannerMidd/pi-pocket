@@ -1,9 +1,36 @@
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
 import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
-import { copyText, formatTokens, modelLabel, shortPath } from "./ui.js";
+import { copyText, formatTokens, formatWhen, modelLabel, replyText, shortPath } from "./ui.js";
 
 const agent = () => store.state.view.agent;
 const isSession = () => store.state.view.conversation?.kind === "session";
+/** Plan mode needs its extension, which the owner can turn off. */
+export const planAvailable = () => store.state.server?.extensions?.includes("pocket-plan") === true;
+/** Scheduled messages need theirs, and a session; so do goals. */
+export const schedulesAvailable = () => isSession() && store.state.server?.extensions?.includes("pocket-schedules") === true;
+const goalsAvailable = () => isSession() && store.state.server?.extensions?.includes("pocket-goals") === true;
+
+/** How long a list of prompt templates is used before it is fetched again: someone may be writing one. */
+const TEMPLATES_FOR_MS = 30_000;
+
+/** Fetch Pi's prompt templates for this conversation, unless a fresh list is here. Call when someone types a command. */
+export function loadTemplates() {
+	const id = store.state.conversationId;
+	const cached = store.state.templates;
+	if (id === null || (cached?.conversationId === id && Date.now() - cached.at < TEMPLATES_FOR_MS)) return;
+	store.set({ templates: { conversationId: id, at: Date.now(), list: cached?.conversationId === id ? cached.list : [] } });
+	actions.prompts().then(
+		(list) => store.state.templates?.conversationId === id && store.set({ templates: { ...store.state.templates, list } }),
+		() => {},
+	);
+}
+
+/** The prompt templates known for this conversation, as entries like the app's commands. */
+function templates() {
+	const cached = store.state.templates;
+	if (cached?.conversationId !== store.state.conversationId) return [];
+	return cached.list.map((template) => ({ name: template.name, args: template.argumentHint ?? "", description: template.description, template: true }));
+}
 
 /** A path as the conversation means it: absolute, `~/…`, or relative to its working directory. */
 function pathFrom(arg) {
@@ -59,7 +86,7 @@ async function copyLast() {
 	for (let index = view.order.length - 1; index >= 0; index--) {
 		const entry = view.entries.get(view.order[index]);
 		if (entry?.kind !== "assistant") continue;
-		const text = entry.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n").trim();
+		const text = replyText(entry).trim();
 		if (text === "") continue;
 		await copyText(text);
 		return notify("info", "Copied Pi’s last reply.");
@@ -81,6 +108,14 @@ function showSession() {
 /** `args` in brackets is optional. `available` hides a command where it does not apply. */
 export const COMMANDS = [
 	{ name: "compact", args: "[what to keep]", description: "Summarize older messages to free up context", run: (arg) => actions.compact(arg || undefined) },
+	{ name: "reset", args: "[handoff note]", description: "Start a new context: Pi starts fresh, history stays", run: (arg) => actions.reset(arg || undefined) },
+	{
+		name: "instructions",
+		args: "[text]",
+		description: "Set what Pi is told with every message here",
+		available: isSession,
+		run: (arg) => (arg === "" ? openSheet({ type: "instructions" }) : actions.setInstructions(arg)),
+	},
 	{ name: "model", args: "[name]", description: "Switch the model", run: switchModel },
 	{ name: "thinking", args: "[level]", description: "Set the thinking level", run: setThinking },
 	{ name: "new", args: "[folder]", description: "Start a new session in this folder", available: () => !scoped(), run: newSession },
@@ -92,9 +127,42 @@ export const COMMANDS = [
 		run: (arg) => (arg === "" ? openSheet({ type: "rename" }) : actions.updateSession(store.state.view.conversation.id, { title: arg })),
 	},
 	{ name: "cwd", args: "[folder]", description: "Change the working directory", run: (arg) => (arg === "" ? openSheet({ type: "cwd", mode: "change" }) : actions.configure({ cwd: pathFrom(arg) })) },
+	{
+		name: "plan",
+		description: "Plan mode on or off: Pi reads and proposes, and changes nothing",
+		available: () => planAvailable() && isSession(),
+		run: async () => {
+			const on = !store.state.view.plan?.on;
+			await actions.setPlan(on);
+			notify("info", on ? "Plan mode is on: Pi proposes a plan and changes nothing until you approve it." : "Plan mode is off.");
+		},
+	},
+	{
+		name: "schedule",
+		args: "<when> <message>",
+		description: "Send Pi a message later or on repeat: in 2h …, tomorrow 9:00 …, every weekday 8:00 …",
+		available: schedulesAvailable,
+		run: async (arg) => {
+			if (arg === "") return openSheet({ type: "schedules" });
+			const added = await actions.schedule(arg);
+			notify("info", `Scheduled for ${formatWhen(added.next)}.`);
+		},
+	},
+	{
+		name: "until",
+		args: "<command>",
+		description: "Pi keeps going until a check passes, such as npm test (5 checks at most)",
+		available: goalsAvailable,
+		run: async (arg) => {
+			if (arg === "") throw new Error("Say which command has to pass, such as /until npm test.");
+			await actions.setGoal(arg);
+			notify("info", `Pi keeps going until ${arg} passes, checked after each answer.`);
+		},
+	},
 	{ name: "stop", description: "Stop the current run", run: () => actions.abort() },
 	{ name: "copy", description: "Copy Pi’s last reply", run: copyLast },
 	{ name: "session", description: "Show the model, context use, and cost", run: showSession },
+	{ name: "export", description: "Download this conversation as Markdown", run: () => location.assign(`/api/c/${store.state.view.conversation.id}/export`) },
 	{ name: "resume", description: "Switch to another session", run: () => store.set({ drawer: true }) },
 	{ name: "chat", description: "Open the people chat", available: collab, run: () => openSheet({ type: "chat" }) },
 	{ name: "artifacts", description: "Show artifacts", run: () => openSheet({ type: "artifacts" }) },
@@ -112,12 +180,20 @@ export function parseCommand(text) {
 	return command ? { command, arg: (match[2] ?? "").trim() } : null;
 }
 
-/** Commands to offer while someone types a command name: "/" lists them all. */
+/** The prompt template a message to Pi starts with, or null. The app's own commands come first. */
+export function parseTemplate(text) {
+	const match = /^\/(\S+)(?:\s|$)/.exec(text.trim());
+	if (!match || parseCommand(text)) return null;
+	return templates().find((template) => template.name === match[1]) ?? null;
+}
+
+/** Commands to offer while someone types a command name: "/" lists them all, then Pi's prompt templates. */
 export function suggestCommands(text) {
 	const match = /^\/([\w-]*)$/.exec(text);
 	if (!match) return [];
 	const prefix = match[1].toLowerCase();
-	const commands = available();
+	const own = available();
+	const commands = [...own, ...templates().filter((template) => !own.some((command) => command.name === template.name))];
 	const starts = commands.filter((each) => each.name.startsWith(prefix));
 	// Two letters or more also find names that contain them: "/py" finds /copy.
 	const contains = prefix.length < 2 ? [] : commands.filter((each) => !each.name.startsWith(prefix) && each.name.includes(prefix));

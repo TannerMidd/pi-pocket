@@ -42,6 +42,17 @@ test("tool results count their images and leave the data out", () => {
 	assert.ok(plain?.kind === "toolResult" && plain.images === undefined);
 });
 
+test("a long script's list of calls stays in the short form, without its errors", () => {
+	const calls = Array.from({ length: 60 }, (_, index) => ({ name: "write", status: "error", path: `file-${index}.txt`, durationMs: 3, error: "x".repeat(200) }));
+	const message = { role: "toolResult", toolCallId: "c1", toolName: "codemode", content: [{ type: "text", text: "done" }], details: { calls }, isError: false };
+	const short = projectEntry(entry("pi.tool-result", message));
+	assert.ok(short?.kind === "toolResult");
+	assert.deepEqual((short.details as { calls: unknown[] }).calls[59], { name: "write", status: "error", path: "file-59.txt" });
+	const full = projectEntry(entry("pi.tool-result", message), true);
+	assert.ok(full?.kind === "toolResult");
+	assert.deepEqual(full.details, { calls });
+});
+
 test("big tool arguments are clipped for the list and complete on request", () => {
 	const content = "x".repeat(5000);
 	const message = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "write", arguments: { path: "a.txt", content } }], stopReason: "toolUse" };

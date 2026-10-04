@@ -1,9 +1,11 @@
 // Sheets: model picker, working directory, artifacts, providers and login, invites, the session menu.
 import { useEffect, useState } from "preact/hooks";
-import { Avatar, ChatSheet } from "./chat.js";
+import { Avatar, ChatSheet, jumpToEntry } from "./chat.js";
+import { schedulesAvailable } from "./commands.js";
 import { NotificationsSheet } from "./notify.js";
+import { ShareSheet } from "./share.js";
 import { actions, api, attempt, canSteer, closeSheet, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
-import { copyText, formatBytes, formatTokens, html, Icon, Loader, shortPath, Sheet, timeAgo } from "./ui.js";
+import { copyText, Diff, formatBytes, formatTokens, formatWhen, html, Icon, Loader, modelLabel, replyText, shortPath, Sheet, Spinner, timeAgo, writtenText } from "./ui.js";
 
 function ModelSheet() {
 	const { models, view } = store.state;
@@ -56,6 +58,7 @@ function CwdSheet({ mode }) {
 	const [listing, setListing] = useState(null);
 	const [hidden, setHidden] = useState(false);
 	const [browse, setBrowse] = useState(true);
+	const [worktree, setWorktree] = useState(false);
 	const load = (target, showHidden = hidden) =>
 		attempt(async () => {
 			const result = await api(`fs?path=${encodeURIComponent(target)}${showHidden ? "&hidden=1" : ""}`);
@@ -71,7 +74,7 @@ function CwdSheet({ mode }) {
 				await actions.configure({ cwd: target });
 				closeSheet();
 			} else {
-				const created = await actions.createSession(target);
+				const created = await actions.createSession(target, { worktree });
 				navigate(created.id);
 			}
 		});
@@ -80,6 +83,8 @@ function CwdSheet({ mode }) {
 			<input class="mono" value=${path} onInput=${(event) => setPath(event.currentTarget.value)} onKeyDown=${(event) => event.key === "Enter" && load(path)} />
 			<button class="button" onClick=${() => (browse ? setBrowse(false) : (setBrowse(true), load(path)))}>${browse ? "Hide" : "Browse"}</button>
 		</div>
+		${mode === "new" &&
+		html`<label class="check"><input type="checkbox" checked=${worktree} onChange=${(event) => setWorktree(event.currentTarget.checked)} /> In a git worktree of its own: a branch, apart from this folder</label>`}
 		<button class="button primary wide" onClick=${() => use(path)}>Use ${shortPath(path, listing?.home ?? server?.home)}</button>
 		${browse &&
 		listing &&
@@ -169,6 +174,19 @@ function guardNote(module, guard) {
 	return { warn: false, text: "Checks bash, write, and edit calls. Risky ones wait for someone in the session to allow them." };
 }
 
+/** Who may allow a risky call: anyone who can steer, or (for guests) someone other than whoever asked for it. */
+function ApprovalRule({ owner }) {
+	const others = store.state.server?.approvalRule === "others";
+	const change = () => attempt(() => api("settings", { approvalRule: others ? "anyone" : "others" }));
+	return html`<div class="setting">
+		<div class="grow">
+			<div class="small">Approvals need someone else</div>
+			<div class="muted small">A guest cannot allow a call that their own message led to. You always can.</div>
+		</div>
+		<${Switch} on=${others} disabled=${!owner} label=${`Approvals need someone else: ${others ? "on" : "off"}`} onChange=${change} />
+	</div>`;
+}
+
 function ExtensionsSheet() {
 	const { me } = store.state;
 	const owner = me?.role === "owner";
@@ -195,6 +213,7 @@ function ExtensionsSheet() {
 	};
 	const toggle = (module) => {
 		if (module.file === "guard.ts" && module.enabled && !confirm("Turn off Lancet Guard in Pi Pocket?\n\nbash, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.")) return;
+		if (module.source === "drop-in" && !module.enabled && !confirm(`Turn on ${module.title}?\n\nA drop-in extension runs inside the server with your rights, in every session.`)) return;
 		change(module, "", { enabled: !module.enabled });
 	};
 	return html`<${Sheet} title="Extensions" onClose=${closeSheet}>
@@ -209,8 +228,9 @@ function ExtensionsSheet() {
 					<div class="extension-title">${module.title}${module.error && html` <span class="warn small">· failed to load</span>`}</div>
 					${module.summary && html`<div class="muted small">${module.summary}</div>`}
 					${note && html`<div class=${`small ${note.warn ? "warn" : "ok"}`}>${note.text}</div>`}
+					${module.file === "guard.ts" && module.enabled && html`<${ApprovalRule} owner=${owner} />`}
 					${module.error && html`<div class="error-box small">${module.error}</div>`}
-					<div class="muted small mono">${module.file}${tools.length > 0 ? ` · tools: ${tools.join(", ")}` : ""}${module.required ? " · required" : ""}</div>
+					<div class="muted small mono">${module.source === "drop-in" ? `drop-in${module.path ? ` · ${shortPath(module.path, store.state.server?.home)}` : ""}` : module.file}${tools.length > 0 ? ` · tools: ${tools.join(", ")}` : ""}${module.required ? " · required" : ""}</div>
 				</div>
 				<div class="extension-actions">
 					<${Switch} on=${module.enabled} disabled=${!owner || module.required || busy !== null} label=${`${module.title}: ${module.enabled ? "on" : "off"}`} onChange=${() => toggle(module)} />
@@ -218,6 +238,7 @@ function ExtensionsSheet() {
 				</div>
 			</div>`;
 		})}
+		${data?.dropIns && html`<p class="muted small">Add your own: put a <span class="mono">.ts</span> extension module in <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. Drop-ins stay off until the owner turns them on, and run inside the server with the owner's rights.</p>`}
 	<//>`;
 }
 
@@ -412,13 +433,14 @@ function PeopleSheet() {
 	<//>`;
 }
 
-function TextSheet({ title, label, initial = "", placeholder = "", submit, multiline = false, button = "Save" }) {
+function TextSheet({ title, label, hint = "", initial = "", placeholder = "", submit, multiline = false, button = "Save" }) {
 	const [value, setValue] = useState(initial);
 	const save = () => attempt(async () => {
 		await submit(value);
 		closeSheet();
 	});
 	return html`<${Sheet} title=${title} onClose=${closeSheet}>
+		${hint && html`<p class="muted small">${hint}</p>`}
 		<div class="field">
 			<div class="label">${label}</div>
 			${multiline
@@ -426,6 +448,306 @@ function TextSheet({ title, label, initial = "", placeholder = "", submit, multi
 				: html`<input autofocus value=${value} placeholder=${placeholder} onInput=${(event) => setValue(event.currentTarget.value)} onKeyDown=${(event) => event.key === "Enter" && save()} />`}
 		</div>
 		<button class="button primary wide" onClick=${save}>${button}</button>
+	<//>`;
+}
+
+/** A row in a menu: a label, an optional hint on the right, and what a tap does. */
+function item(label, run, hint) {
+	return html`<button class="list-item" onClick=${run}><span>${label}</span>${hint && html`<span class="muted small">${hint}</span>`}</button>`;
+}
+
+/** The message to Pi a reply answers: the newest one before it. */
+function promptBefore(entryId) {
+	const { view } = store.state;
+	for (let index = view.order.indexOf(entryId) - 1; index >= 0; index--) {
+		const entry = view.entries.get(view.order[index]);
+		if (entry?.kind === "user") return entry;
+	}
+	return undefined;
+}
+
+/** Open a session made from this one, and say so. */
+let branching = false;
+/** Make a new session from this one and open it. A second tap while the first is on its way does nothing. */
+const openBranch = (run) => {
+	if (branching) return;
+	branching = true;
+	attempt(async () => {
+		const created = await run();
+		navigate(created.id);
+		notify("info", "Opened the new session. The original is unchanged.");
+	}).finally(() => {
+		branching = false;
+	});
+};
+
+/** Send a message to Pi again in a fork: with this session's model, or another one. */
+function SendAgain({ prompt, worktree }) {
+	const { models, view } = store.state;
+	const [choosing, setChoosing] = useState(false);
+	const [query, setQuery] = useState("");
+	const current = view.agent?.model;
+	const needle = query.trim().toLowerCase();
+	const others = models.filter(
+		(model) => !(model.provider === current?.provider && model.id === current?.modelId) && (needle === "" || `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle)),
+	);
+	return html`<div class="group">
+		<div class="group-title">Send again in a new session</div>
+		${item(`With ${modelLabel(view.agent)}`, () => openBranch(() => actions.resend(prompt.id, { worktree })), "same model")}
+		${choosing
+			? html`<label class="search"><${Icon} name="search" size=${16} /><input autofocus placeholder="Search models" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)} /></label>
+					${others.map((model) =>
+						item(model.name, () => openBranch(() => actions.resend(prompt.id, { model: { provider: model.provider, modelId: model.id }, worktree })), html`<span class="mono">${model.provider}</span>`),
+					)}`
+			: item("With another model…", () => setChoosing(true))}
+	</div>`;
+}
+
+/** The letter git's short status uses for each kind of change. */
+const CHANGE_LETTERS = { modified: "M", added: "A", deleted: "D", renamed: "R", new: "N" };
+
+/** One changed file: tap it to see its diff. */
+function ChangedFile({ file }) {
+	const [diff, setDiff] = useState(null);
+	const toggle = () =>
+		diff !== null
+			? setDiff(null)
+			: attempt(async () => {
+					const response = await fetch(`/api/c/${store.state.conversationId}/changes/diff?path=${encodeURIComponent(file.path)}`);
+					const text = await response.text();
+					if (!response.ok) throw new Error(JSON.parse(text).error ?? `HTTP ${response.status}`);
+					setDiff(text);
+				});
+	return html`<div class="changed">
+		<button class="changed-head" onClick=${toggle}>
+			<span class=${`change-kind ${file.kind}`} title=${file.kind}>${CHANGE_LETTERS[file.kind]}</span>
+			<span class="mono grow">${file.path}</span>
+			${file.byPi && html`<span class="chip">Pi</span>`}
+			${file.added !== undefined && html`<span class="mono small"><span class="ok">+${file.added}</span> <span class="err">−${file.removed}</span></span>`}
+		</button>
+		${diff !== null && html`<${Diff} diff=${diff || "No difference in text."} />`}
+	</div>`;
+}
+
+/** What changed in the session's folder: uncommitted changes in its repository, and every file Pi wrote or edited. */
+function ChangesSheet() {
+	const { server } = store.state;
+	const [changes, setChanges] = useState(null);
+	const load = () => attempt(async () => setChanges(await api(`c/${store.state.conversationId}/changes`)));
+	useEffect(() => {
+		load();
+	}, []);
+	const refresh = html`<button class="icon-button" title="Refresh" aria-label="Refresh" onClick=${() => (setChanges(null), load())}>↻</button>`;
+	return html`<${Sheet} title="Changes" onClose=${closeSheet} actions=${refresh}>
+		${changes === null && html`<${Loader} label="Asking git" />`}
+		${changes?.repo &&
+		html`<p class="muted small">Uncommitted changes in <span class="mono">${shortPath(changes.repo.root, server?.home)}</span>${changes.repo.branch ? html` on <span class="mono">${changes.repo.branch}</span>` : ""}. Tap a file for its diff.</p>`}
+		${changes && !changes.repo && html`<p class="muted small">This folder is not in a git repository, so only the files Pi wrote or edited are listed.</p>`}
+		${changes?.repo && changes.files.length === 0 && html`<p class="muted">No uncommitted changes.</p>`}
+		${changes?.files.map((file) => html`<${ChangedFile} key=${file.path} file=${file} />`)}
+		${changes?.more > 0 && html`<p class="muted small">And ${changes.more} more changed ${changes.more === 1 ? "file" : "files"}, not listed here.</p>`}
+		${changes?.piOnly.length > 0 &&
+		html`<div class="group">
+			<div class="group-title">${changes.repo ? "Pi also edited" : "Pi wrote or edited"}</div>
+			${changes.piOnly.map((each) => item(html`<span class="mono">${shortPath(each.path, server?.home)}</span>`, () => jumpToEntry(each.entryId), "show"))}
+		</div>`}
+	<//>`;
+}
+
+const money = (amount) => `$${amount.toFixed(2)}`;
+
+/** A spend limit, and (for the owner) a way to change it. */
+function SpendLimit({ budget, editable, save }) {
+	const [draft, setDraft] = useState(null);
+	if (draft === null) {
+		return html`<span class="muted small">${budget === undefined ? "no limit" : `limit ${money(budget)}`}</span>
+			${editable && html`<button class="link small" onClick=${() => setDraft(budget === undefined ? "" : String(budget))}>Change</button>`}`;
+	}
+	const done = (value) =>
+		attempt(async () => {
+			await save(value);
+			setDraft(null);
+		});
+	return html`<span class="limit-edit">
+		$<input type="number" inputmode="decimal" min="0.01" step="0.01" autofocus value=${draft} onInput=${(event) => setDraft(event.currentTarget.value)} />
+		<button class="button small primary" disabled=${!(Number(draft) > 0)} onClick=${() => done(Number(draft))}>Set</button>
+		${budget !== undefined && html`<button class="button small ghost" onClick=${() => done(null)}>No limit</button>`}
+	</span>`;
+}
+
+/** What Pi spent, by person and by session, with the owner's limits. */
+function SpendSheet() {
+	const owner = store.state.me?.role === "owner";
+	const [data, setData] = useState(null);
+	useEffect(() => {
+		attempt(async () => setData(await api("spend")));
+	}, []);
+	const save = (target) => async (budget) => setData(await api("spend", { ...target, budget }));
+	return html`<${Sheet} title="Spend" onClose=${closeSheet}>
+		${data === null && html`<${Loader} label="Adding it up" />`}
+		${data?.total !== undefined && html`<p>Pi spent <strong>${money(data.total)}</strong> on this server so far.</p>`}
+		<p class="muted small">Spend goes to whoever asked for the work. Past a limit, Pi takes no new messages there, and a run that crosses it stops.</p>
+		${data &&
+		html`<div class="group">
+				<div class="group-title">People</div>
+				${data.people.map(
+					(person) => html`<div class="spend-row" key=${person.id}>
+						<span class="grow">${person.name}</span>
+						<span class="mono">${money(person.spent)}</span>
+						<${SpendLimit} budget=${person.budget} editable=${owner && person.id !== store.state.me?.id} save=${save({ person: person.id })} />
+					</div>`,
+				)}
+			</div>
+			<div class="group">
+				<div class="group-title">Sessions</div>
+				${data.sessions.map(
+					(session) => html`<div class="spend-row" key=${session.id}>
+						<span class="grow">${session.title}</span>
+						<span class="mono">${money(session.spent)}</span>
+						<${SpendLimit} budget=${session.budget} editable=${owner} save=${save({ session: session.id })} />
+					</div>`,
+				)}
+			</div>`}
+	<//>`;
+}
+
+/** How often the Running now sheet asks again while it is open. */
+const RUNNING_EVERY_MS = 2000;
+
+/** Everything at work in the sessions you can see: open one, stop a run, or cancel a scheduled message. */
+function RunningSheet() {
+	const [sessions, setSessions] = useState(null);
+	useEffect(() => {
+		let open = true;
+		const load = () => api("running").then((list) => open && setSessions(list), (error) => open && notify("error", error.message));
+		load();
+		const timer = setInterval(load, RUNNING_EVERY_MS);
+		return () => {
+			open = false;
+			clearInterval(timer);
+		};
+	}, []);
+	const steer = canSteer();
+	const go = (id) => {
+		closeSheet();
+		navigate(id);
+	};
+	return html`<${Sheet} title="Running now" onClose=${closeSheet}>
+		${sessions === null && html`<${Loader} label="Looking" />`}
+		${sessions?.length === 0 && html`<p class="muted">Nothing is running.</p>`}
+		${sessions?.map(
+			(session) => html`<div class="running" key=${session.id}>
+				<div class="running-head">
+					<button class="link grow" onClick=${() => go(session.id)}>${session.title}</button>
+					${session.approvals > 0 && html`<span class="warn small">${session.approvals} waiting for approval</span>`}
+					${steer && session.busy && html`<button class="button small" onClick=${() => attempt(() => api(`c/${session.id}/abort`, {}))}>Stop</button>`}
+				</div>
+				${session.tasks.map(
+					(task) => html`<div class="running-task" key=${task.id}>
+						${task.status === "running" ? html`<${Spinner} />` : html`<span class="muted">·</span>`}
+						<span class="grow">${task.subagent && html`<span class="mono">${task.subagent}</span>: `}${task.label}</span>
+						${steer && task.scheduleId && html`<button class="link small" onClick=${() => attempt(() => api(`c/${task.conversationId}/schedules/${encodeURIComponent(task.scheduleId)}/cancel`, {}))}>Cancel</button>`}
+						${steer && task.subagent && task.kind === "pi.generation" && html`<button class="link small" onClick=${() => attempt(() => api(`c/${task.conversationId}/abort`, {}))}>Stop</button>`}
+						<span class="muted small mono">${task.status}</span>
+					</div>`,
+				)}
+			</div>`,
+		)}
+	<//>`;
+}
+
+/** Messages that go to Pi later or on repeat: set one up, see what is coming, cancel one. */
+function SchedulesSheet() {
+	const { view, users, me } = store.state;
+	const [when, setWhen] = useState("");
+	const steer = canSteer();
+	const setBy = (id) => (id === undefined ? "Pi" : id === me?.id ? "you" : (users.find((user) => user.id === id)?.name ?? "someone"));
+	const add = () =>
+		attempt(async () => {
+			await actions.schedule(when);
+			setWhen("");
+		});
+	return html`<${Sheet} title="Scheduled messages" onClose=${closeSheet}>
+		<p class="muted small">Pi gets these at their time, also when nobody is here, and the people in this session get a notification when it is done.</p>
+		${steer &&
+		html`<div class="row">
+				<input placeholder="in 2h check the deploy" value=${when} onInput=${(event) => setWhen(event.currentTarget.value)} onKeyDown=${(event) => event.key === "Enter" && add()} />
+				<button class="button primary" disabled=${when.trim() === ""} onClick=${add}>Add</button>
+			</div>
+			<p class="muted small">Start with when: in 30m, 7:00, tomorrow 9am, fri 17:30, every 2h, every weekday 8:00. Then what Pi gets.</p>`}
+		${view.schedules.length === 0 && html`<p class="muted">Nothing is scheduled.</p>`}
+		${view.schedules.map(
+			(schedule) => html`<div class="schedule" key=${schedule.id}>
+				<div class="grow">
+					<div>${schedule.text}</div>
+					<div class="muted small">${schedule.repeat ? `${schedule.repeat} · next ${formatWhen(schedule.next)}` : formatWhen(schedule.next)} · set by ${setBy(schedule.by)}</div>
+				</div>
+				${steer && html`<button class="button small ghost" onClick=${() => attempt(() => actions.cancelSchedule(schedule.id))}>Cancel</button>`}
+			</div>`,
+		)}
+	<//>`;
+}
+
+/** A session's own git worktree: where it is, and removing it (its branch stays). */
+function WorktreeSheet() {
+	const { view, server } = store.state;
+	const worktree = view.conversation?.worktree;
+	const [dirty, setDirty] = useState(false);
+	const remove = (force) =>
+		attempt(async () => {
+			try {
+				await actions.removeWorktree(force);
+				closeSheet();
+				notify("info", `Removed the worktree. The branch ${worktree.branch} stays.`);
+			} catch (error) {
+				if (error.status !== 409) throw error;
+				setDirty(true);
+			}
+		});
+	if (!worktree) return html`<${Sheet} title="Worktree" onClose=${closeSheet}><p class="muted">This session works in its folder, not in a worktree.</p><//>`;
+	return html`<${Sheet} title="Worktree" onClose=${closeSheet}>
+		<p>This session works on the branch <span class="mono">${worktree.branch}</span>, in a checkout of its own: its changes stay apart from <span class="mono">${shortPath(worktree.source, server?.home)}</span>.</p>
+		<p class="muted small">Ask Pi to commit, merge, or open a pull request when it is done. Removing the worktree deletes its folder; the branch and its commits stay, and Pi works in the original folder again.</p>
+		${dirty
+			? html`<div class="error-box small">The worktree has uncommitted changes. Removing it anyway loses them.</div>
+					<button class="button wide" onClick=${() => remove(true)}>Remove anyway</button>`
+			: html`<button class="button wide" onClick=${() => remove(false)}>Remove the worktree</button>`}
+	<//>`;
+}
+
+/** What can be done with one message: fork from it, edit it, send it again, or copy it. */
+function MessageSheet({ entryId }) {
+	const { view } = store.state;
+	const entry = view.entries.get(entryId) ?? store.state.history?.find((each) => each.id === entryId);
+	const [draft, setDraft] = useState(null);
+	const [worktree, setWorktree] = useState(false);
+	if (entry?.kind !== "user" && entry?.kind !== "assistant") {
+		return html`<${Sheet} title="Message" onClose=${closeSheet}><p class="muted">This message is not here anymore.</p><//>`;
+	}
+	// Forks are new sessions: who may start one may fork.
+	const canBranch = canSteer() && !scoped() && view.conversation?.kind === "session";
+	// A message to Pi (from anyone), or one of its replies.
+	const toPi = entry.kind === "user";
+	const text = toPi ? writtenText(entry) : replyText(entry);
+	const prompt = toPi ? entry : promptBefore(entryId);
+	const copy = () => copyText(text).then(() => notify("info", "Copied."), () => notify("error", "Could not copy."));
+	if (draft !== null) {
+		return html`<${Sheet} title="Edit and send again" onClose=${closeSheet}>
+			<p class="muted small">Pi gets the edited message in a new session that forks just before the original. The original stays as it is.</p>
+			<textarea rows="6" autofocus value=${draft} onInput=${(event) => setDraft(event.currentTarget.value)}></textarea>
+			<div class="row">
+				<button class="button" onClick=${() => setDraft(null)}>Back</button>
+				<button class="button primary grow" onClick=${() => openBranch(() => actions.resend(entry.id, { text: draft, worktree }))}>Send in a new session</button>
+			</div>
+		<//>`;
+	}
+	return html`<${Sheet} title=${toPi ? "Message" : "Reply"} onClose=${closeSheet}>
+		${canBranch && view.conversation.inRepository &&
+		html`<label class="check"><input type="checkbox" checked=${worktree} onChange=${(event) => setWorktree(event.currentTarget.checked)} /> New sessions get a git worktree of their own</label>`}
+		${canBranch && !toPi && item("Fork from here", () => openBranch(() => actions.fork(entry.id, { worktree })), "everything up to this reply")}
+		${canBranch && toPi && item("Edit and send again…", () => setDraft(text))}
+		${canBranch && prompt && html`<${SendAgain} prompt=${prompt} worktree=${worktree} />`}
+		${item("Copy text", copy)}
 	<//>`;
 }
 
@@ -439,7 +761,7 @@ function MenuSheet() {
 	// driver has left: the same rules the server applies.
 	const driving = !turns?.on || turns.driver === me?.id;
 	const canStopTurns = driving || me?.role === "owner" || !turns.driver || !store.state.presence.some((person) => person.id === turns.driver);
-	const item = (label, run, hint) => html`<button class="list-item" onClick=${run}><span>${label}</span>${hint && html`<span class="muted small">${hint}</span>`}</button>`;
+	const instructions = view.agent?.instructions;
 	return html`<${Sheet} title=${conversation?.title ?? "Menu"} onClose=${closeSheet}>
 		${conversation && collab() && item("People here", () => openSheet({ type: "chat" }), "chat, pinned, notes")}
 		${conversation && collab() && steer && (!turns?.on || canStopTurns) &&
@@ -449,10 +771,17 @@ function MenuSheet() {
 				closeSheet();
 			}), turns?.on ? "anyone here can send to Pi again" : "one person drives Pi at a time")}
 		${session && steer && item("Rename", () => openSheet({ type: "rename" }))}
-		${conversation && steer && driving && !scoped() && item("Working directory", () => openSheet({ type: "cwd", mode: "change" }), shortPath(view.agent?.cwd, server?.home))}
+		${conversation?.worktree && steer
+			? item("Worktree", () => openSheet({ type: "worktree" }), conversation.worktree.branch)
+			: conversation && steer && driving && !scoped() && item("Working directory", () => openSheet({ type: "cwd", mode: "change" }), shortPath(view.agent?.cwd, server?.home))}
+		${conversation && steer && item("Changes", () => openSheet({ type: "changes" }), "what Pi changed")}
+		${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
 		${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
+		${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
+		${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), view.schedules.length === 0 ? "none" : `${view.schedules.length} coming`)}
 		${conversation &&
 		item("Copy link", () => copyText(location.href).then(() => notify("info", "Link copied. Other signed-in devices can open it."), () => notify("error", "Could not copy.")))}
+		${conversation && html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download><span>Export as Markdown</span><span class="muted small">the whole history</span></a>`}
 		${session && steer &&
 		item(conversation.archived ? "Unarchive" : "Archive", () =>
 			attempt(async () => {
@@ -469,6 +798,8 @@ function MenuSheet() {
 			${item("Your name", () => openSheet({ type: "name" }), me?.name)}
 			${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
 			${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
+			${item("Running now", () => openSheet({ type: "running" }), "everything Pi is doing")}
+			${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
 			${item("Providers", () => openSheet({ type: "providers" }))}
 			${item("Extensions", () => openSheet({ type: "extensions" }), store.state.guard?.enabled ? "Lancet Guard on" : store.state.guard?.available ? "Lancet Guard off" : "")}
 			${me?.role === "owner" &&
@@ -531,6 +862,49 @@ export function Sheets() {
 			break;
 		case "rename":
 			body = html`<${TextSheet} title="Rename" label="Session title" initial=${view.conversation?.title ?? ""} submit=${(value) => actions.updateSession(view.conversation.id, { title: value })} />`;
+			break;
+		case "worktree":
+			body = html`<${WorktreeSheet} />`;
+			break;
+		case "changes":
+			body = view.conversation ? html`<${ChangesSheet} />` : null;
+			break;
+		case "spend":
+			body = html`<${SpendSheet} />`;
+			break;
+		case "running":
+			body = html`<${RunningSheet} />`;
+			break;
+		case "schedules":
+			body = view.conversation ? html`<${SchedulesSheet} />` : null;
+			break;
+		case "share":
+			body = html`<${ShareSheet} share=${sheet.share} />`;
+			break;
+		case "message":
+			body = view.conversation ? html`<${MessageSheet} key=${sheet.entryId} entryId=${sheet.entryId} />` : null;
+			break;
+		case "reset":
+			body = html`<${TextSheet}
+				title="New context"
+				hint="Pi starts fresh: it no longer sees the messages so far, though everyone here still does."
+				label="Handoff note (optional)"
+				placeholder="e.g. We fixed the login bug; next is the signup form."
+				multiline=${true}
+				button="Start a new context"
+				submit=${(value) => actions.reset(value)}
+			/>`;
+			break;
+		case "instructions":
+			body = html`<${TextSheet}
+				title="Instructions for Pi"
+				hint="Pi gets these with every message in this session, after its own instructions. Everyone here can see them. Leave empty for none."
+				label="Instructions"
+				initial=${view.agent?.instructions ?? ""}
+				placeholder="e.g. Use pnpm, not npm. Ask before adding dependencies."
+				multiline=${true}
+				submit=${(value) => actions.setInstructions(value)}
+			/>`;
 			break;
 		case "compact":
 			body = html`<${TextSheet} title="Compact context" label="What should the summary keep? (optional)" placeholder="e.g. the failing test names" multiline=${true} button="Compact" submit=${(value) => actions.compact(value)} />`;

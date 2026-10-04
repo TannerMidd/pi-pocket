@@ -35,6 +35,9 @@ const emptyView = () => ({
 	pins: [],
 	turns: { on: false, asks: [] },
 	decisions: {},
+	plan: { on: false },
+	schedules: [],
+	goal: null,
 });
 
 export const store = {
@@ -45,6 +48,8 @@ export const store = {
 		guard: null,
 		server: null,
 		sessions: [],
+		/** False until the server's first session list arrives: an empty list until then means "not here yet". */
+		sessionsLoaded: false,
 		conversationId: routeConversation(),
 		view: emptyView(),
 		...peopleFor(routeConversation()),
@@ -61,6 +66,8 @@ export const store = {
 		chatQuote: null,
 		/** Text to put into the message box to Pi: `{ text, n }`, picked up by the composer. */
 		composerInsert: null,
+		/** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
+		templates: null,
 	},
 	listeners: new Set(),
 	set(patch) {
@@ -94,6 +101,12 @@ function peopleFor(id) {
 /** How far this browser has read a conversation's chat: the time of the newest message seen. */
 export function chatReadOf(id) {
 	return Number(localStorage.getItem(readKey(id)) ?? 0);
+}
+
+/** Someone else chatted in a session after this browser last read its chat. */
+export function sessionUnread(session, state = store.state) {
+	const read = session.id === state.conversationId ? state.chatRead : chatReadOf(session.id);
+	return session.chatAt !== undefined && session.chatBy !== state.me?.id && session.chatAt > read;
 }
 
 /** Server features the web app may use. `collab` 2 adds roles, take turns, reactions, pins, notes, mentions, push. */
@@ -232,6 +245,10 @@ function applyView(data) {
 				pins: data.pins ?? base.pins,
 				turns: data.turns ?? base.turns,
 				decisions: data.decisions ?? base.decisions,
+				plan: data.plan ?? base.plan,
+				schedules: data.schedules ?? base.schedules,
+				// No goal is null, which the server sends too: only a missing field keeps the last value.
+				goal: data.goal === undefined ? base.goal : data.goal,
 			},
 			missing: null,
 		};
@@ -241,7 +258,7 @@ function applyView(data) {
 /** What the server sends, by event name. Both transports deliver the same events. */
 const handlers = {
 	hello: (data) => store.set({ me: data.user, users: data.users, models: data.models, guard: data.guard, server: data.server }),
-	sessions: (sessions) => store.set({ sessions }),
+	sessions: (sessions) => store.set({ sessions, sessionsLoaded: true }),
 	models: (models) => store.set({ models }),
 	view: applyView,
 	chat: applyChat,
@@ -284,6 +301,16 @@ export function connect() {
 	const query = `tab=${encodeURIComponent(TAB)}${id === null ? "" : `&c=${id}`}`;
 	source = pollHere() && !local ? pollEvents(query) : streamEvents(query);
 }
+
+// A page kept for Back and Forward stays alive, frozen, and so would its stream: each holds one of the few connections a
+// browser makes to a server, and after a handful nothing else loads. It closes on leaving and reconnects on return.
+addEventListener("pagehide", () => {
+	source?.close();
+	source = null;
+});
+addEventListener("pageshow", (event) => {
+	if (event.persisted) connect();
+});
 
 /** Server-sent events: one long response the server writes to as things change. */
 function streamEvents(query) {
@@ -458,8 +485,24 @@ export const actions = {
 	withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
 	configure: (change) => api(`c/${current()}/configure`, change),
 	compact: (instructions) => api(`c/${current()}/compact`, { instructions }),
+	reset: (note) => api(`c/${current()}/reset`, { note }),
+	setInstructions: (text) => api(`c/${current()}/instructions`, { text }),
+	/** A new session with this one's history through `entryId`. */
+	fork: (entryId, { worktree = false } = {}) => api(`c/${current()}/fork`, { entryId, ...(worktree ? { worktree } : {}) }),
+	/** Send a message to Pi again in a fork that ends just before it: `{ text }` edits it, `{ model }` picks another model. */
+	resend: (entryId, change = {}) => api(`c/${current()}/resend`, { entryId, ...change }),
+	setPlan: (on) => api(`c/${current()}/plan`, { on }),
+	approvePlan: () => api(`c/${current()}/plan`, { approve: true }),
+	prompts: () => api(`c/${current()}/prompts`),
+	/** `when` says when, then what Pi gets: `in 2h check the deploy`. Clock times are this device's. */
+	schedule: (when) => api(`c/${current()}/schedules`, { when, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+	cancelSchedule: (id) => api(`c/${current()}/schedules/${encodeURIComponent(id)}/cancel`, {}),
+	setGoal: (command) => api(`c/${current()}/goal`, { command }),
+	removeWorktree: (force) => api(`c/${current()}/worktree`, { remove: true, force }),
+	clearGoal: () => api(`c/${current()}/goal`, { clear: true }),
 	approve: (id, allow) => api(`approvals/${encodeURIComponent(id)}`, { allow }),
-	createSession: (cwd) => api("sessions", { cwd }),
+	/** `worktree`: the session works in a git worktree of its own, made from the folder. */
+	createSession: (cwd, { worktree = false } = {}) => api("sessions", { cwd, ...(worktree ? { worktree } : {}) }),
 	updateSession: (id, patch) => api(`sessions/${id}`, patch),
 	upload: (file) => api(`c/${current()}/upload?name=${encodeURIComponent(file.name)}`, file),
 	fullEntry: (entryId) => api(`c/${current()}/entry/${entryId}`),
@@ -489,9 +532,9 @@ export function openSheet(sheet) {
 	store.set({ sheet, drawer: false });
 }
 
-/** Put text into the message box to Pi (after what is there), and close any sheet so it shows. */
-export function insertIntoComposer(text) {
-	store.set((state) => ({ sheet: null, composerInsert: { text, n: (state.composerInsert?.n ?? 0) + 1 } }));
+/** Put text into the message box to Pi (after what is there), and files to attach, and close any sheet so it shows. */
+export function insertIntoComposer(text, files = []) {
+	store.set((state) => ({ sheet: null, composerInsert: { text, files, n: (state.composerInsert?.n ?? 0) + 1 } }));
 }
 
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */

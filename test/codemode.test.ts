@@ -59,7 +59,7 @@ function fakeApi(tools: ToolRegistration[], extensions: ReturnType<typeof define
 	};
 }
 
-const host = { approvals: new Approvals() } as unknown as PocketHost;
+const host = { approvals: new Approvals(() => undefined) } as unknown as PocketHost;
 const codemodeTool = createCodemode(host).tools![0]!;
 const run = async (fake: Fake, code: string) => {
 	const result = await codemodeTool.execute({ code } as never, fake.api as never, context);
@@ -138,7 +138,7 @@ test("output over the budget keeps its start and end, and saves the whole", asyn
 });
 
 test("with Lancet Guard asking, each nested call waits for its own answer, even in parallel", async () => {
-	const approvals = new Approvals();
+	const approvals = new Approvals(() => undefined);
 	const guardHost = {
 		approvals,
 		guard: { judge: async (_tool: string, args: { command: string }) => ({ subject: args.command, decision: { action: "ask", source: "test", reason: "risky" } }) },
