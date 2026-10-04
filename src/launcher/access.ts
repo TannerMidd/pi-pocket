@@ -97,13 +97,22 @@ export async function downloadCloudflared(dataDir: string, url: string, progress
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	const target = join(directory, "cloudflared");
 	const temp = `${target}.download`;
-	const response = await fetch(url);
-	if (!response.ok || response.body === null) throw new Error(`download failed: HTTP ${response.status}`);
-	const total = Number(response.headers.get("content-length") ?? 0);
+	// Give up when no data arrives for a minute: a stalled connection must not hang the launcher. Slow is fine.
+	const controller = new AbortController();
+	let idle: NodeJS.Timeout | undefined;
+	const wait = () => {
+		clearTimeout(idle);
+		idle = setTimeout(() => controller.abort(new Error("the download stalled")), 60_000);
+	};
+	wait();
 	const out = createWriteStream(temp, { mode: 0o755 });
 	let done = 0;
 	try {
+		const response = await fetch(url, { signal: controller.signal });
+		if (!response.ok || response.body === null) throw new Error(`download failed: HTTP ${response.status}`);
+		const total = Number(response.headers.get("content-length") ?? 0);
 		for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+			wait();
 			done += chunk.length;
 			if (!out.write(chunk)) await once(out, "drain");
 			progress(done, total);
@@ -113,6 +122,8 @@ export async function downloadCloudflared(dataDir: string, url: string, progress
 		out.destroy();
 		rmSync(temp, { force: true });
 		throw error;
+	} finally {
+		clearTimeout(idle);
 	}
 	chmodSync(temp, 0o755);
 	const check = spawnSync(temp, ["--version"], { encoding: "utf8", timeout: 20_000 });
@@ -153,7 +164,9 @@ export class CloudflareTunnel {
 	}
 
 	start(): void {
-		appendFileSync(this.#logFile, `\n--- ${new Date().toISOString()} starting cloudflared\n`);
+		// cloudflared logs the addresses of failed requests, which can include a sign-in token: only this user may read it.
+		appendFileSync(this.#logFile, `\n--- ${new Date().toISOString()} starting cloudflared\n`, { mode: 0o600 });
+		chmodSync(this.#logFile, 0o600);
 		const child = spawn(this.#binary, ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${this.#port}`], {
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -175,7 +188,8 @@ export class CloudflareTunnel {
 		};
 		for (const stream of [child.stdout, child.stderr]) createInterface({ input: stream! }).on("line", onLine);
 		child.on("error", (error) => this.#events.problem(error.message));
-		child.on("exit", (code) => {
+		// "close", not "exit": a cloudflared that could not be started (removed, not executable) never exits.
+		child.on("close", (code) => {
 			if (this.#child === child) this.#child = undefined;
 			this.#events.exit(code);
 		});

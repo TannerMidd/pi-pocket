@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { closeSync, createReadStream, createWriteStream, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { closeSync, createReadStream, createWriteStream, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir, networkInterfaces } from "node:os";
 import { basename, dirname, extname, join, normalize, resolve, sep } from "node:path";
@@ -70,6 +70,42 @@ const ENTRY_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "imag
 const ARTIFACT_CSP =
 	"sandbox allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads; frame-ancestors 'self'";
 
+/**
+ * The app page's policy. Replies show markdown that Pi wrote, and what Pi writes can be steered by any file or page it
+ * reads: nothing on the page may load from, send to, or post to another site. The inline import map is allowed by hash.
+ */
+export function appPolicy(html: string): string {
+	// Browsers hash script text after turning CRLF and CR into LF, as their HTML parser does.
+	const hashes = [...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(
+		(match) => `'sha256-${createHash("sha256").update(match[1]!.replace(/\r\n?/g, "\n")).digest("base64")}'`,
+	);
+	return [
+		"default-src 'self'",
+		["script-src 'self'", ...hashes].join(" "),
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"media-src 'self' data: blob:",
+		"connect-src 'self'",
+		"frame-src 'self'",
+		"worker-src 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'self'",
+		"frame-ancestors 'self'",
+	].join("; ");
+}
+
+/** A form posted from another site, as browsers report it. Such a post must not sign this browser in or out. */
+function crossSite(request: IncomingMessage): boolean {
+	const site = request.headers["sec-fetch-site"];
+	return site !== undefined && site !== "same-origin" && site !== "none";
+}
+
+/** Where to go after signing in: a path on this server, never `//host` or `/\host`, which browsers read as another site. */
+function localPath(next: string | null): string {
+	return next !== null && /^\/(?![/\\])/.test(next) ? next : "/";
+}
+
 /** How long a poll waits for events before answering empty, and how long an unpolled session lives. */
 const POLL_HOLD_MS = 25_000;
 const POLL_EXPIRE_MS = 60_000;
@@ -103,15 +139,24 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 	send(response, status, JSON.stringify(value), "application/json");
 }
 
+/** How long a JSON or form body may take to arrive: a client that stops sending must not hold the connection. */
+const BODY_TIMEOUT_MS = 60_000;
+
 async function readBody(request: IncomingMessage, limit: number): Promise<Buffer> {
-	const chunks: Buffer[] = [];
-	let size = 0;
-	for await (const chunk of request) {
-		size += (chunk as Buffer).length;
-		if (size > limit) throw new HttpError(413, "Request too large");
-		chunks.push(chunk as Buffer);
+	if (Number(request.headers["content-length"] ?? 0) > limit) throw new HttpError(413, "Request too large");
+	const timer = setTimeout(() => request.destroy(new HttpError(408, "The request body took too long")), BODY_TIMEOUT_MS);
+	try {
+		const chunks: Buffer[] = [];
+		let size = 0;
+		for await (const chunk of request) {
+			size += (chunk as Buffer).length;
+			if (size > limit) throw new HttpError(413, "Request too large");
+			chunks.push(chunk as Buffer);
+		}
+		return Buffer.concat(chunks);
+	} finally {
+		clearTimeout(timer);
 	}
-	return Buffer.concat(chunks);
 }
 
 async function readJson<T>(request: IncomingMessage): Promise<T> {
@@ -153,6 +198,18 @@ function safeName(name: string): string {
 export function createHandler(options: HttpOptions) {
 	const { app } = options;
 	const auth = new Auth(app.config);
+
+	/** The app page, with its content security policy. */
+	const serveApp = (response: ServerResponse): void => {
+		let body: string;
+		try {
+			body = readFileSync(join(WEB, "index.html"), "utf8");
+		} catch {
+			send(response, 404, "Not found");
+			return;
+		}
+		send(response, 200, body, "text/html; charset=utf-8", { "cache-control": "no-cache", "content-security-policy": appPolicy(body) });
+	};
 
 	const serveFile = (response: ServerResponse, file: string, fallbackType?: string): void => {
 		let body: Buffer;
@@ -384,14 +441,14 @@ export function createHandler(options: HttpOptions) {
 			clearAuthCookie(response);
 			return json(response, 200, { ok: true });
 		}
-		if (first === "users" && second === undefined && method === "GET") return json(response, 200, app.people());
+		if (first === "users" && second === undefined && method === "GET") return json(response, 200, app.people(user));
 		if (first === "users" && second !== undefined && third === "remove" && method === "POST") {
 			app.removeUser(user, second);
 			return json(response, 200, { ok: true });
 		}
 		if (first === "users" && second !== undefined && third === undefined && method === "POST") {
 			app.setAccess(user, second, await readJson(request));
-			return json(response, 200, app.people());
+			return json(response, 200, app.people(user));
 		}
 		if (first === "visibility" && method === "POST") {
 			const body = await readJson<{ tab?: unknown; visible?: unknown }>(request);
@@ -415,6 +472,7 @@ export function createHandler(options: HttpOptions) {
 			if (third === "submit" && method === "POST") {
 				const body = await readJson<SubmitRequest>(request);
 				if (typeof body.text !== "string" || typeof body.requestId !== "string") throw new HttpError(400, "text and requestId are required");
+				if (body.attachments !== undefined && !Array.isArray(body.attachments)) throw new HttpError(400, "attachments must be a list");
 				const attachments = (body.attachments ?? []).filter((file): file is Attachment => {
 					// Only files this server stored for this conversation.
 					return typeof file?.path === "string" && resolve(file.path).startsWith(app.uploadDirectory(id) + sep);
@@ -462,8 +520,9 @@ export function createHandler(options: HttpOptions) {
 				return json(response, 200, { ok: true });
 			}
 			if (third === "compact" && method === "POST") {
-				const body = await readJson<{ instructions?: string }>(request);
-				await app.compact(id, user, body.instructions?.trim() || undefined);
+				const body = await readJson<{ instructions?: unknown }>(request);
+				if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") throw new HttpError(400, "instructions must be text");
+				await app.compact(id, user, (body.instructions as string | null | undefined)?.trim() || undefined);
 				return json(response, 200, { ok: true });
 			}
 			if (third === "image" && fourth !== undefined && method === "GET") {
@@ -487,15 +546,26 @@ export function createHandler(options: HttpOptions) {
 			}
 			if (third === "upload" && method === "POST") {
 				app.requireSteer(user);
+				if (Number(request.headers["content-length"] ?? 0) > MAX_UPLOAD) throw new HttpError(413, "Files can be up to 50 MB");
+				await app.requireConversation(id);
 				const name = safeName(url.searchParams.get("name") ?? "upload");
 				const directory = app.uploadDirectory(id);
-				const file = join(directory, `${Date.now().toString(36)}-${name}`);
+				// Unique, and never written over: pasted images all arrive as image.png, often at once.
+				const file = join(directory, `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}-${name}`);
 				let size = 0;
 				request.on("data", (chunk: Buffer) => {
 					size += chunk.length;
-					if (size > MAX_UPLOAD) request.destroy(new Error("too large"));
+					if (size > MAX_UPLOAD) request.destroy(new HttpError(413, "Files can be up to 50 MB"));
 				});
-				await pipeline(request, createWriteStream(file, { mode: 0o600 }));
+				try {
+					await pipeline(request, createWriteStream(file, { mode: 0o600, flags: "wx" }));
+				} catch (error) {
+					// A cut-off or oversized upload leaves nothing behind (and a name already taken was never this upload's).
+					// Cut off is the client's doing, not a server error.
+					if ((error as NodeJS.ErrnoException).code !== "EEXIST") rmSync(file, { force: true });
+					if (error instanceof HttpError || request.complete) throw error;
+					throw new HttpError(400, "The upload stopped before it finished");
+				}
 				const mime = String(request.headers["content-type"] ?? "") || TYPES[extname(name).toLowerCase()] || "application/octet-stream";
 				const attachment: Attachment = { path: file, name, mime: mime.split(";")[0]!.trim(), size };
 				return json(response, 200, attachment);
@@ -551,6 +621,10 @@ export function createHandler(options: HttpOptions) {
 		if (first === "providers" && second !== undefined && third === "logout" && method === "POST") {
 			requireOwner(user);
 			await app.logout(second);
+			return json(response, 200, { ok: true });
+		}
+		if (first === "auth" && second !== undefined && third === "cancel" && method === "POST") {
+			app.cancelLogin(user, second);
 			return json(response, 200, { ok: true });
 		}
 		if (first === "auth" && second !== undefined && third !== undefined && method === "POST") {
@@ -623,19 +697,39 @@ export function createHandler(options: HttpOptions) {
 			if (parts[0] === "vendor" && parts[1] !== undefined && VENDOR[parts[1]] !== undefined) {
 				return serveFile(response, VENDOR[parts[1]]!, "text/javascript; charset=utf-8");
 			}
-			if (parts[0] === "login" && request.method === "GET") {
-				const token = url.searchParams.get("token") ?? "";
-				if (auth.tokenUser(token) === undefined) {
+			if (parts[0] === "login" && (request.method === "GET" || request.method === "POST")) {
+				const posted = request.method === "POST";
+				if (posted && crossSite(request)) throw new HttpError(403, "Sign in from Pi Pocket's own page.");
+				const form = posted ? new URLSearchParams((await readBody(request, 10_000)).toString("utf8")) : url.searchParams;
+				const token = form.get("token") ?? "";
+				const next = localPath(form.get("next"));
+				const signingIn = auth.tokenUser(token);
+				if (signingIn === undefined) {
 					return send(response, 401, page("Pi Pocket", `<h1>Link expired</h1><p>That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.</p>`), "text/html; charset=utf-8");
 				}
+				const current = auth.user(request);
+				if (!posted && current !== undefined && current.id !== signingIn.id) {
+					// Signed in as someone else: switching takes a tap, so a link on another site cannot do it unnoticed.
+					return send(
+						response,
+						200,
+						page(
+							"Switch account? · Pi Pocket",
+							`<h1>Switch account?</h1><p>This browser is signed in as ${escapeHtml(current.name)}. The link you opened signs it in as ${escapeHtml(signingIn.name)} instead.</p><form method="post" action="/login"><input type="hidden" name="token" value="${escapeHtml(token)}"><input type="hidden" name="next" value="${escapeHtml(next)}"><button type="submit">Sign in as ${escapeHtml(signingIn.name)}</button></form><p><a href="/">Stay signed in as ${escapeHtml(current.name)}</a></p>`,
+						),
+						"text/html; charset=utf-8",
+						{ "referrer-policy": "no-referrer" },
+					);
+				}
 				setAuthCookie(request, response, token);
-				response.writeHead(303, { location: url.searchParams.get("next")?.startsWith("/") ? url.searchParams.get("next")! : "/" });
+				response.writeHead(303, { location: next });
 				response.end();
 				return;
 			}
 			if (parts[0] === "join" && parts[1] !== undefined) {
 				const code = parts[1];
 				if (request.method === "POST") {
+					if (crossSite(request)) throw new HttpError(403, "Join from Pi Pocket's own page.");
 					const form = new URLSearchParams((await readBody(request, 10_000)).toString("utf8"));
 					const redeemed = auth.redeem(code, form.get("name") ?? "");
 					if (redeemed === undefined) {
@@ -666,9 +760,10 @@ export function createHandler(options: HttpOptions) {
 				);
 			}
 			// The web app: index.html for app routes, files from web/ otherwise.
-			if (parts.length === 0 || parts[0] === "s") return serveFile(response, join(WEB, "index.html"));
+			if (parts.length === 0 || parts[0] === "s") return serveApp(response);
 			const file = normalize(join(WEB, ...parts));
 			if (!file.startsWith(WEB + sep)) throw new HttpError(404, "Not found");
+			if (file === join(WEB, "index.html")) return serveApp(response);
 			return serveFile(response, file);
 		} catch (error) {
 			const status = error instanceof HttpError ? error.status : 500;

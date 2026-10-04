@@ -152,6 +152,16 @@ export async function sendPush(
 	return response.status;
 }
 
+/**
+ * The push services browsers use: Chrome and other Chromium browsers (FCM), Firefox, Edge, and Safari. The person
+ * subscribing picks the endpoint, and the server posts to it: any other host would let them aim the server at
+ * addresses only it can reach.
+ */
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^android\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/, /(^|\.)push\.apple\.com$/];
+
+/** How many devices one person can turn notifications on for; the oldest goes when another is added. */
+export const MAX_DEVICES = 10;
+
 /** Throw a clear Error unless the subscription looks like one a browser produced. */
 export function validateSubscription(subscription: PushSubscriptionJson): PushSubscriptionJson {
 	const value = subscription as Partial<PushSubscriptionJson> | null | undefined;
@@ -164,6 +174,9 @@ export function validateSubscription(subscription: PushSubscriptionJson): PushSu
 		throw new Error("subscription endpoint is not a valid URL");
 	}
 	if (url.protocol !== "https:") throw new Error("subscription endpoint must be an https URL");
+	if (url.port !== "" || url.username !== "" || url.password !== "" || !PUSH_HOSTS.some((host) => host.test(url.hostname))) {
+		throw new Error(`${url.host} is not a browser push service`);
+	}
 	const keys = value.keys;
 	if (keys === null || typeof keys !== "object" || typeof keys.p256dh !== "string" || typeof keys.auth !== "string") {
 		throw new Error("subscription keys.p256dh and keys.auth are required");
@@ -223,8 +236,10 @@ export class PushStore {
 		const clean = validateSubscription(subscription);
 		const stored: StoredSubscription = { ...clean, userId, createdAt: Date.now() };
 		if (userAgent !== undefined && userAgent !== "") stored.userAgent = userAgent.slice(0, 300);
-		this.#data.subscriptions = this.#data.subscriptions.filter((sub) => sub.endpoint !== clean.endpoint);
-		this.#data.subscriptions.push(stored);
+		const others = this.#data.subscriptions.filter((sub) => sub.endpoint !== clean.endpoint);
+		const theirs = others.filter((sub) => sub.userId === userId);
+		const dropped = new Set(theirs.slice(0, Math.max(0, theirs.length - (MAX_DEVICES - 1))));
+		this.#data.subscriptions = [...others.filter((sub) => !dropped.has(sub)), stored];
 		this.save();
 	}
 

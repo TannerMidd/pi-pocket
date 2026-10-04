@@ -3,7 +3,7 @@ import { useEffect, useState } from "preact/hooks";
 import { Avatar, ChatSheet } from "./chat.js";
 import { NotificationsSheet } from "./notify.js";
 import { actions, api, attempt, canSteer, closeSheet, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
-import { formatBytes, formatTokens, html, Icon, shortPath, Sheet, Spinner, timeAgo } from "./ui.js";
+import { copyText, formatBytes, formatTokens, html, Icon, Loader, shortPath, Sheet, timeAgo } from "./ui.js";
 
 function ModelSheet() {
 	const { models, view } = store.state;
@@ -129,7 +129,7 @@ function ArtifactViewer({ id, version }) {
 				<span class="muted small">${artifact?.type ?? ""} · version ${shown}${latest && shown !== latest ? html` · <button class="link" onClick=${() => setShown(latest)}>latest is v${latest}</button>` : ""}</span>
 			</div>
 			${artifact && artifact.versions.length > 1 &&
-			html`<select value=${shown} onChange=${(event) => setShown(Number(event.currentTarget.value))}>${[...artifact.versions].reverse().map(
+			html`<select aria-label="Version" value=${shown} onChange=${(event) => setShown(Number(event.currentTarget.value))}>${[...artifact.versions].reverse().map(
 				(each) => html`<option value=${each.version}>v${each.version}</option>`,
 			)}</select>`}
 			<button class="icon-button" title="Reload" onClick=${() => setNonce(nonce + 1)}>↻</button>
@@ -200,7 +200,7 @@ function ExtensionsSheet() {
 	return html`<${Sheet} title="Extensions" onClose=${closeSheet}>
 		<p class="muted small">Extensions give Pi its tools and checks in Pi Pocket. A change applies to every session right away and stays after restarts.${owner ? "" : " Only the owner can change them."}</p>
 		${problem && html`<div class="error-box">${problem}</div>`}
-		${!data && !problem && html`<${Spinner} />`}
+		${!data && !problem && html`<${Loader} label="Loading extensions" />`}
 		${data?.modules.map((module) => {
 			const tools = module.extensions.flatMap((extension) => extension.tools);
 			const note = module.file === "guard.ts" ? guardNote(module, data.guard) : null;
@@ -244,7 +244,7 @@ function ProvidersSheet() {
 	return html`<${Sheet} title="Providers" onClose=${closeSheet}>
 		<p class="muted small">Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}</p>
 		<label class="search"><${Icon} name="search" size=${16} /><input placeholder="Search providers" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)} /></label>
-		${providers === null && html`<${Spinner} />`}
+		${providers === null && html`<${Loader} label="Loading providers" />`}
 		${list.map(
 			(provider) => html`<div class="provider">
 				<div>
@@ -273,7 +273,8 @@ function AuthDialog() {
 			store.set({ auth: { ...store.state.auth, prompt: null } });
 		});
 	const close = () => {
-		if (auth.prompt) answer({ cancel: true });
+		// Stop the sign-in on the server too, also while it waits without a question (an OAuth callback holds a port).
+		if (!auth.done) api(`auth/${encodeURIComponent(auth.flowId)}/cancel`, {}).catch(() => {});
 		store.set({ auth: null });
 	};
 	const prompt = auth.prompt;
@@ -297,7 +298,7 @@ function AuthDialog() {
 						<button class="button primary" onClick=${() => answer({ value })}>Continue</button>
 					</div>
 				</div>`)}
-		${!prompt && !auth.done && html`<p class="muted"><${Spinner} /> Waiting…</p>`}
+		${!prompt && !auth.done && html`<${Loader} label="Waiting for the provider" />`}
 		${auth.done && !auth.done.ok && html`<div class="error-box">${auth.done.error}</div>`}
 	<//>`;
 }
@@ -348,11 +349,11 @@ function InviteSheet({ session = null }) {
 					html`<div class="error-box">This link only works on this device. To let other devices in, press <span class="mono">a</span> in the Pi Pocket terminal (or start it with <span class="mono">--access</span>) and pick Local network, Cloudflare Tunnel, or Tailscale. Then make a new invite.</div>`}
 					<div class="qr" dangerouslySetInnerHTML=${{ __html: invite.svg }}></div>
 					<div class="row"><input class="mono" readonly value=${invite.url} onFocus=${(event) => event.currentTarget.select()} />
-					<button class="button" onClick=${() => navigator.clipboard?.writeText(invite.url).then(() => notify("info", "Link copied."))}>Copy</button></div>
+					<button class="button" onClick=${() => copyText(invite.url).then(() => notify("info", "Link copied."), () => notify("error", "Could not copy."))}>Copy</button></div>
 					<p class="muted small">Code: <span class="mono">${invite.code}</span></p>
 					${invite.alternatives?.length > 0 && html`<p class="muted small">Also reachable at: ${invite.alternatives.map((url) => html`<span class="mono">${url} </span>`)}</p>`}
 				</div>`
-			: html`<${Spinner} />`}
+			: html`<${Loader} label="Making an invite" />`}
 		<button class="button wide" onClick=${create}>New invite</button>
 		${!collab() && html`<${PeopleList} />`}
 	<//>`;
@@ -429,20 +430,24 @@ function MenuSheet() {
 	const steer = canSteer();
 	const session = conversation?.kind === "session";
 	const turns = view.turns;
+	// While take turns is on, settings belong to the driver. Turning it off also works for the owner, or when the
+	// driver has left: the same rules the server applies.
+	const driving = !turns?.on || turns.driver === me?.id;
+	const canStopTurns = driving || me?.role === "owner" || !turns.driver || !store.state.presence.some((person) => person.id === turns.driver);
 	const item = (label, run, hint) => html`<button class="list-item" onClick=${run}><span>${label}</span>${hint && html`<span class="muted small">${hint}</span>`}</button>`;
 	return html`<${Sheet} title=${conversation?.title ?? "Menu"} onClose=${closeSheet}>
 		${conversation && collab() && item("People here", () => openSheet({ type: "chat" }), "chat, pinned, notes")}
-		${conversation && collab() && steer &&
+		${conversation && collab() && steer && (!turns?.on || canStopTurns) &&
 		item(turns?.on ? "Turn off take turns" : "Take turns", () =>
 			attempt(async () => {
 				await actions.turns(turns?.on ? "off" : "on");
 				closeSheet();
 			}), turns?.on ? "anyone here can send to Pi again" : "one person drives Pi at a time")}
 		${session && steer && item("Rename", () => openSheet({ type: "rename" }))}
-		${conversation && steer && item("Working directory", () => openSheet({ type: "cwd", mode: "change" }), shortPath(view.agent?.cwd, server?.home))}
-		${conversation && steer && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
+		${conversation && steer && driving && !scoped() && item("Working directory", () => openSheet({ type: "cwd", mode: "change" }), shortPath(view.agent?.cwd, server?.home))}
+		${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
 		${conversation &&
-		item("Copy link", () => navigator.clipboard?.writeText(location.href).then(() => notify("info", "Link copied. Other signed-in devices can open it."), () => notify("error", "Could not copy.")))}
+		item("Copy link", () => copyText(location.href).then(() => notify("info", "Link copied. Other signed-in devices can open it."), () => notify("error", "Could not copy.")))}
 		${session && steer &&
 		item(conversation.archived ? "Unarchive" : "Archive", () =>
 			attempt(async () => {

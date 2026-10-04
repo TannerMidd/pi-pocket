@@ -5,7 +5,7 @@
  * classifier of the installed `specpi-lancet-guard` package and exposes one `judge()` call. The guard's own settings
  * file (`~/.pi/lancet-guard.json`) decides whether it is on, exactly as it does inside Pi.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -99,6 +99,19 @@ export class LancetGuard {
 		return this.#modules;
 	}
 
+	/**
+	 * Whether the settings file turns the guard on, read as the guard reads it: off unless `enabled` is true, and off
+	 * when the file is missing or unreadable. Needs none of the guard's code, so it answers when the guard cannot load.
+	 */
+	#switchedOn(): boolean {
+		try {
+			const parsed: unknown = JSON.parse(readFileSync(this.settingsFile, "utf8").replace(/^\uFEFF/, ""));
+			return typeof parsed === "object" && parsed !== null && (parsed as { enabled?: unknown }).enabled === true;
+		} catch {
+			return false;
+		}
+	}
+
 	async status(): Promise<GuardStatus> {
 		if (this.disabled) return { available: false, enabled: false, detail: "Lancet Guard is off (PI_POCKET_GUARD=off); tools run unguarded." };
 		if (this.directory === undefined) {
@@ -115,7 +128,10 @@ export class LancetGuard {
 					: `Lancet Guard is off in ${this.settingsFile}.`,
 			};
 		} catch (error) {
-			return { available: false, enabled: false, detail: `Lancet Guard failed to load: ${this.#loadError ?? String(error)}` };
+			const reason = this.#loadError ?? (error instanceof Error ? error.message : String(error));
+			return this.#switchedOn()
+				? { available: false, enabled: true, detail: `Lancet Guard is on but failed to load, so bash, write, and edit calls are blocked: ${reason}` }
+				: { available: false, enabled: false, detail: `Lancet Guard failed to load (it is off in ${this.settingsFile}): ${reason}` };
 		}
 	}
 
@@ -128,7 +144,7 @@ export class LancetGuard {
 
 	/**
 	 * The guard's decision for one tool call, or undefined when the guard does not apply (another tool, or off).
-	 * Fails closed: a guard that is on but cannot load blocks the call.
+	 * Fails closed: a guard that is on but cannot load blocks the call. One that is off stays out of the way.
 	 */
 	async judge(tool: string, args: Record<string, unknown>, cwd: string): Promise<ToolJudgement | undefined> {
 		if (!SHELL_TOOLS.has(tool) && !FILE_TOOLS.has(tool)) return undefined;
@@ -137,6 +153,7 @@ export class LancetGuard {
 		try {
 			modules = await this.#load();
 		} catch (error) {
+			if (!this.#switchedOn()) return undefined;
 			return {
 				subject: tool,
 				decision: {

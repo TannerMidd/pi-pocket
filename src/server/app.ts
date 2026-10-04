@@ -92,6 +92,8 @@ export interface Client {
 	/** Entries this client has, so updates carry only new ones. */
 	readonly sentEntries: Set<number>;
 	orderKey: string;
+	/** The JSON of each slow-changing view field this client last got, so updates repeat only those that changed. */
+	sentFields?: Map<string, string>;
 }
 
 export type Attachment = { path: string; name: string; mime: string; size: number };
@@ -144,6 +146,34 @@ export type Person = { id: string; name: string; role: string; tabs: number; typ
 type Notes = { text: string; rev: number; by?: string; at?: number };
 type Turns = { on: boolean; driver?: string; asks: string[] };
 type Decision = { allow: boolean; by: string; userId: string; at: number };
+
+/**
+ * Whether a lock file's process is still running Pi Pocket. A process id can be reused after a crash, so on Linux
+ * (and Android) a live process must also be Node; where that cannot be read, a live process counts.
+ */
+function lockHolder(pid: number): boolean {
+	if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+	try {
+		process.kill(pid, 0);
+	} catch {
+		// Gone, or (EPERM) another user's process: Pi Pocket runs as this user, so not a holder either way.
+		return false;
+	}
+	try {
+		return /(^|\/)node[^/\0]*\0/.test(readFileSync(`/proc/${pid}/cmdline`, "latin1"));
+	} catch {
+		return true;
+	}
+}
+
+/** A request field that must be text when present: a wrong type is a 400 for the client, not a TypeError and a 500. */
+function optionalText(value: unknown, name: string): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "string") throw new HttpError(400, `${name} must be text`);
+	return value;
+}
+
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /** A short single-line snippet of a message. */
 function snippet(text: string, max = 280): string {
@@ -216,9 +246,11 @@ class Room {
 		this.reactions = { ...((await harness.snapshot(ReactionsDoc, this.id, context))?.entries ?? {}) };
 		this.pins = [...((await harness.snapshot(PinsDoc, this.id, context))?.items ?? [])] as Pin[];
 		this.notes = { ...((await harness.snapshot(NotesDoc, this.id, context)) ?? { text: "", rev: 0 }) };
-		this.turns = { ...((await harness.snapshot(TurnsDoc, this.id, context)) ?? { on: false, asks: [] }) } as Turns;
-		this.decisions = { ...((await harness.snapshot(DecisionsDoc, this.id, context))?.calls ?? {}) };
 		const owner = this.#view.value.conversation.owner;
+		// Take turns belongs to the session: a subagent's view shows (and follows) its session's.
+		const root = owner === undefined ? this.id : this.#app.rootOf(owner.conversationId);
+		this.turns = { ...((await harness.snapshot(TurnsDoc, root, context)) ?? { on: false, asks: [] }) } as Turns;
+		this.decisions = { ...((await harness.snapshot(DecisionsDoc, this.id, context))?.calls ?? {}) };
 		if (owner !== undefined) {
 			const siblings = (await harness.snapshot(SubagentsDoc, owner.conversationId, context))?.agents ?? {};
 			this.subagentName = Object.entries(siblings).find(([, record]) => record.conversationId === this.id)?.[0];
@@ -278,9 +310,11 @@ class Room {
 	push(client: Client, full: boolean): void {
 		const view = this.#view?.value;
 		if (view === undefined) return;
+		const sentFields = (client.sentFields ??= new Map());
 		if (full) {
 			client.sentEntries.clear();
 			client.orderKey = "";
+			sentFields.clear();
 		}
 		const entries: ClientEntry[] = [];
 		const order: number[] = [];
@@ -299,6 +333,31 @@ class Room {
 		const agentState = (view.docs["pi.agent"] ?? {}) as AgentState;
 		const inbox = (view.docs["pi.inbox"] ?? { items: [] }) as unknown as InboxState;
 		const live = view.docs["pi.live"] as LiveState | undefined;
+		// These grow with the session (authors has one item per message) but rarely change: streaming sends an update
+		// every 90 ms, which would repeat them all each time. Send each only when it differs from what this client has.
+		const fields: Record<string, unknown> = {
+			artifacts: Object.entries(this.artifacts).map(([id, meta]) => ({
+				id,
+				title: meta.title,
+				type: meta.type,
+				versions: meta.versions.map((version) => ({ version: version.version, size: version.size, createdAt: version.createdAt })),
+			})),
+			subagents: Object.entries(this.subagents).map(([name, record]) => ({
+				name,
+				conversationId: record.conversationId,
+				busy: this.#app.isBusy(record.conversationId),
+			})),
+			authors: this.authors,
+			reactions: this.reactions,
+			pins: this.pins,
+			turns: this.turns,
+			decisions: this.decisions,
+		};
+		for (const [key, value] of Object.entries(fields)) {
+			const json = JSON.stringify(value);
+			if (sentFields.get(key) === json) delete fields[key];
+			else sentFields.set(key, json);
+		}
 		client.send("view", {
 			full,
 			conversation: this.#app.conversationInfo(this),
@@ -320,22 +379,7 @@ class Room {
 			clients: [...new Set([...this.clients].map((each) => each.id))].length,
 			viewers: [...new Set([...this.clients].map((each) => each.user.name))],
 			approvals: this.#app.approvals.forConversation(this.id),
-			artifacts: Object.entries(this.artifacts).map(([id, meta]) => ({
-				id,
-				title: meta.title,
-				type: meta.type,
-				versions: meta.versions.map((version) => ({ version: version.version, size: version.size, createdAt: version.createdAt })),
-			})),
-			subagents: Object.entries(this.subagents).map(([name, record]) => ({
-				name,
-				conversationId: record.conversationId,
-				busy: this.#app.isBusy(record.conversationId),
-			})),
-			authors: this.authors,
-			reactions: this.reactions,
-			pins: this.pins,
-			turns: this.turns,
-			decisions: this.decisions,
+			...fields,
 		});
 	}
 
@@ -489,21 +533,24 @@ export class PocketApp {
 		return app;
 	}
 
+	/**
+	 * One process per data directory. A lock left by a process that died (killed, or its phone stopped it) is taken
+	 * over; created with `wx`, so of two processes starting at once only one gets it.
+	 */
 	#lock(): void {
 		if (existsSync(this.#lockFile)) {
 			const pid = Number(readFileSync(this.#lockFile, "utf8").trim());
-			let alive = false;
-			if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
-				try {
-					process.kill(pid, 0);
-					alive = true;
-				} catch {
-					alive = false;
-				}
+			if (lockHolder(pid)) {
+				throw new Error(`Pi Pocket is already running on this data directory (pid ${pid}). If it is not, delete ${this.#lockFile}.`);
 			}
-			if (alive) throw new Error(`Pi Pocket is already running on this data directory (pid ${pid}).`);
+			rmSync(this.#lockFile, { force: true });
 		}
-		writeFileSync(this.#lockFile, `${process.pid}\n`);
+		try {
+			writeFileSync(this.#lockFile, `${process.pid}\n`, { flag: "wx" });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			throw new Error("Pi Pocket is already running on this data directory: another one started at the same moment.");
+		}
 	}
 
 	async #open(): Promise<void> {
@@ -612,6 +659,13 @@ export class PocketApp {
 							(room) => room.setDoc(kind, change.value as Record<string, unknown> | null),
 							() => {},
 						);
+						if (kind === TurnsDoc.definition.kind) {
+							for (const pending of this.#rooms.values()) {
+								void pending.then((room) => {
+									if (room.id !== id && this.rootOf(room.id) === id) room.setDoc(kind, change.value as Record<string, unknown> | null);
+								}, () => {});
+							}
+						}
 					}
 				} else if (change.type === "submission") {
 					const record = change.value;
@@ -718,10 +772,16 @@ export class PocketApp {
 		for (const client of this.#clients) client.send("reload", { file });
 	}
 
+	/**
+	 * Start sending a tab its events. The tab may close during the waits here (opening a room, or the guard's status
+	 * right after a restart, when every browser reconnects at once): `detach` has then run, and the tab must not be added.
+	 */
 	async attach(client: Client): Promise<void> {
 		const arriving = !this.#online(client.user.id);
 		this.#clients.add(client);
-		client.send("hello", await this.hello(client.user));
+		const hello = await this.hello(client.user);
+		if (!this.#clients.has(client)) return;
+		client.send("hello", hello);
 		client.send("sessions", this.sessions(client.user));
 		if (arriving) this.#peopleChanged(client.user.id);
 		if (client.conversationId === undefined) return;
@@ -732,7 +792,12 @@ export class PocketApp {
 			return;
 		}
 		try {
-			const room = await this.#room(client.conversationId);
+			const id = client.conversationId;
+			const room = await this.#room(id);
+			if (!this.#clients.has(client)) {
+				if (room.clients.size === 0) room.closeLater(() => this.#rooms.delete(id));
+				return;
+			}
 			room.keepOpen();
 			room.clients.add(client);
 			room.push(client, true);
@@ -797,20 +862,25 @@ export class PocketApp {
 	/** Someone came, went, or changed: remember when they were last here and tell everyone. */
 	#peopleChanged(userId?: string): void {
 		if (userId !== undefined && this.config.userById(userId) !== undefined) this.config.updateUser(userId, { lastSeen: Date.now() });
-		const people = this.people();
-		for (const client of this.#clients) client.send("users", people);
+		for (const client of this.#clients) client.send("users", this.people(client.user));
 	}
 
-	/** Everyone with access to this server: who is online now, and when the others were last here. */
-	people() {
-		return this.config.users.map((each) => ({
-			id: each.id,
-			name: each.name,
-			role: each.role,
-			online: this.#online(each.id),
-			...(each.lastSeen === undefined ? {} : { lastSeen: each.lastSeen }),
-			...(each.sessions === undefined ? {} : { sessions: each.sessions.map(Number) }),
-		}));
+	/**
+	 * The people with access to this server as `viewer` may see them: who is online now, and when the others were last
+	 * here. People invited to one session see only those who share it, and not which sessions others are limited to.
+	 */
+	people(viewer: User) {
+		const scope = viewer.sessions;
+		return this.config.users
+			.filter((each) => scope === undefined || each.sessions === undefined || each.sessions.some((id) => scope.includes(id)))
+			.map((each) => ({
+				id: each.id,
+				name: each.name,
+				role: each.role,
+				online: this.#online(each.id),
+				...(each.lastSeen === undefined ? {} : { lastSeen: each.lastSeen }),
+				...(each.sessions === undefined || scope !== undefined ? {} : { sessions: each.sessions.map(Number) }),
+			}));
 	}
 
 	// ─── Access ─────────────────────────────────────────────────────────────
@@ -902,7 +972,7 @@ export class PocketApp {
 	async hello(user: User) {
 		return {
 			user: { id: user.id, name: user.name, role: user.role, ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }) },
-			users: this.people(),
+			users: this.people(user),
 			models: this.modelList(),
 			guard: await this.guardStatus(),
 			server: {
@@ -1055,6 +1125,11 @@ export class PocketApp {
 		return conversation;
 	}
 
+	/** Throws 404 unless the conversation exists. */
+	async requireConversation(id: ConversationId): Promise<void> {
+		await this.#conversation(id);
+	}
+
 	checkDirectory(path: string): string {
 		const absolute = resolve(expandHome(path.trim() === "" ? "~" : path.trim()));
 		let ok = false;
@@ -1070,7 +1145,8 @@ export class PocketApp {
 	async createSession(user: User, request: { cwd?: string; title?: string }): Promise<{ id: ConversationId }> {
 		this.requireSteer(user);
 		if (user.sessions !== undefined) throw new HttpError(403, "You were invited to one session and cannot start new ones.");
-		const cwd = this.checkDirectory(request.cwd ?? this.defaultCwd);
+		optionalText(request.title, "title");
+		const cwd = this.checkDirectory(optionalText(request.cwd, "cwd") ?? this.defaultCwd);
 		const initial = this.#defaultModel();
 		const now = Date.now();
 		const conversation = await this.harness.createConversation(
@@ -1100,6 +1176,8 @@ export class PocketApp {
 	async updateSession(id: ConversationId, user: User, patch: { title?: string; archived?: boolean }): Promise<void> {
 		this.requireSee(user, id);
 		this.requireSteer(user);
+		optionalText(patch.title, "title");
+		if (patch.archived !== undefined && typeof patch.archived !== "boolean") throw new HttpError(400, "archived must be true or false");
 		const before = this.#sessions[String(id)];
 		await this.harness.commit(async (tx) => {
 			const sessions = await tx.doc(SessionsDoc);
@@ -1201,6 +1279,14 @@ export class PocketApp {
 	): Promise<void> {
 		this.requireSee(user, id);
 		await this.#requireDriver(id, user);
+		const asked = request.model as { provider?: unknown; modelId?: unknown } | undefined;
+		if (asked !== undefined && (typeof asked !== "object" || asked === null || typeof asked.provider !== "string" || typeof asked.modelId !== "string")) {
+			throw new HttpError(400, "model must name a provider and a model id");
+		}
+		if (optionalText(request.thinkingLevel, "thinkingLevel") !== undefined && !THINKING_LEVELS.has(request.thinkingLevel!)) {
+			throw new HttpError(400, `thinkingLevel must be one of ${[...THINKING_LEVELS].join(", ")}`);
+		}
+		optionalText(request.cwd, "cwd");
 		const conversation = await this.#conversation(id);
 		const current = (await this.harness.snapshot(AgentDoc, id, context)) as AgentState | undefined;
 		const ref = request.model ?? current?.model;
@@ -1509,6 +1595,8 @@ export class PocketApp {
 			}
 		}, context);
 		if (line !== undefined) await this.#activity(root, user, line);
+		// Opened only to see who is here (the request came from a subagent's view): close it again like any other.
+		if (room.clients.size === 0) room.closeLater(() => this.#rooms.delete(root));
 	}
 
 	async answerApproval(id: string, allow: boolean, user: User): Promise<boolean> {
@@ -1826,6 +1914,15 @@ export class PocketApp {
 		} else {
 			prompt.resolve(value);
 		}
+	}
+
+	/** Stop a sign-in its person gave up on, whether or not it is asking something. */
+	cancelLogin(user: User, flowId: string): void {
+		const flow = this.#flows.get(flowId);
+		if (flow === undefined || flow.userId !== user.id) return;
+		for (const prompt of flow.prompts.values()) prompt.reject(new Error("cancelled"));
+		flow.prompts.clear();
+		flow.abort.abort();
 	}
 
 	async logout(providerId: string): Promise<void> {

@@ -1325,6 +1325,10 @@ code {
 	background: var(--card);
 }
 
+.term-tablist {
+	display: flex;
+}
+
 .term-tabs button {
 	padding: 12px 18px;
 	border: 0;

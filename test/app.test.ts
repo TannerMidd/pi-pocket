@@ -35,6 +35,11 @@ const route: FauxResponseStep = (context) => {
 		return call("artifact", { id: "demo-page", title: "Demo", edits: [{ oldText: "one", newText: "two" }] });
 	}
 	if (text.includes("start a helper")) return call("subagent", { action: "spawn", name: "helper", message: "say hi please" });
+	if (text.includes("run a script")) {
+		return call("codemode", {
+			code: 'for (const body of ["<p>one</p>", "<p>two</p>"]) await tools.artifact({ id: "notes", title: "Notes", content: body });\nreturn await tools.read({ path: "hello.txt" });',
+		});
+	}
 	if (text.includes("say hi please")) return fauxAssistantMessage([fauxText("hi from helper")]);
 	if (text.startsWith("[subagent helper answered")) return fauxAssistantMessage([fauxText("noted")]);
 	return fauxAssistantMessage([fauxText(`echo: ${text}`)]);
@@ -105,6 +110,20 @@ test("the artifact tool publishes versions, edits the latest, and serves the bod
 	assert.equal(second.version, 2);
 	assert.equal(second.content, "<h1>two</h1>");
 	assert.equal((await app.artifactBody(id, "demo-page", 1)).content, "<h1>one</h1>");
+});
+
+test("codemode is on by default, and a script's nested calls each do their own work", async () => {
+	assert.ok((await app.extensions()).modules.some((module) => module.file === "codemode.ts" && module.enabled));
+	writeFileSync(join(work, "hello.txt"), "hello from a file\n");
+	const id = await newSession();
+	await say(id, "please run a script");
+	assert.equal((await app.artifactBody(id, "notes", 1)).content, "<p>one</p>");
+	assert.equal((await app.artifactBody(id, "notes", undefined)).version, 2, "the second nested artifact call made its own version");
+	const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
+	const view = await (await app.harness.conversation(id, BACKGROUND_CONTEXT))!.context(BACKGROUND_CONTEXT);
+	const said = view.messages.map((message) => JSON.stringify(message.content)).join("\n");
+	assert.match(said, /tool said: Script completed\\nWall time [\d.]+ seconds\\nOutput:\\n/);
+	assert.match(said, /hello from a file/);
 });
 
 test("a background subagent reports its answer back to the parent", async () => {
@@ -186,9 +205,12 @@ test("the owner turns extensions off and on, the guard follows its switch, and t
 	const module = (file: string) => app.loader.list().find((each) => each.file === file)!;
 	assert.deepEqual(
 		app.loader.list().map((each) => each.file),
-		["prompt.ts", "artifacts.ts", "subagents.ts", "guard.ts"],
+		["prompt.ts", "artifacts.ts", "subagents.ts", "guard.ts", "codemode.ts"],
 	);
 	assert.equal(module("prompt.ts").required, true);
+	assert.equal(module("codemode.ts").title, "Codemode");
+	assert.match(module("codemode.ts").summary, /^Codemode lets the agent write JavaScript that calls its other tools/);
+	assert.deepEqual(module("codemode.ts").extensions[0]?.tools, ["codemode"]);
 	assert.match(module("guard.ts").summary, /^Lancet Guard for Pi Pocket's tools\.$/);
 	assert.deepEqual(module("subagents.ts").extensions[0]?.tools, ["subagent"]);
 
@@ -234,7 +256,7 @@ test("anyone signed in can list extensions; only the owner can change them", asy
 	try {
 		const listed = await call(guest.token, "extensions");
 		assert.equal(listed.status, 200);
-		assert.equal(((await listed.json()) as { modules: unknown[] }).modules.length, 4);
+		assert.equal(((await listed.json()) as { modules: unknown[] }).modules.length, 5);
 		assert.equal((await call(guest.token, "extensions/guard.ts", { enabled: false })).status, 403);
 		assert.equal((await call(guest.token, "extensions/guard.ts/reload", {})).status, 403);
 		assert.equal((await call(app.config.ownerToken, "extensions/guard.ts", { enabled: "no" })).status, 400);
@@ -314,7 +336,9 @@ function fakeTab(id: ConversationId | undefined, user: { id: string; name: strin
 		send: (event: string, data: unknown) => events.push({ event, data: data as Record<string, unknown> }),
 	};
 	const last = (event: string) => events.findLast((each) => each.event === event)?.data;
-	return { client, events, last };
+	/** A view field as a browser has it: updates leave out the fields that did not change. */
+	const field = (name: string) => events.findLast((each) => each.event === "view" && name in each.data)?.data[name];
+	return { client, events, last, field };
 }
 
 test("viewers read and chat but never steer; people invited to one session see only that session", async () => {
@@ -364,9 +388,9 @@ test("take turns: only the driver steers, others ask, the driver hands over, and
 		await assert.rejects(app.configure(id, alex, { thinkingLevel: "off" }), /is driving/);
 		await assert.rejects(app.turns(id, alex, { action: "claim" }), /is driving/);
 		await app.turns(id, alex, { action: "ask" });
-		await until(() => (alexTab.last("view")?.turns as { asks?: string[] } | undefined)?.asks?.includes(alex.id) === true, "the ask to show");
+		await until(() => (alexTab.field("turns") as { asks?: string[] } | undefined)?.asks?.includes(alex.id) === true, "the ask to show");
 		await app.turns(id, owner(), { action: "handover", to: alex.id });
-		await until(() => (ownerTab.last("view")?.turns as { driver?: string } | undefined)?.driver === alex.id, "Alex to drive");
+		await until(() => (ownerTab.field("turns") as { driver?: string } | undefined)?.driver === alex.id, "Alex to drive");
 		await assert.rejects(app.submit(id, owner(), { text: "me again", requestId: "t2" }), /Alex is driving/);
 		await app.submit(id, alex, { text: "hello from the driver", requestId: "t3" });
 		await app.turns(id, alex, { action: "off" });
@@ -384,6 +408,90 @@ test("take turns: only the driver steers, others ask, the driver hands over, and
 		app.detach(ownerTab.client);
 		app.detach(alexTab.client);
 		app.config.removeUser(alex.id);
+	}
+});
+
+test("a tab that closes while it is attaching is never counted as there", async () => {
+	const id = await newSession();
+	const gone = fakeTab(id, owner() as never);
+	const attaching = app.attach(gone.client);
+	app.detach(gone.client);
+	await attaching;
+	const here = fakeTab(id, owner() as never);
+	try {
+		await app.attach(here.client);
+		const people = (here.last("presence")?.people ?? []) as { id: string; tabs: number }[];
+		assert.deepEqual(people.map((person) => [person.id, person.tabs]), [[owner().id, 1]]);
+		assert.equal(gone.events.some((each) => each.event === "view"), false, "the closed tab got no view");
+	} finally {
+		app.detach(here.client);
+	}
+});
+
+test("requests with the wrong types are refused, and nothing odd is stored", async () => {
+	const id = await newSession();
+	await assert.rejects(app.updateSession(id, owner(), { archived: "yes" as never }), /archived must be true or false/);
+	await assert.rejects(app.updateSession(id, owner(), { title: 5 as never }), /title must be text/);
+	await assert.rejects(app.configure(id, owner(), { thinkingLevel: "banana" }), /thinkingLevel must be one of/);
+	await assert.rejects(app.configure(id, owner(), { model: { provider: 5 } as never }), /model must name/);
+	await assert.rejects(app.configure(id, owner(), { cwd: 5 as never }), /cwd must be text/);
+	await assert.rejects(app.createSession(owner(), { cwd: 5 as never }), /cwd must be text/);
+	assert.equal(app.sessions().find((each) => each.id === Number(id))?.archived, undefined);
+	await app.configure(id, owner(), { thinkingLevel: "off" });
+});
+
+test("a lock left by a process that is gone, or is not Node, is taken over; a running server's is not", async () => {
+	const { spawn } = await import("node:child_process");
+	const { once } = await import("node:events");
+	const dataDir = join(root, "locks");
+	mkdirSync(dataDir, { recursive: true });
+	const lock = join(dataDir, "harness.lock");
+	const openHere = () => PocketApp.open({ dataDir, defaultCwd: work, supervised: false, log: () => {} });
+	// Something running that is not Node; only Linux (and Android) can tell, through /proc.
+	const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { argv0: "not-node" });
+	const node = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"]);
+	try {
+		writeFileSync(lock, "999999999\n");
+		await (await openHere()).close();
+		if (process.platform === "linux" || process.platform === "android") {
+			writeFileSync(lock, `${other.pid}\n`);
+			await (await openHere()).close();
+		}
+		writeFileSync(lock, `${node.pid}\n`);
+		await assert.rejects(openHere(), new RegExp(`already running on this data directory \\(pid ${node.pid}\\)`));
+	} finally {
+		other.kill();
+		node.kill();
+		await Promise.all([once(other, "exit"), once(node, "exit")]);
+	}
+});
+
+test("view updates repeat the slow-changing fields only when they change", async () => {
+	const id = await newSession();
+	await say(id, "hello there");
+	const tab = fakeTab(id, owner() as never);
+	const fields = ["artifacts", "subagents", "authors", "reactions", "pins", "turns", "decisions"];
+	const views = () => tab.events.filter((each) => each.event === "view").map((each) => each.data);
+	try {
+		await app.attach(tab.client);
+		const first = views()[0]!;
+		assert.equal(first.full, true);
+		for (const name of fields) assert.ok(name in first, `a full view has ${name}`);
+		const answer = (first.entries as { id: number; kind: string }[]).findLast((entry) => entry.kind === "assistant")!;
+
+		await app.react(id, owner(), answer.id, "👍");
+		await until(() => views().length > 1, "an update after the reaction");
+		const update = views().at(-1)!;
+		assert.deepEqual(update.reactions, { [String(answer.id)]: { "👍": [owner().id] } });
+		for (const name of fields.filter((each) => each !== "reactions")) assert.ok(!(name in update), `an update leaves out unchanged ${name}`);
+
+		app.detach(tab.client);
+		await app.attach(tab.client);
+		const again = views().at(-1)!;
+		assert.equal(again.full, true);
+		for (const name of fields) assert.ok(name in again, `a fresh attach sends ${name} again`);
+	} finally {
+		app.detach(tab.client);
 	}
 });
 
@@ -510,6 +618,106 @@ test("invites carry a role and a session over HTTP, and viewers get 403 on steer
 		assert.equal((await call(token, "push/subscribe", { subscription: { endpoint: "http://insecure.example/x", keys: { p256dh: "a", auth: "b" } } })).status, 400);
 	} finally {
 		for (const userId of joined) app.config.removeUser(userId);
+		server.closeAllConnections();
+		server.close();
+	}
+});
+
+test("the web edge: page policy, local redirects, asked account switches, no cross-site sign-ins, clean uploads, scoped people", async () => {
+	const { createServer, request: rawRequest } = await import("node:http");
+	const { createHandler } = await import("../src/server/http.ts");
+	const { createHash } = await import("node:crypto");
+	const { existsSync, readdirSync, readFileSync } = await import("node:fs");
+	const server = createServer(createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }));
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = (server.address() as { port: number }).port;
+	const base = `http://127.0.0.1:${port}`;
+	const ownerToken = app.config.ownerToken;
+	const id = await newSession();
+	const other = await newSession();
+	const guest = app.config.addUser("Gus", "guest");
+	const scoped = app.config.addUser("Sam", "viewer", [String(id)]);
+	const elsewhere = app.config.addUser("Eve", "guest", [String(other)]);
+	const cookie = (response: Response) => response.headers.get("set-cookie") ?? "";
+	try {
+		// The app page allows its own import map by hash and nothing from other sites.
+		const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+		const map = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html)![1]!;
+		for (const path of ["/", `/s/${id}`, "/index.html"]) {
+			const policy = (await fetch(base + path)).headers.get("content-security-policy") ?? "";
+			assert.ok(policy.includes(`'sha256-${createHash("sha256").update(map).digest("base64")}'`), `${path} allows the import map`);
+			assert.match(policy, /img-src 'self' data: blob:;/);
+			assert.match(policy, /connect-src 'self';/);
+			assert.match(policy, /frame-ancestors 'self'/);
+		}
+
+		// After signing in, only paths on this server.
+		const login = (query: string, headers: Record<string, string> = {}) => fetch(`${base}/login?${query}`, { redirect: "manual", headers });
+		for (const next of ["//evil.example/x", "/\\evil.example/x", "https://evil.example/"]) {
+			assert.equal((await login(`token=${ownerToken}&next=${encodeURIComponent(next)}`)).headers.get("location"), "/", next);
+		}
+		assert.equal((await login(`token=${ownerToken}&next=${encodeURIComponent(`/s/${id}`)}`)).headers.get("location"), `/s/${id}`);
+
+		// A link for someone else asks before switching; only a same-site post switches.
+		const asked = await login(`token=${guest.token}`, { cookie: `pocket_auth=${ownerToken}` });
+		assert.equal(asked.status, 200);
+		assert.equal(cookie(asked), "");
+		assert.match(await asked.text(), /Switch account\?[\s\S]*signed in as [^<]+\. The link you opened signs it in as Gus/);
+		const post = (path: string, body: string, site: string) =>
+			fetch(base + path, { method: "POST", redirect: "manual", body, headers: { "content-type": "application/x-www-form-urlencoded", "sec-fetch-site": site } });
+		const forged = await post("/login", `token=${guest.token}`, "cross-site");
+		assert.equal(forged.status, 403);
+		assert.equal(cookie(forged), "");
+		const switched = await post("/login", `token=${guest.token}`, "same-origin");
+		assert.equal(switched.status, 303);
+		assert.match(cookie(switched), new RegExp(`pocket_auth=${encodeURIComponent(guest.token)}`));
+		assert.equal(cookie(await login(`token=${ownerToken}`, { cookie: `pocket_auth=${ownerToken}` })).includes("pocket_auth="), true, "the same person signs in without asking");
+
+		// Another site cannot spend an invite on this browser.
+		const invite = (await (await fetch(`${base}/api/invite`, { method: "POST", body: "{}", headers: { authorization: `Bearer ${ownerToken}`, "x-pocket": "1" } })).json()) as { code: string };
+		assert.equal((await post(`/join/${invite.code}`, "name=Mallory", "cross-site")).status, 403);
+		assert.equal((await fetch(`${base}/join/${invite.code}`)).status, 200, "the invite still works");
+
+		// Uploads: none for a conversation that does not exist, and nothing left of one cut off midway.
+		const uploads = join(root, "data", "uploads");
+		const missing = await fetch(`${base}/api/c/987654/upload?name=x.txt`, { method: "POST", body: "x", headers: { authorization: `Bearer ${ownerToken}`, "x-pocket": "1" } });
+		assert.equal(missing.status, 404);
+		assert.equal(existsSync(join(uploads, "987654")), false);
+		const big = await fetch(`${base}/api/c/${id}/upload?name=big.bin`, { method: "POST", body: "x", headers: { authorization: `Bearer ${ownerToken}`, "x-pocket": "1", "content-length": "1" } });
+		assert.equal(big.status, 200);
+		const before = readdirSync(join(uploads, String(id))).length;
+		await new Promise<void>((resolve) => {
+			const cut = rawRequest({ port, method: "POST", path: `/api/c/${id}/upload?name=cut.bin`, headers: { authorization: `Bearer ${ownerToken}`, "x-pocket": "1", "content-length": "1000000" } });
+			cut.on("error", () => resolve());
+			cut.write(Buffer.alloc(1000));
+			setTimeout(() => cut.destroy(), 200);
+		});
+		await until(() => readdirSync(join(uploads, String(id))).length === before, "the cut-off upload to be removed");
+		const declared = await new Promise<number>((resolve) => {
+			const huge = rawRequest({ port, method: "POST", path: `/api/c/${id}/upload?name=huge.bin`, headers: { authorization: `Bearer ${ownerToken}`, "x-pocket": "1", "content-length": String(60 * 1024 * 1024) } });
+			huge.on("response", (response) => resolve(response.statusCode ?? 0));
+			huge.on("error", () => resolve(-1));
+			huge.write("x");
+		});
+		assert.equal(declared, 413, "an upload declared too big is refused before it is read");
+		// Two pasted images, both image.png, at the same moment: two files.
+		const paste = () =>
+			fetch(`${base}/api/c/${id}/upload?name=image.png`, { method: "POST", body: crypto.randomUUID(), headers: { authorization: `Bearer ${ownerToken}`, "x-pocket": "1" } }).then(
+				(response) => response.json() as Promise<{ path: string }>,
+			);
+		const [first, second] = await Promise.all([paste(), paste()]);
+		assert.notEqual(first.path, second.path);
+		assert.notEqual(readFileSync(first.path, "utf8"), readFileSync(second.path, "utf8"));
+
+		// People invited to one session see only the people who share it, without anyone's session limits.
+		const seen = (await (await fetch(`${base}/api/users`, { headers: { authorization: `Bearer ${scoped.token}` } })).json()) as { name: string; sessions?: number[] }[];
+		assert.ok(seen.some((each) => each.name === "Gus") && seen.some((each) => each.name === "Sam"));
+		assert.ok(!seen.some((each) => each.name === "Eve"), "someone limited to another session stays hidden");
+		assert.ok(seen.every((each) => each.sessions === undefined));
+		const all = (await (await fetch(`${base}/api/users`, { headers: { authorization: `Bearer ${ownerToken}` } })).json()) as { name: string; sessions?: number[] }[];
+		assert.deepEqual(all.find((each) => each.name === "Eve")?.sessions, [Number(other)]);
+	} finally {
+		for (const each of [guest, scoped, elsewhere]) app.config.removeUser(each.user.id);
 		server.closeAllConnections();
 		server.close();
 	}

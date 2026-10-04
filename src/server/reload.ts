@@ -13,7 +13,7 @@ import type { Extension, Registry } from "@earendil-works/pi-durable";
 import type { ExtensionModule, PocketHost } from "./host.ts";
 
 /** Built-in extension modules, in install order. Other `.ts` files in the directory load after them, by name. */
-const ORDER = ["prompt.ts", "artifacts.ts", "subagents.ts", "guard.ts"];
+const ORDER = ["prompt.ts", "artifacts.ts", "subagents.ts", "guard.ts", "codemode.ts"];
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
 const TITLES: Record<string, string> = {
@@ -21,6 +21,7 @@ const TITLES: Record<string, string> = {
 	"artifacts.ts": "Artifacts",
 	"subagents.ts": "Subagents",
 	"guard.ts": "Lancet Guard",
+	"codemode.ts": "Codemode",
 };
 
 export interface ExtensionInfo {

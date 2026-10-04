@@ -4,7 +4,7 @@ import { marked } from "marked";
 import { h } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import htm from "htm";
-import { openSheet, store } from "./store.js";
+import { notify, openSheet, store } from "./store.js";
 
 export const html = htm.bind(h);
 
@@ -24,8 +24,11 @@ export function imageSource(src, conversationId) {
 	if (value === "" || conversationId === undefined || conversationId === null) return value;
 	if (value.startsWith("/api/") || value.startsWith("/a/")) return value;
 	const file = /^file:\/\//i.test(value);
-	if (!file && /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(value)) return value;
-	let path = file ? value.replace(/^file:\/\/(localhost)?/i, "") : value;
+	// A Windows path (C:\shot.png) is not a URL scheme.
+	const drive = /^[a-z]:[\\/]/i.test(value);
+	if (!file && !drive && /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(value)) return value;
+	// file:///C:/shot.png names C:/shot.png.
+	let path = file ? value.replace(/^file:\/\/(localhost)?/i, "").replace(/^\/([a-z]:)/i, "$1") : value;
 	try {
 		path = decodeURIComponent(path);
 	} catch {
@@ -46,6 +49,67 @@ export function Thumb({ src, alt = "image" }) {
 // ─── Markdown ──────────────────────────────────────────────────────────────────
 
 marked.setOptions({ gfm: true, breaks: false });
+// Task list boxes as characters: the sanitizer drops form controls.
+marked.use({ renderer: { checkbox: ({ checked }) => (checked ? "☑ " : "☐ ") } });
+
+/**
+ * Replies are untrusted: a file or page Pi read can steer what it writes. No forms or controls, no media that loads by
+ * itself, and no style, class, or id hooks that could lay a fake screen over the app.
+ */
+const PURIFY = {
+	FORBID_TAGS: ["form", "input", "button", "select", "textarea", "dialog", "style", "audio", "video", "source", "track", "picture"],
+	FORBID_ATTR: ["style", "class", "id", "srcset", "background", "poster", "action", "formaction"],
+	RETURN_DOM_FRAGMENT: true,
+};
+
+/** Images the app serves for a conversation (files, stored images, artifacts), or inline data. Nothing else loads. */
+const localImage = (src) => /^\/api\/c\/\d+\/(file\?|image\/)/.test(src) || /^\/a\/\d+\//.test(src) || /^data:image\//i.test(src);
+
+/**
+ * Sanitized HTML, changed only through the DOM afterwards: editing the sanitized string could turn text inside an
+ * attribute into markup. An image from another site becomes a link, since its address could carry data out the moment
+ * it loads, and code blocks get a copy button.
+ */
+function sanitize(html) {
+	const fragment = DOMPurify.sanitize(html, PURIFY);
+	for (const pre of fragment.querySelectorAll("pre")) {
+		const wrap = document.createElement("div");
+		wrap.className = "code";
+		const copy = document.createElement("button");
+		copy.className = "copy";
+		copy.type = "button";
+		copy.dataset.copy = "";
+		copy.textContent = "Copy";
+		pre.replaceWith(wrap);
+		wrap.append(copy, pre);
+	}
+	for (const image of fragment.querySelectorAll("img")) {
+		const src = image.getAttribute("src") ?? "";
+		if (localImage(src)) continue;
+		const label = `🖼 ${image.getAttribute("alt") || "image"}`;
+		let host;
+		try {
+			host = /^https?:\/\//i.test(src) ? new URL(src).host : undefined;
+		} catch {
+			host = undefined;
+		}
+		// Inside a link already, or not a web address: the label alone.
+		if (host === undefined || image.closest("a")) {
+			image.replaceWith(label);
+			continue;
+		}
+		const link = document.createElement("a");
+		link.href = src;
+		link.textContent = label;
+		link.title = `Image from ${host}`;
+		link.target = "_blank";
+		link.rel = "noopener noreferrer";
+		image.replaceWith(link);
+	}
+	const holder = document.createElement("div");
+	holder.append(fragment);
+	return holder.innerHTML;
+}
 
 /** The conversation whose markdown is being sanitized, for image paths relative to its folder. */
 let rendering = null;
@@ -66,23 +130,33 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 const markdownCache = new Map();
 
-/** Markdown to sanitized HTML, with copy buttons on code blocks. Cached: streaming re-renders the same text often. */
-export function markdown(text, conversationId = currentConversation()) {
+const MARKDOWN_CACHE = 500;
+
+/**
+ * Markdown to sanitized HTML, with copy buttons on code blocks. Cached, least recently used out first: a transcript
+ * renders its rows in order, and evicting the oldest insert would miss on every row once a thread outgrew the cache.
+ */
+export function markdown(text, conversationId = currentConversation(), cache = true) {
 	const key = `${conversationId ?? ""}\u0000${text}`;
 	let out = markdownCache.get(key);
-	if (out === undefined) {
-		rendering = conversationId ?? null;
-		const clean = DOMPurify.sanitize(marked.parse(text, { async: false }));
-		rendering = null;
-		out = clean.replaceAll("<pre>", '<div class="code"><button class="copy" data-copy type="button">Copy</button><pre>').replaceAll("</pre>", "</pre></div>");
-		if (markdownCache.size > 400) markdownCache.delete(markdownCache.keys().next().value);
+	if (out !== undefined) {
+		markdownCache.delete(key);
+		markdownCache.set(key, out);
+		return out;
+	}
+	rendering = conversationId ?? null;
+	out = sanitize(marked.parse(text, { async: false }));
+	rendering = null;
+	if (cache) {
+		if (markdownCache.size >= MARKDOWN_CACHE) markdownCache.delete(markdownCache.keys().next().value);
 		markdownCache.set(key, out);
 	}
 	return out;
 }
 
-export function Markdown({ text, class: className = "" }) {
-	return html`<div class=${`md ${className}`} dangerouslySetInnerHTML=${{ __html: markdown(text) }}></div>`;
+/** Rendered markdown. `cache={false}` for text that is still changing, such as a streaming answer. */
+export function Markdown({ text, class: className = "", cache = true }) {
+	return html`<div class=${`md ${className}`} dangerouslySetInnerHTML=${{ __html: markdown(text, undefined, cache) }}></div>`;
 }
 
 /** Images in rendered markdown open full screen, unless they are links. */
@@ -112,11 +186,27 @@ document.addEventListener("click", (event) => {
 	const button = event.target.closest?.("[data-copy]");
 	if (!button) return;
 	const pre = button.parentElement.querySelector("pre");
-	navigator.clipboard?.writeText(pre?.innerText ?? "").then(() => {
-		button.textContent = "Copied";
-		setTimeout(() => (button.textContent = "Copy"), 1200);
-	});
+	copyText(pre?.innerText ?? "").then(
+		() => {
+			button.textContent = "Copied";
+			setTimeout(() => (button.textContent = "Copy"), 1200);
+		},
+		() => notify("error", "Could not copy."),
+	);
 });
+
+/** Copy text, with a fallback for plain-http addresses, where the clipboard API does not exist. */
+export async function copyText(text) {
+	if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+	const area = document.createElement("textarea");
+	area.value = text;
+	area.style.cssText = "position:fixed;opacity:0;top:0;left:0";
+	document.body.append(area);
+	area.select();
+	const ok = document.execCommand("copy");
+	area.remove();
+	if (!ok) throw new Error("Could not copy.");
+}
 
 export function formatTokens(count) {
 	if (count === undefined || count === null) return "?";
@@ -184,8 +274,32 @@ export function Icon({ name, size = 20, class: className = "" }) {
 	return html`<svg class=${`icon ${className}`} width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name] ?? ""} /></svg>`;
 }
 
-export function Spinner() {
-	return html`<span class="spinner" aria-label="working"></span>`;
+/**
+ * The app's loaders, after Omarchy's: a quadrant block that steps around a square like a terminal spinner, a flat bar
+ * that eases toward 70% the way Omarchy's boot screen does while it waits, and a sweep of square cells for "thinking".
+ */
+export function Spinner({ label = "Working" }) {
+	return html`<span class="spinner" role="img" aria-label=${label}></span>`;
+}
+
+/** A spinner with a short line about what is loading, for sheets and panels. */
+export function Loader({ label = "Loading" }) {
+	return html`<div class="loader" role="status"><${Spinner} label=${label} /><span>${label}…</span></div>`;
+}
+
+/** The full-screen loader: π over Omarchy's boot bar, and what is happening under it. */
+export function Boot({ caption = "starting", detail = "", inline = false }) {
+	return html`<div class=${`boot ${inline ? "inline" : ""}`} role="status" aria-live="polite">
+		<div class="boot-mark" aria-hidden="true">π</div>
+		<div class="boot-bar" aria-hidden="true"><span></span></div>
+		<div class="boot-caption">${caption}</div>
+		${detail && html`<div class="boot-detail">${detail}</div>`}
+	</div>`;
+}
+
+/** Pi is working on an answer: a block sweeping across square cells. */
+export function Thinking() {
+	return html`<div class="thinking" role="status" aria-label="Pi is thinking"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>`;
 }
 
 /** A bottom sheet on phones, a centered dialog on wide screens. */
@@ -196,8 +310,12 @@ export function Sheet({ title, onClose, children, wide = false, actions = null }
 		addEventListener("keydown", onKey);
 		return () => removeEventListener("keydown", onKey);
 	}, [onClose]);
+	// Keys go to the sheet, not the message box behind it, unless something inside already took focus.
+	useEffect(() => {
+		if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus({ preventScroll: true });
+	}, []);
 	return html`<div class="overlay" onClick=${(event) => event.target === event.currentTarget && onClose()}>
-		<section class=${`sheet ${wide ? "wide" : ""}`} ref=${ref} role="dialog" aria-label=${title}>
+		<section class=${`sheet ${wide ? "wide" : ""}`} ref=${ref} role="dialog" aria-modal="true" aria-label=${title} tabindex="-1">
 			<header class="sheet-head">
 				<div class="grip"></div>
 				<h2>${title}</h2>

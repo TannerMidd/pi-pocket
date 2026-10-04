@@ -1,6 +1,6 @@
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
 import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
-import { formatTokens, modelLabel, shortPath } from "./ui.js";
+import { copyText, formatTokens, modelLabel, shortPath } from "./ui.js";
 
 const agent = () => store.state.view.agent;
 const isSession = () => store.state.view.conversation?.kind === "session";
@@ -52,19 +52,6 @@ async function newSession(arg) {
 	const cwd = arg === "" ? agent()?.cwd : pathFrom(arg);
 	const created = await actions.createSession(cwd);
 	navigate(created.id);
-}
-
-/** Copy text, with a fallback for plain-http addresses, where the clipboard API does not exist. */
-async function copyText(text) {
-	if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
-	const area = document.createElement("textarea");
-	area.value = text;
-	area.style.cssText = "position:fixed;opacity:0;top:0;left:0";
-	document.body.append(area);
-	area.select();
-	const ok = document.execCommand("copy");
-	area.remove();
-	if (!ok) throw new Error("Could not copy.");
 }
 
 async function copyLast() {

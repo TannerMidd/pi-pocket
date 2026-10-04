@@ -10,6 +10,9 @@ export function uid() {
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/** How many transcript rows a session shows when opened; "Show earlier messages" adds this many more. */
+export const TRANSCRIPT_ROWS = 60;
+
 const TAB_KEY = "pocket.tab";
 export const TAB = sessionStorage.getItem(TAB_KEY) ?? uid();
 sessionStorage.setItem(TAB_KEY, TAB);
@@ -46,6 +49,8 @@ export const store = {
 		view: emptyView(),
 		...peopleFor(routeConversation()),
 		history: null,
+		/** The id of the oldest transcript entry shown, or null for the newest `TRANSCRIPT_ROWS` rows. */
+		transcriptFrom: null,
 		missing: null,
 		connection: "connecting",
 		notices: [],
@@ -219,13 +224,14 @@ function applyView(data) {
 				clients: data.clients,
 				viewers: data.viewers,
 				approvals: data.approvals,
-				artifacts: data.artifacts,
-				subagents: data.subagents,
-				authors: data.authors,
-				reactions: data.reactions ?? {},
-				pins: data.pins ?? [],
-				turns: data.turns ?? { on: false, asks: [] },
-				decisions: data.decisions ?? {},
+				// The server sends these again only when they change: a missing one keeps its last value.
+				artifacts: data.artifacts ?? base.artifacts,
+				subagents: data.subagents ?? base.subagents,
+				authors: data.authors ?? base.authors,
+				reactions: data.reactions ?? base.reactions,
+				pins: data.pins ?? base.pins,
+				turns: data.turns ?? base.turns,
+				decisions: data.decisions ?? base.decisions,
 			},
 			missing: null,
 		};
@@ -249,13 +255,25 @@ const handlers = {
 	auth: (data) => handleAuth(data),
 	closing: () => store.set({ connection: "closed" }),
 	reload: () => {
-		// A web file changed on the server. Drafts live in localStorage, so a reload loses nothing.
+		// A web file changed on the server. Message drafts live in localStorage and survive the reload; an unsaved notes
+		// draft, attachments not yet sent, and an open provider sign-in do not.
 		setTimeout(() => location.reload(), 150);
 	},
 };
 
 const TRANSPORT_KEY = "pocket.transport";
 const local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(location.hostname);
+/** After an event stream stalls on this address, poll for a day, then try the stream again: one slow start is not forever. */
+const POLL_FOR_MS = 24 * 60 * 60_000;
+const pollHere = () => {
+	const saved = localStorage.getItem(TRANSPORT_KEY) ?? "";
+	// Saved before the choice had a time: a choice made now.
+	if (saved === "poll") localStorage.setItem(TRANSPORT_KEY, `poll:${Date.now()}`);
+	const [mode, at] = (localStorage.getItem(TRANSPORT_KEY) ?? "").split(":");
+	return mode === "poll" && Date.now() - Number(at) < POLL_FOR_MS;
+};
+/** Event stream reconnects in a row that the browser gave up on, for the pause before the next one. */
+let streamRetries = 0;
 
 const connected = () => store.state.connection !== "open" && store.set({ connection: "open" });
 
@@ -264,47 +282,63 @@ export function connect() {
 	store.set({ connection: "connecting" });
 	const id = store.state.conversationId;
 	const query = `tab=${encodeURIComponent(TAB)}${id === null ? "" : `&c=${id}`}`;
-	source = localStorage.getItem(TRANSPORT_KEY) === "poll" && !local ? pollEvents(query) : streamEvents(query);
+	source = pollHere() && !local ? pollEvents(query) : streamEvents(query);
 }
 
 /** Server-sent events: one long response the server writes to as things change. */
 function streamEvents(query) {
 	const events = new EventSource(`/api/events?${query}`);
-	let heard = false;
+	/** The first batch arrived whole: the session's view, or the session list when no session is open. */
+	let settled = false;
+	const settles = query.includes("&c=") ? ["view", "missing"] : ["sessions"];
 	const connection = {
 		close() {
 			clearTimeout(fallback);
 			events.close();
 		},
 	};
-	// Some tunnels (Cloudflare quick tunnels) hold the stream back. Nothing after a few seconds: poll instead, and
-	// remember that for this address.
+	// Some tunnels hold the stream back. A Cloudflare quick tunnel passes it on in 64 KiB blocks and keeps the rest, so
+	// a long session's first view can stop partway after its small first events got through. The stream counts as
+	// working only once that first batch is whole; otherwise poll instead, and remember that for this address.
 	const fallback = local
 		? undefined
 		: setTimeout(() => {
-				if (heard || source !== connection) return;
-				localStorage.setItem(TRANSPORT_KEY, "poll");
+				if (settled || source !== connection) return;
+				localStorage.setItem(TRANSPORT_KEY, `poll:${Date.now()}`);
 				connect();
 			}, 6000);
 	for (const [name, handler] of Object.entries(handlers)) {
 		events.addEventListener(name, (event) => {
 			if (source !== connection) return;
-			heard = true;
+			if (settles.includes(name)) settled = true;
 			handler(JSON.parse(event.data));
 		});
 	}
-	events.onopen = () => source === connection && connected();
+	events.onopen = () => {
+		if (source !== connection) return;
+		streamRetries = 0;
+		connected();
+	};
 	events.onerror = async () => {
 		if (source !== connection) return;
 		store.set({ connection: "closed" });
-		// EventSource retries by itself; a 401 needs a sign-in instead.
+		// EventSource retries by itself after a network error; a 401 needs a sign-in instead.
 		try {
 			await api("me");
 		} catch (error) {
 			if (error.status === 401) {
 				connection.close();
 				store.set({ me: null });
+				return;
 			}
+		}
+		// It gives up for good when a retry gets an answer other than 200, such as a tunnel's 502 while the server
+		// restarts. Start a new stream after a pause that grows with each try.
+		if (events.readyState === EventSource.CLOSED && source === connection) {
+			// A stream that failed was not held back: no reason to switch this address to polling.
+			clearTimeout(fallback);
+			streamRetries++;
+			setTimeout(() => source === connection && connect(), Math.min(10_000, 1000 * streamRetries));
 		}
 	};
 	return connection;
@@ -381,14 +415,14 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
 		if (sheet) store.set({ sheet, drawer: false });
 		return;
 	}
-	store.set({ conversationId, view: emptyView(), ...peopleFor(conversationId), history: null, missing: null, drawer: false, sheet });
+	store.set({ conversationId, view: emptyView(), ...peopleFor(conversationId), history: null, transcriptFrom: null, missing: null, drawer: false, sheet });
 	connect();
 }
 
 addEventListener("popstate", () => {
 	const id = routeConversation();
 	if (id !== store.state.conversationId) {
-		store.set({ conversationId: id, view: emptyView(), ...peopleFor(id), history: null, missing: null, sheet: null, drawer: false });
+		store.set({ conversationId: id, view: emptyView(), ...peopleFor(id), history: null, transcriptFrom: null, missing: null, sheet: null, drawer: false });
 		connect();
 	}
 });
@@ -431,6 +465,25 @@ export const actions = {
 	fullEntry: (entryId) => api(`c/${current()}/entry/${entryId}`),
 	history: (before) => api(`c/${current()}/history?before=${before}`),
 };
+
+/** Entries that show as transcript rows. Tool results show inside their call's card instead. */
+export const isRow = (entry) => entry.kind === "user" || entry.kind === "assistant" || entry.kind === "compaction" || entry.kind === "reset";
+
+/**
+ * Show the transcript from this entry down when it is above the rows shown now, as for a jump to a pinned or quoted
+ * message. Compares places in the transcript, not ids: after a compaction, the summary comes first with the newest id.
+ */
+export function revealEntry(entryId) {
+	const { view, transcriptFrom } = store.state;
+	if (transcriptFrom === null) return;
+	const ids = view.order.filter((id) => {
+		const entry = view.entries.get(id);
+		return entry !== undefined && isRow(entry);
+	});
+	const at = ids.indexOf(entryId);
+	const from = ids.indexOf(transcriptFrom);
+	if (at !== -1 && (from === -1 || at < from)) store.set({ transcriptFrom: entryId });
+}
 
 export function openSheet(sheet) {
 	store.set({ sheet, drawer: false });

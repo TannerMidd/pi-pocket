@@ -8,8 +8,10 @@ import {
 	DEFAULT_PREFS,
 	encryptPayload,
 	generateVapidKeys,
+	MAX_DEVICES,
 	PushStore,
 	sendPush,
+	validateSubscription,
 	vapidAuthorization,
 	type PushKeys,
 } from "../src/server/push.ts";
@@ -162,13 +164,15 @@ test("PushStore persists, validates, prefs merge, and notify drops gone subscrip
 	t.after(() => rmSync(directory, { recursive: true, force: true }));
 	const store = new PushStore(directory);
 	const file = join(directory, "push.json");
-	assert.equal(statSync(file).mode & 0o777, 0o600);
+	// Windows has no Unix permission bits.
+	const private600 = () => process.platform === "win32" || (statSync(file).mode & 0o777) === 0o600;
+	assert.ok(private600());
 
 	const a = browser();
 	const b = browser();
-	store.subscribe("u1", { endpoint: "https://push.example.net/a", keys: a.keys }, "Firefox");
-	store.subscribe("u1", { endpoint: "https://push.example.net/b", keys: b.keys });
-	assert.equal(statSync(file).mode & 0o777, 0o600);
+	store.subscribe("u1", { endpoint: "https://fcm.googleapis.com/fcm/send/a", keys: a.keys }, "Firefox");
+	store.subscribe("u1", { endpoint: "https://fcm.googleapis.com/fcm/send/b", keys: b.keys });
+	assert.ok(private600());
 
 	const reopened = new PushStore(directory);
 	assert.deepEqual(reopened.vapid, store.vapid);
@@ -179,21 +183,28 @@ test("PushStore persists, validates, prefs merge, and notify drops gone subscrip
 
 	// Validation.
 	const bad = (endpoint: string, keys: PushKeys) => () => reopened.subscribe("u1", { endpoint, keys });
-	assert.throws(bad("http://push.example.net/x", a.keys), /https/);
+	assert.throws(bad("http://fcm.googleapis.com/fcm/send/x", a.keys), /https/);
+	// Only browser push services: the endpoint must not aim the server at its own network.
+	for (const endpoint of ["https://127.0.0.1/internal", "https://169.254.169.254/latest", "https://localhost/x", "https://push.example.net/x", "https://fcm.googleapis.com:8443/x", "https://user@fcm.googleapis.com/x", "https://evilfcm.googleapis.com.example/x"]) {
+		assert.throws(bad(endpoint, a.keys), /not a browser push service/, endpoint);
+	}
+	for (const endpoint of ["https://updates.push.services.mozilla.com/wpush/v2/x", "https://web.push.apple.com/x", "https://wns2-par02p.notify.windows.com/w/?token=x"]) {
+		assert.doesNotThrow(() => validateSubscription({ endpoint, keys: a.keys }), endpoint);
+	}
 	assert.throws(bad("not a url", a.keys), /valid URL/);
 	const randomKey = randomBytes(65).toString("base64url");
 	const shortAuth = randomBytes(8).toString("base64url");
-	assert.throws(bad("https://push.example.net/x", { p256dh: randomKey, auth: a.keys.auth }), /p256dh/);
-	assert.throws(bad("https://push.example.net/x", { p256dh: a.keys.p256dh, auth: shortAuth }), /auth/);
+	assert.throws(bad("https://fcm.googleapis.com/fcm/send/x", { p256dh: randomKey, auth: a.keys.auth }), /p256dh/);
+	assert.throws(bad("https://fcm.googleapis.com/fcm/send/x", { p256dh: a.keys.p256dh, auth: shortAuth }), /auth/);
 	assert.equal(reopened.subscriptions().length, 2);
 
 	// Same endpoint moves to another user; unsubscribe respects ownership.
-	reopened.subscribe("u2", { endpoint: "https://push.example.net/b", keys: b.keys });
+	reopened.subscribe("u2", { endpoint: "https://fcm.googleapis.com/fcm/send/b", keys: b.keys });
 	assert.equal(reopened.subscriptions("u1").length, 1);
 	assert.equal(reopened.subscriptions("u2").length, 1);
-	assert.equal(reopened.unsubscribe("https://push.example.net/b", "u1"), false);
-	assert.equal(reopened.unsubscribe("https://push.example.net/b", "u2"), true);
-	reopened.subscribe("u1", { endpoint: "https://push.example.net/b", keys: b.keys });
+	assert.equal(reopened.unsubscribe("https://fcm.googleapis.com/fcm/send/b", "u1"), false);
+	assert.equal(reopened.unsubscribe("https://fcm.googleapis.com/fcm/send/b", "u2"), true);
+	reopened.subscribe("u1", { endpoint: "https://fcm.googleapis.com/fcm/send/b", keys: b.keys });
 
 	// Prefs.
 	assert.deepEqual(reopened.prefs("u1"), DEFAULT_PREFS);
@@ -208,16 +219,24 @@ test("PushStore persists, validates, prefs merge, and notify drops gone subscrip
 	}) as unknown as typeof fetch;
 	const accepted = await reopened.notify("u1", { title: "Done", body: "Finished", url: "/c/1", tag: "c1" }, { fetch: stub });
 	assert.equal(accepted, 1);
-	assert.deepEqual(calls.sort(), ["https://push.example.net/a", "https://push.example.net/b"]);
+	assert.deepEqual(calls.sort(), ["https://fcm.googleapis.com/fcm/send/a", "https://fcm.googleapis.com/fcm/send/b"]);
 	assert.deepEqual(
 		new PushStore(directory).subscriptions("u1").map((sub) => sub.endpoint),
-		["https://push.example.net/b"],
+		["https://fcm.googleapis.com/fcm/send/b"],
 	);
 	const failing = (async () => {
 		throw new Error("network down");
 	}) as unknown as typeof fetch;
 	assert.equal(await reopened.notify("u1", { title: "x", body: "y", url: "/" }, { fetch: failing }), 0);
 	assert.equal(reopened.subscriptions("u1").length, 1);
+
+	// One person keeps at most MAX_DEVICES devices: the oldest goes first.
+	for (let index = 0; index < MAX_DEVICES + 2; index++) reopened.subscribe("u3", { endpoint: `https://fcm.googleapis.com/fcm/send/many-${index}`, keys: a.keys });
+	assert.deepEqual(
+		reopened.subscriptions("u3").map((sub) => sub.endpoint.split("-").at(-1)),
+		Array.from({ length: MAX_DEVICES }, (_, index) => String(index + 2)),
+	);
+	reopened.removeUser("u3");
 
 	// removeUser drops subscriptions and prefs.
 	reopened.removeUser("u1");

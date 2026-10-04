@@ -55,14 +55,14 @@
 					</div>
 					<div class="install">
 						<span class="prompt">$</span>
-						<code id="install-cmd">npm install &amp;&amp; npm start</code>
+						<code id="install-cmd">git clone https://github.com/TannerMidd/pi-pocket.git</code>
 						<button class="copy" type="button" data-copy="#install-cmd">Copy</button>
 					</div>
 					<div class="facts">
 						<span>Self-hosted</span>
 						<span>Any provider</span>
 						<span>No build step</span>
-						<span>Node.js 22.18+</span>
+						<span>Node.js 22.19+</span>
 					</div>
 				</div>
 
@@ -116,7 +116,7 @@
 			<div class="wrap">
 				<div class="stat"><b>1 file</b><span>SQLite holds every run</span></div>
 				<div class="stat"><b>0</b><span>build steps</span></div>
-				<div class="stat"><b>4 ways</b><span>to reach it remotely</span></div>
+				<div class="stat"><b>4 ways</b><span>to connect your devices</span></div>
 				<div class="stat"><b>Any</b><span>provider or model</span></div>
 			</div>
 		</section>
@@ -162,6 +162,7 @@
 					</article>
 				</div>
 				<div class="tags" aria-label="More features">
+					<span class="tag">Codemode</span>
 					<span class="tag">Take turns</span>
 					<span class="tag">@mentions</span>
 					<span class="tag">Shared notes</span>
@@ -365,12 +366,14 @@
 					</ol>
 				</div>
 				<div class="term">
-					<div class="term-tabs" role="tablist" aria-label="Platform">
-						<button type="button" role="tab" id="tab-desktop" aria-selected="true" aria-controls="cmd-desktop">macOS &amp; Linux</button>
-						<button type="button" role="tab" id="tab-android" aria-selected="false" aria-controls="cmd-android" tabindex="-1">Android (Termux)</button>
+					<div class="term-tabs">
+						<div class="term-tablist" role="tablist" aria-label="Platform">
+							<button type="button" role="tab" id="tab-desktop" aria-selected="true" aria-controls="cmd-desktop">macOS &amp; Linux</button>
+							<button type="button" role="tab" id="tab-android" aria-selected="false" aria-controls="cmd-android" tabindex="-1">Android (Termux)</button>
+						</div>
 						<button class="copy" type="button" data-copy-active>Copy</button>
 					</div>
-<pre id="cmd-desktop" role="tabpanel" aria-labelledby="tab-desktop"><span class="c"># Requires Node.js 22.18 or newer</span>
+<pre id="cmd-desktop" role="tabpanel" aria-labelledby="tab-desktop"><span class="c"># Requires Node.js 22.19 or newer</span>
 <span class="p">$ </span>git clone https://github.com/TannerMidd/pi-pocket.git
 <span class="p">$ </span>cd pi-pocket
 <span class="p">$ </span>npm install
