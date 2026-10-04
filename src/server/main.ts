@@ -101,7 +101,7 @@ if (launcher) {
 	// The launcher is gone (killed, or its terminal closed): stop instead of holding the port and the database.
 	process.on("disconnect", () => void stop(0));
 	process.on("message", (message: { type?: string; access?: AccessInfo }) => {
-		if (message?.type === "access" && app !== undefined) app.access = message.access;
+		if (message?.type === "access" && app !== undefined) app.setReach(message.access);
 	});
 }
 

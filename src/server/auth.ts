@@ -32,6 +32,14 @@ export function origin(request: IncomingMessage): string {
 	return `${isHttps(request) ? "https" : "http"}://${host}`;
 }
 
+/** The Cloudflare quick tunnel host a request came through, such as `abc-def.trycloudflare.com`, if it did. */
+export function quickTunnelHost(request: IncomingMessage): string | undefined {
+	const host = String(request.headers["x-forwarded-host"] ?? request.headers.host ?? "")
+		.toLowerCase()
+		.replace(/:\d+$/, "");
+	return /^[a-z0-9-]+\.trycloudflare\.com$/.test(host) ? host : undefined;
+}
+
 export function setAuthCookie(request: IncomingMessage, response: ServerResponse, token: string): void {
 	const parts = [
 		`${COOKIE}=${encodeURIComponent(token)}`,

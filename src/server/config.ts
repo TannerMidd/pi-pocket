@@ -25,6 +25,11 @@ export interface User {
 	lastSeen?: number;
 	/** Conversation ids of the only sessions this person may open; absent means every session. */
 	sessions?: string[];
+	/**
+	 * The Cloudflare quick tunnel host (`abc-def.trycloudflare.com`) this person's device signed in through. Its sign-in
+	 * cookie works only there, and each tunnel gets a new address, so they are removed once that tunnel is gone.
+	 */
+	tunnel?: string;
 }
 
 export interface ModelChoice {
@@ -132,7 +137,7 @@ export class ConfigStore {
 		return { user, token };
 	}
 
-	updateUser(id: string, patch: Partial<Pick<User, "name" | "lastSeen" | "role" | "sessions">>): void {
+	updateUser(id: string, patch: Partial<Pick<User, "name" | "lastSeen" | "role" | "sessions" | "tunnel">>): void {
 		const user = this.userById(id);
 		if (user === undefined) return;
 		// The owner stays the owner, and nobody else becomes one.
