@@ -25,9 +25,13 @@ function lastText(context: { messages: readonly { role: string; content: unknown
 	return { role: last.role, text: content.flatMap((part) => (part.type === "text" ? [part.text ?? ""] : [])).join("") };
 }
 
+/** The provider session id each request carried, with the message it answered. */
+const requests: { sessionId: string | undefined; text: string }[] = [];
+
 /** One scripted model for every conversation, answering by the last message, like a tiny real model. */
-const route: FauxResponseStep = (context) => {
+const route: FauxResponseStep = (context, options) => {
 	const { role, text } = lastText(context as never);
+	requests.push({ sessionId: (options as { sessionId?: string } | undefined)?.sessionId, text });
 	const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 	if (role === "toolResult") return fauxAssistantMessage([fauxText(`tool said: ${text}`)]);
 	if (text.includes("make an artifact")) return call("artifact", { id: "Demo Page", title: "Demo", content: "<h1>one</h1>" });
@@ -110,6 +114,44 @@ test("the artifact tool publishes versions, edits the latest, and serves the bod
 	assert.equal(second.version, 2);
 	assert.equal(second.content, "<h1>two</h1>");
 	assert.equal((await app.artifactBody(id, "demo-page", 1)).content, "<h1>one</h1>");
+});
+
+test("each conversation sends its own provider session id, the same on every request and after a reopen", async () => {
+	const first = await newSession();
+	const second = await newSession();
+	const sent = (text: string) => requests.findLast((request) => request.text === text)?.sessionId;
+	await say(first, "session id one");
+	await say(first, "session id two");
+	await say(second, "session id three");
+	const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+	assert.match(sent("session id one") ?? "", uuid, "OpenCode refuses requests without one");
+	assert.equal(sent("session id two"), sent("session id one"));
+	assert.notEqual(sent("session id three"), sent("session id one"));
+	await app.close();
+	app = await open();
+	await say(first, "session id four");
+	assert.equal(sent("session id four"), sent("session id one"));
+});
+
+test("a sign-in that needs this installation's id gets Pi's, the same every time", async () => {
+	const calls: unknown[][] = [];
+	const login = app.models.login;
+	app.models.login = (async (...args: unknown[]) => {
+		calls.push(args);
+		return {} as never;
+	}) as typeof login;
+	try {
+		app.startLogin(owner(), "openai-chatgpt", "oauth");
+		app.startLogin(owner(), "openai-chatgpt", "oauth");
+		await until(() => calls.length === 2, "both sign-ins to start");
+		const ids = calls.map((args) => (args[3] as { getDeviceId?: () => string } | undefined)?.getDeviceId?.());
+		assert.match(ids[0] ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+		assert.equal(ids[1], ids[0]);
+		const { readFileSync } = await import("node:fs");
+		assert.equal(JSON.parse(readFileSync(join(process.env.PI_CODING_AGENT_DIR!, "settings.json"), "utf8")).deviceId, ids[0], "kept in Pi's settings");
+	} finally {
+		app.models.login = login;
+	}
 });
 
 test("codemode is on by default, and a script's nested calls each do their own work", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "pi-pocket",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
   "private": true,
   "type": "module",
@@ -28,11 +28,11 @@
     "site:publish": "git subtree push --prefix site origin gh-pages"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.0.1",
-    "@earendil-works/pi-ai": "1.0.1",
-    "@earendil-works/pi-codemode": "1.0.1",
-    "@earendil-works/pi-coding-agent": "1.0.1",
-    "@earendil-works/pi-durable": "1.0.1",
+    "@earendil-works/chord": "1.0.2",
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-codemode": "1.0.2",
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-durable": "1.0.2",
     "dompurify": "^3.4.16",
     "htm": "^3.1.1",
     "jiti": "2.7.0",

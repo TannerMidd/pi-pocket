@@ -1888,7 +1888,8 @@ export class PocketApp {
 			notify: (event: unknown) => send({ step: "event", event }),
 		};
 		void this.models
-			.login(providerId, type, interaction)
+			// Sign-ins that identify the installation (ChatGPT) get the ID Pi keeps for it, the same as Pi's own login.
+			.login(providerId, type, interaction, { getDeviceId: () => this.settings.getOrCreateDeviceId() })
 			.then(
 				async () => {
 					await this.models.getAvailable().catch(() => []);
