@@ -256,6 +256,14 @@ test("the owner turns extensions off and on, the guard follows its switch, and t
 	assert.match(module("guard.ts").summary, /^Lancet Guard for Pi Pocket's tools\.$/);
 	assert.deepEqual(module("subagents.ts").extensions[0]?.tools, ["subagent"]);
 
+	// Lancet Guard is off until the owner turns it on.
+	assert.equal(module("guard.ts").enabled, false);
+	assert.ok(!app.loader.extensionNames().includes("pocket-guard"));
+	assert.match((await app.guardStatus()).detail, /off in Pi Pocket/);
+	await app.setExtensionEnabled(owner(), "guard.ts", true);
+	assert.ok(app.loader.extensionNames().includes("pocket-guard"));
+	assert.deepEqual(app.config.enabledExtensions, ["guard.ts"]);
+
 	await app.setExtensionEnabled(owner(), "subagents.ts", false);
 	assert.equal(module("subagents.ts").enabled, false);
 	assert.deepEqual(module("subagents.ts").extensions, []);
@@ -280,6 +288,12 @@ test("the owner turns extensions off and on, the guard follows its switch, and t
 	assert.deepEqual(module("subagents.ts").extensions[0]?.tools, ["subagent"]);
 	assert.ok(app.loader.extensionNames().includes("pocket-guard"));
 	assert.deepEqual(app.config.disabledExtensions, []);
+
+	// Turned on, it stays on after a restart.
+	await app.close();
+	app = await open();
+	assert.equal(module("guard.ts").enabled, true);
+	assert.ok(app.loader.extensionNames().includes("pocket-guard"));
 });
 
 test("anyone signed in can list extensions; only the owner can change them", async () => {

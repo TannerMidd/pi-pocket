@@ -588,7 +588,7 @@ export class PocketApp {
 			notice: (level, message) => this.notice(level, message),
 		};
 		this.loader = new ExtensionLoader(registry, host, join(APP_ROOT, "src", "server", "extensions"), (file) =>
-			this.config.disabledExtensions.includes(file),
+			this.config.extensionChoice(file),
 		);
 		await this.loader.loadAll();
 

@@ -76,7 +76,8 @@ export function SignIn() {
 			// not a URL
 		}
 		// Invite codes are ten lowercase letters and digits, and phones capitalize the first letter typed. Tokens are longer.
-		const code = text.toLowerCase();
+		// The invite sheet shows a code in two groups, so spaces typed or copied between them are dropped.
+		const code = text.toLowerCase().replace(/\s+/g, "");
 		location.href = /^[a-z0-9]{10}$/.test(code) ? `/join/${code}` : `/login?token=${encodeURIComponent(text)}`;
 	};
 	return html`<div class="signin">

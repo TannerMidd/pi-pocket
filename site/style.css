@@ -726,40 +726,6 @@ code {
 	}
 }
 
-/* ── Stats strip ─────────────────────────────────────────── */
-
-.stats {
-	border-bottom: 1px solid var(--line);
-	background: var(--panel);
-}
-
-.stats .wrap {
-	display: grid;
-	grid-template-columns: repeat(4, 1fr);
-}
-
-.stat {
-	padding: 30px 24px;
-	border-left: 1px solid var(--line);
-}
-
-.stat:last-child {
-	border-right: 1px solid var(--line);
-}
-
-.stat b {
-	display: block;
-	font-size: 30px;
-	line-height: 1.1;
-	color: var(--text);
-	letter-spacing: -0.03em;
-}
-
-.stat span {
-	font-size: 12.5px;
-	color: var(--muted);
-}
-
 /* ── Sections ────────────────────────────────────────────── */
 
 .section {
@@ -1469,33 +1435,6 @@ code {
 
 	.section-head {
 		margin-bottom: 36px;
-	}
-
-	.stats .wrap {
-		grid-template-columns: repeat(2, 1fr);
-		padding: 0;
-	}
-
-	.stat {
-		padding: 22px 18px;
-		border-left: 0;
-		border-bottom: 1px solid var(--line);
-	}
-
-	.stat:nth-child(odd) {
-		border-right: 1px solid var(--line);
-	}
-
-	.stat:last-child {
-		border-right: 0;
-	}
-
-	.stat:nth-last-child(-n + 2) {
-		border-bottom: 0;
-	}
-
-	.stat b {
-		font-size: 24px;
 	}
 
 	.grid,

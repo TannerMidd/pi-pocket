@@ -41,7 +41,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Built for phones.** Streaming answers, tool cards with diffs and live output, push notifications, a home-screen app, and long sessions that stay fast.
 - **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.
 - **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
-- **Lancet Guard.** With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
+- **Lancet Guard.** Off by default; turn it on in Menu → Extensions. With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
 - **Roles and invites.** Steer or view-only access, to every session or just one, through one-time links and QR codes.
 - **Live-editable.** No build step: edit the web app or an extension and it reloads in place.
 
