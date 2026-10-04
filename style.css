@@ -222,7 +222,8 @@ code {
 	border-bottom: 1px solid var(--line);
 }
 
-.hero::before {
+.hero::before,
+.page-head::before {
 	content: "";
 	position: absolute;
 	inset: 0;
@@ -1359,6 +1360,261 @@ code {
 	color: var(--muted);
 }
 
+/* ── Engineering page ────────────────────────────────────── */
+
+.page-head {
+	position: relative;
+	overflow: hidden;
+	padding: 88px 0 80px;
+	border-bottom: 1px solid var(--line);
+}
+
+.page-head .wrap {
+	position: relative;
+}
+
+.page-head h1 {
+	margin: 0 0 22px;
+	font-size: clamp(32px, 4.6vw, 54px);
+	line-height: 1.06;
+	letter-spacing: -0.045em;
+}
+
+/* The architecture: the request stack, top to bottom, with what runs beside it. */
+
+.arch {
+	display: grid;
+	grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+	gap: 24px;
+	margin: 0 0 56px;
+}
+
+.arch-stack,
+.arch-side {
+	display: flex;
+	flex-direction: column;
+}
+
+.arch-side {
+	gap: 16px;
+}
+
+.layer {
+	padding: 16px 18px;
+	background: var(--card);
+	border: 1px solid var(--line);
+}
+
+.layer.core {
+	position: relative;
+	border-color: var(--line-strong);
+}
+
+.layer.core::before {
+	content: "";
+	position: absolute;
+	left: -1px;
+	top: -1px;
+	bottom: -1px;
+	width: 2px;
+	background: var(--active);
+}
+
+.layer.store {
+	background: var(--code-bg);
+}
+
+.layer-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px 12px;
+}
+
+.layer-head b {
+	color: var(--text);
+	font-size: 14px;
+}
+
+.layer-head code {
+	background: none;
+	border: 0;
+	padding: 0;
+	font-size: 12px;
+	color: var(--brand);
+}
+
+.layer p {
+	margin-top: 8px;
+	font-size: 13px;
+}
+
+.parts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 12px;
+}
+
+.parts span {
+	border: 1px solid var(--line);
+	background: var(--bg);
+	padding: 2px 9px;
+	font-size: 12px;
+}
+
+/* What crosses between two layers, on the line that joins them. */
+.wire {
+	position: relative;
+	padding: 10px 0 10px 30px;
+	font-size: 11.5px;
+	color: var(--muted);
+}
+
+.wire::before {
+	content: "";
+	position: absolute;
+	left: 18px;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--line-strong);
+}
+
+/* The path of a message: numbered steps down a line. */
+
+.trace {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	counter-reset: step;
+	border-left: 1px solid var(--line-strong);
+}
+
+.trace li {
+	position: relative;
+	counter-increment: step;
+	padding: 0 0 34px 44px;
+}
+
+.trace li:last-child {
+	padding-bottom: 0;
+}
+
+.trace li::before {
+	content: counter(step);
+	position: absolute;
+	left: -14px;
+	top: 0;
+	display: grid;
+	place-items: center;
+	width: 27px;
+	height: 27px;
+	background: var(--bg);
+	border: 1px solid var(--line-strong);
+	color: var(--accent);
+	font-size: 12px;
+	font-weight: 700;
+}
+
+.trace li > code:first-child {
+	background: none;
+	border: 0;
+	padding: 0;
+	font-size: 12.5px;
+	color: var(--brand);
+}
+
+.trace h3 {
+	margin: 4px 0 6px;
+	font-size: 15px;
+}
+
+.trace p {
+	max-width: 44em;
+	font-size: 13.5px;
+}
+
+/* Pi Pocket's documents. */
+
+.table-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--line);
+}
+
+.docs {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.docs th {
+	text-align: left;
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--muted);
+	background: var(--card);
+}
+
+.docs th,
+.docs td {
+	padding: 10px 16px;
+	border-bottom: 1px solid var(--line);
+	vertical-align: top;
+}
+
+.docs tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.docs td:first-child {
+	white-space: nowrap;
+}
+
+.docs td:last-child {
+	white-space: nowrap;
+	color: var(--muted);
+}
+
+.tag b {
+	color: var(--text);
+	font-weight: 600;
+	margin-right: 6px;
+}
+
+/* Extensions, in install order. */
+
+.ext {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border-top: 1px solid var(--line);
+}
+
+.ext li {
+	display: grid;
+	grid-template-columns: 150px 120px minmax(0, 1fr);
+	gap: 16px;
+	align-items: baseline;
+	padding: 14px 4px;
+	border-bottom: 1px solid var(--line);
+	font-size: 13.5px;
+}
+
+.ext code {
+	background: none;
+	border: 0;
+	padding: 0;
+	color: var(--brand);
+}
+
+.ext .kinds {
+	font-size: 12px;
+	color: var(--muted);
+}
+
 /* ── Footer ──────────────────────────────────────────────── */
 
 .footer {
@@ -1416,9 +1672,24 @@ code {
 		grid-template-columns: repeat(2, 1fr);
 	}
 
+	.arch {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
 	.hero .wrap {
 		padding-top: 64px;
 		padding-bottom: 72px;
+	}
+}
+
+/* The section links need the width of a laptop; narrower screens scroll to the sections. */
+@media (max-width: 900px) {
+	.nav-links {
+		display: none;
+	}
+
+	.nav .btn {
+		margin-left: auto;
 	}
 }
 
@@ -1429,14 +1700,6 @@ code {
 
 	.wrap {
 		padding: 0 18px;
-	}
-
-	.nav-links {
-		display: none;
-	}
-
-	.nav .btn {
-		margin-left: auto;
 	}
 
 	.lead {
@@ -1481,6 +1744,30 @@ code {
 
 	.timeline .state {
 		display: none;
+	}
+
+	.page-head {
+		padding: 64px 0 56px;
+	}
+
+	.ext li {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 4px 12px;
+	}
+
+	.ext li p {
+		grid-column: 1 / -1;
+	}
+
+	.docs th,
+	.docs td {
+		padding: 9px 10px;
+	}
+
+	.docs td:first-child,
+	.docs td:last-child {
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 
 	.approval-actions small {
