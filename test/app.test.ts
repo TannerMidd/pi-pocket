@@ -665,6 +665,51 @@ test("invites carry a role and a session over HTTP, and viewers get 403 on steer
 	}
 });
 
+test("people who signed in through a Cloudflare quick tunnel are removed once that tunnel is gone", async () => {
+	const { createServer } = await import("node:http");
+	const { createHandler } = await import("../src/server/http.ts");
+	const server = createServer(createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }));
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+	const owner = { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1", "content-type": "application/json" };
+	const join = async (name: string, host?: string): Promise<string> => {
+		const { code } = (await (await fetch(`${base}/api/invite`, { method: "POST", headers: owner, body: "{}" })).json()) as { code: string };
+		const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded", ...(host === undefined ? {} : { "x-forwarded-host": host }) };
+		const joined = await fetch(`${base}/join/${code}`, { method: "POST", body: `name=${name}`, headers, redirect: "manual" });
+		return decodeURIComponent(/pocket_auth=([^;]+)/.exec(joined.headers.get("set-cookie") ?? "")![1]!);
+	};
+	const named = (name: string) => app.config.users.find((each) => each.name === name);
+	const before = app.access;
+	try {
+		await join("Tunnelled", "old-tunnel.trycloudflare.com");
+		await join("Wifi");
+		const legacy = await join("Legacy");
+		assert.equal(named("Tunnelled")?.tunnel, "old-tunnel.trycloudflare.com");
+		assert.equal(named("Wifi")?.tunnel, undefined);
+		// Someone who joined before tunnels were recorded is tagged when their cookie comes back through one.
+		await fetch(`${base}/api/me`, { headers: { cookie: `pocket_auth=${encodeURIComponent(legacy)}`, "x-forwarded-host": "old-tunnel.trycloudflare.com" } });
+		assert.equal(named("Legacy")?.tunnel, "old-tunnel.trycloudflare.com");
+
+		// A server restart keeps the tunnel: nobody is removed.
+		app.setReach({ mode: "cloudflare", label: "Cloudflare Tunnel", url: "https://old-tunnel.trycloudflare.com" });
+		assert.ok(named("Tunnelled") && named("Legacy") && named("Wifi"));
+		// A new tunnel: its address is new, so the old one's people go. Others and the owner stay.
+		app.setReach({ mode: "cloudflare", label: "Cloudflare Tunnel", url: "https://new-tunnel.trycloudflare.com" });
+		assert.equal(named("Tunnelled"), undefined);
+		assert.equal(named("Legacy"), undefined);
+		assert.ok(named("Wifi"));
+		assert.ok(app.config.users.some((each) => each.role === "owner"));
+	} finally {
+		app.access = before;
+		for (const name of ["Tunnelled", "Wifi", "Legacy"]) {
+			const user = named(name);
+			if (user !== undefined) app.config.removeUser(user.id);
+		}
+		server.closeAllConnections();
+		server.close();
+	}
+});
+
 test("the web edge: page policy, local redirects, asked account switches, no cross-site sign-ins, clean uploads, scoped people", async () => {
 	const { createServer, request: rawRequest } = await import("node:http");
 	const { createHandler } = await import("../src/server/http.ts");

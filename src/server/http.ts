@@ -8,7 +8,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { marked } from "marked";
 import QRCode from "qrcode";
 import { type Attachment, type Client, HttpError, type PocketApp, type SubmitRequest } from "./app.ts";
-import { Auth, clearAuthCookie, type InviteGrant, origin, setAuthCookie } from "./auth.ts";
+import { Auth, COOKIE, clearAuthCookie, type InviteGrant, origin, parseCookies, quickTunnelHost, setAuthCookie } from "./auth.ts";
 import { APP_ROOT, type User } from "./config.ts";
 
 const WEB = join(APP_ROOT, "web");
@@ -421,9 +421,17 @@ export function createHandler(options: HttpOptions) {
 		throw new HttpError(404, "Unknown push route");
 	};
 
+	/** A guest signed in by a cookie set on a Cloudflare quick tunnel can only come back through it: remember which one. */
+	const noteTunnel = (request: IncomingMessage, user: User): void => {
+		if (user.role === "owner" || user.tunnel !== undefined || !parseCookies(request.headers.cookie)[COOKIE]) return;
+		const tunnel = quickTunnelHost(request);
+		if (tunnel !== undefined) app.config.updateUser(user.id, { tunnel });
+	};
+
 	const api = async (request: IncomingMessage, response: ServerResponse, url: URL, parts: string[]): Promise<void> => {
 		const method = request.method ?? "GET";
 		const user = requireUser(request);
+		noteTunnel(request, user);
 		if (method !== "GET" && request.headers["x-pocket"] !== "1") throw new HttpError(403, "Missing X-Pocket header");
 		const [first, second, third, fourth] = parts;
 
@@ -735,6 +743,8 @@ export function createHandler(options: HttpOptions) {
 					if (redeemed === undefined) {
 						return send(response, 410, page("Pi Pocket", "<h1>Invite expired</h1><p>Ask for a new one.</p>"), "text/html; charset=utf-8");
 					}
+					const tunnel = quickTunnelHost(request);
+					if (tunnel !== undefined) app.config.updateUser(redeemed.user.id, { tunnel });
 					setAuthCookie(request, response, redeemed.token);
 					response.writeHead(303, { location: "/" });
 					response.end();

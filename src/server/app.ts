@@ -1648,6 +1648,25 @@ export class PocketApp {
 	removeUser(owner: User, userId: string): void {
 		if (owner.role !== "owner") throw new HttpError(403, "Only the owner can do that");
 		if (this.config.userById(userId)?.role === "owner") throw new HttpError(400, "The owner cannot be removed");
+		this.#forget(userId);
+	}
+
+	/**
+	 * How other devices reach this server, from the launcher. People who signed in through another Cloudflare quick
+	 * tunnel can never sign in again (its address is gone, and their cookie works only there), so they are removed.
+	 */
+	setReach(access: AccessInfo | undefined): void {
+		this.access = access;
+		let current: string | undefined;
+		try {
+			current = access?.url === undefined ? undefined : new URL(access.url).host;
+		} catch {}
+		for (const user of [...this.config.users]) {
+			if (user.role !== "owner" && user.tunnel !== undefined && user.tunnel !== current) this.#forget(user.id);
+		}
+	}
+
+	#forget(userId: string): void {
 		this.config.removeUser(userId);
 		this.pushStore?.removeUser(userId);
 		// Their open tabs end now; reconnecting fails, so they land on the sign-in screen.
