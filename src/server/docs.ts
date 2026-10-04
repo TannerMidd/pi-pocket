@@ -6,6 +6,8 @@
  */
 import type { JsonValue } from "@earendil-works/chord";
 import { type ConversationId, defineDoc, defineDocFamily, type EntryId, type TaskId } from "@earendil-works/pi-durable";
+import type { Repeat } from "./when.ts";
+import type { Worktree } from "./worktrees.ts";
 
 export type SessionMeta = {
 	title?: string;
@@ -14,6 +16,12 @@ export type SessionMeta = {
 	updatedAt: number;
 	createdBy?: string;
 	archived?: boolean;
+	/** The session this one was forked from, and the last entry it inherited; no entry: forked before the first message. */
+	forkedFrom?: { id: number; entryId?: number };
+	/** The most Pi may spend here, in dollars, subagents included. */
+	budget?: number;
+	/** The git worktree the session works in, when it has one of its own. */
+	worktree?: Worktree;
 };
 
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */
@@ -24,8 +32,11 @@ export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
 	initial: () => ({ items: {} }),
 });
 
-/** Who wrote each user message: requests carry the author until the entry exists, then entries do. */
-export const AuthorsDoc = defineDoc<{ requests: Record<string, string>; entries: Record<string, string> }>({
+/**
+ * Who wrote each user message, by entry id. `requesters` holds, for a message no person wrote (a parent's message to
+ * its subagent), whose work it is: the person the parent worked for then. `requests` is unused.
+ */
+export const AuthorsDoc = defineDoc<{ requests: Record<string, string>; entries: Record<string, string>; requesters?: Record<string, string> }>({
 	kind: "pocket.authors",
 	version: 1,
 	scope: "conversation",
@@ -165,8 +176,10 @@ export const PinsDoc = defineDoc<{ items: Pin[] }>({
 	initial: () => ({ items: [] }),
 });
 
+export type Notes = { text: string; rev: number; by?: string; at?: number };
+
 /** One shared notes page per conversation. `rev` rises with every save, so two editors cannot overwrite each other unseen. */
-export const NotesDoc = defineDoc<{ text: string; rev: number; by?: string; at?: number }>({
+export const NotesDoc = defineDoc<Notes>({
 	kind: "pocket.notes",
 	version: 1,
 	scope: "conversation",
@@ -175,8 +188,10 @@ export const NotesDoc = defineDoc<{ text: string; rev: number; by?: string; at?:
 	initial: () => ({ text: "", rev: 0 }),
 });
 
+export type Turns = { on: boolean; driver?: string; asks: string[] };
+
 /** Take turns: while on, only the driver sends to Pi or changes its settings. */
-export const TurnsDoc = defineDoc<{ on: boolean; driver?: string; asks: string[] }>({
+export const TurnsDoc = defineDoc<Turns>({
 	kind: "pocket.turns",
 	version: 1,
 	scope: "conversation",
@@ -185,8 +200,10 @@ export const TurnsDoc = defineDoc<{ on: boolean; driver?: string; asks: string[]
 	initial: () => ({ on: false, asks: [] }),
 });
 
+export type Decision = { allow: boolean; by: string; userId: string; at: number };
+
 /** Who allowed or denied each tool call Lancet Guard asked about, by tool call id. */
-export const DecisionsDoc = defineDoc<{ calls: Record<string, { allow: boolean; by: string; userId: string; at: number }> }>({
+export const DecisionsDoc = defineDoc<{ calls: Record<string, Decision> }>({
 	kind: "pocket.decisions",
 	version: 1,
 	scope: "conversation",
@@ -197,3 +214,77 @@ export const DecisionsDoc = defineDoc<{ calls: Record<string, { allow: boolean; 
 
 /** The text a subagent report starts with; the UI renders these as report cards. */
 export const REPORT_PREFIX = "[subagent ";
+
+/** Plan mode: while on, Pi reads and proposes, and anything that would change something is blocked. */
+export const PlanDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({
+	kind: "pocket.plan",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "current",
+	initial: () => ({ on: false }),
+});
+
+export type Schedule = {
+	/** Short and stable: what people and Pi use to cancel it. */
+	id: string;
+	/** What was asked for, as shown in the list. */
+	text: string;
+	/** What Pi gets: the text marked as scheduled, with who set it when several people use this server. */
+	content: string;
+	/** When it goes out next. */
+	next: number;
+	every?: Repeat;
+	/** The time zone its clock times are in. */
+	zone: string;
+	/** Who set it; absent when Pi did. */
+	by?: string;
+	/** For one Pi set up: whom Pi worked for then. It goes out as Pi's, but as their work. */
+	requestedBy?: string;
+	createdAt: number;
+	/** How many times it went out: each time sends with its own request id, so a restart never sends one twice. */
+	runs: number;
+	/** The durable task that sends it. */
+	taskId: TaskId;
+	/** Set by the same call already, when a tool call is replayed: its `taskId:callId`. */
+	key?: string;
+};
+
+/** Messages that go to Pi later, or on repeat. A fork starts without them: they belong to who set them up. */
+export const ScheduleDoc = defineDoc<{ items: Record<string, Schedule> }>({
+	kind: "pocket.schedules",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ items: {} }),
+});
+
+/** The last check of a goal: whether it passed, its exit code, and the end of its output. */
+export type GoalCheck = { passed: boolean; code: number; at: number; tail: string };
+
+/**
+ * "Done when": Pi keeps working until a check command passes, up to `max` checks. `counted` holds the generation
+ * tasks whose answer was checked already, so an answer replayed after a restart is not counted twice.
+ */
+export type Goal = { command: string; by: string; max: number; tries: number; status: "working" | "met" | "gave-up"; last?: GoalCheck; counted: string[] };
+
+export const GoalDoc = defineDoc<{ goal?: Goal }>({
+	kind: "pocket.goal",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({}),
+});
+
+/**
+ * What Pi spent for each person, in dollars: the work goes to whoever asked for it. `counted` is how much of each
+ * conversation's spend is in `people` already, so every dollar is counted once, also across restarts.
+ */
+export const SpendDoc = defineDoc<{ people: Record<string, number>; counted: Record<string, number> }>({
+	kind: "pocket.spend",
+	version: 1,
+	scope: "session",
+	initial: () => ({ people: {}, counted: {} }),
+});

@@ -221,6 +221,15 @@ export function formatBytes(bytes) {
 	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** A time ahead, on this device's clock: "14:30" today, "Mon 09:00" this week, "Oct 20 09:00" later. */
+export function formatWhen(ms) {
+	const at = new Date(ms);
+	const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+	if (at.toDateString() === new Date().toDateString()) return time;
+	const day = ms - Date.now() < 6 * 86_400_000 ? at.toLocaleDateString([], { weekday: "short" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
+	return `${day} ${time}`;
+}
+
 export function timeAgo(ms) {
 	const seconds = Math.max(0, (Date.now() - ms) / 1000);
 	if (seconds < 45) return "now";
@@ -239,6 +248,19 @@ export function plainText(markdown) {
 		.replace(/(\*\*|__)(.+?)\1/g, "$2")
 		.replace(/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,!?:;]|$)/gm, "$1$2")
 		.replace(/^[ \t]{0,3}(#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+\.[ \t]+)/gm, "");
+}
+
+/** What separates a message to Pi from the list of files attached to it, which the server adds. */
+export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n";
+
+/** What a person wrote in a message to Pi, without the list of attached files. */
+export function writtenText(entry) {
+	return entry.text.split(ATTACHMENTS_HEADING)[0];
+}
+
+/** What Pi wrote in a reply: its text blocks, without thinking or tool calls. */
+export function replyText(entry) {
+	return entry.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
 }
 
 /** `~/x` for paths under home. */
@@ -268,6 +290,7 @@ const ICONS = {
 	users: "M16 20v-1a4 4 0 00-4-4H6a4 4 0 00-4 4v1M9 11a4 4 0 100-8 4 4 0 000 8zM22 20v-1a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8",
 	sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z",
 	chat: "M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z",
+	fork: "M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM18 9a9 9 0 01-9 9",
 };
 
 export function Icon({ name, size = 20, class: className = "" }) {
@@ -300,6 +323,14 @@ export function Boot({ caption = "starting", detail = "", inline = false }) {
 /** Pi is working on an answer: a block sweeping across square cells. */
 export function Thinking() {
 	return html`<div class="thinking" role="status" aria-label="Pi is thinking"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>`;
+}
+
+/** A unified diff, with added and removed lines marked. */
+export function Diff({ diff }) {
+	return html`<pre class="diff">${diff.split("\n").map((line) => {
+		const kind = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
+		return html`<span class=${kind}>${line}\n</span>`;
+	})}</pre>`;
 }
 
 /** A bottom sheet on phones, a centered dialog on wide screens. */

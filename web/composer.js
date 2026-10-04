@@ -1,7 +1,7 @@
 // The message box: send, steer or queue while busy, attach files, pick the model, stop.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Avatar, TypingLine } from "./chat.js";
-import { parseCommand, suggestCommands } from "./commands.js";
+import { loadTemplates, parseCommand, parseTemplate, planAvailable, suggestCommands } from "./commands.js";
 import { actions, attempt, canSteer, collab, drafts, notify, openSheet, store, typing, uid } from "./store.js";
 import { formatBytes, formatTokens, html, Icon, modelLabel, Spinner } from "./ui.js";
 
@@ -41,6 +41,37 @@ function DriverBar() {
 	</div>`;
 }
 
+/** Plan mode: Pi proposes and changes nothing until someone here approves its plan. */
+function PlanBar({ blocked }) {
+	const { view } = store.state;
+	if (!view.plan?.on || !planAvailable()) return null;
+	// A subagent follows its session's plan mode; it is approved there.
+	const subagent = view.conversation?.kind === "subagent";
+	return html`<div class="plan-bar">
+		<span class="grow"><strong>Plan mode.</strong> ${subagent ? "This subagent follows its session: it reads, and changes nothing." : "Pi reads and proposes; nothing changes until you approve."}</span>
+		${!blocked && !subagent &&
+		html`<button class="link small" onClick=${() => attempt(() => actions.setPlan(false))}>Turn off</button>
+			<button class="button small primary" disabled=${view.live.busy} onClick=${() => attempt(actions.approvePlan)}>Approve plan</button>`}
+	</div>`;
+}
+
+/** Done when: the check Pi works toward, how many checks it took, and a way to drop it. */
+function GoalBar() {
+	const { goal } = store.state.view;
+	if (!goal) return null;
+	const command = html`<span class="mono">${goal.command}</span>`;
+	const text =
+		goal.status === "met"
+			? html`<strong>Done:</strong> ${command} passes (check ${goal.tries} of ${goal.max}).`
+			: goal.status === "gave-up"
+				? html`<strong>Stopped:</strong> ${command} still fails after ${goal.max} checks.`
+				: html`<strong>Until</strong> ${command} passes${goal.tries > 0 ? ` · check ${goal.tries} of ${goal.max} failed` : ""}.`;
+	return html`<div class=${`goal-bar ${goal.status}`}>
+		<span class="grow">${text}</span>
+		${canSteer() && html`<button class="link small" onClick=${() => attempt(actions.clearGoal)}>${goal.status === "working" ? "Drop" : "Dismiss"}</button>`}
+	</div>`;
+}
+
 export function Composer() {
 	const { view, conversationId } = store.state;
 	const [text, setText] = useState(() => drafts.get(conversationId));
@@ -56,12 +87,15 @@ export function Composer() {
 	const agent = view.agent;
 
 	useEffect(() => setText(drafts.get(conversationId)), [conversationId]);
-	// Text sent here from the chat or the notes ("Send to Pi") goes after whatever is in the box, once: the message box
-	// is made again for every session, and must not add the same text there.
+	// Text sent here from the chat, the notes ("Send to Pi"), or another app (Share) goes after whatever is in the box,
+	// once: the message box is made again for every session, and must not add the same text there. Shared files are
+	// attached the same way.
 	const insert = store.state.composerInsert;
 	useEffect(() => {
 		if (!insert || insert.n <= insertedUpTo) return;
 		insertedUpTo = insert.n;
+		if (insert.files?.length > 0) addFiles(insert.files);
+		if (insert.text === "") return;
 		const current = drafts.get(conversationId);
 		update(current.trim() === "" ? insert.text : `${current.replace(/\s+$/, "")}\n\n${insert.text}`);
 		requestAnimationFrame(() => {
@@ -83,6 +117,7 @@ export function Composer() {
 		drafts.set(conversationId, value);
 		setPick(0);
 		if (!value.startsWith("/") || value === "/") setHideCommands(false);
+		if (value.startsWith("/")) loadTemplates();
 		// A command is not a message to Pi: no "typing to Pi" for it.
 		typing(value.trim() === "" || value.startsWith("/") ? null : "pi");
 	};
@@ -90,6 +125,7 @@ export function Composer() {
 	const suggestions = hideCommands ? [] : suggestCommands(text);
 	const chosen = suggestions[Math.min(pick, suggestions.length - 1)];
 	const parsed = parseCommand(text);
+	const template = parsed ? null : parseTemplate(text);
 
 	const focusEnd = () =>
 		requestAnimationFrame(() => {
@@ -110,9 +146,9 @@ export function Composer() {
 		if (ok) update("");
 	};
 
-	/** A tapped suggestion: commands that take text fill the box, the others run at once. */
+	/** A tapped suggestion: commands that take text, and prompt templates, fill the box; the others run at once. */
 	const choose = (command) => {
-		if (command.args) {
+		if (command.args || command.template) {
 			update(`/${command.name} `);
 			focusEnd();
 		} else runCommand({ command, arg: "" });
@@ -223,6 +259,8 @@ export function Composer() {
 			)}
 		</div>`}
 		${collab() && html`<${DriverBar} />`}
+		<${PlanBar} blocked=${blocked} />
+		<${GoalBar} />
 		${blocked
 			? html`${busy && html`<div class="composer-row stop-only"><span class="muted small grow">Pi is working…</span><button class="round stop" aria-label="Stop" onClick=${() => attempt(actions.abort)}><${Icon} name="stop" size=${16} /></button></div>`}`
 			: html`${suggestions.length > 0 &&
@@ -241,6 +279,9 @@ export function Composer() {
 		${suggestions.length === 0 &&
 		parsed &&
 		html`<div class="command-hint"><span class="command-name">/${parsed.command.name}</span>${parsed.command.args && html` <span class="command-args">${parsed.command.args}</span>`} <span class="muted">· ${parsed.command.description} · not sent to Pi</span></div>`}
+		${suggestions.length === 0 &&
+		template &&
+		html`<div class="command-hint"><span class="command-name">/${template.name}</span>${template.args && html` <span class="command-args">${template.args}</span>`} <span class="muted">· prompt template · Pi gets it filled in</span></div>`}
 		<div class="composer" onDragOver=${(event) => event.preventDefault()} onDrop=${(event) => {
 			event.preventDefault();
 			addFiles([...(event.dataTransfer?.files ?? [])]);
@@ -275,6 +316,8 @@ export function Composer() {
 				<button class=${`chip model-chip ${agent?.available === false ? "warn" : ""}`} onClick=${() => openSheet({ type: "model" })}>
 					<span class="glyph">✦</span> ${modelLabel(agent)}${level && html`<span class="muted"> ${level}</span>`}
 				</button>
+				${planAvailable() && view.conversation?.kind !== "subagent" &&
+				html`<button class=${`chip toggle ${view.plan?.on ? "on" : ""}`} title="Plan mode: Pi reads and proposes, and changes nothing until you approve" onClick=${() => attempt(() => actions.setPlan(!view.plan?.on))}>Plan</button>`}
 				${busy && html`<button class=${`chip toggle ${steer ? "on" : ""}`} onClick=${() => setSteer(!steer)} title="Steer joins the running work; off queues a follow-up">Steer</button>`}
 				<span class="grow"></span>
 				${busy && html`<button class="round stop" aria-label="Stop" onClick=${() => attempt(actions.abort)}><${Icon} name="stop" size=${16} /></button>`}
@@ -298,7 +341,10 @@ export function StatusLine() {
 		const percent = stats.contextTokens ? Math.round((stats.contextTokens / window) * 100) : 0;
 		parts.push(html`<span>${percent}%/${formatTokens(window)}</span>`);
 	}
-	parts.push(html`<span>$${(stats.cost ?? 0).toFixed(2)}</span>`);
+	// The session's spend, its subagents' included, and its limit when it has one.
+	const spend = view.conversation?.spend;
+	const spent = spend?.spent ?? stats.cost ?? 0;
+	parts.push(html`<span class=${spend?.budget !== undefined && spent >= spend.budget ? "warn" : ""}>$${spent.toFixed(2)}${spend?.budget !== undefined ? `/$${spend.budget.toFixed(2)}` : ""}</span>`);
 	// On but not loaded: the guard blocks bash, write, and edit until it loads or is turned off.
 	if (guard?.enabled && guard.available === false) parts.push(html`<button class="guard off" title=${guard.detail} onClick=${() => openSheet({ type: "extensions" })}><${Icon} name="shield" size=${11} /> guard failed</button>`);
 	else if (guard?.enabled) parts.push(html`<button class="guard" title=${guard.detail} onClick=${() => openSheet({ type: "extensions" })}><${Icon} name="shield" size=${11} /> guard</button>`);

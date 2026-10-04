@@ -7,9 +7,13 @@ import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { marked } from "marked";
 import QRCode from "qrcode";
-import { type Attachment, type Client, HttpError, type PocketApp, type SubmitRequest } from "./app.ts";
+import type { PocketApp } from "./app.ts";
 import { Auth, COOKIE, clearAuthCookie, type InviteGrant, origin, parseCookies, quickTunnelHost, setAuthCookie } from "./auth.ts";
+import type { Attachment, SubmitRequest } from "./commands.ts";
 import { APP_ROOT, type User } from "./config.ts";
+import { HttpError } from "./errors.ts";
+import type { Client } from "./room.ts";
+import { runningNow } from "./running.ts";
 
 const WEB = join(APP_ROOT, "web");
 const MODULES = join(APP_ROOT, "node_modules");
@@ -464,14 +468,23 @@ export function createHandler(options: HttpOptions) {
 			return json(response, 200, { ok: true });
 		}
 		if (first === "push") return pushRoute(request, response, user, second);
+		if (first === "running" && method === "GET") return json(response, 200, await runningNow(app, user));
+		if (first === "spend" && method === "GET") return json(response, 200, app.spend.summary(user));
+		if (first === "spend" && method === "POST") {
+			const body = await readJson<{ session?: unknown; person?: unknown; budget?: unknown }>(request);
+			if (body.session !== undefined) await app.spend.setSessionBudget(user, conversationId(String(body.session)), body.budget);
+			else if (typeof body.person === "string") app.spend.setPersonBudget(user, body.person, body.budget);
+			else throw new HttpError(400, "Say which session or person");
+			return json(response, 200, app.spend.summary(user));
+		}
 		if (first === "sessions" && second === undefined && method === "GET") return json(response, 200, app.sessions(user));
 		if (first === "sessions" && second === undefined && method === "POST") {
-			const body = await readJson<{ cwd?: string; title?: string }>(request);
-			return json(response, 200, await app.createSession(user, body));
+			const body = await readJson<{ cwd?: string; title?: string; worktree?: unknown }>(request);
+			return json(response, 200, await app.commands.createSession(user, body));
 		}
 		if (first === "sessions" && second !== undefined && method === "POST") {
 			const body = await readJson<{ title?: string; archived?: boolean }>(request);
-			await app.updateSession(conversationId(second), user, body);
+			await app.commands.updateSession(conversationId(second), user, body);
 			return json(response, 200, { ok: true });
 		}
 		if (first === "c" && second !== undefined) {
@@ -485,52 +498,87 @@ export function createHandler(options: HttpOptions) {
 					// Only files this server stored for this conversation.
 					return typeof file?.path === "string" && resolve(file.path).startsWith(app.uploadDirectory(id) + sep);
 				});
-				return json(response, 200, await app.submit(id, user, { ...body, attachments }));
+				return json(response, 200, await app.commands.submit(id, user, { ...body, attachments }));
 			}
 			if (third === "chat" && method === "POST") {
 				const body = await readJson<{ text?: unknown; requestId?: unknown; quote?: { entryId?: unknown } }>(request);
 				if (typeof body.text !== "string" || typeof body.requestId !== "string") throw new HttpError(400, "text and requestId are required");
 				const quote = typeof body.quote === "object" && body.quote !== null ? { entryId: body.quote.entryId } : undefined;
-				return json(response, 200, await app.postChat(id, user, { text: body.text, requestId: body.requestId, ...(quote === undefined ? {} : { quote }) }));
+				return json(response, 200, await app.collab.postChat(id, user, { text: body.text, requestId: body.requestId, ...(quote === undefined ? {} : { quote }) }));
 			}
 			if (third === "react" && method === "POST") {
 				const body = await readJson<{ entryId?: unknown; emoji?: unknown }>(request);
-				await app.react(id, user, Number(body.entryId), String(body.emoji ?? ""));
+				await app.collab.react(id, user, Number(body.entryId), String(body.emoji ?? ""));
 				return json(response, 200, { ok: true });
 			}
 			if (third === "pin" && method === "POST") {
-				return json(response, 200, await app.pin(id, user, await readJson(request)));
+				return json(response, 200, await app.collab.pin(id, user, await readJson(request)));
 			}
 			if (third === "notes" && method === "POST") {
 				const body = await readJson<{ text?: unknown; rev?: unknown }>(request);
 				if (typeof body.text !== "string" || typeof body.rev !== "number") throw new HttpError(400, "text and rev are required");
-				return json(response, 200, await app.saveNotes(id, user, body.text, body.rev));
+				return json(response, 200, await app.collab.saveNotes(id, user, body.text, body.rev));
 			}
 			if (third === "turns" && method === "POST") {
-				await app.turns(id, user, await readJson(request));
+				await app.collab.turns(id, user, await readJson(request));
 				return json(response, 200, { ok: true });
 			}
 			if (third === "typing" && method === "POST") {
 				const body = await readJson<{ where?: unknown }>(request);
-				app.setTyping(id, user, body.where);
+				app.collab.setTyping(id, user, body.where);
 				return json(response, 200, { ok: true });
 			}
 			if (third === "abort" && method === "POST") {
-				await app.abort(id, user);
+				await app.commands.abort(id, user);
 				return json(response, 200, { ok: true });
 			}
 			if (third === "withdraw" && method === "POST") {
 				const body = await readJson<{ submissionId?: number }>(request);
-				return json(response, 200, { result: await app.withdraw(id, user, Number(body.submissionId)) });
+				return json(response, 200, { result: await app.commands.withdraw(id, user, Number(body.submissionId)) });
 			}
 			if (third === "configure" && method === "POST") {
-				await app.configure(id, user, await readJson(request));
+				await app.commands.configure(id, user, await readJson(request));
 				return json(response, 200, { ok: true });
 			}
+			if (third === "reset" && method === "POST") {
+				const body = await readJson<{ note?: unknown }>(request);
+				await app.commands.reset(id, user, body.note);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "instructions" && method === "POST") {
+				const body = await readJson<{ text?: unknown }>(request);
+				await app.commands.setInstructions(id, user, body.text);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "plan" && method === "POST") {
+				const body = await readJson<{ on?: unknown; approve?: unknown }>(request);
+				if (body.approve === true) return json(response, 200, await app.commands.approvePlan(id, user));
+				await app.commands.setPlan(id, user, body.on);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "schedules" && fourth === undefined && method === "POST") return json(response, 200, await app.commands.schedule(id, user, await readJson(request)));
+			if (third === "schedules" && fourth !== undefined && parts[4] === "cancel" && method === "POST") {
+				await app.commands.cancelSchedule(id, user, fourth);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "goal" && method === "POST") {
+				const body = await readJson<{ command?: unknown; clear?: unknown }>(request);
+				if (body.clear === true) await app.commands.clearGoal(id, user);
+				else await app.commands.setGoal(id, user, body.command);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "worktree" && method === "POST") {
+				const body = await readJson<{ remove?: unknown; force?: unknown }>(request);
+				if (body.remove !== true) throw new HttpError(400, "Only removing a worktree is asked for here");
+				await app.commands.removeWorktree(id, user, body.force);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "fork" && method === "POST") return json(response, 200, await app.commands.fork(id, user, await readJson(request)));
+			if (third === "resend" && method === "POST") return json(response, 200, await app.commands.resend(id, user, await readJson(request)));
 			if (third === "compact" && method === "POST") {
 				const body = await readJson<{ instructions?: unknown }>(request);
 				if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") throw new HttpError(400, "instructions must be text");
-				await app.compact(id, user, (body.instructions as string | null | undefined)?.trim() || undefined);
+				await app.commands.compact(id, user, (body.instructions as string | null | undefined)?.trim() || undefined);
 				return json(response, 200, { ok: true });
 			}
 			if (third === "image" && fourth !== undefined && method === "GET") {
@@ -549,13 +597,24 @@ export function createHandler(options: HttpOptions) {
 				if (entry === undefined) throw new HttpError(404, "No such entry");
 				return json(response, 200, entry);
 			}
+			if (third === "export" && method === "GET") {
+				const { filename, markdown } = await app.exportMarkdown(id, user);
+				return send(response, 200, markdown, "text/markdown; charset=utf-8", { "content-disposition": `attachment; filename="${filename}"` });
+			}
+			if (third === "changes" && fourth === undefined && method === "GET") return json(response, 200, await app.changes(id, user));
+			if (third === "changes" && fourth === "diff" && method === "GET") {
+				return send(response, 200, await app.changeDiff(id, user, url.searchParams.get("path") ?? ""), "text/plain; charset=utf-8");
+			}
+			if (third === "prompts" && method === "GET") {
+				return json(response, 200, app.promptTemplates(id).map(({ name, description, argumentHint }) => ({ name, description, ...(argumentHint === undefined ? {} : { argumentHint }) })));
+			}
 			if (third === "history" && method === "GET") {
 				return json(response, 200, await app.history(id, Number(url.searchParams.get("before") ?? Number.MAX_SAFE_INTEGER)));
 			}
 			if (third === "upload" && method === "POST") {
 				app.requireSteer(user);
 				if (Number(request.headers["content-length"] ?? 0) > MAX_UPLOAD) throw new HttpError(413, "Files can be up to 50 MB");
-				await app.requireConversation(id);
+				await app.conversation(id);
 				const name = safeName(url.searchParams.get("name") ?? "upload");
 				const directory = app.uploadDirectory(id);
 				// Unique, and never written over: pasted images all arrive as image.png, often at once.
@@ -607,37 +666,42 @@ export function createHandler(options: HttpOptions) {
 			const recent = [...new Set(app.sessions(user).map((session) => session.cwd))].slice(0, 8);
 			return json(response, 200, { path, parent: dirname(path) === path ? null : dirname(path), home: homedir(), dirs: dirs.slice(0, 1000), recent });
 		}
-		if (first === "extensions" && second === undefined && method === "GET") return json(response, 200, await app.extensions());
+		if (first === "settings" && method === "POST") {
+			const body = await readJson<{ approvalRule?: unknown }>(request);
+			if (body.approvalRule !== undefined) await app.setApprovalRule(user, body.approvalRule);
+			return json(response, 200, { ok: true });
+		}
+		if (first === "extensions" && second === undefined && method === "GET") return json(response, 200, await app.extensions(user));
 		if (first === "extensions" && second !== undefined && third === undefined && method === "POST") {
 			requireOwner(user);
 			const body = await readJson<{ enabled?: unknown }>(request);
 			if (typeof body.enabled !== "boolean") throw new HttpError(400, "enabled must be true or false");
 			await app.setExtensionEnabled(user, second, body.enabled);
-			return json(response, 200, await app.extensions());
+			return json(response, 200, await app.extensions(user));
 		}
 		if (first === "extensions" && second !== undefined && third === "reload" && method === "POST") {
 			requireOwner(user);
 			await app.reloadExtension(second);
-			return json(response, 200, await app.extensions());
+			return json(response, 200, await app.extensions(user));
 		}
-		if (first === "providers" && second === undefined && method === "GET") return json(response, 200, app.providers());
+		if (first === "providers" && second === undefined && method === "GET") return json(response, 200, app.providers.list());
 		if (first === "providers" && second !== undefined && third === "login" && method === "POST") {
 			requireOwner(user);
 			const body = await readJson<{ type?: string }>(request);
-			return json(response, 200, { flowId: app.startLogin(user, second, body.type === "oauth" ? "oauth" : "api_key") });
+			return json(response, 200, { flowId: app.providers.startLogin(user, second, body.type === "oauth" ? "oauth" : "api_key") });
 		}
 		if (first === "providers" && second !== undefined && third === "logout" && method === "POST") {
 			requireOwner(user);
-			await app.logout(second);
+			await app.providers.logout(second);
 			return json(response, 200, { ok: true });
 		}
 		if (first === "auth" && second !== undefined && third === "cancel" && method === "POST") {
-			app.cancelLogin(user, second);
+			app.providers.cancelLogin(user, second);
 			return json(response, 200, { ok: true });
 		}
 		if (first === "auth" && second !== undefined && third !== undefined && method === "POST") {
 			const body = await readJson<{ value?: string; cancel?: boolean }>(request);
-			app.answerLogin(user, second, third, body.cancel === true ? undefined : String(body.value ?? ""));
+			app.providers.answerLogin(user, second, third, body.cancel === true ? undefined : String(body.value ?? ""));
 			return json(response, 200, { ok: true });
 		}
 		if (first === "invite" && method === "POST") {
@@ -766,6 +830,16 @@ export function createHandler(options: HttpOptions) {
 						"Join Pi Pocket",
 						`<h1>Join Pi Pocket</h1><p>This device will be able to ${can}.</p><form method="post"><label>Your name<input name="name" maxlength="40" autofocus required placeholder="e.g. Alex"></label><button type="submit">Join</button></form>`,
 					),
+					"text/html; charset=utf-8",
+				);
+			}
+			// Shares from other apps go to the service worker (web/sw.js). One that reaches the server came before the
+			// worker was installed on this device; nothing here knows where it should go.
+			if (parts[0] === "share" && request.method === "POST") {
+				return send(
+					response,
+					200,
+					page("Share to Pi", `<h1>Open Pi Pocket first</h1><p>Sharing works once Pi Pocket has been opened on this device over https. Open it, then share again.</p><p><a href="/">Open Pi Pocket</a></p>`),
 					"text/html; charset=utf-8",
 				);
 			}

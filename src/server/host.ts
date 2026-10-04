@@ -1,7 +1,9 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { ConversationId, Extension, ModelRef, TaskId } from "@earendil-works/pi-durable";
+import type { Goals } from "./goals.ts";
 import type { LancetGuard } from "./lancet.ts";
+import type { Schedules } from "./schedules.ts";
 
 export interface ApprovalRequest {
 	id: string;
@@ -14,6 +16,8 @@ export interface ApprovalRequest {
 	reason: string;
 	score?: number;
 	createdAt: number;
+	/** Who Pi was working for when the call asked: set by `Approvals`, not by the asker. */
+	requestedBy?: string;
 }
 
 export type ApprovalAnswer = { allow: boolean; by: string };
@@ -25,8 +29,18 @@ export type ApprovalAnswer = { allow: boolean; by: string };
 export class Approvals {
 	readonly #pending = new Map<string, { request: ApprovalRequest; resolve: (answer: ApprovalAnswer) => void }>();
 	readonly #listeners = new Set<(conversationId: ConversationId) => void>();
+	readonly #requesterOf: (conversationId: ConversationId) => string | undefined;
 
-	request(request: ApprovalRequest, context: Context): Promise<ApprovalAnswer> {
+	/** `requesterOf`: who Pi works for in a conversation right now. */
+	constructor(requesterOf: (conversationId: ConversationId) => string | undefined) {
+		this.#requesterOf = requesterOf;
+	}
+
+	request(asked: ApprovalRequest, context: Context): Promise<ApprovalAnswer> {
+		// Who asked is fixed now: someone writing to Pi while the call waits does not become its requester.
+		const { requestedBy: _ignored, ...rest } = asked;
+		const requestedBy = this.#requesterOf(asked.conversationId);
+		const request: ApprovalRequest = requestedBy === undefined ? rest : { ...rest, requestedBy };
 		const existing = this.#pending.get(request.id);
 		if (existing !== undefined) existing.resolve({ allow: false, by: "superseded" });
 		const answered = new Promise<ApprovalAnswer>((resolve) => {
@@ -80,8 +94,14 @@ export interface PocketHost {
 	skillPaths(): string[];
 	/** `provider/modelId` (or a bare model id) to an available model, or an error naming the choices. */
 	resolveModel(spec: string): ModelRef;
+	/** Who Pi works for in a conversation now: whose message led to its current work. */
+	requesterOf(conversationId: ConversationId): string | undefined;
 	/** Report something odd to the log and the connected clients. */
 	notice(level: "info" | "warning" | "error", message: string): void;
+	/** Messages to Pi for later: the schedule tool sets up Pi's own. */
+	readonly schedules: Pick<Schedules, "add" | "cancel" | "list" | "task">;
+	/** Sessions' goals: the goals extension runs their checks and counts them. */
+	readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
 }
 
 /** The shape of every module in `src/server/extensions/`: a default export building one or more extensions. */

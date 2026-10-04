@@ -1,29 +1,26 @@
 // End-to-end tests of the server core with a scripted model: no network, no API keys, no Pi config.
+import {
+	type App,
+	type Attachment,
+	cleanUp,
+	fakeTab,
+	lastText,
+	openApp,
+	owner as ownerOf,
+	root,
+	say as sayTo,
+	scriptedModel,
+	newSession as startSession,
+	until,
+	work,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
-
-const root = mkdtempSync(join(tmpdir(), "pi-pocket-test-"));
-// Isolate from the real Pi install: its auth, settings, skills, and Lancet Guard.
-process.env.PI_CODING_AGENT_DIR = join(root, "agent");
-process.env.PI_POCKET_GUARD = "off";
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
-const work = join(root, "work");
-mkdirSync(work);
-
-const { PocketApp } = await import("../src/server/app.ts");
-type App = Awaited<ReturnType<typeof PocketApp.open>>;
-
-function lastText(context: { messages: readonly { role: string; content: unknown }[] }): { role: string; text: string } {
-	const last = context.messages.findLast((message) => message.role !== "system")!;
-	const content = typeof last.content === "string" ? [{ type: "text", text: last.content }] : (last.content as { type: string; text?: string }[]);
-	return { role: last.role, text: content.flatMap((part) => (part.type === "text" ? [part.text ?? ""] : [])).join("") };
-}
 
 /** The provider session id each request carried, with the message it answered. */
 const requests: { sessionId: string | undefined; text: string }[] = [];
@@ -49,42 +46,13 @@ const route: FauxResponseStep = (context, options) => {
 	return fauxAssistantMessage([fauxText(`echo: ${text}`)]);
 };
 
-const faux = fauxProvider({ tokensPerSecond: 2000, models: [{ id: "faux-1" }, { id: "faux-vision", input: ["text", "image"] }] });
-faux.setResponses(Array.from({ length: 200 }, () => route));
+const faux = scriptedModel(route);
 
 let app: App;
-const open = () =>
-	PocketApp.open({
-		dataDir: join(root, "data"),
-		defaultCwd: work,
-		supervised: false,
-		log: () => {},
-		configureModels: (models) => models.registerNativeProvider(faux.provider),
-	});
-
-async function until(check: () => Promise<boolean> | boolean, what: string, timeoutMs = 10_000): Promise<void> {
-	const started = Date.now();
-	while (!(await check())) {
-		if (Date.now() - started > timeoutMs) throw new Error(`Timed out waiting for ${what}`);
-		await new Promise((resolve) => setTimeout(resolve, 20));
-	}
-}
-
-const owner = () => app.config.users.find((user) => user.role === "owner")!;
-
-async function newSession(): Promise<ConversationId> {
-	const { id } = await app.createSession(owner(), { cwd: work });
-	await app.configure(id, owner(), { model: { provider: "faux", modelId: "faux-1" }, thinkingLevel: "off" });
-	return id;
-}
-
-type Attachment = { path: string; name: string; mime: string; size: number };
-
-async function say(id: ConversationId, text: string, attachments?: Attachment[]): Promise<void> {
-	const { submissionId } = await app.submit(id, owner(), { text, requestId: crypto.randomUUID(), ...(attachments === undefined ? {} : { attachments }) });
-	const submission = await app.harness.submission(submissionId, (await import("@earendil-works/chord/context")).BACKGROUND_CONTEXT);
-	await submission!.wait((await import("@earendil-works/chord/context")).BACKGROUND_CONTEXT);
-}
+const open = () => openApp(faux);
+const owner = () => ownerOf(app);
+const newSession = () => startSession(app);
+const say = (id: ConversationId, text: string, attachments?: Attachment[]) => sayTo(app, id, text, attachments);
 
 before(async () => {
 	app = await open();
@@ -92,7 +60,7 @@ before(async () => {
 
 after(async () => {
 	await app?.close();
-	rmSync(root, { recursive: true, force: true });
+	cleanUp();
 });
 
 test("a session lists itself and takes its first message as its title", async () => {
@@ -141,8 +109,8 @@ test("a sign-in that needs this installation's id gets Pi's, the same every time
 		return {} as never;
 	}) as typeof login;
 	try {
-		app.startLogin(owner(), "openai-chatgpt", "oauth");
-		app.startLogin(owner(), "openai-chatgpt", "oauth");
+		app.providers.startLogin(owner(), "openai-chatgpt", "oauth");
+		app.providers.startLogin(owner(), "openai-chatgpt", "oauth");
 		await until(() => calls.length === 2, "both sign-ins to start");
 		const ids = calls.map((args) => (args[3] as { getDeviceId?: () => string } | undefined)?.getDeviceId?.());
 		assert.match(ids[0] ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
@@ -155,7 +123,7 @@ test("a sign-in that needs this installation's id gets Pi's, the same every time
 });
 
 test("codemode is on by default, and a script's nested calls each do their own work", async () => {
-	assert.ok((await app.extensions()).modules.some((module) => module.file === "codemode.ts" && module.enabled));
+	assert.ok((await app.extensions(owner())).modules.some((module) => module.file === "codemode.ts" && module.enabled));
 	writeFileSync(join(work, "hello.txt"), "hello from a file\n");
 	const id = await newSession();
 	await say(id, "please run a script");
@@ -183,7 +151,7 @@ test("a background subagent reports its answer back to the parent", async () => 
 
 test("a pasted image is stored with its message and read back, and image paths resolve in the session folder", async () => {
 	const id = await newSession();
-	await app.configure(id, owner(), { model: { provider: "faux", modelId: "faux-vision" } });
+	await app.commands.configure(id, owner(), { model: { provider: "faux", modelId: "faux-vision" } });
 	const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 	const path = join(app.uploadDirectory(id), "dot.png");
 	writeFileSync(path, png);
@@ -247,7 +215,7 @@ test("the owner turns extensions off and on, the guard follows its switch, and t
 	const module = (file: string) => app.loader.list().find((each) => each.file === file)!;
 	assert.deepEqual(
 		app.loader.list().map((each) => each.file),
-		["prompt.ts", "artifacts.ts", "subagents.ts", "guard.ts", "codemode.ts"],
+		["prompt.ts", "artifacts.ts", "subagents.ts", "schedules.ts", "goals.ts", "plan.ts", "guard.ts", "codemode.ts"],
 	);
 	assert.equal(module("prompt.ts").required, true);
 	assert.equal(module("codemode.ts").title, "Codemode");
@@ -312,7 +280,10 @@ test("anyone signed in can list extensions; only the owner can change them", asy
 	try {
 		const listed = await call(guest.token, "extensions");
 		assert.equal(listed.status, 200);
-		assert.equal(((await listed.json()) as { modules: unknown[] }).modules.length, 5);
+		assert.deepEqual(
+			((await listed.json()) as { modules: { file: string }[] }).modules.map((module) => module.file),
+			app.loader.list().map((module) => module.file),
+		);
 		assert.equal((await call(guest.token, "extensions/guard.ts", { enabled: false })).status, 403);
 		assert.equal((await call(guest.token, "extensions/guard.ts/reload", {})).status, 403);
 		assert.equal((await call(app.config.ownerToken, "extensions/guard.ts", { enabled: "no" })).status, 400);
@@ -352,18 +323,18 @@ test("people chat beside Pi: presence, typing, one post per request, and the cha
 		await app.attach(guestTab);
 		assert.deepEqual(people().map((each) => each.name).sort(), ["Alex", owner().name].sort());
 
-		app.setTyping(id, guest.user, "chat");
+		app.collab.setTyping(id, guest.user, "chat");
 		await until(() => people().find((each) => each.name === "Alex")?.typing === "chat", "Alex to show as typing");
 
-		const posted = await app.postChat(id, guest.user, { text: "  hi team  ", requestId: "r1" });
+		const posted = await app.collab.postChat(id, guest.user, { text: "  hi team  ", requestId: "r1" });
 		assert.equal(posted.text, "hi team");
-		assert.equal((await app.postChat(id, guest.user, { text: "hi team", requestId: "r1" })).id, posted.id, "a retry does not post twice");
+		assert.equal((await app.collab.postChat(id, guest.user, { text: "hi team", requestId: "r1" })).id, posted.id, "a retry does not post twice");
 		await until(
 			() => mine.some((each) => each.event === "chat" && (each.data.messages as { id: string }[]).some((message) => message.id === posted.id)),
 			"the message to reach the other tab",
 		);
 		await until(() => people().find((each) => each.name === "Alex")?.typing === undefined, "sending to stop the typing indicator");
-		await assert.rejects(app.postChat(id, guest.user, { text: "   ", requestId: "r2" }), /empty/);
+		await assert.rejects(app.collab.postChat(id, guest.user, { text: "   ", requestId: "r2" }), /empty/);
 
 		app.detach(guestTab);
 		await until(() => people().length === 1, "Alex to leave");
@@ -381,39 +352,23 @@ test("people chat beside Pi: presence, typing, one post per request, and the cha
 });
 
 /** A fake browser tab attached to a conversation, recording what the server sends it. */
-function fakeTab(id: ConversationId | undefined, user: { id: string; name: string; role: "owner" | "guest" | "viewer"; sessions?: string[] } & Record<string, unknown>) {
-	const events: { event: string; data: Record<string, unknown> }[] = [];
-	const client = {
-		id: `tab-${crypto.randomUUID()}`,
-		user: user as never,
-		conversationId: id,
-		sentEntries: new Set<number>(),
-		orderKey: "",
-		send: (event: string, data: unknown) => events.push({ event, data: data as Record<string, unknown> }),
-	};
-	const last = (event: string) => events.findLast((each) => each.event === event)?.data;
-	/** A view field as a browser has it: updates leave out the fields that did not change. */
-	const field = (name: string) => events.findLast((each) => each.event === "view" && name in each.data)?.data[name];
-	return { client, events, last, field };
-}
-
 test("viewers read and chat but never steer; people invited to one session see only that session", async () => {
 	const id = await newSession();
 	const other = await newSession();
 	const viewer = app.config.addUser("Vee", "viewer").user;
 	const scoped = app.config.addUser("Sam", "guest", [String(id)]).user;
 	try {
-		await assert.rejects(app.submit(id, viewer, { text: "hi", requestId: "v1" }), /not steer/);
-		await assert.rejects(app.abort(id, viewer), /not steer/);
-		await assert.rejects(app.createSession(viewer, { cwd: work }), /not steer/);
+		await assert.rejects(app.commands.submit(id, viewer, { text: "hi", requestId: "v1" }), /not steer/);
+		await assert.rejects(app.commands.abort(id, viewer), /not steer/);
+		await assert.rejects(app.commands.createSession(viewer, { cwd: work }), /not steer/);
 		await assert.rejects(app.answerApproval("nope", true, viewer), /not steer/);
-		assert.equal((await app.postChat(id, viewer, { text: "just watching", requestId: "v2" })).text, "just watching");
+		assert.equal((await app.collab.postChat(id, viewer, { text: "just watching", requestId: "v2" })).text, "just watching");
 
 		assert.deepEqual(app.sessions(scoped).map((each) => each.id), [Number(id)]);
 		assert.ok(app.sessions(owner()).length >= 2);
-		await assert.rejects(app.submit(other, scoped, { text: "hi", requestId: "s1" }), /not shared/);
-		await assert.rejects(app.createSession(scoped, { cwd: work }), /one session/);
-		const tab = fakeTab(other, scoped as never);
+		await assert.rejects(app.commands.submit(other, scoped, { text: "hi", requestId: "s1" }), /not shared/);
+		await assert.rejects(app.commands.createSession(scoped, { cwd: work }), /one session/);
+		const tab = fakeTab(other, scoped);
 		await app.attach(tab.client);
 		assert.match(String(tab.last("missing")?.message), /not shared/);
 		app.detach(tab.client);
@@ -434,22 +389,22 @@ test("viewers read and chat but never steer; people invited to one session see o
 test("take turns: only the driver steers, others ask, the driver hands over, and it all shows as activity", async () => {
 	const id = await newSession();
 	const alex = app.config.addUser("Alex", "guest").user;
-	const ownerTab = fakeTab(id, owner() as never);
-	const alexTab = fakeTab(id, alex as never);
+	const ownerTab = fakeTab(id, owner());
+	const alexTab = fakeTab(id, alex);
 	try {
 		await app.attach(ownerTab.client);
 		await app.attach(alexTab.client);
-		await app.turns(id, owner(), { action: "on" });
-		await assert.rejects(app.submit(id, alex, { text: "my turn?", requestId: "t1" }), /is driving/);
-		await assert.rejects(app.configure(id, alex, { thinkingLevel: "off" }), /is driving/);
-		await assert.rejects(app.turns(id, alex, { action: "claim" }), /is driving/);
-		await app.turns(id, alex, { action: "ask" });
+		await app.collab.turns(id, owner(), { action: "on" });
+		await assert.rejects(app.commands.submit(id, alex, { text: "my turn?", requestId: "t1" }), /is driving/);
+		await assert.rejects(app.commands.configure(id, alex, { thinkingLevel: "off" }), /is driving/);
+		await assert.rejects(app.collab.turns(id, alex, { action: "claim" }), /is driving/);
+		await app.collab.turns(id, alex, { action: "ask" });
 		await until(() => (alexTab.field("turns") as { asks?: string[] } | undefined)?.asks?.includes(alex.id) === true, "the ask to show");
-		await app.turns(id, owner(), { action: "handover", to: alex.id });
+		await app.collab.turns(id, owner(), { action: "handover", to: alex.id });
 		await until(() => (ownerTab.field("turns") as { driver?: string } | undefined)?.driver === alex.id, "Alex to drive");
-		await assert.rejects(app.submit(id, owner(), { text: "me again", requestId: "t2" }), /Alex is driving/);
-		await app.submit(id, alex, { text: "hello from the driver", requestId: "t3" });
-		await app.turns(id, alex, { action: "off" });
+		await assert.rejects(app.commands.submit(id, owner(), { text: "me again", requestId: "t2" }), /Alex is driving/);
+		await app.commands.submit(id, alex, { text: "hello from the driver", requestId: "t3" });
+		await app.collab.turns(id, alex, { action: "off" });
 		const chat = (await app.harness.snapshot((await import("../src/server/docs.ts")).ChatDoc, id, (await import("@earendil-works/chord/context")).BACKGROUND_CONTEXT))!;
 		const lines = chat.messages.filter((each) => each.kind === "event").map((each) => `${each.name} ${each.text}`);
 		assert.deepEqual(lines, [
@@ -469,11 +424,11 @@ test("take turns: only the driver steers, others ask, the driver hands over, and
 
 test("a tab that closes while it is attaching is never counted as there", async () => {
 	const id = await newSession();
-	const gone = fakeTab(id, owner() as never);
+	const gone = fakeTab(id, owner());
 	const attaching = app.attach(gone.client);
 	app.detach(gone.client);
 	await attaching;
-	const here = fakeTab(id, owner() as never);
+	const here = fakeTab(id, owner());
 	try {
 		await app.attach(here.client);
 		const people = (here.last("presence")?.people ?? []) as { id: string; tabs: number }[];
@@ -486,14 +441,14 @@ test("a tab that closes while it is attaching is never counted as there", async 
 
 test("requests with the wrong types are refused, and nothing odd is stored", async () => {
 	const id = await newSession();
-	await assert.rejects(app.updateSession(id, owner(), { archived: "yes" as never }), /archived must be true or false/);
-	await assert.rejects(app.updateSession(id, owner(), { title: 5 as never }), /title must be text/);
-	await assert.rejects(app.configure(id, owner(), { thinkingLevel: "banana" }), /thinkingLevel must be one of/);
-	await assert.rejects(app.configure(id, owner(), { model: { provider: 5 } as never }), /model must name/);
-	await assert.rejects(app.configure(id, owner(), { cwd: 5 as never }), /cwd must be text/);
-	await assert.rejects(app.createSession(owner(), { cwd: 5 as never }), /cwd must be text/);
+	await assert.rejects(app.commands.updateSession(id, owner(), { archived: "yes" as never }), /archived must be true or false/);
+	await assert.rejects(app.commands.updateSession(id, owner(), { title: 5 as never }), /title must be text/);
+	await assert.rejects(app.commands.configure(id, owner(), { thinkingLevel: "banana" }), /thinkingLevel must be one of/);
+	await assert.rejects(app.commands.configure(id, owner(), { model: { provider: 5 } as never }), /model must name/);
+	await assert.rejects(app.commands.configure(id, owner(), { cwd: 5 as never }), /cwd must be text/);
+	await assert.rejects(app.commands.createSession(owner(), { cwd: 5 as never }), /cwd must be text/);
 	assert.equal(app.sessions().find((each) => each.id === Number(id))?.archived, undefined);
-	await app.configure(id, owner(), { thinkingLevel: "off" });
+	await app.commands.configure(id, owner(), { thinkingLevel: "off" });
 });
 
 test("a lock left by a process that is gone, or is not Node, is taken over; a running server's is not", async () => {
@@ -502,7 +457,7 @@ test("a lock left by a process that is gone, or is not Node, is taken over; a ru
 	const dataDir = join(root, "locks");
 	mkdirSync(dataDir, { recursive: true });
 	const lock = join(dataDir, "harness.lock");
-	const openHere = () => PocketApp.open({ dataDir, defaultCwd: work, supervised: false, log: () => {} });
+	const openHere = () => openApp(faux, dataDir);
 	// Something running that is not Node; only Linux (and Android) can tell, through /proc.
 	const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { argv0: "not-node" });
 	const node = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"]);
@@ -525,7 +480,7 @@ test("a lock left by a process that is gone, or is not Node, is taken over; a ru
 test("view updates repeat the slow-changing fields only when they change", async () => {
 	const id = await newSession();
 	await say(id, "hello there");
-	const tab = fakeTab(id, owner() as never);
+	const tab = fakeTab(id, owner());
 	const fields = ["artifacts", "subagents", "authors", "reactions", "pins", "turns", "decisions"];
 	const views = () => tab.events.filter((each) => each.event === "view").map((each) => each.data);
 	try {
@@ -535,7 +490,7 @@ test("view updates repeat the slow-changing fields only when they change", async
 		for (const name of fields) assert.ok(name in first, `a full view has ${name}`);
 		const answer = (first.entries as { id: number; kind: string }[]).findLast((entry) => entry.kind === "assistant")!;
 
-		await app.react(id, owner(), answer.id, "👍");
+		await app.collab.react(id, owner(), answer.id, "👍");
 		await until(() => views().length > 1, "an update after the reaction");
 		const update = views().at(-1)!;
 		assert.deepEqual(update.reactions, { [String(answer.id)]: { "👍": [owner().id] } });
@@ -557,7 +512,7 @@ test("reactions, pins, notes, mentions, quotes, model changes, and guard decisio
 	const id = await newSession();
 	const other = await newSession();
 	const alex = app.config.addUser("Alex", "guest").user;
-	const elsewhere = fakeTab(other, alex as never);
+	const elsewhere = fakeTab(other, alex);
 	try {
 		await app.attach(elsewhere.client);
 		await say(id, "something to react to");
@@ -565,30 +520,30 @@ test("reactions, pins, notes, mentions, quotes, model changes, and guard decisio
 		const page = await entries.entries({}, 20, undefined, BACKGROUND_CONTEXT);
 		const answer = page.items.find((entry) => entry.kind === "pi.assistant")!.id as unknown as number;
 
-		await app.react(id, alex, answer, "👍");
-		await app.react(id, owner(), answer, "👍");
-		await app.react(id, owner(), answer, "👍");
+		await app.collab.react(id, alex, answer, "👍");
+		await app.collab.react(id, owner(), answer, "👍");
+		await app.collab.react(id, owner(), answer, "👍");
 		assert.deepEqual((await app.harness.snapshot(docs.ReactionsDoc, id, BACKGROUND_CONTEXT))?.entries, { [String(answer)]: { "👍": [alex.id] } });
-		await assert.rejects(app.react(id, alex, answer, "💩"), /Pick one/);
+		await assert.rejects(app.collab.react(id, alex, answer, "💩"), /Pick one/);
 
-		assert.deepEqual(await app.pin(id, alex, { entryId: answer }), { pinned: true });
+		assert.deepEqual(await app.collab.pin(id, alex, { entryId: answer }), { pinned: true });
 		const pins = (await app.harness.snapshot(docs.PinsDoc, id, BACKGROUND_CONTEXT))!.items;
 		assert.equal(pins[0]?.author, "Pi");
 		assert.match(pins[0]!.text, /^echo: .*something to react to$/);
 		const pinnedText = pins[0]!.text;
-		assert.deepEqual(await app.pin(id, alex, { entryId: answer }), { pinned: false });
+		assert.deepEqual(await app.collab.pin(id, alex, { entryId: answer }), { pinned: false });
 
-		const saved = await app.saveNotes(id, alex, "plan: ship it", 0);
+		const saved = await app.collab.saveNotes(id, alex, "plan: ship it", 0);
 		assert.equal(saved.rev, 1);
-		await assert.rejects(app.saveNotes(id, owner(), "stale edit", 0), /Alex changed the notes/);
+		await assert.rejects(app.collab.saveNotes(id, owner(), "stale edit", 0), /Alex changed the notes/);
 
-		const posted = await app.postChat(id, owner(), { text: "@alex look at this, cc @Alexander", requestId: "m1", quote: { entryId: answer } });
+		const posted = await app.collab.postChat(id, owner(), { text: "@alex look at this, cc @Alexander", requestId: "m1", quote: { entryId: answer } });
 		assert.deepEqual(posted.mentions, [alex.id]);
 		assert.equal(posted.quote!.text, pinnedText);
 		await until(() => elsewhere.events.some((each) => each.event === "notice" && String(each.data.message).includes("mentioned you")), "Alex to hear about the mention elsewhere");
 		assert.deepEqual(elsewhere.last("notice")?.link, { conversationId: id, sheet: "chat" });
 
-		await app.configure(id, alex, { model: { provider: "faux", modelId: "faux-vision" }, thinkingLevel: "off" });
+		await app.commands.configure(id, alex, { model: { provider: "faux", modelId: "faux-vision" }, thinkingLevel: "off" });
 		const asked = app.approvals.request(
 			{ id: "approval-1", conversationId: id, taskId: 1 as never, callId: "call-1", tool: "bash", subject: "rm -rf build", reason: "deletes files", createdAt: Date.now() },
 			BACKGROUND_CONTEXT,
@@ -610,14 +565,14 @@ test("reactions, pins, notes, mentions, quotes, model changes, and guard decisio
 test("the session list shows who is where, the newest chat, and people come and go with a last-seen time", async () => {
 	const id = await newSession();
 	const alex = app.config.addUser("Alex", "guest").user;
-	const watcher = fakeTab(undefined, owner() as never);
-	const tab = fakeTab(id, alex as never);
+	const watcher = fakeTab(undefined, owner());
+	const tab = fakeTab(id, alex);
 	try {
 		await app.attach(watcher.client);
 		await app.attach(tab.client);
 		const online = (watcher.last("users") as unknown as { id: string; online: boolean }[]).find((each) => each.id === alex.id);
 		assert.equal(online?.online, true);
-		await app.postChat(id, alex, { text: "hello list", requestId: "l1" });
+		await app.collab.postChat(id, alex, { text: "hello list", requestId: "l1" });
 		await until(() => {
 			const sessions = watcher.last("sessions") as unknown as { id: number; people?: { name: string }[]; chatBy?: string }[] | undefined;
 			const row = sessions?.find((each) => each.id === Number(id));
@@ -829,16 +784,16 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
 	const other = await newSession();
 	const sam = app.config.addUser("Sam", "guest", [String(id)]).user;
 	const vee = app.config.addUser("Vee", "viewer").user;
-	const sneaky = fakeTab(other, sam as never);
-	const samTab = fakeTab(id, sam as never);
-	const veeTab = fakeTab(id, vee as never);
+	const sneaky = fakeTab(other, sam);
+	const samTab = fakeTab(id, sam);
+	const veeTab = fakeTab(id, vee);
 	let closed = 0;
 	(veeTab.client as { close?: () => void }).close = () => closed++;
 	try {
 		// A tab pointed at a session Sam may not see gets "missing", then nothing about that session.
 		await app.attach(sneaky.client);
 		assert.equal(sneaky.client.conversationId, undefined);
-		await app.updateSession(other, owner(), { title: "Secret plans" });
+		await app.commands.updateSession(other, owner(), { title: "Secret plans" });
 		app.notice("warning", "server-wide detail");
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		assert.ok(!sneaky.events.some((each) => each.event === "notice"), "no notices from the other session or the server");
@@ -848,7 +803,7 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
 		await app.attach(samTab.client);
 		app.setAccess(owner(), sam.id, { sessions: [String(other)] });
 		assert.match(String(samTab.last("missing")?.message), /no longer shared/);
-		await app.postChat(id, owner(), { text: "after the change", requestId: "acc-1" });
+		await app.collab.postChat(id, owner(), { text: "after the change", requestId: "acc-1" });
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		assert.ok(!samTab.events.some((each) => each.event === "chat" && JSON.stringify(each.data).includes("after the change")));
 
