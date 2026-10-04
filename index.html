@@ -28,8 +28,8 @@
 		<div class="wrap">
 			<a class="logo" href="#top" aria-label="Pi Pocket home"><img src="icon.svg" alt="" width="28" height="28">Pi Pocket</a>
 			<nav class="nav-links" aria-label="Sections">
+				<a href="#pi-durable">Pi Durable</a>
 				<a href="#features">Features</a>
-				<a href="#durable">Durable</a>
 				<a href="#multiplayer">Multiplayer</a>
 				<a href="#security">Security</a>
 				<a href="#get-started">Get started</a>
@@ -111,6 +111,71 @@
 			</div>
 		</section>
 
+		<!-- Pi Durable -->
+		<section class="section alt" id="pi-durable">
+			<div class="wrap">
+				<div class="split">
+					<div class="split-copy">
+						<span class="kicker">Foundation</span>
+						<h2>Built on Pi Durable.</h2>
+						<p>Pi Durable is Earendil's harness for long-running agents, released with Pi 1.0. It keeps conversations, model calls, tool calls, and app state in one storage, and commits each step before anything is shown. If the process dies, the next one picks the work up where it stopped.</p>
+						<p>Pi Pocket is a web app on top of it. Pi Durable runs the agent: it saves each step, resumes runs after a restart, queues messages, and runs subagents. Pi Pocket adds the screens, the people, and the ways to connect. Its sessions live in one SQLite file, <code>~/.pi-pocket/pocket.sqlite</code>.</p>
+						<div class="cta">
+							<a class="btn" href="https://earendil.com/posts/pi-durable/">Read the announcement</a>
+							<a class="btn" href="https://github.com/earendil-works/pi/tree/main/packages/durable">Pi Durable source</a>
+						</div>
+					</div>
+					<div class="panel" role="img" aria-label="A run's timeline: steps are committed, the server restarts, and the run resumes from the last committed step.">
+						<div class="panel-head" aria-hidden="true"><b>pocket.sqlite</b><span class="right">run #128</span></div>
+						<ol class="timeline" aria-hidden="true">
+							<li><span class="mark">✓</span><span class="what">model request</span><span class="state">committed</span></li>
+							<li><span class="mark">✓</span><span class="what">read <em>src/auth.ts</em></span><span class="state">committed</span></li>
+							<li><span class="mark">✓</span><span class="what">edit <em>src/auth.ts</em></span><span class="state">committed</span></li>
+							<li class="crash"><span class="mark">✕</span><span class="what">server restarted</span><span class="state">process killed</span></li>
+							<li class="resume"><span class="mark">↻</span><span class="what">run resumed</span><span class="state">from last commit</span></li>
+							<li><span class="mark">✓</span><span class="what">bash <em>npm test</em></span><span class="state">passed</span></li>
+							<li><span class="mark">✓</span><span class="what">model request</span><span class="state">done</span></li>
+						</ol>
+					</div>
+				</div>
+
+				<h3 class="map-head">What Pi Pocket gets from it</h3>
+				<div class="grid map">
+					<article class="card">
+						<code>tasks + checkpoints</code>
+						<h3>Runs survive restarts</h3>
+						<p>Each model request and tool call is a task that saves a checkpoint before it moves on. After a restart, unfinished runs continue. A tool call that was cut off reruns only if that is safe; otherwise the model is told it was interrupted.</p>
+					</article>
+					<article class="card">
+						<code>atomic commits</code>
+						<h3>Same view on every device</h3>
+						<p>Nothing is shown before it is stored, and browsers only get committed state. A device that reconnects or joins late sees what everyone else sees.</p>
+					</article>
+					<article class="card">
+						<code>inbox</code>
+						<h3>Steer or queue</h3>
+						<p>A message sent while Pi works either joins the current run or waits for the next one. Queued messages stay queued across restarts.</p>
+					</article>
+					<article class="card">
+						<code>documents</code>
+						<h3>Chat, pins, notes, artifacts</h3>
+						<p>Pi Pocket stores its own data as documents, changed in the same commits as the transcript, so after a crash the two never disagree.</p>
+					</article>
+					<article class="card">
+						<code>owned conversations</code>
+						<h3>Subagents</h3>
+						<p>A subagent is a conversation of its own, owned by a task. It survives restarts, tracks its own cost, and you can open it and talk to it.</p>
+					</article>
+					<article class="card">
+						<code>extensions + hooks</code>
+						<h3>Live editing and Lancet Guard</h3>
+						<p>Pi Pocket's features are extensions. Installing a new version replaces the old one while the server runs. The guard is a hook that stores each decision, so a restart never asks twice.</p>
+					</article>
+				</div>
+				<p class="note">Pi Durable is experimental, and its API can change between releases. Pi Pocket pins the exact version it is tested with.</p>
+			</div>
+		</section>
+
 		<!-- Features -->
 		<section class="section" id="features">
 			<div class="wrap">
@@ -165,36 +230,8 @@
 			</div>
 		</section>
 
-		<!-- Durable -->
-		<section class="section alt" id="durable">
-			<div class="wrap split">
-				<div class="split-copy">
-					<span class="kicker">Durable</span>
-					<h2>Restarts don't lose work.</h2>
-					<p>Pi Pocket runs on Pi Durable, which saves each step of a run to SQLite before showing it. If the server restarts or a browser disconnects, the run continues from the last saved step.</p>
-					<ul class="points">
-						<li><b>Interrupted tool calls.</b> Calls that are safe to repeat run again. The others go back to the model marked as interrupted, so nothing runs twice.</li>
-						<li><b>Same view on every device.</b> Browsers only show saved state, so a device that reconnects or joins late sees what everyone else sees.</li>
-						<li><b>Queues and approvals.</b> Queued messages, pending approvals, and subagents are kept across restarts.</li>
-					</ul>
-				</div>
-				<div class="panel" role="img" aria-label="A run's timeline: steps are committed, the server restarts, and the run resumes from the last committed step.">
-					<div class="panel-head" aria-hidden="true"><b>pocket.sqlite</b><span class="right">run #128</span></div>
-					<ol class="timeline" aria-hidden="true">
-						<li><span class="mark">✓</span><span class="what">model request</span><span class="state">committed</span></li>
-						<li><span class="mark">✓</span><span class="what">read <em>src/auth.ts</em></span><span class="state">committed</span></li>
-						<li><span class="mark">✓</span><span class="what">edit <em>src/auth.ts</em></span><span class="state">committed</span></li>
-						<li class="crash"><span class="mark">✕</span><span class="what">server restarted</span><span class="state">power lost</span></li>
-						<li class="resume"><span class="mark">↻</span><span class="what">run resumed</span><span class="state">from last commit</span></li>
-						<li><span class="mark">✓</span><span class="what">bash <em>npm test</em></span><span class="state">passed</span></li>
-						<li><span class="mark">✓</span><span class="what">model request</span><span class="state">done</span></li>
-					</ol>
-				</div>
-			</div>
-		</section>
-
 		<!-- Multiplayer -->
-		<section class="section" id="multiplayer">
+		<section class="section alt" id="multiplayer">
 			<div class="wrap split flip">
 				<div class="split-copy">
 					<span class="kicker">Multiplayer</span>
@@ -248,7 +285,7 @@
 		</section>
 
 		<!-- Live editing -->
-		<section class="section alt" id="live">
+		<section class="section" id="live">
 			<div class="wrap">
 				<div class="section-head">
 					<span class="kicker">Live editing</span>
@@ -276,7 +313,7 @@
 		</section>
 
 		<!-- Access -->
-		<section class="section" id="access">
+		<section class="section alt" id="access">
 			<div class="wrap">
 				<div class="section-head">
 					<span class="kicker">Access</span>
@@ -310,7 +347,7 @@
 		</section>
 
 		<!-- Security -->
-		<section class="section alt" id="security">
+		<section class="section" id="security">
 			<div class="wrap split">
 				<div class="split-copy">
 					<span class="kicker">Security</span>
@@ -344,7 +381,7 @@
 		</section>
 
 		<!-- Get started -->
-		<section class="section" id="get-started">
+		<section class="section alt" id="get-started">
 			<div class="wrap start">
 				<div>
 					<span class="kicker">Get started</span>
