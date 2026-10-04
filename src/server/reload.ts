@@ -16,6 +16,8 @@ import type { ExtensionModule, PocketHost } from "./host.ts";
 const ORDER = ["prompt.ts", "artifacts.ts", "subagents.ts", "guard.ts", "codemode.ts"];
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
+/** Modules that stay off until the owner turns them on. */
+const OFF_BY_DEFAULT = new Set(["guard.ts"]);
 const TITLES: Record<string, string> = {
 	"prompt.ts": "System prompt",
 	"artifacts.ts": "Artifacts",
@@ -41,23 +43,31 @@ export class ExtensionLoader {
 	readonly #registry: Registry;
 	readonly #host: PocketHost;
 	readonly #directory: string;
-	readonly #isOff: (file: string) => boolean;
+	readonly #choice: (file: string) => boolean | undefined;
 	/** Extension names each file installed, to uninstall the ones a new version no longer provides. */
 	readonly #installed = new Map<string, Extension[]>();
 	readonly #errors = new Map<string, string>();
 	readonly #timers = new Map<string, NodeJS.Timeout>();
 	#watcher: FSWatcher | undefined;
 
-	/** `isOff` says which modules the owner turned off; it is read again on every load. */
-	constructor(registry: Registry, host: PocketHost, directory: string, isOff: (file: string) => boolean = () => false) {
+	/**
+	 * `choice` says whether the owner turned a module on (true) or off (false), or never chose (undefined, so the
+	 * module's default applies). It is read again on every load.
+	 */
+	constructor(
+		registry: Registry,
+		host: PocketHost,
+		directory: string,
+		choice: (file: string) => boolean | undefined = () => undefined,
+	) {
 		this.#registry = registry;
 		this.#host = host;
 		this.#directory = directory;
-		this.#isOff = isOff;
+		this.#choice = choice;
 	}
 
 	enabled(file: string): boolean {
-		return REQUIRED.has(file) || !this.#isOff(file);
+		return REQUIRED.has(file) || (this.#choice(file) ?? !OFF_BY_DEFAULT.has(file));
 	}
 
 	files(): string[] {
@@ -83,7 +93,7 @@ export class ExtensionLoader {
 	}
 
 	/**
-	 * Install a module that was turned on, or uninstall one that was turned off (after `isOff` already says so).
+	 * Install a module that was turned on, or uninstall one that was turned off (after `choice` already says so).
 	 * Throws when a module that was turned on fails to load; it stays on, and the error shows in `list()`.
 	 */
 	async apply(file: string): Promise<void> {

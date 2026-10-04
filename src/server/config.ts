@@ -46,6 +46,8 @@ interface PocketConfig {
 	lastModel?: ModelChoice;
 	/** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
 	disabledExtensions?: string[];
+	/** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
+	enabledExtensions?: string[];
 }
 
 export function newToken(): string {
@@ -104,12 +106,31 @@ export class ConfigStore {
 		return this.#config.disabledExtensions ?? [];
 	}
 
+	get enabledExtensions(): readonly string[] {
+		return this.#config.enabledExtensions ?? [];
+	}
+
+	/** Whether the owner turned a module on or off; undefined when they never chose, so its default applies. */
+	extensionChoice(file: string): boolean | undefined {
+		if (this.#config.disabledExtensions?.includes(file)) return false;
+		if (this.#config.enabledExtensions?.includes(file)) return true;
+		return undefined;
+	}
+
 	setExtensionEnabled(file: string, enabled: boolean): void {
 		const disabled = new Set(this.#config.disabledExtensions ?? []);
-		if (enabled) disabled.delete(file);
-		else disabled.add(file);
+		const turnedOn = new Set(this.#config.enabledExtensions ?? []);
+		if (enabled) {
+			disabled.delete(file);
+			turnedOn.add(file);
+		} else {
+			disabled.add(file);
+			turnedOn.delete(file);
+		}
 		if (disabled.size === 0) delete this.#config.disabledExtensions;
 		else this.#config.disabledExtensions = [...disabled].sort();
+		if (turnedOn.size === 0) delete this.#config.enabledExtensions;
+		else this.#config.enabledExtensions = [...turnedOn].sort();
 		this.save();
 	}
 
