@@ -6,6 +6,8 @@ import { actions, attempt, canSteer, collab, drafts, notify, openSheet, store, t
 import { formatBytes, formatTokens, html, Icon, modelLabel, Spinner } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
+/** The newest "Send to Pi" text already put into a message box (see `insertIntoComposer`). */
+let insertedUpTo = 0;
 
 /** Take turns: who drives, who asked, and the buttons to hand over, ask, or take the wheel. */
 function DriverBar() {
@@ -54,10 +56,12 @@ export function Composer() {
 	const agent = view.agent;
 
 	useEffect(() => setText(drafts.get(conversationId)), [conversationId]);
-	// Text sent here from the chat or the notes ("Send to Pi") goes after whatever is in the box.
+	// Text sent here from the chat or the notes ("Send to Pi") goes after whatever is in the box, once: the message box
+	// is made again for every session, and must not add the same text there.
 	const insert = store.state.composerInsert;
 	useEffect(() => {
-		if (!insert) return;
+		if (!insert || insert.n <= insertedUpTo) return;
+		insertedUpTo = insert.n;
 		const current = drafts.get(conversationId);
 		update(current.trim() === "" ? insert.text : `${current.replace(/\s+$/, "")}\n\n${insert.text}`);
 		requestAnimationFrame(() => {
@@ -213,7 +217,8 @@ export function Composer() {
 				(item) => html`<div class="queued">
 					<span class="queued-mode">${item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queued" : "Note"}<span class="muted">${queuedBy(item)}</span></span>
 					<span class="queued-text">${item.text ?? ""}</span>
-					<button class="icon-button small" aria-label="Withdraw" onClick=${() => attempt(() => actions.withdraw(item.id))}><${Icon} name="close" size=${14} /></button>
+					${canSteer() && (!blocked || item.by === me?.id) &&
+					html`<button class="icon-button small" aria-label="Withdraw" onClick=${() => attempt(() => actions.withdraw(item.id))}><${Icon} name="close" size=${14} /></button>`}
 				</div>`,
 			)}
 		</div>`}
@@ -245,7 +250,7 @@ export function Composer() {
 				(file) => html`<span class=${`chip ${file.preview ? "with-thumb" : ""}`}>
 					${file.preview && html`<img class="chip-thumb" src=${file.preview} alt="" />`}
 					${file.state === "uploading" ? html`<${Spinner} />` : file.preview ? "" : "📎"} ${file.name} <span class="muted">${formatBytes(file.size)}</span>
-					<button class="icon-button small" onClick=${() => {
+					<button class="icon-button small" aria-label=${`Remove ${file.name}`} onClick=${() => {
 						forget([file]);
 						setFiles((current) => current.filter((each) => each.key !== file.key));
 					}}><${Icon} name="close" size=${12} /></button>
@@ -294,7 +299,9 @@ export function StatusLine() {
 		parts.push(html`<span>${percent}%/${formatTokens(window)}</span>`);
 	}
 	parts.push(html`<span>$${(stats.cost ?? 0).toFixed(2)}</span>`);
-	if (guard?.enabled) parts.push(html`<button class="guard" title=${guard.detail} onClick=${() => openSheet({ type: "extensions" })}><${Icon} name="shield" size=${11} /> guard</button>`);
+	// On but not loaded: the guard blocks bash, write, and edit until it loads or is turned off.
+	if (guard?.enabled && guard.available === false) parts.push(html`<button class="guard off" title=${guard.detail} onClick=${() => openSheet({ type: "extensions" })}><${Icon} name="shield" size=${11} /> guard failed</button>`);
+	else if (guard?.enabled) parts.push(html`<button class="guard" title=${guard.detail} onClick=${() => openSheet({ type: "extensions" })}><${Icon} name="shield" size=${11} /> guard</button>`);
 	else if (guard?.available) parts.push(html`<button class="guard off" title=${guard.detail} onClick=${() => openSheet({ type: "extensions" })}><${Icon} name="shield" size=${11} /> guard off</button>`);
 	return html`<div class="status-line">${parts.flatMap((part, index) => (index === 0 ? [part] : [html`<span class="dot">·</span>`, part]))}</div>`;
 }

@@ -4,6 +4,7 @@
  *
  * Kinds are part of the stored data: rename one and old sessions lose it.
  */
+import type { JsonValue } from "@earendil-works/chord";
 import { type ConversationId, defineDoc, defineDocFamily, type EntryId, type TaskId } from "@earendil-works/pi-durable";
 
 export type SessionMeta = {
@@ -39,6 +40,11 @@ export type ArtifactVersion = {
 	version: number;
 	/** The tool task that wrote it; a replayed call finds its version instead of writing another. */
 	taskId: TaskId;
+	/**
+	 * The call within that task. One codemode task makes many calls; versions from before this field match on the task
+	 * alone.
+	 */
+	callId?: string;
 	size: number;
 	createdAt: number;
 };
@@ -75,6 +81,16 @@ export type SubagentRecord = {
 	/** Answers already reported to the parent: several messages can end in one answer, reported once. */
 	reported: EntryId[];
 };
+
+/** Values codemode scripts keep with `store(key, value)`, read back with `load(key)` in later scripts. */
+export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>({
+	kind: "pocket.codemode-store",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "current",
+	initial: () => ({ values: {} }),
+});
 
 /** A conversation's named background subagents, and the reporter task of each message sent to them. */
 export const SubagentsDoc = defineDoc<{ agents: Record<string, SubagentRecord>; reporters: Record<string, TaskId> }>({

@@ -8,7 +8,7 @@ import { Drawer, SessionList, SignIn } from "./sessions.js";
 import { Sheets } from "./sheets.js";
 import { dismiss, openSheet, start, store } from "./store.js";
 import { Transcript } from "./transcript.js";
-import { html, Icon, shortPath } from "./ui.js";
+import { Boot, html, Icon, shortPath } from "./ui.js";
 
 
 function Topbar() {
@@ -20,7 +20,7 @@ function Topbar() {
 	return html`<header class="topbar">
 		<button class="icon-button" aria-label="Sessions" onClick=${() => store.set({ drawer: true })}><${Icon} name="menu" /></button>
 		<button class="title" onClick=${() => conversation && openSheet({ type: "menu" })}>
-			<div class="title-main">${conversation?.title ?? "…"}</div>
+			<div class="title-main">${conversation?.title ?? store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ?? "Loading…"}</div>
 			<div class="title-sub mono">${subtitle}</div>
 		</button>
 		${busySubagents > 0 && html`<button class="icon-button" title="Subagents working" onClick=${() => openSheet({ type: "menu" })}><span class="pulse"></span><span class="count">${busySubagents}</span></button>`}
@@ -48,14 +48,14 @@ function App() {
 	useEffect(() => {
 		document.title = state.view.conversation?.title ? `${state.view.conversation.title} · Pi Pocket` : "Pi Pocket";
 	}, [state.view.conversation?.title]);
-	if (state.me === undefined) return html`<div class="boot">π</div><${Notices} />`;
+	if (state.me === undefined) return html`<${Boot} caption=${state.notices.some((notice) => notice.level === "error") ? "waiting for the server" : "starting"} /><${Notices} />`;
 	if (state.me === null) return html`<${SignIn} />`;
 	const inConversation = state.conversationId !== null;
 	return html`<div class=${`layout ${inConversation ? "" : "home"}`}>
 		<aside class="sidebar"><${SessionList} /></aside>
 		<div class="pane">
 			${inConversation
-				? html`<${Topbar} /><${Transcript} />${state.view.conversation && !state.missing && html`<${Composer} key=${state.conversationId} />`}`
+				? html`<${Topbar} /><${Transcript} key=${state.conversationId} />${state.view.conversation && !state.missing && html`<${Composer} key=${state.conversationId} />`}`
 				: html`<div class="home-list"><${SessionList} /></div>`}
 		</div>
 		<${Drawer} />

@@ -1,8 +1,9 @@
 // The conversation: messages, thinking, tool cards, artifacts, subagents, approvals, and the live run.
+import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { personColor } from "./chat.js";
-import { actions, attempt, canSteer, collab, discuss, navigate, openSheet, store } from "./store.js";
-import { entryImageUrl, fileUrl, html, Icon, Markdown, plainText, Spinner, Thumb } from "./ui.js";
+import { actions, attempt, canSteer, collab, discuss, isRow, navigate, openSheet, store, TRANSCRIPT_ROWS } from "./store.js";
+import { Boot, entryImageUrl, fileUrl, html, Icon, Markdown, plainText, Spinner, Thinking, Thumb } from "./ui.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
 /** One line of the attachment list the server adds to a message: `- path (name, mime, size bytes)`. */
@@ -100,6 +101,14 @@ function describeCall(call) {
 			return { icon: ">_", label: "", subject: short(args.command, 140), mono: true };
 		case "artifact":
 			return { icon: "✦", label: "Artifact", subject: args.title ?? args.id ?? "", mono: false };
+		case "codemode": {
+			// The first line that does something: not the options line, a comment, or blank.
+			const line = String(args.code ?? "")
+				.split("\n")
+				.map((each) => each.trim())
+				.find((each) => each !== "" && !each.startsWith("//"));
+			return { icon: "{}", label: "Codemode", subject: short(line ?? "", 140), mono: true };
+		}
 		case "subagent":
 			return {
 				icon: "⧉",
@@ -147,17 +156,33 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 			else if (Array.isArray(args.edits)) parts.push(html`<pre class="output">${args.edits.map((edit) => `- ${edit.oldText}\n+ ${edit.newText}`).join("\n\n")}</pre>`);
 		}
 		if (call.name === "subagent" && args.message) parts.push(html`<div class="tool-note">${args.message}</div>`);
+		if (call.name === "codemode") {
+			if (args.code) parts.push(html`<pre class="cmd">${args.code}</pre>`);
+			// The script's own tool calls, live while it runs.
+			const nested = Array.isArray(details?.calls) ? details.calls : [];
+			if (nested.length > 0) {
+				parts.push(html`<div class="nested-calls">${nested.map(
+					(each) => html`<div class=${`nested-call ${each.status}`}>
+						<span class="nested-status">${each.status === "ok" ? "✓" : each.status === "running" ? "…" : each.status === "cancelled" ? "–" : "!"}</span>
+						<span class="mono">${each.name}</span>
+						${each.durationMs !== undefined && html`<span class="muted">${each.durationMs} ms</span>`}
+						${each.error && html`<span class="nested-error">${each.error}</span>`}
+					</div>`,
+				)}</div>`);
+			}
+		}
 		if (call.name === "artifact" && (args.content || args.edits)) {
 			parts.push(html`<pre class="output">${args.content ?? JSON.stringify(args.edits, null, 2)}</pre>`);
 		}
-		if (!["read", "write", "edit", "bash", "subagent", "artifact"].includes(call.name)) {
+		if (!["read", "write", "edit", "bash", "subagent", "artifact", "codemode"].includes(call.name)) {
 			parts.push(html`<pre class="output">${JSON.stringify(args, null, 2)}</pre>`);
 		}
 		const output = resultText ?? slot?.output;
 		if (output && !(call.name === "edit" && details?.diff && !result?.isError)) {
 			parts.push(html`<pre class=${`output ${result?.isError ? "error" : ""}`}>${output}</pre>`);
 		}
-		if (clipped) parts.push(html`<button class="link" onClick=${loadFull}>Load everything</button>`);
+		// A call still streaming has no stored entry to load yet.
+		if (clipped && entryId !== undefined) parts.push(html`<button class="link" onClick=${loadFull}>Load everything</button>`);
 		body = html`<div class="tool-body">${parts}</div>`;
 	}
 
@@ -213,7 +238,11 @@ function ApprovalCard({ approval }) {
 
 function AssistantBlocks({ blocks, entryId, results, slots, approvals, streaming }) {
 	return blocks.map((block, index) => {
-		if (block.type === "text") return html`<${Markdown} text=${block.text} class=${streaming && index === blocks.length - 1 ? "streaming" : ""} />`;
+		if (block.type === "text") {
+			// The block still growing changes on every update: caching each version would only push out finished ones.
+			const growing = streaming && index === blocks.length - 1;
+			return html`<${Markdown} text=${block.text} class=${growing ? "streaming" : ""} cache=${!growing} />`;
+		}
 		if (block.type === "thinking") return html`<${Thought} block=${block} streaming=${streaming && index === blocks.length - 1} />`;
 		if (block.type === "toolCall") {
 			const slot = slots.get(block.id);
@@ -271,13 +300,17 @@ function Divider({ entry }) {
 	</div>`;
 }
 
-function History({ firstId }) {
+function History({ firstId, results, keepPlace }) {
 	const history = store.state.history;
 	if (history === null) {
 		return html`<div class="divider"><button class="link" onClick=${() =>
-			attempt(async () => store.set({ history: await actions.history(firstId) }))}>Show earlier messages</button></div>`;
+			attempt(async () => {
+				const earlier = await actions.history(firstId);
+				keepPlace();
+				store.set({ history: earlier });
+			})}>Show earlier messages</button></div>`;
 	}
-	return html`<div class="history">${history.map((entry) => html`<${EntryView} entry=${entry} results=${new Map()} slots=${new Map()} approvals=${[]} />`)}</div>`;
+	return html`<div class="history">${history.filter(isRow).map((entry) => html`<${Row} key=${entry.id} entry=${entry} results=${results} slots=${NO_SLOTS} approvals=${NO_APPROVALS} deps=${rowDeps(entry, results, NO_SLOTS, NO_APPROVALS)} />`)}</div>`;
 }
 
 function EntryView({ entry, results, slots, approvals }) {
@@ -288,15 +321,87 @@ function EntryView({ entry, results, slots, approvals }) {
 	return null;
 }
 
+const NO_SLOTS = new Map();
+const NO_APPROVALS = [];
+const agentsKey = (view) => (view.subagents ?? []).map((agent) => `${agent.name}:${agent.conversationId}`).join();
+
+/**
+ * Everything a row shows besides its entry, as values that compare with Object.is. Each update from the server builds
+ * new objects for the whole view, so this picks out the parts one row uses: a row whose parts did not change skips
+ * rendering, and a long thread stays cheap while Pi streams into its newest message.
+ */
+function rowDeps(entry, results, slots, approvals) {
+	const { view, users, me, server } = store.state;
+	const deps = [entry, users, me, server, view.conversation?.id, view.conversation?.kind];
+	if (entry.kind === "user") {
+		deps.push(view.authors?.[entry.id]);
+		if (entry.text.startsWith("[subagent ")) deps.push(agentsKey(view));
+	} else if (entry.kind === "assistant") {
+		const reactions = view.reactions?.[entry.id];
+		deps.push(reactions === undefined ? "" : JSON.stringify(reactions), (view.pins ?? []).some((pin) => pin.entryId === entry.id));
+		for (const block of entry.blocks) {
+			if (block.type !== "toolCall") continue;
+			const slot = slots.get(block.id);
+			const decision = view.decisions?.[block.id];
+			deps.push(results.get(block.id), slot === undefined ? "" : JSON.stringify(slot), decision === undefined ? "" : JSON.stringify(decision));
+			if (slot?.taskId !== undefined) deps.push(approvals.find((each) => each.taskId === slot.taskId)?.id);
+			if (block.name === "artifact") deps.push((view.artifacts ?? []).map((each) => `${each.id}:${each.type}`).join());
+			if (block.name === "subagent") deps.push(agentsKey(view));
+		}
+	}
+	return deps;
+}
+
+/** One transcript row, rendered again only when its `deps` change (see `rowDeps`). Its cards keep their open state. */
+class Row extends Component {
+	shouldComponentUpdate(next) {
+		const before = this.props.deps;
+		const after = next.deps;
+		return before.length !== after.length || before.some((value, index) => !Object.is(value, after[index]));
+	}
+
+	render({ entry, results, slots, approvals }) {
+		return html`<${EntryView} entry=${entry} results=${results} slots=${slots} approvals=${approvals} />`;
+	}
+}
+
+/**
+ * Which rows to render: from the row `store.state.transcriptFrom` names down. Older rows wait behind "Show earlier
+ * messages", so opening a long session and streaming into it stay fast on a phone. Without that row (none chosen yet,
+ * or gone after a compaction), the newest `TRANSCRIPT_ROWS`.
+ */
+function windowStart(rows, from) {
+	const index = from === null ? -1 : rows.findIndex((row) => row.id === from);
+	return index === -1 ? Math.max(0, rows.length - TRANSCRIPT_ROWS) : index;
+}
+
 export function Transcript() {
-	const { view, missing } = store.state;
+	const { view, missing, history, transcriptFrom } = store.state;
 	const scroller = useRef(null);
 	const stick = useRef(true);
+	/** Distance from the bottom to restore after rows are added above, so the reader stays in place. */
+	const keep = useRef(null);
+	const counted = useRef(0);
 	const [showJump, setShowJump] = useState(false);
+
+	const entries = view.order.map((id) => view.entries.get(id)).filter(Boolean);
+	const rows = entries.filter(isRow);
+	const start = windowStart(rows, transcriptFrom);
 
 	useLayoutEffect(() => {
 		const element = scroller.current;
-		if (element && stick.current) element.scrollTop = element.scrollHeight;
+		if (!element) return;
+		if (keep.current !== null) {
+			element.scrollTop = element.scrollHeight - keep.current;
+			keep.current = null;
+		} else if (stick.current) element.scrollTop = element.scrollHeight;
+		const grew = rows.length > counted.current;
+		counted.current = rows.length;
+		if (rows.length === 0) return;
+		// Fix the first row shown, so rows arriving below never push the ones being read off the top. While the reader
+		// follows along at the bottom, drop the oldest once there are twice as many as a fresh open shows.
+		if (rows[start].id !== transcriptFrom) store.set({ transcriptFrom: rows[start].id });
+		else if (grew && stick.current && rows.length - start > 2 * TRANSCRIPT_ROWS) store.set({ transcriptFrom: rows[rows.length - TRANSCRIPT_ROWS].id });
 	});
 
 	// Images finish loading after the transcript renders and make it taller: stay at the bottom if we were there.
@@ -318,16 +423,28 @@ export function Transcript() {
 	};
 
 	if (missing) return html`<main class="scroller"><div class="empty"><p>${missing}</p><button class="button" onClick=${() => navigate(null)}>All sessions</button></div></main>`;
-	if (!view.conversation) return html`<main class="scroller"><div class="empty"><${Spinner} /></div></main>`;
+	if (!view.conversation) {
+		const { connection, sessions, conversationId } = store.state;
+		const title = sessions.find((session) => session.id === conversationId)?.title;
+		const caption = connection === "connecting" ? "connecting" : connection === "open" ? "loading session" : "reconnecting";
+		return html`<main class="scroller"><${Boot} inline caption=${caption} detail=${title ?? ""} /></main>`;
+	}
+
+	const keepPlace = () => {
+		const element = scroller.current;
+		if (!element) return;
+		keep.current = element.scrollHeight - element.scrollTop;
+		stick.current = false;
+	};
+	const showEarlier = () => {
+		keepPlace();
+		store.set({ transcriptFrom: rows[Math.max(0, start - TRANSCRIPT_ROWS)].id });
+	};
 
 	const results = new Map();
-	for (const id of view.order) {
-		const entry = view.entries.get(id);
-		if (entry?.kind === "toolResult") results.set(entry.callId, entry);
-	}
+	for (const entry of [...(history ?? []), ...entries]) if (entry.kind === "toolResult") results.set(entry.callId, entry);
 	const slots = new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot]));
 	const approvals = view.approvals ?? [];
-	const entries = view.order.map((id) => view.entries.get(id)).filter(Boolean);
 	const first = entries[0];
 	const partial = view.live.generation?.message?.blocks ?? [];
 	const runningTools = (view.live.tools ?? []).some((slot) => slot.status !== "done");
@@ -340,18 +457,20 @@ export function Transcript() {
 		<div class="transcript">
 			${conversation.parent &&
 			html`<button class="breadcrumb" onClick=${() => navigate(conversation.parent.id)}><${Icon} name="back" size=${14} /> ${conversation.parent.title}</button>`}
-			${first && (first.kind === "compaction" || first.kind === "reset") && html`<${History} firstId=${first.id} />`}
+			${start > 0
+				? html`<div class="divider"><button class="link" onClick=${showEarlier}>Show earlier messages</button></div>`
+				: first && (first.kind === "compaction" || first.kind === "reset") && html`<${History} firstId=${first.id} results=${results} keepPlace=${keepPlace} />`}
 			${entries.length === 0 && !view.live.busy && html`<div class="empty hint">
 				<div class="pi">π</div>
 				<p>${conversation.kind === "subagent" ? "This subagent has no messages yet." : "Ask anything. Pi works in this session's folder, and keeps working if the server restarts."}</p>
 			</div>`}
-			${entries.map((entry) => html`<${EntryView} key=${entry.id} entry=${entry} results=${results} slots=${slots} approvals=${approvals} />`)}
+			${rows.slice(start).map((entry) => html`<${Row} key=${entry.id} entry=${entry} results=${results} slots=${slots} approvals=${approvals} deps=${rowDeps(entry, results, slots, approvals)} />`)}
 			${partial.length > 0 &&
 			html`<div class="assistant live"><${AssistantBlocks} blocks=${partial} results=${results} slots=${slots} approvals=${approvals} streaming=${true} /></div>`}
 			${approvals.map((approval) => html`<${ApprovalCard} key=${approval.id} approval=${approval} />`)}
 			${retry && html`<div class="muted small">Retrying (attempt ${view.live.generation.attempt + 1}) after: ${retry.error}</div>`}
 			${compactions.map((compaction) => html`<div class="muted small"><${Spinner} /> Compacting context (${compaction.reason})…</div>`)}
-			${thinking && html`<div class="typing"><span></span><span></span><span></span></div>`}
+			${thinking && html`<${Thinking} />`}
 		</div>
 		${showJump && html`<button class="jump" onClick=${() => {
 			stick.current = true;

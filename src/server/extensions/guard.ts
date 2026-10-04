@@ -31,7 +31,8 @@ export default function createGuard(host: PocketHost) {
 					if (answer === undefined) {
 						const asked = await host.approvals.request(
 							{
-								id: String(api.taskId),
+								// The call, not just its task: a codemode script makes several calls in one task, maybe at once.
+								id: `${api.taskId}:${call.id}`,
 								conversationId: api.conversationId,
 								taskId: api.taskId,
 								callId: call.id,

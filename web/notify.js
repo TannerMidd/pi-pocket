@@ -1,7 +1,7 @@
 // Phone notifications: this device subscribes to the server's pushes, and each person picks what they hear about.
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, notify } from "./store.js";
-import { html, Sheet, Spinner } from "./ui.js";
+import { html, Loader, Sheet } from "./ui.js";
 
 const supported = "serviceWorker" in navigator && "PushManager" in globalThis && "Notification" in globalThis;
 
@@ -29,7 +29,7 @@ function sameKey(subscription, publicKey) {
 
 /** Why this device cannot get notifications, or null when it can. */
 function blocker() {
-	if (!isSecureContext) return "Notifications need a secure (https) address. Open Pi Pocket through the Cloudflare Tunnel, or Tailscale with https, on this device.";
+	if (!isSecureContext) return "Notifications need a secure (https) address. Open Pi Pocket through the Cloudflare Tunnel, or through tailscale serve, on this device.";
 	if (!supported) return "This browser cannot receive notifications. On iPhone and iPad, add Pi Pocket to the home screen first, then open it from there.";
 	if (Notification.permission === "denied") return "Notifications are blocked for this site. Allow them in the browser's site settings, then come back.";
 	return null;
@@ -108,7 +108,7 @@ export function NotificationsSheet() {
 		<p class="muted small">Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.</p>
 		${problem && html`<div class="error-box small">${problem}</div>`}
 		${!info || subscription === undefined
-			? html`<${Spinner} />`
+			? html`<${Loader} label="Checking this device" />`
 			: html`
 				<div class="extension">
 					<div class="extension-main">

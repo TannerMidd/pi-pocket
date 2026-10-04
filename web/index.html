@@ -5,10 +5,12 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
 		<meta name="color-scheme" content="dark" />
 		<meta name="theme-color" content="#13141c" />
+		<meta name="mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<title>Pi Pocket</title>
 		<link rel="manifest" href="/manifest.webmanifest" />
 		<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 		<link rel="preload" href="/fonts/JetBrainsMono.woff2" as="font" type="font/woff2" crossorigin />
 		<link rel="stylesheet" href="/style.css" />
 		<script type="importmap">
@@ -24,7 +26,10 @@
 		</script>
 	</head>
 	<body>
-		<div id="app"><div class="boot">π</div></div>
+		<!-- The same boot screen the app shows while it starts (Boot in ui.js), so nothing jumps when the script takes over. -->
+		<div id="app">
+			<div class="boot" role="status"><div class="boot-mark" aria-hidden="true">π</div><div class="boot-bar" aria-hidden="true"><span></span></div><div class="boot-caption">starting</div></div>
+		</div>
 		<script type="module" src="/app.js"></script>
 	</body>
 </html>

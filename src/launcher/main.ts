@@ -29,7 +29,6 @@ import { accent, bold, type Choice, choose, columns, confirm, cut, cyan, dim, gr
 
 const SERVER = fileURLToPath(new URL("../server/main.ts", import.meta.url));
 const RESTART_CODE = 75;
-const CONFIG_ERROR_CODE = 78;
 
 // ─── Options ────────────────────────────────────────────────────────────
 
@@ -248,12 +247,15 @@ const state = {
 	publicUrl: undefined as string | undefined,
 	tunnelTrouble: false,
 	tunnelFailures: 0,
+	/** A restart asked for while the server was starting: done once it is up. */
+	restartWhenReady: false,
+	/** Server starts in a row that failed after it had run, for the pause before the next try. */
+	serverFailures: 0,
 };
 
 let child: ChildProcess | undefined;
 let tunnel: CloudflareTunnel | undefined;
 let quitting = false;
-const crashes: number[] = [];
 
 const wildcard = (host: string) => host === "0.0.0.0" || host === "::";
 const loopback = (host: string) => host === "localhost" || host === "::1" || host.startsWith("127.");
@@ -352,7 +354,8 @@ function maybeShowPanel(): void {
 function startServer(first: boolean): void {
 	const args = [SERVER, "--host", state.host, "--port", String(options.port), "--cwd", options.cwd, "--data", options.data];
 	if (first && options.rotateToken) args.push("--rotate-token");
-	const proc = spawn(process.execPath, args, {
+	// Node 22 calls node:sqlite experimental and says so at every start, right above the panel.
+	const proc = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...args], {
 		stdio: ["ignore", "pipe", "pipe", "ipc"],
 		env: { ...process.env, PI_POCKET_SUPERVISED: "1", PI_POCKET_LAUNCHER: "1" },
 	});
@@ -363,13 +366,18 @@ function startServer(first: boolean): void {
 		if (message?.type !== "ready" || child !== proc) return;
 		state.loginPath = message.loginPath;
 		state.serverReady = true;
+		state.serverFailures = 0;
 		const restarted = state.everReady;
 		state.everReady = true;
 		sendAccess();
 		if (state.panelPending) maybeShowPanel();
 		else if (restarted) log(green("  ✓ Server restarted. Running work continues."));
+		if (state.restartWhenReady) {
+			state.restartWhenReady = false;
+			restartServer();
+		}
 	});
-	proc.on("exit", (code, signal) => {
+	const exited = (code: number | null, signal: NodeJS.Signals | null) => {
 		if (child !== proc) return;
 		child = undefined;
 		state.serverReady = false;
@@ -379,7 +387,7 @@ function startServer(first: boolean): void {
 			startServer(false);
 			return;
 		}
-		if (code === CONFIG_ERROR_CODE || !state.everReady) {
+		if (!state.everReady) {
 			log(red("  Pi Pocket could not start (see above)."));
 			void quit(code ?? 1);
 			return;
@@ -388,21 +396,29 @@ function startServer(first: boolean): void {
 			void quit(0);
 			return;
 		}
-		const now = Date.now();
-		crashes.push(now);
-		while (crashes.length > 0 && now - crashes[0]! > 60_000) crashes.shift();
-		if (crashes.length > 4) {
-			log(red("  The server crashed 5 times in a minute; giving up."));
-			void quit(code ?? 1);
-			return;
-		}
-		log(yellow(`  The server stopped (${signal ?? `code ${code}`}); starting it again in 2 seconds…`));
-		setTimeout(() => !quitting && child === undefined && startServer(false), 2000);
+		// It ran before: a crash, a start that fails after an edit to the server's code, or a port or address that is
+		// not back yet. Keep trying, more slowly each time, and keep the tunnel and its address for the phones using it.
+		state.serverFailures++;
+		const delay = Math.min(60_000, 2000 * 2 ** Math.min(5, state.serverFailures - 1));
+		log(yellow(`  The server stopped (${signal ?? `code ${code}`}); trying again in ${delay / 1000} seconds. Press q to quit.`));
+		setTimeout(() => !quitting && child === undefined && startServer(false), delay);
+	};
+	proc.on("exit", exited);
+	// A process that could not be started at all reports an error and never exits.
+	proc.on("error", (error) => {
+		log(red(`  Could not run the server: ${error.message}`));
+		if (proc.pid === undefined) exited(1, null);
 	});
 }
 
 function restartServer(): void {
 	if (child === undefined) return;
+	// Still starting: stopping it now would end the start; restart once it is up.
+	if (!state.serverReady) {
+		state.restartWhenReady = true;
+		log(dim("  ↻ The server will restart as soon as it is up."));
+		return;
+	}
 	if (process.platform === "win32") {
 		log(dim("  ↻ Restarting the server…"));
 		// No SIGUSR2 on Windows: stop it, and start it again from the exit handler.

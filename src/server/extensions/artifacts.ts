@@ -67,7 +67,9 @@ export default function createArtifacts(_host: PocketHost) {
 			if (id === "") throw new Error("The id must contain letters or digits.");
 			const index = (await api.snapshot(ArtifactsDoc, api.conversationId, context)) ?? { items: {} };
 			const previous = Object.hasOwn(index.items, id) ? (index.items[id] as ArtifactMeta) : undefined;
-			const replayed = previous?.versions.find((version) => version.taskId === api.taskId);
+			// A replay of this very call, not another call of the same task (codemode makes several in one).
+			const mine = (version: { taskId: unknown; callId?: string }) => version.taskId === api.taskId && (version.callId ?? api.callId) === api.callId;
+			const replayed = previous?.versions.find(mine);
 			let version = replayed?.version;
 			if (version === undefined) {
 				let content: string;
@@ -86,10 +88,10 @@ export default function createArtifacts(_host: PocketHost) {
 				version = await api.commit(async (tx) => {
 					const doc = await tx.doc(ArtifactsDoc, api.conversationId);
 					const current = Object.hasOwn(doc.items, id) ? doc.items[id] : undefined;
-					const again = current?.versions.find((each) => each.taskId === api.taskId);
+					const again = current?.versions.find(mine);
 					if (again !== undefined) return again.version;
 					const next = (current?.versions.at(-1)?.version ?? 0) + 1;
-					const record = { version: next, taskId: api.taskId, size: content.length, createdAt: Date.now() };
+					const record = { version: next, taskId: api.taskId, callId: api.callId, size: content.length, createdAt: Date.now() };
 					if (current === undefined) {
 						doc.items[id] = { title: args.title, type, versions: [record] };
 					} else {

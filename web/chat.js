@@ -1,8 +1,9 @@
 // People working together beside Pi: who is here, who is typing, and a side panel Pi does not see, with the chat,
 // pinned messages, and shared notes.
+import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { actions, attempt, canSteer, closeSheet, collab, drafts, insertIntoComposer, markChatRead, notify, openSheet, store, typing } from "./store.js";
-import { html, Icon, Sheet, Spinner, timeAgo } from "./ui.js";
+import { actions, attempt, canSteer, closeSheet, collab, drafts, insertIntoComposer, markChatRead, notify, openSheet, revealEntry, store, typing } from "./store.js";
+import { copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
 const COLORS = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#f7768e", "#ff9e64", "#73daca"];
@@ -79,6 +80,8 @@ function clock(at) {
 /** Close the panel and scroll the transcript to a message, briefly highlighted. */
 export function jumpToEntry(entryId) {
 	closeSheet();
+	// A message above the rows the transcript shows: show from it down. The render runs before the next frame.
+	revealEntry(entryId);
 	requestAnimationFrame(() => {
 		const element = document.getElementById(`entry-${entryId}`);
 		if (!element) {
@@ -117,6 +120,35 @@ function MessageText({ text, mentions, users, me }) {
 	return parts;
 }
 
+/**
+ * One line of the chat log. The whole app renders again on every update while Pi streams; a line renders again only
+ * when something it shows changed, so a long chat stays light.
+ */
+class ChatLine extends Component {
+	shouldComponentUpdate(next) {
+		const now = this.props;
+		return !["message", "grouped", "open", "pinned", "users", "me", "steer"].every((key) => now[key] === next[key]);
+	}
+
+	render({ message, grouped, open, pinned, users, me, steer, onSelect }) {
+		if (message.kind === "event") {
+			return html`<div class="chat-event"><span style=${`color:${personColor(message.userId)}`}>${message.userId === me?.id ? "You" : senderName(message, users)}</span> ${message.text} · ${clock(message.at)}</div>`;
+		}
+		const mine = message.userId === me?.id;
+		return html`<div data-chat=${message.id} class=${`chat-msg ${grouped ? "grouped" : ""} ${open ? "open" : ""} ${message.mentions?.includes(me?.id) ? "mentions-me" : ""}`} style=${`--who:${personColor(message.userId)}`}>
+			${!grouped && html`<div class="chat-meta"><span class="chat-name">${mine ? "You" : senderName(message, users)}</span><span class="muted">${clock(message.at)}</span>${pinned && html`<span class="muted">📌</span>`}</div>`}
+			${message.quote && html`<button class="chat-quote" onClick=${() => jumpToEntry(message.quote.entryId)}>${message.quote.text}</button>`}
+			<div class="chat-text" onClick=${() => collab() && onSelect(open ? null : message.id)}><${MessageText} text=${message.text} mentions=${message.mentions} users=${users} me=${me} /></div>
+			${open &&
+			html`<div class="chat-actions">
+				${steer && html`<button class="link small" onClick=${() => insertIntoComposer(`> ${senderName(message, users)}: ${message.text.replace(/\n/g, "\n> ")}\n\n`)}>Send to Pi</button>`}
+				<button class="link small" onClick=${() => attempt(() => actions.pin({ chatId: message.id }))}>${pinned ? "Unpin" : "Pin"}</button>
+				<button class="link small" onClick=${() => copyText(message.text).then(() => notify("info", "Copied."), () => notify("error", "Could not copy."))}>Copy</button>
+			</div>`}
+		</div>`;
+	}
+}
+
 /** The `@query` being typed right before the caret, if any. */
 function mentionQuery(value, caret) {
 	const before = value.slice(0, caret);
@@ -135,14 +167,16 @@ function ChatTab({ sheet }) {
 	const box = useRef(null);
 	const pinned = new Set((view.pins ?? []).map((pin) => pin.chatId).filter(Boolean));
 
-	useEffect(() => markChatRead(), [chat.length]);
+	// The newest message, not the count: the chat keeps its last 500, so the count stops changing.
+	const newest = chat.at(-1)?.id;
+	useEffect(() => markChatRead(), [newest]);
 	useLayoutEffect(() => {
 		const element = log.current;
 		if (!element) return;
 		const target = sheet.highlight && element.querySelector(`[data-chat="${CSS.escape(sheet.highlight)}"]`);
 		if (target) target.scrollIntoView({ block: "center" });
 		else element.scrollTop = element.scrollHeight;
-	}, [chat.length]);
+	}, [newest]);
 	useEffect(() => {
 		if (!coarse) box.current?.focus();
 		return () => typing(null);
@@ -199,24 +233,9 @@ function ChatTab({ sheet }) {
 		<div class="chat-log" ref=${log}>
 			${chat.length === 0 && html`<div class="muted">No messages yet. Pi does not see this chat.</div>`}
 			${chat.map((message, index) => {
-				if (message.kind === "event") {
-					return html`<div key=${message.id} class="chat-event"><span style=${`color:${personColor(message.userId)}`}>${message.userId === me?.id ? "You" : senderName(message, users)}</span> ${message.text} · ${clock(message.at)}</div>`;
-				}
 				const previous = chat[index - 1];
-				const grouped = previous?.kind !== "event" && previous?.userId === message.userId && message.at - previous.at < 5 * 60_000 && !message.quote;
-				const mine = message.userId === me?.id;
-				const open = selected === message.id;
-				return html`<div key=${message.id} data-chat=${message.id} class=${`chat-msg ${grouped ? "grouped" : ""} ${open ? "open" : ""} ${message.mentions?.includes(me?.id) ? "mentions-me" : ""}`} style=${`--who:${personColor(message.userId)}`}>
-					${!grouped && html`<div class="chat-meta"><span class="chat-name">${mine ? "You" : senderName(message, users)}</span><span class="muted">${clock(message.at)}</span>${pinned.has(message.id) && html`<span class="muted">📌</span>`}</div>`}
-					${message.quote && html`<button class="chat-quote" onClick=${() => jumpToEntry(message.quote.entryId)}>${message.quote.text}</button>`}
-					<div class="chat-text" onClick=${() => collab() && setSelected(open ? null : message.id)}><${MessageText} text=${message.text} mentions=${message.mentions} users=${users} me=${me} /></div>
-					${open &&
-					html`<div class="chat-actions">
-						${canSteer() && html`<button class="link small" onClick=${() => insertIntoComposer(`> ${senderName(message, users)}: ${message.text.replace(/\n/g, "\n> ")}\n\n`)}>Send to Pi</button>`}
-						<button class="link small" onClick=${() => attempt(() => actions.pin({ chatId: message.id }))}>${pinned.has(message.id) ? "Unpin" : "Pin"}</button>
-						<button class="link small" onClick=${() => navigator.clipboard?.writeText(message.text).then(() => notify("info", "Copied."))}>Copy</button>
-					</div>`}
-				</div>`;
+				const grouped = message.kind !== "event" && previous?.kind !== "event" && previous?.userId === message.userId && message.at - previous.at < 5 * 60_000 && !message.quote;
+				return html`<${ChatLine} key=${message.id} message=${message} grouped=${grouped} open=${selected === message.id} pinned=${pinned.has(message.id)} users=${users} me=${me} steer=${canSteer()} onSelect=${setSelected} />`;
 			})}
 		</div>
 		<${TypingLine} where="chat" />
@@ -280,7 +299,7 @@ function NotesTab() {
 	const [draft, setDraft] = useState(null);
 	const [base, setBase] = useState(notes?.rev ?? 0);
 	const [saving, setSaving] = useState(false);
-	if (notes === null) return html`<${Spinner} />`;
+	if (notes === null) return html`<${Loader} label="Loading notes" />`;
 	const editing = draft !== null;
 	const changedMeanwhile = editing && notes.rev !== base;
 	const by = notes.by ? (users.find((user) => user.id === notes.by)?.name ?? "someone") : null;

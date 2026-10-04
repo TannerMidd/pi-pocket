@@ -5,11 +5,20 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "author": "Tanner Middleton",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TannerMidd/pi-pocket.git"
+  },
+  "homepage": "https://tannermidd.github.io/pi-pocket/",
+  "bugs": {
+    "url": "https://github.com/TannerMidd/pi-pocket/issues"
+  },
   "bin": {
     "pi-pocket": "bin/pi-pocket.js"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.19"
   },
   "scripts": {
     "start": "node bin/pi-pocket.js",
@@ -21,10 +30,12 @@
   "dependencies": {
     "@earendil-works/chord": "1.0.1",
     "@earendil-works/pi-ai": "1.0.1",
+    "@earendil-works/pi-codemode": "1.0.1",
     "@earendil-works/pi-coding-agent": "1.0.1",
     "@earendil-works/pi-durable": "1.0.1",
     "dompurify": "^3.4.16",
     "htm": "^3.1.1",
+    "jiti": "2.7.0",
     "marked": "^18.0.14",
     "preact": "^11.0.0",
     "qrcode": "^1.5.4",

@@ -75,14 +75,16 @@ export function SignIn() {
 		} catch {
 			// not a URL
 		}
-		location.href = /^[a-z0-9]{10}$/.test(text) ? `/join/${text}` : `/login?token=${encodeURIComponent(text)}`;
+		// Invite codes are ten lowercase letters and digits, and phones capitalize the first letter typed. Tokens are longer.
+		const code = text.toLowerCase();
+		location.href = /^[a-z0-9]{10}$/.test(code) ? `/join/${code}` : `/login?token=${encodeURIComponent(text)}`;
 	};
 	return html`<div class="signin">
 		<div class="pi big">π</div>
 		<h1>Pi Pocket</h1>
 		<p class="muted">Open the sign-in link Pi Pocket printed when it started, or an invite from a signed-in device. You can also paste the link, the token, or an invite code here.</p>
 		<div class="row">
-			<input value=${value} placeholder="Link, token, or invite code" onInput=${(event) => setValue(event.currentTarget.value)} onKeyDown=${(event) => event.key === "Enter" && go()} />
+			<input value=${value} placeholder="Link, token, or invite code" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck=${false} onInput=${(event) => setValue(event.currentTarget.value)} onKeyDown=${(event) => event.key === "Enter" && go()} />
 			<button class="button primary" onClick=${go}>Sign in</button>
 		</div>
 	</div>`;
