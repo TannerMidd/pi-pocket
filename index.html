@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<title>Pi Pocket: your Pi coding agent, in your pocket</title>
-	<meta name="description" content="A durable, multiplayer, mobile-first web app for Pi coding agents. Self-hosted on your computer or your phone, with any provider or model. Built on Pi Durable.">
+	<meta name="description" content="A self-hosted web app for using the Pi coding agent from your phone or any browser. Sessions can be shared and survive restarts. Built on Pi Durable.">
 	<meta name="theme-color" content="#13141c">
 	<link rel="canonical" href="https://tannermidd.github.io/pi-pocket/">
 	<link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -14,7 +14,7 @@
 	<meta property="og:type" content="website">
 	<meta property="og:site_name" content="Pi Pocket">
 	<meta property="og:title" content="Pi Pocket: your Pi coding agent, in your pocket">
-	<meta property="og:description" content="A durable, multiplayer, mobile-first web app for Pi coding agents. Built on Pi Durable.">
+	<meta property="og:description" content="A self-hosted web app for using the Pi coding agent from your phone or any browser. Built on Pi Durable.">
 	<meta property="og:url" content="https://tannermidd.github.io/pi-pocket/">
 	<meta property="og:image" content="https://tannermidd.github.io/pi-pocket/og.png">
 	<meta property="og:image:width" content="1200">
@@ -48,7 +48,7 @@
 				<div>
 					<a class="badge" href="https://earendil.com/posts/pi-durable/"><b>v0.1.2</b> Built on Pi Durable →</a>
 					<h1>Your coding agent,<br><span class="grad">in your pocket.</span></h1>
-					<p class="lead">Pi Pocket is a durable, multiplayer web app for Pi agents. Run it on your computer or right on your phone, then drive it from any browser: with your team, across restarts, on any model.</p>
+					<p class="lead">Pi Pocket lets you use Pi from a browser, including your phone's. It runs on your computer, or on Android in Termux. Several people can share a session, and a run keeps going after a server restart.</p>
 					<div class="cta">
 						<a class="btn btn-primary" href="#get-started">Get started</a>
 						<a class="btn" href="https://github.com/TannerMidd/pi-pocket">View on GitHub</a>
@@ -111,34 +111,24 @@
 			</div>
 		</section>
 
-		<!-- Stats -->
-		<section class="stats" aria-label="At a glance">
-			<div class="wrap">
-				<div class="stat"><b>1 file</b><span>SQLite holds every run</span></div>
-				<div class="stat"><b>0</b><span>build steps</span></div>
-				<div class="stat"><b>4 ways</b><span>to connect your devices</span></div>
-				<div class="stat"><b>Any</b><span>provider or model</span></div>
-			</div>
-		</section>
-
 		<!-- Features -->
 		<section class="section" id="features">
 			<div class="wrap">
 				<div class="section-head">
 					<span class="kicker">Features</span>
-					<h2>A real coding agent, built for the phone in your hand.</h2>
-					<p>Everything you expect from Pi, plus what a shared, always-on agent needs.</p>
+					<h2>Pi in a browser.</h2>
+					<p>Pi's tools and models, with additions for phones and for sessions that several people share.</p>
 				</div>
 				<div class="grid">
 					<article class="card">
 						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 7.5V12l3 2"/></svg></div>
-						<h3>Durable by design</h3>
+						<h3>Survives restarts</h3>
 						<p>Every model call, tool call, queued message, and subagent is a durable task in SQLite. Restart mid-run and the work picks up where it stopped.</p>
 					</article>
 					<article class="card">
 						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5c.7-3.6 3.3-5.8 6.5-5.8s5.8 2.2 6.5 5.8"/><path d="M15.5 4.7a3.5 3.5 0 0 1 0 6.6"/><path d="M18 15c1.8.8 3 2.7 3.5 5.5"/></svg></div>
 						<h3>Multiplayer</h3>
-						<p>Any number of people and devices can watch and steer one live session, with presence, a side chat, pins, reactions, and shared notes.</p>
+						<p>Several people and devices can watch and steer one session. They also get a side chat, pins, reactions, and shared notes.</p>
 					</article>
 					<article class="card">
 						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><rect x="6" y="6" width="12" height="12"/><rect x="10" y="10" width="4" height="4"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></svg></div>
@@ -148,7 +138,7 @@
 					<article class="card">
 						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19"/><path d="M11 18h2"/></svg></div>
 						<h3>Made for phones</h3>
-						<p>Streaming answers, tool cards with diffs and live output, push notifications, and an app you can add to your home screen.</p>
+						<p>Streaming replies, tool cards with diffs and live output, push notifications, and an icon for your home screen.</p>
 					</article>
 					<article class="card">
 						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><path d="M13 2.5 4.5 13.5H11l-1 8 8.5-11H12l1-8Z"/></svg></div>
@@ -180,12 +170,12 @@
 			<div class="wrap split">
 				<div class="split-copy">
 					<span class="kicker">Durable</span>
-					<h2>Kill it mid-run.<br>It keeps going.</h2>
-					<p>Pi Pocket runs on Pi Durable. Each step of a run is committed to SQLite before anyone sees it, so a restart, a dropped connection, or a closed tab never loses work.</p>
+					<h2>Restarts don't lose work.</h2>
+					<p>Pi Pocket runs on Pi Durable, which saves each step of a run to SQLite before showing it. If the server restarts or a browser disconnects, the run continues from the last saved step.</p>
 					<ul class="points">
-						<li><b>Safe replays.</b> Tool calls that are safe to repeat rerun on their own. The rest come back to the model as interrupted, so nothing runs twice by accident.</li>
-						<li><b>One shared truth.</b> Browsers render only committed state, so a device that reconnects or joins late sees exactly what everyone else sees.</li>
-						<li><b>Nothing forgotten.</b> Queued messages, approvals, and subagents all survive restarts.</li>
+						<li><b>Interrupted tool calls.</b> Calls that are safe to repeat run again. The others go back to the model marked as interrupted, so nothing runs twice.</li>
+						<li><b>Same view on every device.</b> Browsers only show saved state, so a device that reconnects or joins late sees what everyone else sees.</li>
+						<li><b>Queues and approvals.</b> Queued messages, pending approvals, and subagents are kept across restarts.</li>
 					</ul>
 				</div>
 				<div class="panel" role="img" aria-label="A run's timeline: steps are committed, the server restarts, and the run resumes from the last committed step.">
@@ -208,12 +198,12 @@
 			<div class="wrap split flip">
 				<div class="split-copy">
 					<span class="kicker">Multiplayer</span>
-					<h2>One agent.<br>Everyone at the table.</h2>
-					<p>Share a session with your team or just your other devices. Everyone sees the same live run, and Pi Pocket keeps people from talking over each other.</p>
+					<h2>Share a session.</h2>
+					<p>Invite other people, or open the same session on your own devices. Everyone sees the run as it happens.</p>
 					<ul class="points">
-						<li><b>Presence.</b> See who is here, and get a heads-up when someone else is writing to Pi.</li>
-						<li><b>Side chat.</b> Talk it over without Pi listening. @mention people, quote Pi's replies, and send the best idea to Pi.</li>
-						<li><b>Take turns.</b> Hand one person the wheel. Everyone else can ask to drive.</li>
+						<li><b>Presence.</b> See who is in the session and when someone is writing to Pi.</li>
+						<li><b>Side chat.</b> A chat Pi does not see. @mention people, quote Pi's replies, and send a chat message on to Pi.</li>
+						<li><b>Take turns.</b> One person drives and only they send to Pi. The others can ask to drive.</li>
 						<li><b>Invites and roles.</b> Let people steer or just watch, in every session or only one, with a one-time link or QR code.</li>
 						<li><b>Notifications.</b> Get a push when Pi finishes, needs approval, or someone mentions you.</li>
 					</ul>
@@ -261,25 +251,25 @@
 		<section class="section alt" id="live">
 			<div class="wrap">
 				<div class="section-head">
-					<span class="kicker">Live-editable</span>
-					<h2>Change the app from inside the app.</h2>
-					<p>There is no build step. Ask Pi to change Pi Pocket and watch it happen, without leaving the conversation.</p>
+					<span class="kicker">Live editing</span>
+					<h2>Ask Pi to change Pi Pocket.</h2>
+					<p>There is no build step, so changes Pi makes to Pi Pocket's code apply while you are still talking to it.</p>
 				</div>
 				<div class="flow">
 					<div class="step">
 						<code>web/</code>
-						<h3>Reloads instantly</h3>
+						<h3>Browsers reload</h3>
 						<p>Save a file and every open browser reloads.</p>
 					</div>
 					<div class="step">
 						<code>src/server/extensions/</code>
-						<h3>Hot-reinstalls</h3>
+						<h3>Reinstalled while running</h3>
 						<p>Extensions reload into the running server. A broken one keeps its last good version.</p>
 					</div>
 					<div class="step">
 						<code>src/server/</code>
-						<h3>Restarts cleanly</h3>
-						<p>Restart from the menu. Running work resumes on the other side.</p>
+						<h3>Needs a restart</h3>
+						<p>Restart from the menu. Running work resumes afterward.</p>
 					</div>
 				</div>
 			</div>
@@ -290,7 +280,7 @@
 			<div class="wrap">
 				<div class="section-head">
 					<span class="kicker">Access</span>
-					<h2>Reach it from anywhere.</h2>
+					<h2>Four ways to connect.</h2>
 					<p>The launcher asks how your devices should connect, then shows a sign-in link and a QR code for your phone.</p>
 				</div>
 				<div class="access">
@@ -307,7 +297,7 @@
 					<div class="mode featured">
 						<code>--access cloudflare</code>
 						<h3>Cloudflare Tunnel</h3>
-						<p>An https address that works from anywhere. Free, and no account needed.</p>
+						<p>A public https address. Free, with no account needed.</p>
 					</div>
 					<div class="mode">
 						<code>--access tailscale</code>
@@ -323,13 +313,13 @@
 		<section class="section alt" id="security">
 			<div class="wrap split">
 				<div class="split-copy">
-					<span class="kicker">Guardrails</span>
-					<h2>Powerful, with a human in the loop.</h2>
-					<p>An agent with a shell is a serious tool. Pi Pocket keeps people in charge of what it runs.</p>
+					<span class="kicker">Security</span>
+					<h2>Who can make Pi act.</h2>
+					<p>Pi runs commands on your machine as you. These settings control who can ask it to, and which calls need someone's approval.</p>
 					<ul class="points">
-						<li><b>Lancet Guard.</b> When installed in Pi, it checks every bash, write, and edit call. Risky ones wait for someone in the session to allow or deny them, and the decision survives restarts.</li>
+						<li><b>Lancet Guard.</b> Off by default. Once it is on in both Pi and Pi Pocket (Menu → Extensions), it checks every bash, write, and edit call. Risky calls wait for someone in the session to allow or deny them, and the answer is kept across restarts.</li>
 						<li><b>View-only roles.</b> Viewers can read, react, and chat, but cannot send to Pi, approve, or upload.</li>
-						<li><b>Sandboxed artifacts.</b> Artifacts open in an isolated sandbox with no access to the app or its cookies.</li>
+						<li><b>Artifacts.</b> They open in a sandboxed frame with no access to the app or its cookies.</li>
 					</ul>
 				</div>
 				<div>
@@ -358,11 +348,11 @@
 			<div class="wrap start">
 				<div>
 					<span class="kicker">Get started</span>
-					<h2>Running in a minute.</h2>
+					<h2>Install.</h2>
 					<ol class="steps">
 						<li><span><b>Sign in with Pi</b>Run <code>pi</code> and use <code>/login</code> for your provider, or sign in from the app later.</span></li>
 						<li><span><b>Start the launcher</b>Choose how your devices connect. Your choice is remembered.</span></li>
-						<li><span><b>Scan the QR code</b>Your phone signs in for a year. Add it to your home screen for an app-like window.</span></li>
+						<li><span><b>Scan the QR code</b>Your phone stays signed in for a year. Add Pi Pocket to the home screen to open it in its own window.</span></li>
 					</ol>
 				</div>
 				<div class="term">
@@ -394,7 +384,7 @@
 		<div class="wrap">
 			<div>
 				<a class="logo" href="#top"><img src="icon.svg" alt="" width="28" height="28">Pi Pocket</a>
-				<small>A durable, multiplayer web app for Pi agents.</small>
+				<small>A self-hosted web app for Pi.</small>
 				<small>Inspired by <a href="https://x.com/badlogicgames/status/2106452296087302173">Mario Zechner's demo</a>.</small>
 			</div>
 			<div>
