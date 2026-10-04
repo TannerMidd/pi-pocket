@@ -1,0 +1,11 @@
+{
+	"name": "Pi Pocket",
+	"short_name": "Pi Pocket",
+	"description": "Durable, multiplayer Pi agents in your browser",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#13141c",
+	"theme_color": "#13141c",
+	"icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
