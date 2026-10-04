@@ -348,9 +348,14 @@ function InviteSheet({ session = null }) {
 					${invite.local &&
 					html`<div class="error-box">This link only works on this device. To let other devices in, press <span class="mono">a</span> in the Pi Pocket terminal (or start it with <span class="mono">--access</span>) and pick Local network, Cloudflare Tunnel, or Tailscale. Then make a new invite.</div>`}
 					<div class="qr" dangerouslySetInnerHTML=${{ __html: invite.svg }}></div>
+					<div class="invite-code">
+						<div class="invite-code-head"><span>Invite code</span>
+						<button class="link small" onClick=${() => copyText(invite.code).then(() => notify("info", "Code copied."), () => notify("error", "Could not copy."))}>Copy</button></div>
+						<div class="invite-code-value" aria-label=${`Invite code ${invite.code.split("").join(" ")}`}><span>${invite.code.slice(0, 5)}</span><span>${invite.code.slice(5)}</span></div>
+						<div class="muted small">Or enter it on the other device's sign-in screen.</div>
+					</div>
 					<div class="row"><input class="mono" readonly value=${invite.url} onFocus=${(event) => event.currentTarget.select()} />
 					<button class="button" onClick=${() => copyText(invite.url).then(() => notify("info", "Link copied."), () => notify("error", "Could not copy."))}>Copy</button></div>
-					<p class="muted small">Code: <span class="mono">${invite.code}</span></p>
 					${invite.alternatives?.length > 0 && html`<p class="muted small">Also reachable at: ${invite.alternatives.map((url) => html`<span class="mono">${url} </span>`)}</p>`}
 				</div>`
 			: html`<${Loader} label="Making an invite" />`}

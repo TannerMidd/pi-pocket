@@ -1653,6 +1653,40 @@ pre.diff .del {
 	height: auto;
 }
 
+/* The invite code, for typing on the other device: easy to spot and to read out. */
+.invite-code {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.6rem 0.8rem 0.7rem;
+	border: 1px solid var(--accent-line);
+	background: var(--accent-soft);
+	border-radius: var(--radius);
+	text-align: center;
+}
+
+.invite-code-head {
+	align-self: stretch;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--accent);
+}
+
+.invite-code-value {
+	display: flex;
+	gap: 0.6em;
+	font: 700 1.7rem var(--mono);
+	letter-spacing: 0.12em;
+	color: var(--text);
+	user-select: all;
+}
+
 .code-big {
 	font: 600 1.8rem var(--mono);
 	letter-spacing: 0.15em;
