@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="web/icon.svg" alt="Pi Pocket" width="112">
-
 # Pi Pocket
 
 **Your Pi coding agent, in your pocket.**
@@ -9,64 +7,19 @@
 A durable, multiplayer, mobile-first web app for Pi agents, built on [Pi Durable](https://earendil.com/posts/pi-durable/).<br>
 Runs on your own machine or directly on your phone. No cloud VM.
 
+[![Release](https://img.shields.io/github/v/release/TannerMidd/pi-pocket?color=7aa2f7)](https://github.com/TannerMidd/pi-pocket/releases)
 [![Node.js 22.19+](https://img.shields.io/badge/node-%E2%89%A5%2022.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Built on Pi Durable](https://img.shields.io/badge/built%20on-Pi%20Durable-ff9e64)](https://earendil.com/posts/pi-durable/)
-![No build step](https://img.shields.io/badge/build%20step-none-7aa2f7)
+[![MIT license](https://img.shields.io/badge/license-MIT-ff9e64)](LICENSE)
 
-[Quick start](#quick-start) · [Features](#features) · [Remote access](#remote-access) · [Architecture](#architecture)
+[Website](https://tannermidd.github.io/pi-pocket/) · [Quick start](#quick-start) · [Features](#features) · [Remote access](#remote-access)
+
+<img src="docs/showcase.png" alt="Pi Pocket on three phones: Pi fixing a login bug with a diff and passing tests, two people discussing the fix in the side chat, and a chart artifact" width="100%">
 
 </div>
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**Durable**<br>
-Every model call, tool call, and subagent is a durable task in SQLite. Restart the server mid-run and the work picks up where it left off.
-
-</td>
-<td width="50%" valign="top">
-
-**Multiplayer**<br>
-Share a live session across devices and people: steer, queue, chat, pin, react, and take turns.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Any provider, any model**<br>
-Uses Pi's own model runtime and sign-ins. Choose the model and thinking level per session.
-
-</td>
-<td valign="top">
-
-**Built for phones**<br>
-Streaming chat, tool cards with diffs and live output, push notifications, and a home-screen app.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Live-editable**<br>
-No build step. Edit the web app or an extension and it reloads in place, even while Pi is editing itself.
-
-</td>
-<td valign="top">
-
-**Artifacts and subagents**<br>
-Publish sandboxed HTML, Markdown, and SVG artifacts. Run background subagents you can open and talk to.
-
-</td>
-</tr>
-</table>
-
 ## Quick start
 
-Requires Node.js 22.19 or newer (26 recommended). Sign in to a provider with Pi first (`pi`, then `/login`), or later from the app's Providers sheet.
-
-Runs on Linux, macOS, Windows, and Android (Termux). It is developed and tested on Linux; the launcher supports the others, but they are less tested.
+Requires Node.js 22.19 or newer. Runs on Linux, macOS, Windows, and Android (Termux); Linux is the most tested. Sign in to a provider with Pi first (`pi`, then `/login`), or later from the app's Providers sheet.
 
 ```bash
 git clone https://github.com/TannerMidd/pi-pocket.git
@@ -81,17 +34,16 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 
 ## Features
 
-- **Durable runs.** An interrupted tool call reruns if that is safe; otherwise the model is told it was interrupted.
-- **Steer or queue.** Redirect a running agent, queue follow-ups, withdraw them, or stop.
-- **Collaboration.** Presence, typing notices, a side chat Pi does not see, @mentions, pins, reactions, and shared notes.
-- **Take turns.** One person drives at a time; others ask to drive.
+- **Durable.** Every model call, tool call, and subagent is stored as it happens. Restart the server mid-run and the work continues; a cut-off tool call reruns only if that is safe.
+- **Multiplayer.** Share a live session: presence, a side chat Pi does not see, @mentions, pins, reactions, shared notes, and take turns.
+- **Steer or queue.** Redirect Pi while it works, queue follow-ups, or stop it.
+- **Any provider, any model.** Uses Pi's own model runtime and sign-ins, with the model and thinking level chosen per session.
+- **Built for phones.** Streaming answers, tool cards with diffs and live output, push notifications, a home-screen app, and long sessions that stay fast.
+- **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.
+- **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
+- **Lancet Guard.** With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
 - **Roles and invites.** Steer or view-only access, to every session or just one, through one-time links and QR codes.
-- **Push notifications.** When Pi finishes, needs approval, or someone mentions you (https required).
-- **Lancet Guard.** If the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package is installed and on, it checks bash, write, and edit calls. Risky calls wait for someone in the session to approve.
-- **Codemode.** On by default: Pi can write a short JavaScript program that calls its tools, to batch calls, chain them, or filter large output. Scripts run in a sandbox, and every call they make still goes through Lancet Guard.
-- **Extensions sheet.** The owner can turn Artifacts, Subagents, Codemode, and Lancet Guard on or off, or reload them.
-- **Uploads and images.** Attach or paste files. Images show inline and go straight to models that accept them.
-- **Theme.** Tokyo Night colors, Omarchy's square shapes, JetBrains Mono.
+- **Live-editable.** No build step: edit the web app or an extension and it reloads in place.
 
 The full tour is in [docs/features.md](docs/features.md).
 
