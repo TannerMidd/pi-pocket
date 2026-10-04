@@ -15,7 +15,8 @@
     "start": "node bin/pi-pocket.js",
     "dev": "node bin/pi-pocket.js --cwd .",
     "check": "tsc --noEmit -p .",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "site:publish": "git subtree push --prefix site origin gh-pages"
   },
   "dependencies": {
     "@earendil-works/chord": "1.0.1",
