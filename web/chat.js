@@ -2,7 +2,7 @@
 // pinned messages, and shared notes.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { actions, attempt, canSteer, closeSheet, collab, drafts, insertIntoComposer, markChatRead, notify, openSheet, revealEntry, store, typing } from "./store.js";
+import { actions, attempt, canSteer, chatLogShown, closePeople, closeSheet, collab, drafts, insertIntoComposer, markChatRead, notify, openSheet, peopleDocked, revealEntry, store, typing } from "./store.js";
 import { copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
@@ -39,14 +39,15 @@ function senderName(message, users) {
 	return users.find((user) => user.id === message.userId)?.name ?? message.name;
 }
 
-/** Top bar: the other people in this session, and the chat with its unread count. */
+/** Top bar: the other people in this session, and the chat with its unread count. Shows and hides the People panel. */
 export function PeopleButton() {
 	const { presence, me, server } = store.state;
 	if (!server?.chat) return null;
 	const others = presence.filter((person) => person.id !== me?.id);
 	const unread = chatUnread();
+	const docked = peopleDocked();
 	const label = others.length === 0 ? "Chat" : `Chat with ${others.map((person) => person.name).join(", ")}`;
-	return html`<button class="people-button badge-host" aria-label=${label} title=${label} onClick=${() => openSheet({ type: "chat" })}>
+	return html`<button class=${`people-button badge-host ${docked ? "on" : ""}`} aria-label=${label} aria-pressed=${docked} title=${label} onClick=${() => (docked ? closePeople() : openSheet({ type: "chat" }))}>
 		${others.length === 0
 			? html`<${Icon} name="chat" />`
 			: html`<span class="avatars">
@@ -78,7 +79,7 @@ function clock(at) {
 	return date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
-/** Close the panel and scroll the transcript to a message, briefly highlighted. */
+/** Close the sheet and scroll the transcript to a message, briefly highlighted. The docked People panel stays. */
 export function jumpToEntry(entryId) {
 	closeSheet();
 	// A message above the rows the transcript shows: show from it down. The render runs before the next frame.
@@ -157,12 +158,13 @@ function mentionQuery(value, caret) {
 	return match ? { query: match[2], start: caret - match[2].length - 1 } : null;
 }
 
-function ChatTab({ sheet }) {
+/** The chat. `focus` puts the caret in its box on desktops: not when a reload brings back the People panel. */
+function ChatTab({ highlight, focus }) {
 	const { chat, presence, me, users, conversationId, chatQuote, view } = store.state;
 	const draftKey = `chat-${conversationId}`;
 	const [text, setText] = useState(() => drafts.get(draftKey));
 	const [sending, setSending] = useState(false);
-	const [selected, setSelected] = useState(sheet.highlight ?? null);
+	const [selected, setSelected] = useState(highlight ?? null);
 	const [mention, setMention] = useState(null);
 	const log = useRef(null);
 	const box = useRef(null);
@@ -171,15 +173,16 @@ function ChatTab({ sheet }) {
 	// The newest message, not the count: the chat keeps its last 500, so the count stops changing.
 	const newest = chat.at(-1)?.id;
 	useEffect(() => markChatRead(), [newest]);
+	useEffect(() => chatLogShown(), []);
 	useLayoutEffect(() => {
 		const element = log.current;
 		if (!element) return;
-		const target = sheet.highlight && element.querySelector(`[data-chat="${CSS.escape(sheet.highlight)}"]`);
+		const target = highlight && element.querySelector(`[data-chat="${CSS.escape(highlight)}"]`);
 		if (target) target.scrollIntoView({ block: "center" });
 		else element.scrollTop = element.scrollHeight;
 	}, [newest]);
 	useEffect(() => {
-		if (!coarse) box.current?.focus();
+		if (focus && !coarse) box.current?.focus();
 		return () => typing(null);
 	}, []);
 	useEffect(() => {
@@ -333,12 +336,11 @@ function NotesTab() {
 		</div>`;
 }
 
-export function ChatSheet() {
-	// While the sheet animates out, the store has no sheet any more.
-	const sheet = store.state.sheet ?? {};
+/** Chat, pinned, and notes: the People sheet's on phones, the People panel's on wide screens. `ask` picks what shows first. */
+function PeopleTabs({ ask, focus }) {
 	const { view } = store.state;
-	const [tab, setTab] = useState(sheet.tab ?? "chat");
-	const [highlight, setHighlight] = useState(sheet.highlight ?? null);
+	const [tab, setTab] = useState(ask.tab ?? "chat");
+	const [highlight, setHighlight] = useState(ask.highlight ?? null);
 	const pins = view.pins?.length ?? 0;
 	const tabs = collab()
 		? html`<div class="segmented tabs">
@@ -347,13 +349,48 @@ export function ChatSheet() {
 				<button class=${tab === "notes" ? "on" : ""} onClick=${() => setTab("notes")}>Notes</button>
 			</div>`
 		: null;
-	return html`<${Sheet} title="People" onClose=${closeSheet}>
+	return html`
 		${tabs}
-		${tab === "chat" && html`<${ChatTab} key=${highlight ?? "chat"} sheet=${{ ...sheet, highlight }} />`}
+		${tab === "chat" && html`<${ChatTab} key=${highlight ?? "chat"} highlight=${highlight} focus=${focus} />`}
 		${tab === "pins" && html`<${PinsTab} onShowChat=${(chatId) => {
 			setHighlight(chatId);
 			setTab("chat");
 		}} />`}
-		${tab === "notes" && html`<${NotesTab} />`}
-	<//>`;
+		${tab === "notes" && html`<${NotesTab} />`}`;
+}
+
+export function ChatSheet() {
+	// While the sheet animates out, the store has no sheet any more.
+	const sheet = store.state.sheet ?? {};
+	return html`<${Sheet} title="People" onClose=${closeSheet}><${PeopleTabs} ask=${sheet} focus=${true} /><//>`;
+}
+
+/** Esc in the panel leaves its field, and never counts toward the two that stop Pi. */
+function keepEscape(event) {
+	if (event.key !== "Escape" || event.defaultPrevented) return;
+	event.preventDefault();
+	if (event.currentTarget.contains(document.activeElement)) document.activeElement.blur();
+}
+
+/** The last request to show the People panel that it answered. Outlives the panel: coming back to it is no request. */
+let answeredAsk = 0;
+
+/**
+ * Wide screens: the People sheet as a window of its own beside the conversation, sliding in from the right. Each request
+ * to show it (a pin, a link, Discuss) starts it afresh on what it asked for, with the caret in the chat; another session,
+ * or the panel coming back after the home screen or a narrow window, starts it afresh too, but leaves the caret be.
+ */
+export function PeoplePanel({ leaving = false }) {
+	const { peopleAsk, conversationId } = store.state;
+	const focus = peopleAsk.n > answeredAsk;
+	useEffect(() => {
+		answeredAsk = peopleAsk.n;
+	});
+	return html`<section class=${`people window ${leaving ? "leaving" : ""}`} aria-label="People" inert=${leaving} onKeyDown=${keepEscape}>
+		<header class="sheet-head">
+			<h2>People</h2>
+			<button class="icon-button" aria-label="Close the People panel" title="Close" onClick=${closePeople}><${Icon} name="close" /></button>
+		</header>
+		<div class="sheet-body"><${PeopleTabs} key=${`${conversationId}:${peopleAsk.n}`} ask=${peopleAsk} focus=${focus} /></div>
+	</section>`;
 }

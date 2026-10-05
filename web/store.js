@@ -78,6 +78,10 @@ export const store = {
 		browser: null,
 		/** The Browser panel shows; kept per tab, so the reload after a live edit keeps it. */
 		browserOpen: sessionStorage.getItem("pocket.browser") === "1",
+		/** The People panel shows beside the conversation on wide screens; kept per tab, like the browser's. */
+		peopleOpen: sessionStorage.getItem("pocket.people") === "1",
+		/** The last request to show the People panel: which tab and chat message, and a count that tells requests apart. */
+		peopleAsk: { tab: null, highlight: null, n: 0 },
 	},
 	listeners: new Set(),
 	set(patch) {
@@ -141,7 +145,8 @@ function applyChat(data) {
 	const known = new Set(data.full ? [] : state.chat.map((message) => message.id));
 	const added = data.messages.filter((message) => !known.has(message.id));
 	store.set({ chat: (data.full ? data.messages : [...state.chat, ...added]).slice(-CHAT_LIMIT) });
-	if (state.sheet?.type === "chat") {
+	// The People panel stays open for long: on its Pinned or Notes tab, new messages still count and show a notice.
+	if (state.sheet?.type === "chat" || chatLogs > 0) {
 		markChatRead();
 		return;
 	}
@@ -457,10 +462,10 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
 	const path = conversationId === null ? "/" : `/s/${conversationId}`;
 	if (location.pathname !== path) history[replace ? "replaceState" : "pushState"]({}, "", path);
 	if (store.state.conversationId === conversationId && source) {
-		if (sheet) store.set({ sheet, drawer: false });
+		if (sheet) openSheet(sheet);
 		return;
 	}
-	store.set({ conversationId, view: emptyView(), ...peopleFor(conversationId), browser: null, history: null, transcriptFrom: null, missing: null, drawer: false, sheet });
+	store.set((state) => ({ conversationId, view: emptyView(), ...peopleFor(conversationId), browser: null, history: null, transcriptFrom: null, missing: null, drawer: false, ...sheetChange(sheet, state) }));
 	connect();
 }
 
@@ -554,8 +559,55 @@ export function revealEntry(entryId) {
 	if (at !== -1 && (from === -1 || at < from)) store.set({ transcriptFrom: entryId });
 }
 
+// ─── The People panel ──────────────────────────────────────────────────────────────
+
+const PEOPLE_KEY = "pocket.people";
+/** Wide enough for the session list, the conversation, and a panel beside it: where the Browser panel docks too. */
+const PEOPLE_DOCK = matchMedia("(min-width: 1100px)");
+
+/** The People panel shows beside the conversation now. */
+export function peopleDocked(state = store.state) {
+	return state.peopleOpen && PEOPLE_DOCK.matches && Boolean(state.server?.chat) && state.conversationId !== null && !state.missing;
+}
+
+/**
+ * What showing a sheet changes. On wide screens the chat docks beside the conversation instead, as the People panel, and
+ * takes the Browser panel's place: both beside the conversation leave it too narrow.
+ */
+function sheetChange(sheet, state) {
+	if (sheet?.type !== "chat" || !PEOPLE_DOCK.matches) return { sheet };
+	sessionStorage.setItem(PEOPLE_KEY, "1");
+	sessionStorage.removeItem("pocket.browser");
+	return { sheet: null, peopleOpen: true, browserOpen: false, peopleAsk: { tab: sheet.tab ?? null, highlight: sheet.highlight ?? null, n: state.peopleAsk.n + 1 } };
+}
+
+/** Hide the People panel. Showing it is `openSheet({ type: "chat" })`, which docks it on wide screens. */
+export function closePeople() {
+	sessionStorage.removeItem(PEOPLE_KEY);
+	// Its active border goes to the conversation, not nowhere.
+	if (document.documentElement.dataset.focus === "people") document.documentElement.dataset.focus = "pane";
+	store.set({ peopleOpen: false });
+}
+
+let chatLogs = 0;
+
+/** A chat log is on screen, as the People sheet's or panel's Chat tab: call when it shows, and what it returns when it goes. */
+export function chatLogShown() {
+	chatLogs++;
+	return () => {
+		chatLogs--;
+	};
+}
+
+// A window widened with the chat open as a sheet docks it. One narrowed hides the panel until it is wide again.
+PEOPLE_DOCK.addEventListener("change", () => {
+	const { sheet } = store.state;
+	if (PEOPLE_DOCK.matches && sheet?.type === "chat") openSheet(sheet);
+	else store.set({});
+});
+
 export function openSheet(sheet) {
-	store.set({ sheet, drawer: false });
+	store.set((state) => ({ ...sheetChange(sheet, state), drawer: false }));
 }
 
 /**
@@ -568,7 +620,7 @@ export function insertIntoComposer(text, files = [], { inline = false } = {}) {
 
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */
 export function discuss(entryId, text) {
-	store.set({ chatQuote: { entryId, text }, sheet: { type: "chat" }, drawer: false });
+	store.set((state) => ({ chatQuote: { entryId, text }, ...sheetChange({ type: "chat" }, state), drawer: false }));
 }
 
 // Tell the server when this tab is hidden or shown: others see "away", and push notifications only reach hidden tabs.

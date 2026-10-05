@@ -2,7 +2,7 @@
 // come as JPEGs by long polling (which passes any tunnel); taps, drags, scrolls, and keys go back as input events. Wide
 // screens show it as a window beside the conversation; phones show it full screen.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api, attempt, canSteer, notify, store } from "./store.js";
+import { api, attempt, canSteer, closePeople, notify, store } from "./store.js";
 import { APPLE, html, Icon, Spinner } from "./ui.js";
 
 const OPEN_KEY = "pocket.browser";
@@ -11,10 +11,12 @@ const WIDTH_KEY = "pocket.browserWidth";
 /** The browser is on while its extension is: the owner turns it off in Extensions. */
 export const browserAvailable = () => store.state.server?.extensions?.includes("pocket-browser") === true;
 
-/** Show or hide the panel. Kept per tab, so a reload after a live edit keeps it open. */
+/** Show or hide the panel. Kept per tab, so a reload after a live edit keeps it open. It takes the People panel's place. */
 export function setBrowserOpen(open) {
-	if (open) sessionStorage.setItem(OPEN_KEY, "1");
-	else sessionStorage.removeItem(OPEN_KEY);
+	if (open) {
+		sessionStorage.setItem(OPEN_KEY, "1");
+		closePeople();
+	} else sessionStorage.removeItem(OPEN_KEY);
 	store.set({ browserOpen: open, drawer: false });
 }
 

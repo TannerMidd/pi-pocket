@@ -663,7 +663,8 @@ kbd {
 	}
 	:root[data-tiling="on"][data-focus="sidebar"] .sidebar::after,
 	:root[data-tiling="on"][data-focus="browser"] .browser::after,
-	:root[data-tiling="on"]:not([data-focus="sidebar"]):not([data-focus="browser"]) .pane::after {
+	:root[data-tiling="on"][data-focus="people"] .people::after,
+	:root[data-tiling="on"]:not([data-focus="sidebar"]):not([data-focus="browser"]):not([data-focus="people"]) .pane::after {
 		opacity: 1;
 	}
 }
@@ -4630,6 +4631,62 @@ textarea.notes {
 
 .empty.hint .pi {
 	animation: boot-breathe 3s var(--ease-in-out) infinite;
+}
+
+/* ─── People panel ─────────────────────────────────────────── */
+
+/* Wide screens: the chat, pinned, and notes in a window beside the conversation, sliding in from the right. Narrower
+ * ones show them as a sheet instead, so the panel exists only where it fits. */
+.people {
+	flex: 0 0 var(--people-w, clamp(320px, 25vw, 420px));
+	height: 100dvh;
+	border-left: 1px solid var(--line);
+	background: var(--panel);
+}
+
+/* Past the tiled windows' pop-in, which would otherwise win. */
+:root .layout > .people.window {
+	animation: people-in var(--t-in) var(--ease-out) backwards;
+}
+
+:root .layout > .people.window.leaving {
+	animation: people-out var(--t-out) linear forwards;
+}
+
+@keyframes people-in {
+	from {
+		opacity: 0;
+		transform: translateX(48px);
+	}
+}
+
+@keyframes people-out {
+	to {
+		opacity: 0;
+		transform: translateX(48px);
+	}
+}
+
+.people .sheet-body {
+	flex: 1;
+	min-height: 0;
+	padding-bottom: 0.8rem;
+}
+
+/* The chat fills the window, its box at the bottom, as a chat app's does. */
+.people .chat-log {
+	flex: 1;
+	max-height: none;
+}
+
+.people textarea.notes {
+	flex: 1;
+	resize: none;
+}
+
+.people-button.on {
+	color: var(--accent);
+	background: var(--card);
 }
 
 /* ─── Browser ──────────────────────────────────────────────── */
