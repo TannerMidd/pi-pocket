@@ -35,48 +35,135 @@ import {
 	writtenText,
 } from "./ui.js";
 
-function ModelSheet() {
+/** Models past this many get a search box in the picker. */
+const MODEL_SEARCH_AT = 8;
+const coarsePointer = matchMedia("(pointer: coarse)").matches;
+
+/**
+ * Where the model picker opens: above the message box's model chip and aligned with it, within what shows of the page
+ * (a phone's keyboard can cover the chip), and as tall as its models need up to a menu's height. Null, for the middle
+ * of the screen, when the chip is gone or scrolled away, or has too little room above it.
+ */
+function modelAnchor() {
+	const rect = document.querySelector(".model-chip")?.getBoundingClientRect();
+	if (!rect || rect.width === 0) return null;
+	const top = visualViewport?.offsetTop ?? 0;
+	const bottom = top + (visualViewport?.height ?? innerHeight);
+	const at = Math.min(rect.top, bottom - 8);
+	const room = at - top - 14;
+	if (rect.bottom < top || room < 220) return null;
+	const width = Math.min(420, innerWidth - 16);
+	return { left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)), bottom: innerHeight - at + 6, width, height: Math.min(540, room) };
+}
+
+const anchorStyle = (anchor) => (anchor ? `left:${anchor.left}px;bottom:${anchor.bottom}px;width:${anchor.width}px;max-height:${anchor.height}px` : "");
+
+/**
+ * The model picker: a menu that opens up from the message box's model chip, with the current model first and checked,
+ * and how hard Pi thinks below. Arrows and Enter pick; a search box shows when there are many models, or when
+ * `/model son` opened it already searching.
+ */
+function ModelPicker() {
 	const { models, view } = store.state;
-	// `/model son` opens the picker already searching when several models match.
+	// While the picker animates out, the store has no sheet any more.
 	const [query, setQuery] = useState(store.state.sheet?.query ?? "");
+	// Decided once: a search box that went away when emptied would take the caret with it.
+	const [searchable] = useState(() => models.length > MODEL_SEARCH_AT || query !== "");
+	const [picked, setPicked] = useState(0);
+	const [anchor, setAnchor] = useState(modelAnchor);
+	const box = useRef(null);
+	const search = useRef(null);
+	const list = useRef(null);
+	// Arrows scroll the list to the model they reach; the mouse does not, or the list would run away under it.
+	const keyed = useRef(false);
 	const agent = view.agent;
-	const needle = query.trim().toLowerCase();
-	const shown = models.filter((model) => needle === "" || `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle));
-	const providers = [...new Set(shown.map((model) => model.provider))];
 	const current = agent?.model;
+	const isCurrent = (model) => current?.provider === model.provider && current?.modelId === model.id;
+	const needle = query.trim().toLowerCase();
+	const shown = models
+		.filter((model) => needle === "" || `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle))
+		.sort((a, b) => Number(isCurrent(b)) - Number(isCurrent(a)));
+	// The list can change while the picker is open.
+	const active = Math.max(0, Math.min(picked, shown.length - 1));
 	const levels = agent?.levels ?? ["off"];
-	return html`<${Sheet} title="Model" onClose=${closeSheet}>
-		${agent?.reasoning &&
-		html`<div class="field">
-			<div class="label">Thinking</div>
-			<div class="segmented">${levels.map(
-				(level) => html`<button class=${agent.thinkingLevel === level ? "on" : ""} onClick=${() => attempt(() => actions.configure({ thinkingLevel: level }))}>${level}</button>`,
-			)}</div>
-		</div>`}
-		<label class="search"><${Icon} name="search" size=${16} /><input placeholder="Search models" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)} /></label>
-		${models.length === 0 && html`<p class="muted">No models are available. Add a provider first.</p>`}
-		${providers.map(
-			(provider) => html`<div class="group">
-				<div class="group-title">${provider}</div>
-				${shown
-					.filter((model) => model.provider === provider)
-					.map(
-						(model) => html`<button
-							class=${`list-item ${current?.provider === model.provider && current?.modelId === model.id ? "active" : ""}`}
-							onClick=${() =>
-								attempt(async () => {
-									await actions.configure({ model: { provider: model.provider, modelId: model.id } });
-									closeSheet();
-								})}
-						>
-							<span>${model.name}</span>
-							<span class="muted small mono">${model.id} · ${formatTokens(model.contextWindow)}${model.images ? " · images" : ""}</span>
-						</button>`,
-					)}
-			</div>`,
-		)}
-		<button class="button wide" onClick=${() => openSheet({ type: "providers" })}><${Icon} name="key" size=${16} /> Providers…</button>
-	<//>`;
+
+	useEffect(() => {
+		const place = () => setAnchor(modelAnchor());
+		const onKey = (event) => event.key === "Escape" && closeSheet();
+		addEventListener("resize", place);
+		visualViewport?.addEventListener("resize", place);
+		addEventListener("keydown", onKey);
+		// Keys go to the picker, not the message box behind it. Phones keep their keyboard down until the search is tapped.
+		(searchable && !coarsePointer ? search.current : box.current)?.focus({ preventScroll: true });
+		return () => {
+			removeEventListener("resize", place);
+			visualViewport?.removeEventListener("resize", place);
+			removeEventListener("keydown", onKey);
+		};
+	}, []);
+	useEffect(() => {
+		if (!keyed.current) return;
+		keyed.current = false;
+		list.current?.querySelector(".model-row.on")?.scrollIntoView({ block: "nearest" });
+	}, [active]);
+
+	const pick = (model) =>
+		attempt(async () => {
+			if (!isCurrent(model)) await actions.configure({ model: { provider: model.provider, modelId: model.id } });
+			closeSheet();
+		});
+	// Arrows and Enter move through the models from the search box or the picker itself, not from its other buttons.
+	const onKeyDown = (event) => {
+		if (event.isComposing || shown.length === 0 || (event.target !== search.current && event.target !== box.current)) return;
+		const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+		if (step !== 0) {
+			event.preventDefault();
+			keyed.current = true;
+			setPicked((active + step + shown.length) % shown.length);
+		} else if (event.key === "Enter" && shown[active]) {
+			event.preventDefault();
+			pick(shown[active]);
+		}
+	};
+
+	return html`<div class="overlay pop-overlay" onClick=${(event) => event.target === event.currentTarget && closeSheet()}>
+		<section class=${`model-pop ${anchor ? "" : "free"}`} style=${anchorStyle(anchor)} ref=${box} role="dialog" aria-label="Model" tabindex="-1" onKeyDown=${onKeyDown}>
+			<header class="model-pop-head">
+				<span>Model</span>
+				<button class="model-pop-link" onClick=${() => openSheet({ type: "providers" })}><${Icon} name="key" size=${13} /> Providers</button>
+			</header>
+			${searchable &&
+			html`<label class="search model-pop-search"><${Icon} name="search" size=${15} /><input ref=${search} placeholder="Search models" value=${query} onInput=${(event) => {
+				setQuery(event.currentTarget.value);
+				setPicked(0);
+			}} /></label>`}
+			<div class="model-list" ref=${list} role="listbox" aria-label="Models">
+				${models.length === 0 && html`<p class="muted model-pop-note">No models are available. Add a provider first.</p>`}
+				${models.length > 0 && shown.length === 0 && html`<p class="muted model-pop-note">No model matches “${query.trim()}”.</p>`}
+				${shown.map(
+					(model, index) => html`<button
+						key=${`${model.provider}/${model.id}`}
+						class=${`model-row ${index === active ? "on" : ""}`}
+						role="option"
+						aria-selected=${isCurrent(model)}
+						title=${`${model.provider}/${model.id} · ${formatTokens(model.contextWindow)} context${model.images ? " · images" : ""}`}
+						onMouseMove=${() => index !== active && setPicked(index)}
+						onClick=${() => pick(model)}
+					>
+						<span class="model-row-text"><span class="model-row-name">${model.name}</span><span class="model-row-sub">${model.provider}</span></span>
+						${isCurrent(model) && html`<${Icon} name="check" size=${14} />`}
+					</button>`,
+				)}
+			</div>
+			${agent?.reasoning &&
+			html`<div class="model-pop-foot">
+				<div class="label">Thinking</div>
+				<div class="segmented model-levels" role="radiogroup" aria-label="Thinking">${levels.map(
+					(level) => html`<button role="radio" aria-checked=${agent.thinkingLevel === level} class=${agent.thinkingLevel === level ? "on" : ""} onClick=${() => attempt(() => actions.configure({ thinkingLevel: level }))}>${level}</button>`,
+				)}</div>
+			</div>`}
+		</section>
+	</div>`;
 }
 
 function CwdSheet({ mode }) {
@@ -1171,7 +1258,7 @@ function sheetBody(sheet) {
 			body = html`<${ShortcutsSheet} />`;
 			break;
 		case "model":
-			body = html`<${ModelSheet} />`;
+			body = html`<${ModelPicker} />`;
 			break;
 		case "cwd":
 			body = html`<${CwdSheet} mode=${sheet.mode} />`;

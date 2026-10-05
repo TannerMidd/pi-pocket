@@ -2,14 +2,14 @@
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { BrowserButton, BrowserPanel, browserAvailable, toggleBrowser } from "./browser.js";
-import { PeopleButton } from "./chat.js";
+import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
 import { Drawer, Rail, ResizeHandle, SessionList, SignIn, Splash, workspaceOrder } from "./sessions.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
-import { actions, attempt, canSteer, dismiss, navigate, notify, openSheet, scoped, start, store } from "./store.js";
+import { actions, attempt, canSteer, dismiss, navigate, notify, openSheet, peopleDocked, scoped, start, store } from "./store.js";
 import { prefs, setPrefs, startTheme } from "./theme.js";
 import { Transcript } from "./transcript.js";
 import { APPLE, Boot, html, Icon, shortPath, usePresence } from "./ui.js";
@@ -70,6 +70,13 @@ function LauncherHost() {
 	return open ? html`<${Launcher} leaving=${leaving} />` : null;
 }
 
+/** The People panel, kept on screen a moment after it closes so it can slide out. Not when the browser takes its place. */
+function PeopleHost({ shown, browsing }) {
+	const [kept, leaving] = usePresence(shown || null, 180);
+	if (kept === null || (leaving && browsing)) return null;
+	return html`<${PeoplePanel} leaving=${leaving} />`;
+}
+
 function App() {
 	const state = store.state;
 	useEffect(() => {
@@ -80,6 +87,7 @@ function App() {
 	const inConversation = state.conversationId !== null;
 	const rail = prefs().sidebar === "rail";
 	const browsing = inConversation && state.browserOpen && browserAvailable() && !state.missing;
+	const people = !browsing && peopleDocked(state);
 	return html`<div class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""}`}>
 		<aside class="sidebar window">${rail ? html`<${Rail} />` : html`<${SessionList} />`}${!rail && html`<${ResizeHandle} />`}</aside>
 		<div class="pane window">
@@ -88,6 +96,7 @@ function App() {
 				: html`<div class="home-list"><${SessionList} /></div><${Splash} />`}
 		</div>
 		${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
+		${inConversation && html`<${PeopleHost} shown=${people} browsing=${browsing} />`}
 		<${Drawer} />
 		<${Sheets} />
 		<${LauncherHost} />
@@ -102,7 +111,7 @@ function focusWindow(event) {
 	if (event.type === "pointerover" && event.pointerType !== "mouse") return;
 	const win = event.target.closest?.(".window");
 	if (!win) return;
-	const name = win.classList.contains("sidebar") ? "sidebar" : win.classList.contains("browser") ? "browser" : "pane";
+	const name = ["sidebar", "browser", "people"].find((each) => win.classList.contains(each)) ?? "pane";
 	if (document.documentElement.dataset.focus !== name) document.documentElement.dataset.focus = name;
 }
 document.addEventListener("pointerover", focusWindow, true);
@@ -213,7 +222,7 @@ render(html`<${App} />`, root);
 // A notification's link can ask for the chat: `/s/12?chat=1`.
 if (new URLSearchParams(location.search).has("chat")) {
 	history.replaceState({}, "", location.pathname);
-	store.set({ sheet: { type: "chat" } });
+	openSheet({ type: "chat" });
 }
 // The worker shows notifications and receives what other apps share; it needs a secure page (https or localhost).
 registerWorker();
