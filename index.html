@@ -207,9 +207,9 @@
 						<p>Streaming replies, tool cards with diffs and live output, push notifications, and an icon for your home screen.</p>
 					</article>
 					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><path d="M13 2.5 4.5 13.5H11l-1 8 8.5-11H12l1-8Z"/></svg></div>
-						<h3>Steer or queue</h3>
-						<p>Redirect Pi while it works, or queue a follow-up for when it finishes. Withdraw queued messages or stop the run at any time.</p>
+						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3Z"/></svg></div>
+						<h3>A built-in browser</h3>
+						<p>Pi opens, clicks through, and screenshots pages in a real Chromium on the server, and you watch and use the same page, your localhost dev server included.</p>
 					</article>
 					<article class="card">
 						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><path d="m12 3 9 4.8-9 4.8-9-4.8L12 3Z"/><path d="m3 12.2 9 4.8 9-4.8"/><path d="m3 16.6 9 4.8 9-4.8"/></svg></div>
@@ -218,6 +218,7 @@
 					</article>
 				</div>
 				<div class="tags" aria-label="More features">
+					<span class="tag">Steer or queue</span>
 					<span class="tag">Forks &amp; retries</span>
 					<span class="tag">Plan mode</span>
 					<span class="tag">Scheduled messages</span>
@@ -235,7 +236,7 @@
 					<span class="tag">QR sign-in</span>
 					<span class="tag">Uploads &amp; inline images</span>
 					<span class="tag">Extensions sheet</span>
-					<span class="tag">Tokyo Night theme</span>
+					<span class="tag">Every Omarchy theme</span>
 				</div>
 			</div>
 		</section>
@@ -367,6 +368,7 @@
 						<li><b>Lancet Guard.</b> Off by default. Once it is on in both Pi and Pi Pocket (Menu → Extensions), it checks every bash, write, and edit call. Risky calls wait for someone in the session to allow or deny them, and the answer is kept across restarts.</li>
 						<li><b>View-only roles.</b> Viewers can read, react, and chat, but cannot send to Pi, approve, or upload.</li>
 						<li><b>Artifacts.</b> They open in a sandboxed frame with no access to the app or its cookies.</li>
+						<li><b>The browser.</b> Its pages run in Chromium on the server, not in your browser, so they cannot reach the app. It reaches what the server reaches, localhost included: using it takes steering rights, and the addresses people open show in the chat.</li>
 					</ul>
 				</div>
 				<div>
