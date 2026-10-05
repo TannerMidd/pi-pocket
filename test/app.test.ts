@@ -493,6 +493,21 @@ test("requests with the wrong types are refused, and nothing odd is stored", asy
 	await app.commands.configure(id, owner(), { thinkingLevel: "off" });
 });
 
+test("archiving leaves a session where it was in the list, and so does bringing it back; renaming moves it up", async () => {
+	const id = await newSession();
+	const meta = () => app.sessions().find((each) => each.id === Number(id))!;
+	const before = meta().updatedAt;
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	await app.commands.updateSession(id, owner(), { archived: true });
+	assert.equal(meta().archived, true);
+	assert.equal(meta().updatedAt, before);
+	await app.commands.updateSession(id, owner(), { archived: false });
+	assert.equal(meta().archived, false);
+	assert.equal(meta().updatedAt, before);
+	await app.commands.updateSession(id, owner(), { title: "Moved up" });
+	assert.ok(meta().updatedAt > before);
+});
+
 test("a lock left by a process that is gone, or is not Node, is taken over; a running server's is not", async () => {
 	const { spawn } = await import("node:child_process");
 	const { once } = await import("node:events");

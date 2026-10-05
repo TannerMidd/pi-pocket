@@ -2170,14 +2170,19 @@ button.chip:hover {
 	margin-top: 0.3rem;
 }
 
-/* Pin: on the row's right, shown on hover (always, for pinned rows on touch screens). */
-.session-pin {
+/* Archive and pin: on the row's right, shown on hover. */
+.session-actions {
 	position: absolute;
 	top: 50%;
 	right: 0.35rem;
+	margin-top: -13px;
+	display: flex;
+	gap: 4px;
+}
+
+.session-act {
 	width: 26px;
 	height: 26px;
-	margin-top: -13px;
 	display: grid;
 	place-items: center;
 	color: var(--muted);
@@ -2191,31 +2196,133 @@ button.chip:hover {
 		color var(--t-hover) var(--ease-out);
 }
 
-.session-pin:hover {
+.session-act:hover {
 	color: var(--accent);
 	border-color: var(--accent-line);
+}
+
+.session-act + .session-act {
+	transition-delay: 25ms;
 }
 
 .session-pin.on {
 	color: var(--brand);
 }
 
-/* Touch screens pin from the session's menu instead: an unseen button would take taps meant for the row. */
+/* Touch screens archive and pin from the session's menu instead: an unseen button would take taps meant for the row. */
 @media (hover: none) {
-	.session-pin {
+	.session-actions {
 		display: none;
 	}
 }
 
+/* The buttons take the time's place, widened so a long title ends before them (two 26px buttons and their gap). */
 @media (hover: hover) {
-	.session-row:hover .session-pin,
-	.session-pin:focus-visible {
+	.session-row:hover .session-act,
+	.session-act:focus-visible {
 		opacity: 1;
 		transform: none;
 	}
 	.session-row:hover .session-side {
 		opacity: 0;
+		min-width: calc(56px - 0.6rem);
 	}
+	/* Kept apart from the rules above: a browser without :has() drops only these. */
+	.session-actions:has(:focus-visible) .session-act {
+		opacity: 1;
+		transform: none;
+	}
+	.session-row:has(.session-act:focus-visible) .session-side {
+		opacity: 0;
+		min-width: calc(56px - 0.6rem);
+	}
+	/* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
+	:root.selecting .session-row .session-act {
+		opacity: 0;
+	}
+	:root.selecting .session-row .session-side {
+		opacity: 1;
+		min-width: 2.2rem;
+	}
+}
+
+/* Selected rows (Ctrl/⌘+click or drag, Shift+click): the accent's soft fill and a check where the state mark was. */
+.session-row.selected .session {
+	background: var(--accent-soft);
+	border-color: var(--accent-line);
+}
+
+/* On its way into or out of the archive: dimmed until the server's list moves it. */
+.session-row.moving {
+	opacity: 0.4;
+	pointer-events: none;
+	transition: opacity var(--t-hover) var(--ease-out);
+}
+
+.state-check {
+	display: grid;
+	place-items: center;
+	width: 12px;
+	height: 12px;
+	background: var(--accent);
+	color: var(--accent-ink);
+	animation: popin 0.16s var(--ease-out);
+}
+
+.state-check .icon {
+	stroke-width: 3.5;
+}
+
+:root.selecting,
+:root.selecting * {
+	user-select: none;
+}
+
+/* What to do with the selected sessions: in the tiles' place, so the list keeps its height while a drag is on. */
+.foot-top {
+	display: grid;
+}
+
+.foot-top > * {
+	grid-area: 1 / 1;
+}
+
+.foot-tiles.covered {
+	visibility: hidden;
+}
+
+.select-bar {
+	container-type: inline-size;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-width: 0;
+	padding: 0 0.35rem 0 0.6rem;
+	border: 1px solid var(--accent-line);
+	background: var(--accent-soft);
+	border-radius: var(--radius);
+	animation: rise-in var(--t-in) var(--ease-out);
+}
+
+.select-count {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	font-size: 0.78rem;
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+/* A narrow bar (a narrow sidebar, or larger text) shows just the count, so the buttons fit. */
+@container (max-width: 17.5rem) {
+	.select-word {
+		display: none;
+	}
+}
+
+.select-count b {
+	color: var(--accent);
+	font-variant-numeric: tabular-nums;
 }
 
 .sessions-empty {

@@ -1,7 +1,7 @@
 // Session list (sidebar, drawer, and home screen), the folded rail, the wide home screen, and the sign-in screen.
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { Avatar, initials } from "./chat.js";
-import { canSteer, collab, navigate, openSheet, scoped, sessionUnread, store } from "./store.js";
+import { actions, canSteer, collab, navigate, notify, openSheet, scoped, sessionUnread, stillMoving, store } from "./store.js";
 import { isPinned, paletteOf, prefs, setPrefs, togglePin } from "./theme.js";
 import { html, Icon, Keys, shortPath, Slide, timeAgo, useSlide, usePresence } from "./ui.js";
 
@@ -22,6 +22,55 @@ export function workspaceOrder(state = store.state) {
 	const active = state.sessions.filter((session) => !session.archived);
 	const pinned = state.pinned.map((id) => active.find((session) => session.id === id)).filter(Boolean);
 	return [...pinned, ...active.filter((session) => !pinned.includes(session))];
+}
+
+/**
+ * Archive sessions, or bring them back, then say so in a notice that undoes it. Archiving the open session leaves it
+ * for the home screen; undoing that opens it again.
+ */
+export async function setArchived(ids, archived, { undo = true } = {}) {
+	if (ids.length === 0) return;
+	const titles = new Map(store.state.sessions.map((session) => [session.id, session.title ?? "New session"]));
+	markMoving(ids, archived);
+	const results = await Promise.allSettled(ids.map((id) => actions.updateSession(id, { archived })));
+	const done = ids.filter((_, index) => results[index].status === "fulfilled");
+	// Rows that failed come back at once; the rest stay dimmed until the server's list shows them moved.
+	unmarkMoving(
+		ids.filter((id) => !done.includes(id)),
+		archived,
+	);
+	const failed = results.find((result) => result.status === "rejected");
+	if (failed) notify("error", failed.reason?.message ?? String(failed.reason));
+	const open = store.state.conversationId;
+	const left = undo && archived && done.includes(open);
+	if (left) navigate(null);
+	if (!undo || done.length === 0) return;
+	const title = titles.get(done[0]) ?? "";
+	const what = done.length === 1 ? `“${title.length > 48 ? `${title.slice(0, 47)}…` : title}”` : `${done.length} sessions`;
+	notify("info", `${archived ? "Archived" : "Unarchived"} ${what}. Tap to undo.`, async () => {
+		await setArchived(done, !archived, { undo: false });
+		if (left && store.state.conversationId === null) navigate(open);
+	});
+}
+
+/**
+ * Mark sessions as on their way into the archive (true) or out of it (false). The store drops a mark once the list
+ * shows the session where it was going; should that never happen (someone moved it straight back, or the request
+ * hangs), the mark goes after a while anyway.
+ */
+function markMoving(ids, archived) {
+	store.set((state) => ({ moving: stillMoving({ ...state.moving, ...Object.fromEntries(ids.map((id) => [id, archived])) }, state.sessions) }));
+	setTimeout(() => unmarkMoving(ids, archived), 10_000);
+}
+
+/** Drop the marks, but not ones made since the other way (an undo, say). */
+function unmarkMoving(ids, archived) {
+	if (!ids.some((id) => store.state.moving[id] === archived)) return;
+	store.set((state) => {
+		const moving = { ...state.moving };
+		for (const id of ids) if (moving[id] === archived) delete moving[id];
+		return { moving };
+	});
 }
 
 const CLOSED_KEY = "pocket.closedGroups";
@@ -62,18 +111,27 @@ function Highlight({ text, needle }) {
 	return html`${text.slice(0, at)}<mark>${text.slice(at, at + needle.length)}</mark>${text.slice(at + needle.length)}`;
 }
 
-function SessionRow({ session, index, number, needle }) {
+function SessionRow({ session, index, number, needle, selected, onPick, onSelect }) {
 	const { conversationId, server, me } = store.state;
 	const pinned = isPinned(session.id);
 	const unread = collab() && sessionUnread(session);
-	const state = session.waiting
-		? html`<span class="state-warn" title="Waiting for approval">!</span>`
-		: session.busy
-			? html`<span class="mini-sweep" title="Working"><i></i><i></i><i></i></span>`
-			: html`<span class="state-idle"></span>`;
+	const moving = store.state.moving[session.id] !== undefined;
+	const state = selected
+		? html`<span class="state-check" role="img" aria-label="Selected" title="Selected"><${Icon} name="check" size=${10} /></span>`
+		: session.waiting
+			? html`<span class="state-warn" title="Waiting for approval">!</span>`
+			: session.busy
+				? html`<span class="mini-sweep" title="Working"><i></i><i></i><i></i></span>`
+				: html`<span class="state-idle"></span>`;
 	const people = collab() ? (session.people ?? []).filter((person) => person.id !== me?.id).slice(0, 4) : [];
-	return html`<div class=${`session-row ${session.id === conversationId ? "active" : ""}`} style=${`--i:${index}`}>
-		<button class="session" onClick=${() => navigate(session.id)} title=${session.title ?? "New session"}>
+	return html`<div class=${`session-row ${session.id === conversationId ? "active" : ""} ${selected ? "selected" : ""} ${moving ? "moving" : ""}`} data-id=${session.id} style=${`--i:${index}`}>
+		<button
+			class="session"
+			onPointerDown=${(event) => onSelect(event, session.id)}
+			onClick=${(event) => onPick(event, session.id)}
+			onContextMenu=${(event) => event.ctrlKey && event.preventDefault()}
+			title=${session.title ?? "New session"}
+		>
 			<span class="session-state">${state}</span>
 			<span class="session-main">
 				<span class="session-title"><${Highlight} text=${session.title ?? "New session"} needle=${needle} /></span>
@@ -89,9 +147,15 @@ function SessionRow({ session, index, number, needle }) {
 			</span>
 			${people.length > 0 && html`<span class="session-people">${people.map((person) => html`<${Avatar} key=${person.id} person=${person} size=${18} />`)}</span>`}
 		</button>
-		<button class=${`session-pin ${pinned ? "on" : ""}`} title=${pinned ? "Unpin" : "Pin to the top"} aria-label=${pinned ? "Unpin" : "Pin"} onClick=${() => togglePin(session.id)}>
-			<${Icon} name="pin" size=${14} />
-		</button>
+		<span class="session-actions">
+			${canSteer() &&
+			html`<button class="session-act" title=${session.archived ? "Unarchive" : "Archive"} aria-label=${session.archived ? "Unarchive" : "Archive"} onClick=${() => setArchived([session.id], !session.archived)}>
+				<${Icon} name=${session.archived ? "unarchive" : "archive"} size=${14} />
+			</button>`}
+			<button class=${`session-act session-pin ${pinned ? "on" : ""}`} title=${pinned ? "Unpin" : "Pin to the top"} aria-label=${pinned ? "Unpin" : "Pin"} onClick=${() => togglePin(session.id)}>
+				<${Icon} name="pin" size=${14} />
+			</button>
+		</span>
 	</div>`;
 }
 
@@ -123,12 +187,28 @@ export function SessionList({ compact = false }) {
 	const [query, setQuery] = useState("");
 	const [tab, setTabState] = useState(() => (prefs().group === "folder" ? "folders" : "recent"));
 	const [closed, setClosed] = useState(readClosed);
+	const [selected, setSelectedState] = useState(() => new Set());
+	// The selection as drags and clicks see it between renders; the row a Shift+click extends from; the row a Ctrl/⌘ press
+	// already selected, whose click then does nothing; the rows in view, in order.
+	const picked = useRef(selected);
+	const anchor = useRef(null);
+	const held = useRef(null);
+	const visible = useRef([]);
 	const list = useRef(null);
 	const tabs = useRef(null);
 	const needle = query.trim().toLowerCase();
 	const archived = tab === "archived";
+	const setSelected = (next) => {
+		picked.current = next;
+		setSelectedState(next);
+	};
+	const clearSelection = () => {
+		anchor.current = null;
+		setSelected(new Set());
+	};
 	const setTab = (next) => {
 		setTabState(next);
+		clearSelection();
 		if (next !== "archived") setPrefs({ group: next === "folders" ? "folder" : "recent" });
 	};
 	const shown = sessions.filter(
@@ -137,7 +217,144 @@ export function SessionList({ compact = false }) {
 			(needle === "" || `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, server?.home)} ${session.model ?? ""}`.toLowerCase().includes(needle)),
 	);
 	const groups = groupsOf(shown, { tab, needle, home: server?.home, pinned });
+	visible.current = groups.flatMap((group) => (closed.has(group.key) && group.key !== "flat" ? [] : group.rows.map((session) => session.id)));
+	const chosen = shown.filter((session) => selected.has(session.id)).map((session) => session.id);
 	const numbers = new Map(workspaceOrder().map((session, index) => [session.id, index]));
+	/** The rows from `from` to `to` as they show, or just `to` when either is out of view. */
+	const span = (from, to) => {
+		const ids = visible.current;
+		const a = ids.indexOf(from);
+		const b = ids.indexOf(to);
+		return a === -1 || b === -1 ? [to] : ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+	};
+	/**
+	 * A plain click opens the session. Shift+click selects from the last row picked (or the open one) to this row;
+	 * Ctrl/⌘+Enter on a focused row selects it or lets it go.
+	 */
+	const pick = (event, id) => {
+		// The press already selected, even if Ctrl/⌘ was let go before the button.
+		if (held.current === id && event.detail > 0) {
+			held.current = null;
+			return;
+		}
+		if (event.shiftKey) {
+			// From the last row picked, or else the open session, if it shows; or else from this row on.
+			if (!visible.current.includes(anchor.current)) {
+				const open = store.state.conversationId;
+				anchor.current = visible.current.includes(open) ? open : id;
+			}
+			setSelected(new Set([...picked.current, ...span(anchor.current, id)]));
+			return;
+		}
+		if (event.ctrlKey || event.metaKey) {
+			const next = new Set(picked.current);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			anchor.current = id;
+			setSelected(next);
+			return;
+		}
+		clearSelection();
+		navigate(id);
+	};
+	/**
+	 * Ctrl/⌘+press on a row selects it (or, if it was selected, unselects it); dragging on does the same to every row
+	 * between it and the pointer. Once the pointer moves, the list scrolls along near its top or bottom edge.
+	 */
+	const select = (event, id) => {
+		held.current = null;
+		if (event.button !== 0 || event.pointerType !== "mouse") return;
+		if (event.shiftKey) {
+			// No text selection: the click extends the session selection instead.
+			event.preventDefault();
+			return;
+		}
+		if (!event.ctrlKey && !event.metaKey) return;
+		event.preventDefault();
+		held.current = id;
+		const box = list.current;
+		const root = document.documentElement;
+		const before = picked.current;
+		const adding = !before.has(id);
+		anchor.current = id;
+		let reached = null;
+		const reach = (to) => {
+			if (to === reached) return;
+			reached = to;
+			const next = new Set(before);
+			for (const each of span(id, to)) {
+				if (adding) next.add(each);
+				else next.delete(each);
+			}
+			setSelected(next);
+		};
+		reach(id);
+		const start = event.clientY;
+		let y = start;
+		// The row at the pointer's height, held inside the list so a drag past its sides or ends still counts.
+		const under = () => {
+			const rect = box.getBoundingClientRect();
+			const row = document
+				.elementFromPoint(rect.left + box.clientWidth / 2, Math.min(rect.bottom - 2, Math.max(rect.top + 2, y)))
+				?.closest?.(".session-row[data-id]");
+			if (!row || !box.contains(row)) return;
+			const found = visible.current.find((each) => String(each) === row.dataset.id);
+			if (found !== undefined) reach(found);
+		};
+		// No frame until the pointer moves: a press near an edge is not a drag.
+		let frame = 0;
+		const scroll = () => {
+			const rect = box.getBoundingClientRect();
+			const edge = 36;
+			const past = y < rect.top + edge ? y - rect.top - edge : y > rect.bottom - edge ? y - rect.bottom + edge : 0;
+			if (past !== 0) {
+				box.scrollTop += Math.max(-24, Math.min(24, past / 2));
+				under();
+			}
+			frame = requestAnimationFrame(scroll);
+		};
+		const move = (each) => {
+			// The button came up where this page did not hear it, say in another window.
+			if ((each.buttons & 1) === 0) return stop();
+			y = each.clientY;
+			if (frame === 0 && Math.abs(y - start) > 4) frame = requestAnimationFrame(scroll);
+			under();
+		};
+		const stop = () => {
+			cancelAnimationFrame(frame);
+			root.classList.remove("selecting");
+			removeEventListener("pointermove", move);
+			removeEventListener("pointerup", stop);
+			removeEventListener("pointercancel", stop);
+			removeEventListener("blur", stop);
+		};
+		root.classList.add("selecting");
+		getSelection()?.removeAllRanges();
+		addEventListener("pointermove", move);
+		addEventListener("pointerup", stop);
+		addEventListener("pointercancel", stop);
+		addEventListener("blur", stop);
+	};
+	const archiveChosen = () => {
+		clearSelection();
+		setArchived(chosen, !archived);
+	};
+	const allPinned = chosen.length > 0 && chosen.every((id) => pinned.includes(id));
+	const pinChosen = () => {
+		for (const id of chosen) if (isPinned(id) === allPinned) togglePin(id);
+		clearSelection();
+	};
+	// Esc lets go of the selection, unless something else takes it: a sheet, the launcher, a text field, or a menu.
+	const selecting = selected.size > 0;
+	useEffect(() => {
+		if (!selecting) return;
+		const onKey = (event) => {
+			if (event.key !== "Escape" || event.defaultPrevented || store.state.sheet || store.state.launcher) return;
+			clearSelection();
+		};
+		addEventListener("keydown", onKey);
+		return () => removeEventListener("keydown", onKey);
+	}, [selecting]);
 	const toggleGroup = (key) => {
 		const next = new Set(closed);
 		if (next.has(key)) next.delete(key);
@@ -158,7 +375,12 @@ export function SessionList({ compact = false }) {
 		</div>
 		<label class="search">
 			<${Icon} name="search" size=${16} />
-			<input placeholder="Search sessions" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)} onKeyDown=${(event) => event.key === "Escape" && setQuery("")} />
+			<input placeholder="Search sessions" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)} onKeyDown=${(event) => {
+				if (event.key !== "Escape" || query === "") return;
+				// Taken: this Esc clears the search, not the selection.
+				event.preventDefault();
+				setQuery("");
+			}} />
 			${query
 				? html`<button class="icon-button small" aria-label="Clear" onClick=${() => setQuery("")}><${Icon} name="close" size=${14} /></button>`
 				: html`<span class="search-keys" title="Launcher" onClick=${(event) => {
@@ -185,22 +407,43 @@ export function SessionList({ compact = false }) {
 							</button>`
 						: null}
 					<div class="group-body"><div>
-						${group.rows.map((session) => html`<${SessionRow} key=${session.id} session=${session} index=${index++} number=${numbers.get(session.id)} needle=${needle} />`)}
+						${group.rows.map(
+							(session) =>
+								html`<${SessionRow}
+									key=${session.id}
+									session=${session}
+									index=${index++}
+									number=${numbers.get(session.id)}
+									needle=${needle}
+									selected=${selected.has(session.id)}
+									onPick=${pick}
+									onSelect=${select}
+								/>`,
+						)}
 					</div></div>
 				</section>`;
 			})}
 		</div>
 		<div class="sessions-foot">
-			<div class="foot-tiles">
-				<button class=${`foot-tile ${busy > 0 ? "lit" : ""}`} title="Everything Pi is doing" onClick=${() => openSheet({ type: "running" })}>
-					<${Icon} name="pulse" size=${16} />
-					Running${busy > 0 && html`<span class="tile-count">${busy}</span>`}
-				</button>
-				<button class="foot-tile" title="Model providers" onClick=${() => openSheet({ type: "providers" })}><${Icon} name="key" size=${16} /> Providers</button>
-				${collab()
-					? html`<button class="foot-tile" title=${canStart ? "People and invites" : "People"} onClick=${() => openSheet({ type: "people" })}><${Icon} name="users" size=${16} /> People</button>`
-					: html`<button class="foot-tile" title="Sign in another device" onClick=${() => openSheet({ type: "invite" })}><${Icon} name="users" size=${16} /> Devices</button>`}
-				<button class="foot-tile" title="Theme, tiling, motion" onClick=${() => openSheet({ type: "appearance" })}><${Icon} name="palette" size=${16} /> Theme</button>
+			<div class="foot-top">
+				<div class=${`foot-tiles ${chosen.length > 0 ? "covered" : ""}`}>
+					<button class=${`foot-tile ${busy > 0 ? "lit" : ""}`} title="Everything Pi is doing" onClick=${() => openSheet({ type: "running" })}>
+						<${Icon} name="pulse" size=${16} />
+						Running${busy > 0 && html`<span class="tile-count">${busy}</span>`}
+					</button>
+					<button class="foot-tile" title="Model providers" onClick=${() => openSheet({ type: "providers" })}><${Icon} name="key" size=${16} /> Providers</button>
+					${collab()
+						? html`<button class="foot-tile" title=${canStart ? "People and invites" : "People"} onClick=${() => openSheet({ type: "people" })}><${Icon} name="users" size=${16} /> People</button>`
+						: html`<button class="foot-tile" title="Sign in another device" onClick=${() => openSheet({ type: "invite" })}><${Icon} name="users" size=${16} /> Devices</button>`}
+					<button class="foot-tile" title="Theme, tiling, motion" onClick=${() => openSheet({ type: "appearance" })}><${Icon} name="palette" size=${16} /> Theme</button>
+				</div>
+				${chosen.length > 0 &&
+				html`<div class="select-bar" role="group" aria-label="Selected sessions">
+					<span class="select-count"><b>${chosen.length}</b><span class="select-word"> selected</span></span>
+					${canSteer() && html`<button class="button small" onClick=${archiveChosen}>${archived ? "Unarchive" : "Archive"}</button>`}
+					${!archived && html`<button class="button small" onClick=${pinChosen}>${allPinned ? "Unpin" : "Pin"}</button>`}
+					<button class="icon-button small" title="Clear the selection (Esc)" aria-label="Clear the selection" onClick=${clearSelection}><${Icon} name="close" size=${14} /></button>
+				</div>`}
 			</div>
 			<button class="me-row" title="Your name" onClick=${() => openSheet({ type: "name" })}>
 				${me && html`<${Avatar} person=${me} size=${22} />`}

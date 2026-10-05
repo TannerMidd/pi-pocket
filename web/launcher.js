@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { planAvailable, schedulesAvailable } from "./commands.js";
-import { workspaceOrder } from "./sessions.js";
+import { setArchived, workspaceOrder } from "./sessions.js";
 import { actions, attempt, canSteer, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import { paletteOf, prefs, preview, setPrefs, THEMES, themeIds, themeVars, varsStyle } from "./theme.js";
 import { copyText, html, Icon, Keys, shortPath, Slide, timeAgo, useSlide } from "./ui.js";
@@ -88,7 +88,7 @@ function actionItems() {
 		session && steer && {
 			label: conversation.archived ? "Unarchive session" : "Archive session",
 			icon: "archive",
-			run: () => attempt(() => actions.updateSession(conversation.id, { archived: !conversation.archived })),
+			run: () => setArchived([conversation.id], !conversation.archived),
 		},
 		{ label: "Running now", detail: "everything Pi is doing", icon: "pulse", run: () => openSheet({ type: "running" }) },
 		{ label: "Providers", detail: "sign in to model providers", icon: "key", run: () => openSheet({ type: "providers" }) },

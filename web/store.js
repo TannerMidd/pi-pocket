@@ -50,6 +50,8 @@ export const store = {
 		sessions: [],
 		/** False until the server's first session list arrives: an empty list until then means "not here yet". */
 		sessionsLoaded: false,
+		/** Sessions on their way into the archive (true) or out of it (false), by id, until the list catches up (`sessions.js`). */
+		moving: {},
 		conversationId: routeConversation(),
 		view: emptyView(),
 		...peopleFor(routeConversation()),
@@ -259,10 +261,17 @@ function applyView(data) {
 	});
 }
 
+/** The `moving` marks that a session list has not caught up with yet: it still shows those sessions where they were. */
+export function stillMoving(moving, sessions) {
+	const next = { ...moving };
+	for (const session of sessions) if (next[session.id] === Boolean(session.archived)) delete next[session.id];
+	return next;
+}
+
 /** What the server sends, by event name. Both transports deliver the same events. */
 const handlers = {
 	hello: (data) => store.set({ me: data.user, users: data.users, models: data.models, guard: data.guard, server: data.server }),
-	sessions: (sessions) => store.set({ sessions, sessionsLoaded: true }),
+	sessions: (sessions) => store.set((state) => ({ sessions, sessionsLoaded: true, moving: stillMoving(state.moving, sessions) })),
 	models: (models) => store.set({ models }),
 	view: applyView,
 	chat: applyChat,
