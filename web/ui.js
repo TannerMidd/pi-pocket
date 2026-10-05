@@ -369,7 +369,8 @@ export function Thinking() {
 export function Diff({ diff }) {
 	return html`<pre class="diff">${diff.split("\n").map((line) => {
 		const kind = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
-		return html`<span class=${kind}>${line}\n</span>`;
+		// The line break as a value: htm drops line breaks written in a template's own text.
+		return html`<span class=${kind}>${`${line}\n`}</span>`;
 	})}</pre>`;
 }
 
