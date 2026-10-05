@@ -278,7 +278,7 @@ function installPlaces(env: NodeJS.ProcessEnv): string[] {
 
 export class BrowserError extends Error {}
 
-// biome-ignore lint/suspicious/noExplicitAny: protocol messages are untyped JSON.
+/** A DevTools protocol message: untyped JSON, read field by field where it arrives. */
 type Json = any;
 type EventListener = (method: string, params: Json) => void;
 
@@ -490,14 +490,6 @@ export type BrowserState = {
 export type LogEntry = { seq: number; at: number; level: string; text: string; source?: string };
 
 export type Frame = { seq: number; data: Buffer; width: number; height: number };
-
-/** What people send the page from the Browser panel. Coordinates are CSS pixels of the page's viewport. */
-export type InputEvent =
-	| { type: "click"; x: number; y: number; button?: "left" | "right" | "middle"; count?: number }
-	| { type: "mouse"; action: "down" | "up" | "move"; x: number; y: number; button?: "left" | "right" | "middle"; pressed?: boolean; count?: number }
-	| { type: "wheel"; x: number; y: number; dx: number; dy: number }
-	| { type: "key"; key: string; modifiers?: number }
-	| { type: "text"; text: string };
 
 /** Where Pi points: a ref from the last snapshot, a CSS selector, visible text, or a point. */
 export type Target = { ref?: string; selector?: string; label?: string; x?: number; y?: number };
@@ -1222,7 +1214,10 @@ export class BrowserPage {
 		}
 	}
 
-	/** Taps, drags, scrolls, and keys from the Browser panel, in order. */
+	/**
+	 * Taps, drags, scrolls, and keys from the Browser panel, in order: `click`, `mouse` (down, up, or move), `wheel`, `key`,
+	 * and `text`, at CSS pixels of the viewport. They come from browsers, so each is checked as it is read.
+	 */
 	async input(events: readonly unknown[]): Promise<void> {
 		this.usedAt = Date.now();
 		const { width, height } = this.#viewport;
@@ -1896,4 +1891,3 @@ export async function localServers(exclude: readonly number[] = []): Promise<{ p
 		.map((each) => ({ port: each.port, url: `http://localhost:${each.port}/`, title: each.answer!.title }))
 		.sort((a, b) => a.port - b.port);
 }
-

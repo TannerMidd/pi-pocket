@@ -18,8 +18,6 @@ export function setBrowserOpen(open) {
 	store.set({ browserOpen: open, drawer: false });
 }
 
-export const browserOpenAtStart = () => sessionStorage.getItem(OPEN_KEY) === "1";
-
 export const toggleBrowser = () => setBrowserOpen(!store.state.browserOpen);
 
 const browserApi = (action, body) => api(`c/${store.state.conversationId}/browser/${action}`, body);

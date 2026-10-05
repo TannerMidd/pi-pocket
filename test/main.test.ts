@@ -65,8 +65,8 @@ test("a taken port stops the server before it opens the database", async () => {
 });
 
 /**
- * Whether a process handles SIGUSR2 by now, from Linux's /proc (bit 12 of SigCgt); undefined where that cannot be read.
- * Node takes a while to start on a busy machine: until then, the signal's default would end the process.
+ * Whether a process handles SIGUSR2 (signal 12) by now, from its caught-signal mask in Linux's /proc; undefined where
+ * that cannot be read. Node takes a while to start on a busy machine: until then, the signal's default would end it.
  */
 function catchesRestart(pid: number): boolean | undefined {
 	try {
