@@ -68,6 +68,10 @@ export const store = {
 		composerInsert: null,
 		/** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
 		templates: null,
+		/** The session's browser page as the server last told: address, title, loading, size (`browser.js`). */
+		browser: null,
+		/** The Browser panel shows; kept per tab, so the reload after a live edit keeps it. */
+		browserOpen: sessionStorage.getItem("pocket.browser") === "1",
 	},
 	listeners: new Set(),
 	set(patch) {
@@ -264,6 +268,7 @@ const handlers = {
 	chat: applyChat,
 	presence: (data) => data.conversationId === store.state.conversationId && store.set({ presence: data.people }),
 	notes: (data) => data.conversationId === store.state.conversationId && store.set({ notes: { text: data.text, rev: data.rev, by: data.by, at: data.at } }),
+	browser: (data) => data.conversationId === store.state.conversationId && store.set({ browser: data }),
 	users: (users) => store.set({ users }),
 	missing: (data) => store.set({ missing: data.message }),
 	// A notice may link to a conversation, such as a mention elsewhere: tapping it goes there.
@@ -442,14 +447,14 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
 		if (sheet) store.set({ sheet, drawer: false });
 		return;
 	}
-	store.set({ conversationId, view: emptyView(), ...peopleFor(conversationId), history: null, transcriptFrom: null, missing: null, drawer: false, sheet });
+	store.set({ conversationId, view: emptyView(), ...peopleFor(conversationId), browser: null, history: null, transcriptFrom: null, missing: null, drawer: false, sheet });
 	connect();
 }
 
 addEventListener("popstate", () => {
 	const id = routeConversation();
 	if (id !== store.state.conversationId) {
-		store.set({ conversationId: id, view: emptyView(), ...peopleFor(id), history: null, transcriptFrom: null, missing: null, sheet: null, drawer: false });
+		store.set({ conversationId: id, view: emptyView(), ...peopleFor(id), browser: null, history: null, transcriptFrom: null, missing: null, sheet: null, drawer: false });
 		connect();
 	}
 });

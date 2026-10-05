@@ -1,6 +1,7 @@
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { BrowserButton, BrowserPanel, browserAvailable, toggleBrowser } from "./browser.js";
 import { PeopleButton } from "./chat.js";
 import { Composer } from "./composer.js";
 import { Launcher } from "./launcher.js";
@@ -32,6 +33,7 @@ function Topbar() {
 		</button>
 		${busySubagents > 0 && html`<button class="icon-button" title="Subagents working" onClick=${() => openSheet({ type: "menu" })}><span class="pulse"></span><span class="count">${busySubagents}</span></button>`}
 		<${PeopleButton} />
+		<${BrowserButton} />
 		<button class="icon-button badge-host" aria-label="Artifacts" onClick=${() => openSheet({ type: "artifacts" })}>
 			<${Icon} name="artifact" />${artifacts > 0 && html`<span class="badge">${artifacts}</span>`}
 		</button>
@@ -77,13 +79,15 @@ function App() {
 	if (state.me === null) return html`<${SignIn} /><${Notices} />`;
 	const inConversation = state.conversationId !== null;
 	const rail = prefs().sidebar === "rail";
-	return html`<div class=${`layout ${inConversation ? "" : "home"}`}>
+	const browsing = inConversation && state.browserOpen && browserAvailable() && !state.missing;
+	return html`<div class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""}`}>
 		<aside class="sidebar window">${rail ? html`<${Rail} />` : html`<${SessionList} />`}${!rail && html`<${ResizeHandle} />`}</aside>
 		<div class="pane window">
 			${inConversation
 				? html`<${Topbar} /><${Transcript} key=${state.conversationId} />${state.view.conversation && !state.missing && html`<${Composer} key=${state.conversationId} />`}`
 				: html`<div class="home-list"><${SessionList} /></div><${Splash} />`}
 		</div>
+		${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
 		<${Drawer} />
 		<${Sheets} />
 		<${LauncherHost} />
@@ -98,7 +102,7 @@ function focusWindow(event) {
 	if (event.type === "pointerover" && event.pointerType !== "mouse") return;
 	const win = event.target.closest?.(".window");
 	if (!win) return;
-	const name = win.classList.contains("sidebar") ? "sidebar" : "pane";
+	const name = win.classList.contains("sidebar") ? "sidebar" : win.classList.contains("browser") ? "browser" : "pane";
 	if (document.documentElement.dataset.focus !== name) document.documentElement.dataset.focus = name;
 }
 document.addEventListener("pointerover", focusWindow, true);
@@ -152,6 +156,11 @@ addEventListener("keydown", (event) => {
 		if (event.code === "KeyN" && canSteer() && !scoped()) {
 			event.preventDefault();
 			openSheet({ type: "cwd", mode: "new" });
+			return;
+		}
+		if (event.code === "KeyB" && store.state.conversationId !== null && browserAvailable()) {
+			event.preventDefault();
+			toggleBrowser();
 			return;
 		}
 	}

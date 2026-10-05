@@ -37,6 +37,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Alerts } from "./alerts.ts";
+import { type BrowserState, Browsers } from "./browser.ts";
 import { type Changes, changesIn, diffOf } from "./changes.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
@@ -46,6 +47,7 @@ import {
 	type ArtifactMeta,
 	ArtifactsDoc,
 	AuthorsDoc,
+	BrowserDoc,
 	ChatDoc,
 	type ChatMessage,
 	DecisionsDoc,
@@ -103,6 +105,9 @@ type ModelSummary = {
 
 /** The extension module that runs Lancet Guard on tool calls. */
 const GUARD_FILE = "guard.ts";
+/** The extension module with the browser tool. While it is off, the Browser panel is off too. */
+const BROWSER_FILE = "browser.ts";
+const BROWSER_EXTENSION = "pocket-browser";
 
 /**
  * Whether a lock file's process is still running Pi Pocket. A process id can be reused after a crash, so on Linux
@@ -132,6 +137,8 @@ export interface OpenOptions {
 	configureModels?: (models: ModelRuntime) => void;
 	/** The clock durable work runs by, such as scheduled messages. Tests move it ahead. */
 	now?: () => number;
+	/** The browser to run for the Browser panel and tool; null for none. Undefined finds one on this machine. */
+	browser?: string | null;
 }
 
 export class PocketApp {
@@ -157,6 +164,8 @@ export class PocketApp {
 	readonly schedules = new Schedules(this);
 	readonly goals = new Goals(this);
 	readonly spend = new Spend(this);
+	/** Each conversation's browser page, which Pi and the people in the conversation share. */
+	readonly browsers: Browsers;
 	readonly #clients = new Set<Client>();
 	readonly #rooms = new Map<ConversationId, Promise<Room>>();
 	readonly #envs = new Map<string, NodeExecutionEnv>();
@@ -209,6 +218,7 @@ export class PocketApp {
 	#sessionsTimer: NodeJS.Timeout | undefined;
 	#unsubscribeCommits: (() => void) | undefined;
 	#unsubscribeApprovals: (() => void) | undefined;
+	#unsubscribeBrowsers: (() => void) | undefined;
 	#lockFile: string;
 	#closing: Promise<void> | undefined;
 	readonly #log: (line: string) => void;
@@ -225,6 +235,22 @@ export class PocketApp {
 		this.config = new ConfigStore(options.dataDir);
 		this.#lockFile = join(options.dataDir, "harness.lock");
 		this.#log = options.log ?? ((line) => console.log(line));
+		this.browsers = new Browsers({
+			dataDir: options.dataDir,
+			...(options.browser === undefined ? {} : { executable: options.browser }),
+			log: (line) => this.#log(line),
+			load: async (id) => (await this.harness.snapshot(BrowserDoc, id as unknown as ConversationId, context)) ?? undefined,
+			save: (id, saved) => {
+				void this.harness
+					.commit(async (tx) => {
+						const doc = await tx.doc(BrowserDoc, id as unknown as ConversationId);
+						if (saved.url !== undefined && doc.url !== saved.url) doc.url = saved.url;
+						const viewport = saved.viewport;
+						if (viewport !== undefined && JSON.stringify(doc.viewport) !== JSON.stringify(viewport)) doc.viewport = { ...viewport };
+					}, context)
+					.catch((error: unknown) => this.#log(`browser page not saved: ${describe(error)}`));
+			},
+		});
 	}
 
 	/** Write a line to the server log. */
@@ -296,6 +322,7 @@ export class PocketApp {
 			notice: (level, message) => this.notice(level, message),
 			schedules: this.schedules,
 			goals: this.goals,
+			browsers: this.browsers,
 		};
 		const dropIn = join(this.dataDir, "extensions");
 		try {
@@ -443,6 +470,16 @@ export class PocketApp {
 			this.#scheduleSessions();
 			this.alerts.announceApprovals();
 		});
+		// A browser page's address, title, and loading go to the tabs watching its conversation, as they change.
+		this.#unsubscribeBrowsers = this.browsers.subscribe((id, state) => {
+			const conversationId = id as unknown as ConversationId;
+			void this.#rooms.get(conversationId)?.then(
+				(room) => {
+					for (const client of room.clients) client.send("browser", this.#browserEvent(conversationId, state));
+				},
+				() => {},
+			);
+		});
 
 		if (this.guardOn()) void this.guard.warm().catch(() => {});
 		// Work a previous process left unfinished continues now.
@@ -549,6 +586,8 @@ export class PocketApp {
 			room.push(client, true);
 			client.send("chat", { conversationId: room.id, full: true, messages: room.chat });
 			client.send("notes", { conversationId: room.id, ...room.notes });
+			// Also while the browser is off: turned on later, the panel has its state at once.
+			client.send("browser", this.#browserEvent(room.id, this.browsers.state(Number(room.id))));
 			for (const other of room.clients) if (other !== client) room.push(other, false);
 			room.pushPresence();
 			this.#scheduleSessions();
@@ -1279,6 +1318,7 @@ export class PocketApp {
 			await this.#refreshClients();
 		}
 		if (file === GUARD_FILE && enabled) void this.guard.warm().catch(() => {});
+		if (file === BROWSER_FILE && !enabled) await this.browsers.closeAll();
 		this.notice(enabled ? "info" : "warning", `${user.name} turned ${module.title} ${enabled ? "on" : "off"}.`);
 	}
 
@@ -1310,6 +1350,17 @@ export class PocketApp {
 		for (const client of this.#clients) client.send("hello", await this.hello(client.user));
 	}
 
+	// ─── Browser ────────────────────────────────────────────────────────────
+
+	/** The browser is on while its extension module is: the owner turns both off together in Extensions. */
+	browserOn(): boolean {
+		return this.loader.extensionNames().includes(BROWSER_EXTENSION);
+	}
+
+	#browserEvent(conversationId: ConversationId, state: BrowserState) {
+		return { conversationId: Number(conversationId), ...state };
+	}
+
 	// ─── Uploads ────────────────────────────────────────────────────────────
 
 	uploadDirectory(id: ConversationId): string {
@@ -1327,6 +1378,7 @@ export class PocketApp {
 			this.spend.close();
 			this.#unsubscribeCommits?.();
 			this.#unsubscribeApprovals?.();
+			this.#unsubscribeBrowsers?.();
 			this.loader?.close();
 			for (const client of this.#clients) client.send("closing", {});
 			for (const pending of this.#rooms.values()) void pending.then((room) => room.close(), () => {});
@@ -1336,6 +1388,8 @@ export class PocketApp {
 				await this.harness?.close(context);
 				for (const env of this.#envs.values()) await env.cleanup(context);
 			} finally {
+				// After the harness: a browser call cut off by the stop resumes as interrupted, not as failed.
+				await this.browsers.closeAll({ final: true }).catch(() => {});
 				rmSync(this.#lockFile, { force: true });
 			}
 		})();

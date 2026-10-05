@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,9 +64,25 @@ test("a taken port stops the server before it opens the database", async () => {
 	}
 });
 
+/**
+ * Whether a process handles SIGUSR2 (signal 12) by now, from its caught-signal mask in Linux's /proc; undefined where
+ * that cannot be read. Node takes a while to start on a busy machine: until then, the signal's default would end it.
+ */
+function catchesRestart(pid: number): boolean | undefined {
+	try {
+		const mask = /^SigCgt:\s*([0-9a-f]+)$/m.exec(readFileSync(`/proc/${pid}/status`, "utf8"))?.[1];
+		return mask === undefined ? undefined : (BigInt(`0x${mask}`) & (1n << 11n)) !== 0n;
+	} catch {
+		return undefined;
+	}
+}
+
 test("a restart asked for while starting waits for the start, then restarts", { skip: posix }, async () => {
 	const { proc, data } = server("early", await freePort());
-	await new Promise((resolve) => setTimeout(resolve, 300));
+	// As soon as the server listens for it, which is before it starts loading the app; elsewhere, a moment in.
+	const until = Date.now() + 5000;
+	while (catchesRestart(proc.pid!) === false && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10));
+	if (catchesRestart(proc.pid!) === undefined) await new Promise((resolve) => setTimeout(resolve, 300));
 	proc.kill("SIGUSR2");
 	assert.deepEqual(await exit(proc), { code: 75, signal: null });
 	assert.equal(existsSync(join(data, "harness.lock")), false, "it closed the database on the way out");

@@ -288,3 +288,16 @@ export const SpendDoc = defineDoc<{ people: Record<string, number>; counted: Rec
 	scope: "session",
 	initial: () => ({ people: {}, counted: {} }),
 });
+
+/**
+ * The page a conversation's browser last showed, and its size, to open it again after a restart. The page itself lives
+ * in memory only (`browser.ts`).
+ */
+export const BrowserDoc = defineDoc<{ url?: string; viewport?: { width: number; height: number; scale: number; mobile: boolean } }>({
+	kind: "pocket.browser",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "current",
+	initial: () => ({}),
+});

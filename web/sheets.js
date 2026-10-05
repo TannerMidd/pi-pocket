@@ -1,5 +1,6 @@
 // Sheets: model picker, working directory, artifacts, providers and login, invites, the session menu.
 import { useEffect, useState } from "preact/hooks";
+import { browserAvailable, displayUrl, setBrowserOpen } from "./browser.js";
 import { Avatar, ChatSheet, jumpToEntry } from "./chat.js";
 import { schedulesAvailable } from "./commands.js";
 import { NotificationsSheet } from "./notify.js";
@@ -821,6 +822,7 @@ const SHORTCUTS = [
 	["Alt 1", "… Alt 9: jump to a session, like a workspace"],
 	["Alt ↑", "Alt ↓: previous or next session"],
 	["Alt N", "New session"],
+	["Alt B", "Open or close the browser"],
 	["Mod B", "Fold or unfold the sidebar"],
 	["Alt", "Hold to see session numbers"],
 	["/", "In the message box: commands"],
@@ -862,6 +864,11 @@ function MenuSheet() {
 		${conversation?.worktree && steer
 			? item("Worktree", () => openSheet({ type: "worktree" }), conversation.worktree.branch)
 			: conversation && steer && driving && !scoped() && item("Working directory", () => openSheet({ type: "cwd", mode: "change" }), shortPath(view.agent?.cwd, server?.home))}
+		${conversation && browserAvailable() &&
+		item(store.state.browserOpen ? "Close the browser" : "Browser", () => {
+			setBrowserOpen(!store.state.browserOpen);
+			closeSheet();
+		}, (store.state.browser?.open && displayUrl(store.state.browser.url)) || "see and test pages with Pi")}
 		${conversation && steer && item("Changes", () => openSheet({ type: "changes" }), "what Pi changed")}
 		${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
 		${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}

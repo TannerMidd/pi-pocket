@@ -2,6 +2,7 @@
 // onto a theme shows it at once; Enter keeps it, Escape goes back. Start with > for actions only, @ for sessions, # for
 // themes.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { browserAvailable, toggleBrowser } from "./browser.js";
 import { planAvailable, schedulesAvailable } from "./commands.js";
 import { workspaceOrder } from "./sessions.js";
 import { actions, attempt, canSteer, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
@@ -70,6 +71,7 @@ function actionItems() {
 		{ label: "Appearance", detail: "theme, tiling, motion, text size", icon: "palette", run: () => openSheet({ type: "appearance" }) },
 		wide && { label: prefs().tiling ? "Turn tiling off" : "Turn tiling on", detail: "gaps and window borders", icon: "swatch", run: () => setPrefs({ tiling: !prefs().tiling }) },
 		conversation && steer && { label: "Switch model", icon: "sparkle", run: () => openSheet({ type: "model" }) },
+		conversation && browserAvailable() && { label: store.state.browserOpen ? "Close the browser" : "Open the browser", detail: "see and test pages with Pi", icon: "globe", keys: "Alt B", run: toggleBrowser },
 		conversation && { label: "Artifacts", icon: "artifact", run: () => openSheet({ type: "artifacts" }) },
 		conversation && steer && { label: "Changes", detail: "what Pi changed", icon: "fork", run: () => openSheet({ type: "changes" }) },
 		conversation && collab() && { label: "Chat with people here", icon: "chat", run: () => openSheet({ type: "chat" }) },

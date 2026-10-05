@@ -1,18 +1,20 @@
 /**
  * Plan mode lets Pi read and explore but change nothing, so it proposes a plan for people to approve first. While a
- * session is in plan mode, Pi may read files, run read-only shell commands, publish artifacts, and run codemode
- * scripts (whose calls get the same checks); everything else is blocked with a note saying why. This keeps Pi to
- * planning; it is not a security boundary: Lancet Guard is. Programs that people configured to run on their own, such
- * as a git diff driver or file system monitor, run as they would for anyone.
+ * session is in plan mode, Pi may read files, run read-only shell commands, publish artifacts, look at pages in the
+ * browser, and run codemode scripts (whose calls get the same checks); everything else is blocked with a note saying
+ * why. This keeps Pi to planning; it is not a security boundary: Lancet Guard is. Programs that people configured to
+ * run on their own, such as a git diff driver or file system monitor, run as they would for anyone.
  */
 import { defineExtension, hook, section, ToolTask } from "@earendil-works/pi-durable";
 import { PlanDoc } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
 
-const PLANNING = `Plan mode is on. Read and explore, then propose a plan; change nothing yet. You can use read, artifact, and bash for simple read-only commands such as ls, cat, grep, find, and git status/log/diff/show, without redirects, globs, variables, or command substitution. Writing, editing, other commands, and subagents are blocked until a person approves the plan. End your answer with the plan as a short numbered list.`;
+const PLANNING = `Plan mode is on. Read and explore, then propose a plan; change nothing yet. You can use read, artifact, the browser to look at pages (not to click, type, or run scripts in them), and bash for simple read-only commands such as ls, cat, grep, find, and git status/log/diff/show, without redirects, globs, variables, or command substitution. Writing, editing, other commands, and subagents are blocked until a person approves the plan. End your answer with the plan as a short numbered list.`;
 
 /** Tools that change nothing, or whose own calls are checked one by one (codemode). */
 const ALWAYS_ALLOWED = new Set(["read", "artifact", "codemode"]);
+/** What the browser may do in plan mode: look at pages, not act on them. */
+const BROWSER_LOOKS = new Set(["navigate", "snapshot", "screenshot", "console", "back", "forward", "reload", "scroll", "wait", "viewport", "hover"]);
 
 type ArgsCheck = (args: readonly string[]) => boolean;
 const anyArgs: ArgsCheck = () => true;
@@ -169,8 +171,12 @@ export function blockedInPlanMode(tool: string, args: Record<string, unknown>): 
 	if (ALWAYS_ALLOWED.has(tool)) return undefined;
 	// Asking how a subagent does, or stopping it, changes nothing.
 	if (tool === "subagent" && (args.action === "status" || args.action === "stop")) return undefined;
+	// A data: page is a page Pi writes, scripts and all: looking at pages means pages that exist.
+	const scripted = tool === "browser" && args.action === "navigate" && /^\s*data:/i.test(String(args.url ?? ""));
+	if (tool === "browser" && BROWSER_LOOKS.has(String(args.action)) && !scripted) return undefined;
 	if (tool === "bash" && typeof args.command === "string" && readOnlyCommand(args.command)) return undefined;
-	const what = tool === "bash" ? "This command is not a simple read-only one" : `The ${tool} tool can change things`;
+	const what =
+		tool === "bash" ? "This command is not a simple read-only one" : tool === "browser" ? `The browser's ${String(args.action)} can change things on the page` : `The ${tool} tool can change things`;
 	return `Plan mode is on: ${what}, so it is blocked. Keep exploring with read and read-only commands, then propose your plan; a person approves it before anything changes.`;
 }
 

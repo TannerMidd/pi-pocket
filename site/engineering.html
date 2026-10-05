@@ -77,7 +77,7 @@
 						<div class="wire">JSON API · server-sent events · long polling</div>
 						<div class="layer">
 							<div class="layer-head"><b>HTTP server</b><code>http.ts</code></div>
-							<div class="parts"><span>/api routes</span><span>event stream</span><span>uploads</span><span>sandboxed artifacts</span><span>invites</span></div>
+							<div class="parts"><span>/api routes</span><span>event stream</span><span>uploads</span><span>sandboxed artifacts</span><span>browser frames</span><span>invites</span></div>
 						</div>
 						<div class="wire">calls</div>
 						<div class="layer core">
@@ -102,6 +102,10 @@
 						<div class="layer">
 							<div class="layer-head"><b>Extensions</b><code>src/server/extensions/</code></div>
 							<p>Tools, hooks, prompt sections, and tasks, installed into the harness and reinstalled when edited. The owner's drop-ins load after them.</p>
+						</div>
+						<div class="layer">
+							<div class="layer-head"><b>Chromium</b><code>browser.ts</code></div>
+							<p>One headless browser driven over the DevTools protocol through a pipe, with a page per session that Pi's browser tool and the Browser panel share. Started on first use.</p>
 						</div>
 						<div class="layer">
 							<div class="layer-head"><b>Pi</b><code>~/.pi/agent/</code></div>
@@ -255,6 +259,7 @@
 							<tr><td><code>pocket.decisions</code></td><td>Who allowed or denied each guarded call</td><td>copies</td></tr>
 							<tr><td><code>pocket.artifacts</code></td><td>Artifacts, with each version's body in <code>pocket.artifact-body</code></td><td>copies</td></tr>
 							<tr><td><code>pocket.codemode-store</code></td><td>Values scripts keep between runs</td><td>copies</td></tr>
+							<tr><td><code>pocket.browser</code></td><td>The page the browser last showed, and its size, to open it again after a restart</td><td>copies</td></tr>
 							<tr><td><code>pocket.turns</code></td><td>Take turns: who drives, who asked</td><td>starts empty</td></tr>
 							<tr><td><code>pocket.subagents</code></td><td>Named subagents and the tasks reporting their answers</td><td>starts empty</td></tr>
 							<tr><td><code>pocket.schedules</code></td><td>Scheduled messages</td><td>starts empty</td></tr>
@@ -270,6 +275,7 @@
 					<span class="tag"><b>uploads/</b> files sent to Pi</span>
 					<span class="tag"><b>worktrees/</b> sessions' git worktrees</span>
 					<span class="tag"><b>extensions/</b> the owner's drop-ins</span>
+					<span class="tag"><b>browser/</b> the built-in browser's profile</span>
 				</div>
 				<p class="note">All of it is in <code>~/.pi-pocket/</code>, or wherever <code>PI_POCKET_DIR</code> points. The config files are written atomically with mode 0600.</p>
 			</div>
@@ -286,6 +292,7 @@
 				<ol class="ext">
 					<li><code>prompt.ts</code><span class="kinds">section</span><p>The system prompt: guidelines for a phone-sized screen, the project's AGENTS.md files, Pi's skills, and the working directory. Always on.</p></li>
 					<li><code>artifacts.ts</code><span class="kinds">tool</span><p>Versioned HTML, Markdown, and SVG artifacts, opened in a sandbox.</p></li>
+					<li><code>browser.ts</code><span class="kinds">tool · section</span><p>A real browser Pi shares with the people in a session: snapshots with element refs, clicks, typing, screenshots, the console. In plan mode it may only look.</p></li>
 					<li><code>subagents.ts</code><span class="kinds">tool · tasks</span><p>Background subagents. An anchor task owns each one; a reporter task carries each answer back to the parent.</p></li>
 					<li><code>schedules.ts</code><span class="kinds">tool · task</span><p>Scheduled messages, and Pi's tool for scheduling its own follow-ups.</p></li>
 					<li><code>goals.ts</code><span class="kinds">hook · section</span><p>After each final answer, runs the session's check and keeps Pi going while it fails.</p></li>
@@ -308,6 +315,7 @@
 						<li><b>Sign-in.</b> Random tokens, stored hashed, in an HttpOnly, SameSite=Lax cookie. Invites are one-time links that expire after 15 minutes.</li>
 						<li><b>Requests.</b> Anything that changes something must carry an <code>X-Pocket</code> header, which a form on another site cannot send.</li>
 						<li><b>Pages.</b> The app loads nothing from other sites: its policy allows only its own files and its hashed inline scripts. Replies are sanitized, and artifacts run in a sandbox with no access to the app.</li>
+						<li><b>Browser.</b> Pages run in Chromium on the server and reach people only as images, so they never touch the app. Using one takes steering rights, files are the owner's, and each address someone opens shows in the chat.</li>
 						<li><b>Roles.</b> Owner, steer, or view, in every session or only one. Lancet Guard approvals can require someone other than whoever asked.</li>
 					</ul>
 				</div>

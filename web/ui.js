@@ -301,6 +301,13 @@ const ICONS = {
 	home: "M3 11l9-7 9 7M5 10v10h14V10",
 	archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
 	logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
+	globe: "M12 21a9 9 0 100-18 9 9 0 000 18zM3.5 9h17M3.5 15h17M12 3a14 14 0 010 18M12 3a14 14 0 000 18",
+	reload: "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
+	phone: "M8 3h8a1 1 0 011 1v16a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM11 18h2",
+	tablet: "M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1zM11 17h2",
+	monitor: "M3 4h18v12H3zM8 20h8M12 16v4",
+	terminal: "M4 5h16v14H4zM8 10l2 2-2 2M12 14h4",
+	fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
 };
 
 export function Icon({ name, size = 20, class: className = "" }) {

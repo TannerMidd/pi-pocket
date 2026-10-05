@@ -136,6 +136,8 @@ test("a scheduled message goes out at its time, also after a restart, once; a re
 	await until(async () => (await items(id))[0]?.runs === 1, "the repeat to go out");
 	const [next] = await items(id);
 	assert.ok(next!.next >= sentAt + 20 * 60_000, "20 minutes after it went out, not after when it was due");
+	// Sent while Pi may still be answering, it waits in the queue a moment before it is in the transcript.
+	await until(async () => (await userTexts(id)).some((text) => text.includes("[scheduled] ping")), "the repeat's message");
 	assert.equal((await userTexts(id)).filter((text) => text.includes("[scheduled] ping")).length, 1);
 	assert.equal((await userTexts(id)).filter((text) => text.includes("[scheduled] check the build")).length, 1, "never twice");
 	await app.commands.cancelSchedule(id, owner(app), repeat.id);

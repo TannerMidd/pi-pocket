@@ -662,7 +662,8 @@ kbd {
 		display: block;
 	}
 	:root[data-tiling="on"][data-focus="sidebar"] .sidebar::after,
-	:root[data-tiling="on"]:not([data-focus="sidebar"]) .pane::after {
+	:root[data-tiling="on"][data-focus="browser"] .browser::after,
+	:root[data-tiling="on"]:not([data-focus="sidebar"]):not([data-focus="browser"]) .pane::after {
 		opacity: 1;
 	}
 }
@@ -4484,4 +4485,389 @@ textarea.notes {
 
 .empty.hint .pi {
 	animation: boot-breathe 3s var(--ease-in-out) infinite;
+}
+
+/* ─── Browser ──────────────────────────────────────────────── */
+
+/* Phones and narrow windows: the page full screen, over the conversation and under sheets. Wide screens: a window
+ * beside the conversation, tiled like the others. */
+.browser {
+	position: fixed;
+	inset: 0;
+	z-index: 15;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg);
+	animation: popin var(--t-in) var(--ease-out);
+}
+
+.browser-resize {
+	display: none;
+}
+
+@media (max-width: 1099px) {
+	:root[data-tiling="on"] .browser.window {
+		border: 0;
+	}
+	.browser.window::after {
+		display: none !important;
+	}
+}
+
+@media (min-width: 1100px) {
+	.layout.browsing .browser {
+		position: relative;
+		inset: auto;
+		z-index: auto;
+		flex: 0 0 var(--browser-w, 46%);
+		max-width: calc(100% - 440px);
+		height: 100dvh;
+		border-left: 1px solid var(--line);
+		animation-delay: 90ms;
+	}
+	:root[data-tiling="on"] .layout.browsing .browser {
+		height: auto;
+	}
+	.browser-resize {
+		display: block;
+		left: -7px;
+		right: auto;
+	}
+}
+
+.browser-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.1rem;
+	padding: calc(env(safe-area-inset-top) + 0.35rem) 0.35rem 0.35rem;
+	border-bottom: 1px solid var(--line);
+	background: var(--bg);
+}
+
+.browser-bar .icon-button {
+	width: 34px;
+	height: 34px;
+}
+
+.browser-bar .icon-button:disabled {
+	opacity: 0.35;
+	cursor: default;
+	background: none;
+	transform: none;
+}
+
+.browser-bar .icon-button.on,
+.topbar .icon-button.on {
+	color: var(--accent);
+}
+
+.browser-address {
+	flex: 1;
+	min-width: 0;
+	margin: 0 0.25rem;
+}
+
+.browser-address input {
+	height: 34px;
+	padding: 0.3rem 0.6rem;
+	font-size: 0.86rem;
+	text-overflow: ellipsis;
+}
+
+.browser-address input[readonly] {
+	color: var(--muted);
+}
+
+@media (pointer: coarse) {
+	.browser-address input {
+		font-size: 16px;
+	}
+}
+
+@media (max-width: 480px) {
+	.browser-forward {
+		display: none !important;
+	}
+}
+
+.badge-host .badge.err {
+	background: var(--err);
+	color: var(--accent-ink);
+}
+
+/* The topbar's mark while the session has a page open. */
+.browser-dot {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius);
+	background: var(--accent);
+	animation: popin var(--t-in) var(--ease-out);
+}
+
+/* Loading: a short bar sweeping under the address bar. */
+.browser-progress {
+	position: relative;
+	height: 2px;
+	flex: none;
+	overflow: hidden;
+}
+
+.browser-progress.on::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: 35%;
+	background: var(--accent);
+	animation: browser-load 1.1s var(--ease-in-out) infinite;
+}
+
+@keyframes browser-load {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(300%);
+	}
+}
+
+.browser-stage {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	background: var(--code-bg);
+	overflow: hidden;
+}
+
+.browser-frame {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	justify-content: center;
+	align-items: flex-start;
+}
+
+/* The frame keeps its shape: it is as large as fits, so a tap's place on it is its place on the page. */
+.browser-screen {
+	display: block;
+	max-width: 100%;
+	max-height: 100%;
+	width: auto;
+	height: auto;
+	background: #fff;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	touch-action: none;
+	outline: none;
+}
+
+.browser-screen.live:focus {
+	outline: 1px solid var(--accent);
+	outline-offset: -1px;
+}
+
+/* A page that crashed keeps its last frame, with the news over it. */
+.browser-crashed {
+	position: absolute;
+	top: 0.6rem;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	max-width: calc(100% - 1.2rem);
+	padding: 0.45rem 0.6rem 0.45rem 0.8rem;
+	background: var(--panel);
+	border: 1px solid var(--err-line);
+	color: var(--err);
+	animation: popin var(--t-in) var(--ease-out);
+}
+
+.browser-note {
+	margin: auto;
+	max-width: 30rem;
+	padding: 2rem 1.5rem;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.7rem;
+	text-align: center;
+	color: var(--muted);
+}
+
+.browser-note p {
+	margin: 0;
+}
+
+.browser-start {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.7rem;
+	padding: 2rem 1.5rem;
+	text-align: center;
+	color: var(--muted);
+	background: var(--bg);
+	animation: fade var(--t-fade) var(--ease-almost);
+}
+
+.browser-note .browser-start {
+	position: static;
+	background: none;
+	padding: 0;
+}
+
+.browser-start p {
+	margin: 0;
+	max-width: 26rem;
+}
+
+.browser-servers {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.4rem;
+	margin-top: 0.6rem;
+	max-width: 100%;
+}
+
+.browser-servers .chip {
+	font-size: 0.82rem;
+	padding: 0.35rem 0.7rem;
+}
+
+/* Typing on touch screens: a field of the app's own, whose keyboard sends text to the page. */
+.browser-type {
+	display: flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.4rem 0.4rem calc(env(safe-area-inset-bottom) + 0.4rem);
+	border-top: 1px solid var(--line);
+	background: var(--panel);
+}
+
+/* Hidden, it stays focusable (not display: none), so the tap that shows it can open the phone's keyboard. */
+.browser-type.hidden {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(100%);
+}
+
+.browser-type input {
+	flex: 1;
+	min-width: 0;
+	padding: 0.4rem 0.6rem;
+}
+
+.browser-type .key {
+	min-width: 34px;
+	height: 34px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	background: var(--card);
+	color: var(--text);
+}
+
+.browser-type .key:active {
+	background: var(--pressed);
+}
+
+.browser-console {
+	flex: none;
+	height: min(42%, 340px);
+	display: flex;
+	flex-direction: column;
+	border-top: 1px solid var(--line);
+	background: var(--panel);
+	animation: fade var(--t-fade) var(--ease-almost);
+}
+
+.browser-console header {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.25rem 0.4rem 0.25rem 0.8rem;
+	border-bottom: 1px solid var(--line);
+}
+
+.browser-console .spacer {
+	flex: 1;
+}
+
+.browser-console-lines {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 0.3rem 0.7rem;
+	font-size: 0.78rem;
+	line-height: 1.45;
+}
+
+.console-line {
+	display: flex;
+	gap: 0.6rem;
+	padding: 0.15rem 0.3rem;
+	margin: 0 -0.3rem;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.console-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.console-source {
+	flex: none;
+	max-width: 40%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--faint);
+}
+
+.console-line.error {
+	color: var(--err);
+	background: var(--err-soft);
+}
+
+.console-line.warn {
+	color: var(--warn);
+	background: var(--warn-soft);
+}
+
+.console-line.dialog {
+	color: var(--accent);
+}
+
+.console-line.debug {
+	color: var(--faint);
+}
+
+.console-nav {
+	margin-top: 0.3rem;
+	padding: 0.15rem 0;
+	border-bottom: 1px dashed var(--line);
+	color: var(--faint);
+	font-size: 0.72rem;
+}
+
+.browser-foot {
+	padding: 0.3rem 0.8rem calc(env(safe-area-inset-bottom) + 0.3rem);
+	border-top: 1px solid var(--line);
+	text-align: center;
 }
