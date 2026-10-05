@@ -24,7 +24,7 @@ function Topbar() {
 				? `⎇ ${conversation.worktree.branch}`
 				: shortPath(view.agent?.cwd ?? conversation?.cwd, server?.home);
 	const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
-	return html`<header class=${`topbar ${view.live.busy ? "busy" : ""}`}>
+	return html`<header class="topbar">
 		<button class="icon-button" aria-label="Sessions" onClick=${() => store.set({ drawer: true })}><${Icon} name="menu" /></button>
 		<button class="title" onClick=${() => conversation && openSheet({ type: "menu" })}>
 			<div class="title-main"><span>${conversation?.title ?? store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ?? "Loading…"}</span></div>
