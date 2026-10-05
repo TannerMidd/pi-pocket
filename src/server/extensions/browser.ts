@@ -82,7 +82,8 @@ export default function createBrowser(host: PocketHost) {
 			const action = args.action as Action;
 			const agent = await api.snapshot(AgentDoc, api.conversationId, context);
 			const cwd = agent?.cwd ?? process.cwd();
-			const page = await awaitWithContext(host.browsers.open(Number(api.conversationId)), context);
+			// A page opened again comes back at its last address, unless Pi is about to open another.
+			const page = await awaitWithContext(host.browsers.open(Number(api.conversationId), { restore: action !== "navigate" }), context);
 			const before = page.logSeq;
 			const target: Target = {
 				...(args.ref === undefined ? {} : { ref: args.ref.replace(/^\[|\]$/g, "") }),

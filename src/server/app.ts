@@ -586,7 +586,8 @@ export class PocketApp {
 			room.push(client, true);
 			client.send("chat", { conversationId: room.id, full: true, messages: room.chat });
 			client.send("notes", { conversationId: room.id, ...room.notes });
-			if (this.browserOn()) client.send("browser", this.#browserEvent(room.id, this.browsers.state(Number(room.id))));
+			// Also while the browser is off: turned on later, the panel has its state at once.
+			client.send("browser", this.#browserEvent(room.id, this.browsers.state(Number(room.id))));
 			for (const other of room.clients) if (other !== client) room.push(other, false);
 			room.pushPresence();
 			this.#scheduleSessions();
@@ -802,8 +803,6 @@ export class PocketApp {
 				collab: 2,
 				reactions: REACTIONS,
 				approvalRule: this.config.approvalRule,
-				// Whether this machine has a browser for the Browser panel and Pi's browser tool.
-				browser: { available: this.browsers.available },
 			},
 		};
 	}

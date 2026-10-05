@@ -198,6 +198,10 @@ test("the engine reads, clicks, types in, and streams a real page, and opens it 
 		const logs = page.logs().map((entry) => `${entry.level}: ${entry.text}`);
 		for (const line of ["log: hello {a: 1}", "error: boom", "error: Uncaught Error: late failure", "dialog: confirm: Sure?"]) assert.ok(logs.includes(line), `${line} in ${logs.join(" | ")}`);
 		assert.equal(browsers.state(1).errors, 2);
+		// Clearing is a change the panel sees, so it fetches the empty console.
+		const before = browsers.state(1).logs;
+		page.clearLogs();
+		assert.deepEqual([page.logs(), browsers.state(1).errors, browsers.state(1).logs > before], [[], 0, true]);
 
 		// The panel's frames are JPEGs, and its taps land where they are shown.
 		const frame = (await page.frame(0))!;
@@ -242,6 +246,14 @@ test("the engine reads, clicks, types in, and streams a real page, and opens it 
 		const fresh = await page.frame(Number.MAX_SAFE_INTEGER);
 		assert.ok(fresh !== undefined && fresh.seq > 0);
 
+		// A server that never answers keeps the browser from answering too: the wait ends at its time, and says so.
+		const silent = Date.now();
+		assert.deepEqual(await page.navigate(`${base}/never`, { timeoutMs: 1000 }), { slow: true });
+		await page.stop();
+		assert.deepEqual(await page.navigate(`${base}/never`, { wait: false }), {});
+		assert.ok(Date.now() - silent < 6000, `took ${Date.now() - silent} ms`);
+		await page.stop();
+
 		const refused = await page.navigate("http://127.0.0.1:9/");
 		assert.match(refused.error ?? "", /ERR_CONNECTION_REFUSED|ERR_UNSAFE_PORT/);
 
@@ -252,6 +264,10 @@ test("the engine reads, clicks, types in, and streams a real page, and opens it 
 		const again = await browsers.open(1);
 		assert.equal(again.url, `${base}/two`, "a page opens again where it was");
 		assert.equal(again.viewport.width, 390, "at the size it had");
+		// Opened to go elsewhere, it skips loading the old address, but keeps the size.
+		await browsers.close(1);
+		const blank = await browsers.open(1, { restore: false });
+		assert.deepEqual([blank.url, blank.viewport.width], ["about:blank", 390]);
 		assert.ok(states.some((state) => state.url === `${base}/two`), "changes were announced");
 	} finally {
 		await browsers.closeAll({ final: true });
@@ -382,7 +398,7 @@ test("the browser tool says so when this machine has no browser", async () => {
 	});
 	try {
 		const id = (await newSession(app)) as ConversationId;
-		assert.equal((await app.hello(owner(app))).server.browser.available, false);
+		assert.equal(app.browsers.available, false);
 		await say(app, id, "look");
 		await until(() => results.length === 1, "the result");
 		assert.match(results[0]!, /No Chromium-based browser was found on this machine/);

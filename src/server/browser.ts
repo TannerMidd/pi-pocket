@@ -287,7 +287,7 @@ class Connection {
 	readonly #out: Writable;
 	#parts: string[] = [];
 	#next = 0;
-	readonly #pending = new Map<number, { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout; method: string }>();
+	readonly #pending = new Map<number, { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
 	readonly #sessions = new Map<string, EventListener>();
 	#closed: string | undefined;
 	/** Events without a session: the browser's own, such as targets appearing. */
@@ -355,7 +355,7 @@ class Connection {
 				reject(new BrowserError(`The browser did not answer ${method} in time.`));
 			}, timeoutMs);
 			timer.unref();
-			this.#pending.set(id, { resolve, reject, timer, method });
+			this.#pending.set(id, { resolve, reject, timer });
 			this.#out.write(`${JSON.stringify(sessionId === undefined ? { id, method, params } : { id, method, params, sessionId })}\0`);
 		});
 	}
@@ -806,7 +806,10 @@ const LOCATE_SCRIPT = String.raw`(async (target) => {
 	return { x: (x - (view?.offsetLeft ?? 0)) * scale, y: (y - (view?.offsetTop ?? 0)) * scale, label: describe(el), covered, editable: el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) };
 })`;
 
-/** Selects what the focused field holds, so typed text replaces it: "selected", "empty", or "none" (not a field). */
+/**
+ * Selects what the focused field holds, so typed text replaces it: "selected", "empty", "none" (not a field), or "keys"
+ * for a field a script cannot select (email, number), which the editor's select-all shortcut selects instead.
+ */
 const SELECT_ALL_SCRIPT = String.raw`(() => {
 	const el = document.activeElement;
 	if (!el) return "none";
@@ -1057,14 +1060,15 @@ export class BrowserPage {
 			}
 			return;
 		}
-		if (info?.type !== "page" || info.browserContextId !== this.#context) return;
-		const id = String(info.targetId);
+		const id = String(info?.targetId);
+		// The browser says only which tab is gone.
 		if (method === "Target.targetDestroyed") {
 			clearTimeout(this.#popups.get(id));
 			this.#popups.delete(id);
 			this.#handled.delete(id);
 			return;
 		}
+		if (info?.type !== "page" || info.browserContextId !== this.#context) return;
 		// Pages the browser prerenders on a site's hint are its guesses, not tabs; and only this page's tabs come here.
 		if ((info.subtype ?? "") !== "" || (info.openerId !== undefined && info.openerId !== this.#target) || this.#handled.has(id)) return;
 		// One page per conversation: a popup or new tab opens here instead, once it has an address.
@@ -1313,11 +1317,24 @@ export class BrowserPage {
 		});
 	}
 
-	/** Open an address. With `wait`, until it has loaded (or `timeoutMs` passed); the result says how it went. */
+	/**
+	 * Open an address. With `wait`, until it has loaded (or `timeoutMs` passed); without, only as long as it takes to
+	 * hear whether it failed at once (nothing answers there), at most a few seconds. The result says how it went.
+	 */
 	async navigate(url: string, options: { wait?: boolean; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<{ error?: string; status?: number; slow?: boolean }> {
 		this.usedAt = Date.now();
 		const mark = this.#mark();
-		const result = await this.#send("Page.navigate", { url }, 60_000);
+		const budget = options.wait === false ? 3000 : (options.timeoutMs ?? 30_000);
+		// The browser answers once the page starts to arrive: a server that never responds keeps it waiting, while the
+		// navigation goes on.
+		const answer = this.#send("Page.navigate", { url }, 120_000);
+		answer.catch(() => {});
+		let timer: NodeJS.Timeout | undefined;
+		const late = new Promise<undefined>((done) => {
+			timer = setTimeout(() => done(undefined), budget);
+		});
+		const result = await Promise.race([answer, late]).finally(() => clearTimeout(timer));
+		if (result === undefined) return options.wait === false ? {} : { slow: true };
 		if (result.errorText) return { error: String(result.errorText) };
 		if (options.wait === false || result.loaderId === undefined) return {};
 		const loaded = await this.#settle(mark, options.timeoutMs ?? 30_000, options.signal, true);
@@ -1541,6 +1558,8 @@ export class BrowserPage {
 	clearLogs(): void {
 		this.#logs = [];
 		this.#errors = 0;
+		// Counted as a change, so the panel fetches the (empty) console again.
+		this.#logSeq++;
 		this.#changed();
 	}
 
@@ -1740,11 +1759,12 @@ export class Browsers {
 		const chromium = await this.#browser();
 		const connection = chromium.connection;
 		const { browserContextId } = await connection.send("Target.createBrowserContext", { disposeOnDetach: false });
+		let page: BrowserPage | undefined;
 		try {
 			await connection.send("Browser.setDownloadBehavior", { behavior: "deny", browserContextId }).catch(() => {});
 			const { targetId } = await connection.send("Target.createTarget", { url: "about:blank", browserContextId });
 			const { sessionId } = await connection.send("Target.attachToTarget", { targetId, flatten: true });
-			const page = new BrowserPage({
+			page = new BrowserPage({
 				conversationId,
 				connection,
 				session: sessionId,
@@ -1763,10 +1783,12 @@ export class Browsers {
 			this.#pages.set(conversationId, page);
 			this.#idleSince = Date.now();
 			if (options.restore !== false && saved?.url !== undefined && saved.url !== "") {
-				await page.navigate(saved.url, { timeoutMs: 15_000, wait: options.wait !== false }).catch(() => {});
+				const restoring = page.navigate(saved.url, { timeoutMs: 15_000 }).catch(() => {});
+				if (options.wait !== false) await restoring;
 			}
 			return page;
 		} catch (error) {
+			page?.close();
 			void connection.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
 			throw error;
 		}
@@ -1814,12 +1836,15 @@ export class Browsers {
 		if (options.final === true) {
 			this.#closing = true;
 			clearInterval(this.#reaper);
-			for (const timer of this.#pending.values()) clearTimeout(timer);
-			this.#pending.clear();
 		}
 		const ids = [...this.#pages.keys()];
 		for (const page of this.#pages.values()) page.close();
 		this.#pages.clear();
+		if (options.final === true) {
+			// After the pages closed, which announces them: nobody listens any more.
+			for (const timer of this.#pending.values()) clearTimeout(timer);
+			this.#pending.clear();
+		}
 		await this.#stopBrowser();
 		if (options.final !== true) for (const id of ids) this.#changed(id);
 	}

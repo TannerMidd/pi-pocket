@@ -113,7 +113,7 @@ function localPath(next: string | null): string {
 }
 
 /** What people may do to a conversation's browser page. */
-const BROWSER_ACTIONS = new Set(["open", "navigate", "back", "forward", "reload", "stop", "viewport", "input", "clear", "close"]);
+const BROWSER_ACTIONS = new Set(["open", "navigate", "back", "forward", "reload", "stop", "viewport", "input", "clear"]);
 
 /** How long a poll waits for events before answering empty, and how long an unpolled session lives. */
 const POLL_HOLD_MS = 25_000;
@@ -479,10 +479,6 @@ export function createHandler(options: HttpOptions) {
 		await app.requireDriver(id, user);
 		await app.conversation(id);
 		const body = await readJson<Record<string, unknown>>(request);
-		if (action === "close") {
-			await browsers.close(key);
-			return json(response, 200, browsers.state(key));
-		}
 		// Typing into, stopping, or clearing a page that is not open opens nothing.
 		if (action === "input" || action === "stop" || action === "clear") {
 			const page = browsers.page(key);
@@ -504,7 +500,7 @@ export function createHandler(options: HttpOptions) {
 		if (action === "viewport" && viewport === undefined) throw new HttpError(400, "Say mobile, tablet, desktop, or a size such as 1024x768.");
 		try {
 			// Opening restores the last address without waiting for it: frames show it loading.
-			const page = await browsers.open(key, { wait: false, ...(viewport === undefined ? {} : { viewport }) });
+			const page = await browsers.open(key, { wait: false, restore: action !== "navigate", ...(viewport === undefined ? {} : { viewport }) });
 			if (action === "open") return json(response, 200, browsers.state(key));
 			if (action === "navigate") {
 				// Everyone in the session sees what people open: the browser reaches what this machine reaches.

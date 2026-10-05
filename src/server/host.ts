@@ -104,7 +104,7 @@ export interface PocketHost {
 	/** Sessions' goals: the goals extension runs their checks and counts them. */
 	readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
 	/** The built-in browser: a page per conversation, which the people in it watch and use too. */
-	readonly browsers: Pick<Browsers, "open" | "page" | "state" | "available">;
+	readonly browsers: Pick<Browsers, "open">;
 }
 
 /** The shape of every module in `src/server/extensions/`: a default export building one or more extensions. */

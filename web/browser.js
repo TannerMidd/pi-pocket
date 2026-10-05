@@ -3,7 +3,7 @@
 // screens show it as a window beside the conversation; phones show it full screen.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, canSteer, notify, store } from "./store.js";
-import { html, Icon, Spinner } from "./ui.js";
+import { APPLE, html, Icon, Spinner } from "./ui.js";
 
 const OPEN_KEY = "pocket.browser";
 const WIDTH_KEY = "pocket.browserWidth";
@@ -249,8 +249,9 @@ function Screen({ frame, interactive, send }) {
 		if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v") return;
 		event.preventDefault();
 		event.stopPropagation();
-		// AltGr (Ctrl+Alt on Windows layouts) types characters such as @ and €: they are text, not shortcuts.
-		if (event.key.length === 1 && (event.getModifierState?.("AltGraph") || (event.ctrlKey && event.altKey))) {
+		// AltGr (Ctrl+Alt on Windows layouts) and Option on a Mac type characters such as @ and €: text, not shortcuts.
+		const option = APPLE && event.altKey && !event.ctrlKey && !event.metaKey;
+		if (event.key.length === 1 && (option || event.getModifierState?.("AltGraph") || (event.ctrlKey && event.altKey))) {
 			send({ type: "text", text: event.key });
 			return;
 		}
@@ -562,15 +563,19 @@ export function BrowserPanel() {
 				title="Type into the page"
 				onClick=${() => {
 					setTyping(!typing);
-					// Focused in the tap itself, so the phone's keyboard opens.
-					if (!typing) typeInput.current?.focus();
+					// Focused in the tap itself, so the phone's keyboard opens; let go of, so it closes.
+					if (typing) typeInput.current?.blur();
+					else typeInput.current?.focus();
 				}}
 			><${Icon} name="keyboard" size=${18} /></button>`}
 			<button class="icon-button" aria-label="Close the browser" title="Close the browser (Alt+B)" onClick=${() => setBrowserOpen(false)}><${Icon} name="close" size=${18} /></button>
 		</header>
 		<div class=${`browser-progress ${state?.loading ? "on" : ""}`}></div>
 		<div class="browser-stage" ref=${stageRef}>${stage}</div>
-		${steer && touch && open && html`<${TypeBar} send=${send} input=${typeInput} shown=${typing} onClose=${() => setTyping(false)} />`}
+		${steer && touch && open && html`<${TypeBar} send=${send} input=${typeInput} shown=${typing} onClose=${() => {
+			typeInput.current?.blur();
+			setTyping(false);
+		}} />`}
 		${showConsole && html`<${ConsolePane} conversationId=${conversationId} logs=${state?.logs ?? 0} steer=${steer} onClose=${() => setShowConsole(false)} />`}
 		${me && !steer && open && html`<div class="browser-foot muted small">${canSteer() ? "Take turns is on: the driver uses the page." : "You can watch; people who can steer use the page."}</div>`}
 	</section>`;
