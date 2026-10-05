@@ -2826,6 +2826,177 @@ button.chip:hover {
 	}
 }
 
+/* ─── Model picker ──────────────────────────────────────────── */
+
+/* A menu up from the message box's model chip, over the conversation without dimming it. */
+.pop-overlay {
+	background: none;
+	animation: none;
+}
+
+.model-pop {
+	position: fixed;
+	display: flex;
+	flex-direction: column;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+	outline: none;
+	animation: model-pop-in var(--t-in) var(--ease-out);
+}
+
+/* No chip to open from: in the middle of the screen. */
+.model-pop.free {
+	position: relative;
+	width: min(420px, calc(100vw - 16px));
+	max-height: 80dvh;
+	margin: auto;
+}
+
+.leaving .model-pop {
+	animation: model-pop-out var(--t-out) linear forwards;
+}
+
+@keyframes model-pop-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+@keyframes model-pop-out {
+	to {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+.model-pop-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.6rem;
+	padding: 0.55rem 0.8rem;
+	border-bottom: 1px solid var(--line);
+	font-size: 0.82rem;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.model-pop-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--muted);
+	transition: color var(--t-hover) var(--ease-out);
+}
+
+.model-pop-link:hover {
+	color: var(--accent);
+}
+
+.model-pop-search {
+	margin: 0.5rem 0.6rem 0.25rem;
+}
+
+/* The field's frame shows the focus. */
+.model-pop-search input:focus-visible {
+	outline: none;
+}
+
+.model-list {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.model-row {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	width: 100%;
+	padding: 0.5rem 0.8rem;
+	text-align: left;
+	border-bottom: 1px solid var(--line);
+	color: var(--text);
+}
+
+.model-row:last-child {
+	border-bottom: 0;
+}
+
+.model-row.on {
+	background: var(--card-2);
+	box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+.model-row-text {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.model-row-name {
+	font-size: 0.86rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.model-row-sub {
+	font-size: 0.7rem;
+	color: var(--muted);
+}
+
+.model-row .icon {
+	color: var(--accent);
+}
+
+.model-pop-note {
+	margin: 0;
+	padding: 0.6rem 0.8rem;
+}
+
+.model-pop-foot {
+	padding: 0.4rem 0.8rem 0.7rem;
+	border-top: 1px solid var(--line);
+}
+
+/* Thinking: one bar of levels, the chosen one outlined. Past the general segmented rules, which come later. */
+.segmented.model-levels {
+	flex-wrap: nowrap;
+	gap: 0;
+	padding: 2px;
+	border: 1px solid var(--line);
+	background: var(--bg);
+}
+
+.segmented.model-levels button {
+	flex: 1;
+	min-width: 0;
+	padding: 0.3rem 0.15rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	border-color: transparent;
+	background: none;
+	color: var(--muted);
+}
+
+.segmented.model-levels button.on {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+
+.segmented.model-levels button:not(.on):hover {
+	border-color: transparent;
+	color: var(--text);
+}
+
 .sheet-head {
 	display: flex;
 	align-items: center;
