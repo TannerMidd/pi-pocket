@@ -3,6 +3,7 @@
  * contents in tool arguments, long tool output) are clipped; a client asks for the full entry when the user expands it.
  */
 import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-durable";
+import { SHELL_ENTRY, type ShellData } from "./shell.ts";
 
 export type ClientBlock =
 	| { type: "text"; text: string }
@@ -10,7 +11,7 @@ export type ClientBlock =
 	| { type: "toolCall"; id: string; name: string; args: Record<string, unknown>; clipped?: Record<string, number> };
 
 export type ClientEntry =
-	| { id: number; kind: "user"; text: string; images: number; from?: string }
+	| { id: number; kind: "user"; text: string; images: number; from?: string; files?: string[] }
 	| {
 			id: number;
 			kind: "assistant";
@@ -34,6 +35,8 @@ export type ClientEntry =
 	  }
 	| { id: number; kind: "compaction"; summary: string }
 	| { id: number; kind: "reset"; text?: string }
+	| ({ id: number; kind: "shell"; truncated?: number } & ShellData)
+	| { id: number; kind: "note"; text: string; name: string }
 	| { id: number; kind: "other"; entryKind: string };
 
 export type ClientToolSlot = {
@@ -51,6 +54,11 @@ export type ClientLive = {
 	tools?: ClientToolSlot[];
 	compactions?: { reason: string; blocking: boolean; attempt: number; retry?: { at: number; error: string } }[];
 };
+
+/** How a file sent along with a message starts (`<file name="path">`): such parts show as the file's name only. */
+export const FILE_BLOCK = '<file name="';
+/** The entry kind of a note about what a person did (`Commands.note`). */
+export const NOTE_ENTRY = "pocket.note";
 
 /** The speaker prefix Pi Pocket adds to messages when several people share the server. */
 export const FROM_PREFIX = /^\[from: ([^\]\n]{1,60})\] /;
@@ -154,11 +162,17 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
 		case "pi.user": {
 			const content = message?.content;
 			const images = countImages(content);
-			const text = textOfContent(content);
+			// Files sent along (parts after the message's own text) show by name: their contents would only weigh down
+			// every browser's view.
+			const parts = Array.isArray(content) ? (content as ContentPart[]) : undefined;
+			const isFile = (part: ContentPart, index: number) => index > 0 && part.type === "text" && typeof part.text === "string" && part.text.startsWith(FILE_BLOCK);
+			const files = (parts ?? []).filter(isFile).map((part) => String(part.text).slice(FILE_BLOCK.length).split('"', 1)[0]!);
+			const text = textOfContent(parts === undefined ? content : parts.filter((part, index) => !isFile(part, index)));
+			const named = files.length === 0 ? {} : { files };
 			const prefixed = FROM_PREFIX.exec(text);
 			return prefixed === null
-				? { id, kind: "user", text, images }
-				: { id, kind: "user", text: text.slice(prefixed[0].length), images, from: prefixed[1]! };
+				? { id, kind: "user", text, images, ...named }
+				: { id, kind: "user", text: text.slice(prefixed[0].length), images, from: prefixed[1]!, ...named };
 		}
 		case "pi.assistant": {
 			const blocks = projectBlocks(message?.content, full);
@@ -198,6 +212,15 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
 		}
 		case "pi.system":
 			return undefined;
+		case NOTE_ENTRY: {
+			const data = entry.data as { text?: unknown; name?: unknown } | undefined;
+			return { id, kind: "note", text: String(data?.text ?? ""), name: String(data?.name ?? "Someone") };
+		}
+		case SHELL_ENTRY: {
+			const data = entry.data as ShellData;
+			const { text, clipped } = full ? { text: data.output, clipped: undefined } : clip(data.output, OUTPUT_LIMIT);
+			return { id, kind: "shell", ...data, output: text, ...(clipped === undefined ? {} : { truncated: clipped }) };
+		}
 		default:
 			return { id, kind: "other", entryKind: entry.kind };
 	}

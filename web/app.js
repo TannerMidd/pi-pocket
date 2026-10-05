@@ -9,7 +9,7 @@ import { registerWorker, updateBadge } from "./notify.js";
 import { Drawer, Rail, ResizeHandle, SessionList, SignIn, Splash, workspaceOrder } from "./sessions.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
-import { canSteer, dismiss, navigate, notify, openSheet, scoped, start, store } from "./store.js";
+import { actions, attempt, canSteer, dismiss, navigate, notify, openSheet, scoped, start, store } from "./store.js";
 import { prefs, setPrefs, startTheme } from "./theme.js";
 import { Transcript } from "./transcript.js";
 import { APPLE, Boot, html, Icon, shortPath, usePresence } from "./ui.js";
@@ -132,6 +132,12 @@ addEventListener("keydown", (event) => {
 		store.set({ launcher: !store.state.launcher, drawer: false });
 		return;
 	}
+	// Find in this session: the browser's own find misses the messages the transcript does not draw.
+	if (mod && !event.altKey && !event.shiftKey && key === "f" && store.state.view.conversation && !store.state.launcher) {
+		event.preventDefault();
+		openSheet({ type: "find" });
+		return;
+	}
 	if (mod && !event.altKey && !event.shiftKey && key === "b") {
 		event.preventDefault();
 		if (wide()) setPrefs({ sidebar: prefs().sidebar === "rail" ? "open" : "rail" });
@@ -164,11 +170,29 @@ addEventListener("keydown", (event) => {
 			return;
 		}
 	}
+	if (event.key === "Escape" && !event.defaultPrevented) stopOnSecondEscape();
 	if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey && !typingIn(event.target) && !store.state.sheet && !store.state.launcher) {
 		event.preventDefault();
 		openSheet({ type: "shortcuts" });
 	}
 });
+/** When Esc was last pressed while Pi worked: a second press soon after stops it. */
+let escapedAt = 0;
+const ESCAPE_TWICE_MS = 1500;
+
+/** Esc twice stops Pi, as Esc does in other agents' terminals. Twice, since Esc also closes things and leaves fields. */
+function stopOnSecondEscape() {
+	const { view, sheet, launcher } = store.state;
+	if (sheet || launcher || !view.live?.busy || !canSteer()) return;
+	if (Date.now() - escapedAt < ESCAPE_TWICE_MS) {
+		escapedAt = 0;
+		attempt(actions.abort);
+		return;
+	}
+	escapedAt = Date.now();
+	notify("info", "Press Esc again to stop Pi.");
+}
+
 const altUp = () => delete document.documentElement.dataset.alt;
 addEventListener("keyup", (event) => event.key === "Alt" && altUp());
 addEventListener("blur", altUp);

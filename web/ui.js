@@ -58,7 +58,8 @@ marked.use({ renderer: { checkbox: ({ checked }) => (checked ? "☑ " : "☐ ") 
  */
 const PURIFY = {
 	FORBID_TAGS: ["form", "input", "button", "select", "textarea", "dialog", "style", "audio", "video", "source", "track", "picture"],
-	FORBID_ATTR: ["style", "class", "id", "srcset", "background", "poster", "action", "formaction"],
+	// `data-path` is the app's own mark for file paths (`sanitize`): a reply may not set it.
+	FORBID_ATTR: ["style", "class", "id", "srcset", "background", "poster", "action", "formaction", "data-path"],
 	RETURN_DOM_FRAGMENT: true,
 };
 
@@ -72,6 +73,10 @@ const localImage = (src) => /^\/api\/c\/\d+\/(file\?|image\/)/.test(src) || /^\/
  */
 function sanitize(html) {
 	const fragment = DOMPurify.sanitize(html, PURIFY);
+	// `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
+	for (const code of fragment.querySelectorAll("code")) {
+		if (!code.closest("pre, a") && looksLikePath(code.textContent ?? "")) code.dataset.path = code.textContent;
+	}
 	for (const pre of fragment.querySelectorAll("pre")) {
 		const wrap = document.createElement("div");
 		wrap.className = "code";
@@ -158,6 +163,38 @@ export function markdown(text, conversationId = currentConversation(), cache = t
 export function Markdown({ text, class: className = "", cache = true }) {
 	return html`<div class=${`md ${className}`} dangerouslySetInnerHTML=${{ __html: markdown(text, undefined, cache) }}></div>`;
 }
+
+/** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
+const FILE_TYPES = new Set(
+	"ts tsx js jsx mjs cjs json jsonc md mdx txt css scss html htm py rs go java kt rb php cs c h cc cpp hpp swift sh bash zsh fish yml yaml toml ini cfg conf env lock sql xml svg png jpg jpeg gif webp pdf vue svelte astro lua zig dart ex exs erl hs ml nix gradle csv log diff patch".split(" "),
+);
+
+/**
+ * Whether inline code names a file: `src/app.ts`, `./run.sh`, `~/notes.md`, `app.ts:42`, `package.json`. A path with
+ * folders needs an extension of some kind; a bare name needs a common one.
+ */
+export function looksLikePath(text) {
+	if (text.length > 300) return false;
+	// Anchored at home, the top, or here: `~/.bashrc`, `/etc/hosts`, `./run`.
+	if (/^(?:~|\.{1,2}|)\/[\w@.+-]+(?:\/[\w@.+-]+)*(?::\d+(?:-\d+)?)?$/.test(text) && text !== "/") return true;
+	if (/^(?:Makefile|Dockerfile|LICENSE|\.gitignore|\.env(?:\.\w+)?)$/.test(text)) return true;
+	const match = /^((?:[\w@.+-]+\/)*)([\w@+-][\w@.+-]*\.([A-Za-z0-9]{1,10}))(?::\d+(?:-\d+)?)?$/.exec(text);
+	return match !== null && (match[1] !== "" || FILE_TYPES.has(match[3].toLowerCase()));
+}
+
+/** Open a file (or folder) of the session in the viewer. `path:42` opens it at line 42. */
+export function openFile(path) {
+	const match = /^(.*?):(\d+)(?:-\d+)?$/.exec(path);
+	openSheet({ type: "file", id: match ? match[1] : path, line: match ? Number(match[2]) : undefined });
+}
+
+/** File paths in rendered markdown open in the viewer. */
+document.addEventListener("click", (event) => {
+	const code = event.target.closest?.(".md code[data-path]");
+	if (!code || getSelection()?.toString()) return;
+	event.stopPropagation();
+	openFile(code.dataset.path);
+});
 
 /** Images in rendered markdown open full screen, unless they are links. */
 document.addEventListener("click", (event) => {

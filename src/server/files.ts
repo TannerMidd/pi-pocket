@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { opendir } from "node:fs/promises";
+import { open, opendir, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
 import { git } from "./git.ts";
@@ -170,3 +170,53 @@ export class FileLists {
 	}
 }
 
+/** How much of a file the viewer shows, and of a folder. */
+const VIEW_BYTES = 512 * 1024;
+const VIEW_ENTRIES = 1000;
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i;
+
+/** A file as the viewer shows it: text, an image (loaded through the image route), a folder's entries, binary, or other (a pipe, a device). */
+export type FileView =
+	| { kind: "text"; size: number; text: string; truncated: boolean }
+	| { kind: "image" | "binary" | "other"; size: number }
+	| { kind: "folder"; entries: { name: string; dir: boolean }[]; truncated: boolean };
+
+/** What the viewer shows of `file`. Throws when it is not there. */
+export async function viewFile(file: string): Promise<FileView> {
+	const info = await stat(file);
+	if (info.isDirectory()) {
+		const { entries, more } = await readSome(file, VIEW_ENTRIES);
+		const listed = entries.map((entry) => ({ name: entry.name, dir: entry.isDirectory() })).sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+		return { kind: "folder", entries: listed, truncated: more };
+	}
+	// A pipe or a device would never finish reading: only regular files are opened.
+	if (!info.isFile()) return { kind: "other", size: info.size };
+	if (IMAGE_EXTENSIONS.test(file)) return { kind: "image", size: info.size };
+	const handle = await open(file, "r");
+	try {
+		const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+		const bytes = buffer.subarray(0, bytesRead);
+		// Text files have no NUL bytes; nearly every other kind does, early on.
+		if (bytes.subarray(0, 8000).includes(0)) return { kind: "binary", size: info.size };
+		return { kind: "text", size: info.size, text: bytes.toString("utf8"), truncated: info.size > bytesRead };
+	} finally {
+		await handle.close();
+	}
+}
+
+/**
+ * The files `@` mentions in a message name, as the message box writes them: `@src/app.ts`, or `@"my file.txt"` with
+ * spaces. Each comes with the paths it may mean, best first: as written, then without the punctuation that may end a
+ * sentence after it ("look at @app.ts.").
+ */
+export function mentionedPaths(text: string): { written: string; candidates: string[] }[] {
+	const found: { written: string; candidates: string[] }[] = [];
+	for (const match of text.matchAll(/(?:^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g)) {
+		const written = match[1] ?? match[2]!;
+		if (found.some((each) => each.written === written)) continue;
+		const trimmed = match[1] === undefined ? written.replace(/[.,;:!?)\]}'`]+$/, "") : written;
+		found.push({ written, candidates: trimmed === written || trimmed === "" ? [written] : [written, trimmed] });
+	}
+	return found;
+}

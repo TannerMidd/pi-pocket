@@ -5,8 +5,8 @@
  * command checks who may do it, and changes others should know about become activity lines in the session's chat.
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, extname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { clampThinkingLevel, type ImageContent, type ModelThinkingLevel, type TextContent } from "@earendil-works/pi-ai";
 import type { AgentChange, ConversationCreateOptions, ConversationId, EntryId, ModelRef, SubmissionId } from "@earendil-works/pi-durable";
@@ -15,10 +15,12 @@ import type { User } from "./config.ts";
 import { AuthorsDoc, ChatDoc, NotesDoc, PinsDoc, PlanDoc, type Schedule, SessionsDoc, SubagentsDoc } from "./docs.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
-import { ATTACHMENTS_HEADING, FROM_PREFIX, snippet } from "./projection.ts";
-import { expandPromptTemplate } from "./prompts.ts";
+import { mentionedPaths, viewFile } from "./files.ts";
+import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY, snippet } from "./projection.ts";
+import { expandPromptTemplate, expandSkillCommand } from "./prompts.ts";
 import { ownRequest } from "./requests.ts";
 import { type Resend, resendContent, resendRequest, ResendTask, userContent } from "./resend.ts";
+import { wantsTitle, writeTitle } from "./titles.ts";
 import { describeMoment, describeRepeat, knownZone } from "./when.ts";
 import { createWorktree, discardWorktree, inWorktree, removeWorktree, sourceFolders, type Worktree } from "./worktrees.ts";
 
@@ -33,12 +35,19 @@ export interface SubmitRequest {
 	mode?: "steer" | "followUp";
 	/** Client-generated, so a retried POST does not submit twice. */
 	requestId: string;
+	/** Send the files the message mentions with `@` along with it, so Pi need not read them first. */
+	inlineFiles?: boolean;
 }
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 /** Attached images that also go to the model itself, when it takes images. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
+/** How many `@` mentioned files go along with a message, and how much of them. */
+const MAX_MENTIONED = 10;
+const MAX_MENTIONED_FILE = 100_000;
+const MAX_MENTIONED_TOTAL = 300_000;
+const IMAGE_MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
 const MAX_TITLE = 120;
 /** The extension that makes plan mode block changes; without it, plan mode would do nothing. */
 const PLAN_EXTENSION = "pocket-plan";
@@ -191,8 +200,12 @@ export class Commands {
 		await app.requireDriver(id, user);
 		const conversation = await app.conversation(id);
 		const typed = request.text.trim();
-		// `/name arguments` sends Pi's prompt template of that name, filled in.
-		const text = typed.startsWith("/") ? (expandPromptTemplate(typed, app.promptTemplates(id)) ?? typed) : typed;
+		// `/skill:name request` sends the skill with the request; `/name arguments`, Pi's prompt template of that name.
+		const text = typed.startsWith("/skill:")
+			? (expandSkillCommand(typed, app.skillCommands(id)) ?? typed)
+			: typed.startsWith("/")
+				? (expandPromptTemplate(typed, app.promptTemplates(id)) ?? typed)
+				: typed;
 		const attachments = request.attachments ?? [];
 		if (text === "" && attachments.length === 0) throw new HttpError(400, "Nothing to send");
 		const agent = await app.agentState(id);
@@ -202,7 +215,8 @@ export class Commands {
 
 		const lines = attachments.map((file) => `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`);
 		const body = this.messageText(user, lines.length === 0 ? text : `${text}${ATTACHMENTS_HEADING}${lines.join("\n")}`.trim());
-		const parts: (TextContent | ImageContent)[] = [{ type: "text", text: body }];
+		const mentioned = request.inlineFiles === true ? await this.#mentionedFiles(id, user, typed, model.input.includes("image")) : [];
+		const parts: (TextContent | ImageContent)[] = [{ type: "text", text: body }, ...mentioned];
 		for (const file of attachments) {
 			if (!model.input.includes("image") || !IMAGE_TYPES.has(file.mime) || file.size > MAX_INLINE_IMAGE) continue;
 			try {
@@ -223,20 +237,79 @@ export class Commands {
 		return { submissionId: submission.id };
 	}
 
+	/**
+	 * The files a message mentions with `@`, for Pi: text files as `<file>` blocks, as Pi's terminal app sends files
+	 * given on its command line, and images as images when the model takes them. Only files this person may load
+	 * through the session; anything else stays a mention, which Pi can read itself.
+	 */
+	async #mentionedFiles(id: ConversationId, user: User, text: string, images: boolean): Promise<(TextContent | ImageContent)[]> {
+		const app = this.#app;
+		const parts: (TextContent | ImageContent)[] = [];
+		let total = 0;
+		for (const mention of mentionedPaths(text).slice(0, MAX_MENTIONED)) {
+			let file: string | undefined;
+			for (const candidate of mention.candidates) {
+				try {
+					const resolved = app.readableFile(user, id, candidate);
+					if (statSync(resolved).isFile()) {
+						file = resolved;
+						break;
+					}
+				} catch {
+					// Not there, or not this person's to load.
+				}
+			}
+			if (file === undefined) continue;
+			try {
+				const mime = IMAGE_MIME[extname(file).toLowerCase()];
+				if (mime !== undefined) {
+					if (images && statSync(file).size <= MAX_INLINE_IMAGE) parts.push({ type: "image", mimeType: mime, data: readFileSync(file).toString("base64") });
+					continue;
+				}
+				const view = await viewFile(file);
+				if (view.kind !== "text" || total >= MAX_MENTIONED_TOTAL) continue;
+				const room = Math.min(MAX_MENTIONED_FILE, MAX_MENTIONED_TOTAL - total);
+				const content = view.text.slice(0, room);
+				total += content.length;
+				const cut = view.truncated || view.text.length > room ? "\n… (the rest of the file is left out)" : "";
+				parts.push({ type: "text", text: `${FILE_BLOCK}${file}">\n${content}${cut}\n</file>` });
+			} catch (error) {
+				app.notice("warning", `Could not send ${mention.written}: ${describe(error)}`, id);
+			}
+		}
+		return parts;
+	}
+
 	/** A message to Pi as the model gets it: with more than one person on this server, it says who is talking. */
 	messageText(user: Pick<User, "name">, text: string): string {
 		return this.#app.config.users.length > 1 ? `[from: ${user.name.replace(/[[\]]/g, "")}] ${text}` : text;
 	}
 
-	/** A session just got a message: it moves up the list, and its first message names it. */
+	/**
+	 * A session just got a message: it moves up the list, and its first message names it. A long first message gets a
+	 * short title written for it afterwards (`titles.ts`).
+	 */
 	async #touched(id: ConversationId, text: string): Promise<void> {
 		if (this.#app.sessionMeta(id) === undefined) return;
+		let provisional: string | undefined;
 		await this.#app.harness.commit(async (tx) => {
 			const meta = (await tx.doc(SessionsDoc)).items[String(id)];
 			if (meta === undefined) return;
 			meta.updatedAt = Date.now();
-			if (meta.title === undefined && text !== "") meta.title = text.replace(/\s+/g, " ").slice(0, 80);
+			if (meta.title === undefined && text !== "") meta.title = provisional = text.replace(/\s+/g, " ").slice(0, 80);
 		}, context);
+		if (provisional !== undefined && wantsTitle(text)) void writeTitle(this.#app, id, text, provisional);
+	}
+
+	/**
+	 * A line in the transcript about something a person did that Pi should know about, such as undoing a file's
+	 * changes. Pi gets it too, with its next message; while Pi works, it waits for a place in the conversation.
+	 */
+	async note(id: ConversationId, user: User, text: string): Promise<void> {
+		const conversation = await this.#app.conversation(id);
+		const model = [{ role: "user" as const, content: [{ type: "text" as const, text: `[note] ${user.name} ${text}` }], timestamp: Date.now() }];
+		// The person's, as their messages are: Pi works for them from there.
+		await conversation.submit({ type: "write", entry: { kind: NOTE_ENTRY, data: { text, by: user.id, name: user.name }, model }, requestId: ownRequest(user.id, `note-${randomUUID()}`) }, context);
 	}
 
 	/** A message Pi could not answer, other than one someone stopped, shows as an error to the people there. */

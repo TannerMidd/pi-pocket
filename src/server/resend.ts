@@ -13,13 +13,16 @@ export type Resend = { text: string; by: string; images?: { entry: EntryId } };
 /** The request id of the message a fork was made to send. */
 export const resendRequest = (resend: Resend) => ownRequest(resend.by, "resend");
 
-/** A message's text and images, from a `pi.user` entry's model message. */
+/**
+ * A message's text and images, from a `pi.user` entry's model message. Files sent along with it (`<file>` parts) are
+ * left out: sent again, the message mentions them as before.
+ */
 export function userContent(model: unknown): { text: string; images: ImageContent[] } {
 	const content = (model as { content?: unknown } | undefined)?.content;
 	if (typeof content === "string") return { text: content, images: [] };
 	const parts = Array.isArray(content) ? (content as (TextContent | ImageContent)[]) : [];
 	return {
-		text: parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
+		text: parts.flatMap((part, index) => (part.type === "text" && (index === 0 || !part.text.startsWith('<file name="')) ? [part.text] : [])).join("\n"),
 		images: parts.filter((part): part is ImageContent => part.type === "image"),
 	};
 }

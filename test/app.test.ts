@@ -676,6 +676,9 @@ test("invites carry a role and a session over HTTP, and viewers get 403 on steer
 		assert.equal((await call(token, "invite", {})).status, 403);
 		assert.equal((await call(token, "fs?path=/")).status, 403);
 		assert.equal((await call(token, `c/${id}/files`)).status, 403);
+		assert.equal((await call(token, `c/${id}/view?path=README.md`)).status, 403);
+		assert.equal((await call(token, `c/${id}/shell`, { command: "echo hi" })).status, 403);
+		assert.equal((await call(token, `c/${id}/changes/revert`, { path: "a.txt" })).status, 403);
 		assert.equal((await call(token, `c/${id}/chat`, { text: "hello", requestId: "y" })).status, 200);
 		assert.equal((await call(token, `c/${Number(id) + 999}/chat`, { text: "hello", requestId: "z" })).status, 404);
 		const sessions = (await (await call(token, "sessions")).json()) as { id: number }[];

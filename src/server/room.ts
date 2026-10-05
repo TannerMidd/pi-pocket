@@ -31,6 +31,7 @@ import {
 	TurnsDoc,
 } from "./docs.ts";
 import { type ClientEntry, projectEntry, projectLive, projectStats } from "./projection.ts";
+import { SHELL_ENTRY } from "./shell.ts";
 import { describeRepeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -238,7 +239,7 @@ export class Room {
 			live: projectLive(live),
 			inbox: inbox.items.map((item) =>
 				item.mode === "write"
-					? { id: item.id, mode: item.mode }
+					? { id: item.id, mode: item.mode, ...(item.entry.kind === SHELL_ENTRY ? { text: `$ ${String((item.entry.data as { command?: unknown } | undefined)?.command ?? "")}` } : {}) }
 					: {
 							id: item.id,
 							mode: item.mode,

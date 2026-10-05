@@ -27,11 +27,11 @@ export function loadTemplates() {
 	);
 }
 
-/** The prompt templates known for this conversation, as entries like the app's commands. */
+/** The prompt templates and skills (`skill:name`) known for this conversation, as entries like the app's commands. */
 function templates() {
 	const cached = store.state.templates;
 	if (cached?.conversationId !== store.state.conversationId) return [];
-	return cached.list.map((template) => ({ name: template.name, args: template.argumentHint ?? "", description: template.description, template: true }));
+	return cached.list.map((template) => ({ name: template.name, args: template.argumentHint ?? "", description: template.description, template: true, skill: template.skill === true }));
 }
 
 /** A path as the conversation means it: absolute, `~/…`, or relative to its working directory. */
@@ -163,6 +163,7 @@ export const COMMANDS = [
 	},
 	{ name: "stop", description: "Stop the current run", run: () => actions.abort() },
 	{ name: "copy", description: "Copy Pi’s last reply", run: copyLast },
+	{ name: "find", args: "[text]", description: "Find in this session’s messages", run: (arg) => openSheet({ type: "find", query: arg }) },
 	{ name: "session", description: "Show the model, context use, and cost", run: showSession },
 	{ name: "export", description: "Download this conversation as Markdown", run: () => location.assign(`/api/c/${store.state.view.conversation.id}/export`) },
 	{ name: "resume", description: "Switch to another session", run: () => store.set({ drawer: true }) },
@@ -208,9 +209,9 @@ export function parseTemplate(text) {
 	return templates().find((template) => template.name === match[1]) ?? null;
 }
 
-/** Commands to offer while someone types a command name: "/" lists them all, then Pi's prompt templates. */
+/** Commands to offer while someone types a command name: "/" lists them all, then Pi's prompt templates and skills. */
 export function suggestCommands(text) {
-	const match = /^\/([\w-]*)$/.exec(text);
+	const match = /^\/([\w:-]*)$/.exec(text);
 	if (!match) return [];
 	const prefix = match[1].toLowerCase();
 	const own = available();

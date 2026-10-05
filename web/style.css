@@ -1553,6 +1553,10 @@ pre.diff .del {
 	padding: 0.4rem 0.6rem;
 }
 
+.command-hint.wraps {
+	white-space: normal;
+}
+
 .command-hint {
 	font-size: 0.78rem;
 	padding: 0 0.4rem 0.3rem;
@@ -5011,4 +5015,207 @@ textarea.notes {
 	padding: 0.3rem 0.8rem calc(env(safe-area-inset-bottom) + 0.3rem);
 	border-top: 1px solid var(--line);
 	text-align: center;
+}
+
+/* File paths in replies (inline code that names a file) open the viewer. */
+.md code[data-path] {
+	cursor: pointer;
+	text-decoration: underline dotted color-mix(in srgb, var(--accent) 60%, transparent);
+	text-underline-offset: 3px;
+}
+
+.md code[data-path]:hover {
+	color: var(--accent);
+}
+
+/* @mentions of files in messages, and the files sent along. */
+.file-mention {
+	color: var(--accent);
+	font: inherit;
+	padding: 0;
+	text-decoration: underline dotted;
+	text-underline-offset: 3px;
+}
+
+.skill-chip {
+	margin-bottom: 0.3rem;
+}
+
+.tool-open {
+	align-self: flex-start;
+}
+
+/* `!` commands people ran, and notes about what people did. */
+.shell-row {
+	animation: rise-in 0.3s var(--ease-out);
+}
+
+.shell-card {
+	background: var(--card);
+	border: 1px solid var(--line);
+	border-left: 2px solid var(--ok);
+	border-radius: var(--radius);
+	padding: 0.45rem 0.65rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+
+.shell-card > .link {
+	align-self: flex-start;
+}
+
+.shell-card.failed {
+	border-left-color: var(--err);
+}
+
+.shell-row.pending .shell-card {
+	border-left-color: var(--line-strong);
+}
+
+.shell-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.3rem 0.6rem;
+	font-size: 0.84rem;
+}
+
+.shell-command {
+	color: var(--ok);
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+.shell-card:not(.open) .shell-command {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.note-line {
+	text-align: center;
+	font-size: 0.8rem;
+	color: var(--body);
+}
+
+/* Changes: open a file or undo it. */
+.changed-actions {
+	display: flex;
+	gap: 1rem;
+	padding: 0 0 0.4rem 1.8rem;
+}
+
+.link.danger {
+	color: var(--err);
+	font-weight: 700;
+}
+
+/* The file viewer: line numbers, the line asked for marked, long lines wrapped. */
+.file-path {
+	overflow-wrap: anywhere;
+	margin-top: 0;
+}
+
+.file-view {
+	font: 0.78rem/1.5 var(--mono);
+	background: var(--code-bg);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	padding: 0.4rem 0;
+	overflow-x: auto;
+}
+
+.file-line {
+	display: flex;
+	min-width: 0;
+}
+
+.file-line .ln {
+	flex: none;
+	width: 3.2rem;
+	padding-right: 0.7rem;
+	text-align: right;
+	color: var(--muted);
+	user-select: none;
+	opacity: 0.7;
+}
+
+.file-line .lt {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	min-width: 0;
+	color: var(--body);
+	padding-right: 0.6rem;
+}
+
+.file-line.on {
+	background: var(--accent-soft);
+}
+
+.file-line.on .ln {
+	color: var(--accent);
+	opacity: 1;
+}
+
+.file-image {
+	max-width: 100%;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+}
+
+.file-entry {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+/* Find in session. */
+.find-input {
+	width: 100%;
+	margin-bottom: 0.6rem;
+}
+
+.find-results {
+	display: flex;
+	flex-direction: column;
+}
+
+.find-result {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	text-align: left;
+	padding: 0.5rem 0.6rem;
+	border-left: 2px solid transparent;
+	border-bottom: 1px solid var(--line);
+	transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.find-result:hover,
+.find-result.on {
+	background: var(--hover);
+	border-left-color: var(--accent);
+}
+
+.find-who {
+	font-size: 0.75rem;
+	color: var(--muted);
+}
+
+.find-snippet {
+	font-size: 0.85rem;
+	overflow-wrap: anywhere;
+}
+
+.find-snippet mark {
+	background: none;
+	color: var(--accent);
+	font-weight: 800;
+}
+
+/* Ctrl+R: messages sent before. */
+.history-text {
+	color: var(--text);
 }

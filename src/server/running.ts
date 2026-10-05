@@ -57,6 +57,10 @@ async function describeTask(app: PocketApp, node: TaskGraphNode): Promise<Pick<R
 			if (schedule === undefined) return { label: "a scheduled message" };
 			return { label: `scheduled for ${describeMoment(schedule.next, schedule.zone)}: ${schedule.text}`, scheduleId: schedule.id };
 		}
+		case "pocket.shell": {
+			const command = await app.shell.describe(node.id);
+			return { label: command === undefined ? "running a command" : `running ${command}` };
+		}
 		default:
 			return { label: node.kind };
 	}

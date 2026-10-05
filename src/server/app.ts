@@ -38,7 +38,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Alerts } from "./alerts.ts";
 import { type BrowserState, Browsers } from "./browser.ts";
-import { type Changes, changesIn, diffOf } from "./changes.ts";
+import { type Changes, changesIn, diffOf, revertFile } from "./changes.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
@@ -59,14 +59,14 @@ import {
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { transcriptMarkdown } from "./export.ts";
-import { FileLists, type FileListing } from "./files.ts";
+import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
 import { Goals } from "./goals.ts";
 import { type ApprovalRequest, Approvals, type PocketHost } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { configureHttp } from "./net.ts";
-import { expandHome, homePath } from "./paths.ts";
+import { displayPath, expandHome, homePath } from "./paths.ts";
 import { type ClientEntry, projectEntry, snippet } from "./projection.ts";
-import { loadPromptTemplates, type PromptTemplate } from "./prompts.ts";
+import { loadPromptTemplates, loadSkillCommands, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, prepareDropInFolder } from "./reload.ts";
@@ -74,6 +74,7 @@ import { requestPerson } from "./requests.ts";
 import { ResendTask } from "./resend.ts";
 import { type Client, Room, ROOM_DOCS } from "./room.ts";
 import { Schedules } from "./schedules.ts";
+import { Shell } from "./shell.ts";
 import { Spend } from "./spend.ts";
 import { inRepository } from "./worktrees.ts";
 
@@ -164,6 +165,7 @@ export class PocketApp {
 	readonly providers = new Providers(this);
 	readonly schedules = new Schedules(this);
 	readonly goals = new Goals(this);
+	readonly shell = new Shell(this);
 	readonly spend = new Spend(this);
 	/** Each conversation's browser page, which Pi and the people in the conversation share. */
 	readonly browsers: Browsers;
@@ -195,7 +197,8 @@ export class PocketApp {
 		do {
 			const page = await storage.scanSubmissions({ conversationId: id }, 256, cursor, context);
 			for (const record of page.items) {
-				const entry = record.type === "input" ? record.entry : undefined;
+				// Writes too: a `!` command Pi sees, or a note, is its person's (`shell.ts`, `Commands.note`).
+				const entry = record.entry;
 				const person = requestPerson(record.requestId);
 				if (entry !== undefined && person !== undefined && known[String(entry)] === undefined) missing.push({ entry, ...person });
 			}
@@ -206,6 +209,11 @@ export class PocketApp {
 
 	/** Who wrote to Pi last in each conversation: whoever asked for what Pi is doing there now. */
 	readonly #lastAuthor = new Map<ConversationId, string>();
+	/**
+	 * The entry `#lastAuthor` comes from. Pi works for whoever wrote the newest message: an older one that settles
+	 * later (after a restart, say) does not take that back.
+	 */
+	readonly #lastAuthorEntry = new Map<ConversationId, number>();
 	/** The files in each folder, for `@` mentions. */
 	readonly #files = new FileLists();
 	/** Folders known to be in a git repository or not, for a minute: views ask on every update. */
@@ -307,7 +315,7 @@ export class PocketApp {
 		const registry = createRegistry();
 		registry.install(CodingTools);
 		// Durable work of the app itself, whatever extension modules are on.
-		registry.install(defineExtension({ name: "pocket-core", tasks: [ResendTask] }));
+		registry.install(defineExtension({ name: "pocket-core", tasks: [ResendTask, this.shell.task] }));
 		const host: PocketHost = {
 			guard: this.guard,
 			approvals: this.approvals,
@@ -377,7 +385,12 @@ export class PocketApp {
 				for (const { entry, userId } of missing) known[String(entry)] = userId;
 				if (missing.length > 0) unrecorded.set(id, missing);
 				const newest = Object.entries(known).reduce<[string, string] | undefined>((best, each) => (best === undefined || Number(each[0]) > Number(best[0]) ? each : best), undefined);
-				if (newest !== undefined) this.#lastAuthor.set(id, newest[1]);
+				if (newest !== undefined) {
+					this.#lastAuthor.set(id, newest[1]);
+					this.#lastAuthorEntry.set(id, Number(newest[0]));
+				}
+				// Their authors are known: a message settling after the restart is not noted again.
+				for (const entry of Object.keys(known)) this.#authored.add(`${String(id)}:${entry}`);
 				this.#noteSubagents(id, (await this.harness.snapshot(SubagentsDoc, id, context))?.agents);
 			}
 			cursor = page.next;
@@ -449,15 +462,20 @@ export class PocketApp {
 					const person = requestPerson(record.requestId);
 					if (person?.wrote === true) this.#submitters.set(record.id as unknown as number, person.userId);
 					// A message's submission changes as it is placed and answered; its author is noted once, when it enters.
+					// A write that is a person's (a `!` command Pi sees, a note) counts as theirs too: it speaks to Pi.
 					const key = `${record.conversationId}:${String(record.entry)}`;
-					if (record.type === "input" && record.entry !== undefined && !this.#authored.has(key)) {
+					if ((record.type === "input" || person !== undefined) && record.entry !== undefined && !this.#authored.has(key)) {
 						const conversationId = record.conversationId;
 						const parent = this.parentOf(conversationId);
 						// Subagent tasks started before they carried their person are the work of whoever the parent works for.
 						const requester = person?.userId ?? (record.requestId?.startsWith("subagent:") && parent !== undefined ? this.requesterOf(parent) : undefined);
 						if (requester !== undefined) {
 							this.#authored.add(key);
-							this.#lastAuthor.set(conversationId, requester);
+							const entry = Number(record.entry);
+							if (entry >= (this.#lastAuthorEntry.get(conversationId) ?? -1)) {
+								this.#lastAuthorEntry.set(conversationId, entry);
+								this.#lastAuthor.set(conversationId, requester);
+							}
 							this.#noteAuthor(conversationId, record.entry, requester, person?.wrote === true);
 						}
 					}
@@ -1131,6 +1149,17 @@ export class PocketApp {
 		return resolve(this.cwdOf(id), expandHome(path.trim()));
 	}
 
+	/** Pi's skills in a conversation's folder, to run as `/skill:name`. */
+	skillCommands(id: ConversationId): SkillCommand[] {
+		let paths: string[] = [];
+		try {
+			paths = this.settings.getSkillPaths();
+		} catch {
+			// Unreadable settings: the default folders still count.
+		}
+		return loadSkillCommands(this.cwdOf(id), getAgentDir(), paths);
+	}
+
 	/** Pi's prompt templates, as a conversation in its folder offers them. */
 	promptTemplates(id: ConversationId): PromptTemplate[] {
 		let paths: string[] = [];
@@ -1167,6 +1196,30 @@ export class PocketApp {
 			throw new HttpError(404, "Image not found");
 		}
 		return target;
+	}
+
+	/**
+	 * A file a person may read whole through a session: the viewer, and files sent along with a message. As
+	 * `conversationFile`, but Pi's own folder (sign-ins, settings) and this app's data (people, tokens, the database)
+	 * are the owner's alone. Uploads and worktrees, which sessions use, are not kept back.
+	 */
+	readableFile(user: User, id: ConversationId, path: string): string {
+		const file = this.conversationFile(user, id, path);
+		if (user.role === "owner") return file;
+		const real = (target: string) => {
+			try {
+				return realpathSync(target);
+			} catch {
+				return resolve(target);
+			}
+		};
+		const target = real(file);
+		const inside = (root: string) => target === root || target.startsWith(root + sep);
+		const data = real(this.dataDir);
+		if (inside(real(getAgentDir())) || (inside(data) && !inside(join(data, "uploads")) && !inside(join(data, "worktrees")))) {
+			throw new HttpError(404, "Not found");
+		}
+		return file;
 	}
 
 	/** This session and the sessions it was forked from, nearest first. */
@@ -1249,6 +1302,40 @@ export class PocketApp {
 		this.requireSteer(user);
 		await this.conversation(id);
 		return this.#files.get(this.cwdOf(id));
+	}
+
+	/**
+	 * A file or folder for the viewer, as a person who can steer may load it through the session (`conversationFile`):
+	 * its text, or that it is an image, a folder's entries, or binary.
+	 */
+	async viewFile(id: ConversationId, user: User, path: string): Promise<{ path: string; display: string } & FileView> {
+		this.requireSee(user, id);
+		this.requireSteer(user);
+		await this.conversation(id);
+		let file: string;
+		try {
+			file = this.readableFile(user, id, path);
+			return { path: file, display: displayPath(file, this.cwdOf(id)), ...(await viewFile(file)) };
+		} catch (error) {
+			if (error instanceof HttpError || (error as NodeJS.ErrnoException).code === "ENOENT") throw new HttpError(404, `${path} is not there.`);
+			throw new HttpError(409, describe(error));
+		}
+	}
+
+	/**
+	 * Undo the uncommitted changes to one file of a session's repository. It changes files under Pi, so it takes the
+	 * right to drive and waits until Pi is not working; Pi is told, with its next message.
+	 */
+	async revertChange(id: ConversationId, user: User, path: string): Promise<void> {
+		this.requireSee(user, id);
+		await this.requireDriver(id, user);
+		if (this.isBusy(id)) throw new HttpError(409, "Pi is working here: wait for it, or stop it, before undoing a file.");
+		const kind = await revertFile(this.cwdOf(id), path, user.sessions !== undefined).catch((error: unknown) => {
+			throw new HttpError(409, describe(error));
+		});
+		const what = kind === "new" || kind === "added" ? `deleted ${path}, which was new since the last commit` : `undid the uncommitted changes to ${path}`;
+		await this.commands.note(id, user, what);
+		await this.collab.activity(id, user, what);
 	}
 
 	/** What changed in a session's folder: Pi's edits, and the uncommitted changes of its git repository. */

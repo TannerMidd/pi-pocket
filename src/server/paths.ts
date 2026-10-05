@@ -1,6 +1,6 @@
 /** Paths as people write them (`~/project`) and as activity lines show them. */
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 
 /** `~` and `~/x` to absolute paths; anything else unchanged. */
 export function expandHome(path: string): string {
@@ -13,4 +13,9 @@ export function expandHome(path: string): string {
 export function homePath(path: string): string {
 	const home = homedir();
 	return path === home || path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path;
+}
+
+/** A path as people read it in a session: relative to its folder when inside it, else `~/x` or absolute. */
+export function displayPath(path: string, cwd: string): string {
+	return path.startsWith(cwd + sep) ? relative(cwd, path) : homePath(path);
 }
