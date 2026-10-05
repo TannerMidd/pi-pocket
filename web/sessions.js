@@ -193,7 +193,7 @@ export function SessionList({ compact = false }) {
 		<div class="sessions-foot">
 			<div class="foot-tiles">
 				<button class=${`foot-tile ${busy > 0 ? "lit" : ""}`} title="Everything Pi is doing" onClick=${() => openSheet({ type: "running" })}>
-					${busy > 0 ? html`<span class="mini-sweep"><i></i><i></i><i></i></span>` : html`<${Icon} name="pulse" size=${16} />`}
+					<${Icon} name="pulse" size=${16} />
 					Running${busy > 0 && html`<span class="tile-count">${busy}</span>`}
 				</button>
 				<button class="foot-tile" title="Model providers" onClick=${() => openSheet({ type: "providers" })}><${Icon} name="key" size=${16} /> Providers</button>

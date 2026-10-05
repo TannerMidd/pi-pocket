@@ -320,10 +320,6 @@ kbd {
 	transition-delay: 0s !important;
 }
 
-:root[data-motion="reduced"] .mini-sweep i {
-	background: var(--lit);
-}
-
 :root[data-motion="reduced"] .spinner::before {
 	transform: translate(calc(100% + 2px), 0);
 }
@@ -521,7 +517,11 @@ kbd {
 	}
 }
 
-/* A small sweep of three cells, for rows in the session list while Pi works there. */
+/*
+ * Three lit cells, still: a session where Pi works, in the session list. While Pi works, only the conversation
+ * itself moves (thinking, the streaming cursor, a tool's spinner); everywhere else a working session is marked, not
+ * animated, so several runs at once do not fill the screen with motion.
+ */
 .mini-sweep {
 	display: inline-flex;
 	gap: 2px;
@@ -530,13 +530,12 @@ kbd {
 .mini-sweep i {
 	width: 4px;
 	height: 4px;
-	background: var(--line-strong);
-	animation: sweep 1s infinite;
+	background: var(--lit);
 }
 
 .mini-sweep i:nth-child(1) { --lit: var(--accent); }
-.mini-sweep i:nth-child(2) { --lit: color-mix(in oklab, var(--accent) 50%, var(--spark)); animation-delay: 0.1s; }
-.mini-sweep i:nth-child(3) { --lit: var(--spark); animation-delay: 0.2s; }
+.mini-sweep i:nth-child(2) { --lit: color-mix(in oklab, var(--accent) 50%, var(--spark)); }
+.mini-sweep i:nth-child(3) { --lit: var(--spark); }
 
 @media (prefers-reduced-motion: reduce) {
 	:root:not([data-motion="full"]) .pulse,
@@ -716,29 +715,6 @@ kbd {
 	padding: calc(env(safe-area-inset-top) + 0.35rem) 0.4rem 0.35rem;
 	border-bottom: 1px solid var(--line);
 	background: var(--bg);
-}
-
-/* Pi is working: a thin bar sweeps along the top bar's bottom edge. */
-.topbar.busy::after {
-	content: "";
-	position: absolute;
-	left: 0;
-	right: 0;
-	bottom: -1px;
-	height: 2px;
-	background: linear-gradient(90deg, transparent, var(--accent), var(--spark), transparent);
-	background-size: 40% 100%;
-	background-repeat: no-repeat;
-	animation: busy-sweep 1.6s var(--ease-in-out) infinite;
-}
-
-@keyframes busy-sweep {
-	from {
-		background-position: -40% 0;
-	}
-	to {
-		background-position: 140% 0;
-	}
 }
 
 .title {
@@ -1131,35 +1107,10 @@ kbd {
 	border-color: var(--line-strong);
 }
 
-/* A call at work: light runs down its left edge, accent to spark. */
+/* A call at work: its left edge takes the accent. The spinner in its header is the one thing that moves. */
 .tool.running,
 .tool.pending {
-	border-left-width: 0;
-	padding-left: 2px;
-}
-
-.tool.running::before,
-.tool.pending::before {
-	content: "";
-	position: absolute;
-	left: 0;
-	top: 0;
-	bottom: 0;
-	width: 2px;
-	background:
-		linear-gradient(180deg, transparent, var(--accent), var(--spark), transparent) 0 0 / 100% 60% no-repeat,
-		var(--line-strong);
-	animation: scan 1.1s var(--ease-in-out) infinite;
-	z-index: 1;
-}
-
-@keyframes scan {
-	from {
-		background-position: 0 -150%;
-	}
-	to {
-		background-position: 0 250%;
-	}
+	border-left-color: var(--accent);
 }
 
 /* Just finished: the card flashes its success color once. */
@@ -2472,17 +2423,15 @@ button.chip:hover {
 	color: var(--warn);
 }
 
-/* A working session's tile: its bottom edge sweeps. */
+/* A working session's tile: a still underline, accent to spark. */
 .ws.busy::after {
 	content: "";
 	position: absolute;
-	left: 3px;
-	right: 3px;
-	bottom: 2px;
+	left: 8px;
+	right: 8px;
+	bottom: 3px;
 	height: 2px;
-	background: linear-gradient(90deg, transparent, var(--accent), var(--spark), transparent) no-repeat;
-	background-size: 60% 100%;
-	animation: busy-sweep 1.2s var(--ease-in-out) infinite;
+	background: linear-gradient(90deg, var(--accent), var(--spark));
 }
 
 .ws .unread-dot {
@@ -4524,8 +4473,9 @@ textarea.notes {
 	}
 }
 
-.title-main .mini-sweep {
-	flex: none;
+/* Subagents at work, in the top bar: marked, not blinking. */
+.topbar .pulse {
+	animation: none;
 }
 
 .unread-dot {
