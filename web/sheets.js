@@ -4,6 +4,7 @@ import { browserAvailable, displayUrl, setBrowserOpen } from "./browser.js";
 import { Avatar, ChatSheet, jumpToEntry } from "./chat.js";
 import { schedulesAvailable } from "./commands.js";
 import { NotificationsSheet } from "./notify.js";
+import { setArchived } from "./sessions.js";
 import { ShareSheet } from "./share.js";
 import { actions, api, attempt, canSteer, closeSheet, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import { chooseTheme, isPinned, paletteOf, prefs, setPrefs, THEMES, themeIds, themeVars, togglePin, varsStyle } from "./theme.js";
@@ -824,6 +825,8 @@ const SHORTCUTS = [
 	["Alt N", "New session"],
 	["Alt B", "Open or close the browser"],
 	["Mod B", "Fold or unfold the sidebar"],
+	["Mod Click", "In the sidebar: select a session; drag to select every one you pass"],
+	["Shift Click", "In the sidebar: select a run of sessions"],
 	["Alt", "Hold to see session numbers"],
 	["/", "In the message box: commands"],
 	["?", "This list"],
@@ -878,13 +881,10 @@ function MenuSheet() {
 		item("Copy link", () => copyText(location.href).then(() => notify("info", "Link copied. Other signed-in devices can open it."), () => notify("error", "Could not copy.")))}
 		${conversation && html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download><span>Export as Markdown</span><span class="muted small">the whole history</span></a>`}
 		${session && steer &&
-		item(conversation.archived ? "Unarchive" : "Archive", () =>
-			attempt(async () => {
-				await actions.updateSession(conversation.id, { archived: !conversation.archived });
-				closeSheet();
-				if (!conversation.archived) navigate(null);
-			}),
-		)}
+		item(conversation.archived ? "Unarchive" : "Archive", () => {
+			closeSheet();
+			setArchived([conversation.id], !conversation.archived);
+		})}
 		${view.subagents.length > 0 &&
 		html`<div class="group"><div class="group-title">Subagents</div>${view.subagents.map((agent) =>
 			item(html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`, () => navigate(agent.conversationId), agent.busy ? "working" : "idle"),

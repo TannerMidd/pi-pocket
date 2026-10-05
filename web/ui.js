@@ -300,6 +300,8 @@ const ICONS = {
 	swatch: "M4 4h7v16H4zM11 9l6-4 3 5-9 6M11 16h9v4h-9",
 	home: "M3 11l9-7 9 7M5 10v10h14V10",
 	archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
+	unarchive: "M3 4h18v4H3zM5 8v12h14V8M12 18v-6M9 15l3-3 3 3",
+	check: "M5 12l5 5L20 7",
 	logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
 	globe: "M12 21a9 9 0 100-18 9 9 0 000 18zM3.5 9h17M3.5 15h17M12 3a14 14 0 010 18M12 3a14 14 0 000 18",
 	reload: "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",

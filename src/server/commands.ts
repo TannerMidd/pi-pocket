@@ -171,9 +171,12 @@ export class Commands {
 			const sessions = await tx.doc(SessionsDoc);
 			const meta = sessions.items[String(id)];
 			if (meta === undefined) throw new HttpError(404, "Not a session");
-			if (patch.title !== undefined) meta.title = patch.title.trim().slice(0, MAX_TITLE) || undefined;
+			// A rename moves the session up the list. Archiving does not: brought back, or undone, it returns to where it was.
+			if (patch.title !== undefined) {
+				meta.title = patch.title.trim().slice(0, MAX_TITLE) || undefined;
+				meta.updatedAt = Date.now();
+			}
 			if (patch.archived !== undefined) meta.archived = patch.archived;
-			meta.updatedAt = Date.now();
 		}, context);
 		const title = patch.title?.trim().slice(0, MAX_TITLE);
 		if (title !== undefined && title !== "" && title !== before?.title) await app.collab.activity(id, user, `renamed the session to “${title}”`);

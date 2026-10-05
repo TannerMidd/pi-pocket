@@ -58,7 +58,7 @@ Each default-exports `(host: PocketHost) => Extension | Extension[]` and is inst
 | `commands.js` | Slash commands and prompt templates |
 | `sheets.js` | The menu and every sheet |
 | `chat.js` | People panel: chat, pins, notes |
-| `sessions.js` | Session list (sidebar, drawer), the folded rail, the wide home screen, sign-in |
+| `sessions.js` | Session list (sidebar, drawer), selecting rows and archiving them with undo (`setArchived`), the folded rail, the wide home screen, sign-in |
 | `notify.js`, `sw.js` | Push, the icon badge, approvals from notifications, shares |
 | `share.js` | Share to Pi |
 | `ui.js` | htm binding, Markdown, icons, `Sheet`, `Diff`, `usePresence` (animate out), `useSlide` (sliding indicators) |
