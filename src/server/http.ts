@@ -712,8 +712,35 @@ export function createHandler(options: HttpOptions) {
 			if (third === "changes" && fourth === "diff" && method === "GET") {
 				return send(response, 200, await app.changeDiff(id, user, url.searchParams.get("path") ?? ""), "text/plain; charset=utf-8");
 			}
+			// The folder's files for `@` mentions. A browser that has the newest list says so with `since` and gets only
+			// that; a whole list goes compressed when the browser takes it so.
+			if (third === "files" && method === "GET") {
+				const listing = await app.fileList(id, user);
+				if (url.searchParams.get("since") === listing.version) return json(response, 200, { version: listing.version, same: true });
+				if (!/\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""))) return send(response, 200, listing.json, "application/json");
+				return send(response, 200, await listing.gzipped(), "application/json", { "content-encoding": "gzip", vary: "accept-encoding" });
+			}
+			// Prompt templates and skills, for the message box's slash commands.
 			if (third === "prompts" && method === "GET") {
-				return json(response, 200, app.promptTemplates(id).map(({ name, description, argumentHint }) => ({ name, description, ...(argumentHint === undefined ? {} : { argumentHint }) })));
+				const templates = app.promptTemplates(id).map(({ name, description, argumentHint }) => ({ name, description, ...(argumentHint === undefined ? {} : { argumentHint }) }));
+				const skills = app.skillCommands(id).map(({ name, description }) => ({ name: `skill:${name}`, description, argumentHint: "[what to do]", skill: true }));
+				return json(response, 200, [...templates, ...skills]);
+			}
+			if (third === "view" && method === "GET") {
+				const requested = url.searchParams.get("path") ?? "";
+				if (requested.trim() === "") throw new HttpError(400, "path is required");
+				return json(response, 200, await app.viewFile(id, user, requested));
+			}
+			if (third === "changes" && fourth === "revert" && method === "POST") {
+				const body = await readJson<{ path?: unknown }>(request);
+				if (typeof body.path !== "string" || body.path === "") throw new HttpError(400, "path is required");
+				await app.revertChange(id, user, body.path);
+				return json(response, 200, { ok: true });
+			}
+			if (third === "shell" && fourth === undefined && method === "POST") return json(response, 200, await app.shell.start(id, user, await readJson(request)));
+			if (third === "shell" && fourth !== undefined && parts[4] === "stop" && method === "POST") {
+				await app.shell.stop(id, user, Number(fourth));
+				return json(response, 200, { ok: true });
 			}
 			if (third === "history" && method === "GET") {
 				return json(response, 200, await app.history(id, Number(url.searchParams.get("before") ?? Number.MAX_SAFE_INTEGER)));

@@ -4,13 +4,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { personColor } from "./chat.js";
 import { actions, attempt, canSteer, collab, discuss, isRow, navigate, openSheet, store, TRANSCRIPT_ROWS } from "./store.js";
-import { ATTACHMENTS_HEADING, Boot, Diff, entryImageUrl, fileUrl, html, Icon, Markdown, plainText, replyText, Spinner, Thinking, Thumb } from "./ui.js";
+import { ATTACHMENTS_HEADING, Boot, Diff, entryImageUrl, fileUrl, html, Icon, Markdown, openFile, plainText, replyText, Spinner, Thinking, Thumb } from "./ui.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
 /** How a scheduled message starts (see src/server/schedules.ts). */
 const SCHEDULED = "[scheduled] ";
 /** A goal's check that did not pass, as Pi is told about it (see src/server/extensions/goals.ts): what, then its output. */
 const GOAL_CHECK = /^\[goal\] `([\s\S]*?)` (still fails|was cut off by a server restart) \(([^)]*)\)\. ([\s\S]*)$/;
+/** A skill run with `/skill:name`, as Pi gets it (see `expandSkillCommand` in src/server/prompts.ts): its name, file, and the request. */
+const SKILL = /^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
+/** An @mention of a file or folder in a message, as the message box writes it. */
+const MENTION = /(^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g;
 /** One line of the attachment list the server adds to a message: `- path (name, mime, size bytes)`. */
 const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)$/;
 
@@ -49,6 +53,24 @@ function openMessage(event, entryId) {
  */
 let settledFor = null;
 
+/** A message's text with its @mentions of files as buttons that open them. Mentions of people stay text. */
+function MentionedText({ text }) {
+	const parts = [];
+	let last = 0;
+	for (const match of text.matchAll(MENTION)) {
+		const quoted = match[2] !== undefined;
+		const path = quoted ? match[2] : match[3].replace(/[.,;:!?)\]}'`]+$/, "");
+		if (!quoted && !/[./]/.test(path)) continue;
+		const at = match.index + match[1].length;
+		const written = quoted ? `@"${path}"` : `@${path}`;
+		parts.push(text.slice(last, at));
+		parts.push(html`<button class="file-mention" title=${`Open ${path}`} onClick=${() => openFile(path)}>${written}</button>`);
+		last = at + written.length;
+	}
+	parts.push(text.slice(last));
+	return parts;
+}
+
 function UserEntry({ entry, view, users }) {
 	const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 	const report = REPORT.exec(entry.text);
@@ -77,13 +99,20 @@ function UserEntry({ entry, view, users }) {
 	const scheduled = written.startsWith(SCHEDULED);
 	const body = scheduled ? written.slice(SCHEDULED.length) : written;
 	const files = attachments ? parseAttachments(attachments) : [];
+	// `/skill:name request`: the skill by name, and the request.
+	const skill = SKILL.exec(body);
 	const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
 	const others = files.filter((file) => !pictures.includes(file));
 	return html`<div class=${`user-row ${fresh ? "enter" : ""}`} id=${`entry-${entry.id}`}>
 		<div class="bubble tappable" title="Edit, send again, or copy" onClick=${(event) => openMessage(event, entry.id)}>
 			${(author || scheduled) &&
 			html`<div class="author" style=${view.authors?.[entry.id] ? `color:${personColor(view.authors[entry.id])}` : ""}>${author ?? "Pi"}${scheduled && html`<span class="muted"> · scheduled</span>`}</div>`}
-			${body && html`<div class="user-text">${body}</div>`}
+			${skill && html`<button class="chip skill-chip" title=${skill[2]} onClick=${() => openFile(skill[2])}>⚡ ${skill[1]}</button>`}
+			${(skill ? skill[3] : body) && html`<div class="user-text"><${MentionedText} text=${skill ? skill[3] : body} /></div>`}
+			${entry.files?.length > 0 &&
+			html`<div class="attachments">${entry.files.map(
+				(path) => html`<button class="chip" title=${`Sent with the message: ${path}`} onClick=${() => openFile(path)}>📄 ${path.split("/").pop()}</button>`,
+			)}</div>`}
 			${pictures.length > 0 && html`<div class="thumbs">${pictures.map((file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`)}</div>`}
 			${others.length > 0 && html`<div class="attachments">${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}</div>`}
 			${entry.images > 0 && !attachments && html`<${EntryImages} entryId=${entry.id} count=${entry.images} label="Image" />`}
@@ -199,6 +228,10 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 	if (open) {
 		const clipped = (call.clipped && !full) || (result?.clipped && !full);
 		const parts = [];
+		if ((call.name === "read" || call.name === "write" || call.name === "edit") && typeof args.path === "string" && args.path !== "") {
+			const at = call.name === "read" && args.offset ? `:${args.offset}` : "";
+			parts.push(html`<button class="link small tool-open" onClick=${() => openFile(`${args.path}${at}`)}>Open ${args.path.split("/").pop()} →</button>`);
+		}
 		if (call.name === "bash") parts.push(html`<pre class="cmd">$ ${args.command}</pre>`);
 		if (call.name === "write" && args.content) parts.push(html`<pre class="output">${args.content}</pre>`);
 		if (call.name === "edit") {
@@ -371,8 +404,69 @@ function History({ firstId, results, keepPlace }) {
 	return html`<div class="history">${history.filter(isRow).map((entry) => html`<${Row} key=${entry.id} entry=${entry} results=${results} slots=${NO_SLOTS} approvals=${NO_APPROVALS} deps=${rowDeps(entry, results, NO_SLOTS, NO_APPROVALS)} />`)}</div>`;
 }
 
+/** How a command someone ran ended, when that is worth saying. */
+const SHELL_ENDS = { timeout: "timed out", failed: "could not run", interrupted: "cut off by a restart", stopped: "stopped" };
+/** How many of a command's last lines show before "Show all". */
+const SHELL_LINES = 12;
+
+/** A command someone ran with `!` (or `!!`, which Pi does not see): what it printed, and how it ended. */
+function ShellEntry({ entry }) {
+	const [open, setOpen] = useState(false);
+	const [full, setFull] = useState(null);
+	const output = (full ?? entry.output).replace(/\s+$/, "");
+	const lines = output.split("\n");
+	const long = lines.length > SHELL_LINES;
+	// A long command (a paste in it, say) shows its first lines until opened.
+	const longCommand = entry.command.split("\n").length > 3 || entry.command.length > 240;
+	const end = entry.status === "done" ? (entry.code === 0 ? "" : `exit ${entry.code}`) : SHELL_ENDS[entry.status];
+	return html`<div class="shell-row" id=${`entry-${entry.id}`}>
+		<div class=${`shell-card ${end ? "failed" : ""} ${open ? "open" : ""}`}>
+			<div class="shell-head">
+				<span class="mono shell-command">$ ${entry.command}</span>
+				<span class="muted small">${entry.name}${end ? ` · ${end}` : ""}${entry.context ? "" : " · not shown to Pi"}</span>
+			</div>
+			${output !== "" && html`<pre class="output">${long && !open ? `…\n${lines.slice(-SHELL_LINES).join("\n")}` : output}</pre>`}
+			${(long || longCommand) && html`<button class="link small" onClick=${() => setOpen(!open)}>${open ? "Show less" : long ? `Show all ${lines.length} lines` : "Show all"}</button>`}
+			${entry.truncated && full === null &&
+			html`<button class="link small" onClick=${() =>
+				attempt(async () => {
+					setFull((await actions.fullEntry(entry.id)).output);
+					setOpen(true);
+				})}>Load everything</button>`}
+		</div>
+	</div>`;
+}
+
+/** Something a person did that Pi was told about, such as undoing a file. */
+function NoteEntry({ entry }) {
+	return html`<div class="note-line" id=${`entry-${entry.id}`}>${entry.name} ${entry.text}. <span class="muted">Pi was told.</span></div>`;
+}
+
+/** How long a `!` command's row may wait for its entry: past the server's limit for a command, something went wrong. */
+const PENDING_MS = 11 * 60_000;
+
+/** `!` commands this tab started that have no entry yet: still running, or waiting for Pi to finish its turn. */
+function PendingShells({ conversationId, rows }) {
+	const pending = store.state.pendingShells.filter(
+		(each) => each.conversationId === conversationId && Date.now() - each.at < PENDING_MS && !rows.some((row) => row.kind === "shell" && row.taskId === each.taskId),
+	);
+	return pending.map(
+		(each) => html`<div class="shell-row pending" key=${each.taskId}>
+			<div class="shell-card">
+				<div class="shell-head">
+					<span class="mono shell-command">$ ${each.command}</span>
+					<span class="muted small"><${Spinner} /> running</span>
+					<button class="link small" onClick=${() => attempt(() => actions.stopShell(each.taskId))}>Stop</button>
+				</div>
+			</div>
+		</div>`,
+	);
+}
+
 function EntryView({ entry, results, slots, approvals }) {
 	const { view, users } = store.state;
+	if (entry.kind === "shell") return html`<${ShellEntry} entry=${entry} />`;
+	if (entry.kind === "note") return html`<${NoteEntry} entry=${entry} />`;
 	if (entry.kind === "user") return html`<${UserEntry} entry=${entry} view=${view} users=${users} />`;
 	if (entry.kind === "assistant") return html`<${AssistantEntry} entry=${entry} results=${results} slots=${slots} approvals=${approvals} />`;
 	if (entry.kind === "compaction" || entry.kind === "reset") return html`<${Divider} entry=${entry} />`;
@@ -484,6 +578,14 @@ export function Transcript() {
 		return () => element.removeEventListener("load", onLoad, true);
 	}, [view.conversation?.id]);
 
+	// A `!` command whose entry arrived is no longer pending.
+	const shells = rows.filter((row) => row.kind === "shell").length;
+	useEffect(() => {
+		const pending = store.state.pendingShells;
+		const left = pending.filter((each) => Date.now() - each.at < PENDING_MS && !rows.some((row) => row.kind === "shell" && row.taskId === each.taskId));
+		if (left.length !== pending.length) store.set({ pendingShells: left });
+	}, [shells]);
+
 	const onScroll = () => {
 		const element = scroller.current;
 		const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 60;
@@ -546,6 +648,7 @@ export function Transcript() {
 				<p>${conversation.kind === "subagent" ? "This subagent has no messages yet." : "Ask anything. Pi works in this session's folder, and keeps working if the server restarts."}</p>
 			</div>`}
 			${rows.slice(start).map((entry) => html`<${Row} key=${entry.id} entry=${entry} results=${results} slots=${slots} approvals=${approvals} deps=${rowDeps(entry, results, slots, approvals)} />`)}
+			<${PendingShells} conversationId=${conversation.id} rows=${rows} />
 			${partial.length > 0 &&
 			html`<div class="assistant live"><${AssistantBlocks} blocks=${partial} results=${results} slots=${slots} approvals=${approvals} streaming=${true} /></div>`}
 			${approvals.map((approval) => html`<${ApprovalCard} key=${approval.id} approval=${approval} />`)}

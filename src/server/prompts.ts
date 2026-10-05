@@ -6,10 +6,13 @@
  *
  * This follows `dist/core/prompt-templates.js` in @earendil-works/pi-coding-agent, which the package does not export:
  * check it against that file when updating Pi.
+ *
+ * Skills are commands too, as `/skill:name [what to do]`: the skill's instructions go to Pi with the request, as
+ * `_expandSkillCommand` in `dist/core/agent-session.js` writes them.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, loadSkills, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { expandHome } from "./paths.ts";
 
 export type PromptTemplate = { name: string; description: string; argumentHint?: string; content: string; path: string };
@@ -120,4 +123,33 @@ export function expandPromptTemplate(text: string, templates: readonly PromptTem
 	if (match === null) return undefined;
 	const template = templates.find((each) => each.name === match[1]);
 	return template === undefined ? undefined : fillTemplate(template.content, parseArguments(match[2] ?? ""));
+}
+
+/** A skill Pi has in a session's folder, to run as `/skill:name`. */
+export type SkillCommand = { name: string; description: string; path: string; baseDir: string };
+
+/** The skills a session in `cwd` has, as Pi loads them. `paths` are Pi's configured extra ones. */
+export function loadSkillCommands(cwd: string, agentDir: string, paths: readonly string[]): SkillCommand[] {
+	try {
+		const { skills } = loadSkills({ cwd, agentDir, skillPaths: [...paths], includeDefaults: true });
+		return skills.map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath, baseDir: skill.baseDir }));
+	} catch {
+		return [];
+	}
+}
+
+/** `/skill:name request` with the skill's instructions, as Pi sends it; undefined when the text is not one. */
+export function expandSkillCommand(text: string, skills: readonly SkillCommand[]): string | undefined {
+	const match = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+	const skill = match === null ? undefined : skills.find((each) => each.name === match[1]);
+	if (skill === undefined) return undefined;
+	let body: string;
+	try {
+		body = (parseFrontmatter(readFileSync(skill.path, "utf8")) as { body: string }).body.trim();
+	} catch {
+		return undefined;
+	}
+	const block = `<skill name="${skill.name}" location="${skill.path}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+	const request = (match![2] ?? "").trim();
+	return request === "" ? block : `${block}\n\n${request}`;
 }

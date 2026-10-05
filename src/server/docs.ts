@@ -301,3 +301,16 @@ export const BrowserDoc = defineDoc<{ url?: string; viewport?: { width: number; 
 	fork: "current",
 	initial: () => ({}),
 });
+
+/**
+ * The `!` commands people started here, by request id (`user:request`), oldest first: a request sent again after its
+ * reply was lost runs its command once, also across a restart. A fork starts without them.
+ */
+export const ShellRequestsDoc = defineDoc<{ items: Record<string, number> }>({
+	kind: "pocket.shell-requests",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ items: {} }),
+});

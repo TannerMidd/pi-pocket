@@ -19,7 +19,7 @@ Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.m
 | `app.ts` | `PocketApp`: the harness, the commit listener that feeds everything else, connected tabs, access checks (`canSee`, `requireSteer`, `requireDriver`), the session list, `hello`, uploads |
 | `room.ts` | One conversation's live view for its tabs: Pi Durable's view plus `ROOM_DOCS`, sent every 90 ms as changes |
 | `projection.ts` | Entries as compact JSON for browsers; `usageCost` |
-| `commands.ts` | What people ask of Pi: sessions, messages, forks and resends, model and folder, reset, instructions, plan mode, goals, schedules, worktrees |
+| `commands.ts` | What people ask of Pi: sessions, messages (with skills, templates, and mentioned files expanded), forks and resends, model and folder, reset, instructions, plan mode, goals, schedules, worktrees, notes Pi is told |
 | `collab.ts` | Chat, activity lines (`addActivity`), reactions, pins, notes, typing, take turns |
 | `alerts.ts` | Push notifications: who hears about what |
 | `http.ts` | Static files, the `/api` routes, the event stream (`/api/events`, or `/api/poll`), uploads, artifacts, invites |
@@ -32,9 +32,12 @@ Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.m
 | `schedules.ts`, `when.ts` | Scheduled messages (a durable task) and their time grammar |
 | `goals.ts` | "Done when" checks |
 | `spend.ts` | Cost per conversation and person; limits |
-| `changes.ts`, `worktrees.ts`, `git.ts` | The Changes sheet, per-session worktrees, and the git runner both use |
+| `files.ts` | The files in a session's folder for `@` mentions: git's list, or a capped walk; kept briefly per folder, versioned, and compressed once. The file viewer's reads, and the paths a message mentions |
+| `shell.ts` | `!` and `!!` commands: a background task per command that runs it and writes a `pocket.shell` entry; a restart cuts it off rather than running it again |
+| `titles.ts` | A short title for a session with a long first message, from a small model of its provider |
+| `changes.ts`, `worktrees.ts`, `git.ts` | The Changes sheet (and undoing a file there), per-session worktrees, and the git runner both use |
 | `running.ts` | Running now, from Pi Durable's task graph |
-| `prompts.ts` | Pi's prompt templates as slash commands |
+| `prompts.ts` | Pi's prompt templates and skills (`/skill:name`) as slash commands |
 | `providers.ts`, `net.ts` | Provider sign-ins; HTTP settings for provider streams |
 | `lancet.ts` | Loads Lancet Guard from Pi's install |
 | `push.ts` | Web Push without dependencies (RFC 8291, 8292) |
@@ -54,9 +57,11 @@ Each default-exports `(host: PocketHost) => Extension | Extension[]` and is inst
 | `store.js` | State, the event stream (SSE, or long polling when a tunnel holds it back), `api()`, `actions` |
 | `app.js` | Layout (tiled windows), top bar, notices, keyboard shortcuts, routing |
 | `transcript.js` | Messages, tool cards, approvals, breadcrumbs |
-| `composer.js` | Message box, chips, plan and goal bars |
+| `composer.js` | Message box, chips, plan and goal bars, `@` file suggestions, `!` commands, ↑ and Ctrl+R history, long-paste placeholders |
+| `history.js` | What this browser sent, for ↑ and Ctrl+R |
+| `files.js` | `@` mentions: the folder's file list, fetched once and checked in the background, and matched here as people type |
 | `commands.js` | Slash commands and prompt templates |
-| `sheets.js` | The menu and every sheet |
+| `sheets.js` | The menu and every sheet, the file viewer and find in session among them |
 | `chat.js` | People panel: chat, pins, notes |
 | `sessions.js` | Session list (sidebar, drawer), selecting rows and archiving them with undo (`setArchived`), the folded rail, the wide home screen, sign-in |
 | `notify.js`, `sw.js` | Push, the icon badge, approvals from notifications, shares |

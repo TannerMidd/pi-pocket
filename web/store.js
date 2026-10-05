@@ -70,6 +70,10 @@ export const store = {
 		composerInsert: null,
 		/** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
 		templates: null,
+		/** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
+		filesLoaded: 0,
+		/** `!` commands this tab started that have no entry yet: `{ taskId, command, conversationId, at }`. */
+		pendingShells: [],
 		/** The session's browser page as the server last told: address, title, loading, size (`browser.js`). */
 		browser: null,
 		/** The Browser panel shows; kept per tab, so the reload after a live edit keeps it. */
@@ -487,8 +491,16 @@ export async function start() {
 const current = () => store.state.conversationId;
 
 export const actions = {
-	submit: (text, attachments, mode) =>
-		api(`c/${current()}/submit`, { text, attachments, mode, requestId: uid() }),
+	/** `inlineFiles`: the files the message mentions with @ go along with it. */
+	submit: (text, attachments, mode, inlineFiles = false) =>
+		api(`c/${current()}/submit`, { text, attachments, mode, requestId: uid(), ...(inlineFiles ? { inlineFiles } : {}) }),
+	/** Run a command in the session's folder (`!`); `context: false` keeps it from Pi (`!!`). */
+	shell: (command, context, requestId = uid()) => api(`c/${current()}/shell`, { command, context, requestId }),
+	stopShell: (taskId) => api(`c/${current()}/shell/${taskId}/stop`, {}),
+	/** A file or folder for the viewer. */
+	view: (path) => api(`c/${current()}/view?path=${encodeURIComponent(path)}`),
+	/** Undo the uncommitted changes to one file. */
+	revert: (path) => api(`c/${current()}/changes/revert`, { path }),
 	abort: () => api(`c/${current()}/abort`, {}),
 	chat: (text, quote) => api(`c/${current()}/chat`, { text, requestId: uid(), ...(quote ? { quote: { entryId: quote.entryId } } : {}) }),
 	react: (entryId, emoji) => api(`c/${current()}/react`, { entryId, emoji }),
@@ -524,7 +536,7 @@ export const actions = {
 };
 
 /** Entries that show as transcript rows. Tool results show inside their call's card instead. */
-export const isRow = (entry) => entry.kind === "user" || entry.kind === "assistant" || entry.kind === "compaction" || entry.kind === "reset";
+export const isRow = (entry) => ["user", "assistant", "compaction", "reset", "shell", "note"].includes(entry.kind);
 
 /**
  * Show the transcript from this entry down when it is above the rows shown now, as for a jump to a pinned or quoted
@@ -546,9 +558,12 @@ export function openSheet(sheet) {
 	store.set({ sheet, drawer: false });
 }
 
-/** Put text into the message box to Pi (after what is there), and files to attach, and close any sheet so it shows. */
-export function insertIntoComposer(text, files = []) {
-	store.set((state) => ({ sheet: null, composerInsert: { text, files, n: (state.composerInsert?.n ?? 0) + 1 } }));
+/**
+ * Put text into the message box to Pi (after what is there: on a new paragraph, or with `inline`, after a space), and
+ * files to attach, and close any sheet so it shows.
+ */
+export function insertIntoComposer(text, files = [], { inline = false } = {}) {
+	store.set((state) => ({ sheet: null, composerInsert: { text, files, inline, n: (state.composerInsert?.n ?? 0) + 1 } }));
 }
 
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */

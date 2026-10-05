@@ -106,6 +106,11 @@ export function transcriptMarkdown(input: ExportInput): string {
 		if (entry.kind === "user") sections.push(userMarkdown(entry, input.authors[entry.id]));
 		else if (entry.kind === "compaction") sections.push(`<details><summary>Context compacted</summary>\n\n${entry.summary}\n\n</details>`);
 		else if (entry.kind === "reset") sections.push(["---", "_New context._", entry.text ?? ""].filter((line) => line !== "").join("\n\n"));
+		else if (entry.kind === "note") sections.push(`_${entry.name} ${entry.text}._`);
+		else if (entry.kind === "shell") {
+			const fence = entry.output.includes("```") ? "````" : "```";
+			sections.push(`**${entry.name}** ran \`${entry.command}\`${entry.context ? "" : " (not shown to Pi)"}:\n\n${fence}\n${entry.output.replace(/\s+$/, "")}\n${fence}`);
+		}
 		// Tool results show inside their calls; system entries are not for people.
 		else continue;
 		piSpeaking = false;
