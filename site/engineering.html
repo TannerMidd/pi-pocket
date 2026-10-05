@@ -209,7 +209,7 @@
 					<article class="card">
 						<code>request ids</code>
 						<h3>Sent once</h3>
-						<p>Every message to Pi has a request id, which also says whose work it is. A retried send, a resend, or a scheduled message sent again after a restart finds the one already there.</p>
+						<p>Every message to Pi has a request id, which also says whose work it is. A retried send, a resend, a <code>!</code> command, or a scheduled message sent again after a restart finds the one already there.</p>
 					</article>
 					<article class="card">
 						<code>memos</code>
@@ -219,7 +219,7 @@
 					<article class="card">
 						<code>replay: "safe"</code>
 						<h3>Rerun only when harmless</h3>
-						<p>A tool call cut off by a restart runs again only if running it twice is harmless. Otherwise the model is told it was interrupted and checks what happened.</p>
+						<p>A tool call cut off by a restart runs again only if running it twice is harmless. Otherwise the model is told it was interrupted and checks what happened. A <code>!</code> command someone ran is never run twice: its entry says it was cut off.</p>
 					</article>
 					<article class="card">
 						<code>durable tasks</code>
@@ -264,6 +264,7 @@
 							<tr><td><code>pocket.subagents</code></td><td>Named subagents and the tasks reporting their answers</td><td>starts empty</td></tr>
 							<tr><td><code>pocket.schedules</code></td><td>Scheduled messages</td><td>starts empty</td></tr>
 							<tr><td><code>pocket.goal</code></td><td>"Done when": the check and its tries</td><td>starts empty</td></tr>
+							<tr><td><code>pocket.shell-requests</code></td><td>The <code>!</code> commands people started, by request id, so one sent again runs once</td><td>starts empty</td></tr>
 							<tr><td><code>pocket.spend</code></td><td>Spend per person, and what was counted. One for the server.</td><td>—</td></tr>
 						</tbody>
 					</table>
