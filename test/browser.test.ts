@@ -3,14 +3,15 @@
 import { type App, cleanUp, fakeTab, lastText, newSession, openApp, owner, root, say, scriptedModel, until } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import { Browsers, findBrowser, normalizeUrl, parseKeys, presetOf, viewportFrom } from "../src/server/browser.ts";
+import { Browsers, findBrowser, normalizeUrl, parseKeys, presetOf, profileFolder, snapOf, viewportFrom } from "../src/server/browser.ts";
 import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
 
 test("addresses as people type them become URLs the browser may open", () => {
@@ -30,6 +31,63 @@ test("addresses as people type them become URLs the browser may open", () => {
 	assert.equal(normalizeUrl("/tmp/a b.html", { trusted: true }), "file:///tmp/a%20b.html");
 	assert.equal(normalizeUrl("data:text/html,hi", { trusted: true }), "data:text/html,hi");
 	assert.equal(normalizeUrl("javascript:alert(1)", { trusted: true }), undefined);
+	assert.equal(normalizeUrl("~/site/index.html", { trusted: true, windows: false }), `file://${homedir()}/site/index.html`);
+	// Backslashes and lone dots make no host.
+	for (const refused of [".\\index.html", "..\\site", "\\\\server\\share", ".", "..", "-bad-.com", "a..b.com"]) {
+		assert.equal(normalizeUrl(refused, { trusted: true, windows: false }), undefined, refused);
+	}
+});
+
+test("on Windows, paths as Windows writes them open as files", () => {
+	const windows = { trusted: true, windows: true, cwd: "C:\\work" };
+	assert.equal(normalizeUrl("C:\\site\\index.html", windows), "file:///C:/site/index.html");
+	assert.equal(normalizeUrl("c:/site/a b.html", windows), "file:///c:/site/a%20b.html");
+	assert.equal(normalizeUrl(".\\index.html", windows), "file:///C:/work/index.html");
+	assert.equal(normalizeUrl("..\\other\\index.html", windows), "file:///C:/other/index.html");
+	assert.equal(normalizeUrl("./index.html", windows), "file:///C:/work/index.html");
+	assert.equal(normalizeUrl("\\\\server\\share\\index.html", windows), "file://server/share/index.html");
+	assert.equal(normalizeUrl("file:///C:/site/index.html", windows), "file:///C:/site/index.html");
+	// Web addresses read the same; only people who may open files get paths.
+	assert.equal(normalizeUrl("localhost:5173", windows), "http://localhost:5173/");
+	assert.equal(normalizeUrl("C:\\site\\index.html", { windows: true }), undefined);
+	assert.equal(normalizeUrl(".\\index.html", { windows: true }), undefined);
+});
+
+test("a snap browser comes last, and keeps its profile where a snap may write", () => {
+	const dir = mkdtempSync(join(root, "snap-"));
+	{
+		const snapBin = join(dir, "snap", "bin");
+		const bin = join(dir, "bin");
+		const other = join(dir, "other");
+		for (const folder of [snapBin, bin, other]) mkdirSync(folder, { recursive: true });
+		const executable = (path: string, text: string) => {
+			writeFileSync(path, text);
+			chmodSync(path, 0o755);
+		};
+		// Ubuntu's chromium-browser: a script that runs the snap.
+		executable(join(bin, "chromium-browser"), `#!/bin/sh\nif ! [ -x ${snapBin}/chromium ]; then echo "install the snap" >&2; exit 1; fi\nexec ${snapBin}/chromium "$@"\n`);
+		executable(join(snapBin, "chromium"), "\u007fELF");
+		executable(join(other, "google-chrome-stable"), "\u007fELF");
+		const env = (path: string) => ({ PATH: path });
+		const only = { snapBin, places: [] };
+
+		assert.deepEqual(snapOf(join(bin, "chromium-browser"), snapBin), { name: "chromium", command: join(snapBin, "chromium") });
+		assert.deepEqual(snapOf(join(snapBin, "chromium"), snapBin), { name: "chromium", command: join(snapBin, "chromium") });
+		assert.equal(snapOf(join(other, "google-chrome-stable"), snapBin), undefined);
+		if (process.platform === "linux") {
+			// Chrome installed otherwise wins, though the snap's script comes first on the PATH.
+			assert.equal(findBrowser(env(`${bin}:${other}`), only), join(other, "google-chrome-stable"));
+			// Only the snap: its own command, not the script.
+			const onlySnap = findBrowser(env(bin), only);
+			assert.ok(onlySnap === join(snapBin, "chromium") || onlySnap?.includes("ms-playwright"), String(onlySnap));
+		}
+
+		// Its profile: in the snap's own folder, one per data folder, and never in a hidden folder of the home folder.
+		const profile = profileFolder(join(snapBin, "chromium"), join(homedir(), ".pi-pocket"), snapBin);
+		assert.match(profile, new RegExp(`^${homedir()}/snap/chromium/common/pi-pocket/[0-9a-f]{12}$`));
+		assert.notEqual(profile, profileFolder(join(snapBin, "chromium"), join(homedir(), ".pi-pocket-other"), snapBin));
+		assert.equal(profileFolder(join(other, "google-chrome-stable"), "/data", snapBin), "/data/browser/profile");
+	}
 });
 
 test("viewports and keys are read the way people and Pi write them", () => {

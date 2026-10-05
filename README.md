@@ -135,7 +135,7 @@ Changes to `web/` reload every open browser. Changes to `src/server/extensions/`
 - Pi's own extensions are not supported: Pi Pocket runs its own extensions on Pi Durable, and drop-ins from `~/.pi-pocket/extensions/`. Pi's prompt templates work as slash commands.
 - A git worktree keeps a session's files apart; it is not a sandbox. Pi can still reach everything you can.
 - Artifacts run in an opaque-origin sandbox, so `localStorage` and cookies are unavailable inside them.
-- The browser needs Chromium, Chrome, Brave, or Edge on the server. Its pages live in memory: a restart opens each one again at its last address, but not what was typed into it. Each session's cookies are its own and last until the page closes.
+- The browser needs Chromium, Chrome, Brave, or Edge on the server. Its pages live in memory: a restart opens each one again at its last address, but not what was typed into it. Each session's cookies are its own and last until the page closes. A browser installed as a snap (Ubuntu's Chromium) is used only when there is no other; it cannot open files outside your home folder. The list of servers running on the machine is Linux-only. Tested on Linux so far.
 
 ## Credits
 

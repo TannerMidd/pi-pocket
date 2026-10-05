@@ -10,10 +10,11 @@
  * from its saved state when its page is next opened.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { basename, delimiter, join, posix, win32 } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
@@ -83,20 +84,31 @@ function localHost(host: string): boolean {
 	);
 }
 
+/** Paths as people write them: absolute, from the home folder, or from the current folder. */
+const POSIX_PATH = /^(\/|~\/|~$|\.\.?\/)/;
+/** On Windows also `C:\site`, `C:/site`, `\\server\share`, `.\site`, and `~\site`. */
+const WINDOWS_PATH = /^(\/|\\|[a-z]:[\\/]|~[\\/]|~$|\.\.?[\\/])/i;
+
 /**
  * An address as people and Pi type it, as a URL the browser may open. `localhost:5173` and other local addresses
  * become http, other bare host names https. With `trusted` (Pi, or the owner), paths to files on this machine become
  * file URLs, and file and data URLs are allowed. Undefined for anything else, such as `javascript:` or `chrome:` URLs.
+ * `windows` reads paths as Windows does (the default on Windows).
  */
-export function normalizeUrl(input: string, options: { trusted?: boolean; cwd?: string } = {}): string | undefined {
+export function normalizeUrl(input: string, options: { trusted?: boolean; cwd?: string; windows?: boolean } = {}): string | undefined {
 	const text = input.trim();
 	if (text === "") return undefined;
 	if (text === "about:blank") return text;
-	if (/^(\/|~\/|~$|\.\.?\/)/.test(text)) {
+	const windows = options.windows ?? process.platform === "win32";
+	if ((windows ? WINDOWS_PATH : POSIX_PATH).test(text)) {
 		if (options.trusted !== true) return undefined;
-		const path = text.startsWith("~") ? join(homedir(), text.slice(1)) : resolve(options.cwd ?? process.cwd(), text);
-		return pathToFileURL(path).href;
+		const paths = windows ? win32 : posix;
+		const home = text === "~" || /^~[\\/]/.test(text);
+		const path = paths.resolve(options.cwd ?? process.cwd(), home ? homedir() + text.slice(1) : text);
+		return pathToFileURL(path, { windows }).href;
 	}
+	// A backslash is no part of a web address: browsers read it as a slash, which turns `.\site` into a host named ".".
+	if (/^[^:]*\\/.test(text)) return undefined;
 	// `host:port`, which looks like a scheme followed by a path.
 	const hostPort = /^([^\s/:?#]+|\[[0-9a-f:]+\]):(\d{1,5})(?=$|[/?#])/i.exec(text);
 	const scheme = hostPort === null ? /^([a-z][a-z0-9+.-]*):/i.exec(text)?.[1]?.toLowerCase() : undefined;
@@ -118,7 +130,11 @@ export function normalizeUrl(input: string, options: { trusted?: boolean; cwd?: 
 	}
 	try {
 		const url = new URL(candidate);
-		if ((url.protocol === "http:" || url.protocol === "https:") && url.hostname === "") return undefined;
+		if (url.protocol === "http:" || url.protocol === "https:") {
+			// A name made of labels (letters, digits, hyphens) with dots between, or an IPv6 address.
+			const host = url.hostname;
+			if (!host.startsWith("[") && !/^[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*\.?$/i.test(host)) return undefined;
+		}
 		return url.href;
 	} catch {
 		return undefined;
@@ -172,17 +188,81 @@ function playwrightChromium(): string | undefined {
 	return undefined;
 }
 
+/** Where snapd puts the commands that run snaps. */
+const SNAP_BIN = "/snap/bin";
+
+/**
+ * The snap a browser command runs, if it is one: `/snap/bin/chromium`, or a script that runs one, as Ubuntu's
+ * `/usr/bin/chromium-browser` is. `command` is what to run: the snap's own command, which the script would run.
+ */
+export function snapOf(path: string, snapBin = SNAP_BIN): { name: string; command: string } | undefined {
+	if (path.startsWith(`${snapBin}/`)) return { name: basename(path), command: path };
+	if (path.startsWith("/snap/")) return { name: path.split("/")[2] ?? "", command: path };
+	let head = "";
+	try {
+		const fd = openSync(path, "r");
+		try {
+			const buffer = Buffer.alloc(4096);
+			head = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0)).toString("latin1");
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		return undefined;
+	}
+	if (!head.startsWith("#!")) return undefined;
+	const escaped = snapBin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const name = new RegExp(`${escaped}/([\\w.-]+)`).exec(head)?.[1];
+	return name === undefined ? undefined : { name, command: join(snapBin, name) };
+}
+
+/**
+ * Where the browser keeps its profile. A snap may not write to hidden folders in the home folder, as the data folder
+ * usually is (`~/.pi-pocket`): its profile goes in the snap's own folder instead, one per data folder.
+ */
+export function profileFolder(executable: string, dataDir: string, snapBin = SNAP_BIN): string {
+	const snap = snapOf(executable, snapBin);
+	if (snap === undefined) return join(dataDir, "browser", "profile");
+	const id = createHash("sha256").update(dataDir).digest("hex").slice(0, 12);
+	return join(homedir(), "snap", snap.name, "common", "pi-pocket", id);
+}
+
 /**
  * A Chromium-based browser to run: `PI_POCKET_BROWSER` if set, else Chromium, Chrome, Brave, or Edge where they are
  * usually installed, else a Playwright download. On Linux the real Chromium binary comes before the launcher scripts
- * distributions put on the PATH, which add the desktop's own flags and extensions.
+ * distributions put on the PATH, which add the desktop's own flags and extensions. A snap comes last (Ubuntu's
+ * Chromium is one): it cannot open files outside the home folder, so a browser installed otherwise is the better choice.
  */
-export function findBrowser(env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function findBrowser(env: NodeJS.ProcessEnv = process.env, options: { snapBin?: string; places?: readonly string[] } = {}): string | undefined {
 	const configured = env.PI_POCKET_BROWSER?.trim();
 	if (configured) return isFile(configured) ? configured : undefined;
+	const snapBin = options.snapBin ?? SNAP_BIN;
+	const candidates = [...(options.places ?? installPlaces(env))];
+	const names = ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome", "brave-browser", "brave", "microsoft-edge-stable", "microsoft-edge"];
+	const extension = process.platform === "win32" ? ".exe" : "";
+	for (const folder of (env.PATH ?? "").split(delimiter)) {
+		if (folder === "") continue;
+		for (const name of names) candidates.push(join(folder, name + extension));
+	}
+	let snap: string | undefined;
+	for (const candidate of candidates) {
+		if (!isFile(candidate)) continue;
+		const found = process.platform === "linux" ? snapOf(candidate, snapBin) : undefined;
+		if (found === undefined) return candidate;
+		// A script for a snap that is not installed only says so.
+		if (snap === undefined && isFile(found.command)) snap = found.command;
+	}
+	return playwrightChromium() ?? snap;
+}
+
+/** Where browsers are usually installed on this system, besides the PATH. */
+function installPlaces(env: NodeJS.ProcessEnv): string[] {
 	const candidates: string[] = [];
 	if (process.platform === "darwin") {
-		for (const app of ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge"]) candidates.push(`/Applications/${app}.app/Contents/MacOS/${app}`);
+		// Installed for everyone, or for this user alone.
+		for (const folder of ["/Applications", join(homedir(), "Applications")]) {
+			for (const app of ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge"]) candidates.push(join(folder, `${app}.app`, "Contents", "MacOS", app));
+		}
 	} else if (process.platform === "win32") {
 		for (const base of [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA]) {
 			if (base === undefined) continue;
@@ -191,13 +271,7 @@ export function findBrowser(env: NodeJS.ProcessEnv = process.env): string | unde
 	} else {
 		candidates.push("/usr/lib/chromium/chromium", "/usr/lib/chromium-browser/chromium-browser");
 	}
-	const names = ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome", "brave-browser", "brave", "microsoft-edge-stable", "microsoft-edge"];
-	const extension = process.platform === "win32" ? ".exe" : "";
-	for (const folder of (env.PATH ?? "").split(delimiter)) {
-		if (folder === "") continue;
-		for (const name of names) candidates.push(join(folder, name + extension));
-	}
-	return candidates.find(isFile) ?? playwrightChromium();
+	return candidates;
 }
 
 // ─── The DevTools protocol over a pipe ─────────────────────────────────
@@ -1608,7 +1682,7 @@ export class Browsers {
 		}
 		if (this.#closing) throw new BrowserError("The server is stopping.");
 		const extra = [...(this.#options.args ?? []), ...(process.env.PI_POCKET_BROWSER_ARGS?.split(/\s+/).filter(Boolean) ?? [])];
-		const launching = Chromium.launch(executable, join(this.#options.dataDir, "browser", "profile"), extra);
+		const launching = Chromium.launch(executable, profileFolder(executable, this.#options.dataDir), extra);
 		this.#chromium = launching;
 		launching.catch(() => {
 			if (this.#chromium === launching) this.#chromium = undefined;
