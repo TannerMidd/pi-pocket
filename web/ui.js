@@ -280,6 +280,7 @@ const ICONS = {
 	plus: "M12 5v14M5 12h14",
 	artifact: "M4 5h16v14H4zM4 9h16M8 5v4",
 	folder: "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z",
+	file: "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5",
 	back: "M15 18l-6-6 6-6",
 	chevron: "M9 6l6 6-6 6",
 	down: "M6 9l6 6 6-6",
@@ -311,6 +312,26 @@ const ICONS = {
 	terminal: "M4 5h16v14H4zM8 10l2 2-2 2M12 14h4",
 	fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
 };
+
+/** Text with the letters at `hits` (indexes) marked, as matches of what someone searched for. */
+export function Marked({ text, hits }) {
+	if (!hits || hits.length === 0) return text;
+	const set = new Set(hits);
+	const parts = [];
+	let run = "";
+	let lit = false;
+	for (let index = 0; index < text.length; index++) {
+		const on = set.has(index);
+		if (on !== lit && run !== "") {
+			parts.push(lit ? html`<mark>${run}</mark>` : run);
+			run = "";
+		}
+		lit = on;
+		run += text[index];
+	}
+	if (run !== "") parts.push(lit ? html`<mark>${run}</mark>` : run);
+	return parts;
+}
 
 export function Icon({ name, size = 20, class: className = "" }) {
 	return html`<svg class=${`icon ${className}`} width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name] ?? ""} /></svg>`;

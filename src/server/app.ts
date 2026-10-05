@@ -59,6 +59,7 @@ import {
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { transcriptMarkdown } from "./export.ts";
+import { FileLists, type FileListing } from "./files.ts";
 import { Goals } from "./goals.ts";
 import { type ApprovalRequest, Approvals, type PocketHost } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
@@ -205,6 +206,8 @@ export class PocketApp {
 
 	/** Who wrote to Pi last in each conversation: whoever asked for what Pi is doing there now. */
 	readonly #lastAuthor = new Map<ConversationId, string>();
+	/** The files in each folder, for `@` mentions. */
+	readonly #files = new FileLists();
 	/** Folders known to be in a git repository or not, for a minute: views ask on every update. */
 	readonly #repositories = new Map<string, { inside: boolean; at: number }>();
 	/** The newest chat message (not activity) of each conversation, for unread dots in the session list. */
@@ -1235,6 +1238,17 @@ export class PocketApp {
 			cursor = page.next;
 		} while (cursor !== undefined);
 		return entries.reverse();
+	}
+
+	/**
+	 * The files in a conversation's folder, for `@` mentions in the message box: for people who can write to Pi. It lists
+	 * names under the folder only, so someone invited to one session sees no more than `conversationFile` lets them load.
+	 */
+	async fileList(id: ConversationId, user: User): Promise<FileListing> {
+		this.requireSee(user, id);
+		this.requireSteer(user);
+		await this.conversation(id);
+		return this.#files.get(this.cwdOf(id));
 	}
 
 	/** What changed in a session's folder: Pi's edits, and the uncommitted changes of its git repository. */

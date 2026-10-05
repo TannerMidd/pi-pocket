@@ -829,6 +829,7 @@ const SHORTCUTS = [
 	["Shift Click", "In the sidebar: select a run of sessions"],
 	["Alt", "Hold to see session numbers"],
 	["/", "In the message box: commands"],
+	["@", "In the message box: mention a file or folder"],
 	["?", "This list"],
 	["Esc", "Close what is open"],
 ];

@@ -1,9 +1,10 @@
-// The message box: send, steer or queue while busy, attach files, pick the model, stop.
+// The message box: send, steer or queue while busy, attach files, mention files with @, pick the model, stop.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Avatar, TypingLine } from "./chat.js";
 import { loadTemplates, parseCommand, parseTemplate, planAvailable, suggestCommands } from "./commands.js";
+import { loadFiles, mentionAt, mentionText, suggestFiles } from "./files.js";
 import { actions, attempt, canSteer, collab, drafts, notify, openSheet, store, typing, uid } from "./store.js";
-import { formatBytes, formatTokens, html, Icon, modelLabel, Spinner } from "./ui.js";
+import { formatBytes, formatTokens, html, Icon, Marked, modelLabel, Spinner } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
 /** The newest "Send to Pi" text already put into a message box (see `insertIntoComposer`). */
@@ -81,12 +82,20 @@ export function Composer() {
 	// Slash command suggestions: the highlighted one, and whether Escape hid the list.
 	const [pick, setPick] = useState(0);
 	const [hideCommands, setHideCommands] = useState(false);
+	// File mentions: where the caret is, and the mention Escape hid (by where it starts).
+	const [caret, setCaret] = useState(() => drafts.get(conversationId).length);
+	const [hiddenMention, setHiddenMention] = useState(null);
 	const box = useRef(null);
 	const picker = useRef(null);
+	const list = useRef(null);
 	const busy = view.live.busy;
 	const agent = view.agent;
 
-	useEffect(() => setText(drafts.get(conversationId)), [conversationId]);
+	useEffect(() => {
+		const draft = drafts.get(conversationId);
+		setText(draft);
+		setCaret(draft.length);
+	}, [conversationId]);
 	// Text sent here from the chat, the notes ("Send to Pi"), or another app (Share) goes after whatever is in the box,
 	// once: the message box is made again for every session, and must not add the same text there. Shared files are
 	// attached the same way.
@@ -112,8 +121,9 @@ export function Composer() {
 		element.style.height = `${Math.min(element.scrollHeight, innerHeight * 0.4)}px`;
 	}, [text]);
 
-	const update = (value) => {
+	const update = (value, at = value.length) => {
 		setText(value);
+		setCaret(at);
 		drafts.set(conversationId, value);
 		setPick(0);
 		if (!value.startsWith("/") || value === "/") setHideCommands(false);
@@ -126,6 +136,21 @@ export function Composer() {
 	const chosen = suggestions[Math.min(pick, suggestions.length - 1)];
 	const parsed = parseCommand(text);
 	const template = parsed ? null : parseTemplate(text);
+	// The @path being typed at the caret, and the files that match it. Slash command names come first.
+	const typed = suggestions.length === 0 ? mentionAt(text, caret) : null;
+	const mention = typed && typed.start !== hiddenMention ? typed : null;
+	const found = mention ? suggestFiles(mention.query) : null;
+	const matches = found?.items ?? [];
+	const chosenFile = matches[Math.min(pick, matches.length - 1)];
+	// A new mention checks the folder's list again, in the background; a hidden one shows again once it is gone.
+	useEffect(() => {
+		if (mention) loadFiles();
+	}, [mention?.start, conversationId]);
+	useEffect(() => {
+		if (!typed && hiddenMention !== null) setHiddenMention(null);
+	}, [typed === null]);
+	// Arrowing through a long list keeps the highlighted one in view.
+	useEffect(() => list.current?.querySelector(".command.on")?.scrollIntoView({ block: "nearest" }), [pick]);
 
 	const focusEnd = () =>
 		requestAnimationFrame(() => {
@@ -144,6 +169,24 @@ export function Composer() {
 		});
 		setSending(false);
 		if (ok) update("");
+	};
+
+	/**
+	 * A picked file goes into the box in place of what was typed, with a space after it. A folder goes in with its "/",
+	 * and its own files show next.
+	 */
+	const chooseFile = (item) => {
+		const written = mentionText(item.path);
+		const rest = text.slice(mention.end);
+		const space = item.dir || /^\s/.test(rest) ? "" : " ";
+		const at = mention.start + written.length + (item.dir ? 0 : 1);
+		update(`${text.slice(0, mention.start)}${written}${space}${rest}`, at);
+		requestAnimationFrame(() => {
+			const element = box.current;
+			if (!element) return;
+			element.focus();
+			element.setSelectionRange(at, at);
+		});
 	};
 
 	/** A tapped suggestion: commands that take text, and prompt templates, fill the box; the others run at once. */
@@ -176,6 +219,26 @@ export function Composer() {
 	};
 
 	const onKey = (event) => {
+		if (matches.length > 0 && !event.isComposing) {
+			const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+			if (move !== undefined) {
+				event.preventDefault();
+				setPick((Math.min(pick, matches.length - 1) + move + matches.length) % matches.length);
+				return;
+			}
+			if (event.key === "Escape") {
+				event.preventDefault();
+				setHiddenMention(mention.start);
+				return;
+			}
+			// Tab completes; Enter completes too, unless the file's path is typed out already, which sends.
+			const typedOut = !chosenFile.dir && mention.query === chosenFile.path;
+			if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && !coarse && !typedOut)) {
+				event.preventDefault();
+				chooseFile(chosenFile);
+				return;
+			}
+		}
 		if (suggestions.length > 0 && !event.isComposing) {
 			const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
 			if (move !== undefined) {
@@ -226,7 +289,7 @@ export function Composer() {
 		}
 	};
 
-	const placeholder = busy ? (steer ? "Steer the current run…" : "Queue a follow-up…") : coarse ? "Message Pi…" : "Message Pi… (/ for commands)";
+	const placeholder = busy ? (steer ? "Steer the current run…" : "Queue a follow-up…") : coarse ? "Message Pi…" : "Message Pi… (/ for commands, @ for files)";
 	const inbox = view.inbox ?? [];
 	const { me, users } = store.state;
 	const queuedBy = (item) => (item.by === undefined ? "" : item.by === me?.id ? " · you" : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`);
@@ -263,8 +326,24 @@ export function Composer() {
 		<${GoalBar} />
 		${blocked
 			? html`${busy && html`<div class="composer-row stop-only"><span class="muted small grow">Pi is working…</span><button class="round stop" aria-label="Stop" onClick=${() => attempt(actions.abort)}><${Icon} name="stop" size=${16} /></button></div>`}`
-			: html`${suggestions.length > 0 &&
-			html`<div class="commands" role="listbox">${suggestions.map(
+			: html`${mention && (matches.length > 0 || found.loading) &&
+			html`<div class="commands file-options" role="listbox" aria-label="Files" ref=${list}>${matches.map(
+				(item) => html`<button
+					key=${item.path}
+					class=${`command file-option ${item === chosenFile ? "on" : ""}`}
+					role="option"
+					aria-selected=${item === chosenFile}
+					onMouseDown=${(event) => event.preventDefault()}
+					onClick=${() => chooseFile(item)}
+				>
+					<${Icon} name=${item.dir ? "folder" : "file"} size=${14} class="file-icon" />
+					<span class="file-name"><${Marked} text=${item.name} hits=${item.nameHits} />${item.dir ? "/" : ""}</span>
+					<span class="command-description"><${Marked} text=${item.parent} hits=${item.parentHits} /></span>
+				</button>`,
+			)}${matches.length === 0 && html`<div class="file-note">Finding files…</div>`}${found.truncated &&
+			html`<div class="file-note">A large folder: only the files nearest its top are listed.</div>`}</div>`}
+		${suggestions.length > 0 &&
+			html`<div class="commands" role="listbox" ref=${list}>${suggestions.map(
 				(command) => html`<button
 					class=${`command ${command === chosen ? "on" : ""}`}
 					role="option"
@@ -302,8 +381,11 @@ export function Composer() {
 				rows="1"
 				value=${text}
 				placeholder=${placeholder}
-				onInput=${(event) => update(event.currentTarget.value)}
+				onInput=${(event) => update(event.currentTarget.value, event.currentTarget.selectionStart)}
 				onKeyDown=${onKey}
+				onKeyUp=${(event) => setCaret(event.currentTarget.selectionStart)}
+				onClick=${(event) => setCaret(event.currentTarget.selectionStart)}
+				onFocus=${() => loadFiles({ ifMissing: true })}
 				onPaste=${onPaste}
 				enterkeyhint=${coarse ? "enter" : "send"}
 			></textarea>

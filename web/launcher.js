@@ -7,7 +7,7 @@ import { planAvailable, schedulesAvailable } from "./commands.js";
 import { setArchived, workspaceOrder } from "./sessions.js";
 import { actions, attempt, canSteer, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import { paletteOf, prefs, preview, setPrefs, THEMES, themeIds, themeVars, varsStyle } from "./theme.js";
-import { copyText, html, Icon, Keys, shortPath, Slide, timeAgo, useSlide } from "./ui.js";
+import { copyText, html, Icon, Keys, Marked, shortPath, Slide, timeAgo, useSlide } from "./ui.js";
 
 /**
  * How well `query` matches `text` as a subsequence: null for no match, else a score (higher is better) and the matched
@@ -35,25 +35,6 @@ export function fuzzy(text, query) {
 		from = at + 1;
 	}
 	return { score, hits };
-}
-
-function Marked({ text, hits }) {
-	if (!hits || hits.length === 0) return text;
-	const set = new Set(hits);
-	const parts = [];
-	let run = "";
-	let lit = false;
-	for (let index = 0; index < text.length; index++) {
-		const on = set.has(index);
-		if (on !== lit && run !== "") {
-			parts.push(lit ? html`<mark>${run}</mark>` : run);
-			run = "";
-		}
-		lit = on;
-		run += text[index];
-	}
-	if (run !== "") parts.push(lit ? html`<mark>${run}</mark>` : run);
-	return parts;
 }
 
 /** The actions that make sense here, as launcher items. */

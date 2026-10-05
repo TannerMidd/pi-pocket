@@ -32,6 +32,7 @@ Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.m
 | `schedules.ts`, `when.ts` | Scheduled messages (a durable task) and their time grammar |
 | `goals.ts` | "Done when" checks |
 | `spend.ts` | Cost per conversation and person; limits |
+| `files.ts` | The files in a session's folder for `@` mentions: git's list, or a capped walk; kept briefly per folder, versioned, and compressed once |
 | `changes.ts`, `worktrees.ts`, `git.ts` | The Changes sheet, per-session worktrees, and the git runner both use |
 | `running.ts` | Running now, from Pi Durable's task graph |
 | `prompts.ts` | Pi's prompt templates as slash commands |
@@ -54,7 +55,8 @@ Each default-exports `(host: PocketHost) => Extension | Extension[]` and is inst
 | `store.js` | State, the event stream (SSE, or long polling when a tunnel holds it back), `api()`, `actions` |
 | `app.js` | Layout (tiled windows), top bar, notices, keyboard shortcuts, routing |
 | `transcript.js` | Messages, tool cards, approvals, breadcrumbs |
-| `composer.js` | Message box, chips, plan and goal bars |
+| `composer.js` | Message box, chips, plan and goal bars, `@` file suggestions |
+| `files.js` | `@` mentions: the folder's file list, fetched once and checked in the background, and matched here as people type |
 | `commands.js` | Slash commands and prompt templates |
 | `sheets.js` | The menu and every sheet |
 | `chat.js` | People panel: chat, pins, notes |

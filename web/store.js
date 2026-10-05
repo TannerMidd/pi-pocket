@@ -70,6 +70,8 @@ export const store = {
 		composerInsert: null,
 		/** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
 		templates: null,
+		/** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
+		filesLoaded: 0,
 		/** The session's browser page as the server last told: address, title, loading, size (`browser.js`). */
 		browser: null,
 		/** The Browser panel shows; kept per tab, so the reload after a live edit keeps it. */

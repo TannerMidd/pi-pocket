@@ -712,6 +712,14 @@ export function createHandler(options: HttpOptions) {
 			if (third === "changes" && fourth === "diff" && method === "GET") {
 				return send(response, 200, await app.changeDiff(id, user, url.searchParams.get("path") ?? ""), "text/plain; charset=utf-8");
 			}
+			// The folder's files for `@` mentions. A browser that has the newest list says so with `since` and gets only
+			// that; a whole list goes compressed when the browser takes it so.
+			if (third === "files" && method === "GET") {
+				const listing = await app.fileList(id, user);
+				if (url.searchParams.get("since") === listing.version) return json(response, 200, { version: listing.version, same: true });
+				if (!/\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""))) return send(response, 200, listing.json, "application/json");
+				return send(response, 200, await listing.gzipped(), "application/json", { "content-encoding": "gzip", vary: "accept-encoding" });
+			}
 			if (third === "prompts" && method === "GET") {
 				return json(response, 200, app.promptTemplates(id).map(({ name, description, argumentHint }) => ({ name, description, ...(argumentHint === undefined ? {} : { argumentHint }) })));
 			}

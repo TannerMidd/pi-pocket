@@ -1519,6 +1519,40 @@ pre.diff .del {
 	text-overflow: ellipsis;
 }
 
+/* File mentions: an icon, the name with what matched marked, then its folder. */
+.file-option {
+	align-items: center;
+}
+
+.file-icon {
+	flex: none;
+	color: var(--muted);
+}
+
+.file-option.on .file-icon {
+	color: var(--accent);
+}
+
+.file-name {
+	flex: none;
+	max-width: 60%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.file-option mark {
+	background: none;
+	color: var(--accent);
+	font-weight: 800;
+}
+
+.file-note {
+	font-size: 0.78rem;
+	color: var(--muted);
+	padding: 0.4rem 0.6rem;
+}
+
 .command-hint {
 	font-size: 0.78rem;
 	padding: 0 0.4rem 0.3rem;
