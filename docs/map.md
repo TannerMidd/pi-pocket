@@ -10,7 +10,7 @@ Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.m
 
 - `pocket.sqlite`: Pi Durable's storage: conversations, entries, tasks, and Pi Pocket's documents.
 - `config.json`: people, roles, hashed tokens, settings. `push.json`: VAPID keys and push subscriptions.
-- `uploads/<conversation>/`, `worktrees/` (sessions' git worktrees), `extensions/` (the owner's drop-ins).
+- `uploads/<conversation>/`, `worktrees/` (sessions' git worktrees), `extensions/` (the owner's drop-ins), `browser/profile/` (the built-in browser's profile; each session's cookies live in memory only).
 
 ## Server: `src/server/`
 
@@ -41,10 +41,11 @@ Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.m
 | `export.ts` | A session as Markdown |
 | `errors.ts`, `paths.ts` | `HttpError` and input checks; `~` paths |
 | `omarchy.ts` | The Omarchy desktop's current theme and wallpaper, read-only, for Follow desktop (`/api/theme`) |
+| `browser.ts` | The built-in browser: finds and runs one headless Chromium (`--remote-debugging-pipe`), a page per conversation in its own browser context, screencast frames and input for the Browser panel, and what Pi's tool does to a page (snapshot refs, clicks, typing, screenshots, evaluate); `localServers` for the panel's start screen |
 
 ## Extensions: `src/server/extensions/`
 
-Each default-exports `(host: PocketHost) => Extension | Extension[]` and is installed in this order: `prompt` (system prompt), `artifacts` (artifact tool), `subagents` (subagent tool and its tasks), `schedules` (schedule tool; installs the schedule task), `goals` (hook after each answer), `plan` (tool hook and prompt section), `guard` (tool hook that asks for approval), `codemode` (codemode tool; a script's calls go through the same hooks).
+Each default-exports `(host: PocketHost) => Extension | Extension[]` and is installed in this order: `prompt` (system prompt), `artifacts` (artifact tool), `browser` (browser tool and its prompt section; through `host.browsers`), `subagents` (subagent tool and its tasks), `schedules` (schedule tool; installs the schedule task), `goals` (hook after each answer), `plan` (tool hook and prompt section), `guard` (tool hook that asks for approval), `codemode` (codemode tool; a script's calls go through the same hooks).
 
 ## Web: `web/` (Preact and htm, no build)
 
@@ -64,6 +65,7 @@ Each default-exports `(host: PocketHost) => Extension | Extension[]` and is inst
 | `theme.js` | Appearance: palettes as CSS variables, Follow desktop, tiling, motion, text size, sidebar shape, pins; the theme reveal |
 | `themes.js` | Omarchy's themes as palettes, generated from `/usr/share/omarchy/themes/*/colors.toml` |
 | `launcher.js` | The Ctrl/⌘+K launcher: sessions, actions, and themes, with live theme previews |
+| `browser.js` | The Browser panel: frames by long polling, taps, drags, wheel, and keys as input events, the address bar, sizes, the console, the start screen |
 
 ## How a message travels
 

@@ -215,8 +215,10 @@ test("the owner turns extensions off and on, the guard follows its switch, and t
 	const module = (file: string) => app.loader.list().find((each) => each.file === file)!;
 	assert.deepEqual(
 		app.loader.list().map((each) => each.file),
-		["prompt.ts", "artifacts.ts", "subagents.ts", "schedules.ts", "goals.ts", "plan.ts", "guard.ts", "codemode.ts"],
+		["prompt.ts", "artifacts.ts", "browser.ts", "subagents.ts", "schedules.ts", "goals.ts", "plan.ts", "guard.ts", "codemode.ts"],
 	);
+	assert.equal(module("browser.ts").title, "Browser");
+	assert.deepEqual(module("browser.ts").extensions[0]?.tools, ["browser"]);
 	assert.equal(module("prompt.ts").required, true);
 	assert.equal(module("codemode.ts").title, "Codemode");
 	assert.match(module("codemode.ts").summary, /^Codemode lets the agent write JavaScript that calls its other tools/);

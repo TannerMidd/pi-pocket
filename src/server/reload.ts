@@ -15,7 +15,7 @@ import type { Extension, Registry } from "@earendil-works/pi-durable";
 import type { ExtensionModule, PocketHost } from "./host.ts";
 
 /** Built-in extension modules, in install order. Other `.ts` files in the directory load after them, by name. */
-const ORDER = ["prompt.ts", "artifacts.ts", "subagents.ts", "schedules.ts", "goals.ts", "plan.ts", "guard.ts", "codemode.ts"];
+const ORDER = ["prompt.ts", "artifacts.ts", "browser.ts", "subagents.ts", "schedules.ts", "goals.ts", "plan.ts", "guard.ts", "codemode.ts"];
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
 /** Built-in modules that stay off until the owner turns them on. Drop-ins all do. */
@@ -23,6 +23,7 @@ const OFF_BY_DEFAULT = new Set(["guard.ts"]);
 const TITLES: Record<string, string> = {
 	"prompt.ts": "System prompt",
 	"artifacts.ts": "Artifacts",
+	"browser.ts": "Browser",
 	"subagents.ts": "Subagents",
 	"schedules.ts": "Scheduled messages",
 	"goals.ts": "Done when",

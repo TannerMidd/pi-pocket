@@ -1,6 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { ConversationId, Extension, ModelRef, TaskId } from "@earendil-works/pi-durable";
+import type { Browsers } from "./browser.ts";
 import type { Goals } from "./goals.ts";
 import type { LancetGuard } from "./lancet.ts";
 import type { Schedules } from "./schedules.ts";
@@ -102,6 +103,8 @@ export interface PocketHost {
 	readonly schedules: Pick<Schedules, "add" | "cancel" | "list" | "task">;
 	/** Sessions' goals: the goals extension runs their checks and counts them. */
 	readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
+	/** The built-in browser: a page per conversation, which the people in it watch and use too. */
+	readonly browsers: Pick<Browsers, "open" | "page" | "state" | "available">;
 }
 
 /** The shape of every module in `src/server/extensions/`: a default export building one or more extensions. */

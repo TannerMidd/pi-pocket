@@ -1,6 +1,7 @@
 // The conversation: messages, thinking, tool cards, artifacts, subagents, approvals, and the live run.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { personColor } from "./chat.js";
 import { actions, attempt, canSteer, collab, discuss, isRow, navigate, openSheet, store, TRANSCRIPT_ROWS } from "./store.js";
 import { ATTACHMENTS_HEADING, Boot, Diff, entryImageUrl, fileUrl, html, Icon, Markdown, plainText, replyText, Spinner, Thinking, Thumb } from "./ui.js";
@@ -138,6 +139,22 @@ function describeCall(call) {
 				.find((each) => each !== "" && !each.startsWith("//"));
 			return { icon: "{}", label: "Codemode", subject: short(line ?? "", 140), mono: true };
 		}
+		case "browser": {
+			const firstLine = String(args.script ?? "")
+				.split("\n")
+				.find((each) => each.trim() !== "");
+			const what =
+				args.url ??
+				(args.ref ? `[${String(args.ref).replace(/^\[|\]$/g, "")}]` : undefined) ??
+				args.selector ??
+				(args.label ? `“${args.label}”` : undefined) ??
+				args.key ??
+				args.viewport ??
+				firstLine ??
+				(args.text !== undefined ? `“${args.text}”` : "");
+			const typed = args.action === "type" && args.text !== undefined && what !== `“${args.text}”` ? ` ← “${args.text}”` : "";
+			return { icon: "◎", label: `Browser ${args.action ?? ""}`, subject: short(`${what}${typed}`, 120), mono: true };
+		}
 		case "subagent":
 			return {
 				icon: "⧉",
@@ -207,7 +224,8 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 		if (call.name === "artifact" && (args.content || args.edits)) {
 			parts.push(html`<pre class="output">${args.content ?? JSON.stringify(args.edits, null, 2)}</pre>`);
 		}
-		if (!["read", "write", "edit", "bash", "subagent", "artifact", "codemode"].includes(call.name)) {
+		if (call.name === "browser") parts.push(args.script ? html`<pre class="cmd">${args.script}</pre>` : html`<pre class="output">${JSON.stringify(args, null, 2)}</pre>`);
+		if (!["read", "write", "edit", "bash", "subagent", "artifact", "codemode", "browser"].includes(call.name)) {
 			parts.push(html`<pre class="output">${JSON.stringify(args, null, 2)}</pre>`);
 		}
 		const output = resultText ?? slot?.output;
@@ -246,6 +264,8 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 			Open ${artifact.title} · version ${artifact.version}
 		</button>`}
 		${child !== undefined && html`<button class="artifact-link" onClick=${() => navigate(child)}>Open ${args.name ?? "subagent"} →</button>`}
+		${call.name === "browser" && browserAvailable() && !store.state.browserOpen &&
+		html`<button class="artifact-link" onClick=${() => setBrowserOpen(true)}>Watch in the browser${details?.address ? ` · ${details.address}` : ""} →</button>`}
 		${body}
 	</div>`;
 }
@@ -385,6 +405,7 @@ function rowDeps(entry, results, slots, approvals) {
 			if (slot?.taskId !== undefined) deps.push(approvals.find((each) => each.taskId === slot.taskId)?.id);
 			if (block.name === "artifact") deps.push((view.artifacts ?? []).map((each) => `${each.id}:${each.type}`).join());
 			if (block.name === "subagent") deps.push(agentsKey(view));
+			if (block.name === "browser") deps.push(store.state.browserOpen);
 		}
 	}
 	return deps;

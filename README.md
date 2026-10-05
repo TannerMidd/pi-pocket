@@ -43,6 +43,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Any provider, any model.** Uses Pi's own model runtime and sign-ins, skills, and prompt templates, with the model and thinking level chosen per session.
 - **Omarchy themes.** Every Omarchy theme, or follow your desktop's live; tiled Hyprland-style windows, a Walker-style launcher (Ctrl/⌘+K) with live theme previews, and Hyprland's motion.
 - **Built for phones.** Streaming answers, tool cards with diffs and live output, a Changes sheet with git diffs, push notifications you can allow or deny from, sharing into Pi from other apps, and a home-screen app.
+- **A built-in browser.** Pi opens, reads, clicks through, and screenshots pages in a real Chromium on the server, and you watch and use the same page in the Browser panel, from a phone too: your dev server on `localhost` included.
 - **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.
 - **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
 - **Lancet Guard.** Off by default; turn it on in Menu → Extensions. With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
@@ -94,7 +95,7 @@ Lancet Guard needs ONNX Runtime, which may not load on Android. If the guard is 
 | `--host` | | Listen on a specific address instead of choosing access |
 | `--rotate-token` | | Issue a new owner link and sign out devices that used the old one |
 
-Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_DIR`, `PI_POCKET_HOST`, `PI_POCKET_PORT`, `PI_POCKET_GUARD=off`. Without a terminal (under systemd, for example), the launcher uses `--access` or the last choice.
+Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_DIR`, `PI_POCKET_HOST`, `PI_POCKET_PORT`, `PI_POCKET_GUARD=off`, `PI_POCKET_BROWSER` (the browser to run, when Chromium or Chrome is not found by itself), and `PI_POCKET_BROWSER_ARGS` (extra flags for it, such as `--no-sandbox` where sandboxes are unavailable). Without a terminal (under systemd, for example), the launcher uses `--access` or the last choice.
 
 ## Architecture
 
@@ -106,12 +107,13 @@ Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_DIR`, `PI_POCKET_HOST`, `P
 | `src/server/room.ts` | One conversation's shared live view, sent to every tab watching it |
 | `src/server/commands.ts` | What people ask of Pi: messages, forks, models, plan mode, goals, schedules, worktrees |
 | `src/server/collab.ts` | The people's side: chat, activity lines, reactions, pins, notes, take turns |
-| `src/server/http.ts` | Web files, JSON API, server-sent events, uploads, artifacts, invites |
+| `src/server/http.ts` | Web files, JSON API, server-sent events, uploads, artifacts, invites, the Browser panel's frames and input |
+| `src/server/browser.ts` | The built-in browser: one headless Chromium over the DevTools protocol, a page per conversation |
 | `src/server/projection.ts` | Turns committed conversation state into compact JSON for browsers |
 | `src/server/docs.ts` | Durable documents: sessions, chat, pins, notes, artifacts, subagents, schedules, goals, spend |
 | `src/server/schedules.ts`, `goals.ts`, `spend.ts`, `changes.ts`, `worktrees.ts` | One feature each, with its durable tasks or git calls |
 | `src/server/push.ts`, `alerts.ts` | Dependency-free Web Push (RFC 8291 and RFC 8292), and who gets which notification |
-| `src/server/extensions/` | Live-reloaded extensions: system prompt, artifacts, subagents, schedules, goals, plan mode, Lancet Guard, codemode |
+| `src/server/extensions/` | Live-reloaded extensions: system prompt, artifacts, browser, subagents, schedules, goals, plan mode, Lancet Guard, codemode |
 | `web/` | The app: Preact and htm as plain ES modules |
 
 Browsers render only committed state. Each session's Pi Durable view is coalesced and sent as small updates over server-sent events, so a device that reconnects or joins late sees exactly what everyone else sees. The [engineering page](https://tannermidd.github.io/pi-pocket/engineering.html) explains the design; [docs/map.md](docs/map.md) is a short map of the code.
@@ -133,6 +135,7 @@ Changes to `web/` reload every open browser. Changes to `src/server/extensions/`
 - Pi's own extensions are not supported: Pi Pocket runs its own extensions on Pi Durable, and drop-ins from `~/.pi-pocket/extensions/`. Pi's prompt templates work as slash commands.
 - A git worktree keeps a session's files apart; it is not a sandbox. Pi can still reach everything you can.
 - Artifacts run in an opaque-origin sandbox, so `localStorage` and cookies are unavailable inside them.
+- The browser needs Chromium, Chrome, Brave, or Edge on the server. Its pages live in memory: a restart opens each one again at its last address, but not what was typed into it. Each session's cookies are its own and last until the page closes.
 
 ## Credits
 
