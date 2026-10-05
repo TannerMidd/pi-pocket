@@ -13,7 +13,7 @@ Runs on your own machine or directly on your phone. No cloud VM.
 
 [Website](https://tannermidd.github.io/pi-pocket/) · [Quick start](#quick-start) · [Features](#features) · [Remote access](#remote-access)
 
-<img src="docs/showcase.png" alt="Pi Pocket on three phones: Pi fixing a login bug with a diff and passing tests, two people discussing the fix in the side chat, and a chart artifact" width="100%">
+<img src="docs/showcase.png" alt="Pi Pocket in the Tokyo Night theme, on a desktop and a phone. On the desktop, the sidebar lists sessions by day while Pi fixes a sign-in redirect loop in tiled windows: a diff, 48 passing tests, and a teammate asking for the branch. On the phone, the same session waits for approval before git push." width="100%">
 
 </div>
 
