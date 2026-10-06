@@ -1,49 +1,57 @@
 {
-  "name": "pi-pocket",
-  "version": "0.8.0",
-  "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
-  "private": true,
-  "type": "module",
-  "license": "MIT",
-  "author": "Tanner Middleton",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/TannerMidd/pi-pocket.git"
-  },
-  "homepage": "https://tannermidd.github.io/pi-pocket/",
-  "bugs": {
-    "url": "https://github.com/TannerMidd/pi-pocket/issues"
-  },
-  "bin": {
-    "pi-pocket": "bin/pi-pocket.js"
-  },
-  "engines": {
-    "node": ">=22.19"
-  },
-  "scripts": {
-    "start": "node bin/pi-pocket.js",
-    "dev": "node bin/pi-pocket.js --cwd .",
-    "check": "tsc --noEmit -p .",
-    "test": "node --test test/*.test.ts",
-    "site:publish": "git subtree push --prefix site origin gh-pages"
-  },
-  "dependencies": {
-    "@earendil-works/chord": "1.0.2",
-    "@earendil-works/pi-ai": "1.0.2",
-    "@earendil-works/pi-codemode": "1.0.2",
-    "@earendil-works/pi-coding-agent": "1.0.2",
-    "@earendil-works/pi-durable": "1.0.2",
-    "dompurify": "^3.4.16",
-    "htm": "^3.1.1",
-    "jiti": "2.7.0",
-    "marked": "^18.0.14",
-    "preact": "^11.0.0",
-    "qrcode": "^1.5.4",
-    "undici": "8.10.2"
-  },
-  "devDependencies": {
-    "@types/node": "^26.6.4",
-    "@types/qrcode": "^1.5.6",
-    "typescript": "^5.9.3"
-  }
+    "name": "pi-pocket",
+    "version": "0.8.0",
+    "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
+    "private": true,
+    "type": "module",
+    "license": "MIT",
+    "author": "Tanner Middleton",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/TannerMidd/pi-pocket.git"
+    },
+    "homepage": "https://tannermidd.github.io/pi-pocket/",
+    "bugs": {
+        "url": "https://github.com/TannerMidd/pi-pocket/issues"
+    },
+    "bin": {
+        "pi-pocket": "bin/pi-pocket.js"
+    },
+    "engines": {
+        "node": ">=22.19"
+    },
+    "scripts": {
+        "start": "node bin/pi-pocket.js",
+        "dev": "node bin/pi-pocket.js --cwd .",
+        "check": "tsc --noEmit -p .",
+        "test": "node --test test/*.test.ts",
+        "site:publish": "git subtree push --prefix site origin gh-pages",
+        "format": "eslint --fix . && prettier --write .",
+        "format:check": "prettier --check . && eslint .",
+        "lint": "eslint ."
+    },
+    "dependencies": {
+        "@earendil-works/chord": "1.0.2",
+        "@earendil-works/pi-ai": "1.0.2",
+        "@earendil-works/pi-codemode": "1.0.2",
+        "@earendil-works/pi-coding-agent": "1.0.2",
+        "@earendil-works/pi-durable": "1.0.2",
+        "dompurify": "^3.4.16",
+        "htm": "^3.1.1",
+        "jiti": "2.7.0",
+        "marked": "^18.0.14",
+        "preact": "^11.0.0",
+        "qrcode": "^1.5.4",
+        "undici": "8.10.2"
+    },
+    "devDependencies": {
+        "@stylistic/eslint-plugin": "5.10.0",
+        "@types/node": "^26.6.4",
+        "@types/qrcode": "^1.5.6",
+        "eslint": "^9.39.5",
+        "eslint-config-prettier": "10.1.8",
+        "prettier": "3.9.6",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.71.1"
+    }
 }

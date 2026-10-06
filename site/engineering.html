@@ -1,393 +1,772 @@
 <!doctype html>
 <html lang="en">
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-	<title>Engineering · Pi Pocket</title>
-	<meta name="description" content="How Pi Pocket is built: one Node.js process, one SQLite file through Pi Durable, and a web app with no build step. Architecture, request path, durability rules, state, extensions, and security.">
-	<meta name="theme-color" content="#13141c">
-	<link rel="canonical" href="https://tannermidd.github.io/pi-pocket/engineering.html">
-	<link rel="icon" href="icon.svg" type="image/svg+xml">
-	<link rel="preload" href="fonts/JetBrainsMono.woff2" as="font" type="font/woff2" crossorigin>
-	<link rel="stylesheet" href="style.css">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <title>Engineering · Pi Pocket</title>
+        <meta
+            name="description"
+            content="How Pi Pocket is built: one Node.js process, one SQLite file through Pi Durable, and a web app with no build step. Architecture, request path, durability rules, state, extensions, and security."
+        />
+        <meta name="theme-color" content="#13141c" />
+        <link rel="canonical" href="https://tannermidd.github.io/pi-pocket/engineering.html" />
+        <link rel="icon" href="icon.svg" type="image/svg+xml" />
+        <link
+            rel="preload"
+            href="fonts/JetBrainsMono.woff2"
+            as="font"
+            type="font/woff2"
+            crossorigin
+        />
+        <link rel="stylesheet" href="style.css" />
 
-	<meta property="og:type" content="article">
-	<meta property="og:site_name" content="Pi Pocket">
-	<meta property="og:title" content="How Pi Pocket is built">
-	<meta property="og:description" content="Architecture, request path, durability rules, state, and extensions of a self-hosted web app for the Pi coding agent.">
-	<meta property="og:url" content="https://tannermidd.github.io/pi-pocket/engineering.html">
-	<meta property="og:image" content="https://tannermidd.github.io/pi-pocket/og.png">
-	<meta name="twitter:card" content="summary_large_image">
-</head>
-<body>
-	<a class="skip" href="#main">Skip to content</a>
+        <meta property="og:type" content="article" />
+        <meta property="og:site_name" content="Pi Pocket" />
+        <meta property="og:title" content="How Pi Pocket is built" />
+        <meta
+            property="og:description"
+            content="Architecture, request path, durability rules, state, and extensions of a self-hosted web app for the Pi coding agent."
+        />
+        <meta property="og:url" content="https://tannermidd.github.io/pi-pocket/engineering.html" />
+        <meta property="og:image" content="https://tannermidd.github.io/pi-pocket/og.png" />
+        <meta name="twitter:card" content="summary_large_image" />
+    </head>
+    <body>
+        <a class="skip" href="#main">Skip to content</a>
 
-	<header class="nav">
-		<div class="wrap">
-			<a class="logo" href="./" aria-label="Pi Pocket home"><img src="icon.svg" alt="" width="28" height="28">Pi Pocket</a>
-			<nav class="nav-links" aria-label="Sections">
-				<a href="#architecture">Architecture</a>
-				<a href="#message">A message</a>
-				<a href="#durability">Durability</a>
-				<a href="#state">State</a>
-				<a href="#extensions">Extensions</a>
-				<a href="#practices">Practices</a>
-			</nav>
-			<a class="btn btn-sm" href="https://github.com/TannerMidd/pi-pocket">
-				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
-				GitHub
-			</a>
-		</div>
-	</header>
+        <header class="nav">
+            <div class="wrap">
+                <a class="logo" href="./" aria-label="Pi Pocket home"
+                    ><img src="icon.svg" alt="" width="28" height="28" />Pi Pocket</a
+                >
+                <nav class="nav-links" aria-label="Sections">
+                    <a href="#architecture">Architecture</a>
+                    <a href="#message">A message</a>
+                    <a href="#durability">Durability</a>
+                    <a href="#state">State</a>
+                    <a href="#extensions">Extensions</a>
+                    <a href="#practices">Practices</a>
+                </nav>
+                <a class="btn btn-sm" href="https://github.com/TannerMidd/pi-pocket">
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path
+                            d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
+                        />
+                    </svg>
+                    GitHub
+                </a>
+            </div>
+        </header>
 
-	<main id="main">
-		<section class="page-head">
-			<div class="wrap">
-				<span class="kicker">Engineering</span>
-				<h1>How Pi Pocket <span class="grad">is built.</span></h1>
-				<p class="lead">One Node.js process, one SQLite file, and a web app with no build step. Pi Durable runs the agent and commits every step before anyone sees it. Pi Pocket adds the people, the phone, and the ways in. This page covers the parts, how a message moves through them, and the rules that keep them consistent.</p>
-				<div class="facts">
-					<span>TypeScript, no build</span>
-					<span>Preact and htm</span>
-					<span>SQLite through Pi Durable</span>
-					<span>Node.js 22.19+</span>
-				</div>
-				<div class="cta">
-					<a class="btn btn-primary" href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/map.md">Code map</a>
-					<a class="btn" href="https://github.com/TannerMidd/pi-pocket">Source on GitHub</a>
-				</div>
-			</div>
-		</section>
+        <main id="main">
+            <section class="page-head">
+                <div class="wrap">
+                    <span class="kicker">Engineering</span>
+                    <h1>How Pi Pocket <span class="grad">is built.</span></h1>
+                    <p class="lead">
+                        One Node.js process, one SQLite file, and a web app with no build step. Pi
+                        Durable runs the agent and commits every step before anyone sees it. Pi
+                        Pocket adds the people, the phone, and the ways in. This page covers the
+                        parts, how a message moves through them, and the rules that keep them
+                        consistent.
+                    </p>
+                    <div class="facts">
+                        <span>TypeScript, no build</span>
+                        <span>Preact and htm</span>
+                        <span>SQLite through Pi Durable</span>
+                        <span>Node.js 22.19+</span>
+                    </div>
+                    <div class="cta">
+                        <a
+                            class="btn btn-primary"
+                            href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/map.md"
+                            >Code map</a
+                        >
+                        <a class="btn" href="https://github.com/TannerMidd/pi-pocket"
+                            >Source on GitHub</a
+                        >
+                    </div>
+                </div>
+            </section>
 
-		<!-- Architecture -->
-		<section class="section alt" id="architecture">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Architecture</span>
-					<h2>The parts.</h2>
-					<p>Browsers talk to one server over a JSON API and an event stream. The server keeps its state in Pi Durable's storage and rebuilds the rest from it when it starts. Nothing a browser sees exists only in memory, except who is here and who is typing.</p>
-				</div>
+            <!-- Architecture -->
+            <section class="section alt" id="architecture">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Architecture</span>
+                        <h2>The parts.</h2>
+                        <p>
+                            Browsers talk to one server over a JSON API and an event stream. The
+                            server keeps its state in Pi Durable's storage and rebuilds the rest
+                            from it when it starts. Nothing a browser sees exists only in memory,
+                            except who is here and who is typing.
+                        </p>
+                    </div>
 
-				<figure class="arch">
-					<div class="arch-stack">
-						<div class="layer">
-							<div class="layer-head"><b>Browsers</b><code>web/</code></div>
-							<div class="parts"><span>Preact + htm</span><span>service worker</span><span>push</span><span>share target</span><span>home-screen app</span></div>
-						</div>
-						<div class="wire">JSON API · server-sent events · long polling</div>
-						<div class="layer">
-							<div class="layer-head"><b>HTTP server</b><code>http.ts</code></div>
-							<div class="parts"><span>/api routes</span><span>event stream</span><span>uploads</span><span>sandboxed artifacts</span><span>browser frames</span><span>invites</span></div>
-						</div>
-						<div class="wire">calls</div>
-						<div class="layer core">
-							<div class="layer-head"><b>PocketApp</b><code>app.ts</code></div>
-							<div class="parts"><span>rooms</span><span>commands</span><span>collab</span><span>alerts</span><span>spend</span><span>schedules</span><span>goals</span><span>changes</span><span>worktrees</span></div>
-						</div>
-						<div class="wire">commits · commit listener</div>
-						<div class="layer">
-							<div class="layer-head"><b>Pi Durable harness</b><code>@earendil-works/pi-durable</code></div>
-							<div class="parts"><span>conversations</span><span>tasks</span><span>documents</span><span>extensions</span><span>task graph</span></div>
-						</div>
-						<div class="wire">one file</div>
-						<div class="layer store">
-							<div class="layer-head"><b>SQLite</b><code>~/.pi-pocket/pocket.sqlite</code></div>
-						</div>
-					</div>
-					<div class="arch-side">
-						<div class="layer">
-							<div class="layer-head"><b>Launcher</b><code>src/launcher/</code></div>
-							<p>Runs the server as a child and restarts it when the app asks (exit code 75) or after a crash. Keeps the tunnel up: this device, LAN, Cloudflare, or Tailscale.</p>
-						</div>
-						<div class="layer">
-							<div class="layer-head"><b>Extensions</b><code>src/server/extensions/</code></div>
-							<p>Tools, hooks, prompt sections, and tasks, installed into the harness and reinstalled when edited. The owner's drop-ins load after them.</p>
-						</div>
-						<div class="layer">
-							<div class="layer-head"><b>Chromium</b><code>browser.ts</code></div>
-							<p>One headless browser driven over the DevTools protocol through a pipe, with a page per session that Pi's browser tool and the Browser panel share. Started on first use.</p>
-						</div>
-						<div class="layer">
-							<div class="layer-head"><b>Pi</b><code>~/.pi/agent/</code></div>
-							<p>Sign-ins, settings, skills, and prompt templates, shared with the Pi command line, and Lancet Guard when it is installed.</p>
-						</div>
-					</div>
-				</figure>
+                    <figure class="arch">
+                        <div class="arch-stack">
+                            <div class="layer">
+                                <div class="layer-head"><b>Browsers</b><code>web/</code></div>
+                                <div class="parts">
+                                    <span>Preact + htm</span><span>service worker</span
+                                    ><span>push</span><span>share target</span
+                                    ><span>home-screen app</span>
+                                </div>
+                            </div>
+                            <div class="wire">JSON API · server-sent events · long polling</div>
+                            <div class="layer">
+                                <div class="layer-head"><b>HTTP server</b><code>http.ts</code></div>
+                                <div class="parts">
+                                    <span>/api routes</span><span>event stream</span
+                                    ><span>uploads</span><span>sandboxed artifacts</span
+                                    ><span>browser frames</span><span>invites</span>
+                                </div>
+                            </div>
+                            <div class="wire">calls</div>
+                            <div class="layer core">
+                                <div class="layer-head"><b>PocketApp</b><code>app.ts</code></div>
+                                <div class="parts">
+                                    <span>rooms</span><span>commands</span><span>collab</span
+                                    ><span>alerts</span><span>spend</span><span>schedules</span
+                                    ><span>goals</span><span>changes</span><span>worktrees</span>
+                                </div>
+                            </div>
+                            <div class="wire">commits · commit listener</div>
+                            <div class="layer">
+                                <div class="layer-head">
+                                    <b>Pi Durable harness</b><code>@earendil-works/pi-durable</code>
+                                </div>
+                                <div class="parts">
+                                    <span>conversations</span><span>tasks</span
+                                    ><span>documents</span><span>extensions</span
+                                    ><span>task graph</span>
+                                </div>
+                            </div>
+                            <div class="wire">one file</div>
+                            <div class="layer store">
+                                <div class="layer-head">
+                                    <b>SQLite</b><code>~/.pi-pocket/pocket.sqlite</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="arch-side">
+                            <div class="layer">
+                                <div class="layer-head">
+                                    <b>Launcher</b><code>src/launcher/</code>
+                                </div>
+                                <p>
+                                    Runs the server as a child and restarts it when the app asks
+                                    (exit code 75) or after a crash. Keeps the tunnel up: this
+                                    device, LAN, Cloudflare, or Tailscale.
+                                </p>
+                            </div>
+                            <div class="layer">
+                                <div class="layer-head">
+                                    <b>Extensions</b><code>src/server/extensions/</code>
+                                </div>
+                                <p>
+                                    Tools, hooks, prompt sections, and tasks, installed into the
+                                    harness and reinstalled when edited. The owner's drop-ins load
+                                    after them.
+                                </p>
+                            </div>
+                            <div class="layer">
+                                <div class="layer-head"><b>Chromium</b><code>browser.ts</code></div>
+                                <p>
+                                    One headless browser driven over the DevTools protocol through a
+                                    pipe, with a page per session that Pi's browser tool and the
+                                    Browser panel share. Started on first use.
+                                </p>
+                            </div>
+                            <div class="layer">
+                                <div class="layer-head"><b>Pi</b><code>~/.pi/agent/</code></div>
+                                <p>
+                                    Sign-ins, settings, skills, and prompt templates, shared with
+                                    the Pi command line, and Lancet Guard when it is installed.
+                                </p>
+                            </div>
+                        </div>
+                    </figure>
 
-				<div class="grid map">
-					<article class="card">
-						<code>room.ts</code>
-						<h3>Rooms</h3>
-						<p>A room per conversation someone is watching. It batches changes for 90 ms, turns entries into compact JSON, and sends each tab only the entries and fields it does not have yet.</p>
-					</article>
-					<article class="card">
-						<code>commands.ts</code>
-						<h3>Commands</h3>
-						<p>Everything people ask of Pi checks role, invite scope, and take turns first. Changes others should know about become activity lines in the session's chat.</p>
-					</article>
-					<article class="card">
-						<code>app.ts</code>
-						<h3>One commit listener</h3>
-						<p>The one place that hears every commit: it records authors, tracks busy sessions, counts spend, and updates rooms. Features react to commits instead of polling.</p>
-					</article>
-					<article class="card">
-						<code>store.js</code>
-						<h3>Event stream</h3>
-						<p>Server-sent events by default. When a tunnel holds the stream back, the app switches to long polling and remembers that for a day.</p>
-					</article>
-					<article class="card">
-						<code>reload.ts</code>
-						<h3>Live reload</h3>
-						<p>A changed extension is imported again and installed under the same name. A tool call already running finishes on the old code; a module that fails to load keeps its last good version.</p>
-					</article>
-					<article class="card">
-						<code>projection.ts</code>
-						<h3>Small updates</h3>
-						<p>Long tool output and file contents are clipped in the live view. A tab asks for the full entry when someone expands it.</p>
-					</article>
-				</div>
-			</div>
-		</section>
+                    <div class="grid map">
+                        <article class="card">
+                            <code>room.ts</code>
+                            <h3>Rooms</h3>
+                            <p>
+                                A room per conversation someone is watching. It batches changes for
+                                90 ms, turns entries into compact JSON, and sends each tab only the
+                                entries and fields it does not have yet.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>commands.ts</code>
+                            <h3>Commands</h3>
+                            <p>
+                                Everything people ask of Pi checks role, invite scope, and take
+                                turns first. Changes others should know about become activity lines
+                                in the session's chat.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>app.ts</code>
+                            <h3>One commit listener</h3>
+                            <p>
+                                The one place that hears every commit: it records authors, tracks
+                                busy sessions, counts spend, and updates rooms. Features react to
+                                commits instead of polling.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>store.js</code>
+                            <h3>Event stream</h3>
+                            <p>
+                                Server-sent events by default. When a tunnel holds the stream back,
+                                the app switches to long polling and remembers that for a day.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>reload.ts</code>
+                            <h3>Live reload</h3>
+                            <p>
+                                A changed extension is imported again and installed under the same
+                                name. A tool call already running finishes on the old code; a module
+                                that fails to load keeps its last good version.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>projection.ts</code>
+                            <h3>Small updates</h3>
+                            <p>
+                                Long tool output and file contents are clipped in the live view. A
+                                tab asks for the full entry when someone expands it.
+                            </p>
+                        </article>
+                    </div>
+                </div>
+            </section>
 
-		<!-- A message -->
-		<section class="section" id="message">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Request path</span>
-					<h2>A message, start to finish.</h2>
-					<p>What happens between tapping send on a phone and every open tab showing Pi's answer.</p>
-				</div>
-				<ol class="trace">
-					<li>
-						<code>web/composer.js</code>
-						<h3>Sent with an id</h3>
-						<p>The tab posts the message to <code>/api/c/:id/submit</code> with an id of its own, so sending again after a network error does not send twice.</p>
-					</li>
-					<li>
-						<code>commands.ts</code>
-						<h3>Checked, then queued</h3>
-						<p>Role, invite scope, take turns, and spend limits are checked, and a prompt template expands. The message goes into the conversation's inbox with the request id <code>u:&lt;person&gt;:&lt;id&gt;</code>, which also says who wrote it. While Pi works, it joins the run or waits as a follow-up.</p>
-					</li>
-					<li>
-						<code>pi-durable</code>
-						<h3>Run as durable tasks</h3>
-						<p>The model request and each tool call are tasks that commit as they go. Plan mode, Lancet Guard, and goals hook into those tasks.</p>
-					</li>
-					<li>
-						<code>app.ts</code>
-						<h3>Heard once</h3>
-						<p>The commit listener sees each commit, records the author, marks the session busy, counts spend, and tells the rooms watching that conversation.</p>
-					</li>
-					<li>
-						<code>room.ts</code>
-						<h3>Sent as changes</h3>
-						<p>The room waits up to 90 ms to batch changes, then sends each tab what it is missing over its event stream.</p>
-					</li>
-					<li>
-						<code>web/store.js</code>
-						<h3>Rendered</h3>
-						<p>The store applies the update and Preact renders it. A tab that reconnects gets the whole view again, so every device shows the same thing.</p>
-					</li>
-				</ol>
-			</div>
-		</section>
+            <!-- A message -->
+            <section class="section" id="message">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Request path</span>
+                        <h2>A message, start to finish.</h2>
+                        <p>
+                            What happens between tapping send on a phone and every open tab showing
+                            Pi's answer.
+                        </p>
+                    </div>
+                    <ol class="trace">
+                        <li>
+                            <code>web/composer.js</code>
+                            <h3>Sent with an id</h3>
+                            <p>
+                                The tab posts the message to <code>/api/c/:id/submit</code> with an
+                                id of its own, so sending again after a network error does not send
+                                twice.
+                            </p>
+                        </li>
+                        <li>
+                            <code>commands.ts</code>
+                            <h3>Checked, then queued</h3>
+                            <p>
+                                Role, invite scope, take turns, and spend limits are checked, and a
+                                prompt template expands. The message goes into the conversation's
+                                inbox with the request id <code>u:&lt;person&gt;:&lt;id&gt;</code>,
+                                which also says who wrote it. While Pi works, it joins the run or
+                                waits as a follow-up.
+                            </p>
+                        </li>
+                        <li>
+                            <code>pi-durable</code>
+                            <h3>Run as durable tasks</h3>
+                            <p>
+                                The model request and each tool call are tasks that commit as they
+                                go. Plan mode, Lancet Guard, and goals hook into those tasks.
+                            </p>
+                        </li>
+                        <li>
+                            <code>app.ts</code>
+                            <h3>Heard once</h3>
+                            <p>
+                                The commit listener sees each commit, records the author, marks the
+                                session busy, counts spend, and tells the rooms watching that
+                                conversation.
+                            </p>
+                        </li>
+                        <li>
+                            <code>room.ts</code>
+                            <h3>Sent as changes</h3>
+                            <p>
+                                The room waits up to 90 ms to batch changes, then sends each tab
+                                what it is missing over its event stream.
+                            </p>
+                        </li>
+                        <li>
+                            <code>web/store.js</code>
+                            <h3>Rendered</h3>
+                            <p>
+                                The store applies the update and Preact renders it. A tab that
+                                reconnects gets the whole view again, so every device shows the same
+                                thing.
+                            </p>
+                        </li>
+                    </ol>
+                </div>
+            </section>
 
-		<!-- Durability -->
-		<section class="section alt" id="durability">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Durability</span>
-					<h2>Rules that survive a crash.</h2>
-					<p>Pi Durable provides tasks, checkpoints, and atomic commits. Pi Pocket uses them so that a restart at any moment changes nothing anyone can see.</p>
-				</div>
-				<div class="grid map">
-					<article class="card">
-						<code>commit, then show</code>
-						<h3>Shown once stored</h3>
-						<p>Browsers render committed state only. Pi Pocket's documents change in the same commits as the transcript, so the two never disagree after a crash.</p>
-					</article>
-					<article class="card">
-						<code>request ids</code>
-						<h3>Sent once</h3>
-						<p>Every message to Pi has a request id, which also says whose work it is. A retried send, a resend, a <code>!</code> command, or a scheduled message sent again after a restart finds the one already there.</p>
-					</article>
-					<article class="card">
-						<code>memos</code>
-						<h3>Asked once</h3>
-						<p>A hook keeps its result in its task's memo: an approval's answer, a goal's check. After a restart the hook runs again and reads the memo instead of asking or checking again.</p>
-					</article>
-					<article class="card">
-						<code>replay: "safe"</code>
-						<h3>Rerun only when harmless</h3>
-						<p>A tool call cut off by a restart runs again only if running it twice is harmless. Otherwise the model is told it was interrupted and checks what happened. A <code>!</code> command someone ran is never run twice: its entry says it was cut off.</p>
-					</article>
-					<article class="card">
-						<code>durable tasks</code>
-						<h3>Time that survives</h3>
-						<p>A scheduled message is a task that sleeps in the harness. A restart while it sleeps keeps it sleeping; one after its time sends it at once, and only once.</p>
-					</article>
-					<article class="card">
-						<code>fork policies</code>
-						<h3>Forks are data</h3>
-						<p>Each document says whether a fork copies it or starts empty. A fork's setup trims what it copied, such as pins and authors, to the fork point in the same commit.</p>
-					</article>
-				</div>
-			</div>
-		</section>
+            <!-- Durability -->
+            <section class="section alt" id="durability">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Durability</span>
+                        <h2>Rules that survive a crash.</h2>
+                        <p>
+                            Pi Durable provides tasks, checkpoints, and atomic commits. Pi Pocket
+                            uses them so that a restart at any moment changes nothing anyone can
+                            see.
+                        </p>
+                    </div>
+                    <div class="grid map">
+                        <article class="card">
+                            <code>commit, then show</code>
+                            <h3>Shown once stored</h3>
+                            <p>
+                                Browsers render committed state only. Pi Pocket's documents change
+                                in the same commits as the transcript, so the two never disagree
+                                after a crash.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>request ids</code>
+                            <h3>Sent once</h3>
+                            <p>
+                                Every message to Pi has a request id, which also says whose work it
+                                is. A retried send, a resend, a <code>!</code> command, or a
+                                scheduled message sent again after a restart finds the one already
+                                there.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>memos</code>
+                            <h3>Asked once</h3>
+                            <p>
+                                A hook keeps its result in its task's memo: an approval's answer, a
+                                goal's check. After a restart the hook runs again and reads the memo
+                                instead of asking or checking again.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>replay: "safe"</code>
+                            <h3>Rerun only when harmless</h3>
+                            <p>
+                                A tool call cut off by a restart runs again only if running it twice
+                                is harmless. Otherwise the model is told it was interrupted and
+                                checks what happened. A <code>!</code> command someone ran is never
+                                run twice: its entry says it was cut off.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>durable tasks</code>
+                            <h3>Time that survives</h3>
+                            <p>
+                                A scheduled message is a task that sleeps in the harness. A restart
+                                while it sleeps keeps it sleeping; one after its time sends it at
+                                once, and only once.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>fork policies</code>
+                            <h3>Forks are data</h3>
+                            <p>
+                                Each document says whether a fork copies it or starts empty. A
+                                fork's setup trims what it copied, such as pins and authors, to the
+                                fork point in the same commit.
+                            </p>
+                        </article>
+                    </div>
+                </div>
+            </section>
 
-		<!-- State -->
-		<section class="section" id="state">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">State</span>
-					<h2>Where everything lives.</h2>
-					<p>Pi Pocket's documents sit beside Pi Durable's own (the transcript, the agent's settings, the inbox, the live run, usage) in <code>pocket.sqlite</code>. Their kinds are stored data, so they are never renamed.</p>
-				</div>
-				<div class="table-wrap">
-					<table class="docs">
-						<thead>
-							<tr><th>Document</th><th>Holds</th><th>A fork</th></tr>
-						</thead>
-						<tbody>
-							<tr><td><code>pocket.sessions</code></td><td>The session list: title, folder, who started it, where it was forked from, spend limit, worktree. One for the server.</td><td>adds a session</td></tr>
-							<tr><td><code>pocket.chat</code></td><td>The side chat and activity lines</td><td>starts its own</td></tr>
-							<tr><td><code>pocket.authors</code></td><td>Who wrote each message to Pi, and whose work the ones sent for people are</td><td>copies, to the fork point</td></tr>
-							<tr><td><code>pocket.pins</code></td><td>Pinned messages</td><td>copies, to the fork point</td></tr>
-							<tr><td><code>pocket.reactions</code></td><td>Emoji reactions</td><td>copies</td></tr>
-							<tr><td><code>pocket.notes</code></td><td>The shared notes page</td><td>copies</td></tr>
-							<tr><td><code>pocket.plan</code></td><td>Plan mode</td><td>copies</td></tr>
-							<tr><td><code>pocket.decisions</code></td><td>Who allowed or denied each guarded call</td><td>copies</td></tr>
-							<tr><td><code>pocket.artifacts</code></td><td>Artifacts, with each version's body in <code>pocket.artifact-body</code></td><td>copies</td></tr>
-							<tr><td><code>pocket.codemode-store</code></td><td>Values scripts keep between runs</td><td>copies</td></tr>
-							<tr><td><code>pocket.browser</code></td><td>The page the browser last showed, and its size, to open it again after a restart</td><td>copies</td></tr>
-							<tr><td><code>pocket.turns</code></td><td>Take turns: who drives, who asked</td><td>starts empty</td></tr>
-							<tr><td><code>pocket.subagents</code></td><td>Named subagents and the tasks reporting their answers</td><td>starts empty</td></tr>
-							<tr><td><code>pocket.schedules</code></td><td>Scheduled messages</td><td>starts empty</td></tr>
-							<tr><td><code>pocket.goal</code></td><td>"Done when": the check and its tries</td><td>starts empty</td></tr>
-							<tr><td><code>pocket.shell-requests</code></td><td>The <code>!</code> commands people started, by request id, so one sent again runs once</td><td>starts empty</td></tr>
-							<tr><td><code>pocket.spend</code></td><td>Spend per person, and what was counted. One for the server.</td><td>—</td></tr>
-						</tbody>
-					</table>
-				</div>
-				<h3 class="map-head">Outside the database</h3>
-				<div class="tags">
-					<span class="tag"><b>config.json</b> people, roles, hashed tokens, settings</span>
-					<span class="tag"><b>push.json</b> VAPID keys, push subscriptions</span>
-					<span class="tag"><b>uploads/</b> files sent to Pi</span>
-					<span class="tag"><b>worktrees/</b> sessions' git worktrees</span>
-					<span class="tag"><b>extensions/</b> the owner's drop-ins</span>
-					<span class="tag"><b>browser/</b> the built-in browser's profile</span>
-				</div>
-				<p class="note">All of it is in <code>~/.pi-pocket/</code>, or wherever <code>PI_POCKET_DIR</code> points. The config files are written atomically with mode 0600.</p>
-			</div>
-		</section>
+            <!-- State -->
+            <section class="section" id="state">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">State</span>
+                        <h2>Where everything lives.</h2>
+                        <p>
+                            Pi Pocket's documents sit beside Pi Durable's own (the transcript, the
+                            agent's settings, the inbox, the live run, usage) in
+                            <code>pocket.sqlite</code>. Their kinds are stored data, so they are
+                            never renamed.
+                        </p>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="docs">
+                            <thead>
+                                <tr>
+                                    <th>Document</th>
+                                    <th>Holds</th>
+                                    <th>A fork</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>pocket.sessions</code></td>
+                                    <td>
+                                        The session list: title, folder, who started it, where it
+                                        was forked from, spend limit, worktree. One for the server.
+                                    </td>
+                                    <td>adds a session</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.chat</code></td>
+                                    <td>The side chat and activity lines</td>
+                                    <td>starts its own</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.authors</code></td>
+                                    <td>
+                                        Who wrote each message to Pi, and whose work the ones sent
+                                        for people are
+                                    </td>
+                                    <td>copies, to the fork point</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.pins</code></td>
+                                    <td>Pinned messages</td>
+                                    <td>copies, to the fork point</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.reactions</code></td>
+                                    <td>Emoji reactions</td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.notes</code></td>
+                                    <td>The shared notes page</td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.plan</code></td>
+                                    <td>Plan mode</td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.decisions</code></td>
+                                    <td>Who allowed or denied each guarded call</td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.artifacts</code></td>
+                                    <td>
+                                        Artifacts, with each version's body in
+                                        <code>pocket.artifact-body</code>
+                                    </td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.codemode-store</code></td>
+                                    <td>Values scripts keep between runs</td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.browser</code></td>
+                                    <td>
+                                        The page the browser last showed, and its size, to open it
+                                        again after a restart
+                                    </td>
+                                    <td>copies</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.turns</code></td>
+                                    <td>Take turns: who drives, who asked</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.subagents</code></td>
+                                    <td>Named subagents and the tasks reporting their answers</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.schedules</code></td>
+                                    <td>Scheduled messages</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.goal</code></td>
+                                    <td>"Done when": the check and its tries</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.shell-requests</code></td>
+                                    <td>
+                                        The <code>!</code> commands people started, by request id,
+                                        so one sent again runs once
+                                    </td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.spend</code></td>
+                                    <td>
+                                        Spend per person, and what was counted. One for the server.
+                                    </td>
+                                    <td>—</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <h3 class="map-head">Outside the database</h3>
+                    <div class="tags">
+                        <span class="tag"
+                            ><b>config.json</b> people, roles, hashed tokens, settings</span
+                        >
+                        <span class="tag"><b>push.json</b> VAPID keys, push subscriptions</span>
+                        <span class="tag"><b>uploads/</b> files sent to Pi</span>
+                        <span class="tag"><b>worktrees/</b> sessions' git worktrees</span>
+                        <span class="tag"><b>extensions/</b> the owner's drop-ins</span>
+                        <span class="tag"><b>browser/</b> the built-in browser's profile</span>
+                    </div>
+                    <p class="note">
+                        All of it is in <code>~/.pi-pocket/</code>, or wherever
+                        <code>PI_POCKET_DIR</code> points. The config files are written atomically
+                        with mode 0600.
+                    </p>
+                </div>
+            </section>
 
-		<!-- Extensions -->
-		<section class="section alt" id="extensions">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Extensions</span>
-					<h2>Features are extensions.</h2>
-					<p>Much of what Pi Pocket adds around the agent is Pi Durable extensions: tools, hooks, prompt sections, and task definitions, installed in this order. Editing one reinstalls it in the running server.</p>
-				</div>
-				<ol class="ext">
-					<li><code>prompt.ts</code><span class="kinds">section</span><p>The system prompt: guidelines for a phone-sized screen, the project's AGENTS.md files, Pi's skills, and the working directory. Always on.</p></li>
-					<li><code>artifacts.ts</code><span class="kinds">tool</span><p>Versioned HTML, Markdown, and SVG artifacts, opened in a sandbox.</p></li>
-					<li><code>browser.ts</code><span class="kinds">tool · section</span><p>A real browser Pi shares with the people in a session: snapshots with element refs, clicks, typing, screenshots, the console. In plan mode it may only look.</p></li>
-					<li><code>subagents.ts</code><span class="kinds">tool · tasks</span><p>Background subagents. An anchor task owns each one; a reporter task carries each answer back to the parent.</p></li>
-					<li><code>schedules.ts</code><span class="kinds">tool · task</span><p>Scheduled messages, and Pi's tool for scheduling its own follow-ups.</p></li>
-					<li><code>goals.ts</code><span class="kinds">hook · section</span><p>After each final answer, runs the session's check and keeps Pi going while it fails.</p></li>
-					<li><code>plan.ts</code><span class="kinds">hook · section</span><p>Plan mode: calls that would change something are blocked before they run.</p></li>
-					<li><code>guard.ts</code><span class="kinds">hook</span><p>Lancet Guard: risky bash, write, and edit calls wait for a person. Off by default.</p></li>
-					<li><code>codemode.ts</code><span class="kinds">tool</span><p>Scripts that call the other tools. Each call goes through the same hooks as a direct one.</p></li>
-				</ol>
-				<p class="note">The owner's own modules in <code>~/.pi-pocket/extensions/</code> load after these, stay off until turned on, and import the same packages through a <code>node_modules</code> link.</p>
-			</div>
-		</section>
+            <!-- Extensions -->
+            <section class="section alt" id="extensions">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Extensions</span>
+                        <h2>Features are extensions.</h2>
+                        <p>
+                            Much of what Pi Pocket adds around the agent is Pi Durable extensions:
+                            tools, hooks, prompt sections, and task definitions, installed in this
+                            order. Editing one reinstalls it in the running server.
+                        </p>
+                    </div>
+                    <ol class="ext">
+                        <li>
+                            <code>prompt.ts</code><span class="kinds">section</span>
+                            <p>
+                                The system prompt: guidelines for a phone-sized screen, the
+                                project's AGENTS.md files, Pi's skills, and the working directory.
+                                Always on.
+                            </p>
+                        </li>
+                        <li>
+                            <code>artifacts.ts</code><span class="kinds">tool</span>
+                            <p>Versioned HTML, Markdown, and SVG artifacts, opened in a sandbox.</p>
+                        </li>
+                        <li>
+                            <code>browser.ts</code><span class="kinds">tool · section</span>
+                            <p>
+                                A real browser Pi shares with the people in a session: snapshots
+                                with element refs, clicks, typing, screenshots, the console. In plan
+                                mode it may only look.
+                            </p>
+                        </li>
+                        <li>
+                            <code>subagents.ts</code><span class="kinds">tool · tasks</span>
+                            <p>
+                                Background subagents. An anchor task owns each one; a reporter task
+                                carries each answer back to the parent.
+                            </p>
+                        </li>
+                        <li>
+                            <code>schedules.ts</code><span class="kinds">tool · task</span>
+                            <p>
+                                Scheduled messages, and Pi's tool for scheduling its own follow-ups.
+                            </p>
+                        </li>
+                        <li>
+                            <code>goals.ts</code><span class="kinds">hook · section</span>
+                            <p>
+                                After each final answer, runs the session's check and keeps Pi going
+                                while it fails.
+                            </p>
+                        </li>
+                        <li>
+                            <code>plan.ts</code><span class="kinds">hook · section</span>
+                            <p>
+                                Plan mode: calls that would change something are blocked before they
+                                run.
+                            </p>
+                        </li>
+                        <li>
+                            <code>guard.ts</code><span class="kinds">hook</span>
+                            <p>
+                                Lancet Guard: risky bash, write, and edit calls wait for a person.
+                                Off by default.
+                            </p>
+                        </li>
+                        <li>
+                            <code>codemode.ts</code><span class="kinds">tool</span>
+                            <p>
+                                Scripts that call the other tools. Each call goes through the same
+                                hooks as a direct one.
+                            </p>
+                        </li>
+                    </ol>
+                    <p class="note">
+                        The owner's own modules in <code>~/.pi-pocket/extensions/</code> load after
+                        these, stay off until turned on, and import the same packages through a
+                        <code>node_modules</code> link.
+                    </p>
+                </div>
+            </section>
 
-		<!-- Security -->
-		<section class="section" id="security">
-			<div class="wrap split">
-				<div class="split-copy">
-					<span class="kicker">Security</span>
-					<h2>Narrow ways in.</h2>
-					<p>Pi runs commands as the person who started the server, so the app limits who can ask it to, and what a page or a reply can do.</p>
-					<ul class="points">
-						<li><b>Sign-in.</b> Random tokens, stored hashed, in an HttpOnly, SameSite=Lax cookie. Invites are one-time links that expire after 15 minutes.</li>
-						<li><b>Requests.</b> Anything that changes something must carry an <code>X-Pocket</code> header, which a form on another site cannot send.</li>
-						<li><b>Pages.</b> The app loads nothing from other sites: its policy allows only its own files and its hashed inline scripts. Replies are sanitized, and artifacts run in a sandbox with no access to the app.</li>
-						<li><b>Browser.</b> Pages run in Chromium on the server and reach people only as images, so they never touch the app. Using one takes steering rights, files are the owner's, and each address someone opens shows in the chat.</li>
-						<li><b>Roles.</b> Owner, steer, or view, in every session or only one. Lancet Guard approvals can require someone other than whoever asked.</li>
-					</ul>
-				</div>
-				<div class="callout">
-					<b>!</b>
-					<p><b>Steering means shell access.</b> Anyone who can steer can make Pi run commands on the machine. Worktrees keep a session's files apart, and spend limits stop runs, but neither is a sandbox. <a href="https://github.com/TannerMidd/pi-pocket/blob/main/SECURITY.md">SECURITY.md</a> spells out what is protected.</p>
-				</div>
-			</div>
-		</section>
+            <!-- Security -->
+            <section class="section" id="security">
+                <div class="wrap split">
+                    <div class="split-copy">
+                        <span class="kicker">Security</span>
+                        <h2>Narrow ways in.</h2>
+                        <p>
+                            Pi runs commands as the person who started the server, so the app limits
+                            who can ask it to, and what a page or a reply can do.
+                        </p>
+                        <ul class="points">
+                            <li>
+                                <b>Sign-in.</b> Random tokens, stored hashed, in an HttpOnly,
+                                SameSite=Lax cookie. Invites are one-time links that expire after 15
+                                minutes.
+                            </li>
+                            <li>
+                                <b>Requests.</b> Anything that changes something must carry an
+                                <code>X-Pocket</code> header, which a form on another site cannot
+                                send.
+                            </li>
+                            <li>
+                                <b>Pages.</b> The app loads nothing from other sites: its policy
+                                allows only its own files and its hashed inline scripts. Replies are
+                                sanitized, and artifacts run in a sandbox with no access to the app.
+                            </li>
+                            <li>
+                                <b>Browser.</b> Pages run in Chromium on the server and reach people
+                                only as images, so they never touch the app. Using one takes
+                                steering rights, files are the owner's, and each address someone
+                                opens shows in the chat.
+                            </li>
+                            <li>
+                                <b>Roles.</b> Owner, steer, or view, in every session or only one.
+                                Lancet Guard approvals can require someone other than whoever asked.
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="callout">
+                        <b>!</b>
+                        <p>
+                            <b>Steering means shell access.</b> Anyone who can steer can make Pi run
+                            commands on the machine. Worktrees keep a session's files apart, and
+                            spend limits stop runs, but neither is a sandbox.
+                            <a href="https://github.com/TannerMidd/pi-pocket/blob/main/SECURITY.md"
+                                >SECURITY.md</a
+                            >
+                            spells out what is protected.
+                        </p>
+                    </div>
+                </div>
+            </section>
 
-		<!-- Practices -->
-		<section class="section alt" id="practices">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Practices</span>
-					<h2>Built to be changed.</h2>
-					<p>Pi Pocket is often edited by Pi from inside itself, so its code has to stay easy to read and safe to change while it runs.</p>
-				</div>
-				<div class="grid map">
-					<article class="card">
-						<code>no build</code>
-						<h3>Nothing to compile</h3>
-						<p>Node runs the server's TypeScript by stripping its types, so only erasable syntax is used. The web app is plain ES modules with Preact and htm.</p>
-					</article>
-					<article class="card">
-						<code>dependencies</code>
-						<h3>Few dependencies</h3>
-						<p>Earendil's Pi packages, pinned to the versions tested, plus Preact, htm, marked, DOMPurify, qrcode, undici, and jiti. Web Push is built in.</p>
-					</article>
-					<article class="card">
-						<code>npm test</code>
-						<h3>Tested on the real core</h3>
-						<p>Tests run the real server against a scripted model: real SQLite, real git repositories, and restarts by reopening the same data folder, with the clock moved forward for schedules.</p>
-					</article>
-					<article class="card">
-						<code>npm run check</code>
-						<h3>Type-checked</h3>
-						<p>The TypeScript compiler checks the server and the tests. Web files get Node's syntax check after every edit, since a broken one blanks every open tab.</p>
-					</article>
-					<article class="card">
-						<code>AGENTS.md</code>
-						<h3>Safe to edit live</h3>
-						<p>Web files reload every browser, extensions reinstall in place, and anything else waits for a restart from the menu, after which running work resumes.</p>
-					</article>
-					<article class="card">
-						<code>docs/map.md</code>
-						<h3>Written to be read</h3>
-						<p>Each module starts with what it owns, comments say why in plain sentences, and a short map of the code helps agents find their way.</p>
-					</article>
-				</div>
-			</div>
-		</section>
-	</main>
+            <!-- Practices -->
+            <section class="section alt" id="practices">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Practices</span>
+                        <h2>Built to be changed.</h2>
+                        <p>
+                            Pi Pocket is often edited by Pi from inside itself, so its code has to
+                            stay easy to read and safe to change while it runs.
+                        </p>
+                    </div>
+                    <div class="grid map">
+                        <article class="card">
+                            <code>no build</code>
+                            <h3>Nothing to compile</h3>
+                            <p>
+                                Node runs the server's TypeScript by stripping its types, so only
+                                erasable syntax is used. The web app is plain ES modules with Preact
+                                and htm.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>dependencies</code>
+                            <h3>Few dependencies</h3>
+                            <p>
+                                Earendil's Pi packages, pinned to the versions tested, plus Preact,
+                                htm, marked, DOMPurify, qrcode, undici, and jiti. Web Push is built
+                                in.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>npm test</code>
+                            <h3>Tested on the real core</h3>
+                            <p>
+                                Tests run the real server against a scripted model: real SQLite,
+                                real git repositories, and restarts by reopening the same data
+                                folder, with the clock moved forward for schedules.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>npm run check</code>
+                            <h3>Type-checked</h3>
+                            <p>
+                                The TypeScript compiler checks the server and the tests. Web files
+                                get Node's syntax check after every edit, since a broken one blanks
+                                every open tab.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>AGENTS.md</code>
+                            <h3>Safe to edit live</h3>
+                            <p>
+                                Web files reload every browser, extensions reinstall in place, and
+                                anything else waits for a restart from the menu, after which running
+                                work resumes.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>docs/map.md</code>
+                            <h3>Written to be read</h3>
+                            <p>
+                                Each module starts with what it owns, comments say why in plain
+                                sentences, and a short map of the code helps agents find their way.
+                            </p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+        </main>
 
-	<footer class="footer">
-		<div class="wrap">
-			<div>
-				<a class="logo" href="./"><img src="icon.svg" alt="" width="28" height="28">Pi Pocket</a>
-				<small>A self-hosted web app for Pi.</small>
-			</div>
-			<div>
-				<nav class="footer-links" aria-label="Footer">
-					<a href="./">Home</a>
-					<a href="https://github.com/TannerMidd/pi-pocket">GitHub</a>
-					<a href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/map.md">Code map</a>
-					<a href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/features.md">Feature tour</a>
-					<a href="https://earendil.com/posts/pi-durable/">Pi Durable</a>
-				</nav>
-				<small>JetBrains Mono is used under the <a href="fonts/OFL.txt">SIL Open Font License</a>.</small>
-			</div>
-		</div>
-	</footer>
-</body>
+        <footer class="footer">
+            <div class="wrap">
+                <div>
+                    <a class="logo" href="./"
+                        ><img src="icon.svg" alt="" width="28" height="28" />Pi Pocket</a
+                    >
+                    <small>A self-hosted web app for Pi.</small>
+                </div>
+                <div>
+                    <nav class="footer-links" aria-label="Footer">
+                        <a href="./">Home</a>
+                        <a href="https://github.com/TannerMidd/pi-pocket">GitHub</a>
+                        <a href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/map.md"
+                            >Code map</a
+                        >
+                        <a href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/features.md"
+                            >Feature tour</a
+                        >
+                        <a href="https://earendil.com/posts/pi-durable/">Pi Durable</a>
+                    </nav>
+                    <small
+                        >JetBrains Mono is used under the
+                        <a href="fonts/OFL.txt">SIL Open Font License</a>.</small
+                    >
+                </div>
+            </div>
+        </footer>
+    </body>
 </html>

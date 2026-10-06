@@ -12,7 +12,10 @@ export const ownRequest = (userId: string, key: string) => `u:${userId}:${key}`;
 export const requestFor = (userId: string, key: string) => `p:${userId}:${key}`;
 
 /** Whose a message is, from its request id, and whether they wrote it. Undefined for messages that are nobody's. */
-export function requestPerson(requestId: string | undefined): { userId: string; wrote: boolean } | undefined {
-	const match = /^([up]):([^:]+):/.exec(requestId ?? "");
-	return match === null ? undefined : { userId: match[2]!, wrote: match[1] === "u" };
+export function requestPerson(
+    requestId: string | undefined,
+): { userId: string; wrote: boolean } | undefined {
+    const match = /^([up]):([^:]+):/.exec(requestId ?? "");
+
+    return match === null ? undefined : { userId: match[2]!, wrote: match[1] === "u" };
 }

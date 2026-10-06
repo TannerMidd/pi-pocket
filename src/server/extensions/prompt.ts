@@ -5,7 +5,11 @@
  *
  * Edit freely: saving this file reloads it into the running server.
  */
-import { formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
+import {
+    formatSkillsForPrompt,
+    loadProjectContextFiles,
+    loadSkills,
+} from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import type { PocketHost } from "../host.ts";
 
@@ -25,46 +29,67 @@ const STALE_MS = 30_000;
 type Resources = { at: number; context: string | undefined; skills: string | undefined };
 
 export default function createPrompt(host: PocketHost) {
-	// Context files and skills load once per directory, and again when the copy is older than STALE_MS.
-	const resources = new Map<string, Resources>();
-	const load = (cwd: string): Resources => {
-		const cached = resources.get(cwd);
-		if (cached !== undefined && Date.now() - cached.at < STALE_MS) return cached;
-		let context: string | undefined;
-		let skills: string | undefined;
-		try {
-			const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir });
-			if (files.length > 0) {
-				context = files.map((file) => `<file path="${file.path}">\n${file.content.trim()}\n</file>`).join("\n\n");
-			}
-		} catch (error) {
-			host.notice("warning", `Could not load AGENTS.md files for ${cwd}: ${String(error)}`);
-		}
-		try {
-			const loaded = loadSkills({ cwd, agentDir: host.agentDir, skillPaths: host.skillPaths(), includeDefaults: true });
-			const text = formatSkillsForPrompt(loaded.skills, "read").trim();
-			skills = text === "" ? undefined : text;
-		} catch (error) {
-			host.notice("warning", `Could not load skills for ${cwd}: ${String(error)}`);
-		}
-		const fresh = { at: Date.now(), context, skills };
-		resources.set(cwd, fresh);
-		return fresh;
-	};
-	const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
+    // Context files and skills load once per directory, and again when the copy is older than STALE_MS.
+    const resources = new Map<string, Resources>();
 
-	return defineExtension({
-		name: "pocket-prompt",
-		sections: [
-			section("preamble", () => PREAMBLE, { tag: false }),
-			section("guidelines", () => GUIDELINES),
-			section("project_context", (input) => load(cwdOf(input)).context),
-			section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
-			section("environment", (input) => {
-				// The date only, so the prompt stays cache-friendly through the day.
-				const today = new Date().toISOString().slice(0, 10);
-				return `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}\nToday: ${today}`;
-			}),
-		],
-	});
+    const load = (cwd: string): Resources => {
+        const cached = resources.get(cwd);
+
+        if (cached !== undefined && Date.now() - cached.at < STALE_MS) {
+            return cached;
+        }
+
+        let context: string | undefined;
+        let skills: string | undefined;
+
+        try {
+            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir });
+
+            if (files.length > 0) {
+                context = files
+                    .map((file) => `<file path="${file.path}">\n${file.content.trim()}\n</file>`)
+                    .join("\n\n");
+            }
+        } catch (error) {
+            host.notice("warning", `Could not load AGENTS.md files for ${cwd}: ${String(error)}`);
+        }
+
+        try {
+            const loaded = loadSkills({
+                cwd,
+                agentDir: host.agentDir,
+                skillPaths: host.skillPaths(),
+                includeDefaults: true,
+            });
+            const text = formatSkillsForPrompt(loaded.skills, "read").trim();
+
+            skills = text === "" ? undefined : text;
+        } catch (error) {
+            host.notice("warning", `Could not load skills for ${cwd}: ${String(error)}`);
+        }
+
+        const fresh = { at: Date.now(), context, skills };
+
+        resources.set(cwd, fresh);
+
+        return fresh;
+    };
+
+    const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
+
+    return defineExtension({
+        name: "pocket-prompt",
+        sections: [
+            section("preamble", () => PREAMBLE, { tag: false }),
+            section("guidelines", () => GUIDELINES),
+            section("project_context", (input) => load(cwdOf(input)).context),
+            section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
+            section("environment", (input) => {
+                // The date only, so the prompt stays cache-friendly through the day.
+                const today = new Date().toISOString().slice(0, 10);
+
+                return `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}\nToday: ${today}`;
+            }),
+        ],
+    });
 }
