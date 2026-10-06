@@ -22,6 +22,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import { type BrowserPage, Browsers, findBrowser, VIEWPORTS } from "../src/server/browser.ts";
+import { SubagentsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 import type { Client } from "../src/server/room.ts";
 
@@ -36,6 +37,19 @@ const route: FauxResponseStep = (request) => {
     const messages = (request as { messages: { role: string; content: unknown }[] }).messages;
     const asked = messages.findLast((message) => message.role === "user");
     const done = messages.slice(messages.indexOf(asked!)).filter((m) => m.role === "toolResult");
+
+    if (role === "user" && text.endsWith("start a helper")) {
+        return fauxAssistantMessage(
+            [fauxToolCall("subagent", { action: "spawn", name: "helper", message: "look around" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (role === "user" && text === "look around") {
+        return fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 20" })], {
+            stopReason: "toolUse",
+        });
+    }
 
     if (JSON.stringify(asked?.content ?? "").includes("keep working")) {
         const call =
@@ -63,6 +77,7 @@ const ids = {} as Record<"open" | "idle" | "pinned" | "waiting" | "finished", Co
     working: ConversationId[];
 };
 let approval: Promise<{ allow: boolean; by: string }>;
+const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Run a script in the page and read back the JSON it returns. */
 async function inPage<T>(script: string): Promise<T> {
@@ -406,12 +421,183 @@ test("the ✓ on a finished tile marks it seen", real, async () => {
         `document.querySelector('.peeks .peek[data-peek="${id}"] .peek-seen').click()`,
     );
     await until(async () => !(await tiles()).some((tile) => tile.id === id), "the tile to go");
-    const seen = await inPage<Record<string, number>>(
-        `return localStorage.getItem("pocket.peekSeen")`,
-    );
+    const seen = await inPage<number>(`return localStorage.getItem("pocket.peekSeen.${id}")`);
 
-    assert.ok(seen[String(id)]! > 0);
+    assert.ok(seen > 0);
 });
+
+test("a seen mark from another tab of this browser is kept, and shows at once", real, async () => {
+    // Pinned and idle: it shows as pinned, until a run of it ends unseen.
+    const id = Number(ids.pinned);
+
+    await say(app, ids.pinned, "one more look");
+    await until(
+        async () => (await tiles()).find((tile) => tile.id === id)?.label === "done · new",
+        "the pinned session to be new",
+    );
+    // Another tab marks it seen; this tab marks another session seen at the same time.
+    await page.evaluate(`
+        const mark = "pocket.peekSeen.${id}";
+
+        localStorage.setItem(mark, String(Date.now() + 60_000));
+        window.dispatchEvent(new StorageEvent("storage", { key: mark }));
+        (await import("/peeks.js")).markSeen(${Number(ids.idle)});
+    `);
+    await until(
+        async () => (await tiles()).find((tile) => tile.id === id)?.label === "pinned",
+        "the other tab's mark to show here",
+    );
+    assert.ok(
+        Number(await inPage<string>(`return localStorage.getItem("pocket.peekSeen.${id}")`)) >
+            Date.now(),
+        "and to stay",
+    );
+    // Nothing changed for the tiles: the same choice, not made again.
+    assert.equal(
+        await inPage<boolean>(`
+            const { peekTiles } = await import("/peeks.js");
+
+            return JSON.stringify(peekTiles() === peekTiles());
+        `),
+        true,
+    );
+});
+
+test(
+    "a short command in wide characters still shows whole before it can be allowed",
+    real,
+    async () => {
+        const id = Number(ids.pinned);
+        const subject = `echo ${"全部删除旧的构建文件".repeat(7)} > a`;
+
+        assert.ok(subject.length <= 80, "short enough by count to be allowed");
+        const asked = app.approvals.request(
+            {
+                id: "wide-call",
+                conversationId: ids.pinned,
+                taskId: 4 as unknown as TaskId,
+                tool: "bash",
+                subject,
+                reason: "Overwrites a file",
+                createdAt: Date.now(),
+            },
+            context,
+        );
+        /** Whether the tile offers Allow, and whether its command is cut off anywhere. */
+        const check = (where: string) =>
+            inPage<{ allow: boolean; clipped: boolean } | null>(`
+            const tile = document.querySelector('${where} .peek[data-peek="${id}"]');
+            const what = tile?.querySelector(".peek-ask-what");
+
+            if (!what) {
+                return JSON.stringify(null);
+            }
+
+            const box = what.getBoundingClientRect();
+            const edge = tile.getBoundingClientRect();
+
+            return JSON.stringify({
+                allow: [...tile.querySelectorAll("button")].some((button) => button.textContent.trim() === "Allow"),
+                clipped: what.scrollHeight > what.clientHeight + 1 || box.bottom > edge.bottom + 1 || box.right > edge.right + 1,
+            });
+        `);
+
+        try {
+            for (const [where, viewport] of [
+                [".peeks", DESKTOP],
+                [".peek-strip", VIEWPORTS.mobile],
+            ] as const) {
+                await page.setViewport(viewport);
+                await until(
+                    async () => (await tiles(where)).some((tile) => tile.id === id),
+                    `the tile in ${where}`,
+                );
+                await page.evaluate(
+                    `document.querySelector('${where} .peek[data-peek="${id}"]').scrollIntoView({ block: "nearest", inline: "nearest" })`,
+                );
+                let seen: { allow: boolean; clipped: boolean } | null = null;
+
+                await until(async () => {
+                    seen = await check(where);
+
+                    return seen !== null;
+                }, `the call on the tile in ${where}`);
+                await settle(300);
+                seen = await check(where);
+                assert.equal(seen!.clipped, false, `nothing of the command is cut off in ${where}`);
+                assert.equal(seen!.allow, true, `so it may be allowed in ${where}`);
+            }
+        } finally {
+            await page.setViewport(DESKTOP);
+            app.approvals.answer("wide-call", { allow: false, by: "test" });
+            await asked;
+        }
+    },
+);
+
+test(
+    "Open on a subagent's long call goes to the subagent, where its card shows the command",
+    real,
+    async () => {
+        const parent = await newSession(app);
+
+        await say(app, parent, "please start a helper");
+        const helper = (await app.harness.snapshot(SubagentsDoc, parent, context))!.agents.helper!
+            .conversationId;
+        const asked = app.approvals.request(
+            {
+                id: "helper-long-call",
+                conversationId: helper,
+                taskId: 5 as unknown as TaskId,
+                tool: "bash",
+                subject: `rsync -av --delete ./build/ deploy@staging:/srv/app/ && ${"ssh deploy@staging restart; ".repeat(3)}`,
+                reason: "Deletes files on a server",
+                createdAt: Date.now(),
+            },
+            context,
+        );
+
+        try {
+            await until(
+                async () => (await tiles()).some((tile) => tile.id === Number(parent)),
+                "the parent's tile",
+            );
+            await page.evaluate(
+                `document.querySelector('.peeks .peek[data-peek="${Number(parent)}"]').scrollIntoView({ block: "nearest" })`,
+            );
+            await until(
+                async () =>
+                    (await tiles())
+                        .find((tile) => tile.id === Number(parent))
+                        ?.buttons.includes("Open") === true,
+                "Open on the parent's tile",
+            );
+            await page.evaluate(`
+            const tile = document.querySelector('.peeks .peek[data-peek="${Number(parent)}"]');
+
+            [...tile.querySelectorAll("button")].find((button) => button.textContent.trim() === "Open").click();
+        `);
+            await until(
+                async () =>
+                    (await inPage<string>(`return JSON.stringify(location.pathname)`)) ===
+                    `/s/${helper}`,
+                "the subagent's conversation to open",
+            );
+            await until(
+                async () =>
+                    (
+                        await inPage<string>(
+                            `return JSON.stringify(document.querySelector(".approval")?.textContent ?? "")`,
+                        )
+                    ).includes("rsync -av --delete"),
+                "its card with the whole command",
+            );
+        } finally {
+            app.approvals.answer("helper-long-call", { allow: false, by: "test" });
+            await asked;
+        }
+    },
+);
 
 test(
     "a command too long to show whole is not allowed from its tile: Open shows it in its session",

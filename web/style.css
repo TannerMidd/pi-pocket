@@ -4969,7 +4969,15 @@ textarea.notes {
 }
 
 .peek.waiting {
+    height: auto;
+    min-height: var(--peek-h, 13rem);
     border-color: var(--warn-line);
+}
+
+/* A waiting tile grows to show its whole call; its own lines keep to a few. */
+.peek.waiting .peek-lines {
+    flex: none;
+    max-height: 5.6rem;
 }
 
 .peek-head {
@@ -5079,6 +5087,14 @@ textarea.notes {
     -webkit-line-clamp: 4;
     line-clamp: 4;
     overflow: hidden;
+}
+
+/* A command short enough to allow from here shows whole, never clamped. */
+.peek-ask-what.whole {
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: none;
+    overflow: visible;
 }
 
 .peek-ask-why {
@@ -5199,9 +5215,11 @@ textarea.notes {
     display: none;
 }
 
-.peek-strip .peek {
+.peek-strip .peek,
+.peek-strip .peek.waiting {
     width: 15rem;
     height: auto;
+    min-height: 0;
 }
 
 .peek-strip .peek-head {

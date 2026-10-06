@@ -21,7 +21,10 @@ const MAX_LIVE = 12;
 const ALLOW_LENGTH = 80;
 /** Waits before sending the list again after a send failed, growing with each failure. */
 const RETRY_MS = [1000, 3000, 10_000];
-const SEEN_KEY = "pocket.peekSeen";
+/** Each session's seen mark is a key of its own, so tabs that mark different sessions at once keep both. */
+const SEEN_PREFIX = "pocket.peekSeen.";
+/** Marks older than this are forgotten: the run they saw is long over, and the server has likely restarted since. */
+const SEEN_KEEP_MS = 30 * 24 * 60 * 60_000;
 const SINCE_KEY = "pocket.peekSince";
 
 PEEK_WIDE.addEventListener("change", () => store.set({}));
@@ -35,10 +38,23 @@ let clockOffset = 0;
 const serverNow = () => Date.now() + clockOffset;
 
 function readSeen() {
-    try {
-        return JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") ?? {};
-    } catch {
-        return {};
+    const seen = {};
+
+    for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        const at = key?.startsWith(SEEN_PREFIX) ? Number(localStorage.getItem(key)) : 0;
+
+        if (at > 0) {
+            seen[key.slice(SEEN_PREFIX.length)] = at;
+        }
+    }
+
+    return seen;
+}
+
+for (const [id, at] of Object.entries(readSeen())) {
+    if (Date.now() - at > SEEN_KEEP_MS) {
+        localStorage.removeItem(SEEN_PREFIX + id);
     }
 }
 
@@ -47,27 +63,22 @@ let since = Number(localStorage.getItem(SINCE_KEY)) || null;
 
 store.set({ peeks: {}, peekSeen: readSeen() });
 
-// Another tab of this browser marked a session seen.
+// Another tab of this browser marked a session seen (or cleared the storage).
 addEventListener("storage", (event) => {
-    if (event.key === SEEN_KEY) {
+    if (event.key === null || event.key.startsWith(SEEN_PREFIX)) {
         store.set({ peekSeen: readSeen() });
     }
 });
 
 /** Remember that this browser looked at a session now: a run that ended before is no longer new. */
 export function markSeen(id) {
-    const { sessions, sessionsLoaded } = store.state;
-    const known = new Set(sessions.map((session) => String(session.id)));
-    const ended = sessions.find((session) => session.id === id)?.endedAt ?? 0;
-    // Read afresh, so marks another tab made since are kept; the run's own end counts, in case the clocks disagree.
-    const seen = Object.fromEntries(
-        Object.entries({ ...readSeen(), [id]: Math.max(serverNow(), ended) }).filter(
-            ([key]) => !sessionsLoaded || known.has(key),
-        ),
-    );
+    const key = SEEN_PREFIX + id;
+    const ended = store.state.sessions.find((session) => session.id === id)?.endedAt ?? 0;
+    // The latest look counts, whichever tab made it; the run's own end counts too, in case the clocks disagree.
+    const at = Math.max(Number(localStorage.getItem(key)) || 0, serverNow(), ended);
 
-    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
-    store.set({ peekSeen: seen });
+    localStorage.setItem(key, String(at));
+    store.set({ peekSeen: { ...store.state.peekSeen, [id]: at } });
 }
 
 /** A session whose run ended since this browser last had it open. */
@@ -141,19 +152,36 @@ store.subscribe((state) => {
     seeOpen(store.state);
 });
 
-const rank = (session, state) =>
+const rank = (session, state, pinned) =>
     session.waiting
         ? 0
         : session.busy
           ? 1
           : finishedUnseen(session, state)
             ? 2
-            : state.pinned.includes(session.id)
+            : pinned.has(session.id)
               ? 3
               : 4;
 
+/** The last choice of tiles, and what it was made from: most renders (a streaming answer's) change none of it. */
+let chosen = { from: [], tiles: [] };
+
 /** The sessions shown as tiles now, in tile order. */
 export function peekTiles(state = store.state) {
+    const from = [
+        state.sessions,
+        state.conversationId,
+        state.pinned,
+        state.peekSeen,
+        lastLeft,
+        since,
+    ];
+
+    if (from.every((value, index) => value === chosen.from[index])) {
+        return chosen.tiles;
+    }
+
+    const pinned = new Set(state.pinned);
     const shown = state.sessions.filter(
         (session) =>
             !session.archived &&
@@ -161,20 +189,23 @@ export function peekTiles(state = store.state) {
             (session.busy ||
                 session.waiting ||
                 finishedUnseen(session, state) ||
-                state.pinned.includes(session.id) ||
+                pinned.has(session.id) ||
                 session.id === lastLeft),
     );
     const ids = new Set(shown.map((session) => session.id));
 
     slots = slots.filter((id) => ids.has(id));
+    const placed = new Set(slots);
     const fresh = shown
-        .filter((session) => !slots.includes(session.id))
-        .sort((a, b) => rank(a, state) - rank(b, state));
+        .filter((session) => !placed.has(session.id))
+        .sort((a, b) => rank(a, state, pinned) - rank(b, state, pinned));
 
     slots.push(...fresh.map((session) => session.id));
     const byId = new Map(shown.map((session) => [session.id, session]));
 
-    return slots.map((id) => byId.get(id));
+    chosen = { from, tiles: slots.map((id) => byId.get(id)) };
+
+    return chosen.tiles;
 }
 
 /** Peeks show in this session: turned on, a server that sends them, and a session open. */
@@ -423,14 +454,17 @@ function PeekLine({ line }) {
     }
 }
 
-/** Whether a call's whole command shows on its tile: only then may it be allowed from there. */
+/**
+ * Whether a call's command is short enough to show whole on its tile: only then may it be allowed from there. Shown
+ * whole, it is never clamped; the tile also measures that it fits (`PeekTile`), as wide characters take more room.
+ */
 const wholeOnTile = (approval) =>
     approval.subject.length <= ALLOW_LENGTH && !/[\r\n]/.test(approval.subject);
 
 /** The call a session waits on, in full when it is short, and why the guard asks. */
 function PeekAsk({ approval, compact }) {
     return html`<div class="peek-ask" title=${`${approval.subject}\n\n${approval.reason}`}>
-        <div class="peek-ask-what mono">
+        <div class=${`peek-ask-what mono ${wholeOnTile(approval) ? "whole" : ""}`}>
             <${Icon} name="shield" size=${11} /> ${approval.tool}: ${approval.subject}
         </div>
         ${!compact && approval.reason && html`<div class="peek-ask-why">${approval.reason}</div>`}
@@ -438,10 +472,10 @@ function PeekAsk({ approval, compact }) {
 }
 
 /**
- * Allow or deny a call from its tile, as from its card: the same rules, the same request. A command too long to show
- * whole is not allowed from here: Open shows it in its session first.
+ * Allow or deny a call from its tile, as from its card: the same rules, the same request. A command that does not show
+ * whole is not allowed from here: Open shows it on its card, in the conversation that asks (a subagent's, maybe).
  */
-function PeekApproval({ approval, me, rule, open }) {
+function PeekApproval({ approval, me, rule, whole }) {
     const [busy, setBusy] = useState(false);
 
     const answer = (allow) => {
@@ -450,7 +484,6 @@ function PeekApproval({ approval, me, rule, open }) {
     };
 
     const ownCall = rule === "others" && me?.role !== "owner" && approval.requestedBy === me?.id;
-    const whole = wholeOnTile(approval);
 
     return html`<span class="peek-actions">
         <button class="button small" disabled=${busy} onClick=${() => answer(false)}>Deny</button>
@@ -466,8 +499,8 @@ function PeekApproval({ approval, me, rule, open }) {
                   </button>`
                 : html`<button
                       class="button small primary"
-                      title="See the whole command in its session"
-                      onClick=${open}
+                      title="See the whole command where it waits"
+                      onClick=${() => navigate(approval.conversationId)}
                   >
                       Open
                   </button>`
@@ -480,8 +513,42 @@ function PeekApproval({ approval, me, rule, open }) {
  * shows changed (`tileProps` makes its props, which keep their identity until then).
  */
 class PeekTile extends Component {
-    shouldComponentUpdate(next) {
-        return Object.keys(next).some((key) => next[key] !== this.props[key]);
+    state = { clipped: false };
+
+    shouldComponentUpdate(next, state) {
+        return (
+            state.clipped !== this.state.clipped ||
+            Object.keys(next).some((key) => next[key] !== this.props[key])
+        );
+    }
+
+    componentDidMount() {
+        this.measure();
+    }
+
+    componentDidUpdate() {
+        this.measure();
+    }
+
+    /** Whether the command waiting on this tile is cut off anywhere, by a clamp or by the tile's edge. */
+    measure() {
+        const what = this.base?.querySelector(".peek-ask-what");
+        let clipped = false;
+
+        if (what) {
+            const box = what.getBoundingClientRect();
+            const tile = this.base.getBoundingClientRect();
+
+            clipped =
+                what.scrollHeight > what.clientHeight + 1 ||
+                what.scrollWidth > what.clientWidth + 1 ||
+                box.bottom > tile.bottom + 1 ||
+                box.right > tile.right + 1;
+        }
+
+        if (clipped !== this.state.clipped) {
+            this.setState({ clipped });
+        }
     }
 
     render({ session, peek, status, label, number, compact, steer, home, me, rule }) {
@@ -531,7 +598,7 @@ class PeekTile extends Component {
                         approval=${approval}
                         me=${me}
                         rule=${rule}
-                        open=${open}
+                        whole=${wholeOnTile(approval) && !this.state.clipped}
                     />`
                 }
                 ${
