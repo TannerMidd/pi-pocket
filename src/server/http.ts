@@ -17,7 +17,7 @@ import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { marked } from "marked";
 import QRCode from "qrcode";
-import type { PocketApp } from "./app.ts";
+import { MAX_PEEKS, type PocketApp } from "./app.ts";
 import {
     Auth,
     COOKIE,
@@ -442,6 +442,7 @@ export function createHandler(options: HttpOptions) {
 
         return {
             id: (url.searchParams.get("tab") ?? randomUUID()).slice(0, 64),
+            connection: randomUUID(),
             user,
             conversationId: raw === null || raw === "" ? undefined : conversationId(raw),
             sentEntries: new Set(),
@@ -981,6 +982,30 @@ export function createHandler(options: HttpOptions) {
             const body = await readJson<{ tab?: unknown; visible?: unknown }>(request);
 
             app.setVisible(user, String(body.tab ?? ""), body.visible !== false);
+
+            return json(response, 200, { ok: true });
+        }
+
+        // The sessions a connection shows as peek tiles on screen now: they get `peek` events until it sends another list.
+        if (first === "peeks" && method === "POST") {
+            const body = await readJson<{ connection?: unknown; ids?: unknown; seq?: unknown }>(
+                request,
+            );
+
+            if (!Array.isArray(body.ids)) {
+                throw new HttpError(400, "ids must be a list of session ids");
+            }
+
+            if (body.seq !== undefined && !Number.isSafeInteger(body.seq)) {
+                throw new HttpError(400, "seq must be a whole number");
+            }
+
+            app.setPeeks(
+                user,
+                String(body.connection ?? ""),
+                body.ids.slice(0, MAX_PEEKS).map((id) => conversationId(String(id))),
+                body.seq as number | undefined,
+            );
 
             return json(response, 200, { ok: true });
         }

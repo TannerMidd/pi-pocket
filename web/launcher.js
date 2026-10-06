@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { planAvailable, schedulesAvailable } from "./commands.js";
+import { togglePeeks } from "./peeks.js";
 import { setArchived, workspaceOrder } from "./sessions.js";
 import {
     actions,
@@ -113,6 +114,13 @@ function actionItems() {
             detail: "gaps and window borders",
             icon: "swatch",
             run: () => setPrefs({ tiling: !prefs().tiling }),
+        },
+        {
+            label: prefs().peeks ? "Hide peek tiles" : "Show peek tiles",
+            detail: "other sessions' live work beside this one",
+            icon: "tiles",
+            keys: "Alt P",
+            run: togglePeeks,
         },
         conversation &&
             steer && {

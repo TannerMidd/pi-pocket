@@ -8,6 +8,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
 import type { User } from "../src/server/config.ts";
+import type { Client } from "../src/server/room.ts";
 
 export const context = BACKGROUND_CONTEXT;
 
@@ -154,8 +155,9 @@ export async function modelTexts(app: App, id: ConversationId): Promise<string[]
 /** A browser tab as the app sees it, recording every event it is sent. Attach it with `app.attach(tab.client)`. */
 export function fakeTab(id: ConversationId | undefined, user: User) {
     const events: { event: string; data: Record<string, unknown> }[] = [];
-    const client = {
+    const client: Client = {
         id: `tab-${crypto.randomUUID()}`,
+        connection: `connection-${crypto.randomUUID()}`,
         user,
         conversationId: id,
         sentEntries: new Set<number>(),

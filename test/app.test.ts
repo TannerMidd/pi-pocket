@@ -532,6 +532,7 @@ test("people chat beside Pi: presence, typing, one post per request, and the cha
     type Event = { event: string; data: Record<string, unknown> };
     const tab = (name: string, user: (typeof guest)["user"], events: Event[]) => ({
         id: name,
+        connection: name,
         user,
         conversationId: id,
         sentEntries: new Set<number>(),

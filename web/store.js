@@ -378,6 +378,8 @@ const handlers = {
             models: data.models,
             guard: data.guard,
             server: data.server,
+            // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
+            ...(data.connection === undefined ? {} : { streamId: data.connection }),
         }),
     sessions: (sessions) =>
         store.set((state) => ({
@@ -395,6 +397,9 @@ const handlers = {
         store.set({ notes: { text: data.text, rev: data.rev, by: data.by, at: data.at } }),
     browser: (data) =>
         data.conversationId === store.state.conversationId && store.set({ browser: data }),
+    // Another session as its peek tile shows it (`peeks.js`): kept after it scrolls away, as the tile's last look.
+    peek: (data) =>
+        store.set((state) => ({ peeks: { ...state.peeks, [data.conversationId]: data } })),
     users: (users) => store.set({ users }),
     missing: (data) => store.set({ missing: data.message }),
     // A notice may link to a conversation, such as a mention elsewhere: tapping it goes there.

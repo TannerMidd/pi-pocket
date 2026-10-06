@@ -2193,6 +2193,16 @@ function AppearanceSheet() {
                     onChange=${() => setPrefs({ tiling: !p.tiling })}
                 />
             <//>
+            <${SettingRow}
+                title="Peek tiles"
+                detail="Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar, or Alt+P"
+            >
+                <${Switch}
+                    on=${p.peeks}
+                    label="Peek tiles"
+                    onChange=${() => setPrefs({ peeks: !p.peeks })}
+                />
+            <//>
             ${
                 desktop?.wallpaper &&
                 html`<${SettingRow}
@@ -2271,6 +2281,7 @@ const SHORTCUTS = [
     ["Alt ↑", "Alt ↓: previous or next session"],
     ["Alt N", "New session"],
     ["Alt B", "Open or close the browser"],
+    ["Alt P", "Show or hide peek tiles"],
     ["Mod B", "Fold or unfold the sidebar"],
     ["Mod Click", "In the sidebar: select a session; drag to select every one you pass"],
     ["Shift Click", "In the sidebar: select a run of sessions"],

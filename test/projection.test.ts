@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import { slugify } from "../src/server/extensions/artifacts.ts";
-import { plainText, projectEntry, projectLive, projectStats } from "../src/server/projection.ts";
+import {
+    type ClientEntry,
+    peekLines,
+    plainText,
+    projectEntry,
+    projectLive,
+    projectStats,
+} from "../src/server/projection.ts";
 
 const entry = (kind: string, message: unknown, id = 1) =>
     ({ id, conversationId: 2, kind, model: [message] }) as unknown as EntryRecord;
@@ -170,4 +177,182 @@ test("snippets drop markdown: emphasis, code ticks, links, headings, and list ma
         plainText("a * b * c and snake_case_name stay"),
         "a * b * c and snake_case_name stay",
     );
+});
+
+test("peek lines are a session's last steps in brief: words, calls and how they went, and what streams now", () => {
+    const entries: ClientEntry[] = [
+        {
+            id: 1,
+            kind: "user",
+            text: "fix the login\n\nAttached files (saved on the server):\n- /tmp/a.png",
+            images: 0,
+            from: "Alex",
+        },
+        {
+            id: 2,
+            kind: "assistant",
+            blocks: [
+                { type: "thinking", text: "hmm" },
+                { type: "text", text: "Looking at **`auth.ts`**" },
+                {
+                    type: "toolCall",
+                    id: "c1",
+                    name: "read",
+                    args: { path: "src/auth.ts", content: "x".repeat(1000), edits: [{ a: 1 }] },
+                },
+                { type: "toolCall", id: "c2", name: "bash", args: { command: "npm test" } },
+            ],
+        },
+        { id: 3, kind: "toolResult", callId: "c1", name: "read", text: "…", isError: false },
+        { id: 4, kind: "toolResult", callId: "c2", name: "bash", text: "1 failing", isError: true },
+        {
+            id: 5,
+            kind: "assistant",
+            blocks: [{ type: "toolCall", id: "c3", name: "edit", args: { path: "src/auth.ts" } }],
+        },
+    ];
+
+    assert.deepEqual(
+        peekLines(entries, {
+            busy: true,
+            tools: [{ callId: "c3", name: "edit", status: "running" }],
+        }),
+        [
+            { kind: "user", text: "fix the login", from: "Alex" },
+            { kind: "text", text: "Looking at auth.ts" },
+            {
+                kind: "tool",
+                name: "read",
+                args: { path: "src/auth.ts", content: "x".repeat(300) },
+                status: "done",
+            },
+            { kind: "tool", name: "bash", args: { command: "npm test" }, status: "error" },
+            { kind: "tool", name: "edit", args: { path: "src/auth.ts" }, status: "running" },
+        ],
+    );
+    // A call without a result is done once Pi stopped; what streams comes last, and only the newest lines are kept.
+    assert.deepEqual(
+        peekLines(
+            entries,
+            {
+                busy: false,
+                generation: { attempt: 0, message: { blocks: [{ type: "text", text: "Almost" }] } },
+            },
+            2,
+        ),
+        [
+            { kind: "tool", name: "edit", args: { path: "src/auth.ts" }, status: "done" },
+            { kind: "text", text: "Almost" },
+        ],
+    );
+    assert.deepEqual(
+        peekLines(
+            [
+                { id: 6, kind: "assistant", blocks: [], stopReason: "aborted" },
+                {
+                    id: 7,
+                    kind: "assistant",
+                    blocks: [],
+                    stopReason: "error",
+                    error: "rate limited",
+                },
+                { id: 8, kind: "compaction", summary: "…" },
+                { id: 9, kind: "other", entryKind: "pi.system" },
+            ],
+            { busy: false },
+        ),
+        [
+            { kind: "event", text: "Stopped" },
+            { kind: "error", text: "rate limited" },
+            { kind: "event", text: "Context compacted" },
+        ],
+    );
+});
+
+test("peek lines keep each step short: shell commands, notes, attachments, long words, and nested arguments", () => {
+    const shell = (id: number, status: "done" | "failed", code?: number) =>
+        ({
+            id,
+            kind: "shell",
+            command: `make ${"x".repeat(400)}`,
+            by: "u1",
+            name: "Alex",
+            context: true,
+            output: "…",
+            status,
+            ...(code === undefined ? {} : { code }),
+            taskId: 1,
+        }) as ClientEntry;
+    const lines = peekLines(
+        [
+            { id: 1, kind: "user", text: "", images: 2 },
+            { id: 2, kind: "user", text: "", images: 0 },
+            shell(3, "done", 0),
+            shell(4, "done", 2),
+            shell(5, "failed"),
+            { id: 6, kind: "note", text: "Alex turned plan mode on", name: "Alex" },
+            {
+                id: 7,
+                kind: "assistant",
+                blocks: [
+                    { type: "text", text: `# Summary\n\n${"word ".repeat(100)}` },
+                    { type: "text", text: "   " },
+                    {
+                        type: "toolCall",
+                        id: "c9",
+                        name: "codemode",
+                        args: {
+                            code: "return 1",
+                            options: { a: 1 },
+                            list: [1, 2],
+                            flag: true,
+                            n: 3,
+                        },
+                    },
+                ],
+            },
+            { id: 8, kind: "reset", text: "fresh start" },
+        ],
+        { busy: false },
+        20,
+    );
+
+    assert.deepEqual(lines[0], { kind: "user", text: "(attachments)" });
+    assert.equal(
+        lines.length,
+        8,
+        "an empty message without attachments, and blank text, make no line",
+    );
+    assert.deepEqual(
+        lines.slice(1, 4).map((line) => (line.kind === "shell" ? line.status : line.kind)),
+        ["done", "error", "error"],
+    );
+    const [, command, , , note, words] = lines;
+
+    assert.equal(command?.kind === "shell" && command.command.length, 300);
+    assert.deepEqual(note, { kind: "note", text: "Alex turned plan mode on", name: "Alex" });
+    assert.ok(words?.kind === "text");
+    assert.ok(words.text.length <= 200 && words.text.endsWith("…"));
+    assert.ok(!words.text.includes("#"), "markdown is plain text");
+    assert.deepEqual(lines[6], {
+        kind: "tool",
+        name: "codemode",
+        args: { code: "return 1", flag: true, n: 3 },
+        status: "done",
+    });
+    assert.deepEqual(lines[7], { kind: "event", text: "Context cleared" });
+    // A call that streams in is running, whatever came before.
+    assert.deepEqual(
+        peekLines([], {
+            busy: true,
+            generation: {
+                attempt: 0,
+                message: {
+                    blocks: [{ type: "toolCall", id: "c1", name: "bash", args: { command: "ls" } }],
+                },
+            },
+        }),
+        [{ kind: "tool", name: "bash", args: { command: "ls" }, status: "running" }],
+    );
+    assert.deepEqual(peekLines([], { busy: false }), []);
 });
