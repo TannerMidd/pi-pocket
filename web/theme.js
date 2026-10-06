@@ -10,7 +10,7 @@ const DESKTOP_CACHE = "pocket.desktopTheme";
 const PINNED = "pocket.pinned";
 const FALLBACK = "tokyo-night";
 
-export const DEFAULTS = {
+const DEFAULTS = {
     /** "desktop" follows the Omarchy theme of the machine Pi Pocket runs on; otherwise a key of THEMES. */
     theme: "desktop",
     /** Wide screens: the sidebar and the conversation as Hyprland windows, with gaps and borders. */
@@ -84,7 +84,7 @@ function hyprColor(value) {
 }
 
 /** A Hyprland border (`rgba(…) rgba(…) 45deg`): its color stops and angle, or null for anything else. */
-export function hyprBorder(value) {
+function hyprBorder(value) {
     if (typeof value !== "string") {
         return null;
     }
@@ -177,7 +177,7 @@ function setVars(root, vars) {
     }
 }
 
-export const modeOf = (palette) => (palette.colors.mode === "light" ? "light" : "dark");
+const modeOf = (palette) => (palette.colors.mode === "light" ? "light" : "dark");
 
 const reducedMotion = () => {
     const motion = prefs().motion;
@@ -234,7 +234,7 @@ export function apply() {
  */
 let transitions = 0;
 
-export function transition(change, at) {
+function transition(change, at) {
     const root = document.documentElement;
 
     if (
@@ -304,7 +304,7 @@ let checking = false;
 let started = false;
 
 /** Ask the server for the desktop's theme; animate to it when it changed since the last look. */
-export async function checkDesktop({ animate = true } = {}) {
+async function checkDesktop({ animate = true } = {}) {
     if (checking || store.state.me === null) {
         return;
     }

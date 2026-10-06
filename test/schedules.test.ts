@@ -341,7 +341,11 @@ test("a schedule Pi sets up is the work of whom it worked for, and is cancelled 
         "Hal's to go out and Ida's to be cancelled",
     );
     await until(() => !app.isBusy(id), "Pi to answer");
-    assert.equal(app.requesterOf(id), hal.id, "the owner wrote last, but Pi works for Hal now");
+    assert.equal(
+        app.attribution.requesterOf(id),
+        hal.id,
+        "the owner wrote last, but Pi works for Hal now",
+    );
     const authors = (await app.harness.snapshot(AuthorsDoc, id, context))!;
     const sent = Object.keys(authors.requesters ?? {}).find(
         (entry) => authors.requesters![entry] === hal.id,

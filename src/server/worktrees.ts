@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { copyFile, lstat, mkdir } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { HttpError } from "./errors.ts";
+import { describe, HttpError } from "./errors.ts";
 import { git, GitError } from "./git.ts";
 
 export type Worktree = {
@@ -23,7 +23,7 @@ export type Worktree = {
 const MAX_COPIED_BYTES = 50 * 1024 * 1024;
 
 /** The top folder of the repository `cwd` is in, or undefined when it is in none. */
-export async function repositoryOf(cwd: string): Promise<string | undefined> {
+async function repositoryOf(cwd: string): Promise<string | undefined> {
     return git(cwd, ["rev-parse", "--show-toplevel"]).then(
         (root) => root.trim(),
         () => undefined,
@@ -131,10 +131,7 @@ export async function createWorktree(
     } catch (error) {
         await discardWorktree(worktree).catch(() => undefined);
 
-        throw new HttpError(
-            500,
-            `The worktree could not be set up: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        throw new HttpError(500, `The worktree could not be set up: ${describe(error)}`);
     }
 }
 
@@ -197,7 +194,7 @@ export async function removeWorktree(worktree: Worktree, force: boolean): Promis
     try {
         await git(root, ["worktree", "remove", ...(force ? ["--force"] : []), worktree.path]);
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = describe(error);
 
         // Git runs in English here (see git.ts), so its words can be matched.
         if (!force && error instanceof GitError && /modified or untracked files/.test(message)) {

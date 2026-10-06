@@ -22,6 +22,7 @@ import {
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Extension, Registry } from "@earendil-works/pi-durable";
+import { describe } from "./errors.ts";
 import type { ExtensionModule, PocketHost } from "./host.ts";
 
 /** Built-in extension modules, in install order. Other `.ts` files in the directory load after them, by name. */
@@ -448,8 +449,4 @@ export function watchTree(directory: string, onChange: (file: string) => void): 
         clearTimeout(timer);
         watcher.close();
     };
-}
-
-function describe(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }

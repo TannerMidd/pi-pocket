@@ -1,8 +1,9 @@
 // The conversation: messages, thinking, tool cards, artifacts, subagents, approvals, and the live run.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { personColor } from "./avatar.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
-import { personColor } from "./chat.js";
+import { describeCall } from "./calls.js";
 import {
     actions,
     attempt,
@@ -33,15 +34,20 @@ import {
 } from "./ui.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
+
 /** How a scheduled message starts (see src/server/schedules.ts). */
 const SCHEDULED = "[scheduled] ";
+
 /** A goal's check that did not pass, as Pi is told about it (see src/server/extensions/goals.ts): what, then its output. */
 const GOAL_CHECK =
     /^\[goal\] `([\s\S]*?)` (still fails|was cut off by a server restart) \(([^)]*)\)\. ([\s\S]*)$/;
+
 /** A skill run with `/skill:name`, as Pi gets it (see `expandSkillCommand` in src/server/prompts.ts): its name, file, and the request. */
 const SKILL = /^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
+
 /** An @mention of a file or folder in a message, as the message box writes it. */
 const MENTION = /(^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g;
+
 /** One line of the attachment list the server adds to a message: `- path (name, mime, size bytes)`. */
 const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)$/;
 
@@ -277,94 +283,6 @@ function Thought({ block, streaming }) {
         </button>
         ${open && html`<div class="thought-body">${block.text}</div>`}
     </div>`;
-}
-
-const short = (text, max = 90) => {
-    const flat = String(text ?? "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-};
-
-/** A tool call in one line: an icon, a label, and what it acts on. Peek tiles describe calls this way too. */
-export function describeCall(call) {
-    const args = call.args ?? {};
-
-    switch (call.name) {
-        case "read": {
-            const range = args.offset ? `:${args.offset}${args.limit ? `+${args.limit}` : ""}` : "";
-
-            return { icon: "▤", label: "Read", subject: `${args.path ?? ""}${range}`, mono: true };
-        }
-
-        case "write":
-            return { icon: "✎", label: "Write", subject: args.path ?? "", mono: true };
-        case "edit":
-            return { icon: "✎", label: "Edit", subject: args.path ?? "", mono: true };
-        case "bash":
-            return { icon: ">_", label: "", subject: short(args.command, 140), mono: true };
-        case "artifact":
-            return {
-                icon: "✦",
-                label: "Artifact",
-                subject: args.title ?? args.id ?? "",
-                mono: false,
-            };
-
-        case "codemode": {
-            // The first line that does something: not the options line, a comment, or blank.
-            const line = String(args.code ?? "")
-                .split("\n")
-                .map((each) => each.trim())
-                .find((each) => each !== "" && !each.startsWith("//"));
-
-            return { icon: "{}", label: "Codemode", subject: short(line ?? "", 140), mono: true };
-        }
-
-        case "browser": {
-            const firstLine = String(args.script ?? "")
-                .split("\n")
-                .find((each) => each.trim() !== "");
-            const what =
-                args.url ??
-                (args.ref ? `[${String(args.ref).replace(/^\[|\]$/g, "")}]` : undefined) ??
-                args.selector ??
-                (args.label ? `“${args.label}”` : undefined) ??
-                args.key ??
-                args.viewport ??
-                firstLine ??
-                (args.text !== undefined ? `“${args.text}”` : "");
-            const typed =
-                args.action === "type" && args.text !== undefined && what !== `“${args.text}”`
-                    ? ` ← “${args.text}”`
-                    : "";
-
-            return {
-                icon: "◎",
-                label: `Browser ${args.action ?? ""}`,
-                subject: short(`${what}${typed}`, 120),
-                mono: true,
-            };
-        }
-
-        case "subagent":
-            return {
-                icon: "⧉",
-                label: `Subagent ${args.action ?? ""}`,
-                subject: [args.name, args.message && short(args.message, 60)]
-                    .filter(Boolean)
-                    .join(" · "),
-                mono: true,
-            };
-        default:
-            return {
-                icon: "⚙",
-                label: call.name,
-                subject: short(JSON.stringify(args), 100),
-                mono: true,
-            };
-    }
 }
 
 function ToolCard({ call, result, slot, approval, entryId }) {
@@ -865,6 +783,7 @@ const SHELL_ENDS = {
     interrupted: "cut off by a restart",
     stopped: "stopped",
 };
+
 /** How many of a command's last lines show before "Show all". */
 const SHELL_LINES = 12;
 
@@ -993,7 +912,9 @@ function EntryView({ entry, results, slots, approvals }) {
 }
 
 const NO_SLOTS = new Map();
+
 const NO_APPROVALS = [];
+
 const agentsKey = (view) =>
     (view.subagents ?? []).map((agent) => `${agent.name}:${agent.conversationId}`).join();
 

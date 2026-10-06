@@ -39,6 +39,8 @@ import {
     type Turns,
     TurnsDoc,
 } from "./docs.ts";
+import { SHELL_ENTRY } from "./entry-format.ts";
+import { agentInfo } from "./models.ts";
 import {
     type ClientEntry,
     PEEK_LINES,
@@ -48,7 +50,6 @@ import {
     projectLive,
     projectStats,
 } from "./projection.ts";
-import { SHELL_ENTRY } from "./shell.ts";
 import { describeRepeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -435,10 +436,10 @@ export class Room {
                               typeof item.content === "string"
                                   ? item.content
                                   : JSON.stringify(item.content).slice(0, 500),
-                          ...this.#app.submitterOf(item.id as unknown as number, this),
+                          ...this.#app.attribution.submitterOf(item.id as unknown as number, this),
                       },
             ),
-            agent: this.#app.agentInfo(agentState),
+            agent: agentInfo(this.#app.models, agentState, this.#app.defaultCwd),
             stats: projectStats(view.docs["pi.usage"] as UsageState | undefined, view.entries),
             clients: [...new Set([...this.clients].map((each) => each.id))].length,
             viewers: [...new Set([...this.clients].map((each) => each.user.name))],

@@ -19,11 +19,10 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { ShellRequestsDoc } from "./docs.ts";
+import { SHELL_ENTRY, type ShellData } from "./entry-format.ts";
 import { HttpError } from "./errors.ts";
 import { ownRequest } from "./requests.ts";
 
-/** The entry kind of a command someone ran. */
-export const SHELL_ENTRY = "pocket.shell";
 const TASK = "pocket.shell";
 /** How long a command may run. */
 const TIMEOUT_SECONDS = 600;
@@ -33,26 +32,10 @@ const MAX_COMMAND = 4000;
 
 export type ShellInput = { command: string; by: string; name: string; context: boolean };
 
-/** What a command's entry holds. */
-export type ShellData = {
-    command: string;
-    by: string;
-    name: string;
-    /** Pi sees this command and its output. */
-    context: boolean;
-    output: string;
-    /** Absent when the command did not get to exit. */
-    code?: number;
-    status: "done" | "timeout" | "failed" | "interrupted" | "stopped";
-    /** The output was longer: this is its end. */
-    clipped?: boolean;
-    taskId: number;
-};
-
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 /** What Pi gets for a command, as Pi's terminal app words it. */
-export function shellMessage(data: ShellData, speaker: (text: string) => string): string {
+function shellMessage(data: ShellData, speaker: (text: string) => string): string {
     const notes: string[] = [];
 
     if (data.clipped) {

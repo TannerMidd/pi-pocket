@@ -1,6 +1,6 @@
 # Working on Pi Pocket
 
-Pi Pocket is often edited from inside itself, while it runs. [docs/map.md](docs/map.md) says where things are. Keep editing safe:
+Pi Pocket is often edited from inside itself, while it runs. [docs/map.md](docs/map.md) says where things are, and [docs/architecture.md](docs/architecture.md) what they rely on. Keep editing safe:
 
 - `web/**` changes reload every open browser right away. Keep the app loadable after each save: a syntax error blanks the screen for everyone, including you. Check with `node --check web/<file>.js` after editing.
 - `src/server/extensions/*.ts` changes are reinstalled into the running server. A file that fails to load keeps its previous version and reports the error. Each module default-exports `(host) => Extension | Extension[]`. Start each module with a `/** … */` comment: its first sentence is the description in the app's Extensions sheet, where the owner can turn modules off (a module that is off is not loaded, even when edited).

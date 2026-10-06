@@ -23,16 +23,11 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import {
-    Browsers,
-    findBrowser,
-    normalizeUrl,
-    parseKeys,
-    presetOf,
-    profileFolder,
-    snapOf,
-    viewportFrom,
-} from "../src/server/browser.ts";
+import { Browsers } from "../src/server/browser.ts";
+import { findBrowser, profileFolder, snapOf } from "../src/server/browser/discovery.ts";
+import { parseKeys } from "../src/server/browser/keys.ts";
+import { normalizeUrl } from "../src/server/browser/urls.ts";
+import { presetOf, viewportFrom } from "../src/server/browser/viewport.ts";
 import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
 
 test("addresses as people type them become URLs the browser may open", () => {
@@ -514,6 +509,31 @@ test(
     },
 );
 
+test("a command sent while a navigation swaps the page waits for it", real, async () => {
+    const browsers = new Browsers({
+        dataDir: mkdtempSync(join(root, "swap-")),
+        load: async () => undefined,
+        save: () => {},
+    });
+
+    try {
+        const page = await browsers.open(1, { restore: false });
+
+        // Across sites (to the test site and back to about:blank), Chromium moves the page to a new process and for a
+        // moment refuses commands. A reload or stop sent right then used to fail: "Not attached to an active page".
+        for (let round = 0; round < 3; round++) {
+            await page.navigate("about:blank");
+            await page.navigate(`${base}/`);
+            await page.go(-1, { wait: false });
+            await page.reload({ wait: false });
+            await page.navigate(`${base}/two`, { wait: false });
+            await page.stop();
+        }
+    } finally {
+        await browsers.closeAll({ final: true });
+    }
+});
+
 test(
     "Pi uses the browser tool, and people watch and use the same page in the panel",
     real,
@@ -618,7 +638,7 @@ test(
             )!;
 
             assert.equal(
-                (await app.entryImage(id, shot.id as unknown as number, 0))?.mimeType,
+                (await app.transcripts.entryImage(id, shot.id as unknown as number, 0))?.mimeType,
                 "image/jpeg",
                 "Pi sees the screenshot",
             );

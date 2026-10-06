@@ -3,7 +3,14 @@
  * contents in tool arguments, long tool output) are clipped; a client asks for the full entry when the user expands it.
  */
 import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-durable";
-import { SHELL_ENTRY, type ShellData } from "./shell.ts";
+import {
+    ATTACHMENTS_HEADING,
+    FILE_BLOCK,
+    FROM_PREFIX,
+    NOTE_ENTRY,
+    SHELL_ENTRY,
+    type ShellData,
+} from "./entry-format.ts";
 
 export type ClientBlock =
     | { type: "text"; text: string }
@@ -70,13 +77,6 @@ export type ClientLive = {
     }[];
 };
 
-/** How a file sent along with a message starts (`<file name="path">`): such parts show as the file's name only. */
-export const FILE_BLOCK = '<file name="';
-/** The entry kind of a note about what a person did (`Commands.note`). */
-export const NOTE_ENTRY = "pocket.note";
-
-/** The speaker prefix Pi Pocket adds to messages when several people share the server. */
-export const FROM_PREFIX = /^\[from: ([^\]\n]{1,60})\] /;
 const ARG_LIMIT = 1500;
 const OUTPUT_LIMIT = 8000;
 const LIVE_OUTPUT_LIMIT = 4000;
@@ -164,7 +164,7 @@ function projectArgs(
     return Object.keys(clipped).length === 0 ? { args: out } : { args: out, clipped };
 }
 
-export function projectBlocks(content: unknown, full = false): ClientBlock[] {
+function projectBlocks(content: unknown, full = false): ClientBlock[] {
     if (!Array.isArray(content)) {
         return [];
     }
@@ -501,9 +501,6 @@ export function snippet(text: string, max = 280): string {
 
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
-
-/** What separates a message from the list of files attached to it. The web app splits messages on it too. */
-export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n";
 
 /** The visible text of a projected entry, as plain text: what a person or Pi wrote. */
 export function entryText(entry: ClientEntry): string {

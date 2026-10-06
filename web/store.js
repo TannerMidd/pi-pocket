@@ -20,7 +20,8 @@ export const TRANSCRIPT_ROWS = 60;
 
 const TAB_KEY = "pocket.tab";
 
-export const TAB = sessionStorage.getItem(TAB_KEY) ?? uid();
+const TAB = sessionStorage.getItem(TAB_KEY) ?? uid();
+
 sessionStorage.setItem(TAB_KEY, TAB);
 
 const emptyView = () => ({
@@ -134,7 +135,7 @@ function peopleFor(id) {
 }
 
 /** How far this browser has read a conversation's chat: the time of the newest message seen. */
-export function chatReadOf(id) {
+function chatReadOf(id) {
     return Number(localStorage.getItem(readKey(id)) ?? 0);
 }
 
@@ -232,7 +233,7 @@ export function typing(where) {
     api(`c/${id}/typing`, { where }).catch(() => {});
 }
 
-export class ApiError extends Error {
+class ApiError extends Error {
     constructor(status, message) {
         super(message);
         this.status = status;

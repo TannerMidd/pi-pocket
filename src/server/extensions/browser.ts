@@ -8,15 +8,9 @@
 import { awaitWithContext } from "@earendil-works/chord/context";
 import { type ImageContent, type TextContent, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
-import {
-    type BrowserPage,
-    displayUrl,
-    type LogEntry,
-    normalizeUrl,
-    presetOf,
-    type Target,
-    viewportFrom,
-} from "../browser.ts";
+import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
+import { displayUrl, normalizeUrl } from "../browser/urls.ts";
+import { presetOf, viewportFrom } from "../browser/viewport.ts";
 import type { PocketHost } from "../host.ts";
 
 const ACTIONS = [

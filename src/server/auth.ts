@@ -29,7 +29,7 @@ export function parseCookies(header: string | undefined): Record<string, string>
 }
 
 /** https when the request came through TLS or a TLS-terminating tunnel such as ngrok or Tailscale Funnel. */
-export function isHttps(request: IncomingMessage): boolean {
+function isHttps(request: IncomingMessage): boolean {
     const forwarded = String(request.headers["x-forwarded-proto"] ?? "")
         .split(",")[0]
         ?.trim();

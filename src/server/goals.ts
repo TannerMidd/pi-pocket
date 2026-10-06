@@ -17,7 +17,7 @@ export const GOALS_EXTENSION = "pocket-goals";
 /** How the message telling Pi that a check failed starts. The web app shows these as check cards. */
 export const GOAL_PREFIX = "[goal] ";
 /** How many checks a goal gets before Pi stops trying. */
-export const MAX_CHECKS = 5;
+const MAX_CHECKS = 5;
 /** How long a check may run. */
 const CHECK_TIMEOUT_SECONDS = 600;
 /** How much of a failing check's output Pi gets: its end, where the failures usually are. */

@@ -5,7 +5,7 @@
  */
 
 /** How often a schedule may repeat, at most: a runaway loop of model calls costs money. */
-export const MIN_INTERVAL_MINUTES = 10;
+const MIN_INTERVAL_MINUTES = 10;
 /** How far ahead a one-time message may go. */
 const MAX_AHEAD_MS = 366 * 24 * 60 * 60_000;
 

@@ -4,6 +4,11 @@
  * person, such as a scheduled message Pi set up or a subagent's task. A request id is unique in its conversation, so
  * a message retried with the same one is not sent twice.
  */
+import { randomUUID } from "node:crypto";
+
+/** The key a browser gave a request it may retry, made safe for an id; a new one when it gave none. */
+export const clientKey = (key: string) =>
+    key.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || randomUUID();
 
 /** A person's own message. */
 export const ownRequest = (userId: string, key: string) => `u:${userId}:${key}`;

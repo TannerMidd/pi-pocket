@@ -1,9 +1,11 @@
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { BrowserButton, BrowserPanel, browserAvailable, toggleBrowser } from "./browser.js";
+import { BrowserButton, BrowserPanel } from "./browser-panel.js";
+import { browserAvailable, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
+import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
 import {
@@ -15,17 +17,10 @@ import {
     peeksWanted,
     togglePeeks,
 } from "./peeks.js";
-import {
-    Drawer,
-    Rail,
-    ResizeHandle,
-    SessionList,
-    SignIn,
-    Splash,
-    workspaceOrder,
-} from "./sessions.js";
+import { Drawer, Rail, ResizeHandle, SessionList, workspaceOrder } from "./sessions.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
+import { SignIn } from "./signin.js";
 import {
     actions,
     attempt,

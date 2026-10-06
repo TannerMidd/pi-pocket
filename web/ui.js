@@ -1,10 +1,11 @@
-// Shared bits: htm binding, markdown, formatting, icons, and the bottom sheet.
+// Shared bits: htm binding, markdown, formatting, icons, the bottom sheet, and small controls (switches, menu rows).
+
 import DOMPurify from "dompurify";
+import htm from "htm";
 import { marked } from "marked";
 import { Component, h } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import htm from "htm";
-import { notify, openSheet, store } from "./store.js";
+import { actions, notify, openSheet, store } from "./store.js";
 
 export const html = htm.bind(h);
 
@@ -21,7 +22,7 @@ export const entryImageUrl = (entryId, index, conversationId = currentConversati
     `/api/c/${conversationId}/image/${entryId}/${index}`;
 
 /** Where the browser loads `![alt](src)` from. Web and data URLs stay; paths and file:// URLs point at the server. */
-export function imageSource(src, conversationId) {
+function imageSource(src, conversationId) {
     const value = String(src ?? "").trim();
 
     if (value === "" || conversationId === undefined || conversationId === null) {
@@ -80,6 +81,7 @@ export function Thumb({ src, alt = "image" }) {
 // ─── Markdown ──────────────────────────────────────────────────────────────────
 
 marked.setOptions({ gfm: true, breaks: false });
+
 // Task list boxes as characters: the sanitizer drops form controls.
 marked.use({ renderer: { checkbox: ({ checked }) => (checked ? "☑ " : "☐ ") } });
 
@@ -200,6 +202,7 @@ DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
         data.attrValue = imageSource(data.attrValue, rendering);
     }
 });
+
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
     if (node.tagName === "A") {
         node.setAttribute("target", "_blank");
@@ -263,7 +266,7 @@ const FILE_TYPES = new Set(
  * Whether inline code names a file: `src/app.ts`, `./run.sh`, `~/notes.md`, `app.ts:42`, `package.json`. A path with
  * folders needs an extension of some kind; a bare name needs a common one.
  */
-export function looksLikePath(text) {
+function looksLikePath(text) {
     if (text.length > 300) {
         return false;
     }
@@ -745,7 +748,8 @@ export function Slide({ box, axis = "y" }) {
 
 /** Keys as they are on this device: ⌘ on Apple keyboards, Ctrl elsewhere. */
 export const APPLE = /Mac|iPhone|iPad/.test(navigator.platform ?? "");
-export const MOD = APPLE ? "⌘" : "Ctrl";
+
+const MOD = APPLE ? "⌘" : "Ctrl";
 
 /** A keyboard shortcut as key caps: `Keys keys="Mod K"`. */
 export function Keys({ keys }) {
@@ -825,4 +829,27 @@ export function modelLabel(agent) {
     }
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");
+}
+
+/** An on and off switch, named for screen readers by `label`. */
+export function Switch({ on, disabled, label, onChange }) {
+    return html`<button
+        type="button"
+        role="switch"
+        aria-checked=${on ? "true" : "false"}
+        aria-label=${label}
+        class=${`switch ${on ? "on" : ""}`}
+        disabled=${disabled}
+        onClick=${onChange}
+    >
+        <span></span>
+    </button>`;
+}
+
+/** A row in a menu: a label, an optional hint on the right, and what a tap does. */
+export function item(label, run, hint) {
+    return html`<button class="list-item" onClick=${run}>
+        <span>${label}</span>
+        ${hint && html`<span class="muted small">${hint}</span>`}
+    </button>`;
 }

@@ -119,8 +119,11 @@ test("a fork keeps the history through the chosen message, then goes its own way
     );
 
     // Inherited messages are the fork's own to load, pin, and quote; the original's later ones are not.
-    assert.equal((await app.fullEntry(fork, Number(firstAnswer!.id)))?.kind, "assistant");
-    assert.equal(await app.fullEntry(fork, Number(secondAnswer!.id)), undefined);
+    assert.equal(
+        (await app.transcripts.fullEntry(fork, Number(firstAnswer!.id)))?.kind,
+        "assistant",
+    );
+    assert.equal(await app.transcripts.fullEntry(fork, Number(secondAnswer!.id)), undefined);
     const pins = (await app.harness.snapshot(PinsDoc, fork, context))!.items;
 
     assert.deepEqual(
@@ -148,9 +151,15 @@ test("a fork keeps the history through the chosen message, then goes its own way
         entryId: Number(forkAnswer.id),
     });
 
-    assert.equal((await app.fullEntry(grandchild, Number(firstAnswer!.id)))?.kind, "assistant");
-    assert.equal((await app.fullEntry(grandchild, Number(forkAnswer.id)))?.kind, "assistant");
-    assert.equal(await app.fullEntry(grandchild, Number(secondAnswer!.id)), undefined);
+    assert.equal(
+        (await app.transcripts.fullEntry(grandchild, Number(firstAnswer!.id)))?.kind,
+        "assistant",
+    );
+    assert.equal(
+        (await app.transcripts.fullEntry(grandchild, Number(forkAnswer.id)))?.kind,
+        "assistant",
+    );
+    assert.equal(await app.transcripts.fullEntry(grandchild, Number(secondAnswer!.id)), undefined);
 });
 
 test("a fork's people are the ones who took part up to where it forked", async () => {
@@ -279,7 +288,7 @@ test("a message sent again reaches its fork even when the server stops before se
 
 test("an edited message keeps the files attached to the original", async () => {
     const id = await newSession(app);
-    const path = join(app.uploadDirectory(id), "notes.txt");
+    const path = join(app.workspace.uploadDirectory(id), "notes.txt");
 
     writeFileSync(path, "some notes");
     await say(app, id, "read my notes", [
@@ -469,7 +478,7 @@ test("a session exports as Markdown with its whole history, inherited messages i
     await say(app, id, "after the reset");
     const [, answer] = await ofKind(id, "pi.assistant");
     const { id: fork } = await app.commands.fork(id, owner(app), { entryId: Number(answer!.id) });
-    const { filename, markdown } = await app.exportMarkdown(fork, owner(app));
+    const { filename, markdown } = await app.transcripts.exportMarkdown(fork, owner(app));
 
     assert.equal(filename, "export-me-fork.md");
     assert.match(markdown, /^# Export me! · fork\n/);
@@ -481,7 +490,7 @@ test("a session exports as Markdown with its whole history, inherited messages i
     );
     const viewer = app.config.addUser("Scoped viewer", "viewer", [String(id)]).user;
 
-    await assert.rejects(app.exportMarkdown(fork, viewer), { status: 404 });
+    await assert.rejects(app.transcripts.exportMarkdown(fork, viewer), { status: 404 });
 });
 
 test("a new title and spend limit reach the people looking at the session at once", async () => {

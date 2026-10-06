@@ -49,7 +49,7 @@ const CODEMODE = "codemode";
  * The files Pi wrote or edited, by absolute path, with the newest of its replies that did: its own calls, and the
  * ones its codemode scripts made, which their results list.
  */
-export function piEdits(entries: readonly ClientEntry[], cwd: string): Map<string, number> {
+function piEdits(entries: readonly ClientEntry[], cwd: string): Map<string, number> {
     const edits = new Map<string, number>();
     /** The reply that made each tool call, by call id. */
     const callers = new Map<string, number>();

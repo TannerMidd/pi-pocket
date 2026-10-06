@@ -1,7 +1,6 @@
 // End-to-end tests of the server core with a scripted model: no network, no API keys, no Pi config.
 import {
     type App,
-    type Attachment,
     cleanUp,
     fakeTab,
     lastText,
@@ -21,6 +20,7 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import type { Attachment } from "../src/server/commands.ts";
 
 /** The provider session id each request carried, with the message it answered. */
 const requests: { sessionId: string | undefined; text: string }[] = [];
@@ -230,7 +230,7 @@ test("a pasted image is stored with its message and read back, and image paths r
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
         "base64",
     );
-    const path = join(app.uploadDirectory(id), "dot.png");
+    const path = join(app.workspace.uploadDirectory(id), "dot.png");
 
     writeFileSync(path, png);
     await say(id, "look at this", [{ path, name: "dot.png", mime: "image/png", size: png.length }]);
@@ -238,21 +238,21 @@ test("a pasted image is stored with its message and read back, and image paths r
     const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
     const entries = await conversation.entries({}, 256, undefined, BACKGROUND_CONTEXT);
     const user = entries.items.find((entry) => entry.kind === "pi.user")!;
-    const image = await app.entryImage(id, user.id as unknown as number, 0);
+    const image = await app.transcripts.entryImage(id, user.id as unknown as number, 0);
 
     assert.equal(image?.mimeType, "image/png");
     assert.deepEqual(image?.data, png);
-    assert.equal(await app.entryImage(id, user.id as unknown as number, 1), undefined);
+    assert.equal(await app.transcripts.entryImage(id, user.id as unknown as number, 1), undefined);
     assert.equal(
-        await app.entryImage(
+        await app.transcripts.entryImage(
             (Number(id) + 1000) as unknown as ConversationId,
             user.id as unknown as number,
             0,
         ),
         undefined,
     );
-    assert.equal(app.conversationPath(id, "chart.png"), join(work, "chart.png"));
-    assert.equal(app.conversationPath(id, "/tmp/chart.png"), "/tmp/chart.png");
+    assert.equal(app.workspace.conversationPath(id, "chart.png"), join(work, "chart.png"));
+    assert.equal(app.workspace.conversationPath(id, "/tmp/chart.png"), "/tmp/chart.png");
 });
 
 test("long polling delivers the stream's events, resends until acknowledged, and waits for new ones", async () => {
@@ -1494,11 +1494,17 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
 
         writeFileSync(join(work, "inside.png"), png);
         writeFileSync(join(root, "outside.png"), png);
-        assert.equal(app.conversationFile(vee, id, "inside.png"), join(work, "inside.png"));
-        assert.throws(() => app.conversationFile(vee, id, join(root, "outside.png")), /not found/);
-        assert.throws(() => app.conversationFile(vee, id, "../outside.png"), /not found/);
         assert.equal(
-            app.conversationFile(owner(), id, join(root, "outside.png")),
+            app.workspace.conversationFile(vee, id, "inside.png"),
+            join(work, "inside.png"),
+        );
+        assert.throws(
+            () => app.workspace.conversationFile(vee, id, join(root, "outside.png")),
+            /not found/,
+        );
+        assert.throws(() => app.workspace.conversationFile(vee, id, "../outside.png"), /not found/);
+        assert.equal(
+            app.workspace.conversationFile(owner(), id, join(root, "outside.png")),
             join(root, "outside.png"),
         );
 

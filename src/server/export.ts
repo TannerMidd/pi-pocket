@@ -3,7 +3,7 @@
  * `<details>` block, so it reads well on GitHub or in any Markdown viewer. Pi's thinking is left out.
  */
 import type { ClientBlock, ClientEntry } from "./projection.ts";
-import { ATTACHMENTS_HEADING, FROM_PREFIX } from "./projection.ts";
+import { ATTACHMENTS_HEADING, FROM_PREFIX } from "./entry-format.ts";
 
 /** Tool output beyond this keeps its start and end. */
 const MAX_OUTPUT = 4000;

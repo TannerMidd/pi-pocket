@@ -195,7 +195,7 @@ function showSession() {
 }
 
 /** `args` in brackets is optional. `available` hides a command where it does not apply. */
-export const COMMANDS = [
+const COMMANDS = [
     {
         name: "compact",
         args: "[what to keep]",

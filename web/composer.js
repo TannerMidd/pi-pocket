@@ -1,7 +1,8 @@
 // The message box: send, steer or queue while busy, attach files, mention files with @, run commands with !, recall
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Avatar, TypingLine } from "./chat.js";
+import { Avatar } from "./avatar.js";
+import { TypingLine } from "./chat.js";
 import {
     loadTemplates,
     parseCommand,
@@ -1132,7 +1133,7 @@ export function Composer() {
     </footer>`;
 }
 
-export function StatusLine() {
+function StatusLine() {
     const { view, connection, guard } = store.state;
     const stats = view.stats ?? {};
     const window = view.agent?.contextWindow;

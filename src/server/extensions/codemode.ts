@@ -33,6 +33,7 @@ import {
     ToolTask,
 } from "@earendil-works/pi-durable";
 import { CodemodeStoreDoc } from "../docs.ts";
+import { describe } from "../errors.ts";
 import type { PocketHost } from "../host.ts";
 
 export const CODEMODE_TOOL = "codemode";
@@ -89,10 +90,6 @@ function toolHooks(extensions: readonly Extension[]): { before: BeforeTool[]; af
     }
 
     return { before, after };
-}
-
-function errorText(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }
 
 /** A result's text as the model would read it: text parts, then its diagnostics. */
@@ -171,7 +168,7 @@ async function budget(
         await writeFile(path, combined, { mode: 0o600 });
         text += `\n\n[Full output: ${path} (read it with offset and limit)]`;
     } catch (error) {
-        text += `\n\n[Could not save the full output: ${errorText(error)}]`;
+        text += `\n\n[Could not save the full output: ${describe(error)}]`;
 
         return {
             items: [{ type: "text", text }, ...items.filter((item) => item.type === "image")],
@@ -259,7 +256,7 @@ export default function createCodemode(_host: PocketHost) {
                                 throw error;
                             }
 
-                            throw new Error(`Tool call blocked: ${errorText(error)}`);
+                            throw new Error(`Tool call blocked: ${describe(error)}`);
                         }
 
                         if (decision?.block !== undefined) {
@@ -327,7 +324,7 @@ export default function createCodemode(_host: PocketHost) {
                     return text;
                 } catch (error) {
                     record.status = signal.aborted ? "cancelled" : "error";
-                    record.error = errorText(error).slice(0, 500);
+                    record.error = describe(error).slice(0, 500);
 
                     throw error;
                 } finally {

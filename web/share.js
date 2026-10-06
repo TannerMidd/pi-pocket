@@ -51,7 +51,7 @@ export async function takeShare(id) {
 }
 
 /** Apps fill the title, text, and link differently, and often repeat one in another: each part once. */
-export function shareText({ title = "", text = "", url = "" }) {
+function shareText({ title = "", text = "", url = "" }) {
     const parts = [];
 
     for (const part of [title, text, url].map((each) => each.trim())) {

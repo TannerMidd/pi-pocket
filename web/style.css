@@ -4,6 +4,41 @@
  * over the background at a few percent for fills, square tiles, 2px window borders, no shadows or blur, JetBrains Mono
  * everywhere, and Hyprland's animation curves and timings for motion.
  */
+/*
+ * Contents, in the order the cascade reads them. Search for "─── " and a name to jump to a section. A rule later in
+ * the file wins over an earlier one of the same specificity, and some later sections restyle earlier ones on purpose:
+ * move a rule only after checking what it crosses.
+ *
+ *   Fonts, tokens, and the reset   the palette's variables, light themes, scrollbars, base elements
+ *   Motion                         Hyprland's curves, reduced motion, the theme reveal
+ *   Loaders                        the boot screen, the spinner, the thinking bar
+ *   Layout                         windows on a desktop, the sidebar's edge
+ *   Top bar
+ *   Transcript                     messages, arrivals, chevrons
+ *   Tool cards
+ *   Composer                       slash commands, file mentions, the message box, the bar under it
+ *   Extensions                     extension cards, and the switch every sheet uses
+ *   Sessions                       the sidebar: tabs, groups, rows, selection, its foot
+ *   The rail, The home screen
+ *   Sheets                         sheets on phones, popups on wide screens, the drawer
+ *   Model picker
+ *   Sheet parts and controls       sheet heads and bodies, menu rows, fields, buttons, segmented choices, checks,
+ *                                  providers, invites
+ *   Artifact viewer, Images
+ *   Notices, sign-in, plain pages  also the server's own pages (sign-in, invites)
+ *   People                         who is here, typing, the side chat
+ *   Collaboration                  activity, quotes, mentions, pins, notes, reactions, take turns
+ *   Parts of sheets                share, schedules, goals, running now, changes, spend
+ *   Launcher, Appearance
+ *   Sign in                        the app's sign-in screen
+ *   Small glue                     the sheet host, viewers leaving, search keys, unread dots
+ *   People panel, Peek tiles, Browser
+ *   Files, commands, and find      file paths and mentions, `!` commands and notes, changes, the file viewer, find,
+ *                                  messages sent before
+ */
+
+/* ─── Fonts, tokens, and the reset ───────────────────────────── */
+
 @font-face {
     font-family: "Pocket Mono";
     src: url("/fonts/JetBrainsMono.woff2") format("woff2");
@@ -79,7 +114,6 @@
     /* Motion: Omarchy's Hyprland curves, and its speeds in milliseconds. */
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* easeOutQuint */
     --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1); /* easeInOutCubic */
-    --ease-quick: cubic-bezier(0.15, 0, 0.1, 1); /* quick */
     --ease-almost: cubic-bezier(0.5, 0.5, 0.75, 1); /* almostLinear */
     --t-in: 410ms; /* windowsIn */
     --t-out: 150ms; /* windowsOut */
@@ -90,7 +124,6 @@
     --mono:
         "Pocket Mono", "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo,
         Consolas, monospace;
-    --sans: var(--mono);
     color-scheme: dark;
 }
 
@@ -1809,6 +1842,7 @@ button.chip:hover {
     gap: 0.45rem;
 }
 
+/* The on and off switch (`Switch` in ui.js), in every sheet that has one. */
 .switch {
     position: relative;
     width: 42px;
@@ -3042,6 +3076,8 @@ button.chip:hover {
     color: var(--text);
 }
 
+/* ─── Sheet parts and controls ───────────────────────────────── */
+
 .sheet-head {
     display: flex;
     align-items: center;
@@ -4264,6 +4300,8 @@ textarea.notes {
     }
 }
 
+/* ─── Parts of sheets: share, schedules, goals, running now, changes, spend ─── */
+
 /* Share to Pi: what another app shared, before it goes into a message box. */
 .share-text {
     white-space: pre-wrap;
@@ -4796,7 +4834,7 @@ textarea.notes {
     color: var(--body);
 }
 
-/* ─── Sign in ──────────────────────────────────────────────── */
+/* ─── Sign in: the app's screen (the server's pages are under Notices) ─── */
 
 .signin {
     animation: rise-in 0.5s var(--ease-out);
@@ -4814,7 +4852,7 @@ textarea.notes {
     background: none;
 }
 
-/* ─── Small glue ───────────────────────────────────────────── */
+/* ─── Small glue: the sheet host, viewers leaving, search keys, unread dots ─── */
 
 .sheet-host {
     display: contents;
@@ -5710,6 +5748,8 @@ textarea.notes {
     border-top: 1px solid var(--line);
     text-align: center;
 }
+
+/* ─── Files, commands, and find ──────────────────────────────── */
 
 /* File paths in replies (inline code that names a file) open the viewer. */
 .md code[data-path] {
