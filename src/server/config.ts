@@ -9,205 +9,271 @@ export const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Where Pi Pocket keeps its database, users, uploads, and logs. */
 export function dataDir(): string {
-	return process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket");
+    return process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket");
 }
 
 /** owner: everything. guest: steers Pi (which can run commands here). viewer: reads, chats, and reacts, never steers. */
 export type Role = "owner" | "guest" | "viewer";
 
 export interface User {
-	id: string;
-	name: string;
-	role: Role;
-	/** sha256 of the user's login token; the token itself is only kept for the owner. */
-	tokenHash: string;
-	createdAt: number;
-	lastSeen?: number;
-	/** Conversation ids of the only sessions this person may open; absent means every session. */
-	sessions?: string[];
-	/**
-	 * The Cloudflare quick tunnel host (`abc-def.trycloudflare.com`) this person's device signed in through. Its sign-in
-	 * cookie works only there, and each tunnel gets a new address, so they are removed once that tunnel is gone.
-	 */
-	tunnel?: string;
-	/** The most Pi may spend for this person, in dollars; never for the owner. */
-	budget?: number;
+    id: string;
+    name: string;
+    role: Role;
+    /** sha256 of the user's login token; the token itself is only kept for the owner. */
+    tokenHash: string;
+    createdAt: number;
+    lastSeen?: number;
+    /** Conversation ids of the only sessions this person may open; absent means every session. */
+    sessions?: string[];
+    /**
+     * The Cloudflare quick tunnel host (`abc-def.trycloudflare.com`) this person's device signed in through. Its sign-in
+     * cookie works only there, and each tunnel gets a new address, so they are removed once that tunnel is gone.
+     */
+    tunnel?: string;
+    /** The most Pi may spend for this person, in dollars; never for the owner. */
+    budget?: number;
 }
 
 export interface ModelChoice {
-	provider: string;
-	modelId: string;
-	thinkingLevel?: string;
+    provider: string;
+    modelId: string;
+    thinkingLevel?: string;
 }
 
 interface PocketConfig {
-	version: 1;
-	/** Printed in the login URL at every start. Keep this file private. */
-	ownerToken: string;
-	users: User[];
-	lastModel?: ModelChoice;
-	/** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
-	disabledExtensions?: string[];
-	/** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
-	enabledExtensions?: string[];
-	/** "others": a guest cannot allow a risky call that their own message led to. Absent: anyone who can steer may. */
-	approvals?: ApprovalRule;
+    version: 1;
+    /** Printed in the login URL at every start. Keep this file private. */
+    ownerToken: string;
+    users: User[];
+    lastModel?: ModelChoice;
+    /** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
+    disabledExtensions?: string[];
+    /** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
+    enabledExtensions?: string[];
+    /** "others": a guest cannot allow a risky call that their own message led to. Absent: anyone who can steer may. */
+    approvals?: ApprovalRule;
 }
 
 /** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
 export type ApprovalRule = "anyone" | "others";
 
 export function newToken(): string {
-	return randomBytes(24).toString("base64url");
+    return randomBytes(24).toString("base64url");
 }
 
 export function hashToken(token: string): string {
-	return createHash("sha256").update(token).digest("hex");
+    return createHash("sha256").update(token).digest("hex");
 }
 
 function sameHash(a: string, b: string): boolean {
-	const left = Buffer.from(a, "hex");
-	const right = Buffer.from(b, "hex");
-	return left.length === right.length && timingSafeEqual(left, right);
+    const left = Buffer.from(a, "hex");
+    const right = Buffer.from(b, "hex");
+
+    return left.length === right.length && timingSafeEqual(left, right);
 }
 
 /** `config.json` in the data directory, written atomically with mode 0600. */
 export class ConfigStore {
-	readonly file: string;
-	#config: PocketConfig;
+    readonly file: string;
+    #config: PocketConfig;
 
-	constructor(directory: string) {
-		mkdirSync(directory, { recursive: true, mode: 0o700 });
-		this.file = join(directory, "config.json");
-		if (existsSync(this.file)) {
-			this.#config = JSON.parse(readFileSync(this.file, "utf8")) as PocketConfig;
-		} else {
-			const ownerToken = newToken();
-			this.#config = {
-				version: 1,
-				ownerToken,
-				users: [{ id: randomUUID(), name: "Owner", role: "owner", tokenHash: hashToken(ownerToken), createdAt: Date.now() }],
-			};
-			this.save();
-		}
-	}
+    constructor(directory: string) {
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        this.file = join(directory, "config.json");
 
-	get ownerToken(): string {
-		return this.#config.ownerToken;
-	}
+        if (existsSync(this.file)) {
+            this.#config = JSON.parse(readFileSync(this.file, "utf8")) as PocketConfig;
+        } else {
+            const ownerToken = newToken();
 
-	get users(): readonly User[] {
-		return this.#config.users;
-	}
+            this.#config = {
+                version: 1,
+                ownerToken,
+                users: [
+                    {
+                        id: randomUUID(),
+                        name: "Owner",
+                        role: "owner",
+                        tokenHash: hashToken(ownerToken),
+                        createdAt: Date.now(),
+                    },
+                ],
+            };
+            this.save();
+        }
+    }
 
-	get lastModel(): ModelChoice | undefined {
-		return this.#config.lastModel;
-	}
+    get ownerToken(): string {
+        return this.#config.ownerToken;
+    }
 
-	set lastModel(choice: ModelChoice | undefined) {
-		this.#config.lastModel = choice;
-		this.save();
-	}
+    get users(): readonly User[] {
+        return this.#config.users;
+    }
 
-	get approvalRule(): ApprovalRule {
-		return this.#config.approvals ?? "anyone";
-	}
+    get lastModel(): ModelChoice | undefined {
+        return this.#config.lastModel;
+    }
 
-	set approvalRule(rule: ApprovalRule) {
-		if (rule === "anyone") delete this.#config.approvals;
-		else this.#config.approvals = rule;
-		this.save();
-	}
+    set lastModel(choice: ModelChoice | undefined) {
+        this.#config.lastModel = choice;
+        this.save();
+    }
 
-	get disabledExtensions(): readonly string[] {
-		return this.#config.disabledExtensions ?? [];
-	}
+    get approvalRule(): ApprovalRule {
+        return this.#config.approvals ?? "anyone";
+    }
 
-	get enabledExtensions(): readonly string[] {
-		return this.#config.enabledExtensions ?? [];
-	}
+    set approvalRule(rule: ApprovalRule) {
+        if (rule === "anyone") {
+            delete this.#config.approvals;
+        } else {
+            this.#config.approvals = rule;
+        }
 
-	/** Whether the owner turned a module on or off; undefined when they never chose, so its default applies. */
-	extensionChoice(file: string): boolean | undefined {
-		if (this.#config.disabledExtensions?.includes(file)) return false;
-		if (this.#config.enabledExtensions?.includes(file)) return true;
-		return undefined;
-	}
+        this.save();
+    }
 
-	setExtensionEnabled(file: string, enabled: boolean): void {
-		const disabled = new Set(this.#config.disabledExtensions ?? []);
-		const turnedOn = new Set(this.#config.enabledExtensions ?? []);
-		if (enabled) {
-			disabled.delete(file);
-			turnedOn.add(file);
-		} else {
-			disabled.add(file);
-			turnedOn.delete(file);
-		}
-		if (disabled.size === 0) delete this.#config.disabledExtensions;
-		else this.#config.disabledExtensions = [...disabled].sort();
-		if (turnedOn.size === 0) delete this.#config.enabledExtensions;
-		else this.#config.enabledExtensions = [...turnedOn].sort();
-		this.save();
-	}
+    get disabledExtensions(): readonly string[] {
+        return this.#config.disabledExtensions ?? [];
+    }
 
-	userByToken(token: string): User | undefined {
-		const hash = hashToken(token);
-		return this.#config.users.find((user) => sameHash(user.tokenHash, hash));
-	}
+    get enabledExtensions(): readonly string[] {
+        return this.#config.enabledExtensions ?? [];
+    }
 
-	userById(id: string): User | undefined {
-		return this.#config.users.find((user) => user.id === id);
-	}
+    /** Whether the owner turned a module on or off; undefined when they never chose, so its default applies. */
+    extensionChoice(file: string): boolean | undefined {
+        if (this.#config.disabledExtensions?.includes(file)) {
+            return false;
+        }
 
-	addUser(name: string, role: Role, sessions?: string[]): { user: User; token: string } {
-		const token = newToken();
-		const user: User = {
-			id: randomUUID(),
-			name,
-			role,
-			tokenHash: hashToken(token),
-			createdAt: Date.now(),
-			...(sessions === undefined ? {} : { sessions: [...sessions] }),
-		};
-		this.#config.users.push(user);
-		this.save();
-		return { user, token };
-	}
+        if (this.#config.enabledExtensions?.includes(file)) {
+            return true;
+        }
 
-	updateUser(id: string, patch: Partial<Pick<User, "name" | "lastSeen" | "role" | "sessions" | "tunnel" | "budget">>): void {
-		const user = this.userById(id);
-		if (user === undefined) return;
-		// The owner stays the owner, and nobody else becomes one.
-		if (patch.role !== undefined && (user.role === "owner" || patch.role === "owner")) delete patch.role;
-		if ("sessions" in patch && user.role === "owner") delete patch.sessions;
-		if ("budget" in patch && user.role === "owner") delete patch.budget;
-		Object.assign(user, patch);
-		if (user.sessions === undefined) delete user.sessions;
-		if (user.budget === undefined) delete user.budget;
-		this.save();
-	}
+        return undefined;
+    }
 
-	removeUser(id: string): void {
-		this.#config.users = this.#config.users.filter((user) => user.id !== id || user.role === "owner");
-		this.save();
-	}
+    setExtensionEnabled(file: string, enabled: boolean): void {
+        const disabled = new Set(this.#config.disabledExtensions ?? []);
+        const turnedOn = new Set(this.#config.enabledExtensions ?? []);
 
-	/** Replace the owner token, signing out every device that used the old one. */
-	rotateOwnerToken(): string {
-		const token = newToken();
-		this.#config.ownerToken = token;
-		const owner = this.#config.users.find((user) => user.role === "owner");
-		if (owner !== undefined) owner.tokenHash = hashToken(token);
-		this.save();
-		return token;
-	}
+        if (enabled) {
+            disabled.delete(file);
+            turnedOn.add(file);
+        } else {
+            disabled.add(file);
+            turnedOn.delete(file);
+        }
 
-	save(): void {
-		mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-		const temp = `${this.file}.${process.pid}.tmp`;
-		writeFileSync(temp, `${JSON.stringify(this.#config, null, "\t")}\n`, { mode: 0o600 });
-		renameSync(temp, this.file);
-		chmodSync(this.file, 0o600);
-	}
+        if (disabled.size === 0) {
+            delete this.#config.disabledExtensions;
+        } else {
+            this.#config.disabledExtensions = [...disabled].sort();
+        }
+
+        if (turnedOn.size === 0) {
+            delete this.#config.enabledExtensions;
+        } else {
+            this.#config.enabledExtensions = [...turnedOn].sort();
+        }
+
+        this.save();
+    }
+
+    userByToken(token: string): User | undefined {
+        const hash = hashToken(token);
+
+        return this.#config.users.find((user) => sameHash(user.tokenHash, hash));
+    }
+
+    userById(id: string): User | undefined {
+        return this.#config.users.find((user) => user.id === id);
+    }
+
+    addUser(name: string, role: Role, sessions?: string[]): { user: User; token: string } {
+        const token = newToken();
+        const user: User = {
+            id: randomUUID(),
+            name,
+            role,
+            tokenHash: hashToken(token),
+            createdAt: Date.now(),
+            ...(sessions === undefined ? {} : { sessions: [...sessions] }),
+        };
+
+        this.#config.users.push(user);
+        this.save();
+
+        return { user, token };
+    }
+
+    updateUser(
+        id: string,
+        patch: Partial<Pick<User, "name" | "lastSeen" | "role" | "sessions" | "tunnel" | "budget">>,
+    ): void {
+        const user = this.userById(id);
+
+        if (user === undefined) {
+            return;
+        }
+
+        // The owner stays the owner, and nobody else becomes one.
+        if (patch.role !== undefined && (user.role === "owner" || patch.role === "owner")) {
+            delete patch.role;
+        }
+
+        if ("sessions" in patch && user.role === "owner") {
+            delete patch.sessions;
+        }
+
+        if ("budget" in patch && user.role === "owner") {
+            delete patch.budget;
+        }
+
+        Object.assign(user, patch);
+
+        if (user.sessions === undefined) {
+            delete user.sessions;
+        }
+
+        if (user.budget === undefined) {
+            delete user.budget;
+        }
+
+        this.save();
+    }
+
+    removeUser(id: string): void {
+        this.#config.users = this.#config.users.filter(
+            (user) => user.id !== id || user.role === "owner",
+        );
+        this.save();
+    }
+
+    /** Replace the owner token, signing out every device that used the old one. */
+    rotateOwnerToken(): string {
+        const token = newToken();
+
+        this.#config.ownerToken = token;
+        const owner = this.#config.users.find((user) => user.role === "owner");
+
+        if (owner !== undefined) {
+            owner.tokenHash = hashToken(token);
+        }
+
+        this.save();
+
+        return token;
+    }
+
+    save(): void {
+        mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
+        const temp = `${this.file}.${process.pid}.tmp`;
+
+        writeFileSync(temp, `${JSON.stringify(this.#config, null, "\t")}\n`, { mode: 0o600 });
+        renameSync(temp, this.file);
+        chmodSync(this.file, 0o600);
+    }
 }

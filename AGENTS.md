@@ -8,4 +8,5 @@ Pi Pocket is often edited from inside itself, while it runs. [docs/map.md](docs/
 - The owner's drop-in extensions in `~/.pi-pocket/extensions/` load the same way, after the built-in ones, and stay off until the owner turns them on. A `node_modules` link there lets them import Pi Pocket's packages.
 - Document kinds in `src/server/docs.ts` are stored data. Do not rename them, or change their scope, history, or fork settings: Pi Durable checks those against what is stored.
 - The server is plain TypeScript run by Node's type stripping: only erasable syntax (no enums, no parameter properties, no namespaces). Imports use `.ts` extensions.
-- Run `npm run check` and `npm test` after server changes.
+- Code style is Prettier (`.prettierrc.json`: 4 spaces, 100 columns) plus ESLint's layout rules (`eslint.config.js`): braces on every `if` and loop, and a blank line after declarations, around blocks, and before `return` and `throw`. Run `npm run format` after editing. Prettier leaves the markup in `html` templates alone, so lay it out by hand the same way: 4 spaces per level, and a tag that runs past 100 columns gets one attribute per line and its children on their own lines. In htm a line break is not a space: break only where there is no space, or between tags, never inside running text.
+- Run `npm run check`, `npm run lint`, and `npm test` after server changes.

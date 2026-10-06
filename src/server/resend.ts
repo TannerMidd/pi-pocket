@@ -18,41 +18,65 @@ export const resendRequest = (resend: Resend) => ownRequest(resend.by, "resend")
  * left out: sent again, the message mentions them as before.
  */
 export function userContent(model: unknown): { text: string; images: ImageContent[] } {
-	const content = (model as { content?: unknown } | undefined)?.content;
-	if (typeof content === "string") return { text: content, images: [] };
-	const parts = Array.isArray(content) ? (content as (TextContent | ImageContent)[]) : [];
-	return {
-		text: parts.flatMap((part, index) => (part.type === "text" && (index === 0 || !part.text.startsWith('<file name="')) ? [part.text] : [])).join("\n"),
-		images: parts.filter((part): part is ImageContent => part.type === "image"),
-	};
+    const content = (model as { content?: unknown } | undefined)?.content;
+
+    if (typeof content === "string") {
+        return { text: content, images: [] };
+    }
+
+    const parts = Array.isArray(content) ? (content as (TextContent | ImageContent)[]) : [];
+
+    return {
+        text: parts
+            .flatMap((part, index) =>
+                part.type === "text" && (index === 0 || !part.text.startsWith('<file name="'))
+                    ? [part.text]
+                    : [],
+            )
+            .join("\n"),
+        images: parts.filter((part): part is ImageContent => part.type === "image"),
+    };
 }
 
 /** The message to send: its text, with the images of the message it repeats. */
-export const resendContent = (text: string, images: readonly ImageContent[]) => (images.length === 0 ? text : [{ type: "text" as const, text }, ...images]);
+export const resendContent = (text: string, images: readonly ImageContent[]) =>
+    images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
 
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 /** Sends a fork's message, with the original's images read from where it was sent first. */
 export const ResendTask = defineTask<Resend, { phase: "send" }, null>({
-	name: "pocket.resend",
-	version: 1,
-	initial: () => ({ phase: "send" }),
-	phases: {
-		send: async (task, runtime, context) => {
-			const resend = task.input;
-			let images: ImageContent[] = [];
-			const original = resend.images?.entry;
-			if (original !== undefined) {
-				// A commit that changes nothing, to read the original message.
-				await runtime.commit(async (tx) => {
-					images = userContent((await tx.entry(original))?.model?.[0]).images;
-					return undefined;
-				}, context);
-			}
-			const conversation = await runtime.conversation(runtime.conversationId, context);
-			await conversation?.submit({ type: "input", content: resendContent(resend.text, images), requestId: resendRequest(resend) }, context);
-			await runtime.commit(() => finished, context);
-		},
-	},
-	abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+    name: "pocket.resend",
+    version: 1,
+    initial: () => ({ phase: "send" }),
+    phases: {
+        send: async (task, runtime, context) => {
+            const resend = task.input;
+            let images: ImageContent[] = [];
+            const original = resend.images?.entry;
+
+            if (original !== undefined) {
+                // A commit that changes nothing, to read the original message.
+                await runtime.commit(async (tx) => {
+                    images = userContent((await tx.entry(original))?.model?.[0]).images;
+
+                    return undefined;
+                }, context);
+            }
+
+            const conversation = await runtime.conversation(runtime.conversationId, context);
+
+            await conversation?.submit(
+                {
+                    type: "input",
+                    content: resendContent(resend.text, images),
+                    requestId: resendRequest(resend),
+                },
+                context,
+            );
+            await runtime.commit(() => finished, context);
+        },
+    },
+    abort: (_task, runtime, context) =>
+        runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });

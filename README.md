@@ -56,12 +56,12 @@ The full tour is in [docs/features.md](docs/features.md).
 
 Choose a mode in the launcher, or pass `--access`:
 
-| Mode | Who can connect | Notes |
-| --- | --- | --- |
-| `local` | This machine | Listens on `127.0.0.1` |
-| `lan` | Your local network | All addresses, plain http |
+| Mode         | Who can connect      | Notes                                                                                                                                                                                                       |
+| ------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local`      | This machine         | Listens on `127.0.0.1`                                                                                                                                                                                      |
+| `lan`        | Your local network   | All addresses, plain http                                                                                                                                                                                   |
 | `cloudflare` | Anyone with the link | Free quick tunnel with https, no account needed (Cloudflare offers quick tunnels for testing and development). The address changes each time the launcher starts but stays the same across server restarts. |
-| `tailscale` | Your tailnet | Tailscale address only, encrypted by the tailnet |
+| `tailscale`  | Your tailnet         | Tailscale address only, encrypted by the tailnet                                                                                                                                                            |
 
 Cloudflare mode needs `cloudflared`. On Linux the launcher can download the official release into `~/.pi-pocket/bin`. To use another tunnel (ngrok, `tailscale serve`), choose `local` and point the tunnel at port 8787.
 
@@ -85,36 +85,36 @@ Lancet Guard needs ONNX Runtime, which may not load on Android. If the guard is 
 
 ## Configuration
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `--access <mode>` | last choice | Skip the access menu |
-| `-y` | | Reuse the last access choice |
-| `--port` | `8787` | Port to listen on |
-| `--cwd` | current folder | Default folder for new sessions |
-| `--data` | `~/.pi-pocket` | Database, settings, uploads, and push keys |
-| `--host` | | Listen on a specific address instead of choosing access |
-| `--rotate-token` | | Issue a new owner link and sign out devices that used the old one |
+| Option            | Default        | Purpose                                                           |
+| ----------------- | -------------- | ----------------------------------------------------------------- |
+| `--access <mode>` | last choice    | Skip the access menu                                              |
+| `-y`              |                | Reuse the last access choice                                      |
+| `--port`          | `8787`         | Port to listen on                                                 |
+| `--cwd`           | current folder | Default folder for new sessions                                   |
+| `--data`          | `~/.pi-pocket` | Database, settings, uploads, and push keys                        |
+| `--host`          |                | Listen on a specific address instead of choosing access           |
+| `--rotate-token`  |                | Issue a new owner link and sign out devices that used the old one |
 
 Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_DIR`, `PI_POCKET_HOST`, `PI_POCKET_PORT`, `PI_POCKET_GUARD=off`, `PI_POCKET_BROWSER` (the browser to run, when Chromium or Chrome is not found by itself), and `PI_POCKET_BROWSER_ARGS` (extra flags for it, such as `--no-sandbox` where sandboxes are unavailable). Without a terminal (under systemd, for example), the launcher uses `--access` or the last choice.
 
 ## Architecture
 
-| Path | Role |
-| --- | --- |
-| `bin/pi-pocket.js` | Entry point: checks the Node version, starts the launcher |
-| `src/launcher/` | Access menu, server supervisor, Cloudflare tunnel, keys, QR code |
-| `src/server/app.ts` | Durable harness over `pocket.sqlite`, connected tabs, access, and the session list |
-| `src/server/room.ts` | One conversation's shared live view, sent to every tab watching it |
-| `src/server/commands.ts` | What people ask of Pi: messages, forks, models, plan mode, goals, schedules, worktrees |
-| `src/server/collab.ts` | The people's side: chat, activity lines, reactions, pins, notes, take turns |
-| `src/server/http.ts` | Web files, JSON API, server-sent events, uploads, artifacts, invites, the Browser panel's frames and input |
-| `src/server/browser.ts` | The built-in browser: one headless Chromium over the DevTools protocol, a page per conversation |
-| `src/server/projection.ts` | Turns committed conversation state into compact JSON for browsers |
-| `src/server/docs.ts` | Durable documents: sessions, chat, pins, notes, artifacts, subagents, schedules, goals, spend |
-| `src/server/schedules.ts`, `goals.ts`, `spend.ts`, `changes.ts`, `worktrees.ts` | One feature each, with its durable tasks or git calls |
-| `src/server/push.ts`, `alerts.ts` | Dependency-free Web Push (RFC 8291 and RFC 8292), and who gets which notification |
-| `src/server/extensions/` | Live-reloaded extensions: system prompt, artifacts, browser, subagents, schedules, goals, plan mode, Lancet Guard, codemode |
-| `web/` | The app: Preact and htm as plain ES modules |
+| Path                                                                            | Role                                                                                                                        |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `bin/pi-pocket.js`                                                              | Entry point: checks the Node version, starts the launcher                                                                   |
+| `src/launcher/`                                                                 | Access menu, server supervisor, Cloudflare tunnel, keys, QR code                                                            |
+| `src/server/app.ts`                                                             | Durable harness over `pocket.sqlite`, connected tabs, access, and the session list                                          |
+| `src/server/room.ts`                                                            | One conversation's shared live view, sent to every tab watching it                                                          |
+| `src/server/commands.ts`                                                        | What people ask of Pi: messages, forks, models, plan mode, goals, schedules, worktrees                                      |
+| `src/server/collab.ts`                                                          | The people's side: chat, activity lines, reactions, pins, notes, take turns                                                 |
+| `src/server/http.ts`                                                            | Web files, JSON API, server-sent events, uploads, artifacts, invites, the Browser panel's frames and input                  |
+| `src/server/browser.ts`                                                         | The built-in browser: one headless Chromium over the DevTools protocol, a page per conversation                             |
+| `src/server/projection.ts`                                                      | Turns committed conversation state into compact JSON for browsers                                                           |
+| `src/server/docs.ts`                                                            | Durable documents: sessions, chat, pins, notes, artifacts, subagents, schedules, goals, spend                               |
+| `src/server/schedules.ts`, `goals.ts`, `spend.ts`, `changes.ts`, `worktrees.ts` | One feature each, with its durable tasks or git calls                                                                       |
+| `src/server/push.ts`, `alerts.ts`                                               | Dependency-free Web Push (RFC 8291 and RFC 8292), and who gets which notification                                           |
+| `src/server/extensions/`                                                        | Live-reloaded extensions: system prompt, artifacts, browser, subagents, schedules, goals, plan mode, Lancet Guard, codemode |
+| `web/`                                                                          | The app: Preact and htm as plain ES modules                                                                                 |
 
 Browsers render only committed state. Each session's Pi Durable view is coalesced and sent as small updates over server-sent events, so a device that reconnects or joins late sees exactly what everyone else sees. The [engineering page](https://tannermidd.github.io/pi-pocket/engineering.html) explains the design; [docs/map.md](docs/map.md) is a short map of the code.
 
@@ -123,6 +123,8 @@ Browsers render only committed state. Each session's Pi Durable view is coalesce
 ```bash
 npm run check   # type-check
 npm test        # server tests with a scripted model
+npm run format  # ESLint's layout fixes, then Prettier
+npm run lint    # check the layout rules
 ```
 
 Changes to `web/` reload every open browser. Changes to `src/server/extensions/` are reinstalled into the running server. Other server changes need **Restart server** from the menu, and running work resumes afterward. [AGENTS.md](AGENTS.md) covers editing Pi Pocket safely from inside itself.

@@ -1,459 +1,848 @@
 <!doctype html>
 <html lang="en">
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-	<title>Pi Pocket: your Pi coding agent, in your pocket</title>
-	<meta name="description" content="A self-hosted web app for using the Pi coding agent from your phone or any browser. Sessions can be shared and survive restarts. Built on Pi Durable.">
-	<meta name="theme-color" content="#13141c">
-	<link rel="canonical" href="https://tannermidd.github.io/pi-pocket/">
-	<link rel="icon" href="icon.svg" type="image/svg+xml">
-	<link rel="preload" href="fonts/JetBrainsMono.woff2" as="font" type="font/woff2" crossorigin>
-	<link rel="stylesheet" href="style.css">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <title>Pi Pocket: your Pi coding agent, in your pocket</title>
+        <meta
+            name="description"
+            content="A self-hosted web app for using the Pi coding agent from your phone or any browser. Sessions can be shared and survive restarts. Built on Pi Durable."
+        />
+        <meta name="theme-color" content="#13141c" />
+        <link rel="canonical" href="https://tannermidd.github.io/pi-pocket/" />
+        <link rel="icon" href="icon.svg" type="image/svg+xml" />
+        <link
+            rel="preload"
+            href="fonts/JetBrainsMono.woff2"
+            as="font"
+            type="font/woff2"
+            crossorigin
+        />
+        <link rel="stylesheet" href="style.css" />
 
-	<meta property="og:type" content="website">
-	<meta property="og:site_name" content="Pi Pocket">
-	<meta property="og:title" content="Pi Pocket: your Pi coding agent, in your pocket">
-	<meta property="og:description" content="A self-hosted web app for using the Pi coding agent from your phone or any browser. Built on Pi Durable.">
-	<meta property="og:url" content="https://tannermidd.github.io/pi-pocket/">
-	<meta property="og:image" content="https://tannermidd.github.io/pi-pocket/og.png">
-	<meta property="og:image:width" content="1200">
-	<meta property="og:image:height" content="630">
-	<meta name="twitter:card" content="summary_large_image">
-</head>
-<body>
-	<a class="skip" href="#main">Skip to content</a>
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Pi Pocket" />
+        <meta property="og:title" content="Pi Pocket: your Pi coding agent, in your pocket" />
+        <meta
+            property="og:description"
+            content="A self-hosted web app for using the Pi coding agent from your phone or any browser. Built on Pi Durable."
+        />
+        <meta property="og:url" content="https://tannermidd.github.io/pi-pocket/" />
+        <meta property="og:image" content="https://tannermidd.github.io/pi-pocket/og.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta name="twitter:card" content="summary_large_image" />
+    </head>
+    <body>
+        <a class="skip" href="#main">Skip to content</a>
 
-	<header class="nav">
-		<div class="wrap">
-			<a class="logo" href="#top" aria-label="Pi Pocket home"><img src="icon.svg" alt="" width="28" height="28">Pi Pocket</a>
-			<nav class="nav-links" aria-label="Sections">
-				<a href="#pi-durable">Pi Durable</a>
-				<a href="#features">Features</a>
-				<a href="#multiplayer">Multiplayer</a>
-				<a href="#security">Security</a>
-				<a href="#get-started">Get started</a>
-				<a href="engineering.html">Engineering</a>
-			</nav>
-			<a class="btn btn-sm" href="https://github.com/TannerMidd/pi-pocket">
-				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
-				GitHub
-			</a>
-		</div>
-	</header>
+        <header class="nav">
+            <div class="wrap">
+                <a class="logo" href="#top" aria-label="Pi Pocket home"
+                    ><img src="icon.svg" alt="" width="28" height="28" />Pi Pocket</a
+                >
+                <nav class="nav-links" aria-label="Sections">
+                    <a href="#pi-durable">Pi Durable</a>
+                    <a href="#features">Features</a>
+                    <a href="#multiplayer">Multiplayer</a>
+                    <a href="#security">Security</a>
+                    <a href="#get-started">Get started</a>
+                    <a href="engineering.html">Engineering</a>
+                </nav>
+                <a class="btn btn-sm" href="https://github.com/TannerMidd/pi-pocket">
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path
+                            d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
+                        />
+                    </svg>
+                    GitHub
+                </a>
+            </div>
+        </header>
 
-	<main id="main">
-		<!-- Hero -->
-		<section class="hero" id="top">
-			<div class="wrap">
-				<div>
-					<a class="badge" href="https://earendil.com/posts/pi-durable/"><b>v0.8.0</b> Built on Pi Durable →</a>
-					<h1>Your coding agent,<br><span class="grad">in your pocket.</span></h1>
-					<p class="lead">Pi Pocket lets you use Pi from a browser, including your phone's. It runs on your computer, or on Android in Termux. Several people can share a session, and a run keeps going after a server restart.</p>
-					<div class="cta">
-						<a class="btn btn-primary" href="#get-started">Get started</a>
-						<a class="btn" href="https://github.com/TannerMidd/pi-pocket">View on GitHub</a>
-					</div>
-					<div class="install">
-						<span class="prompt">$</span>
-						<code id="install-cmd">git clone https://github.com/TannerMidd/pi-pocket.git</code>
-						<button class="copy" type="button" data-copy="#install-cmd">Copy</button>
-					</div>
-					<div class="facts">
-						<span>Self-hosted</span>
-						<span>Any provider</span>
-						<span>No build step</span>
-						<span>Node.js 22.19+</span>
-					</div>
-				</div>
+        <main id="main">
+            <!-- Hero -->
+            <section class="hero" id="top">
+                <div class="wrap">
+                    <div>
+                        <a class="badge" href="https://earendil.com/posts/pi-durable/"
+                            ><b>v0.8.1</b> Built on Pi Durable →</a
+                        >
+                        <h1>Your coding agent,<br /><span class="grad">in your pocket.</span></h1>
+                        <p class="lead">
+                            Pi Pocket lets you use Pi from a browser, including your phone's. It
+                            runs on your computer, or on Android in Termux. Several people can share
+                            a session, and a run keeps going after a server restart.
+                        </p>
+                        <div class="cta">
+                            <a class="btn btn-primary" href="#get-started">Get started</a>
+                            <a class="btn" href="https://github.com/TannerMidd/pi-pocket"
+                                >View on GitHub</a
+                            >
+                        </div>
+                        <div class="install">
+                            <span class="prompt">$</span>
+                            <code id="install-cmd"
+                                >git clone https://github.com/TannerMidd/pi-pocket.git</code
+                            >
+                            <button class="copy" type="button" data-copy="#install-cmd">
+                                Copy
+                            </button>
+                        </div>
+                        <div class="facts">
+                            <span>Self-hosted</span>
+                            <span>Any provider</span>
+                            <span>No build step</span>
+                            <span>Node.js 22.19+</span>
+                        </div>
+                    </div>
 
-				<div class="device" role="img" aria-label="Pi Pocket on a phone: Alex asks Pi about a login bug, Pi edits src/auth.ts and runs the tests while Tanner writes a message.">
-					<div class="screen" aria-hidden="true">
-						<div class="ui-top">
-							<span class="ui-menu"></span>
-							<div class="ui-title"><b>fix-login-redirect</b><span>~/projects/web</span></div>
-							<div class="avatars">
-								<span class="av" style="--who: #7dcfff">T</span>
-								<span class="av" style="--who: #bb9af7">A</span>
-							</div>
-						</div>
-						<div class="ui-body">
-							<span class="ui-author">Alex</span>
-							<div class="ui-bubble">The login redirect loops on Safari. Can you find out why?</div>
-							<div class="ui-text">Found it: the session cookie has no <code>SameSite</code>, so Safari drops it on the redirect. Fixing it now.</div>
-							<div class="ui-tool">
-								<div class="ui-tool-head"><span class="ic">✎</span><span class="lbl">Edit</span><span class="subj">src/auth.ts</span><span class="ok">✓</span></div>
-								<pre class="ui-diff"><span class="del">- res.cookie("sid", id);</span><span class="add">+ res.cookie("sid", id, {</span><span class="add">+   sameSite: "lax", secure: true,</span><span class="add">+ });</span></pre>
-							</div>
-							<div class="ui-tool running">
-								<div class="ui-tool-head"><span class="ic">&gt;_</span><span class="subj" style="color: var(--text)">npm test</span><span class="spin"></span></div>
-								<pre class="ui-out"><span class="pass">✓</span> auth › keeps session on redirect
+                    <div
+                        class="device"
+                        role="img"
+                        aria-label="Pi Pocket on a phone: Alex asks Pi about a login bug, Pi edits src/auth.ts and runs the tests while Tanner writes a message."
+                    >
+                        <div class="screen" aria-hidden="true">
+                            <div class="ui-top">
+                                <span class="ui-menu"></span>
+                                <div class="ui-title">
+                                    <b>fix-login-redirect</b><span>~/projects/web</span>
+                                </div>
+                                <div class="avatars">
+                                    <span class="av" style="--who: #7dcfff">T</span>
+                                    <span class="av" style="--who: #bb9af7">A</span>
+                                </div>
+                            </div>
+                            <div class="ui-body">
+                                <span class="ui-author">Alex</span>
+                                <div class="ui-bubble">
+                                    The login redirect loops on Safari. Can you find out why?
+                                </div>
+                                <div class="ui-text">
+                                    Found it: the session cookie has no <code>SameSite</code>, so
+                                    Safari drops it on the redirect. Fixing it now.
+                                </div>
+                                <div class="ui-tool">
+                                    <div class="ui-tool-head">
+                                        <span class="ic">✎</span><span class="lbl">Edit</span
+                                        ><span class="subj">src/auth.ts</span
+                                        ><span class="ok">✓</span>
+                                    </div>
+                                    <pre
+                                        class="ui-diff"
+                                    ><span class="del">- res.cookie("sid", id);</span><span class="add">+ res.cookie("sid", id, {</span><span class="add">+   sameSite: "lax", secure: true,</span><span class="add">+ });</span></pre>
+                                </div>
+                                <div class="ui-tool running">
+                                    <div class="ui-tool-head">
+                                        <span class="ic">&gt;_</span
+                                        ><span class="subj" style="color: var(--text)"
+                                            >npm test</span
+                                        ><span class="spin"></span>
+                                    </div>
+                                    <pre
+                                        class="ui-out"
+                                    ><span class="pass">✓</span> auth › keeps session on redirect
 <span class="pass">✓</span> auth › sets SameSite=Lax</pre>
-							</div>
-							<div class="ui-typing" style="--who: #7dcfff"><span class="dots"><i></i><i></i><i></i></span>Tanner is writing to Pi…</div>
-						</div>
-						<div class="ui-compose">
-							<div class="ui-input">
-								<div class="ui-input-inner">
-									<span class="ui-placeholder">Also add a regression test<span class="caret"></span></span>
-								</div>
-							</div>
-							<div class="ui-row">
-								<span class="chip"><span class="glyph">✦</span>sonnet-4.5 <span style="color: var(--muted)">high</span></span>
-								<span class="chip on">Steer</span>
-								<span class="ui-round"><i></i></span>
-							</div>
-							<div class="ui-status">
-								<span>2 clients</span><span class="sep">·</span><span>cache 94%</span><span class="sep">·</span><span>31%/200k</span><span class="sep">·</span><span>$0.42</span><span class="sep">·</span><span class="guard">⛨ guard</span>
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-		</section>
+                                </div>
+                                <div class="ui-typing" style="--who: #7dcfff">
+                                    <span class="dots"><i></i><i></i><i></i></span>Tanner is writing
+                                    to Pi…
+                                </div>
+                            </div>
+                            <div class="ui-compose">
+                                <div class="ui-input">
+                                    <div class="ui-input-inner">
+                                        <span class="ui-placeholder"
+                                            >Also add a regression test<span class="caret"></span
+                                        ></span>
+                                    </div>
+                                </div>
+                                <div class="ui-row">
+                                    <span class="chip"
+                                        ><span class="glyph">✦</span>sonnet-4.5
+                                        <span style="color: var(--muted)">high</span></span
+                                    >
+                                    <span class="chip on">Steer</span>
+                                    <span class="ui-round"><i></i></span>
+                                </div>
+                                <div class="ui-status">
+                                    <span>2 clients</span><span class="sep">·</span
+                                    ><span>cache 94%</span><span class="sep">·</span
+                                    ><span>31%/200k</span><span class="sep">·</span
+                                    ><span>$0.42</span><span class="sep">·</span
+                                    ><span class="guard">⛨ guard</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-		<!-- Pi Durable -->
-		<section class="section alt" id="pi-durable">
-			<div class="wrap">
-				<div class="split">
-					<div class="split-copy">
-						<span class="kicker">Foundation</span>
-						<h2>Built on Pi Durable.</h2>
-						<p>Pi Durable is Earendil's harness for long-running agents, released with Pi 1.0. It keeps conversations, model calls, tool calls, and app state in one storage, and commits each step before anything is shown. If the process dies, the next one picks the work up where it stopped.</p>
-						<p>Pi Pocket is a web app on top of it. Pi Durable runs the agent: it saves each step, resumes runs after a restart, queues messages, and runs subagents. Pi Pocket adds the screens, the people, and the ways to connect. Its sessions live in one SQLite file, <code>~/.pi-pocket/pocket.sqlite</code>.</p>
-						<div class="cta">
-							<a class="btn" href="https://earendil.com/posts/pi-durable/">Read the announcement</a>
-							<a class="btn" href="https://github.com/earendil-works/pi/tree/main/packages/durable">Pi Durable source</a>
-						</div>
-					</div>
-					<div class="panel" role="img" aria-label="A run's timeline: steps are committed, the server restarts, and the run resumes from the last committed step.">
-						<div class="panel-head" aria-hidden="true"><b>pocket.sqlite</b><span class="right">run #128</span></div>
-						<ol class="timeline" aria-hidden="true">
-							<li><span class="mark">✓</span><span class="what">model request</span><span class="state">committed</span></li>
-							<li><span class="mark">✓</span><span class="what">read <em>src/auth.ts</em></span><span class="state">committed</span></li>
-							<li><span class="mark">✓</span><span class="what">edit <em>src/auth.ts</em></span><span class="state">committed</span></li>
-							<li class="crash"><span class="mark">✕</span><span class="what">server restarted</span><span class="state">process killed</span></li>
-							<li class="resume"><span class="mark">↻</span><span class="what">run resumed</span><span class="state">from last commit</span></li>
-							<li><span class="mark">✓</span><span class="what">bash <em>npm test</em></span><span class="state">passed</span></li>
-							<li><span class="mark">✓</span><span class="what">model request</span><span class="state">done</span></li>
-						</ol>
-					</div>
-				</div>
+            <!-- Pi Durable -->
+            <section class="section alt" id="pi-durable">
+                <div class="wrap">
+                    <div class="split">
+                        <div class="split-copy">
+                            <span class="kicker">Foundation</span>
+                            <h2>Built on Pi Durable.</h2>
+                            <p>
+                                Pi Durable is Earendil's harness for long-running agents, released
+                                with Pi 1.0. It keeps conversations, model calls, tool calls, and
+                                app state in one storage, and commits each step before anything is
+                                shown. If the process dies, the next one picks the work up where it
+                                stopped.
+                            </p>
+                            <p>
+                                Pi Pocket is a web app on top of it. Pi Durable runs the agent: it
+                                saves each step, resumes runs after a restart, queues messages, and
+                                runs subagents. Pi Pocket adds the screens, the people, and the ways
+                                to connect. Its sessions live in one SQLite file,
+                                <code>~/.pi-pocket/pocket.sqlite</code>.
+                            </p>
+                            <div class="cta">
+                                <a class="btn" href="https://earendil.com/posts/pi-durable/"
+                                    >Read the announcement</a
+                                >
+                                <a
+                                    class="btn"
+                                    href="https://github.com/earendil-works/pi/tree/main/packages/durable"
+                                    >Pi Durable source</a
+                                >
+                            </div>
+                        </div>
+                        <div
+                            class="panel"
+                            role="img"
+                            aria-label="A run's timeline: steps are committed, the server restarts, and the run resumes from the last committed step."
+                        >
+                            <div class="panel-head" aria-hidden="true">
+                                <b>pocket.sqlite</b><span class="right">run #128</span>
+                            </div>
+                            <ol class="timeline" aria-hidden="true">
+                                <li>
+                                    <span class="mark">✓</span
+                                    ><span class="what">model request</span
+                                    ><span class="state">committed</span>
+                                </li>
+                                <li>
+                                    <span class="mark">✓</span
+                                    ><span class="what">read <em>src/auth.ts</em></span
+                                    ><span class="state">committed</span>
+                                </li>
+                                <li>
+                                    <span class="mark">✓</span
+                                    ><span class="what">edit <em>src/auth.ts</em></span
+                                    ><span class="state">committed</span>
+                                </li>
+                                <li class="crash">
+                                    <span class="mark">✕</span
+                                    ><span class="what">server restarted</span
+                                    ><span class="state">process killed</span>
+                                </li>
+                                <li class="resume">
+                                    <span class="mark">↻</span><span class="what">run resumed</span
+                                    ><span class="state">from last commit</span>
+                                </li>
+                                <li>
+                                    <span class="mark">✓</span
+                                    ><span class="what">bash <em>npm test</em></span
+                                    ><span class="state">passed</span>
+                                </li>
+                                <li>
+                                    <span class="mark">✓</span
+                                    ><span class="what">model request</span
+                                    ><span class="state">done</span>
+                                </li>
+                            </ol>
+                        </div>
+                    </div>
 
-				<h3 class="map-head">What Pi Pocket gets from it</h3>
-				<div class="grid map">
-					<article class="card">
-						<code>tasks + checkpoints</code>
-						<h3>Runs survive restarts</h3>
-						<p>Each model request and tool call is a task that saves a checkpoint before it moves on. After a restart, unfinished runs continue. A tool call that was cut off reruns only if that is safe; otherwise the model is told it was interrupted.</p>
-					</article>
-					<article class="card">
-						<code>atomic commits</code>
-						<h3>Same view on every device</h3>
-						<p>Nothing is shown before it is stored, and browsers only get committed state. A device that reconnects or joins late sees what everyone else sees.</p>
-					</article>
-					<article class="card">
-						<code>inbox</code>
-						<h3>Steer or queue</h3>
-						<p>A message sent while Pi works either joins the current run or waits for the next one. Queued messages stay queued across restarts.</p>
-					</article>
-					<article class="card">
-						<code>documents</code>
-						<h3>Chat, pins, notes, artifacts</h3>
-						<p>Pi Pocket stores its own data as documents, changed in the same commits as the transcript, so after a crash the two never disagree.</p>
-					</article>
-					<article class="card">
-						<code>owned conversations</code>
-						<h3>Subagents</h3>
-						<p>A subagent is a conversation of its own, owned by a task. It survives restarts, tracks its own cost, and you can open it and talk to it.</p>
-					</article>
-					<article class="card">
-						<code>extensions + hooks</code>
-						<h3>Live editing and Lancet Guard</h3>
-						<p>Pi Pocket's features are extensions. Installing a new version replaces the old one while the server runs. The guard is a hook that stores each decision, so a restart never asks twice.</p>
-					</article>
-				</div>
-				<p class="note">Pi Durable is experimental, and its API can change between releases. Pi Pocket pins the exact version it is tested with.</p>
-			</div>
-		</section>
+                    <h3 class="map-head">What Pi Pocket gets from it</h3>
+                    <div class="grid map">
+                        <article class="card">
+                            <code>tasks + checkpoints</code>
+                            <h3>Runs survive restarts</h3>
+                            <p>
+                                Each model request and tool call is a task that saves a checkpoint
+                                before it moves on. After a restart, unfinished runs continue. A
+                                tool call that was cut off reruns only if that is safe; otherwise
+                                the model is told it was interrupted.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>atomic commits</code>
+                            <h3>Same view on every device</h3>
+                            <p>
+                                Nothing is shown before it is stored, and browsers only get
+                                committed state. A device that reconnects or joins late sees what
+                                everyone else sees.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>inbox</code>
+                            <h3>Steer or queue</h3>
+                            <p>
+                                A message sent while Pi works either joins the current run or waits
+                                for the next one. Queued messages stay queued across restarts.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>documents</code>
+                            <h3>Chat, pins, notes, artifacts</h3>
+                            <p>
+                                Pi Pocket stores its own data as documents, changed in the same
+                                commits as the transcript, so after a crash the two never disagree.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>owned conversations</code>
+                            <h3>Subagents</h3>
+                            <p>
+                                A subagent is a conversation of its own, owned by a task. It
+                                survives restarts, tracks its own cost, and you can open it and talk
+                                to it.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>extensions + hooks</code>
+                            <h3>Live editing and Lancet Guard</h3>
+                            <p>
+                                Pi Pocket's features are extensions. Installing a new version
+                                replaces the old one while the server runs. The guard is a hook that
+                                stores each decision, so a restart never asks twice.
+                            </p>
+                        </article>
+                    </div>
+                    <p class="note">
+                        Pi Durable is experimental, and its API can change between releases. Pi
+                        Pocket pins the exact version it is tested with.
+                    </p>
+                </div>
+            </section>
 
-		<!-- Features -->
-		<section class="section" id="features">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Features</span>
-					<h2>Pi in a browser.</h2>
-					<p>Pi's tools and models, with additions for phones and for sessions that several people share.</p>
-				</div>
-				<div class="grid">
-					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 7.5V12l3 2"/></svg></div>
-						<h3>Survives restarts</h3>
-						<p>Every model call, tool call, queued message, and subagent is a durable task in SQLite. Restart mid-run and the work picks up where it stopped.</p>
-					</article>
-					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5c.7-3.6 3.3-5.8 6.5-5.8s5.8 2.2 6.5 5.8"/><path d="M15.5 4.7a3.5 3.5 0 0 1 0 6.6"/><path d="M18 15c1.8.8 3 2.7 3.5 5.5"/></svg></div>
-						<h3>Multiplayer</h3>
-						<p>Several people and devices can watch and steer one session. They also get a side chat, pins, reactions, and shared notes.</p>
-					</article>
-					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><rect x="6" y="6" width="12" height="12"/><rect x="10" y="10" width="4" height="4"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></svg></div>
-						<h3>Any provider, any model</h3>
-						<p>Uses Pi's own model runtime and sign-ins. Pick the model and thinking level per session, and sign in to providers from the app.</p>
-					</article>
-					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19"/><path d="M11 18h2"/></svg></div>
-						<h3>Made for phones</h3>
-						<p>Streaming replies, tool cards with diffs and live output, push notifications, and an icon for your home screen.</p>
-					</article>
-					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3Z"/></svg></div>
-						<h3>A built-in browser</h3>
-						<p>Pi opens, clicks through, and screenshots pages in a real Chromium on the server, and you watch and use the same page, your localhost dev server included.</p>
-					</article>
-					<article class="card">
-						<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><path d="m12 3 9 4.8-9 4.8-9-4.8L12 3Z"/><path d="m3 12.2 9 4.8 9-4.8"/><path d="m3 16.6 9 4.8 9-4.8"/></svg></div>
-						<h3>Artifacts and subagents</h3>
-						<p>Publish sandboxed HTML, Markdown, and SVG artifacts. Spawn background subagents you can open, watch, and talk to.</p>
-					</article>
-				</div>
-				<div class="tags" aria-label="More features">
-					<span class="tag">Steer or queue</span>
-					<span class="tag">@file mentions</span>
-					<span class="tag">! shell commands</span>
-					<span class="tag">File viewer</span>
-					<span class="tag">Find in session</span>
-					<span class="tag">Skills as commands</span>
-					<span class="tag">Message history</span>
-					<span class="tag">Forks &amp; retries</span>
-					<span class="tag">Plan mode</span>
-					<span class="tag">Scheduled messages</span>
-					<span class="tag">Done when</span>
-					<span class="tag">Git worktrees</span>
-					<span class="tag">Changes, diffs &amp; undo</span>
-					<span class="tag">Spend limits</span>
-					<span class="tag">Share to Pi</span>
-					<span class="tag">Drop-in extensions</span>
-					<span class="tag">Codemode</span>
-					<span class="tag">Take turns</span>
-					<span class="tag">@mentions</span>
-					<span class="tag">Shared notes</span>
-					<span class="tag">View-only invites</span>
-					<span class="tag">QR sign-in</span>
-					<span class="tag">Uploads &amp; inline images</span>
-					<span class="tag">Extensions sheet</span>
-					<span class="tag">Every Omarchy theme</span>
-				</div>
-			</div>
-		</section>
+            <!-- Features -->
+            <section class="section" id="features">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Features</span>
+                        <h2>Pi in a browser.</h2>
+                        <p>
+                            Pi's tools and models, with additions for phones and for sessions that
+                            several people share.
+                        </p>
+                    </div>
+                    <div class="grid">
+                        <article class="card">
+                            <div class="icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="square"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" />
+                                    <path d="M3.5 3.5v5h5" />
+                                    <path d="M12 7.5V12l3 2" />
+                                </svg>
+                            </div>
+                            <h3>Survives restarts</h3>
+                            <p>
+                                Every model call, tool call, queued message, and subagent is a
+                                durable task in SQLite. Restart mid-run and the work picks up where
+                                it stopped.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <div class="icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="square"
+                                    aria-hidden="true"
+                                >
+                                    <circle cx="9" cy="8" r="3.5" />
+                                    <path d="M2.5 20.5c.7-3.6 3.3-5.8 6.5-5.8s5.8 2.2 6.5 5.8" />
+                                    <path d="M15.5 4.7a3.5 3.5 0 0 1 0 6.6" />
+                                    <path d="M18 15c1.8.8 3 2.7 3.5 5.5" />
+                                </svg>
+                            </div>
+                            <h3>Multiplayer</h3>
+                            <p>
+                                Several people and devices can watch and steer one session. They
+                                also get a side chat, pins, reactions, and shared notes.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <div class="icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="square"
+                                    aria-hidden="true"
+                                >
+                                    <rect x="6" y="6" width="12" height="12" />
+                                    <rect x="10" y="10" width="4" height="4" />
+                                    <path
+                                        d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"
+                                    />
+                                </svg>
+                            </div>
+                            <h3>Any provider, any model</h3>
+                            <p>
+                                Uses Pi's own model runtime and sign-ins. Pick the model and
+                                thinking level per session, and sign in to providers from the app.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <div class="icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="square"
+                                    aria-hidden="true"
+                                >
+                                    <rect x="6" y="2.5" width="12" height="19" />
+                                    <path d="M11 18h2" />
+                                </svg>
+                            </div>
+                            <h3>Made for phones</h3>
+                            <p>
+                                Streaming replies, tool cards with diffs and live output, push
+                                notifications, and an icon for your home screen.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <div class="icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="square"
+                                    aria-hidden="true"
+                                >
+                                    <circle cx="12" cy="12" r="9" />
+                                    <path d="M3 12h18" />
+                                    <path
+                                        d="M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3Z"
+                                    />
+                                </svg>
+                            </div>
+                            <h3>A built-in browser</h3>
+                            <p>
+                                Pi opens, clicks through, and screenshots pages in a real Chromium
+                                on the server, and you watch and use the same page, your localhost
+                                dev server included.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <div class="icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="square"
+                                    stroke-linejoin="miter"
+                                    aria-hidden="true"
+                                >
+                                    <path d="m12 3 9 4.8-9 4.8-9-4.8L12 3Z" />
+                                    <path d="m3 12.2 9 4.8 9-4.8" />
+                                    <path d="m3 16.6 9 4.8 9-4.8" />
+                                </svg>
+                            </div>
+                            <h3>Artifacts and subagents</h3>
+                            <p>
+                                Publish sandboxed HTML, Markdown, and SVG artifacts. Spawn
+                                background subagents you can open, watch, and talk to.
+                            </p>
+                        </article>
+                    </div>
+                    <div class="tags" aria-label="More features">
+                        <span class="tag">Steer or queue</span>
+                        <span class="tag">@file mentions</span>
+                        <span class="tag">! shell commands</span>
+                        <span class="tag">File viewer</span>
+                        <span class="tag">Find in session</span>
+                        <span class="tag">Skills as commands</span>
+                        <span class="tag">Message history</span>
+                        <span class="tag">Forks &amp; retries</span>
+                        <span class="tag">Plan mode</span>
+                        <span class="tag">Scheduled messages</span>
+                        <span class="tag">Done when</span>
+                        <span class="tag">Git worktrees</span>
+                        <span class="tag">Changes, diffs &amp; undo</span>
+                        <span class="tag">Spend limits</span>
+                        <span class="tag">Share to Pi</span>
+                        <span class="tag">Drop-in extensions</span>
+                        <span class="tag">Codemode</span>
+                        <span class="tag">Take turns</span>
+                        <span class="tag">@mentions</span>
+                        <span class="tag">Shared notes</span>
+                        <span class="tag">View-only invites</span>
+                        <span class="tag">QR sign-in</span>
+                        <span class="tag">Uploads &amp; inline images</span>
+                        <span class="tag">Extensions sheet</span>
+                        <span class="tag">Every Omarchy theme</span>
+                    </div>
+                </div>
+            </section>
 
-		<!-- Multiplayer -->
-		<section class="section alt" id="multiplayer">
-			<div class="wrap split flip">
-				<div class="split-copy">
-					<span class="kicker">Multiplayer</span>
-					<h2>Share a session.</h2>
-					<p>Invite other people, or open the same session on your own devices. Everyone sees the run as it happens.</p>
-					<ul class="points">
-						<li><b>Presence.</b> See who is in the session and when someone is writing to Pi.</li>
-						<li><b>Side chat.</b> A chat Pi does not see. @mention people, quote Pi's replies, and send a chat message on to Pi.</li>
-						<li><b>Take turns.</b> One person drives and only they send to Pi. The others can ask to drive.</li>
-						<li><b>Invites and roles.</b> Let people steer or just watch, in every session or only one, with a one-time link or QR code.</li>
-						<li><b>Notifications.</b> Get a push when Pi finishes, needs approval, or someone mentions you.</li>
-					</ul>
-				</div>
-				<div class="panel" role="img" aria-label="The People panel: Alex and Tanner chat about Pi's fix, an activity line shows Alex allowed a command, and Tanner is driving.">
-					<div aria-hidden="true">
-						<div class="panel-head">
-							<b>People</b>
-							<span class="avatars right">
-								<span class="av" style="--who: #7dcfff">T</span>
-								<span class="av" style="--who: #bb9af7">A</span>
-								<span class="av away" style="--who: #9ece6a">J</span>
-							</span>
-						</div>
-						<div class="tabs"><span class="on">Chat</span><span>Pinned</span><span>Notes</span></div>
-						<div class="chat">
-							<div class="msg">
-								<span class="av" style="--who: #bb9af7">A</span>
-								<div>
-									<div class="msg-name" style="--who: #bb9af7">Alex<time>10:42</time></div>
-									<div class="msg-text"><span class="mention">@Tanner</span> does this look right before Pi ships it?</div>
-									<div class="quote">Found it: the session cookie has no SameSite, so Safari drops it…</div>
-								</div>
-							</div>
-							<div class="event"><b>Alex</b> allowed the bash call: npm test</div>
-							<div class="msg">
-								<span class="av" style="--who: #7dcfff">T</span>
-								<div>
-									<div class="msg-name" style="--who: #7dcfff">Tanner<time>10:43</time></div>
-									<div class="msg-text">Yes. Asking it for a regression test too.</div>
-								</div>
-							</div>
-						</div>
-						<div class="drive">
-							<span class="av" style="--who: #7dcfff">T</span>
-							<span class="grow">Tanner is driving</span>
-							<span class="chip">Ask to drive</span>
-						</div>
-					</div>
-				</div>
-			</div>
-		</section>
+            <!-- Multiplayer -->
+            <section class="section alt" id="multiplayer">
+                <div class="wrap split flip">
+                    <div class="split-copy">
+                        <span class="kicker">Multiplayer</span>
+                        <h2>Share a session.</h2>
+                        <p>
+                            Invite other people, or open the same session on your own devices.
+                            Everyone sees the run as it happens.
+                        </p>
+                        <ul class="points">
+                            <li>
+                                <b>Presence.</b> See who is in the session and when someone is
+                                writing to Pi.
+                            </li>
+                            <li>
+                                <b>Side chat.</b> A chat Pi does not see. @mention people, quote
+                                Pi's replies, and send a chat message on to Pi.
+                            </li>
+                            <li>
+                                <b>Take turns.</b> One person drives and only they send to Pi. The
+                                others can ask to drive.
+                            </li>
+                            <li>
+                                <b>Invites and roles.</b> Let people steer or just watch, in every
+                                session or only one, with a one-time link or QR code.
+                            </li>
+                            <li>
+                                <b>Notifications.</b> Get a push when Pi finishes, needs approval,
+                                or someone mentions you.
+                            </li>
+                        </ul>
+                    </div>
+                    <div
+                        class="panel"
+                        role="img"
+                        aria-label="The People panel: Alex and Tanner chat about Pi's fix, an activity line shows Alex allowed a command, and Tanner is driving."
+                    >
+                        <div aria-hidden="true">
+                            <div class="panel-head">
+                                <b>People</b>
+                                <span class="avatars right">
+                                    <span class="av" style="--who: #7dcfff">T</span>
+                                    <span class="av" style="--who: #bb9af7">A</span>
+                                    <span class="av away" style="--who: #9ece6a">J</span>
+                                </span>
+                            </div>
+                            <div class="tabs">
+                                <span class="on">Chat</span><span>Pinned</span><span>Notes</span>
+                            </div>
+                            <div class="chat">
+                                <div class="msg">
+                                    <span class="av" style="--who: #bb9af7">A</span>
+                                    <div>
+                                        <div class="msg-name" style="--who: #bb9af7">
+                                            Alex<time>10:42</time>
+                                        </div>
+                                        <div class="msg-text">
+                                            <span class="mention">@Tanner</span> does this look
+                                            right before Pi ships it?
+                                        </div>
+                                        <div class="quote">
+                                            Found it: the session cookie has no SameSite, so Safari
+                                            drops it…
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="event"><b>Alex</b> allowed the bash call: npm test</div>
+                                <div class="msg">
+                                    <span class="av" style="--who: #7dcfff">T</span>
+                                    <div>
+                                        <div class="msg-name" style="--who: #7dcfff">
+                                            Tanner<time>10:43</time>
+                                        </div>
+                                        <div class="msg-text">
+                                            Yes. Asking it for a regression test too.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="drive">
+                                <span class="av" style="--who: #7dcfff">T</span>
+                                <span class="grow">Tanner is driving</span>
+                                <span class="chip">Ask to drive</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-		<!-- Live editing -->
-		<section class="section" id="live">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Live editing</span>
-					<h2>Ask Pi to change Pi Pocket.</h2>
-					<p>There is no build step, so changes Pi makes to Pi Pocket's code apply while you are still talking to it.</p>
-				</div>
-				<div class="flow">
-					<div class="step">
-						<code>web/</code>
-						<h3>Browsers reload</h3>
-						<p>Save a file and every open browser reloads.</p>
-					</div>
-					<div class="step">
-						<code>src/server/extensions/</code>
-						<h3>Reinstalled while running</h3>
-						<p>Extensions reload into the running server. A broken one keeps its last good version.</p>
-					</div>
-					<div class="step">
-						<code>src/server/</code>
-						<h3>Needs a restart</h3>
-						<p>Restart from the menu. Running work resumes afterward.</p>
-					</div>
-				</div>
-			</div>
-		</section>
+            <!-- Live editing -->
+            <section class="section" id="live">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Live editing</span>
+                        <h2>Ask Pi to change Pi Pocket.</h2>
+                        <p>
+                            There is no build step, so changes Pi makes to Pi Pocket's code apply
+                            while you are still talking to it.
+                        </p>
+                    </div>
+                    <div class="flow">
+                        <div class="step">
+                            <code>web/</code>
+                            <h3>Browsers reload</h3>
+                            <p>Save a file and every open browser reloads.</p>
+                        </div>
+                        <div class="step">
+                            <code>src/server/extensions/</code>
+                            <h3>Reinstalled while running</h3>
+                            <p>
+                                Extensions reload into the running server. A broken one keeps its
+                                last good version.
+                            </p>
+                        </div>
+                        <div class="step">
+                            <code>src/server/</code>
+                            <h3>Needs a restart</h3>
+                            <p>Restart from the menu. Running work resumes afterward.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-		<!-- Access -->
-		<section class="section alt" id="access">
-			<div class="wrap">
-				<div class="section-head">
-					<span class="kicker">Access</span>
-					<h2>Four ways to connect.</h2>
-					<p>The launcher asks how your devices should connect, then shows a sign-in link and a QR code for your phone.</p>
-				</div>
-				<div class="access">
-					<div class="mode">
-						<code>--access local</code>
-						<h3>This device</h3>
-						<p>Listens on 127.0.0.1. Bring your own tunnel, such as ngrok or <code>tailscale serve</code>.</p>
-					</div>
-					<div class="mode">
-						<code>--access lan</code>
-						<h3>Local network</h3>
-						<p>Any device on the same network, over plain http.</p>
-					</div>
-					<div class="mode featured">
-						<code>--access cloudflare</code>
-						<h3>Cloudflare Tunnel</h3>
-						<p>A public https address. Free, with no account needed.</p>
-					</div>
-					<div class="mode">
-						<code>--access tailscale</code>
-						<h3>Tailscale</h3>
-						<p>Only devices on your tailnet, encrypted by Tailscale.</p>
-					</div>
-				</div>
-				<p class="note">Runs on Android too: install it in Termux and keep everything on the phone.</p>
-			</div>
-		</section>
+            <!-- Access -->
+            <section class="section alt" id="access">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">Access</span>
+                        <h2>Four ways to connect.</h2>
+                        <p>
+                            The launcher asks how your devices should connect, then shows a sign-in
+                            link and a QR code for your phone.
+                        </p>
+                    </div>
+                    <div class="access">
+                        <div class="mode">
+                            <code>--access local</code>
+                            <h3>This device</h3>
+                            <p>
+                                Listens on 127.0.0.1. Bring your own tunnel, such as ngrok or
+                                <code>tailscale serve</code>.
+                            </p>
+                        </div>
+                        <div class="mode">
+                            <code>--access lan</code>
+                            <h3>Local network</h3>
+                            <p>Any device on the same network, over plain http.</p>
+                        </div>
+                        <div class="mode featured">
+                            <code>--access cloudflare</code>
+                            <h3>Cloudflare Tunnel</h3>
+                            <p>A public https address. Free, with no account needed.</p>
+                        </div>
+                        <div class="mode">
+                            <code>--access tailscale</code>
+                            <h3>Tailscale</h3>
+                            <p>Only devices on your tailnet, encrypted by Tailscale.</p>
+                        </div>
+                    </div>
+                    <p class="note">
+                        Runs on Android too: install it in Termux and keep everything on the phone.
+                    </p>
+                </div>
+            </section>
 
-		<!-- Security -->
-		<section class="section" id="security">
-			<div class="wrap split">
-				<div class="split-copy">
-					<span class="kicker">Security</span>
-					<h2>Who can make Pi act.</h2>
-					<p>Pi runs commands on your machine as you. These settings control who can ask it to, and which calls need someone's approval.</p>
-					<ul class="points">
-						<li><b>Lancet Guard.</b> Off by default. Once it is on in both Pi and Pi Pocket (Menu → Extensions), it checks every bash, write, and edit call. Risky calls wait for someone in the session to allow or deny them, and the answer is kept across restarts.</li>
-						<li><b>View-only roles.</b> Viewers can read, react, and chat, but cannot send to Pi, approve, or upload.</li>
-						<li><b>Artifacts.</b> They open in a sandboxed frame with no access to the app or its cookies.</li>
-						<li><b>The browser.</b> Its pages run in Chromium on the server, not in your browser, so they cannot reach the app. It reaches what the server reaches, localhost included: using it takes steering rights, and the addresses people open show in the chat.</li>
-					</ul>
-				</div>
-				<div>
-					<div class="approval" role="img" aria-label="An approval card: Lancet Guard flags a command as risky and waits for someone to allow or deny it.">
-						<div aria-hidden="true">
-							<div class="approval-head">⛨ Pi wants to run a command<span class="verdict">Risky</span></div>
-							<pre>rm -rf dist &amp;&amp; npm run build</pre>
-							<p class="approval-reason">Deletes a folder recursively. Allow it only if the build output can be regenerated.</p>
-							<div class="approval-actions">
-								<span class="btn btn-allow">Allow</span>
-								<span class="btn btn-deny">Deny</span>
-								<small>Anyone who can steer can decide</small>
-							</div>
-						</div>
-					</div>
-					<div class="callout">
-						<b>!</b>
-						<p><b>Steering means shell access.</b> Anyone who can steer can make Pi run commands on your machine. Invite only people you trust with that.</p>
-					</div>
-				</div>
-			</div>
-		</section>
+            <!-- Security -->
+            <section class="section" id="security">
+                <div class="wrap split">
+                    <div class="split-copy">
+                        <span class="kicker">Security</span>
+                        <h2>Who can make Pi act.</h2>
+                        <p>
+                            Pi runs commands on your machine as you. These settings control who can
+                            ask it to, and which calls need someone's approval.
+                        </p>
+                        <ul class="points">
+                            <li>
+                                <b>Lancet Guard.</b> Off by default. Once it is on in both Pi and Pi
+                                Pocket (Menu → Extensions), it checks every bash, write, and edit
+                                call. Risky calls wait for someone in the session to allow or deny
+                                them, and the answer is kept across restarts.
+                            </li>
+                            <li>
+                                <b>View-only roles.</b> Viewers can read, react, and chat, but
+                                cannot send to Pi, approve, or upload.
+                            </li>
+                            <li>
+                                <b>Artifacts.</b> They open in a sandboxed frame with no access to
+                                the app or its cookies.
+                            </li>
+                            <li>
+                                <b>The browser.</b> Its pages run in Chromium on the server, not in
+                                your browser, so they cannot reach the app. It reaches what the
+                                server reaches, localhost included: using it takes steering rights,
+                                and the addresses people open show in the chat.
+                            </li>
+                        </ul>
+                    </div>
+                    <div>
+                        <div
+                            class="approval"
+                            role="img"
+                            aria-label="An approval card: Lancet Guard flags a command as risky and waits for someone to allow or deny it."
+                        >
+                            <div aria-hidden="true">
+                                <div class="approval-head">
+                                    ⛨ Pi wants to run a command<span class="verdict">Risky</span>
+                                </div>
+                                <pre>rm -rf dist &amp;&amp; npm run build</pre>
+                                <p class="approval-reason">
+                                    Deletes a folder recursively. Allow it only if the build output
+                                    can be regenerated.
+                                </p>
+                                <div class="approval-actions">
+                                    <span class="btn btn-allow">Allow</span>
+                                    <span class="btn btn-deny">Deny</span>
+                                    <small>Anyone who can steer can decide</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="callout">
+                            <b>!</b>
+                            <p>
+                                <b>Steering means shell access.</b> Anyone who can steer can make Pi
+                                run commands on your machine. Invite only people you trust with
+                                that.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-		<!-- Get started -->
-		<section class="section alt" id="get-started">
-			<div class="wrap start">
-				<div>
-					<span class="kicker">Get started</span>
-					<h2>Install.</h2>
-					<ol class="steps">
-						<li><span><b>Sign in with Pi</b>Run <code>pi</code> and use <code>/login</code> for your provider, or sign in from the app later.</span></li>
-						<li><span><b>Start the launcher</b>Choose how your devices connect. Your choice is remembered.</span></li>
-						<li><span><b>Scan the QR code</b>Your phone stays signed in for a year. Add Pi Pocket to the home screen to open it in its own window.</span></li>
-					</ol>
-				</div>
-				<div class="term">
-					<div class="term-tabs">
-						<div class="term-tablist" role="tablist" aria-label="Platform">
-							<button type="button" role="tab" id="tab-desktop" aria-selected="true" aria-controls="cmd-desktop">macOS &amp; Linux</button>
-							<button type="button" role="tab" id="tab-android" aria-selected="false" aria-controls="cmd-android" tabindex="-1">Android (Termux)</button>
-						</div>
-						<button class="copy" type="button" data-copy-active>Copy</button>
-					</div>
-<pre id="cmd-desktop" role="tabpanel" aria-labelledby="tab-desktop"><span class="c"># Requires Node.js 22.19 or newer</span>
+            <!-- Get started -->
+            <section class="section alt" id="get-started">
+                <div class="wrap start">
+                    <div>
+                        <span class="kicker">Get started</span>
+                        <h2>Install.</h2>
+                        <ol class="steps">
+                            <li>
+                                <span
+                                    ><b>Sign in with Pi</b>Run <code>pi</code> and use
+                                    <code>/login</code> for your provider, or sign in from the app
+                                    later.</span
+                                >
+                            </li>
+                            <li>
+                                <span
+                                    ><b>Start the launcher</b>Choose how your devices connect. Your
+                                    choice is remembered.</span
+                                >
+                            </li>
+                            <li>
+                                <span
+                                    ><b>Scan the QR code</b>Your phone stays signed in for a year.
+                                    Add Pi Pocket to the home screen to open it in its own
+                                    window.</span
+                                >
+                            </li>
+                        </ol>
+                    </div>
+                    <div class="term">
+                        <div class="term-tabs">
+                            <div class="term-tablist" role="tablist" aria-label="Platform">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    id="tab-desktop"
+                                    aria-selected="true"
+                                    aria-controls="cmd-desktop"
+                                >
+                                    macOS &amp; Linux
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    id="tab-android"
+                                    aria-selected="false"
+                                    aria-controls="cmd-android"
+                                    tabindex="-1"
+                                >
+                                    Android (Termux)
+                                </button>
+                            </div>
+                            <button class="copy" type="button" data-copy-active>Copy</button>
+                        </div>
+                        <pre
+                            id="cmd-desktop"
+                            role="tabpanel"
+                            aria-labelledby="tab-desktop"
+                        ><span class="c"># Requires Node.js 22.19 or newer</span>
 <span class="p">$ </span>git clone https://github.com/TannerMidd/pi-pocket.git
 <span class="p">$ </span>cd pi-pocket
 <span class="p">$ </span>npm install
 <span class="p">$ </span>npm start</pre>
-<pre id="cmd-android" role="tabpanel" aria-labelledby="tab-android" hidden><span class="p">$ </span>pkg install nodejs git
+                        <pre
+                            id="cmd-android"
+                            role="tabpanel"
+                            aria-labelledby="tab-android"
+                            hidden
+                        ><span class="p">$ </span>pkg install nodejs git
 <span class="p">$ </span>npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 <span class="p">$ </span>pi   <span class="c"># /login, then quit</span>
 <span class="p">$ </span>git clone https://github.com/TannerMidd/pi-pocket.git
 <span class="p">$ </span>cd pi-pocket &amp;&amp; npm install --ignore-scripts
 <span class="p">$ </span>termux-wake-lock &amp;&amp; npm start</pre>
-					<div class="term-foot">Options, remote access, and Termux notes are in the <a href="https://github.com/TannerMidd/pi-pocket#readme">README</a>.</div>
-				</div>
-			</div>
-		</section>
-	</main>
+                        <div class="term-foot">
+                            Options, remote access, and Termux notes are in the
+                            <a href="https://github.com/TannerMidd/pi-pocket#readme">README</a>.
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
 
-	<footer class="footer">
-		<div class="wrap">
-			<div>
-				<a class="logo" href="#top"><img src="icon.svg" alt="" width="28" height="28">Pi Pocket</a>
-				<small>A self-hosted web app for Pi.</small>
-				<small>Inspired by <a href="https://x.com/badlogicgames/status/2106452296087302173">Mario Zechner's demo</a>.</small>
-			</div>
-			<div>
-				<nav class="footer-links" aria-label="Footer">
-					<a href="https://github.com/TannerMidd/pi-pocket">GitHub</a>
-					<a href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/features.md">Feature tour</a>
-					<a href="engineering.html">Engineering</a>
-					<a href="https://earendil.com/posts/pi-durable/">Pi Durable</a>
-				</nav>
-				<small>JetBrains Mono is used under the <a href="fonts/OFL.txt">SIL Open Font License</a>.</small>
-			</div>
-		</div>
-	</footer>
+        <footer class="footer">
+            <div class="wrap">
+                <div>
+                    <a class="logo" href="#top"
+                        ><img src="icon.svg" alt="" width="28" height="28" />Pi Pocket</a
+                    >
+                    <small>A self-hosted web app for Pi.</small>
+                    <small
+                        >Inspired by
+                        <a href="https://x.com/badlogicgames/status/2106452296087302173"
+                            >Mario Zechner's demo</a
+                        >.</small
+                    >
+                </div>
+                <div>
+                    <nav class="footer-links" aria-label="Footer">
+                        <a href="https://github.com/TannerMidd/pi-pocket">GitHub</a>
+                        <a href="https://github.com/TannerMidd/pi-pocket/blob/main/docs/features.md"
+                            >Feature tour</a
+                        >
+                        <a href="engineering.html">Engineering</a>
+                        <a href="https://earendil.com/posts/pi-durable/">Pi Durable</a>
+                    </nav>
+                    <small
+                        >JetBrains Mono is used under the
+                        <a href="fonts/OFL.txt">SIL Open Font License</a>.</small
+                    >
+                </div>
+            </div>
+        </footer>
 
-	<script src="main.js" defer></script>
-</body>
+        <script src="main.js" defer></script>
+    </body>
 </html>

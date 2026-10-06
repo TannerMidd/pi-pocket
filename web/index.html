@@ -1,47 +1,62 @@
 <!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-		<meta name="color-scheme" content="dark" />
-		<meta name="theme-color" content="#13141c" />
-		<meta name="mobile-web-app-capable" content="yes" />
-		<meta name="apple-mobile-web-app-capable" content="yes" />
-		<title>Pi Pocket</title>
-		<link rel="manifest" href="/manifest.webmanifest" />
-		<link rel="icon" href="/icon.svg" type="image/svg+xml" />
-		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-		<link rel="preload" href="/fonts/JetBrainsMono.woff2" as="font" type="font/woff2" crossorigin />
-		<link rel="stylesheet" href="/style.css" />
-		<!-- The last look this browser used (theme.js keeps it), before the first paint: no flash of another theme. -->
-		<script>
-			try {
-				var look = JSON.parse(localStorage.getItem("pocket.themeCache") || "null");
-				if (look) {
-					var root = document.documentElement;
-					for (var name in look.vars) root.style.setProperty(name, look.vars[name]);
-					for (var key in look.attrs) root.dataset[key] = look.attrs[key];
-					document.querySelector('meta[name="theme-color"]').setAttribute("content", look.vars["--o-bg"]);
-				}
-			} catch (error) {}
-		</script>
-		<script type="importmap">
-			{
-				"imports": {
-					"preact": "/vendor/preact.mjs",
-					"preact/hooks": "/vendor/preact-hooks.mjs",
-					"htm": "/vendor/htm.mjs",
-					"marked": "/vendor/marked.mjs",
-					"dompurify": "/vendor/purify.mjs"
-				}
-			}
-		</script>
-	</head>
-	<body>
-		<!-- The same boot screen the app shows while it starts (Boot in ui.js), so nothing jumps when the script takes over. -->
-		<div id="app">
-			<div class="boot" role="status"><div class="boot-mark" aria-hidden="true">π</div><div class="boot-bar" aria-hidden="true"><span></span></div><div class="boot-caption">starting</div></div>
-		</div>
-		<script type="module" src="/app.js"></script>
-	</body>
+    <head>
+        <meta charset="utf-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+        />
+        <meta name="color-scheme" content="dark" />
+        <meta name="theme-color" content="#13141c" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <title>Pi Pocket</title>
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link
+            rel="preload"
+            href="/fonts/JetBrainsMono.woff2"
+            as="font"
+            type="font/woff2"
+            crossorigin
+        />
+        <link rel="stylesheet" href="/style.css" />
+        <!-- The last look this browser used (theme.js keeps it), before the first paint: no flash of another theme. -->
+        <script>
+            try {
+                var look = JSON.parse(localStorage.getItem("pocket.themeCache") || "null");
+                if (look) {
+                    var root = document.documentElement;
+                    for (var name in look.vars) root.style.setProperty(name, look.vars[name]);
+                    for (var key in look.attrs) root.dataset[key] = look.attrs[key];
+                    document
+                        .querySelector('meta[name="theme-color"]')
+                        .setAttribute("content", look.vars["--o-bg"]);
+                }
+            } catch (error) {}
+        </script>
+        <script type="importmap">
+            {
+                "imports": {
+                    "preact": "/vendor/preact.mjs",
+                    "preact/hooks": "/vendor/preact-hooks.mjs",
+                    "htm": "/vendor/htm.mjs",
+                    "marked": "/vendor/marked.mjs",
+                    "dompurify": "/vendor/purify.mjs"
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <!-- The same boot screen the app shows while it starts (Boot in ui.js), so nothing jumps when the script takes over. -->
+        <div id="app">
+            <div class="boot" role="status">
+                <div class="boot-mark" aria-hidden="true">π</div>
+                <div class="boot-bar" aria-hidden="true"><span></span></div>
+                <div class="boot-caption">starting</div>
+            </div>
+        </div>
+        <script type="module" src="/app.js"></script>
+    </body>
 </html>
