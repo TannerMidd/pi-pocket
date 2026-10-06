@@ -2193,6 +2193,16 @@ function AppearanceSheet() {
                     onChange=${() => setPrefs({ tiling: !p.tiling })}
                 />
             <//>
+            <${SettingRow}
+                title="Peek tiles"
+                detail="Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned"
+            >
+                <${Switch}
+                    on=${p.peeks}
+                    label="Peek tiles"
+                    onChange=${() => setPrefs({ peeks: !p.peeks })}
+                />
+            <//>
             ${
                 desktop?.wallpaper &&
                 html`<${SettingRow}

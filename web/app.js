@@ -6,6 +6,7 @@ import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
+import { PEEK_WIDE, PeekColumn, PeekStrip, peekTiles, peeksWanted } from "./peeks.js";
 import {
     Drawer,
     Rail,
@@ -182,6 +183,9 @@ function App() {
     const rail = prefs().sidebar === "rail";
     const browsing = inConversation && state.browserOpen && browserAvailable() && !state.missing;
     const people = !browsing && peopleDocked(state);
+    const tiles = peeksWanted(state) ? peekTiles(state) : [];
+    // The column takes the place beside the conversation when Browser and People leave it free; otherwise a strip.
+    const peekColumn = tiles.length > 0 && PEEK_WIDE.matches && !browsing && !people;
 
     return html`<div
         class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""}`}
@@ -194,6 +198,7 @@ function App() {
             ${
                 inConversation
                     ? html`<${Topbar} />
+                    ${tiles.length > 0 && !peekColumn && html`<${PeekStrip} tiles=${tiles} />`}
                     <${Transcript} key=${state.conversationId} />
                     ${
                         state.view.conversation &&
@@ -203,6 +208,7 @@ function App() {
                     : html`<div class="home-list"><${SessionList} /></div><${Splash} />`
             }
         </div>
+        ${peekColumn && html`<${PeekColumn} tiles=${tiles} />`}
         ${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
         ${inConversation && html`<${PeopleHost} shown=${people} browsing=${browsing} />`}
         <${Drawer} />
@@ -227,7 +233,8 @@ function focusWindow(event) {
     }
 
     const name =
-        ["sidebar", "browser", "people"].find((each) => win.classList.contains(each)) ?? "pane";
+        ["sidebar", "browser", "people", "peeks"].find((each) => win.classList.contains(each)) ??
+        "pane";
 
     if (document.documentElement.dataset.focus !== name) {
         document.documentElement.dataset.focus = name;

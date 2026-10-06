@@ -287,7 +287,8 @@ const short = (text, max = 90) => {
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
-function describeCall(call) {
+/** A tool call in one line: an icon, a label, and what it acts on. Peek tiles describe calls this way too. */
+export function describeCall(call) {
     const args = call.args ?? {};
 
     switch (call.name) {

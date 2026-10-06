@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import { slugify } from "../src/server/extensions/artifacts.ts";
-import { plainText, projectEntry, projectLive, projectStats } from "../src/server/projection.ts";
+import {
+    type ClientEntry,
+    peekLines,
+    plainText,
+    projectEntry,
+    projectLive,
+    projectStats,
+} from "../src/server/projection.ts";
 
 const entry = (kind: string, message: unknown, id = 1) =>
     ({ id, conversationId: 2, kind, model: [message] }) as unknown as EntryRecord;
@@ -169,5 +176,95 @@ test("snippets drop markdown: emphasis, code ticks, links, headings, and list ma
     assert.equal(
         plainText("a * b * c and snake_case_name stay"),
         "a * b * c and snake_case_name stay",
+    );
+});
+
+test("peek lines are a session's last steps in brief: words, calls and how they went, and what streams now", () => {
+    const entries: ClientEntry[] = [
+        {
+            id: 1,
+            kind: "user",
+            text: "fix the login\n\nAttached files (saved on the server):\n- /tmp/a.png",
+            images: 0,
+            from: "Alex",
+        },
+        {
+            id: 2,
+            kind: "assistant",
+            blocks: [
+                { type: "thinking", text: "hmm" },
+                { type: "text", text: "Looking at **`auth.ts`**" },
+                {
+                    type: "toolCall",
+                    id: "c1",
+                    name: "read",
+                    args: { path: "src/auth.ts", content: "x".repeat(1000), edits: [{ a: 1 }] },
+                },
+                { type: "toolCall", id: "c2", name: "bash", args: { command: "npm test" } },
+            ],
+        },
+        { id: 3, kind: "toolResult", callId: "c1", name: "read", text: "…", isError: false },
+        { id: 4, kind: "toolResult", callId: "c2", name: "bash", text: "1 failing", isError: true },
+        {
+            id: 5,
+            kind: "assistant",
+            blocks: [{ type: "toolCall", id: "c3", name: "edit", args: { path: "src/auth.ts" } }],
+        },
+    ];
+
+    assert.deepEqual(
+        peekLines(entries, {
+            busy: true,
+            tools: [{ callId: "c3", name: "edit", status: "running" }],
+        }),
+        [
+            { kind: "user", text: "fix the login", from: "Alex" },
+            { kind: "text", text: "Looking at auth.ts" },
+            {
+                kind: "tool",
+                name: "read",
+                args: { path: "src/auth.ts", content: "x".repeat(300) },
+                status: "done",
+            },
+            { kind: "tool", name: "bash", args: { command: "npm test" }, status: "error" },
+            { kind: "tool", name: "edit", args: { path: "src/auth.ts" }, status: "running" },
+        ],
+    );
+    // A call without a result is done once Pi stopped; what streams comes last, and only the newest lines are kept.
+    assert.deepEqual(
+        peekLines(
+            entries,
+            {
+                busy: false,
+                generation: { attempt: 0, message: { blocks: [{ type: "text", text: "Almost" }] } },
+            },
+            2,
+        ),
+        [
+            { kind: "tool", name: "edit", args: { path: "src/auth.ts" }, status: "done" },
+            { kind: "text", text: "Almost" },
+        ],
+    );
+    assert.deepEqual(
+        peekLines(
+            [
+                { id: 6, kind: "assistant", blocks: [], stopReason: "aborted" },
+                {
+                    id: 7,
+                    kind: "assistant",
+                    blocks: [],
+                    stopReason: "error",
+                    error: "rate limited",
+                },
+                { id: 8, kind: "compaction", summary: "…" },
+                { id: 9, kind: "other", entryKind: "pi.system" },
+            ],
+            { busy: false },
+        ),
+        [
+            { kind: "event", text: "Stopped" },
+            { kind: "error", text: "rate limited" },
+            { kind: "event", text: "Context compacted" },
+        ],
     );
 });

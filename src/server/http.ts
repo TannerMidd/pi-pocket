@@ -17,7 +17,7 @@ import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { marked } from "marked";
 import QRCode from "qrcode";
-import type { PocketApp } from "./app.ts";
+import { MAX_PEEKS, type PocketApp } from "./app.ts";
 import {
     Auth,
     COOKIE,
@@ -981,6 +981,23 @@ export function createHandler(options: HttpOptions) {
             const body = await readJson<{ tab?: unknown; visible?: unknown }>(request);
 
             app.setVisible(user, String(body.tab ?? ""), body.visible !== false);
+
+            return json(response, 200, { ok: true });
+        }
+
+        // The sessions this tab shows as peek tiles on screen now: they get `peek` events until it sends another list.
+        if (first === "peeks" && method === "POST") {
+            const body = await readJson<{ tab?: unknown; ids?: unknown }>(request);
+
+            if (!Array.isArray(body.ids)) {
+                throw new HttpError(400, "ids must be a list of session ids");
+            }
+
+            app.setPeeks(
+                user,
+                String(body.tab ?? ""),
+                body.ids.slice(0, MAX_PEEKS).map((id) => conversationId(String(id))),
+            );
 
             return json(response, 200, { ok: true });
         }

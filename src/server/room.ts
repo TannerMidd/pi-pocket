@@ -39,7 +39,15 @@ import {
     type Turns,
     TurnsDoc,
 } from "./docs.ts";
-import { type ClientEntry, projectEntry, projectLive, projectStats } from "./projection.ts";
+import {
+    type ClientEntry,
+    PEEK_LINES,
+    type PeekLine,
+    peekLines,
+    projectEntry,
+    projectLive,
+    projectStats,
+} from "./projection.ts";
 import { SHELL_ENTRY } from "./shell.ts";
 import { describeRepeat } from "./when.ts";
 
@@ -64,6 +72,25 @@ export const ROOM_DOCS = new Set(
 );
 /** A typing indicator lasts this long unless the browser renews it. */
 const TYPING_MS = 6000;
+/** Peek tiles change at most this often: they are glanced at, and a streaming answer changes every 90 ms. */
+const PEEK_MS = 1000;
+/** Entries read from the end of a session for its peek tile: enough to find the results of the calls it shows. */
+const PEEK_ENTRIES = PEEK_LINES * 3;
+
+/** What a peek tile shows of a session: its last steps, whether Pi works, and the calls waiting for approval. */
+export type PeekSummary = {
+    conversationId: ConversationId;
+    busy: boolean;
+    lines: PeekLine[];
+    approvals: {
+        id: string;
+        conversationId: ConversationId;
+        tool: string;
+        subject: string;
+        reason: string;
+        requestedBy?: string;
+    }[];
+};
 
 /** One browser tab's event stream. */
 export interface Client {
@@ -81,6 +108,8 @@ export interface Client {
     orderKey: string;
     /** The JSON of each slow-changing view field this client last got, so updates repeat only those that changed. */
     sentFields?: Map<string, string>;
+    /** Other sessions this tab shows as peek tiles on screen now; each gets `peek` events (`PocketApp.setPeeks`). */
+    peeks?: Set<ConversationId>;
 }
 
 export type TypingPlace = "chat" | "pi";
@@ -98,6 +127,11 @@ export type Person = {
 export class Room {
     readonly id: ConversationId;
     readonly clients = new Set<Client>();
+    /** Tabs that show this session as a peek tile. They are not here: they get only `peek` events, and no presence. */
+    readonly peekers = new Set<Client>();
+    /** The JSON of the peek each peeker last got, so an unchanged tile is not sent again. */
+    readonly #peekSent = new WeakMap<Client, string>();
+    #peekTimer: NodeJS.Timeout | undefined;
     readonly #app: PocketApp;
     #view: AttachedReplicatedState<ConversationView> | undefined;
     #unsubscribe: (() => void) | undefined;
@@ -243,6 +277,8 @@ export class Room {
 
     /** Coalesce bursts of commits (streaming commits land every 100 ms) into one update per client. */
     schedule(): void {
+        this.schedulePeek();
+
         if (this.#timer !== undefined) {
             return;
         }
@@ -402,6 +438,92 @@ export class Room {
         });
     }
 
+    /** Update the peek tiles soon: at most once every `PEEK_MS`, and only for tabs whose tile changed. */
+    schedulePeek(): void {
+        if (this.#peekTimer !== undefined || this.peekers.size === 0) {
+            return;
+        }
+
+        this.#peekTimer = setTimeout(() => {
+            this.#peekTimer = undefined;
+            const summary = this.peek();
+
+            if (summary === undefined) {
+                return;
+            }
+
+            const json = JSON.stringify(summary);
+
+            for (const client of this.peekers) {
+                this.#sendPeek(client, summary, json);
+            }
+        }, PEEK_MS);
+    }
+
+    /** Send one peeker the tile now, as it starts showing it. */
+    pushPeek(client: Client): void {
+        const summary = this.peek();
+
+        if (summary !== undefined) {
+            this.#peekSent.delete(client);
+            this.#sendPeek(client, summary, JSON.stringify(summary));
+        }
+    }
+
+    #sendPeek(client: Client, summary: PeekSummary, json: string): void {
+        if (this.#peekSent.get(client) === json) {
+            return;
+        }
+
+        this.#peekSent.set(client, json);
+        client.send("peek", summary);
+    }
+
+    /** This session as a peek tile shows it, from the newest few entries: cheap however long the session is. */
+    peek(): PeekSummary | undefined {
+        const view = this.#view?.value;
+
+        if (view === undefined) {
+            return undefined;
+        }
+
+        const recent: ClientEntry[] = [];
+
+        for (let index = view.entries.length - 1; index >= 0; index--) {
+            const projected = this.#entry(view.entries[index]!);
+
+            if (projected !== null) {
+                recent.push(projected);
+
+                if (recent.length === PEEK_ENTRIES) {
+                    break;
+                }
+            }
+        }
+
+        const live = projectLive(view.docs["pi.live"] as LiveState | undefined);
+
+        return {
+            conversationId: this.id,
+            busy: live.busy,
+            lines: peekLines(recent.reverse(), live),
+            // A subagent's calls wait on its session's tile, as they make the session wait.
+            approvals: this.#app.approvals
+                .all()
+                .filter((request) => this.#app.rootOf(request.conversationId) === this.id)
+                .map((request) => ({
+                    id: request.id,
+                    conversationId: request.conversationId,
+                    tool: request.tool,
+                    subject: request.subject.slice(0, 500),
+                    reason: request.reason.slice(0, 300),
+                    ...(request.requestedBy === undefined
+                        ? {}
+                        : { requestedBy: request.requestedBy }),
+                })),
+        };
+    }
+
     /** Is this person here, in any tab? */
     has(userId: string): boolean {
         for (const client of this.clients) {
@@ -496,11 +618,11 @@ export class Room {
         this.#closeTimer = undefined;
     }
 
-    /** Close shortly after the last client leaves, so a reload does not rebuild the view. */
+    /** Close shortly after the last client (and peeker) leaves, so a reload does not rebuild the view. */
     closeLater(onClose: () => void): void {
         clearTimeout(this.#closeTimer);
         this.#closeTimer = setTimeout(() => {
-            if (this.clients.size === 0) {
+            if (this.clients.size === 0 && this.peekers.size === 0) {
                 this.close();
                 onClose();
             }
@@ -510,6 +632,8 @@ export class Room {
     close(): void {
         clearTimeout(this.#timer);
         clearTimeout(this.#closeTimer);
+        clearTimeout(this.#peekTimer);
+        this.#peekTimer = undefined;
 
         for (const state of this.#typing.values()) {
             clearTimeout(state.timer);

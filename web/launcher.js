@@ -114,6 +114,12 @@ function actionItems() {
             icon: "swatch",
             run: () => setPrefs({ tiling: !prefs().tiling }),
         },
+        {
+            label: prefs().peeks ? "Turn peek tiles off" : "Turn peek tiles on",
+            detail: "other sessions' live work beside this one",
+            icon: "pulse",
+            run: () => setPrefs({ peeks: !prefs().peeks }),
+        },
         conversation &&
             steer && {
                 label: "Switch model",

@@ -519,3 +519,141 @@ export function entryText(entry: ClientEntry): string {
 
     return "";
 }
+
+// ─── Peek tiles ─────────────────────────────────────────────────────────────────
+
+/** One line of a peek tile: a session's recent work, small enough to send for many sessions at once. */
+export type PeekLine =
+    | { kind: "user"; text: string; from?: string }
+    | { kind: "text"; text: string }
+    | {
+          kind: "tool";
+          name: string;
+          args: Record<string, string | number | boolean>;
+          status: "running" | "done" | "error";
+      }
+    | { kind: "shell"; command: string; status: "running" | "done" | "error" }
+    | { kind: "note"; text: string; name: string }
+    | { kind: "error"; text: string }
+    | { kind: "event"; text: string };
+
+/** How many lines a peek tile gets, and how long each text may run. */
+export const PEEK_LINES = 8;
+const PEEK_TEXT = 200;
+const PEEK_ARG = 300;
+
+/** A tool call's arguments for a peek line: short scalars only, which is all a one-line description needs. */
+function peekArgs(args: Record<string, unknown>): Record<string, string | number | boolean> {
+    const out: Record<string, string | number | boolean> = {};
+
+    for (const [key, value] of Object.entries(args)) {
+        if (typeof value === "string") {
+            out[key] = value.slice(0, PEEK_ARG);
+        } else if (typeof value === "number" || typeof value === "boolean") {
+            out[key] = value;
+        }
+    }
+
+    return out;
+}
+
+/**
+ * A session's last few steps as peek lines: what was asked, what Pi said, and its tool calls with how they went, ending
+ * with what it is doing now. `entries` are the newest projected entries, oldest first; a call's result may follow it.
+ */
+export function peekLines(
+    entries: readonly ClientEntry[],
+    live: ClientLive,
+    count = PEEK_LINES,
+): PeekLine[] {
+    const results = new Map<string, boolean>();
+    const running = new Set((live.tools ?? []).map((slot) => slot.callId));
+    const lines: PeekLine[] = [];
+
+    for (const entry of entries) {
+        if (entry.kind === "toolResult") {
+            results.set(entry.callId, entry.isError);
+        }
+    }
+
+    const blocks = (list: readonly ClientBlock[], streaming: boolean) => {
+        for (const block of list) {
+            if (block.type === "text" && block.text.trim() !== "") {
+                lines.push({ kind: "text", text: snippet(plainText(block.text), PEEK_TEXT) });
+            } else if (block.type === "toolCall") {
+                const failed = results.get(block.id);
+
+                lines.push({
+                    kind: "tool",
+                    name: block.name,
+                    args: peekArgs(block.args),
+                    status:
+                        failed === true
+                            ? "error"
+                            : failed === false
+                              ? "done"
+                              : streaming || running.has(block.id) || live.busy
+                                ? "running"
+                                : "done",
+                });
+            }
+        }
+    };
+
+    for (const entry of entries) {
+        switch (entry.kind) {
+            case "user": {
+                const text = snippet(entryText(entry), PEEK_TEXT);
+
+                if (text !== "" || entry.images > 0 || (entry.files?.length ?? 0) > 0) {
+                    lines.push({
+                        kind: "user",
+                        text: text === "" ? "(attachments)" : text,
+                        ...(entry.from === undefined ? {} : { from: entry.from }),
+                    });
+                }
+
+                break;
+            }
+
+            case "assistant":
+                blocks(entry.blocks, false);
+
+                if (entry.stopReason === "aborted") {
+                    lines.push({ kind: "event", text: "Stopped" });
+                } else if (entry.error !== undefined) {
+                    lines.push({ kind: "error", text: snippet(entry.error, PEEK_TEXT) });
+                }
+
+                break;
+            case "shell":
+                lines.push({
+                    kind: "shell",
+                    command: entry.command.slice(0, PEEK_ARG),
+                    status: entry.status === "done" && (entry.code ?? 0) === 0 ? "done" : "error",
+                });
+                break;
+            case "note":
+                lines.push({
+                    kind: "note",
+                    text: snippet(entry.text, PEEK_TEXT),
+                    name: entry.name,
+                });
+                break;
+            case "compaction":
+                lines.push({ kind: "event", text: "Context compacted" });
+                break;
+            case "reset":
+                lines.push({ kind: "event", text: "Context cleared" });
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (live.generation?.message !== undefined) {
+        blocks(live.generation.message.blocks, true);
+    }
+
+    return lines.slice(-count);
+}

@@ -42,6 +42,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Plan mode.** Pi reads and proposes a plan; nothing changes until someone approves it.
 - **Any provider, any model.** Uses Pi's own model runtime and sign-ins, skills, and prompt templates, with the model and thinking level chosen per session.
 - **Omarchy themes.** Every Omarchy theme, or follow your desktop's live; tiled Hyprland-style windows, a Walker-style launcher (Ctrl/⌘+K) with live theme previews, and Hyprland's motion.
+- **Peek tiles.** Watch your other sessions work beside the one you are in, approve their calls from there, and swap between them with a click. Only the tiles on screen stay live, so a long list scrolls cheaply.
 - **Built for phones.** Streaming answers, tool cards with diffs and live output, a Changes sheet with git diffs, push notifications you can allow or deny from, sharing into Pi from other apps, and a home-screen app.
 - **A built-in browser.** Pi opens, reads, clicks through, and screenshots pages in a real Chromium on the server, and you watch and use the same page in the Browser panel, from a phone too: your dev server on `localhost` included.
 - **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.

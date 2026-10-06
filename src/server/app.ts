@@ -132,6 +132,9 @@ const GUARD_FILE = "guard.ts";
 const BROWSER_FILE = "browser.ts";
 const BROWSER_EXTENSION = "pocket-browser";
 
+/** The most peek tiles a tab gets live at once: the ones on its screen, which a tall screen fits a handful of. */
+export const MAX_PEEKS = 12;
+
 /**
  * Whether a lock file's process is still running Pi Pocket. A process id can be reused after a crash, so on Linux
  * (and Android) a live process must also be Node; where that cannot be read, a live process counts.
@@ -198,6 +201,8 @@ export class PocketApp {
     readonly #rooms = new Map<ConversationId, Promise<Room>>();
     readonly #envs = new Map<string, NodeExecutionEnv>();
     readonly #busy = new Set<ConversationId>();
+    /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
+    readonly #endedAt = new Map<ConversationId, number>();
     readonly #agents = new Map<ConversationId, AgentState>();
     readonly #authored = new Set<string>();
     /**
@@ -586,6 +591,7 @@ export class PocketApp {
 
                             if (!busy) {
                                 this.spend.runEnded(id);
+                                this.#endedAt.set(id, Date.now());
                             }
 
                             // A parent shows its subagents' busy state.
@@ -716,6 +722,16 @@ export class PocketApp {
                 (room) => room.schedule(),
                 () => {},
             );
+            const root = this.rootOf(id);
+
+            // A subagent's call waits on its session's peek tile too.
+            if (root !== id) {
+                void this.#rooms.get(root)?.then(
+                    (room) => room.schedulePeek(),
+                    () => {},
+                );
+            }
+
             this.#scheduleSessions();
             this.alerts.announceApprovals();
         });
@@ -911,6 +927,12 @@ export class PocketApp {
             return;
         }
 
+        for (const id of client.peeks ?? []) {
+            this.#unpeek(client, id);
+        }
+
+        client.peeks = undefined;
+
         if (!this.#online(client.user.id)) {
             this.#peopleChanged(client.user.id);
         }
@@ -938,6 +960,73 @@ export class PocketApp {
                 room.schedule();
                 this.#scheduleSessions();
                 this.releaseRoom(room);
+            },
+            () => {},
+        );
+    }
+
+    /**
+     * The sessions a tab shows as peek tiles on its screen now. Each gets short `peek` updates while it stays there; the
+     * rest stop, and their views close as they do when the last tab leaves. Sessions this person may not see are left out.
+     */
+    setPeeks(user: User, tab: string, ids: readonly ConversationId[]): void {
+        const wanted = new Set(
+            ids
+                .filter((id) => this.#sessions[String(id)] !== undefined && this.canSee(user, id))
+                .slice(0, MAX_PEEKS),
+        );
+
+        for (const client of this.#clients) {
+            if (client.user.id !== user.id || client.id !== tab) {
+                continue;
+            }
+
+            const had = client.peeks ?? new Set<ConversationId>();
+
+            client.peeks = new Set(wanted);
+
+            for (const id of had) {
+                if (!wanted.has(id)) {
+                    this.#unpeek(client, id);
+                }
+            }
+
+            for (const id of wanted) {
+                if (!had.has(id)) {
+                    void this.#peek(client, id);
+                }
+            }
+        }
+    }
+
+    async #peek(client: Client, id: ConversationId): Promise<void> {
+        let room: Room;
+
+        try {
+            room = await this.room(id);
+        } catch {
+            // A session that is gone has no tile to show.
+            return;
+        }
+
+        // The tab left, or scrolled the tile away, while the view opened.
+        if (!this.#clients.has(client) || client.peeks?.has(id) !== true) {
+            this.releaseRoom(room);
+
+            return;
+        }
+
+        room.keepOpen();
+        room.peekers.add(client);
+        room.pushPeek(client);
+    }
+
+    #unpeek(client: Client, id: ConversationId): void {
+        void this.#rooms.get(id)?.then(
+            (room) => {
+                if (room.peekers.delete(client)) {
+                    this.releaseRoom(room);
+                }
             },
             () => {},
         );
@@ -1197,9 +1286,9 @@ export class PocketApp {
         return this.#rooms.get(id);
     }
 
-    /** Close a room shortly after its last tab left, unless a tab comes back first. */
+    /** Close a room shortly after its last tab (or peek tile) left, unless one comes back first. */
     releaseRoom(room: Room): void {
-        if (room.clients.size === 0) {
+        if (room.clients.size === 0 && room.peekers.size === 0) {
             room.closeLater(() => this.#rooms.delete(room.id));
         }
     }
@@ -1223,6 +1312,8 @@ export class PocketApp {
                 extensions: this.loader.extensionNames(),
                 // Tells the web app this server has people chat and typing indicators.
                 chat: true,
+                // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
+                peeks: true,
                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
                 collab: 2,
                 reactions: REACTIONS,
@@ -1281,12 +1372,14 @@ export class PocketApp {
                     ([userId, name]) => ({ id: userId, name }),
                 );
                 const chat = this.#lastChat.get(id);
+                const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
 
                 return {
                     id: Number(id),
                     ...meta,
                     busy,
                     waiting: waiting.has(id),
+                    ...(endedAt === undefined ? {} : { endedAt }),
                     ...(model === undefined ? {} : { model: model.modelId }),
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
@@ -1585,13 +1678,22 @@ export class PocketApp {
         const updated = this.config.userById(userId);
 
         for (const client of [...this.#clients]) {
+            if (client.user.id !== userId || updated === undefined) {
+                continue;
+            }
+
             if (
-                client.user.id === userId &&
                 client.conversationId !== undefined &&
-                updated !== undefined &&
                 !this.canSee(updated, client.conversationId)
             ) {
                 this.#evict(client, "This session is no longer shared with you.");
+            }
+
+            for (const id of client.peeks ?? []) {
+                if (!this.canSee(updated, id)) {
+                    client.peeks?.delete(id);
+                    this.#unpeek(client, id);
+                }
             }
         }
 
