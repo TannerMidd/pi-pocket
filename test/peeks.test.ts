@@ -114,12 +114,11 @@ test("a tab gets peek tiles for the sessions on its screen, and stays out of the
     try {
         await app.attach(there.client);
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [other]);
+        app.setPeeks(owner(app), tab.client.connection, [other]);
         await until(() => peeks(tab).length > 0, "the first peek");
         const first = peeks(tab)[0]!;
 
         assert.equal(first.conversationId, other);
-        assert.equal(first.busy, false);
         assert.deepEqual(first.lines, [
             { kind: "user", text: "hello there" },
             { kind: "text", text: "echo: hello there" },
@@ -154,7 +153,7 @@ test("a tab gets peek tiles for the sessions on its screen, and stays out of the
         ]);
 
         // Scrolled away: nothing more is sent, and the session's view no longer counts the tab.
-        app.setPeeks(owner(app), tab.client.id, []);
+        app.setPeeks(owner(app), tab.client.connection, []);
         await until(() => room.peekers.size === 0, "the tile to be dropped");
         const sent = peeks(tab).length;
 
@@ -168,7 +167,7 @@ test("a tab gets peek tiles for the sessions on its screen, and stays out of the
     }
 });
 
-test("a running session's tile changes at most once a second, never twice the same, and says it is busy", async () => {
+test("a running session's tile changes at most once a second, never twice the same, and shows what runs", async () => {
     const id = await newSession(app);
     const tab = fakeTab(undefined, owner(app));
     const times: number[] = [];
@@ -184,7 +183,7 @@ test("a running session's tile changes at most once a second, never twice the sa
 
     try {
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [id]);
+        app.setPeeks(owner(app), tab.client.connection, [id]);
         await until(() => peeks(tab, id).length > 0, "the first peek");
         await say(app, id, "work slowly");
         await until(
@@ -193,17 +192,11 @@ test("a running session's tile changes at most once a second, never twice the sa
         );
         const list = peeks(tab, id);
 
-        assert.ok(
-            list.some((peek) => peek.busy),
-            "a tile said Pi was working",
-        );
-        assert.equal(list.at(-1)!.busy, false);
-        assert.ok(
-            list.some((peek) =>
-                peek.lines.some((line) => line.kind === "tool" && line.status === "running"),
-            ),
-            "a tile showed a call running",
-        );
+        const running = (peek: PeekSummary) =>
+            peek.lines.some((line) => line.kind === "tool" && line.status === "running");
+
+        assert.ok(list.some(running), "a tile showed a call running while Pi worked");
+        assert.ok(!running(list.at(-1)!), "and none once it ended");
 
         // The first is sent at once; later ones wait for the second to pass.
         for (let index = 2; index < times.length; index++) {
@@ -231,14 +224,14 @@ test("a tile scrolled away while its view opens is never sent, and a tab gone mi
     try {
         await app.attach(tab.client);
         // In and out again at once: the view opens, but the tile is not there any more.
-        app.setPeeks(owner(app), tab.client.id, [first]);
-        app.setPeeks(owner(app), tab.client.id, []);
+        app.setPeeks(owner(app), tab.client.connection, [first]);
+        app.setPeeks(owner(app), tab.client.connection, []);
         await settle(300);
         assert.equal(peeks(tab, first).length, 0);
         assert.equal((await app.openRoom(first))?.peekers.size ?? 0, 0);
 
         // The tab goes while the view opens.
-        app.setPeeks(owner(app), tab.client.id, [second]);
+        app.setPeeks(owner(app), tab.client.connection, [second]);
         app.detach(tab.client);
         await settle(300);
         assert.equal(peeks(tab, second).length, 0);
@@ -265,7 +258,7 @@ test(`a tab gets at most ${MAX_PEEKS} live tiles, each once`, async () => {
 
     try {
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [...ids, ids[0]!, ids[1]!]);
+        app.setPeeks(owner(app), tab.client.connection, [...ids, ids[0]!, ids[1]!]);
         assert.equal(tab.client.peeks?.size, MAX_PEEKS);
         await until(
             () => new Set(peeks(tab).map((peek) => peek.conversationId)).size === MAX_PEEKS,
@@ -336,12 +329,12 @@ test("a list that arrives after a newer one is dropped", async () => {
 
     try {
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [second], 2);
-        app.setPeeks(owner(app), tab.client.id, [first], 1);
+        app.setPeeks(owner(app), tab.client.connection, [second], 2);
+        app.setPeeks(owner(app), tab.client.connection, [first], 1);
         assert.deepEqual([...tab.client.peeks!], [second]);
-        app.setPeeks(owner(app), tab.client.id, [first], 3);
+        app.setPeeks(owner(app), tab.client.connection, [first], 3);
         assert.deepEqual([...tab.client.peeks!], [first]);
-        app.setPeeks(owner(app), tab.client.id, [second], 3);
+        app.setPeeks(owner(app), tab.client.connection, [second], 3);
         assert.deepEqual([...tab.client.peeks!], [first], "the same number again is late too");
     } finally {
         app.detach(tab.client);
@@ -364,15 +357,15 @@ test("a session's view closes once its last tile and tab are gone, and not befor
     try {
         await app.attach(there.client);
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [id]);
+        app.setPeeks(owner(app), tab.client.connection, [id]);
         await until(() => room.peekers.size === 1, "the tile");
         app.detach(there.client);
         await until(() => room.clients.size === 0, "the tab to leave");
         assert.equal(closing, 0, "a tile keeps the view open");
-        app.setPeeks(owner(app), tab.client.id, []);
+        app.setPeeks(owner(app), tab.client.connection, []);
         await until(() => closing === 1, "the view to close once the tile goes");
         // Back before it closed: the same view, kept open.
-        app.setPeeks(owner(app), tab.client.id, [id]);
+        app.setPeeks(owner(app), tab.client.connection, [id]);
         await until(() => room.peekers.size === 1, "the tile again");
         assert.equal(await app.openRoom(id), room);
     } finally {
@@ -389,7 +382,11 @@ test("peeks leave out sessions the person may not see, and end with the tab or t
 
     try {
         await app.attach(tab.client);
-        app.setPeeks(sam, tab.client.id, [theirs, mine, 99_999 as unknown as ConversationId]);
+        app.setPeeks(sam, tab.client.connection, [
+            theirs,
+            mine,
+            99_999 as unknown as ConversationId,
+        ]);
         assert.deepEqual([...(tab.client.peeks ?? [])], [mine]);
         await until(() => peeks(tab).length > 0, "Sam's peek");
         await settle(200);
@@ -402,7 +399,7 @@ test("peeks leave out sessions the person may not see, and end with the tab or t
         await until(() => room.peekers.size === 0, "the tile to end with the access");
 
         // A tab that goes takes its tiles with it.
-        app.setPeeks(sam, tab.client.id, [theirs]);
+        app.setPeeks(sam, tab.client.connection, [theirs]);
         const theirRoom = await app.room(theirs);
 
         await until(() => theirRoom.peekers.size === 1, "the new tile");
@@ -421,7 +418,7 @@ test("a call waiting for approval shows on its session's tile, and goes when ans
 
     try {
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [id]);
+        app.setPeeks(owner(app), tab.client.connection, [id]);
         await until(() => peeks(tab).length > 0, "the tile");
         const asked = app.approvals.request(
             {
@@ -462,7 +459,7 @@ test("a subagent's waiting call shows on its session's tile", async () => {
             .conversationId;
 
         await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.id, [id]);
+        app.setPeeks(owner(app), tab.client.connection, [id]);
         await until(() => peeks(tab, id).length > 0, "the tile");
         const asked = app.approvals.request(
             {

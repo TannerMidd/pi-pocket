@@ -567,7 +567,6 @@ export function peekLines(
     count = PEEK_LINES,
 ): PeekLine[] {
     const results = new Map<string, boolean>();
-    const running = new Set((live.tools ?? []).map((slot) => slot.callId));
     const lines: PeekLine[] = [];
 
     for (const entry of entries) {
@@ -583,18 +582,19 @@ export function peekLines(
             } else if (block.type === "toolCall") {
                 const failed = results.get(block.id);
 
+                // A call without a result yet runs while Pi does; once Pi stopped, it was cut off.
                 lines.push({
                     kind: "tool",
                     name: block.name,
                     args: peekArgs(block.args),
                     status:
-                        failed === true
-                            ? "error"
-                            : failed === false
-                              ? "done"
-                              : streaming || running.has(block.id) || live.busy
+                        failed === undefined
+                            ? streaming || live.busy
                                 ? "running"
-                                : "done",
+                                : "done"
+                            : failed
+                              ? "error"
+                              : "done",
                 });
             }
         }

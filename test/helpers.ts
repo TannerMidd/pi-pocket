@@ -157,6 +157,7 @@ export function fakeTab(id: ConversationId | undefined, user: User) {
     const events: { event: string; data: Record<string, unknown> }[] = [];
     const client: Client = {
         id: `tab-${crypto.randomUUID()}`,
+        connection: `connection-${crypto.randomUUID()}`,
         user,
         conversationId: id,
         sentEntries: new Set<number>(),

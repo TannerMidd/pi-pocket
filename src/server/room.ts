@@ -76,11 +76,13 @@ const TYPING_MS = 6000;
 const PEEK_MS = 1000;
 /** Entries read from the end of a session for its peek tile: enough to find the results of the calls it shows. */
 const PEEK_ENTRIES = PEEK_LINES * 3;
+/** How much of a waiting call's command and reason a tile gets: the tile allows only short commands anyway. */
+const PEEK_SUBJECT = 500;
+const PEEK_REASON = 300;
 
-/** What a peek tile shows of a session: its last steps, whether Pi works, and the calls waiting for approval. */
+/** What a peek tile shows of a session: its last steps, and the calls waiting for approval. */
 export type PeekSummary = {
     conversationId: ConversationId;
-    busy: boolean;
     lines: PeekLine[];
     approvals: {
         id: string;
@@ -112,7 +114,7 @@ export interface Client {
      * This connection, apart from others of the same tab id: a duplicated browser tab keeps the id, and a reconnect
      * briefly overlaps the old connection. Sent in `hello`; peek lists name it.
      */
-    readonly connection?: string;
+    readonly connection: string;
     /** Other sessions this tab shows as peek tiles on screen now; each gets `peek` events (`PocketApp.setPeeks`). */
     peeks?: Set<ConversationId>;
     /** The number of the last peek list taken, so one that arrives late does not undo a newer one. */
@@ -509,12 +511,12 @@ export class Room {
             }
         }
 
-        const live = projectLive(view.docs["pi.live"] as LiveState | undefined);
-
         return {
             conversationId: this.id,
-            busy: live.busy,
-            lines: peekLines(recent.reverse(), live),
+            lines: peekLines(
+                recent.reverse(),
+                projectLive(view.docs["pi.live"] as LiveState | undefined),
+            ),
             // A subagent's calls wait on its session's tile, as they make the session wait.
             approvals: this.#app.approvals
                 .all()
@@ -523,8 +525,8 @@ export class Room {
                     id: request.id,
                     conversationId: request.conversationId,
                     tool: request.tool,
-                    subject: request.subject.slice(0, 500),
-                    reason: request.reason.slice(0, 300),
+                    subject: request.subject.slice(0, PEEK_SUBJECT),
+                    reason: request.reason.slice(0, PEEK_REASON),
                     ...(request.requestedBy === undefined
                         ? {}
                         : { requestedBy: request.requestedBy }),

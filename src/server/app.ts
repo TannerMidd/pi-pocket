@@ -866,7 +866,7 @@ export class PocketApp {
             return;
         }
 
-        client.send("hello", { ...hello, connection: client.connection });
+        client.send("hello", this.#helloFor(client, hello));
         client.send("sessions", this.sessions(client.user));
 
         if (arriving) {
@@ -971,8 +971,8 @@ export class PocketApp {
     /**
      * The sessions a connection shows as peek tiles on its screen now. Each gets short `peek` updates while it stays
      * there; the rest stop, and their views close as they do when the last tab leaves. Sessions this person may not see
-     * are left out. `connection` is the id its `hello` carried (a test's tab without one goes by its tab id); a list
-     * numbered `seq` below one already taken arrived late, and is dropped.
+     * are left out. `connection` is the id its `hello` carried; a list numbered `seq` below one already taken arrived
+     * late, and is dropped.
      */
     setPeeks(user: User, connection: string, ids: readonly ConversationId[], seq?: number): void {
         const wanted = new Set(
@@ -982,7 +982,7 @@ export class PocketApp {
         );
 
         for (const client of this.#clients) {
-            if (client.user.id !== user.id || (client.connection ?? client.id) !== connection) {
+            if (client.user.id !== user.id || client.connection !== connection) {
                 continue;
             }
 
@@ -1340,6 +1340,11 @@ export class PocketApp {
                 approvalRule: this.config.approvalRule,
             },
         };
+    }
+
+    /** A tab's hello: what everyone gets, and the id of its own connection, which its peek lists name. */
+    #helloFor(client: Client, hello: Awaited<ReturnType<PocketApp["hello"]>>) {
+        return { ...hello, connection: client.connection };
     }
 
     #scheduleSessions(): void {
@@ -1796,7 +1801,7 @@ export class PocketApp {
                 continue;
             }
 
-            client.send("hello", { ...(await this.hello(user)), connection: client.connection });
+            client.send("hello", this.#helloFor(client, await this.hello(user)));
             client.send("sessions", this.sessions(user));
         }
     }
@@ -2365,10 +2370,7 @@ export class PocketApp {
     /** Send every client a fresh hello: the guard's status and the extension names changed. */
     async #refreshClients(): Promise<void> {
         for (const client of this.#clients) {
-            client.send("hello", {
-                ...(await this.hello(client.user)),
-                connection: client.connection,
-            });
+            client.send("hello", this.#helloFor(client, await this.hello(client.user)));
         }
     }
 

@@ -83,7 +83,7 @@ export function markSeen(id) {
 }
 
 /** A session whose run ended since this browser last had it open. */
-export function finishedUnseen(session, state = store.state) {
+function finishedUnseen(session, state = store.state) {
     return (
         since !== null &&
         !session.busy &&
@@ -210,7 +210,7 @@ export function peekTiles(state = store.state) {
 }
 
 /** Peek tiles are turned on in this browser. */
-export const peeksOn = () => prefs().peeks === true;
+const peeksOn = () => prefs().peeks === true;
 
 /** Peeks show in this session: turned on, a server that sends them, and a session open. */
 export function peeksWanted(state = store.state) {
@@ -726,7 +726,7 @@ export function PeekHost({ shown, tiles, replaced }) {
 }
 
 /** Wide screens: the tiles as a column beside the conversation, scrolling, with the way to calls waiting out of view. */
-export function PeekColumn({ tiles, leaving = false }) {
+function PeekColumn({ tiles, leaving = false }) {
     const list = useRef(null);
     const props = tileProps(tiles, false);
     const away = useAwayWaiting(list, props.map((tile) => `${tile.key}:${tile.status}`).join());
