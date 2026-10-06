@@ -25,8 +25,8 @@ export const DEFAULTS = {
     sidebarWidth: 300,
     /** How the session list groups: "recent" (by day) or "folder". */
     group: "recent",
-    /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). */
-    peeks: true,
+    /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). Off until turned on. */
+    peeks: false,
 };
 
 function readJson(key, fallback) {

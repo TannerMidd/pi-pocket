@@ -6,7 +6,15 @@ import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
-import { PEEK_WIDE, PeekColumn, PeekStrip, peekTiles, peeksWanted } from "./peeks.js";
+import {
+    PEEK_WIDE,
+    PeekHost,
+    PeeksButton,
+    PeekStrip,
+    peekTiles,
+    peeksWanted,
+    togglePeeks,
+} from "./peeks.js";
 import {
     Drawer,
     Rail,
@@ -74,6 +82,7 @@ function Topbar() {
                 <span class="count">${busySubagents}</span>
             </button>`
         }
+        <${PeeksButton} />
         <${PeopleButton} />
         <${BrowserButton} />
         <button
@@ -183,9 +192,11 @@ function App() {
     const rail = prefs().sidebar === "rail";
     const browsing = inConversation && state.browserOpen && browserAvailable() && !state.missing;
     const people = !browsing && peopleDocked(state);
-    const tiles = peeksWanted(state) ? peekTiles(state) : [];
-    // The column takes the place beside the conversation when Browser and People leave it free; otherwise a strip.
-    const peekColumn = tiles.length > 0 && PEEK_WIDE.matches && !browsing && !people;
+    const peeking = peeksWanted(state);
+    const tiles = peeking ? peekTiles(state) : [];
+    // The column takes the place beside the conversation when Browser and People leave it free; otherwise a strip,
+    // which only shows when there are tiles.
+    const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !people;
 
     return html`<div
         class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""}`}
@@ -198,7 +209,12 @@ function App() {
             ${
                 inConversation
                     ? html`<${Topbar} />
-                    ${tiles.length > 0 && !peekColumn && html`<${PeekStrip} tiles=${tiles} />`}
+                    ${
+                        peeking &&
+                        tiles.length > 0 &&
+                        !peekColumn &&
+                        html`<${PeekStrip} tiles=${tiles} />`
+                    }
                     <${Transcript} key=${state.conversationId} />
                     ${
                         state.view.conversation &&
@@ -208,7 +224,10 @@ function App() {
                     : html`<div class="home-list"><${SessionList} /></div><${Splash} />`
             }
         </div>
-        ${peekColumn && html`<${PeekColumn} tiles=${tiles} />`}
+        ${
+            inConversation &&
+            html`<${PeekHost} shown=${peekColumn} tiles=${tiles} replaced=${browsing || people} />`
+        }
         ${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
         ${inConversation && html`<${PeopleHost} shown=${people} browsing=${browsing} />`}
         <${Drawer} />
@@ -342,6 +361,13 @@ addEventListener("keydown", (event) => {
         if (event.code === "KeyN" && canSteer() && !scoped()) {
             event.preventDefault();
             openSheet({ type: "cwd", mode: "new" });
+
+            return;
+        }
+
+        if (event.code === "KeyP" && store.state.server?.peeks === true) {
+            event.preventDefault();
+            togglePeeks();
 
             return;
         }

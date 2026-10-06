@@ -1,5 +1,6 @@
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
 import { browserAvailable, openInBrowser, toggleBrowser } from "./browser.js";
+import { togglePeeks } from "./peeks.js";
 import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import { chooseTheme, THEMES } from "./theme.js";
 import { copyText, formatTokens, formatWhen, modelLabel, replyText, shortPath } from "./ui.js";
@@ -320,6 +321,12 @@ export const COMMANDS = [
         description: "Open the browser Pi uses, or an address in it, such as localhost:5173",
         available: browserAvailable,
         run: (arg) => (arg === "" ? toggleBrowser() : openInBrowser(arg)),
+    },
+    {
+        name: "peek",
+        description: "Show or hide peek tiles: other sessions' live work beside this one",
+        available: () => store.state.server?.peeks === true,
+        run: () => togglePeeks(),
     },
     {
         name: "artifacts",

@@ -1,15 +1,16 @@
-// Peek tiles: other sessions' live work beside the open one. Wide screens show a column of tiles where the People and
-// Browser panels dock (when neither is open), narrower ones a strip under the top bar. Tiles are the sessions working,
-// waiting for approval, finished since this browser last looked, and pinned, plus the one just left. Only tiles on
-// screen are live: once scrolling settles, the tab tells the server which (`POST /api/peeks`), and the rest keep the
-// lines they last had. Their state marks stay current from the session list, which covers every session.
+// Peek tiles: other sessions' live work beside the open one, off until turned on (the top bar's tiles button, Alt+P,
+// /peek, the launcher, or Appearance). Wide screens show a column of tiles where the People and Browser panels dock
+// (when neither is open), narrower ones a strip under the top bar. Tiles are the sessions working, waiting for
+// approval, finished since this browser last looked, and pinned, plus the one just left. Only tiles on screen are
+// live: once scrolling settles, the tab tells the server which (`POST /api/peeks`), and the rest keep the lines they
+// last had. Their state marks stay current from the session list, which covers every session.
 import { Component } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { workspaceOrder } from "./sessions.js";
-import { actions, api, attempt, canSteer, navigate, store } from "./store.js";
-import { prefs } from "./theme.js";
+import { actions, api, attempt, canSteer, navigate, notify, store } from "./store.js";
+import { prefs, setPrefs } from "./theme.js";
 import { describeCall } from "./transcript.js";
-import { html, Icon, shortPath } from "./ui.js";
+import { html, Icon, shortPath, usePresence } from "./ui.js";
 
 /** Wide enough for the column beside the conversation: where People and the Browser panel dock too. */
 export const PEEK_WIDE = matchMedia("(min-width: 1100px)");
@@ -208,14 +209,55 @@ export function peekTiles(state = store.state) {
     return chosen.tiles;
 }
 
+/** Peek tiles are turned on in this browser. */
+export const peeksOn = () => prefs().peeks === true;
+
 /** Peeks show in this session: turned on, a server that sends them, and a session open. */
 export function peeksWanted(state = store.state) {
     return (
-        prefs().peeks !== false &&
-        state.server?.peeks === true &&
-        state.conversationId !== null &&
-        !state.missing
+        peeksOn() && state.server?.peeks === true && state.conversationId !== null && !state.missing
     );
+}
+
+/** Turn peek tiles on or off. Turned on where nothing would show yet, a notice says what will. */
+export function togglePeeks() {
+    const on = !peeksOn();
+
+    setPrefs({ peeks: on });
+
+    if (on && !PEEK_WIDE.matches && peekTiles().length === 0) {
+        notify(
+            "info",
+            "Peek tiles on: sessions show here while they work, wait for you, or finish.",
+        );
+    }
+}
+
+/** The top bar's switch. While off, a dot says another session waits for you. */
+export function PeeksButton() {
+    const { server, sessions, conversationId } = store.state;
+
+    if (server?.peeks !== true) {
+        return null;
+    }
+
+    const on = peeksOn();
+    const waiting =
+        !on &&
+        sessions.some(
+            (session) => session.waiting && !session.archived && session.id !== conversationId,
+        );
+
+    return html`<button
+        class=${`icon-button badge-host ${on ? "on" : ""}`}
+        aria-label="Peek tiles"
+        aria-pressed=${on}
+        title=${on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)"}
+        onClick=${togglePeeks}
+    >
+        <${Icon} name="tiles" />
+        ${waiting && html`<span class="peek-dot" aria-hidden="true"></span>`}
+    </button>`;
 }
 
 // ─── What is on screen, and telling the server ───────────────────────────────────────
@@ -265,6 +307,13 @@ function sendScreen() {
     const key = `${streamId}:${ids.join(",")}`;
 
     if (key === sentKey) {
+        return;
+    }
+
+    // A connection starts without a list: no tiles yet (or turned off) needs nothing sent.
+    if (ids.length === 0 && !sentKey?.startsWith(`${streamId}:`)) {
+        sentKey = key;
+
         return;
     }
 
@@ -660,8 +709,24 @@ function tileProps(tiles, compact) {
     });
 }
 
+/**
+ * The column while it shows, and a moment after, so it can slide out. Not when People or the Browser panel takes its
+ * place: that one slides in instead. While it leaves it keeps the tiles it had.
+ */
+export function PeekHost({ shown, tiles, replaced }) {
+    const [kept, leaving] = usePresence(shown ? tiles : null, 180);
+
+    if (shown) {
+        return html`<${PeekColumn} tiles=${tiles} />`;
+    }
+
+    return kept === null || !leaving || replaced
+        ? null
+        : html`<${PeekColumn} tiles=${kept} leaving=${true} />`;
+}
+
 /** Wide screens: the tiles as a column beside the conversation, scrolling, with the way to calls waiting out of view. */
-export function PeekColumn({ tiles }) {
+export function PeekColumn({ tiles, leaving = false }) {
     const list = useRef(null);
     const props = tileProps(tiles, false);
     const away = useAwayWaiting(list, props.map((tile) => `${tile.key}:${tile.status}`).join());
@@ -681,9 +746,21 @@ export function PeekColumn({ tiles }) {
 
     useOnScreen(list);
 
-    return html`<aside class="peeks window" aria-label="Peeks">
+    return html`<aside
+        class=${`peeks window ${leaving ? "leaving" : ""}`}
+        aria-label="Peeks"
+        inert=${leaving}
+    >
         <div class="peeks-list" ref=${list}>
             ${props.map((each) => html`<${PeekTile} ...${each} />`)}
+            ${
+                props.length === 0 &&
+                html`<div class="peeks-empty">
+                    <${Icon} name="tiles" size=${28} />
+                    <p>Other sessions show here while they work, wait for you, or finish.</p>
+                    <p class="muted small">Pinned sessions stay here. Alt+P hides this.</p>
+                </div>`
+            }
         </div>
         ${jump(away.up, "▲", (ids) => ids.at(-1))}
         ${jump(away.down, "▼", (ids) => ids[0])}

@@ -62,7 +62,7 @@ Each default-exports `(host: PocketHost) => Extension | Extension[]` and is inst
 | `files.js`           | `@` mentions: the folder's file list, fetched once and checked in the background, and matched here as people type                              |
 | `commands.js`        | Slash commands and prompt templates                                                                                                            |
 | `sheets.js`          | The menu and every sheet, the file viewer and find in session among them                                                                       |
-| `peeks.js`           | Peek tiles: which sessions get one and in what order, the column and the strip, and telling the server which tiles are on screen               |
+| `peeks.js`           | Peek tiles: their switch, which sessions get one and in what order, the column and the strip, the watch list                                   |
 | `chat.js`            | People panel: chat, pins, notes                                                                                                                |
 | `sessions.js`        | Session list (sidebar, drawer), selecting rows and archiving them with undo (`setArchived`), the folded rail, the wide home screen, sign-in    |
 | `notify.js`, `sw.js` | Push, the icon badge, approvals from notifications, shares                                                                                     |

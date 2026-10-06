@@ -212,10 +212,63 @@ before(async () => {
     );
     await page.navigate(`${base}/s/${ids.open}`);
     await until(
+        async () => (await inPage<boolean>(`return JSON.stringify(${SWITCH} !== null)`)) === true,
+        "the app, with the tiles switch",
+        20_000,
+    );
+});
+
+/** The top bar's switch for peek tiles. */
+const SWITCH = `document.querySelector('.topbar [aria-label="Peek tiles"]')`;
+const pressed = async () =>
+    inPage<string | null>(`return JSON.stringify(${SWITCH}?.getAttribute("aria-pressed") ?? null)`);
+const altP = () =>
+    page.evaluate(
+        `window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", code: "KeyP", altKey: true, bubbles: true }))`,
+    );
+/** Turn peek tiles on in another browser's page, as its person would once. */
+const peeksOnIn = (other: BrowserPage) =>
+    other.evaluate(`localStorage.setItem("pocket.appearance", JSON.stringify({ peeks: true }))`);
+
+test("peek tiles are off until turned on: nothing shows and nothing is sent", real, async () => {
+    assert.equal(await pressed(), "false");
+    assert.equal((await tiles()).length, 0);
+    assert.equal((await tiles(".peek-strip")).length, 0);
+    assert.equal(await serverPeeks(), undefined, "no list was ever sent");
+    // While off, the switch says another session waits for you.
+    await until(
+        async () =>
+            (await inPage<boolean>(
+                `return JSON.stringify(${SWITCH}.querySelector(".peek-dot") !== null)`,
+            )) === true,
+        "the dot on the switch",
+    );
+});
+
+test("the top bar's switch turns them on, and Alt+P off and on again", real, async () => {
+    await page.evaluate(`${SWITCH}.click()`);
+    assert.equal(await pressed(), "true");
+    await until(
         async () => (await tiles()).length >= ids.working.length + 2,
         "the tiles to show",
         20_000,
     );
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify(${SWITCH}.querySelector(".peek-dot") === null)`,
+        ),
+        true,
+        "no dot while they show",
+    );
+    await sameAsScreen("the tiles on screen, live");
+
+    await altP();
+    await until(async () => (await tiles()).length === 0, "the column to slide away");
+    assert.equal(await pressed(), "false");
+    await until(async () => (await serverPeeks())?.length === 0, "nothing live");
+    await altP();
+    await until(async () => (await tiles()).length >= ids.working.length + 2, "the tiles back");
+    await sameAsScreen("the tiles live again");
     // A run that ends after this browser first looked is new to it.
     await say(app, ids.finished, "one more thing");
 });
@@ -333,6 +386,7 @@ test("a viewer sees the waiting call on its tile, without the buttons", real, as
     try {
         await viewer.setViewport(DESKTOP);
         await viewer.navigate(`${base}/login?token=${encodeURIComponent(token)}`);
+        await peeksOnIn(viewer);
         await viewer.navigate(`${base}/s/${ids.open}`);
         let tile: { ask: string; label: string; buttons: string[] } | undefined;
 
@@ -712,6 +766,7 @@ test("a duplicated tab, with the same tab id, keeps its own tiles", real, async 
         await twin.setViewport(VIEWPORTS.mobile);
         await twin.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
         await twin.evaluate(`sessionStorage.setItem("pocket.tab", ${JSON.stringify(tab)})`);
+        await peeksOnIn(twin);
         await twin.navigate(`${base}/s/${ids.open}`);
         assert.equal(
             JSON.parse(
@@ -759,9 +814,12 @@ test(
 
         await page.setViewport(VIEWPORTS.mobile);
         await until(async () => (await tiles(".peek-strip")).length > 0, "the strip on a phone");
-        assert.equal(
-            await inPage<boolean>(`return JSON.stringify(!!document.querySelector(".peeks"))`),
-            false,
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(!!document.querySelector(".peeks"))`,
+                )) === false,
+            "the column to slide away",
         );
         const first = await sameAsScreen("the server to watch the strip's tiles", ".peek-strip");
 
@@ -794,16 +852,40 @@ test(
     "turned off, there are no tiles and nothing is live; turned on, they come back",
     real,
     async () => {
-        await page.evaluate(`(await import("/theme.js")).setPrefs({ peeks: false })`);
+        await page.evaluate(`${SWITCH}.click()`);
         await until(
             async () => (await tiles()).length === 0 && (await tiles(".peek-strip")).length === 0,
             "no tiles",
         );
         await until(async () => (await serverPeeks())?.length === 0, "nothing live");
-        await page.evaluate(`(await import("/theme.js")).setPrefs({ peeks: true })`);
+        await page.evaluate(`${SWITCH}.click()`);
         await sameAsScreen("the tiles back, and live");
     },
 );
+
+test("turned on with nothing to show, the column says what will show there", real, async () => {
+    const { user, token } = app.config.addUser("Solo", "guest", [String(ids.open)]);
+    const solo = await browsers.open(4);
+
+    try {
+        await solo.setViewport(DESKTOP);
+        await solo.navigate(`${base}/login?token=${encodeURIComponent(token)}`);
+        await peeksOnIn(solo);
+        await solo.navigate(`${base}/s/${ids.open}`);
+        await until(
+            async () =>
+                JSON.parse(
+                    await solo.evaluate(
+                        `return JSON.stringify(document.querySelector(".peeks .peeks-empty")?.textContent ?? "")`,
+                    ),
+                ).includes("Other sessions show here"),
+            "the empty column's note",
+        );
+    } finally {
+        await browsers.close(4);
+        app.config.removeUser(user.id);
+    }
+});
 
 test("nothing went wrong in the page", real, async () => {
     // The event stream the reconnect test cut off is the one error expected.

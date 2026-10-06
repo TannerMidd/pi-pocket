@@ -4926,14 +4926,54 @@ textarea.notes {
 /* ─── Peek tiles ───────────────────────────────────────────── */
 
 /* Other sessions beside the conversation, one tile each: a column on wide screens, scrolling, and a strip under the
- * top bar on narrow ones. With tiling, the column is bare and each tile is a window of its own, as Hyprland stacks
- * them; the tile under the mouse takes the active border. Tiles change without motion: only the conversation moves. */
+ * top bar on narrow ones. With tiling, the column is bare and each tile is a window of its own; the tile under the
+ * mouse takes the active border. Turned on or off, the column slides like the People panel; the tiles in it then
+ * change without motion: only the conversation moves. */
 .peeks {
     flex: 0 0 var(--peeks-w, clamp(260px, 21vw, 340px));
     height: 100dvh;
     min-height: 0;
     border-left: 1px solid var(--line);
     background: var(--panel);
+}
+
+:root .layout > .peeks.window {
+    animation: people-in var(--t-in) var(--ease-out) backwards;
+}
+
+:root .layout > .peeks.window.leaving {
+    animation: people-out var(--t-out) linear forwards;
+}
+
+/* Turned on with nothing to show yet: what will show here. */
+.peeks-empty {
+    margin: auto 0;
+    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.86rem;
+}
+
+.peeks-empty p {
+    margin: 0;
+}
+
+.peeks-empty .icon {
+    color: var(--faint);
+}
+
+/* The top bar's switch, while off: another session waits for you. */
+.peek-dot {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 7px;
+    height: 7px;
+    background: var(--warn);
 }
 
 .peeks-list {
@@ -5201,6 +5241,7 @@ textarea.notes {
 
 .peek-strip {
     flex: none;
+    animation: peek-strip-in var(--t-in) var(--ease-out) backwards;
     display: flex;
     gap: 0.5rem;
     overflow-x: auto;
@@ -5213,6 +5254,13 @@ textarea.notes {
 
 .peek-strip::-webkit-scrollbar {
     display: none;
+}
+
+@keyframes peek-strip-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
 }
 
 .peek-strip .peek,
