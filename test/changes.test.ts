@@ -12,7 +12,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -59,6 +59,25 @@ const route: FauxResponseStep = (request) => {
     if (text.endsWith("write notes")) {
         return fauxAssistantMessage(
             [fauxToolCall("write", { path: "notes/todo.md", content: "- one\n" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.endsWith("write through link")) {
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("write", {
+                    path: "../symlinked-ancestor-target/new.txt",
+                    content: "Pi's file\n",
+                }),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.endsWith("write parent")) {
+        return fauxAssistantMessage(
+            [fauxToolCall("write", { path: "../top.txt", content: "Pi's file\n" })],
             { stopReason: "toolUse" },
         );
     }
@@ -255,6 +274,53 @@ test("absolute codemode paths through a symlinked cwd are attributed to Pi", asy
     const changes = await app.workspace.changes(id, owner(app));
 
     assert.equal(changes.files.find((file) => file.path === "scripted.txt")?.byPi, true);
+});
+
+test("a parent-relative write from a symlinked cwd stays outside its repository", async () => {
+    const folder = repository("symlinked-cwd", {
+        "app/seed.txt": "seed\n",
+        "top.txt": "seed\n",
+    });
+    const alias = join(root, "symlinked-cwd-alias");
+
+    writeFileSync(join(folder, "top.txt"), "changed by a person\n");
+    symlinkDirectory(join(folder, "app"), alias);
+    const id = await newSession(app, alias);
+
+    await say(app, id, "write parent");
+    assert.equal(existsSync(join(root, "top.txt")), true);
+    const changes = await app.workspace.changes(id, owner(app));
+
+    assert.deepEqual(
+        changes.files.map((file) => ({ path: file.path, byPi: file.byPi })),
+        [{ path: "top.txt", byPi: false }],
+    );
+    assert.deepEqual(
+        changes.piOnly.map((file) => file.path),
+        [join("..", "top.txt")],
+    );
+});
+
+test("a missing new leaf through a symlinked ancestor resolves to its repository path", async () => {
+    const folder = repository("symlinked-ancestor", { "app/seed.txt": "seed\n" });
+    const cwdAlias = join(root, "symlinked-ancestor-cwd");
+    const escapedAlias = join(root, "symlinked-ancestor-target");
+
+    symlinkDirectory(join(folder, "app"), cwdAlias);
+    symlinkDirectory(join(folder, "app"), escapedAlias);
+    const id = await newSession(app, cwdAlias);
+
+    await say(app, id, "write through link");
+    const path = join(folder, "app", "new.txt");
+
+    assert.equal(existsSync(path), true);
+    rmSync(path);
+    const changes = await app.workspace.changes(id, owner(app));
+
+    assert.deepEqual(
+        changes.piOnly.map((file) => file.path),
+        [join("app", "new.txt")],
+    );
 });
 
 test("someone invited to one session sees the changes in its folder, not the rest of the repository", async () => {

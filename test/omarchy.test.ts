@@ -47,10 +47,32 @@ test("the desktop theme comes from Omarchy's current folder, with its name and w
     assert.equal(theme?.colors.accent, "#ff0000");
     assert.equal(theme?.wallpaper, false);
     writeFileSync(join(current, "theme", "backgrounds", "1.png"), "png");
-    symlinkSync(join(current, "theme", "backgrounds", "1.png"), join(current, "background"));
-    assert.equal(
-        await wallpaperFile(home),
-        realpathSync(join(current, "theme", "backgrounds", "1.png")),
-    );
-    assert.equal((await desktopTheme(home))?.wallpaper, true);
+    let hasWallpaper = true;
+
+    try {
+        symlinkSync(
+            join(current, "theme", "backgrounds", "1.png"),
+            join(current, "background"),
+            "file",
+        );
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+
+        if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES")) {
+            throw error;
+        }
+
+        hasWallpaper = false;
+    }
+
+    if (hasWallpaper) {
+        assert.equal(
+            await wallpaperFile(home),
+            realpathSync(join(current, "theme", "backgrounds", "1.png")),
+        );
+    } else {
+        assert.equal(await wallpaperFile(home), undefined);
+    }
+
+    assert.equal((await desktopTheme(home))?.wallpaper, hasWallpaper);
 });
