@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -48,6 +48,9 @@ test("the desktop theme comes from Omarchy's current folder, with its name and w
     assert.equal(theme?.wallpaper, false);
     writeFileSync(join(current, "theme", "backgrounds", "1.png"), "png");
     symlinkSync(join(current, "theme", "backgrounds", "1.png"), join(current, "background"));
-    assert.equal(await wallpaperFile(home), join(current, "theme", "backgrounds", "1.png"));
+    assert.equal(
+        await wallpaperFile(home),
+        realpathSync(join(current, "theme", "backgrounds", "1.png")),
+    );
     assert.equal((await desktopTheme(home))?.wallpaper, true);
 });

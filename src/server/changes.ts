@@ -3,6 +3,7 @@
  * its tool calls, so nothing new is stored), and, when the folder is in a git repository, every uncommitted change
  * there, with each file's diff on request.
  */
+import { realpathSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { devNull } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -177,12 +178,13 @@ export async function changesIn(
     entries: readonly ClientEntry[],
     onlyHere = false,
 ): Promise<Changes> {
-    const edits = piEdits(entries, cwd);
     let root: string;
 
     try {
         root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
     } catch {
+        const edits = piEdits(entries, cwd);
+
         return {
             files: [],
             more: 0,
@@ -190,6 +192,16 @@ export async function changesIn(
         };
     }
 
+    // Git returns the physical repository root; resolve Pi's paths from the same physical working directory.
+    let base: string;
+
+    try {
+        base = realpathSync(cwd);
+    } catch {
+        base = resolve(cwd);
+    }
+
+    const edits = piEdits(entries, base);
     const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).then(
         (name) => name.trim(),
         () => undefined,

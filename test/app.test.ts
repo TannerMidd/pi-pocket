@@ -14,7 +14,7 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -1496,7 +1496,7 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
         writeFileSync(join(root, "outside.png"), png);
         assert.equal(
             app.workspace.conversationFile(vee, id, "inside.png"),
-            join(work, "inside.png"),
+            realpathSync(join(work, "inside.png")),
         );
         assert.throws(
             () => app.workspace.conversationFile(vee, id, join(root, "outside.png")),

@@ -12,7 +12,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -115,7 +115,7 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
 
     const changes = await app.workspace.changes(id, owner(app));
 
-    assert.equal(changes.repo?.root, repo);
+    assert.equal(changes.repo?.root, realpathSync(repo));
     assert.match(changes.repo?.branch ?? "", /^(main|master)$/);
     assert.deepEqual(
         changes.files.map(({ path, kind, added, removed, byPi }) => ({
