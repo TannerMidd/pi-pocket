@@ -458,6 +458,7 @@ export class Room {
                 this.#sendPeek(client, summary, json);
             }
         }, PEEK_MS);
+        this.#peekTimer.unref();
     }
 
     /** Send one peeker the tile now, as it starts showing it. */
@@ -627,6 +628,8 @@ export class Room {
                 onClose();
             }
         }, 30_000);
+        // Waiting to close keeps nothing running: a server that stops (its tabs leaving as it goes) exits at once.
+        this.#closeTimer.unref();
     }
 
     close(): void {

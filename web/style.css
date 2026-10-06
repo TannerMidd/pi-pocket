@@ -4963,7 +4963,8 @@ textarea.notes {
     transition: border-color var(--t-hover) var(--ease-out);
 }
 
-.peek:hover {
+.peek:hover,
+.peek:focus-within {
     border-color: var(--accent-line);
 }
 
@@ -5223,7 +5224,8 @@ textarea.notes {
     :root[data-tiling="on"] .peeks .peek.waiting {
         border-color: var(--warn);
     }
-    :root[data-tiling="on"] .peeks .peek:hover {
+    :root[data-tiling="on"] .peeks .peek:hover,
+    :root[data-tiling="on"] .peeks .peek:focus-within {
         border-image: var(--active) 1;
     }
 }

@@ -268,3 +268,91 @@ test("peek lines are a session's last steps in brief: words, calls and how they 
         ],
     );
 });
+
+test("peek lines keep each step short: shell commands, notes, attachments, long words, and nested arguments", () => {
+    const shell = (id: number, status: "done" | "failed", code?: number) =>
+        ({
+            id,
+            kind: "shell",
+            command: `make ${"x".repeat(400)}`,
+            by: "u1",
+            name: "Alex",
+            context: true,
+            output: "…",
+            status,
+            ...(code === undefined ? {} : { code }),
+            taskId: 1,
+        }) as ClientEntry;
+    const lines = peekLines(
+        [
+            { id: 1, kind: "user", text: "", images: 2 },
+            { id: 2, kind: "user", text: "", images: 0 },
+            shell(3, "done", 0),
+            shell(4, "done", 2),
+            shell(5, "failed"),
+            { id: 6, kind: "note", text: "Alex turned plan mode on", name: "Alex" },
+            {
+                id: 7,
+                kind: "assistant",
+                blocks: [
+                    { type: "text", text: `# Summary\n\n${"word ".repeat(100)}` },
+                    { type: "text", text: "   " },
+                    {
+                        type: "toolCall",
+                        id: "c9",
+                        name: "codemode",
+                        args: {
+                            code: "return 1",
+                            options: { a: 1 },
+                            list: [1, 2],
+                            flag: true,
+                            n: 3,
+                        },
+                    },
+                ],
+            },
+            { id: 8, kind: "reset", text: "fresh start" },
+        ],
+        { busy: false },
+        20,
+    );
+
+    assert.deepEqual(lines[0], { kind: "user", text: "(attachments)" });
+    assert.equal(
+        lines.length,
+        8,
+        "an empty message without attachments, and blank text, make no line",
+    );
+    assert.deepEqual(
+        lines.slice(1, 4).map((line) => (line.kind === "shell" ? line.status : line.kind)),
+        ["done", "error", "error"],
+    );
+    const [, command, , , note, words] = lines;
+
+    assert.equal(command?.kind === "shell" && command.command.length, 300);
+    assert.deepEqual(note, { kind: "note", text: "Alex turned plan mode on", name: "Alex" });
+    assert.ok(words?.kind === "text");
+    assert.ok(words.text.length <= 200 && words.text.endsWith("…"));
+    assert.ok(!words.text.includes("#"), "markdown is plain text");
+    assert.deepEqual(lines[6], {
+        kind: "tool",
+        name: "codemode",
+        args: { code: "return 1", flag: true, n: 3 },
+        status: "done",
+    });
+    assert.deepEqual(lines[7], { kind: "event", text: "Context cleared" });
+    // A call that streams in is running, whatever came before.
+    assert.deepEqual(
+        peekLines([], {
+            busy: true,
+            generation: {
+                attempt: 0,
+                message: {
+                    blocks: [{ type: "toolCall", id: "c1", name: "bash", args: { command: "ls" } }],
+                },
+            },
+        }),
+        [{ kind: "tool", name: "bash", args: { command: "ls" }, status: "running" }],
+    );
+    assert.deepEqual(peekLines([], { busy: false }), []);
+});

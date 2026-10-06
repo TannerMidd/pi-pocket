@@ -42,12 +42,16 @@ const since =
 
 store.set({ peeks: {}, peekSeen: readSeen() });
 
-/** Remember that this browser looked at a session now: a run that ended before is no longer new. */
+/**
+ * Remember that this browser looked at a session now: a run that ended before is no longer new. The server's time of
+ * the run's end counts too, so a device whose clock runs behind does not call a run it saw new.
+ */
 export function markSeen(id) {
     const { sessions, sessionsLoaded } = store.state;
     const known = new Set(sessions.map((session) => String(session.id)));
+    const ended = sessions.find((session) => session.id === id)?.endedAt ?? 0;
     const seen = Object.fromEntries(
-        Object.entries({ ...store.state.peekSeen, [id]: Date.now() }).filter(
+        Object.entries({ ...store.state.peekSeen, [id]: Math.max(Date.now(), ended) }).filter(
             ([key]) => !sessionsLoaded || known.has(key),
         ),
     );
@@ -505,7 +509,7 @@ export function PeekStrip({ tiles }) {
 
     useOnScreen(list);
 
-    return html`<div class="peek-strip" ref=${list} aria-label="Peeks">
+    return html`<div class="peek-strip" ref=${list} role="region" aria-label="Peeks">
         ${tiles.map(
             (session) =>
                 html`<${PeekTile}
