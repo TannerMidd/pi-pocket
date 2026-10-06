@@ -378,6 +378,8 @@ const handlers = {
             models: data.models,
             guard: data.guard,
             server: data.server,
+            // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
+            ...(data.connection === undefined ? {} : { streamId: data.connection }),
         }),
     sessions: (sessions) =>
         store.set((state) => ({

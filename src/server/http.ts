@@ -442,6 +442,7 @@ export function createHandler(options: HttpOptions) {
 
         return {
             id: (url.searchParams.get("tab") ?? randomUUID()).slice(0, 64),
+            connection: randomUUID(),
             user,
             conversationId: raw === null || raw === "" ? undefined : conversationId(raw),
             sentEntries: new Set(),
@@ -985,18 +986,25 @@ export function createHandler(options: HttpOptions) {
             return json(response, 200, { ok: true });
         }
 
-        // The sessions this tab shows as peek tiles on screen now: they get `peek` events until it sends another list.
+        // The sessions a connection shows as peek tiles on screen now: they get `peek` events until it sends another list.
         if (first === "peeks" && method === "POST") {
-            const body = await readJson<{ tab?: unknown; ids?: unknown }>(request);
+            const body = await readJson<{ connection?: unknown; ids?: unknown; seq?: unknown }>(
+                request,
+            );
 
             if (!Array.isArray(body.ids)) {
                 throw new HttpError(400, "ids must be a list of session ids");
             }
 
+            if (body.seq !== undefined && !Number.isSafeInteger(body.seq)) {
+                throw new HttpError(400, "seq must be a whole number");
+            }
+
             app.setPeeks(
                 user,
-                String(body.tab ?? ""),
+                String(body.connection ?? ""),
                 body.ids.slice(0, MAX_PEEKS).map((id) => conversationId(String(id))),
+                body.seq as number | undefined,
             );
 
             return json(response, 200, { ok: true });

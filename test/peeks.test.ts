@@ -282,37 +282,102 @@ test(`a tab gets at most ${MAX_PEEKS} live tiles, each once`, async () => {
     }
 });
 
-test("an old and a new connection of one tab both follow its list, and the old one leaving keeps the new one's tiles", async () => {
-    const id = await newSession(app);
+test("each connection has its own list: a duplicated tab or a reconnect does not take another's tiles", async () => {
+    const first = await newSession(app);
+    const second = await newSession(app);
+    // Two connections with one tab id, as a duplicated browser tab (or a reconnect overlapping the old one) makes.
     const old = fakeTab(undefined, owner(app));
-    const fresh = fakeTab(undefined, owner(app));
+    const twin = fakeTab(undefined, owner(app));
 
-    fresh.client = { ...fresh.client, id: old.client.id, sentEntries: new Set() };
-    fresh.client.send = (event, data) =>
-        fresh.events.push({ event, data: data as Record<string, unknown> });
+    old.client = { ...old.client, connection: "old-connection" };
+    twin.client = { ...twin.client, id: old.client.id, connection: "twin-connection" };
 
     try {
         await app.attach(old.client);
-        await app.attach(fresh.client);
-        app.setPeeks(owner(app), old.client.id, [id]);
+        await app.attach(twin.client);
+        app.setPeeks(owner(app), "old-connection", [first]);
+        app.setPeeks(owner(app), "twin-connection", [second]);
         await until(
-            () => peeks(old, id).length > 0 && peeks(fresh, id).length > 0,
-            "both connections to get the tile",
+            () => peeks(old, first).length > 0 && peeks(twin, second).length > 0,
+            "each connection's tile",
         );
-        const room = await app.room(id);
+        assert.deepEqual([...old.client.peeks!], [first]);
+        assert.deepEqual([...twin.client.peeks!], [second]);
+        assert.equal(peeks(old, second).length, 0);
+        assert.equal(peeks(twin, first).length, 0);
+        // A tab id alone names no connection that has one.
+        app.setPeeks(owner(app), old.client.id, []);
+        assert.deepEqual([...old.client.peeks!], [first]);
 
-        assert.equal(room.peekers.size, 2);
+        // The old connection goes; the other keeps its tile, and its updates.
+        const room = await app.room(second);
+
         app.detach(old.client);
-        await until(() => room.peekers.size === 1, "the old connection to let go");
-        assert.ok(room.peekers.has(fresh.client));
-        await say(app, id, "still there?");
         await until(
-            () => words(peeks(fresh, id).at(-1)?.lines.at(-1)) === "echo: still there?",
-            "the new connection to keep getting the tile",
+            async () => (await app.room(first)).peekers.size === 0,
+            "the old connection to let go",
+        );
+        assert.ok(room.peekers.has(twin.client));
+        await say(app, second, "still there?");
+        await until(
+            () => words(peeks(twin, second).at(-1)?.lines.at(-1)) === "echo: still there?",
+            "the other connection to keep getting its tile",
         );
     } finally {
         app.detach(old.client);
-        app.detach(fresh.client);
+        app.detach(twin.client);
+    }
+});
+
+test("a list that arrives after a newer one is dropped", async () => {
+    const first = await newSession(app);
+    const second = await newSession(app);
+    const tab = fakeTab(undefined, owner(app));
+
+    try {
+        await app.attach(tab.client);
+        app.setPeeks(owner(app), tab.client.id, [second], 2);
+        app.setPeeks(owner(app), tab.client.id, [first], 1);
+        assert.deepEqual([...tab.client.peeks!], [second]);
+        app.setPeeks(owner(app), tab.client.id, [first], 3);
+        assert.deepEqual([...tab.client.peeks!], [first]);
+        app.setPeeks(owner(app), tab.client.id, [second], 3);
+        assert.deepEqual([...tab.client.peeks!], [first], "the same number again is late too");
+    } finally {
+        app.detach(tab.client);
+    }
+});
+
+test("a session's view closes once its last tile and tab are gone, and not before", async () => {
+    const id = await newSession(app);
+    const there = fakeTab(id, owner(app));
+    const tab = fakeTab(undefined, owner(app));
+    const room = await app.room(id);
+    let closing = 0;
+    const closeLater = room.closeLater.bind(room);
+
+    room.closeLater = (onClose) => {
+        closing++;
+        closeLater(onClose);
+    };
+
+    try {
+        await app.attach(there.client);
+        await app.attach(tab.client);
+        app.setPeeks(owner(app), tab.client.id, [id]);
+        await until(() => room.peekers.size === 1, "the tile");
+        app.detach(there.client);
+        await until(() => room.clients.size === 0, "the tab to leave");
+        assert.equal(closing, 0, "a tile keeps the view open");
+        app.setPeeks(owner(app), tab.client.id, []);
+        await until(() => closing === 1, "the view to close once the tile goes");
+        // Back before it closed: the same view, kept open.
+        app.setPeeks(owner(app), tab.client.id, [id]);
+        await until(() => room.peekers.size === 1, "the tile again");
+        assert.equal(await app.openRoom(id), room);
+    } finally {
+        app.detach(there.client);
+        app.detach(tab.client);
     }
 });
 
@@ -523,6 +588,8 @@ test("the peeks route checks who asks and what, and the event stream carries the
     assert.equal((await postPeeks({ tab: "t", ids: ["two"] })).status, 400);
     assert.equal((await postPeeks({ tab: "t", ids: [-1] })).status, 400);
     assert.equal((await postPeeks({ tab: "t" })).status, 400);
+    assert.equal((await postPeeks({ connection: "c", ids: [], seq: "2" })).status, 400);
+    assert.equal((await postPeeks({ connection: "c", ids: [], seq: 1.5 })).status, 400);
 
     const stream = openStream(`tab=wire-tab&c=${open}`);
 
@@ -537,7 +604,25 @@ test("the peeks route checks who asks and what, and the event stream carries the
             true,
             "the server says it sends peeks",
         );
-        const response = await postPeeks({ tab: "wire-tab", ids: [Number(other)] });
+        const hello = stream.events.find((each) => each.event === "hello")!.data;
+
+        assert.equal(typeof hello.connection, "string", "hello names the connection");
+        assert.ok(
+            Math.abs(Number((hello.server as { now?: number }).now) - Date.now()) < 5000,
+            "and the server's time",
+        );
+        // A list for another connection, or none, changes nothing here.
+        assert.equal(
+            (await postPeeks({ connection: "wire-tab", ids: [Number(other)] })).status,
+            200,
+        );
+        await settle(200);
+        assert.equal((await app.room(other)).peekers.size, 0);
+        const response = await postPeeks({
+            connection: hello.connection,
+            seq: 1,
+            ids: [Number(other)],
+        });
 
         assert.equal(response.status, 200);
         await until(
@@ -567,7 +652,14 @@ test("long polling carries the tiles too", async () => {
     const first = await poll("tab=poll-tab");
 
     try {
-        assert.equal((await postPeeks({ tab: "poll-tab", ids: [Number(other)] })).status, 200);
+        const connection = first.events.find((each) => each.event === "hello")?.data as unknown as {
+            connection: string;
+        };
+
+        assert.equal(
+            (await postPeeks({ connection: connection.connection, ids: [Number(other)] })).status,
+            200,
+        );
         const last = first.events.at(-1)?.seq ?? 0;
         let found: PeekSummary | undefined;
 

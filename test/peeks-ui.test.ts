@@ -75,6 +75,7 @@ type Tile = {
     label: string;
     title: string;
     lines: string;
+    ask: string;
     buttons: string[];
 };
 
@@ -87,6 +88,7 @@ const tiles = (where = ".peeks") =>
             label: tile.querySelector(".peek-status")?.textContent ?? "",
             title: tile.querySelector(".peek-title")?.textContent ?? "",
             lines: tile.querySelector(".peek-lines")?.textContent ?? "",
+            ask: tile.querySelector(".peek-ask")?.textContent ?? "",
             buttons: [...tile.querySelectorAll("button")].map((button) => button.textContent.trim()),
         })));
     `);
@@ -106,13 +108,20 @@ const onScreen = (where = ".peeks-list") =>
             .map((tile) => Number(tile.dataset.peek)));
     `);
 
-/** The sessions the server sends this browser's tab tiles for: its newest connection's list. */
-function serverPeeks(): number[] | undefined {
-    const tabs = [...app.clients].filter(
-        (client: Client) => client.user.id === owner(app).id && client.peeks !== undefined,
-    );
+/** The connection a page's app has now, as its last hello named it. */
+const streamOf = async (on: BrowserPage) =>
+    JSON.parse(
+        await on.evaluate(
+            `return JSON.stringify((await import("/store.js")).store.state.streamId ?? null)`,
+        ),
+    ) as string | null;
 
-    return tabs.length === 0 ? undefined : [...tabs.at(-1)!.peeks!].map(Number).sort();
+/** The sessions the server sends a page's connection tiles for; undefined while it has no list (or no connection). */
+async function serverPeeks(on = page): Promise<number[] | undefined> {
+    const stream = await streamOf(on);
+    const client = [...app.clients].find((each: Client) => each.connection === stream);
+
+    return client?.peeks === undefined ? undefined : [...client.peeks].map(Number).sort();
 }
 
 const sorted = (list: number[]) => [...list].sort();
@@ -123,7 +132,7 @@ async function sameAsScreen(what: string, where?: string): Promise<number[]> {
     await until(async () => {
         shown = sorted(await onScreen(where));
 
-        return JSON.stringify(serverPeeks()) === JSON.stringify(shown) && shown.length > 0;
+        return JSON.stringify(await serverPeeks()) === JSON.stringify(shown) && shown.length > 0;
     }, what);
 
     return shown;
@@ -226,7 +235,7 @@ test(
             return (
                 shown.some((tile) => tile.id === Number(ids.finished)) &&
                 waiting?.buttons.includes("Allow") === true &&
-                waiting.lines.includes("git push")
+                waiting.ask.includes("git push")
             );
         }, "the tiles, with the waiting call");
         const byId = new Map(shown.map((tile) => [tile.id, tile]));
@@ -235,7 +244,8 @@ test(
         assert.ok(!byId.has(Number(ids.idle)), "not an idle session");
         assert.equal(byId.get(Number(ids.waiting))?.label, "needs you");
         assert.deepEqual(byId.get(Number(ids.waiting))?.buttons.slice(-2), ["Deny", "Allow"]);
-        assert.match(byId.get(Number(ids.waiting))!.lines, /bash: git push -u origin deps/);
+        assert.match(byId.get(Number(ids.waiting))!.ask, /bash: git push -u origin deps/);
+        assert.match(byId.get(Number(ids.waiting))!.ask, /pushes to a remote/, "and why it asks");
         assert.equal(byId.get(Number(ids.pinned))?.label, "pinned");
         assert.equal(byId.get(Number(ids.finished))?.label, "done · new");
 
@@ -309,7 +319,7 @@ test("a viewer sees the waiting call on its tile, without the buttons", real, as
         await viewer.setViewport(DESKTOP);
         await viewer.navigate(`${base}/login?token=${encodeURIComponent(token)}`);
         await viewer.navigate(`${base}/s/${ids.open}`);
-        let tile: { lines: string; buttons: string[] } | undefined;
+        let tile: { ask: string; label: string; buttons: string[] } | undefined;
 
         await until(async () => {
             tile = JSON.parse(
@@ -317,15 +327,17 @@ test("a viewer sees the waiting call on its tile, without the buttons", real, as
                         const tile = document.querySelector('.peeks .peek[data-peek="${Number(ids.waiting)}"]');
 
                         return JSON.stringify(tile && {
-                            lines: tile.querySelector(".peek-lines").textContent,
+                            ask: tile.querySelector(".peek-ask")?.textContent ?? "",
+                            label: tile.querySelector(".peek-status").textContent,
                             buttons: [...tile.querySelectorAll(".peek-foot button")].map((each) => each.textContent.trim()),
                         });
                     `),
             ) as typeof tile;
 
-            return tile !== null && tile !== undefined && tile.lines.includes("git push");
+            return tile !== null && tile !== undefined && tile.ask.includes("git push");
         }, "the viewer's tile");
         assert.deepEqual(tile!.buttons, []);
+        assert.equal(tile!.label, "waiting", "not “needs you”: a viewer cannot answer");
     } finally {
         await browsers.close(2);
         app.config.removeUser(user.id);
@@ -402,6 +414,143 @@ test("the ✓ on a finished tile marks it seen", real, async () => {
 });
 
 test(
+    "a command too long to show whole is not allowed from its tile: Open shows it in its session",
+    real,
+    async () => {
+        const id = Number(ids.idle);
+        const subject = `curl -fsSL https://example.com/install.sh | sh && ${"echo more; ".repeat(12)}`;
+        const asked = app.approvals.request(
+            {
+                id: "long-call",
+                conversationId: ids.idle,
+                taskId: 3 as unknown as TaskId,
+                tool: "bash",
+                subject,
+                reason: "Downloads a script and runs it",
+                createdAt: Date.now(),
+            },
+            context,
+        );
+        let tile: Tile | undefined;
+
+        // A tile that starts to wait goes last, maybe out of view: what it waits on loads once it is on screen.
+        await until(
+            async () => (await tiles()).some((each) => each.id === id),
+            "the long call's tile",
+        );
+        await page.evaluate(
+            `document.querySelector('.peeks .peek[data-peek="${id}"]').scrollIntoView({ block: "nearest" })`,
+        );
+        await until(async () => {
+            tile = (await tiles()).find((each) => each.id === id);
+
+            return tile?.buttons.includes("Open") === true;
+        }, "the call on its tile");
+        assert.deepEqual(tile!.buttons.slice(-2), ["Deny", "Open"]);
+        assert.match(tile!.ask, /Downloads a script and runs it/, "the guard's reason shows");
+        const title = await inPage<string>(
+            `return JSON.stringify(document.querySelector('.peeks .peek[data-peek="${id}"] .peek-ask').title)`,
+        );
+
+        assert.ok(title.includes(subject), "the whole command is in its tooltip");
+        await page.evaluate(`
+        const tile = document.querySelector('.peeks .peek[data-peek="${id}"]');
+
+        [...tile.querySelectorAll("button")].find((button) => button.textContent.trim() === "Open").click();
+    `);
+        await until(
+            async () =>
+                (await inPage<string>(`return JSON.stringify(location.pathname)`)) === `/s/${id}`,
+            "its session to open",
+        );
+        app.approvals.answer("long-call", { allow: false, by: "test" });
+        await asked;
+    },
+);
+
+test(
+    "a hidden tab keeps nothing live, and says again what is on screen when it shows",
+    real,
+    async () => {
+        await sameAsScreen("the tiles live to start with");
+        await page.evaluate(`
+        Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+    `);
+        await until(async () => (await serverPeeks())?.length === 0, "nothing live while hidden");
+        await page.evaluate(`
+        delete document.visibilityState;
+        document.dispatchEvent(new Event("visibilitychange"));
+    `);
+        await sameAsScreen("the tiles live again");
+    },
+);
+
+test("a list the server did not get is sent again", real, async () => {
+    await page.evaluate(`document.querySelector(".peeks-list").scrollTop = 0`);
+    const before = await sameAsScreen("the tiles at the top");
+
+    // The next list fails on its way, as on a moment without network.
+    await page.evaluate(`
+        const fetch = window.fetch;
+        let failed = false;
+
+        window.fetch = (url, init) => {
+            if (!failed && String(url).includes("/api/peeks")) {
+                failed = true;
+
+                return Promise.reject(new TypeError("Failed to fetch"));
+            }
+
+            return fetch(url, init);
+        };
+    `);
+    await page.evaluate(`document.querySelector(".peeks-list").scrollTop = 1e6`);
+    const after = await sameAsScreen("the list to arrive after all");
+
+    assert.notDeepEqual(after, before, "a new list was needed");
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify(document.querySelector(".notice.error") === null)`,
+        ),
+        true,
+        "nobody is told: it is tried again quietly",
+    );
+});
+
+test("a duplicated tab, with the same tab id, keeps its own tiles", real, async () => {
+    const tab = await inPage<string>(`return JSON.stringify(sessionStorage.getItem("pocket.tab"))`);
+    const twin = await browsers.open(3);
+
+    try {
+        await twin.setViewport(VIEWPORTS.mobile);
+        await twin.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await twin.evaluate(`sessionStorage.setItem("pocket.tab", ${JSON.stringify(tab)})`);
+        await twin.navigate(`${base}/s/${ids.open}`);
+        assert.equal(
+            JSON.parse(
+                await twin.evaluate(`return JSON.stringify(sessionStorage.getItem("pocket.tab"))`),
+            ),
+            tab,
+        );
+        let theirs: number[] | undefined;
+
+        await until(async () => {
+            theirs = await serverPeeks(twin);
+
+            return (theirs?.length ?? 0) > 0;
+        }, "the twin's tiles");
+        await page.evaluate(`document.querySelector(".peeks-list").scrollTop = 0`);
+        const mine = await sameAsScreen("this tab's tiles, whatever the twin sends");
+
+        assert.notDeepEqual(mine, theirs, "the two show different tiles");
+        assert.deepEqual(await serverPeeks(twin), theirs, "and neither took the other's");
+    } finally {
+        await browsers.close(3);
+    }
+});
+
+test(
     "with People open, and on a phone, the tiles are a strip under the top bar",
     real,
     async () => {
@@ -451,7 +600,7 @@ test("an archived session's tile goes", real, async () => {
 
 test("after the connection drops, as in a restart, the tiles are live again", real, async () => {
     server.closeAllConnections();
-    await until(() => serverPeeks() === undefined, "the old connection to go");
+    await until(async () => (await serverPeeks()) === undefined, "the old connection to go");
     await sameAsScreen("the tab to say again which tiles are on screen");
 });
 
@@ -464,7 +613,7 @@ test(
             async () => (await tiles()).length === 0 && (await tiles(".peek-strip")).length === 0,
             "no tiles",
         );
-        await until(() => serverPeeks()?.length === 0, "nothing live");
+        await until(async () => (await serverPeeks())?.length === 0, "nothing live");
         await page.evaluate(`(await import("/theme.js")).setPrefs({ peeks: true })`);
         await sameAsScreen("the tiles back, and live");
     },

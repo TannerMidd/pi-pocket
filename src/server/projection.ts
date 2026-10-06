@@ -532,7 +532,7 @@ export type PeekLine =
           args: Record<string, string | number | boolean>;
           status: "running" | "done" | "error";
       }
-    | { kind: "shell"; command: string; status: "running" | "done" | "error" }
+    | { kind: "shell"; command: string; status: "done" | "error" }
     | { kind: "note"; text: string; name: string }
     | { kind: "error"; text: string }
     | { kind: "event"; text: string };

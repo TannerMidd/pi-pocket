@@ -108,8 +108,15 @@ export interface Client {
     orderKey: string;
     /** The JSON of each slow-changing view field this client last got, so updates repeat only those that changed. */
     sentFields?: Map<string, string>;
+    /**
+     * This connection, apart from others of the same tab id: a duplicated browser tab keeps the id, and a reconnect
+     * briefly overlaps the old connection. Sent in `hello`; peek lists name it.
+     */
+    readonly connection?: string;
     /** Other sessions this tab shows as peek tiles on screen now; each gets `peek` events (`PocketApp.setPeeks`). */
     peeks?: Set<ConversationId>;
+    /** The number of the last peek list taken, so one that arrives late does not undo a newer one. */
+    peekSeq?: number;
 }
 
 export type TypingPlace = "chat" | "pi";

@@ -591,7 +591,10 @@ export class PocketApp {
 
                             if (!busy) {
                                 this.spend.runEnded(id);
-                                this.#endedAt.set(id, Date.now());
+
+                                if (this.#sessions[String(id)] !== undefined) {
+                                    this.#endedAt.set(id, Date.now());
+                                }
                             }
 
                             // A parent shows its subagents' busy state.
@@ -863,7 +866,7 @@ export class PocketApp {
             return;
         }
 
-        client.send("hello", hello);
+        client.send("hello", { ...hello, connection: client.connection });
         client.send("sessions", this.sessions(client.user));
 
         if (arriving) {
@@ -966,10 +969,12 @@ export class PocketApp {
     }
 
     /**
-     * The sessions a tab shows as peek tiles on its screen now. Each gets short `peek` updates while it stays there; the
-     * rest stop, and their views close as they do when the last tab leaves. Sessions this person may not see are left out.
+     * The sessions a connection shows as peek tiles on its screen now. Each gets short `peek` updates while it stays
+     * there; the rest stop, and their views close as they do when the last tab leaves. Sessions this person may not see
+     * are left out. `connection` is the id its `hello` carried (a test's tab without one goes by its tab id); a list
+     * numbered `seq` below one already taken arrived late, and is dropped.
      */
-    setPeeks(user: User, tab: string, ids: readonly ConversationId[]): void {
+    setPeeks(user: User, connection: string, ids: readonly ConversationId[], seq?: number): void {
         const wanted = new Set(
             ids
                 .filter((id) => this.#sessions[String(id)] !== undefined && this.canSee(user, id))
@@ -977,8 +982,16 @@ export class PocketApp {
         );
 
         for (const client of this.#clients) {
-            if (client.user.id !== user.id || client.id !== tab) {
+            if (client.user.id !== user.id || (client.connection ?? client.id) !== connection) {
                 continue;
+            }
+
+            if (seq !== undefined) {
+                if (seq <= (client.peekSeq ?? -Infinity)) {
+                    continue;
+                }
+
+                client.peekSeq = seq;
             }
 
             const had = client.peeks ?? new Set<ConversationId>();
@@ -1013,6 +1026,11 @@ export class PocketApp {
         if (!this.#clients.has(client) || client.peeks?.has(id) !== true) {
             this.releaseRoom(room);
 
+            return;
+        }
+
+        // Scrolled away and back while the view opened: the first of the two calls added it already.
+        if (room.peekers.has(client)) {
             return;
         }
 
@@ -1314,6 +1332,8 @@ export class PocketApp {
                 chat: true,
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
                 peeks: true,
+                // This server's clock: peek tiles compare the browser's looks with when runs ended here.
+                now: Date.now(),
                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
                 collab: 2,
                 reactions: REACTIONS,
@@ -1776,7 +1796,7 @@ export class PocketApp {
                 continue;
             }
 
-            client.send("hello", await this.hello(user));
+            client.send("hello", { ...(await this.hello(user)), connection: client.connection });
             client.send("sessions", this.sessions(user));
         }
     }
@@ -2345,7 +2365,10 @@ export class PocketApp {
     /** Send every client a fresh hello: the guard's status and the extension names changed. */
     async #refreshClients(): Promise<void> {
         for (const client of this.#clients) {
-            client.send("hello", await this.hello(client.user));
+            client.send("hello", {
+                ...(await this.hello(client.user)),
+                connection: client.connection,
+            });
         }
     }
 

@@ -5061,8 +5061,33 @@ textarea.notes {
     color: var(--faint);
 }
 
-.peek-line.ask {
+/* The call a session waits on: the whole command when it is short enough to allow from here, and the guard's reason. */
+.peek-ask {
+    flex: none;
+    padding: 0.3rem 0.6rem;
+    border-top: 1px solid var(--warn-line);
+    background: var(--warn-soft);
+    font-size: 0.72rem;
+}
+
+.peek-ask-what {
     color: var(--warn);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+}
+
+.peek-ask-why {
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
 }
 
 .peek-line.err,
@@ -5196,6 +5221,11 @@ textarea.notes {
 .peek-strip .peek-line.text {
     display: block;
     white-space: nowrap;
+}
+
+.peek-strip .peek-ask {
+    margin: 0.2rem 0.55rem 0;
+    border: 1px solid var(--warn-line);
 }
 
 .peek-strip .peek-foot {
