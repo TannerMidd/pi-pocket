@@ -509,6 +509,31 @@ test(
     },
 );
 
+test("a command sent while a navigation swaps the page waits for it", real, async () => {
+    const browsers = new Browsers({
+        dataDir: mkdtempSync(join(root, "swap-")),
+        load: async () => undefined,
+        save: () => {},
+    });
+
+    try {
+        const page = await browsers.open(1, { restore: false });
+
+        // Across sites (to the test site and back to about:blank), Chromium moves the page to a new process and for a
+        // moment refuses commands. A reload or stop sent right then used to fail: "Not attached to an active page".
+        for (let round = 0; round < 3; round++) {
+            await page.navigate("about:blank");
+            await page.navigate(`${base}/`);
+            await page.go(-1, { wait: false });
+            await page.reload({ wait: false });
+            await page.navigate(`${base}/two`, { wait: false });
+            await page.stop();
+        }
+    } finally {
+        await browsers.closeAll({ final: true });
+    }
+});
+
 test(
     "Pi uses the browser tool, and people watch and use the same page in the panel",
     real,

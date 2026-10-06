@@ -50,6 +50,14 @@ const FRAME_GAP_MS = 40;
 /** Frames stop this long after the last viewer asked for one. */
 const WATCH_MS = 15_000;
 const FRAME_WAIT_MS = 25_000;
+/**
+ * Across sites, a navigation moves the page to a new process, and for a moment Chromium refuses commands without running
+ * them. These ones are sent again then, for up to `SWAP_WAIT_MS` (the last try still gets the command's own timeout):
+ * reloading and stopping act on whatever document is there. Others are not: a script, a selection, or a place to click
+ * meant for the old document must not act on the new one, and a navigation sent again could overtake a newer one.
+ */
+const RETRY_WHILE_SWAPPING = new Set(["Page.reload", "Page.stopLoading"]);
+const SWAP_WAIT_MS = 3000;
 
 /** A console argument as text: strings as they are, other values as DevTools would show them in one line. */
 function formatArg(arg: Json): string {
@@ -199,12 +207,34 @@ export class BrowserPage {
         return { ...this.#viewport };
     }
 
-    #send(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<Json> {
-        if (this.#closed) {
-            return Promise.reject(new BrowserError("This page is closed."));
-        }
+    /** Send a command to the page; a reload or stop again while a navigation swaps its document (`RETRY_WHILE_SWAPPING`). */
+    async #send(
+        method: string,
+        params: Record<string, unknown> = {},
+        timeoutMs?: number,
+    ): Promise<Json> {
+        const started = Date.now();
 
-        return this.#connection.send(method, params, this.#session, timeoutMs);
+        for (;;) {
+            if (this.#closed) {
+                throw new BrowserError("This page is closed.");
+            }
+
+            try {
+                return await this.#connection.send(method, params, this.#session, timeoutMs);
+            } catch (error) {
+                if (
+                    !(error instanceof BrowserError) ||
+                    error.message !== "Not attached to an active page" ||
+                    !RETRY_WHILE_SWAPPING.has(method) ||
+                    Date.now() - started > SWAP_WAIT_MS
+                ) {
+                    throw error;
+                }
+
+                await wait(25);
+            }
+        }
     }
 
     async init(): Promise<void> {

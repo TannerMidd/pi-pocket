@@ -20,6 +20,15 @@ const BROWSER_ACTIONS = new Set([
     "clear",
 ]);
 
+/** The browser's own failures (none installed, it crashed) are the person's to read, not a server error. */
+function readable(error: unknown): never {
+    if (error instanceof BrowserError) {
+        throw new HttpError(409, error.message);
+    }
+
+    throw error;
+}
+
 /**
  * The Browser panel: the conversation's page as frames, its console, and what people do to it. Everyone who can see
  * the conversation watches; using the page takes what steering Pi takes, as the browser reaches what this machine
@@ -122,13 +131,13 @@ export async function browserRoutes(
                 throw new HttpError(400, "events must be a list");
             }
 
-            await page.input(body.events.slice(0, 200));
+            await page.input(body.events.slice(0, 200)).catch(readable);
 
             return json(response, 200, { ok: true });
         }
 
         if (action === "stop") {
-            await page.stop();
+            await page.stop().catch(readable);
         } else {
             page.clearLogs();
         }
@@ -196,11 +205,6 @@ export async function browserRoutes(
 
         return json(response, 200, browsers.state(key));
     } catch (error) {
-        // The browser's own failures (none installed, it crashed) are the person's to read, not a server error.
-        if (error instanceof BrowserError) {
-            throw new HttpError(409, error.message);
-        }
-
-        throw error;
+        readable(error);
     }
 }
