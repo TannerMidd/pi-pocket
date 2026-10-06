@@ -20,7 +20,7 @@ export type DesktopTheme = {
 };
 
 /** Where Omarchy keeps its current theme, newest layout first. */
-export function currentDirs(home = homedir()): string[] {
+function currentDirs(home = homedir()): string[] {
     return [join(home, ".local/state/omarchy/current"), join(home, ".config/omarchy/current")];
 }
 

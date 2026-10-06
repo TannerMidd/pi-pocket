@@ -57,11 +57,11 @@ interface PocketConfig {
 /** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
 export type ApprovalRule = "anyone" | "others";
 
-export function newToken(): string {
+function newToken(): string {
     return randomBytes(24).toString("base64url");
 }
 
-export function hashToken(token: string): string {
+function hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
 }
 

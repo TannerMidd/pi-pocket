@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { createJiti } from "jiti";
+import { describe } from "./errors.ts";
 
 export type GateDecision =
     | { action: "allow"; source: string; reason: string; audited: boolean; score?: number }
@@ -123,7 +124,7 @@ export class LancetGuard {
             };
         })();
         this.#modules.catch((error: unknown) => {
-            this.#loadError = error instanceof Error ? error.message : String(error);
+            this.#loadError = describe(error);
             this.#modules = undefined;
         });
 
@@ -179,8 +180,7 @@ export class LancetGuard {
                     : `Lancet Guard is off in ${this.settingsFile}.`,
             };
         } catch (error) {
-            const reason =
-                this.#loadError ?? (error instanceof Error ? error.message : String(error));
+            const reason = this.#loadError ?? describe(error);
 
             return this.#switchedOn()
                 ? {
@@ -240,7 +240,7 @@ export class LancetGuard {
                 decision: {
                     action: "block",
                     source: "unavailable",
-                    reason: `Lancet Guard could not load: ${error instanceof Error ? error.message : String(error)}`,
+                    reason: `Lancet Guard could not load: ${describe(error)}`,
                     terminate: false,
                 },
             };

@@ -8,6 +8,7 @@ import type { AuthPrompt } from "@earendil-works/pi-ai";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
+import { modelList } from "./models.ts";
 
 interface AuthFlow {
     id: string;
@@ -154,7 +155,7 @@ export class Providers {
 
     /** Every tab gets the models available now. */
     #sendModels(): void {
-        const models = this.#app.modelList();
+        const models = modelList(this.#app.models);
 
         for (const client of this.#app.clients) {
             client.send("models", models);

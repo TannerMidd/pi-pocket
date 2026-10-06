@@ -34,12 +34,13 @@ import {
     SessionsDoc,
     SubagentsDoc,
 } from "./docs.ts";
+import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY } from "./entry-format.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
-import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY, snippet } from "./projection.ts";
+import { snippet } from "./projection.ts";
 import { expandPromptTemplate, expandSkillCommand } from "./prompts.ts";
-import { ownRequest } from "./requests.ts";
+import { clientKey, ownRequest } from "./requests.ts";
 import { type Resend, resendContent, resendRequest, ResendTask, userContent } from "./resend.ts";
 import { wantsTitle, writeTitle } from "./titles.ts";
 import { describeMoment, describeRepeat, knownZone } from "./when.ts";
@@ -105,6 +106,19 @@ function entryIdOf(value: unknown): number {
     return id;
 }
 
+/** A request's model, when it names one, must name a provider and a model id. */
+function checkModel(asked: { provider?: unknown; modelId?: unknown } | undefined): void {
+    if (
+        asked !== undefined &&
+        (typeof asked !== "object" ||
+            asked === null ||
+            typeof asked.provider !== "string" ||
+            typeof asked.modelId !== "string")
+    ) {
+        throw new HttpError(400, "model must name a provider and a model id");
+    }
+}
+
 export class Commands {
     readonly #app: PocketApp;
 
@@ -126,7 +140,9 @@ export class Commands {
         }
 
         const title = optionalText(request.title, "title")?.trim().slice(0, MAX_TITLE) || undefined;
-        const folder = app.checkDirectory(optionalText(request.cwd, "cwd") ?? app.defaultCwd);
+        const folder = app.workspace.checkDirectory(
+            optionalText(request.cwd, "cwd") ?? app.defaultCwd,
+        );
         const initial = this.#defaultModel();
         const now = Date.now();
 
@@ -410,10 +426,7 @@ export class Commands {
         }
 
         const content = parts.length === 1 ? body : parts;
-        const requestId = ownRequest(
-            user.id,
-            request.requestId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || randomUUID(),
-        );
+        const requestId = ownRequest(user.id, clientKey(request.requestId));
         const submission = await conversation.submit(
             {
                 type: "input",
@@ -451,7 +464,7 @@ export class Commands {
 
             for (const candidate of mention.candidates) {
                 try {
-                    const resolved = app.readableFile(user, id, candidate);
+                    const resolved = app.workspace.readableFile(user, id, candidate);
 
                     if (statSync(resolved).isFile()) {
                         file = resolved;
@@ -616,7 +629,7 @@ export class Commands {
 
         app.requireSee(user, id);
         app.requireSteer(user);
-        const by = app.knownSubmitter(submissionId);
+        const by = app.attribution.knownSubmitter(submissionId);
 
         if (by !== user.id) {
             await app.requireDriver(id, user);
@@ -652,15 +665,7 @@ export class Commands {
         await app.requireDriver(id, user);
         const asked = request.model as { provider?: unknown; modelId?: unknown } | undefined;
 
-        if (
-            asked !== undefined &&
-            (typeof asked !== "object" ||
-                asked === null ||
-                typeof asked.provider !== "string" ||
-                typeof asked.modelId !== "string")
-        ) {
-            throw new HttpError(400, "model must name a provider and a model id");
-        }
+        checkModel(asked);
 
         if (
             optionalText(request.thinkingLevel, "thinkingLevel") !== undefined &&
@@ -690,7 +695,8 @@ export class Commands {
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
-        const cwd = request.cwd === undefined ? undefined : app.checkDirectory(request.cwd);
+        const cwd =
+            request.cwd === undefined ? undefined : app.workspace.checkDirectory(request.cwd);
 
         await conversation.configure(
             {
@@ -988,7 +994,7 @@ export class Commands {
     ): Promise<{ id: ConversationId }> {
         this.#requireForkable(id, user);
         const entryId = entryIdOf(request.entryId);
-        const entry = await this.#app.visibleEntry(id, entryId);
+        const entry = await this.#app.transcripts.visibleEntry(id, entryId);
 
         if (entry === undefined) {
             throw new HttpError(404, "No such message");
@@ -1029,17 +1035,9 @@ export class Commands {
         const edited = optionalText(request.text, "text")?.trim();
         const asked = request.model as { provider?: unknown; modelId?: unknown } | undefined;
 
-        if (
-            asked !== undefined &&
-            (typeof asked !== "object" ||
-                asked === null ||
-                typeof asked.provider !== "string" ||
-                typeof asked.modelId !== "string")
-        ) {
-            throw new HttpError(400, "model must name a provider and a model id");
-        }
+        checkModel(asked);
 
-        const entry = await app.visibleEntry(id, entryId);
+        const entry = await app.transcripts.visibleEntry(id, entryId);
 
         if (entry?.kind !== "pi.user") {
             throw new HttpError(404, "No such message to Pi");

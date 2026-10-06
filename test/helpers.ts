@@ -7,6 +7,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
+import type { Attachment } from "../src/server/commands.ts";
 import type { User } from "../src/server/config.ts";
 import type { Client } from "../src/server/room.ts";
 
@@ -126,8 +127,6 @@ export async function newSession(app: App, cwd = work): Promise<ConversationId> 
 
     return id;
 }
-
-export type Attachment = { path: string; name: string; mime: string; size: number };
 
 /** Send a message as the owner and wait for Pi's answer. */
 export async function say(

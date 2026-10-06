@@ -167,10 +167,14 @@ test("who asked is fixed when the call asks, a subagent works for whoever its pa
                 ),
             "the helper to report",
         );
-        assert.equal(app.requesterOf(helper), alex.id, "its work is still Alex's when it is done");
+        assert.equal(
+            app.attribution.requesterOf(helper),
+            alex.id,
+            "its work is still Alex's when it is done",
+        );
         await app.close();
         app = await openApp(model);
-        assert.equal(app.requesterOf(helper), alex.id, "and after a restart");
+        assert.equal(app.attribution.requesterOf(helper), alex.id, "and after a restart");
         const delegated = ask(helper, "rm -rf docs");
 
         await assert.rejects(
@@ -197,7 +201,7 @@ test("who asked is fixed when the call asks, a subagent works for whoever its pa
             async () => (await modelTexts(app, retry)).some((text) => text.includes("echo:")),
             "the retry to be answered",
         );
-        assert.equal(app.requesterOf(retry), bea.id);
+        assert.equal(app.attribution.requesterOf(retry), bea.id);
         assert.ok(
             (await modelTexts(app, retry)).some((text) => text.includes("[from: Bea S] tidy up")),
         );
@@ -246,7 +250,7 @@ test("whose work Pi does survives a crash before it was written down, and when n
         await sayAs(bea, id, "thanks");
         await crash((authors) => delete authors.requesters, helper);
         assert.equal(
-            app.requesterOf(helper),
+            app.attribution.requesterOf(helper),
             alex.id,
             "the helper's task was Alex's, though Bea wrote to the session since",
         );
@@ -259,7 +263,7 @@ test("whose work Pi does survives a crash before it was written down, and when n
                 }
             }
         }, id);
-        assert.equal(app.requesterOf(id), alex.id, "not Bea, who wrote before him");
+        assert.equal(app.attribution.requesterOf(id), alex.id, "not Bea, who wrote before him");
         assert.ok(
             Object.values((await app.harness.snapshot(AuthorsDoc, id, context))!.entries).includes(
                 alex.id,

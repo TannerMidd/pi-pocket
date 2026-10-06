@@ -21,6 +21,7 @@ import {
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { entryText, snippet } from "./projection.ts";
+import { clientKey } from "./requests.ts";
 import type { TypingPlace } from "./room.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -102,7 +103,9 @@ export class Collab {
 
         if (request.quote !== undefined) {
             const entryId = Number(request.quote.entryId);
-            const entry = Number.isInteger(entryId) ? await app.fullEntry(id, entryId) : undefined;
+            const entry = Number.isInteger(entryId)
+                ? await app.transcripts.fullEntry(id, entryId)
+                : undefined;
 
             if (entry === undefined) {
                 throw new HttpError(400, "The quoted message is not in this conversation");
@@ -112,7 +115,7 @@ export class Collab {
         }
 
         const mentions = this.#mentions(text, user.id);
-        const messageId = `${user.id.slice(0, 8)}-${request.requestId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || randomUUID()}`;
+        const messageId = `${user.id.slice(0, 8)}-${clientKey(request.requestId)}`;
         let created = false;
         const message = await app.harness.commit(async (tx) => {
             const doc = await tx.doc(ChatDoc, id);
@@ -282,7 +285,7 @@ export class Collab {
             throw new HttpError(400, `Pick one of ${REACTIONS.join(" ")}`);
         }
 
-        if ((await app.fullEntry(id, entryId)) === undefined) {
+        if ((await app.transcripts.fullEntry(id, entryId)) === undefined) {
             throw new HttpError(404, "No such message");
         }
 
@@ -333,7 +336,9 @@ export class Collab {
 
         if (target.entryId !== undefined) {
             const entryId = Number(target.entryId);
-            const entry = Number.isInteger(entryId) ? await app.fullEntry(id, entryId) : undefined;
+            const entry = Number.isInteger(entryId)
+                ? await app.transcripts.fullEntry(id, entryId)
+                : undefined;
 
             if (entry === undefined || (entry.kind !== "user" && entry.kind !== "assistant")) {
                 throw new HttpError(404, "No such message");

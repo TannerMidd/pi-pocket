@@ -113,7 +113,7 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
     await say(app, id, "write outside");
     writeFileSync(join(repo, "other.txt"), "changed by a person\n");
 
-    const changes = await app.changes(id, owner(app));
+    const changes = await app.workspace.changes(id, owner(app));
 
     assert.equal(changes.repo?.root, repo);
     assert.match(changes.repo?.branch ?? "", /^(main|master)$/);
@@ -143,30 +143,32 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
         "outside the repository, only Pi's list has it",
     );
 
-    assert.match(await app.changeDiff(id, owner(app), "keep.txt"), /^-b\n\+c$/m);
-    assert.match(await app.changeDiff(id, owner(app), "notes/todo.md"), /^\+- one$/m);
-    await assert.rejects(app.changeDiff(id, owner(app), "../outside.txt"), { status: 404 });
-    await assert.rejects(app.changeDiff(id, owner(app), "/etc/passwd"), { status: 404 });
-    await assert.rejects(app.changeDiff(id, owner(app), "README.md"), {
+    assert.match(await app.workspace.changeDiff(id, owner(app), "keep.txt"), /^-b\n\+c$/m);
+    assert.match(await app.workspace.changeDiff(id, owner(app), "notes/todo.md"), /^\+- one$/m);
+    await assert.rejects(app.workspace.changeDiff(id, owner(app), "../outside.txt"), {
+        status: 404,
+    });
+    await assert.rejects(app.workspace.changeDiff(id, owner(app), "/etc/passwd"), { status: 404 });
+    await assert.rejects(app.workspace.changeDiff(id, owner(app), "README.md"), {
         status: 404,
         message: /no uncommitted changes/,
     });
     const viewer = app.config.addUser("Vee", "viewer").user;
 
-    await assert.rejects(app.changes(id, viewer), { status: 403 });
+    await assert.rejects(app.workspace.changes(id, viewer), { status: 403 });
 });
 
 test("files a codemode script wrote are Pi's too, shown at the reply that ran it", async () => {
     const id = await newSession(app, repo);
 
     await say(app, id, "script it");
-    const changes = await app.changes(id, owner(app));
+    const changes = await app.workspace.changes(id, owner(app));
 
     assert.equal(changes.files.find((file) => file.path === "scripted.txt")?.byPi, true);
     assert.equal(changes.more, 0);
     const [outside] = changes.piOnly.filter((each) => each.path === "../scripted-outside.txt");
 
-    assert.equal((await app.fullEntry(id, outside!.entryId))?.kind, "assistant");
+    assert.equal((await app.transcripts.fullEntry(id, outside!.entryId))?.kind, "assistant");
 });
 
 /** A repository of its own, with one commit of `files`. */
@@ -202,16 +204,16 @@ test("someone invited to one session sees the changes in its folder, not the res
     const guest = app.config.addUser("Scoped", "guest", [String(id)]).user;
 
     assert.deepEqual(
-        (await app.changes(id, guest)).files.map((file) => file.path),
+        (await app.workspace.changes(id, guest)).files.map((file) => file.path),
         ["public/page.txt"],
     );
-    assert.match(await app.changeDiff(id, guest, "public/page.txt"), /^\+hello again$/m);
-    await assert.rejects(app.changeDiff(id, guest, "private/secret.txt"), {
+    assert.match(await app.workspace.changeDiff(id, guest, "public/page.txt"), /^\+hello again$/m);
+    await assert.rejects(app.workspace.changeDiff(id, guest, "private/secret.txt"), {
         status: 404,
         message: /no uncommitted changes/,
     });
     assert.deepEqual(
-        (await app.changes(id, owner(app))).files.map((file) => file.path),
+        (await app.workspace.changes(id, owner(app))).files.map((file) => file.path),
         ["public/page.txt", "private/secret.txt"],
         "the owner sees them all",
     );
@@ -223,7 +225,7 @@ test("a file named like a pattern is that one file", async () => {
     writeFileSync(join(starred, "*"), "star changed\n");
     writeFileSync(join(starred, "plain.txt"), "plain changed\n");
     const id = await newSession(app, starred);
-    const diff = await app.changeDiff(id, owner(app), "*");
+    const diff = await app.workspace.changeDiff(id, owner(app), "*");
 
     assert.match(diff, /^\+star changed$/m);
     assert.doesNotMatch(diff, /plain/);
@@ -236,7 +238,7 @@ test("outside a repository, the changes are Pi's edits alone", async () => {
     const id = await newSession(app, folder);
 
     await say(app, id, "write notes");
-    const changes = await app.changes(id, owner(app));
+    const changes = await app.workspace.changes(id, owner(app));
 
     assert.equal(changes.repo, undefined);
     assert.deepEqual(changes.files, []);

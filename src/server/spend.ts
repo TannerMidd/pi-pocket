@@ -116,7 +116,7 @@ export class Spend {
         const app = this.#app;
 
         return (
-            app.requesterOf(id) ??
+            app.attribution.requesterOf(id) ??
             app.sessionMeta(app.rootOf(id))?.createdBy ??
             app.config.users.find((user) => user.role === "owner")!.id
         );

@@ -188,7 +188,7 @@ export function vapidAuthorization(
 }
 
 /** A Topic header value (at most 32 base64url characters) for a tag; long or unusual tags are hashed. */
-export function topicFor(tag: string): string {
+function topicFor(tag: string): string {
     if (/^[A-Za-z0-9_-]{1,32}$/.test(tag)) {
         return tag;
     }

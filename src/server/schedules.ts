@@ -19,8 +19,9 @@ import {
 import type { PocketApp } from "./app.ts";
 import { addActivity } from "./collab.ts";
 import { ChatDoc, type Schedule, ScheduleDoc } from "./docs.ts";
-import { HttpError } from "./errors.ts";
-import { FROM_PREFIX, snippet } from "./projection.ts";
+import { describe, HttpError } from "./errors.ts";
+import { FROM_PREFIX } from "./entry-format.ts";
+import { snippet } from "./projection.ts";
 import { ownRequest, requestFor } from "./requests.ts";
 import { nextRepeat, parseWhen } from "./when.ts";
 
@@ -235,7 +236,7 @@ export class Schedules {
         try {
             parsed = parseWhen(request.when, app.now(), zone);
         } catch (error) {
-            throw new HttpError(400, error instanceof Error ? error.message : String(error));
+            throw new HttpError(400, describe(error));
         }
 
         if (request.text !== undefined && parsed.rest !== "") {

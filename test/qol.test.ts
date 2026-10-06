@@ -51,8 +51,8 @@ after(async () => {
 });
 
 /** The conversation's entries as browsers get them, oldest first. */
-const entries = (id: Parameters<App["fullEntry"]>[0]): Promise<ClientEntry[]> =>
-    app.history(id, Number.MAX_SAFE_INTEGER);
+const entries = (id: Parameters<App["transcripts"]["fullEntry"]>[0]): Promise<ClientEntry[]> =>
+    app.transcripts.history(id, Number.MAX_SAFE_INTEGER);
 
 test("`!` runs a command in the session's folder and Pi sees it; `!!` shows it to people only", async () => {
     const id = await newSession(app, folder);
@@ -107,19 +107,23 @@ test("a `!` command Pi sees makes Pi work for its person, as a message does; one
 
     try {
         await say(app, id, "hello from the owner");
-        assert.equal(app.requesterOf(id), owner(app).id);
+        assert.equal(app.attribution.requesterOf(id), owner(app).id);
         await app.shell.start(id, guest, { command: "echo quiet", context: false });
         await until(
             async () => (await entries(id)).some((entry) => entry.kind === "shell"),
             "the quiet command",
         );
-        assert.equal(app.requesterOf(id), owner(app).id, "a command Pi does not see is nobody's");
+        assert.equal(
+            app.attribution.requesterOf(id),
+            owner(app).id,
+            "a command Pi does not see is nobody's",
+        );
         await app.shell.start(id, guest, { command: "echo do something risky" });
         await until(
             async () => (await entries(id)).filter((entry) => entry.kind === "shell").length === 2,
             "the command Pi sees",
         );
-        await until(() => app.requesterOf(id) === guest.id, "Pi working for the guest");
+        await until(() => app.attribution.requesterOf(id) === guest.id, "Pi working for the guest");
     } finally {
         app.config.removeUser(guest.id);
     }
@@ -282,7 +286,7 @@ test("a command cut off by a restart is not run again, and its entry says so", a
         );
         await until(
             async () =>
-                (await second.history(id, Number.MAX_SAFE_INTEGER)).some(
+                (await second.transcripts.history(id, Number.MAX_SAFE_INTEGER)).some(
                     (entry) => entry.kind === "shell" && entry.status === "interrupted",
                 ),
             "the cut-off entry",
@@ -321,14 +325,14 @@ test("after a restart, an older message settling does not take Pi back from the 
     try {
         await until(
             async () =>
-                (await second.history(id, Number.MAX_SAFE_INTEGER)).some(
+                (await second.transcripts.history(id, Number.MAX_SAFE_INTEGER)).some(
                     (entry) => entry.kind === "shell",
                 ),
             "the guest's command in place",
             30_000,
         );
         await until(() => !second.isBusy(id), "the answer", 30_000);
-        assert.equal(second.requesterOf(id), guest.id);
+        assert.equal(second.attribution.requesterOf(id), guest.id);
     } finally {
         await second.close();
     }
@@ -342,16 +346,22 @@ test("only the owner may read Pi's folder and the app's data, but anyone who ste
         const agentFile = join(process.env.PI_CODING_AGENT_DIR!, "settings-test.json");
 
         writeFileSync(agentFile, "{}");
-        await assert.rejects(app.viewFile(id, guest, agentFile), /is not there/);
+        await assert.rejects(app.workspace.viewFile(id, guest, agentFile), /is not there/);
         await assert.rejects(
-            app.viewFile(id, guest, join(app.dataDir, "config.json")),
+            app.workspace.viewFile(id, guest, join(app.dataDir, "config.json")),
             /is not there/,
         );
-        assert.equal((await app.viewFile(id, owner(app), agentFile)).kind, "text");
-        mkdirSync(app.uploadDirectory(id), { recursive: true });
-        writeFileSync(join(app.uploadDirectory(id), "shared.txt"), "hi");
+        assert.equal((await app.workspace.viewFile(id, owner(app), agentFile)).kind, "text");
+        mkdirSync(app.workspace.uploadDirectory(id), { recursive: true });
+        writeFileSync(join(app.workspace.uploadDirectory(id), "shared.txt"), "hi");
         assert.equal(
-            (await app.viewFile(id, guest, join(app.uploadDirectory(id), "shared.txt"))).kind,
+            (
+                await app.workspace.viewFile(
+                    id,
+                    guest,
+                    join(app.workspace.uploadDirectory(id), "shared.txt"),
+                )
+            ).kind,
             "text",
         );
     } finally {
@@ -368,7 +378,7 @@ test("the viewer shows text, folders, images, and binary files, and says when a 
     writeFileSync(join(folder, "shot.png"), "not really a png");
     const me = owner(app);
 
-    assert.deepEqual(await app.viewFile(id, me, "docs/a.md"), {
+    assert.deepEqual(await app.workspace.viewFile(id, me, "docs/a.md"), {
         path: join(folder, "docs", "a.md"),
         display: "docs/a.md",
         kind: "text",
@@ -377,8 +387,8 @@ test("the viewer shows text, folders, images, and binary files, and says when a 
         truncated: false,
     });
     assert.deepEqual(
-        (await app.viewFile(id, me, "docs")).kind === "folder" &&
-            (await app.viewFile(id, me, "docs")),
+        (await app.workspace.viewFile(id, me, "docs")).kind === "folder" &&
+            (await app.workspace.viewFile(id, me, "docs")),
         {
             path: join(folder, "docs"),
             display: "docs",
@@ -387,21 +397,25 @@ test("the viewer shows text, folders, images, and binary files, and says when a 
             truncated: false,
         },
     );
-    assert.equal((await app.viewFile(id, me, "blob.bin")).kind, "binary");
-    assert.equal((await app.viewFile(id, me, "shot.png")).kind, "image");
+    assert.equal((await app.workspace.viewFile(id, me, "blob.bin")).kind, "binary");
+    assert.equal((await app.workspace.viewFile(id, me, "shot.png")).kind, "image");
     execFileSync("mkfifo", [join(folder, "pipe")]);
-    assert.equal((await app.viewFile(id, me, "pipe")).kind, "other", "a pipe is not opened");
+    assert.equal(
+        (await app.workspace.viewFile(id, me, "pipe")).kind,
+        "other",
+        "a pipe is not opened",
+    );
     mkdirSync(join(folder, "many"), { recursive: true });
 
     for (let index = 0; index < 1100; index++) {
         writeFileSync(join(folder, "many", `f${index}.txt`), "");
     }
 
-    const many = await app.viewFile(id, me, "many");
+    const many = await app.workspace.viewFile(id, me, "many");
 
     assert.equal(many.kind === "folder" && many.entries.length, 1000);
     assert.equal(many.kind === "folder" && many.truncated, true);
-    await assert.rejects(app.viewFile(id, me, "nope.txt"), /nope\.txt is not there/);
+    await assert.rejects(app.workspace.viewFile(id, me, "nope.txt"), /nope\.txt is not there/);
 });
 
 test("undoing a file from Changes puts it back as committed, and Pi is told", async () => {
@@ -423,14 +437,14 @@ test("undoing a file from Changes puts it back as committed, and Pi is told", as
     const id = await newSession(app, repo);
     const me = owner(app);
 
-    await app.revertChange(id, me, "keep.txt");
-    await app.revertChange(id, me, "gone.txt");
-    await app.revertChange(id, me, "fresh.txt");
+    await app.workspace.revertChange(id, me, "keep.txt");
+    await app.workspace.revertChange(id, me, "gone.txt");
+    await app.workspace.revertChange(id, me, "fresh.txt");
     assert.equal(readFileSync(join(repo, "keep.txt"), "utf8"), "one\n");
     assert.equal(readFileSync(join(repo, "gone.txt"), "utf8"), "two\n");
     assert.equal(existsSync(join(repo, "fresh.txt")), false);
     assert.equal(git("status", "--porcelain"), "");
-    await assert.rejects(app.revertChange(id, me, "keep.txt"), /no uncommitted changes/);
+    await assert.rejects(app.workspace.revertChange(id, me, "keep.txt"), /no uncommitted changes/);
     // Both sides added the same file: a conflict is git's to resolve, and the file stays as it is.
     git("checkout", "-qb", "other");
     writeFileSync(join(repo, "both.txt"), "theirs\n");
@@ -441,7 +455,7 @@ test("undoing a file from Changes puts it back as committed, and Pi is told", as
     git("add", "-A");
     git("commit", "-qm", "ours");
     assert.throws(() => git("merge", "-q", "other"));
-    await assert.rejects(app.revertChange(id, me, "both.txt"), /merge conflict/);
+    await assert.rejects(app.workspace.revertChange(id, me, "both.txt"), /merge conflict/);
     assert.match(readFileSync(join(repo, "both.txt"), "utf8"), /ours/);
     git("merge", "--abort");
     await until(
