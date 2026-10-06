@@ -6,10 +6,10 @@
 // last had. Their state marks stay current from the session list, which covers every session.
 import { Component } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { describeCall } from "./calls.js";
 import { workspaceOrder } from "./sessions.js";
 import { actions, api, attempt, canSteer, navigate, notify, store } from "./store.js";
 import { prefs, setPrefs } from "./theme.js";
-import { describeCall } from "./transcript.js";
 import { html, Icon, shortPath, usePresence } from "./ui.js";
 
 /** Wide enough for the column beside the conversation: where People and the Browser panel dock too. */

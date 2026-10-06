@@ -1,6 +1,6 @@
-// Session list (sidebar, drawer, and home screen), the folded rail, the wide home screen, and the sign-in screen.
+// The session list (sidebar, drawer, and home screen), the folded rail, and the order and archiving of sessions.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Avatar, initials } from "./chat.js";
+import { Avatar, initials } from "./avatar.js";
 import {
     actions,
     canSteer,
@@ -13,8 +13,8 @@ import {
     stillMoving,
     store,
 } from "./store.js";
-import { isPinned, paletteOf, prefs, setPrefs, togglePin } from "./theme.js";
-import { html, Icon, Keys, shortPath, Slide, timeAgo, useSlide, usePresence } from "./ui.js";
+import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
+import { html, Icon, Keys, shortPath, Slide, timeAgo, usePresence, useSlide } from "./ui.js";
 
 /** The session list on its way: rows shaped like sessions, lit in turn. */
 function LoadingSessions() {
@@ -984,169 +984,6 @@ export function Drawer() {
             onClick=${(event) => event.target === event.currentTarget && store.set({ drawer: false })}
         >
             <aside class="drawer"><${SessionList} compact=${true} /></aside>
-        </div>
-    </div>`;
-}
-
-const LOGO = [
-    "▗▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▖",
-    "▝▀▀▀▜██▀▀▀▀▀▀██▛▀▀▀▘",
-    "    ▐██      ██▌   ",
-    "    ▐██      ██▌   ",
-    "    ▐██      ██▌   ",
-    "    ▐██      ██▌   ",
-    "   ▗██▘      ▝██▄▖ ",
-    "  ▝▀▀          ▀▀▀▘",
-].join("\n");
-
-/** The home screen on wide screens: what fastfetch shows for a machine, for this Pi Pocket. */
-export function Splash() {
-    const { me, sessions, models, server, guard } = store.state;
-    const palette = paletteOf();
-    const p = prefs();
-    const busy = sessions.filter((session) => session.busy).length;
-    const recent = workspaceOrder().slice(0, 5);
-    const rows = [
-        ["theme", `${palette.name}${p.theme === "desktop" && palette.desktop ? " (desktop)" : ""}`],
-        [
-            "layout",
-            `${p.tiling ? "tiled windows" : "flat"}, sidebar ${p.sidebar === "rail" ? "folded" : "open"}`,
-        ],
-        [
-            "sessions",
-            `${sessions.filter((session) => !session.archived).length}${busy > 0 ? `, ${busy} running` : ""}`,
-        ],
-        ["models", String(models.length)],
-        ["folder", shortPath(server?.defaultCwd, server?.home) || "~"],
-        [
-            "guard",
-            guard?.enabled
-                ? guard.available === false
-                    ? "failed to load"
-                    : "Lancet Guard on"
-                : "off",
-        ],
-        ["you", `${me?.name ?? "?"} (${me?.role ?? "?"})`],
-    ];
-    const colors = [
-        "--o-red",
-        "--o-yellow",
-        "--o-green",
-        "--o-cyan",
-        "--o-blue",
-        "--o-magenta",
-        "--o-accent",
-        "--o-fg",
-    ];
-    const canStart = canSteer() && !scoped();
-    let line = 0;
-
-    return html`<div class="splash">
-        <div class="fetch">
-            <pre class="fetch-logo" aria-hidden="true">${LOGO}</pre>
-            <div class="fetch-info">
-                <div class="fetch-title" style=${`--i:${line++}`}>
-                    <b>${(me?.name ?? "you").toLowerCase().replace(/\s+/g, "-")}</b>@<b>pi-pocket</b>
-                </div>
-                <div class="fetch-rule" style=${`--i:${line++}`}>${"─".repeat(30)}</div>
-                ${rows.map(
-                    ([key, value]) => html`<dl class="fetch-row" style=${`--i:${line++}`}>
-                        <dt>${key}</dt>
-                        <dd>${value}</dd>
-                    </dl>`,
-                )}
-                <div class="fetch-colors" style=${`--i:${line++}`}>
-                    ${colors.map((name) => html`<span style=${`background:var(${name})`}></span>`)}
-                </div>
-            </div>
-        </div>
-        <div class="splash-actions">
-            ${
-                canStart &&
-                html`<button
-                    class="button primary"
-                    onClick=${() => openSheet({ type: "cwd", mode: "new" })}
-                >
-                    <${Icon} name="plus" size=${16} /> New session <${Keys} keys="Alt N" />
-                </button>`
-            }
-            <button class="button" onClick=${() => store.set({ launcher: true })}>
-                <${Icon} name="command" size=${16} /> Launcher <${Keys} keys="Mod K" />
-            </button>
-            <button class="button" onClick=${() => openSheet({ type: "appearance" })}>
-                <${Icon} name="palette" size=${16} /> Appearance
-            </button>
-        </div>
-        ${
-            recent.length > 0 &&
-            html`<div class="splash-recent">
-                <div class="group-title">Jump back in</div>
-                ${recent.map(
-                    (
-                        session,
-                        index,
-                    ) => html`<button class="list-item" onClick=${() => navigate(session.id)}>
-                        <span><kbd>${index + 1}</kbd>${session.title ?? "New session"}</span>
-                        <span class="muted small mono">
-                            ${session.busy ? "working · " : ""}
-                            ${timeAgo(session.updatedAt)}
-                        </span>
-                    </button>`,
-                )}
-            </div>`
-        }
-    </div>`;
-}
-
-export function SignIn() {
-    const [value, setValue] = useState("");
-
-    const go = () => {
-        const text = value.trim();
-
-        if (!text) {
-            return;
-        }
-
-        try {
-            const url = new URL(text, location.origin);
-
-            if (url.pathname.startsWith("/join/") || url.searchParams.has("token")) {
-                location.href = `${url.pathname}${url.search}`;
-
-                return;
-            }
-        } catch {
-            // not a URL
-        }
-
-        // Invite codes are ten lowercase letters and digits, and phones capitalize the first letter typed. Tokens are longer.
-        // The invite sheet shows a code in two groups, so spaces typed or copied between them are dropped.
-        const code = text.toLowerCase().replace(/\s+/g, "");
-
-        location.href = /^[a-z0-9]{10}$/.test(code)
-            ? `/join/${code}`
-            : `/login?token=${encodeURIComponent(text)}`;
-    };
-
-    return html`<div class="signin">
-        <div class="pi big">π</div>
-        <h1>Pi Pocket</h1>
-        <p class="muted">
-            Open the sign-in link Pi Pocket printed when it started, or an invite from a signed-in device. You can also paste the link, the token, or an invite code here.
-        </p>
-        <div class="row">
-            <input
-                value=${value}
-                placeholder="Link, token, or invite code"
-                autocapitalize="none"
-                autocorrect="off"
-                autocomplete="off"
-                spellcheck=${false}
-                onInput=${(event) => setValue(event.currentTarget.value)}
-                onKeyDown=${(event) => event.key === "Enter" && go()}
-            />
-            <button class="button primary" onClick=${go}>Sign in</button>
         </div>
     </div>`;
 }

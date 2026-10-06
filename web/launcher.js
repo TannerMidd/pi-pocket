@@ -33,7 +33,7 @@ import { copyText, html, Icon, Keys, Marked, shortPath, Slide, timeAgo, useSlide
  * How well `query` matches `text` as a subsequence: null for no match, else a score (higher is better) and the matched
  * places. Runs of letters, letters at word starts, and an early first letter count for more.
  */
-export function fuzzy(text, query) {
+function fuzzy(text, query) {
     if (query === "") {
         return { score: 0, hits: [] };
     }

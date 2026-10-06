@@ -1,7 +1,7 @@
 // Phone notifications: this device subscribes to the server's pushes, and each person picks what they hear about.
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, notify, sessionUnread } from "./store.js";
-import { html, Loader, Sheet } from "./ui.js";
+import { html, Loader, Sheet, Switch } from "./ui.js";
 
 const supported =
     "serviceWorker" in navigator && "PushManager" in globalThis && "Notification" in globalThis;
@@ -105,20 +105,6 @@ const KINDS = [
     ["chat", "Chat messages", "in sessions you take part in"],
 ];
 
-function Toggle({ on, label, onChange, disabled }) {
-    return html`<button
-        type="button"
-        role="switch"
-        aria-checked=${on ? "true" : "false"}
-        aria-label=${label}
-        class=${`switch ${on ? "on" : ""}`}
-        disabled=${disabled}
-        onClick=${onChange}
-    >
-        <span></span>
-    </button>`;
-}
-
 export function NotificationsSheet() {
     const [info, setInfo] = useState(null);
     const [subscription, setSubscription] = useState(undefined);
@@ -213,7 +199,7 @@ export function NotificationsSheet() {
                         </div>
                     </div>
                     <div class="extension-actions">
-                        <${Toggle}
+                        <${Switch}
                             on=${on}
                             disabled=${busy || (!on && problem !== null)}
                             label="Notifications on this device"
@@ -229,7 +215,7 @@ export function NotificationsSheet() {
                             <div class="muted small">${hint}</div>
                         </div>
                         <div class="extension-actions">
-                            <${Toggle}
+                            <${Switch}
                                 on=${info.prefs[key]}
                                 label=${title}
                                 onChange=${() => setPref(key, !info.prefs[key])}
