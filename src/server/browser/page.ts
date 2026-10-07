@@ -59,6 +59,15 @@ const FRAME_WAIT_MS = 25_000;
 const RETRY_WHILE_SWAPPING = new Set(["Page.reload", "Page.stopLoading"]);
 const SWAP_WAIT_MS = 3000;
 
+/**
+ * The longest side of a screenshot's image, in pixels. Models refuse larger images once a conversation holds many of
+ * them, and that refusal breaks every turn after it; they shrink anything past about 1600 pixels themselves anyway.
+ */
+export const SHOT_MAX = 2000;
+
+/** The scale that brings an image of `width` × `height` pixels within `SHOT_MAX`. */
+const fit = (width: number, height: number) => Math.min(1, SHOT_MAX / Math.max(width, height, 1));
+
 /** A console argument as text: strings as they are, other values as DevTools would show them in one line. */
 function formatArg(arg: Json): string {
     if (arg === undefined || arg === null) {
@@ -1150,10 +1159,13 @@ export class BrowserPage {
         return await this.#evaluate(SNAPSHOT_SCRIPT, 20_000);
     }
 
-    /** A JPEG of the viewport, or of the whole page (up to 8000 CSS pixels tall), in CSS pixels. */
+    /**
+     * A JPEG of the viewport, or of the whole page (up to 8000 CSS pixels tall). The size it reports is in CSS pixels;
+     * the image itself is at most `SHOT_MAX` pixels on its longer side (`shrunk` when that made it smaller).
+     */
     async screenshot(
         options: { fullPage?: boolean } = {},
-    ): Promise<{ data: string; width: number; height: number }> {
+    ): Promise<{ data: string; width: number; height: number; shrunk: boolean }> {
         this.usedAt = Date.now();
         const scale = 1 / this.#viewport.scale;
 
@@ -1168,12 +1180,12 @@ export class BrowserPage {
                     format: "jpeg",
                     quality: 80,
                     captureBeyondViewport: true,
-                    clip: { x: 0, y: 0, width, height, scale },
+                    clip: { x: 0, y: 0, width, height, scale: scale * fit(width, height) },
                 },
                 60_000,
             );
 
-            return { data: String(shot.data), width, height };
+            return { data: String(shot.data), width, height, shrunk: fit(width, height) < 1 };
         }
 
         const metrics = await this.#send("Page.getLayoutMetrics");
@@ -1195,7 +1207,7 @@ export class BrowserPage {
                     y: view.pageY,
                     width: view.clientWidth,
                     height: view.clientHeight,
-                    scale: scale * zoom,
+                    scale: scale * zoom * fit(view.clientWidth, view.clientHeight),
                 },
             },
             60_000,
@@ -1205,6 +1217,7 @@ export class BrowserPage {
             data: String(shot.data),
             width: this.#viewport.width,
             height: this.#viewport.height,
+            shrunk: fit(view.clientWidth, view.clientHeight) < 1,
         };
     }
 

@@ -269,7 +269,7 @@ export default function createBrowser(host: PocketHost) {
 
                     image = { type: "image", data: shot.data, mimeType: "image/jpeg" };
                     lines.push(
-                        `Screenshot of ${args.fullPage === true ? "the whole page" : "the viewport"}, ${shot.width}×${shot.height} CSS pixels.`,
+                        `Screenshot of ${args.fullPage === true ? "the whole page" : "the viewport"}, ${shot.width}×${shot.height} CSS pixels${shot.shrunk === true ? ", the image shrunk to at most 2000 pixels a side" : ""}.`,
                     );
                     break;
                 }
