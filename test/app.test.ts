@@ -16,6 +16,7 @@ import {
 import assert from "node:assert/strict";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -297,6 +298,54 @@ test("a pasted image is stored with its message and read back, and image paths r
     );
     assert.equal(app.workspace.conversationPath(id, "chart.png"), join(work, "chart.png"));
     assert.equal(app.workspace.conversationPath(id, "/tmp/chart.png"), "/tmp/chart.png");
+});
+
+/** A grey PNG, `width` by `height`. */
+function greyPng(width: number, height: number): Buffer {
+    const chunk = (type: string, data: Buffer) => {
+        const body = Buffer.concat([Buffer.from(type), data]);
+        const frame = Buffer.alloc(8);
+
+        frame.writeUInt32BE(data.length, 0);
+        frame.writeUInt32BE(crc32(body), 4);
+
+        return Buffer.concat([frame.subarray(0, 4), body, frame.subarray(4)]);
+    };
+
+    const header = Buffer.alloc(13);
+
+    header.writeUInt32BE(width, 0);
+    header.writeUInt32BE(height, 4);
+    header.set([8, 2], 8);
+    const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x80)]);
+
+    return Buffer.concat([
+        Buffer.from("89504e470d0a1a0a", "hex"),
+        chunk("IHDR", header),
+        chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))),
+        chunk("IEND", Buffer.alloc(0)),
+    ]);
+}
+
+test("a big pasted image goes to the model at most 2000 pixels a side", async () => {
+    const id = await newSession();
+
+    await app.commands.configure(id, owner(), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+    const png = greyPng(10, 3000);
+    const path = join(app.workspace.uploadDirectory(id), "tall.png");
+
+    writeFileSync(path, png);
+    await say(id, "how tall?", [{ path, name: "tall.png", mime: "image/png", size: png.length }]);
+    const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
+    const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
+    const entries = await conversation.entries({}, 256, undefined, BACKGROUND_CONTEXT);
+    const user = entries.items.find((entry) => entry.kind === "pi.user")!;
+    const image = (await app.transcripts.entryImage(id, user.id as unknown as number, 0))!;
+
+    assert.equal(image.mimeType, "image/png");
+    assert.equal(image.data.readUInt32BE(20), 2000, "its height, from the PNG header");
 });
 
 test("long polling delivers the stream's events, resends until acknowledged, and waits for new ones", async () => {

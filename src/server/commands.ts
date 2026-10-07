@@ -14,6 +14,7 @@ import {
     type ModelThinkingLevel,
     type TextContent,
 } from "@earendil-works/pi-ai";
+import { resizeImage } from "@earendil-works/pi-coding-agent";
 import type {
     AgentChange,
     ConversationCreateOptions,
@@ -104,6 +105,20 @@ function entryIdOf(value: unknown): number {
     }
 
     return id;
+}
+
+/**
+ * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
+ * a conversation holds many, and then every request fails until they leave its context.
+ */
+async function modelImage(path: string, mimeType: string): Promise<ImageContent> {
+    const image = await resizeImage(readFileSync(path), mimeType);
+
+    if (image === null) {
+        throw new Error("it could not be made small enough for the model");
+    }
+
+    return { type: "image", mimeType: image.mimeType, data: image.data };
 }
 
 /** A request's model, when it names one, must name a provider and a model id. */
@@ -415,11 +430,7 @@ export class Commands {
             }
 
             try {
-                parts.push({
-                    type: "image",
-                    mimeType: file.mime,
-                    data: readFileSync(file.path).toString("base64"),
-                });
+                parts.push(await modelImage(file.path, file.mime));
             } catch (error) {
                 app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
             }
@@ -484,11 +495,7 @@ export class Commands {
 
                 if (mime !== undefined) {
                     if (images && statSync(file).size <= MAX_INLINE_IMAGE) {
-                        parts.push({
-                            type: "image",
-                            mimeType: mime,
-                            data: readFileSync(file).toString("base64"),
-                        });
+                        parts.push(await modelImage(file, mime));
                     }
 
                     continue;
