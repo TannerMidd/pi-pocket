@@ -7,6 +7,7 @@
 }:
 let
   cfg = config.services.pi-pocket;
+  extensionNames = map builtins.baseNameOf cfg.extensions;
 in
 {
   options.services.pi-pocket = {
@@ -94,6 +95,20 @@ in
       description = "Extra Chromium flags. Pi Pocket splits these on whitespace.";
     };
 
+    extensions = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      default = [ ];
+      example = lib.literalExpression "[ ./extensions/my-extension.ts ]";
+      description = ''
+        Drop-in extension files, copied under their original filenames. Files must have
+        distinct names ending in .ts. The extensions directory is replaced on every
+        service start, including when this list is empty: removed extensions disappear,
+        and manual additions or live edits are discarded. Copies are writable and can
+        be live-edited until the next restart. New extensions stay off until the owner
+        turns them on in the app's Extensions sheet.
+      '';
+    };
+
     environment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -119,6 +134,17 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = lib.all (name: lib.hasSuffix ".ts" name) extensionNames;
+        message = "services.pi-pocket.extensions must contain .ts files.";
+      }
+      {
+        assertion = lib.length (lib.unique extensionNames) == lib.length extensionNames;
+        message = "services.pi-pocket.extensions must have distinct filenames.";
+      }
+    ];
+
     users.users.pi-pocket = lib.mkIf (cfg.user == "pi-pocket") {
       isSystemUser = true;
       group = cfg.group;
@@ -140,6 +166,14 @@ in
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
       path = cfg.extraPackages;
+      preStart = ''
+        directory=${lib.escapeShellArg "${cfg.dataDir}/extensions"}
+        rm -rf -- "$directory"
+        mkdir -p -- "$directory"
+        ${lib.concatMapStringsSep "\n" (source: ''
+          install -m 0600 -- ${lib.escapeShellArg "${source}"} "$directory"/${lib.escapeShellArg (builtins.baseNameOf source)}
+        '') cfg.extensions}
+      '';
       environment = {
         HOME = config.users.users.${cfg.user}.home;
       }
