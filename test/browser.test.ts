@@ -26,9 +26,25 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser, profileFolder, snapOf } from "../src/server/browser/discovery.ts";
 import { parseKeys } from "../src/server/browser/keys.ts";
+import { SHOT_MAX } from "../src/server/browser/page.ts";
 import { normalizeUrl } from "../src/server/browser/urls.ts";
 import { presetOf, viewportFrom } from "../src/server/browser/viewport.ts";
 import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
+
+/** A JPEG's size in pixels, from its first frame header. */
+function jpegSize(data: string): { width: number; height: number } {
+    const bytes = Buffer.from(data, "base64");
+
+    for (let at = 2; at + 9 < bytes.length; at += 2 + bytes.readUInt16BE(at + 2)) {
+        const marker = bytes[at + 1]!;
+
+        if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+            return { width: bytes.readUInt16BE(at + 7), height: bytes.readUInt16BE(at + 5) };
+        }
+    }
+
+    throw new Error("no JPEG frame header");
+}
 
 test("addresses as people type them become URLs the browser may open", () => {
     assert.equal(normalizeUrl("localhost:5173"), "http://localhost:5173/");
@@ -427,6 +443,22 @@ test(
                     .subarray(0, 2)
                     .equals(Buffer.from([0xff, 0xd8])),
             );
+            assert.equal(jpegSize(shot.data).height, 800);
+            assert.equal(shot.scale, 1);
+
+            // A huge page comes back small enough for a model to take: too large an image breaks the conversation.
+            await page.evaluate("document.body.style.cssText = 'width: 2600px; height: 6000px'; 1");
+            const whole = await page.screenshot({ fullPage: true });
+            const image = jpegSize(whole.data);
+
+            assert.ok(
+                whole.width >= 2600 && whole.height >= 6000,
+                `${whole.width}×${whole.height}`,
+            );
+            assert.ok(Math.max(image.width, image.height) <= SHOT_MAX, JSON.stringify(image));
+            assert.ok(image.height > SHOT_MAX * 0.95, JSON.stringify(image));
+            assert.equal(Math.round(whole.height * whole.scale), image.height);
+            await page.evaluate("document.body.style.cssText = ''; scrollTo(0, 0); 1");
 
             // A link to a new tab opens in this page: there is one page per conversation.
             await page.click({ label: "Popup" });

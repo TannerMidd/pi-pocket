@@ -343,6 +343,17 @@ export function createApi(options: HttpOptions, auth: Auth) {
             });
         }
 
+        // A new folder, from the folder picker: it opens in the picker, ready to use.
+        if (first === "fs" && second === undefined && method === "POST") {
+            const body = await readJson<{ path?: unknown }>(request);
+
+            if (typeof body.path !== "string") {
+                throw new HttpError(400, "Name the folder to make.");
+            }
+
+            return json(response, 200, { path: app.workspace.makeFolder(user, body.path) });
+        }
+
         if (first === "settings" && method === "POST") {
             const body = await readJson<{ approvalRule?: unknown }>(request);
 

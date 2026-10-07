@@ -4,7 +4,7 @@
  * there, with each file's diff on request.
  */
 import { realpathSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { lstat, rm } from "node:fs/promises";
 import { devNull } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { type GitOptions, git as runGit } from "./git.ts";
@@ -22,11 +22,19 @@ export type ChangedFile = {
     removed?: number;
     /** Pi wrote or edited it in this session. */
     byPi: boolean;
+    /**
+     * Changes whenever the file does (its size and modification time), so a browser knows its diff is new even when
+     * the counts stay the same; absent for a file that is gone.
+     */
+    version?: string;
 };
 
 export type Changes = {
-    /** The repository the folder is in; absent when it is in none. */
-    repo?: { root: string; branch?: string };
+    /**
+     * The repository the folder is in, absent when it is in none: its top folder, its branch, and `head`, the last
+     * commit's id, which the diffs are against. Both are absent before the first commit.
+     */
+    repo?: { root: string; branch?: string; head?: string };
     files: ChangedFile[];
     /** Changed files left out of `files`, past the most it lists. */
     more: number;
@@ -38,9 +46,22 @@ const MAX_FILES = 500;
 const MAX_DIFF = 300_000;
 const GIT_TIMEOUT_MS = 15_000;
 
-/** Git for the Changes sheet: quick, with room for a long diff. Diffs are asked for without external diff programs. */
+/** Git for Changes: quick, with room for a long diff. */
 const git = (cwd: string, args: string[], options: GitOptions = {}) =>
     runGit(cwd, args, { timeoutMs: GIT_TIMEOUT_MS, maxBuffer: MAX_DIFF * 4, ...options });
+/**
+ * Diffs as the viewer reads them, whatever a person's git config says: no external diff program or text conversion, no
+ * colors, git's usual `a/` and `b/` before the paths (`diff.mnemonicPrefix` and `diff.noprefix` change them), and
+ * three unchanged lines around each change, so fewer after the last one say where the file ends (`web/diff.js`).
+ */
+const DIFF_FLAGS = [
+    "-U3",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
 
 const EDITORS = new Set(["write", "edit"]);
 /** The codemode tool's name (`extensions/codemode.ts`): its results list the calls a script made. */
@@ -160,10 +181,10 @@ function kindOf(code: string): ChangeKind {
     return "modified";
 }
 
-/** `git status --porcelain=v1 -z`: each change, with the old path of a rename taking a field of its own. */
-export function parseStatus(output: string): { code: string; path: string }[] {
+/** `git status --porcelain=v1 -z`: each change, and the path a renamed or copied file had (`from`), in a field of its own. */
+export function parseStatus(output: string): { code: string; path: string; from?: string }[] {
     const fields = output.split("\0");
-    const changes: { code: string; path: string }[] = [];
+    const changes: { code: string; path: string; from?: string }[] = [];
 
     for (let at = 0; at < fields.length; at++) {
         const field = fields[at]!;
@@ -173,11 +194,13 @@ export function parseStatus(output: string): { code: string; path: string }[] {
         }
 
         const code = field.slice(0, 2);
-
-        changes.push({ code, path: field.slice(3) });
+        const path = field.slice(3);
 
         if (code.includes("R") || code.includes("C")) {
             at++;
+            changes.push({ code, path, from: fields[at] });
+        } else {
+            changes.push({ code, path });
         }
     }
 
@@ -207,6 +230,17 @@ export function parseNumstat(output: string): Map<string, { added?: number; remo
     }
 
     return counts;
+}
+
+/** A file's size and modification time, one of which changes when it does; undefined when it is not there. */
+async function versionOf(file: string): Promise<string | undefined> {
+    try {
+        const info = await lstat(file);
+
+        return `${info.size}:${info.mtimeMs}`;
+    } catch {
+        return undefined;
+    }
 }
 
 /** Where a folder is in its repository, as git writes paths: `app/` for the folder app, empty at the top. */
@@ -242,6 +276,10 @@ export async function changesIn(
         (name) => name.trim(),
         () => undefined,
     );
+    const head = await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
+        (id) => id.trim() || undefined,
+        () => undefined,
+    );
     const prefix = onlyHere ? await prefixOf(cwd) : "";
     const changed = parseStatus(
         await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
@@ -251,29 +289,30 @@ export async function changesIn(
     const counts =
         branch === undefined
             ? new Map()
-            : parseNumstat(
-                  await git(root, [
-                      "diff",
-                      "HEAD",
-                      "--numstat",
-                      "-z",
-                      "--no-ext-diff",
-                      "--no-textconv",
-                  ]),
-              );
-    const files = status.map(({ code, path }): ChangedFile => ({
-        path,
-        kind: kindOf(code),
-        ...counts.get(path),
-        byPi: edits.has(join(root, path)),
-    }));
+            : parseNumstat(await git(root, ["diff", "HEAD", "--numstat", "-z", ...DIFF_FLAGS]));
+    const versions = await Promise.all(status.map(({ path }) => versionOf(join(root, path))));
+    const files = status.map(({ code, path }, index): ChangedFile => {
+        const version = versions[index];
+
+        return {
+            path,
+            kind: kindOf(code),
+            ...counts.get(path),
+            byPi: edits.has(join(root, path)),
+            ...(version === undefined ? {} : { version }),
+        };
+    });
     const shown = new Set(files.map((file) => join(root, file.path)));
     const piOnly = [...edits]
         .filter(([path]) => !shown.has(path))
         .map(([path, entryId]) => ({ path: relative(root, path), entryId }));
 
     return {
-        repo: { root, ...(branch === undefined ? {} : { branch }) },
+        repo: {
+            root,
+            ...(branch === undefined ? {} : { branch }),
+            ...(head === undefined ? {} : { head }),
+        },
         files,
         more: changed.length - status.length,
         piOnly,
@@ -299,15 +338,15 @@ export async function diffOf(cwd: string, path: string, onlyHere = false): Promi
         () => true,
         () => false,
     );
-    // `--no-index` exits with 1 when the files differ, which is the point.
+    // `--no-index` exits with 1 when the files differ, which is the point. A renamed file is both its paths: given
+    // both, git shows what changed in it, not a whole new file.
+    const paths = change.from === undefined ? [path] : [change.from, path];
     const diff =
         change.code === "??" || !hasHead
-            ? await git(
-                  root,
-                  ["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--", devNull, path],
-                  { allowExit: [1] },
-              )
-            : await git(root, ["diff", "HEAD", "--no-ext-diff", "--no-textconv", "--", path]);
+            ? await git(root, ["diff", "--no-index", ...DIFF_FLAGS, "--", devNull, path], {
+                  allowExit: [1],
+              })
+            : await git(root, ["diff", "HEAD", "-M", ...DIFF_FLAGS, "--", ...paths]);
 
     return diff.length > MAX_DIFF
         ? `${diff.slice(0, MAX_DIFF)}\n… the rest of the diff is left out …\n`

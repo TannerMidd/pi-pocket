@@ -23,7 +23,7 @@ test("git's -z output reads into changes, renames included", () => {
     assert.deepEqual(parseStatus(" D del.txt\0 M keep.txt\0R  new.txt\0old.txt\0?? fresh.txt\0"), [
         { code: " D", path: "del.txt" },
         { code: " M", path: "keep.txt" },
-        { code: "R ", path: "new.txt" },
+        { code: "R ", path: "new.txt", from: "old.txt" },
         { code: "??", path: "fresh.txt" },
     ]);
     assert.deepEqual(
@@ -204,6 +204,37 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
     const viewer = app.config.addUser("Vee", "viewer").user;
 
     await assert.rejects(app.workspace.changes(id, viewer), { status: 403 });
+
+    // A new file has no line counts to change, so its version is what says it did.
+    const versionOf = async (path: string) =>
+        (await app.workspace.changes(id, owner(app))).files.find((file) => file.path === path)
+            ?.version;
+    const before = await versionOf("notes/todo.md");
+
+    assert.ok(before);
+    writeFileSync(join(repo, "notes/todo.md"), "- two, and longer\n");
+    assert.notEqual(await versionOf("notes/todo.md"), before);
+});
+
+test("diffs read the same whatever a person's git config says", async () => {
+    const id = await newSession(app, repo);
+
+    writeFileSync(join(repo, "fresh.txt"), "new\n");
+    gitIn("config", "diff.mnemonicPrefix", "true");
+    gitIn("config", "color.diff", "always");
+
+    try {
+        const changed = await app.workspace.changeDiff(id, owner(app), "other.txt");
+        const added = await app.workspace.changeDiff(id, owner(app), "fresh.txt");
+
+        assert.match(changed, /^diff --git a\/other\.txt b\/other\.txt$/m);
+        assert.match(added, /^\+\+\+ b\/fresh\.txt$/m);
+        assert.ok(!`${changed}${added}`.includes("\u001b"), "no colors");
+    } finally {
+        gitIn("config", "--unset", "diff.mnemonicPrefix");
+        gitIn("config", "--unset", "color.diff");
+        rmSync(join(repo, "fresh.txt"));
+    }
 });
 
 test("files a codemode script wrote are Pi's too, shown at the reply that ran it", async () => {
@@ -360,6 +391,21 @@ test("a file named like a pattern is that one file", async () => {
 
     assert.match(diff, /^\+star changed$/m);
     assert.doesNotMatch(diff, /plain/);
+});
+
+test("a renamed file's diff is what changed in it, under both its names", async () => {
+    const moved = repository("moved", { "café.txt": "one\ntwo\nthree\n" });
+
+    execFileSync("git", ["mv", "café.txt", "thé.txt"], { cwd: moved });
+    writeFileSync(join(moved, "thé.txt"), "one\ntwo\nthree\nfour\n");
+    const id = await newSession(app, moved);
+    const [file] = (await app.workspace.changes(id, owner(app))).files;
+    const diff = await app.workspace.changeDiff(id, owner(app), "thé.txt");
+
+    assert.deepEqual([file?.path, file?.kind, file?.added], ["thé.txt", "renamed", 1]);
+    assert.match(diff, /^rename from "caf\\303\\251\.txt"$/m);
+    assert.match(diff, /^\+four$/m);
+    assert.doesNotMatch(diff, /^\+one$/m, "not the whole file as new");
 });
 
 test("outside a repository, the changes are Pi's edits alone", async () => {

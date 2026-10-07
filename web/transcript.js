@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { personColor } from "./avatar.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall } from "./calls.js";
+import { DiffBlock } from "./diff.js";
+import { Highlighted } from "./rich.js";
 import {
     actions,
     attempt,
@@ -19,7 +21,6 @@ import {
 import {
     ATTACHMENTS_HEADING,
     Boot,
-    Diff,
     entryImageUrl,
     fileUrl,
     html,
@@ -357,12 +358,16 @@ function ToolCard({ call, result, slot, approval, entryId }) {
         }
 
         if (call.name === "write" && args.content) {
-            parts.push(html`<pre class="output">${args.content}</pre>`);
+            parts.push(
+                html`<${Highlighted} class="output" text=${args.content} lang=${args.path} />`,
+            );
         }
 
         if (call.name === "edit") {
             if (details?.diff) {
-                parts.push(html`<${Diff} diff=${details.diff} />`);
+                parts.push(
+                    html`<${DiffBlock} text=${details.diff} path=${args.path ?? ""} bare=${true} />`,
+                );
             } else if (Array.isArray(args.edits)) {
                 parts.push(
                     html`<pre class="output">

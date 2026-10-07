@@ -9,16 +9,21 @@ const OPEN_KEY = "pocket.browser";
 export const browserAvailable = () =>
     store.state.server?.extensions?.includes("pocket-browser") === true;
 
-/** Show or hide the panel. Kept per tab, so a reload after a live edit keeps it open. It takes the People panel's place. */
+/**
+ * Show or hide the panel. Kept per tab, so a reload after a live edit keeps it open. It takes the People panel's and
+ * the Files tile's place.
+ */
 export function setBrowserOpen(open) {
     if (open) {
         sessionStorage.setItem(OPEN_KEY, "1");
+        sessionStorage.removeItem("pocket.files");
         closePeople();
     } else {
         sessionStorage.removeItem(OPEN_KEY);
     }
 
-    store.set({ browserOpen: open, drawer: false });
+    // One panel beside the conversation at a time: the browser takes the Files tile's place too.
+    store.set({ browserOpen: open, drawer: false, ...(open ? { filesOpen: false } : {}) });
 }
 
 export const toggleBrowser = () => setBrowserOpen(!store.state.browserOpen);

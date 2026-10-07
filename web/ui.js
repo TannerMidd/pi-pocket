@@ -5,7 +5,8 @@ import htm from "htm";
 import { marked } from "marked";
 import { Component, h } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { actions, notify, openSheet, store } from "./store.js";
+import { highlight, langOf } from "./highlight.js";
+import { actions, filesShown, notify, openSheet, store } from "./store.js";
 
 export const html = htm.bind(h);
 
@@ -82,8 +83,27 @@ export function Thumb({ src, alt = "image" }) {
 
 marked.setOptions({ gfm: true, breaks: false });
 
-// Task list boxes as characters: the sanitizer drops form controls.
-marked.use({ renderer: { checkbox: ({ checked }) => (checked ? "☑ " : "☐ ") } });
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
+/** Text as HTML that shows it as written. */
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[char]);
+
+/** A fence's language as it may be kept: a short name of safe characters, or nothing. */
+const FENCE_NAME = /^[\w+#.-]{1,24}$/;
+
+marked.use({
+    renderer: {
+        // Task list boxes as characters: the sanitizer drops form controls.
+        checkbox: ({ checked }) => (checked ? "☑ " : "☐ "),
+        // A code block keeps its language as data (the sanitizer drops classes), for colors and a label.
+        code({ text, lang, escaped }) {
+            const name = (lang ?? "").trim().split(/\s+/)[0];
+            const attribute = FENCE_NAME.test(name) ? ` data-lang="${name}"` : "";
+
+            return `<pre${attribute}><code>${escaped ? text : escapeHtml(text)}</code></pre>\n`;
+        },
+    },
+});
 
 /**
  * Replies are untrusted: a file or page Pi read can steer what it writes. No forms or controls, no media that loads by
@@ -125,12 +145,104 @@ const localImage = (src) =>
     /^\/a\/\d+\//.test(src) ||
     /^data:image\//i.test(src);
 
+/** Code blocks past this size show without colors: coloring them would hold up the conversation. */
+export const COLOR_LIMIT = 200_000;
+/** Code blocks longer than this many lines fold to their first lines, once they are written whole. */
+const LONG_CODE = 40;
+
+/**
+ * What a code block shows besides its code, if anything: `html` (a page, previewed), `svg` (an image), or `diff`. Its
+ * fence names it; a page or an image without a name is known by how it starts.
+ */
+function richKind(name, source) {
+    const lang = name.toLowerCase();
+
+    if (lang === "html" || lang === "htm" || lang === "xhtml") {
+        return "html";
+    }
+
+    if (lang === "diff" || lang === "patch") {
+        return "diff";
+    }
+
+    if (
+        lang === "svg" ||
+        ((lang === "xml" || lang === "") && /^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(source))
+    ) {
+        return "svg";
+    }
+
+    if (lang === "" && /^\s*(<!doctype html|<html[\s>])/i.test(source)) {
+        return "html";
+    }
+
+    return undefined;
+}
+
+/**
+ * A code block as the app draws it: its language and a copy button above it (or the button alone, over it), its code
+ * colored, and a long one folded. A block that shows something besides its code is marked with its kind for
+ * `markdownParts`.
+ */
+function codeBlock(pre, fold) {
+    const source = pre.textContent ?? "";
+    const name = FENCE_NAME.test(pre.dataset.lang ?? "") ? pre.dataset.lang : "";
+    const lang = langOf(name);
+    const code = pre.querySelector("code") ?? pre;
+    const wrap = document.createElement("div");
+    const copy = document.createElement("button");
+    const kind = richKind(name, source);
+
+    // The highlighter's output is the source, escaped, in spans of its own: nothing from the reply becomes markup.
+    if (lang && source.length <= COLOR_LIMIT) {
+        code.innerHTML = highlight(source, lang);
+    }
+
+    wrap.className = "code";
+    copy.className = "copy";
+    copy.type = "button";
+    copy.dataset.copy = "";
+    copy.textContent = "Copy";
+    pre.replaceWith(wrap);
+
+    if (kind) {
+        wrap.dataset.kind = kind;
+        wrap.dataset.lang = name;
+    }
+
+    if (name) {
+        const head = document.createElement("div");
+        const label = document.createElement("span");
+
+        head.className = "code-head";
+        label.className = "code-lang";
+        label.textContent = name;
+        head.append(label, copy);
+        wrap.append(head, pre);
+    } else {
+        wrap.append(copy, pre);
+    }
+
+    const lines = source.split("\n").length;
+
+    if (fold && lines > LONG_CODE) {
+        const more = document.createElement("button");
+
+        wrap.classList.add("long");
+        more.className = "code-more";
+        more.type = "button";
+        more.dataset.more = "";
+        more.textContent = `Show all ${lines} lines`;
+        wrap.append(more);
+    }
+}
+
 /**
  * Sanitized HTML, changed only through the DOM afterwards: editing the sanitized string could turn text inside an
  * attribute into markup. An image from another site becomes a link, since its address could carry data out the moment
- * it loads, and code blocks get a copy button.
+ * it loads, and code blocks are drawn by `codeBlock` (folded when long, if `fold`). Returns the element holding it.
  */
-function sanitize(html) {
+function sanitize(html, fold) {
     const fragment = DOMPurify.sanitize(html, PURIFY);
 
     // `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
@@ -141,17 +253,7 @@ function sanitize(html) {
     }
 
     for (const pre of fragment.querySelectorAll("pre")) {
-        const wrap = document.createElement("div");
-
-        wrap.className = "code";
-        const copy = document.createElement("button");
-
-        copy.className = "copy";
-        copy.type = "button";
-        copy.dataset.copy = "";
-        copy.textContent = "Copy";
-        pre.replaceWith(wrap);
-        wrap.append(copy, pre);
+        codeBlock(pre, fold);
     }
 
     for (const image of fragment.querySelectorAll("img")) {
@@ -190,7 +292,56 @@ function sanitize(html) {
 
     holder.append(fragment);
 
-    return holder.innerHTML;
+    return holder;
+}
+
+/**
+ * The parts of rendered markdown: runs of HTML, and between them the top-level code blocks that show more than code
+ * (`{ kind, lang, source, html }`), for `Markdown` to draw with the component `setRichBlock` gave it.
+ */
+function partsOf(holder) {
+    const parts = [];
+    let run = "";
+
+    for (const node of holder.childNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.matches(".code[data-kind]")) {
+            if (run.trim() !== "") {
+                parts.push({ html: run });
+            }
+
+            run = "";
+            parts.push({
+                kind: node.dataset.kind,
+                lang: node.dataset.lang,
+                source: node.querySelector("pre")?.textContent ?? "",
+                html: node.outerHTML,
+            });
+            continue;
+        }
+
+        run +=
+            node.nodeType === Node.ELEMENT_NODE
+                ? node.outerHTML
+                : escapeHtml(node.textContent ?? "");
+    }
+
+    if (run.trim() !== "" || parts.length === 0) {
+        parts.push({ html: run });
+    }
+
+    return parts;
+}
+
+/** A reply that is a whole HTML page, not in a code block: shown as one, so it can be previewed rather than mangled. */
+function fencePage(text) {
+    if (!/^\s*(<!doctype html|<html[\s>])/i.test(text)) {
+        return text;
+    }
+
+    const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((run) => run[0].length));
+    const fence = "`".repeat(longest + 1);
+
+    return `${fence}html\n${text.trim()}\n${fence}`;
 }
 
 /** The conversation whose markdown is being sanitized, for image paths relative to its folder. */
@@ -218,10 +369,11 @@ const markdownCache = new Map();
 const MARKDOWN_CACHE = 500;
 
 /**
- * Markdown to sanitized HTML, with copy buttons on code blocks. Cached, least recently used out first: a transcript
- * renders its rows in order, and evicting the oldest insert would miss on every row once a thread outgrew the cache.
+ * Markdown as sanitized parts (`partsOf`). Cached, least recently used out first: a transcript renders its rows in
+ * order, and evicting the oldest insert would miss on every row once a thread outgrew the cache. Text still changing
+ * (`cache` false) is not kept, and its long code blocks are not folded while they grow.
  */
-export function markdown(text, conversationId = currentConversation(), cache = true) {
+function markdownParts(text, conversationId = currentConversation(), cache = true) {
     const key = `${conversationId ?? ""}\u0000${text}`;
     let out = markdownCache.get(key);
 
@@ -233,7 +385,7 @@ export function markdown(text, conversationId = currentConversation(), cache = t
     }
 
     rendering = conversationId ?? null;
-    out = sanitize(marked.parse(text, { async: false }));
+    out = partsOf(sanitize(marked.parse(fencePage(text), { async: false }), cache));
     rendering = null;
 
     if (cache) {
@@ -247,12 +399,38 @@ export function markdown(text, conversationId = currentConversation(), cache = t
     return out;
 }
 
-/** Rendered markdown. `cache={false}` for text that is still changing, such as a streaming answer. */
+/** What draws a code block that shows more than code (`rich.js`), given once at load: ui.js does not import it. */
+let RichBlock = null;
+
+export function setRichBlock(component) {
+    RichBlock = component;
+}
+
+/**
+ * Rendered markdown. `cache={false}` for text that is still changing, such as a streaming answer: its pages, images, and
+ * diffs show as code until it is whole.
+ */
 export function Markdown({ text, class: className = "", cache = true }) {
-    return html`<div
-        class=${`md ${className}`}
-        dangerouslySetInnerHTML=${{ __html: markdown(text, undefined, cache) }}
-    ></div>`;
+    const parts = markdownParts(text, undefined, cache);
+
+    if (parts.length === 1 && parts[0].kind === undefined) {
+        return html`<div
+            class=${`md ${className}`}
+            dangerouslySetInnerHTML=${{ __html: parts[0].html }}
+        ></div>`;
+    }
+
+    return html`<div class=${`md ${className}`}>
+        ${parts.map((part, index) =>
+            part.kind === undefined || RichBlock === null
+                ? html`<div
+                      key=${index}
+                      class="md-part"
+                      dangerouslySetInnerHTML=${{ __html: part.html }}
+                  ></div>`
+                : html`<${RichBlock} key=${index} ...${part} streaming=${!cache} />`,
+        )}
+    </div>`;
 }
 
 /** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
@@ -289,15 +467,25 @@ function looksLikePath(text) {
     return match !== null && (match[1] !== "" || FILE_TYPES.has(match[3].toLowerCase()));
 }
 
-/** Open a file (or folder) of the session in the viewer. `path:42` opens it at line 42. */
+/**
+ * Open a file (or folder) of the session in the viewer: in the Files tile while it is open, otherwise in a sheet.
+ * `path:42` opens it at line 42.
+ */
 export function openFile(path) {
     const match = /^(.*?):(\d+)(?:-\d+)?$/.exec(path);
+    const target = { path: match ? match[1] : path, line: match ? Number(match[2]) : undefined };
 
-    openSheet({
-        type: "file",
-        id: match ? match[1] : path,
-        line: match ? Number(match[2]) : undefined,
-    });
+    if (filesShown()) {
+        store.set((state) => ({
+            sheet: null,
+            filesTab: "files",
+            filesTarget: { ...target, n: (state.filesTarget?.n ?? 0) + 1 },
+        }));
+
+        return;
+    }
+
+    openSheet({ type: "file", id: target.path, line: target.line });
 }
 
 /** File paths in rendered markdown open in the viewer. */
@@ -355,7 +543,7 @@ document.addEventListener("click", (event) => {
         return;
     }
 
-    const pre = button.parentElement.querySelector("pre");
+    const pre = button.closest(".code")?.querySelector("pre");
 
     copyText(pre?.innerText ?? "").then(
         () => {
@@ -364,6 +552,22 @@ document.addEventListener("click", (event) => {
         },
         () => notify("error", "Could not copy."),
     );
+});
+
+/** A long code block's button shows all of it, and folds it again. */
+document.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-more]");
+    const block = button?.closest(".code");
+
+    if (!block) {
+        return;
+    }
+
+    const open = block.classList.toggle("open");
+
+    button.textContent = open
+        ? "Fold"
+        : `Show all ${block.querySelector("pre")?.textContent.split("\n").length ?? ""} lines`;
 });
 
 /** Copy text, with a fallback for plain-http addresses, where the clipboard API does not exist. */
@@ -623,23 +827,6 @@ export function Thinking() {
     </div>`;
 }
 
-/** A unified diff, with added and removed lines marked. */
-export function Diff({ diff }) {
-    return html`<pre class="diff">
-        ${diff.split("\n").map((line) => {
-            const kind =
-                line.startsWith("+") && !line.startsWith("+++")
-                    ? "add"
-                    : line.startsWith("-") && !line.startsWith("---")
-                      ? "del"
-                      : "";
-
-            // The line break as a value: htm drops line breaks written in a template's own text.
-            return html`<span class=${kind}>${`${line}\n`}</span>`;
-        })}
-    </pre>`;
-}
-
 /**
  * Keep showing a value for `ms` after it goes away (null or undefined), so what it shows can animate out. Returns the
  * value to show and whether it is leaving.
@@ -821,6 +1008,43 @@ export function Sheet({ title, onClose, children, wide = false, actions = null }
         </section>
     </div>`;
 }
+
+/**
+ * Where a menu opens from the control `selector` names: above it and aligned with it, within what shows of the page (a
+ * phone's keyboard can cover it), and as tall as its rows need up to a menu's height. Null, for the middle of the
+ * screen, when the control is gone or scrolled away, or has too little room above it.
+ */
+export function popAnchor(selector) {
+    const rect = document.querySelector(selector)?.getBoundingClientRect();
+
+    if (!rect || rect.width === 0) {
+        return null;
+    }
+
+    const top = visualViewport?.offsetTop ?? 0;
+    const bottom = top + (visualViewport?.height ?? innerHeight);
+    const at = Math.min(rect.top, bottom - 8);
+    const room = at - top - 14;
+
+    if (rect.bottom < top || room < 220) {
+        return null;
+    }
+
+    const width = Math.min(420, innerWidth - 16);
+
+    return {
+        left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
+        bottom: innerHeight - at + 6,
+        width,
+        height: Math.min(540, room),
+    };
+}
+
+/** A `popAnchor` as a menu's style: nothing for the middle of the screen. */
+export const anchorStyle = (anchor) =>
+    anchor
+        ? `left:${anchor.left}px;bottom:${anchor.bottom}px;width:${anchor.width}px;max-height:${anchor.height}px`
+        : "";
 
 /** The short name of a model for chips: "Claude Opus 5.5" stays, long ids lose their date suffix. */
 export function modelLabel(agent) {

@@ -1,6 +1,7 @@
 // The menu: what can be done in this session and in the app.
 import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
 import { schedulesAvailable } from "../commands.js";
+import { filesAvailable, setFilesOpen } from "../files-panel.js";
 import { setArchived } from "../sessions.js";
 import {
     actions,
@@ -16,6 +17,7 @@ import {
     store,
 } from "../store.js";
 import { isPinned, paletteOf, togglePin } from "../theme.js";
+import { branchAvailable, headLabel } from "./branch.js";
 import { copyText, html, item, Sheet, shortPath } from "../ui.js";
 
 export function MenuSheet() {
@@ -93,8 +95,10 @@ export function MenuSheet() {
                     "see and test pages with Pi",
             )
         }
+        ${conversation && branchAvailable() && item("Branch", () => openSheet({ type: "branch" }), headLabel(view.branch))}
         ${conversation && item("Find in session", () => openSheet({ type: "find" }), "messages, commands, files")}
-        ${conversation && steer && item("Changes", () => openSheet({ type: "changes" }), "what Pi changed")}
+        ${conversation && filesAvailable() && item("Files", () => setFilesOpen(true, "files"), "browse the folder, read files")}
+        ${conversation && filesAvailable() && item("Changes", () => setFilesOpen(true, "changes"), "review what changed")}
         ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
         ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
         ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}

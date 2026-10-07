@@ -348,6 +348,18 @@ export async function conversationRoutes(
         return json(response, 200, { ok: true });
     }
 
+    if (third === "branches" && fourth === undefined && method === "GET") {
+        return json(response, 200, await app.workspace.branches(id, user));
+    }
+
+    if (third === "branch" && fourth === undefined && method === "POST") {
+        return json(
+            response,
+            200,
+            await app.workspace.switchBranch(id, user, (await readJson(request)) ?? {}),
+        );
+    }
+
     if (third === "shell" && fourth === undefined && method === "POST") {
         return json(response, 200, await app.shell.start(id, user, await readJson(request)));
     }

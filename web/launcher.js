@@ -4,8 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { planAvailable, schedulesAvailable } from "./commands.js";
+import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { togglePeeks } from "./peeks.js";
 import { setArchived, workspaceOrder } from "./sessions.js";
+import { branchAvailable, headLabel } from "./sheets/branch.js";
 import {
     actions,
     attempt,
@@ -142,11 +144,29 @@ function actionItems() {
             run: () => openSheet({ type: "artifacts" }),
         },
         conversation &&
-            steer && {
+            filesAvailable() && {
+                label:
+                    store.state.filesOpen && store.state.filesTab === "files"
+                        ? "Close the files"
+                        : "Files",
+                detail: "browse the folder, read files",
+                icon: "folder",
+                keys: "Alt E",
+                run: () => toggleFiles("files"),
+            },
+        conversation &&
+            filesAvailable() && {
                 label: "Changes",
-                detail: "what Pi changed",
+                detail: "review what changed, file by file",
                 icon: "fork",
-                run: () => openSheet({ type: "changes" }),
+                run: () => toggleFiles("changes"),
+            },
+        conversation &&
+            branchAvailable() && {
+                label: "Switch branch",
+                detail: `on ${headLabel(view.branch)}`,
+                icon: "fork",
+                run: () => openSheet({ type: "branch" }),
             },
         conversation &&
             collab() && {

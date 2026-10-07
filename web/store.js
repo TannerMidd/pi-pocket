@@ -45,6 +45,7 @@ const emptyView = () => ({
     plan: { on: false },
     schedules: [],
     goal: null,
+    branch: null,
 });
 
 export const store = {
@@ -85,6 +86,14 @@ export const store = {
         browser: null,
         /** The Browser panel shows; kept per tab, so the reload after a live edit keeps it. */
         browserOpen: sessionStorage.getItem("pocket.browser") === "1",
+        /** The Files tile shows (`files-panel.js`); kept per tab, like the browser's. */
+        filesOpen: sessionStorage.getItem("pocket.files") === "1",
+        /** The Files tile's tab: `files` or `changes`. */
+        filesTab: sessionStorage.getItem("pocket.filesTab") === "changes" ? "changes" : "files",
+        /** The last file asked to open in the Files tile: `{ path, line, n }`, `n` telling requests apart. */
+        filesTarget: null,
+        /** When someone last asked for the Files tile, and for which tab: `{ tab, at }`. */
+        filesAsk: null,
         /** The People panel shows beside the conversation on wide screens; kept per tab, like the browser's. */
         peopleOpen: sessionStorage.getItem("pocket.people") === "1",
         /** The last request to show the People panel: which tab and chat message, and a count that tells requests apart. */
@@ -351,6 +360,8 @@ function applyView(data) {
                 schedules: data.schedules ?? base.schedules,
                 // No goal is null, which the server sends too: only a missing field keeps the last value.
                 goal: data.goal === undefined ? base.goal : data.goal,
+                // What the folder has checked out: `{ branch }` or `{ detached }`, and null outside a repository.
+                branch: data.branch === undefined ? base.branch : data.branch,
             },
             missing: null,
         };
@@ -763,6 +774,10 @@ export const actions = {
     stopShell: (taskId) => api(`c/${current()}/shell/${taskId}/stop`, {}),
     /** A file or folder for the viewer. */
     view: (path) => api(`c/${current()}/view?path=${encodeURIComponent(path)}`),
+    /** What changed in the session's folder: git's uncommitted changes, and Pi's edits. */
+    changes: (id = current()) => api(`c/${id}/changes`),
+    branches: () => api(`c/${current()}/branches`),
+    switchBranch: (target) => api(`c/${current()}/branch`, target),
     /** Undo the uncommitted changes to one file. */
     revert: (path) => api(`c/${current()}/changes/revert`, { path }),
     abort: () => api(`c/${current()}/abort`, {}),
@@ -866,17 +881,37 @@ function sheetChange(sheet, state) {
 
     sessionStorage.setItem(PEOPLE_KEY, "1");
     sessionStorage.removeItem("pocket.browser");
+    sessionStorage.removeItem("pocket.files");
 
     return {
         sheet: null,
         peopleOpen: true,
         browserOpen: false,
+        filesOpen: false,
         peopleAsk: {
             tab: sheet.tab ?? null,
             highlight: sheet.highlight ?? null,
             n: state.peopleAsk.n + 1,
         },
     };
+}
+
+/**
+ * The Files tile shows now: asked for, in a conversation, for someone who can steer, and not in the Browser panel's
+ * place (one panel at a time). `App` draws it by this, and `openFile` opens files in it by this.
+ */
+export function filesShown(state = store.state) {
+    // `browserAvailable()` (browser.js), which imports this module.
+    const browsing =
+        state.browserOpen && state.server?.extensions?.includes("pocket-browser") === true;
+
+    return (
+        state.filesOpen &&
+        state.conversationId !== null &&
+        !state.missing &&
+        state.me?.role !== "viewer" &&
+        !browsing
+    );
 }
 
 /** Hide the People panel. Showing it is `openSheet({ type: "chat" })`, which docks it on wide screens. */

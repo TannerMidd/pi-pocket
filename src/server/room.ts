@@ -15,6 +15,7 @@ import type {
     UsageState,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import type { Head } from "./branches.ts";
 import type { User } from "./config.ts";
 import {
     type ArtifactMeta,
@@ -77,6 +78,8 @@ const TYPING_MS = 6000;
 const PEEK_MS = 1000;
 /** Entries read from the end of a session for its peek tile: enough to find the results of the calls it shows. */
 const PEEK_ENTRIES = PEEK_LINES * 3;
+/** How often an open view looks at its folder's branch, for one switched outside the app while the session is quiet. */
+const HEAD_MS = 3000;
 /** How much of a waiting call's command and reason a tile gets: the tile allows only short commands anyway. */
 const PEEK_SUBJECT = 500;
 const PEEK_REASON = 300;
@@ -147,6 +150,9 @@ export class Room {
     #unsubscribe: (() => void) | undefined;
     #timer: NodeJS.Timeout | undefined;
     #closeTimer: NodeJS.Timeout | undefined;
+    #headTimer: NodeJS.Timeout | undefined;
+    /** The branch this view last read, as JSON. */
+    #head = "";
     readonly #projected = new Map<number, ClientEntry | null>();
     authors: Record<string, string> = {};
     artifacts: Record<string, ArtifactMeta> = {};
@@ -224,6 +230,18 @@ export class Room {
                 title: await this.#app.conversationTitle(owner.conversationId),
             };
         }
+
+        // Every update reads the branch; this catches a switch made in a terminal while nothing else changes. Started
+        // last, so a room that failed to open leaves no timer behind.
+        this.#readHead();
+        this.#headTimer = setInterval(() => {
+            const before = this.#head;
+
+            if (JSON.stringify(this.#readHead()) !== before) {
+                this.schedule();
+            }
+        }, HEAD_MS);
+        this.#headTimer.unref();
     }
 
     setDoc(kind: string, value: Record<string, unknown> | null): void {
@@ -279,6 +297,15 @@ export class Room {
         }
 
         this.schedule();
+    }
+
+    /** What the folder has checked out now, null outside a repository; kept as the branch this view last read. */
+    #readHead(): Head | null {
+        const head = this.#app.workspace.head(this.id) ?? null;
+
+        this.#head = JSON.stringify(head);
+
+        return head;
     }
 
     get value(): ConversationView | undefined {
@@ -389,6 +416,8 @@ export class Room {
                     ...(by === undefined ? {} : { by }),
                     runs,
                 })),
+            // The branch is read from the repository each time, so one Pi or a person switched to shows on the next update.
+            branch: this.#readHead(),
             goal:
                 this.goal === undefined
                     ? null
@@ -645,6 +674,7 @@ export class Room {
     close(): void {
         clearTimeout(this.#timer);
         clearTimeout(this.#closeTimer);
+        clearInterval(this.#headTimer);
         clearTimeout(this.#peekTimer);
         this.#peekTimer = undefined;
 

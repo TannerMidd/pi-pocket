@@ -4,7 +4,7 @@ import { ChatSheet } from "./chat.js";
 import { NotificationsSheet } from "./notify.js";
 import { ShareSheet } from "./share.js";
 import { AppearanceSheet } from "./sheets/appearance.js";
-import { ChangesSheet } from "./sheets/changes.js";
+import { BranchPicker } from "./sheets/branch.js";
 import { ExtensionsSheet } from "./sheets/extensions.js";
 import { FileSheet } from "./sheets/file.js";
 import { FindSheet } from "./sheets/find.js";
@@ -58,6 +58,9 @@ function sheetBody(sheet) {
         case "model":
             body = html`<${ModelPicker} />`;
             break;
+        case "branch":
+            body = view.conversation ? html`<${BranchPicker} />` : null;
+            break;
         case "cwd":
             body = html`<${CwdSheet} mode=${sheet.mode} />`;
             break;
@@ -103,9 +106,6 @@ function sheetBody(sheet) {
             break;
         case "worktree":
             body = html`<${WorktreeSheet} />`;
-            break;
-        case "changes":
-            body = view.conversation ? html`<${ChangesSheet} />` : null;
             break;
         case "file":
             body = view.conversation

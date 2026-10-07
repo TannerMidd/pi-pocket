@@ -512,3 +512,62 @@ test("a new title and spend limit reach the people looking at the session at onc
         app.detach(tab.client);
     }
 });
+
+test("the folder picker makes a new folder, nested ones too, for people who may browse folders", async () => {
+    const { existsSync, statSync, symlinkSync } = await import("node:fs");
+    const { root } = await import("./helpers.ts");
+    const made = join(root, "picked", "new app");
+
+    assert.equal(app.workspace.makeFolder(owner(app), made), made);
+    assert.ok(statSync(made).isDirectory());
+    assert.equal(
+        app.workspace.makeFolder(owner(app), `${made}/`),
+        made,
+        "one already there is fine",
+    );
+    assert.equal(app.workspace.makeFolder(guest("Gus"), join(made, "src")), join(made, "src"));
+
+    writeFileSync(join(root, "picked", "notes.txt"), "a file\n");
+    assert.throws(() => app.workspace.makeFolder(owner(app), join(root, "picked", "notes.txt")), {
+        status: 409,
+    });
+    symlinkSync(join(root, "picked", "gone"), join(root, "picked", "dangling"));
+    assert.throws(() => app.workspace.makeFolder(owner(app), join(root, "picked", "dangling")), {
+        status: 409,
+        message: /broken link/,
+    });
+    assert.throws(() => app.workspace.makeFolder(owner(app), "relative/folder"), { status: 400 });
+    assert.throws(() => app.workspace.makeFolder(owner(app), "  "), { status: 400 });
+    assert.throws(
+        () => app.workspace.makeFolder(app.config.addUser("Vic", "viewer").user, join(root, "v")),
+        { status: 403 },
+    );
+    assert.throws(() => app.workspace.makeFolder(guest("Scoped Sam", ["1"]), join(root, "s")), {
+        status: 403,
+    });
+    assert.ok(!existsSync(join(root, "v")) && !existsSync(join(root, "s")));
+
+    // What the picker offers to make: a folder not there yet, never a file.
+    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "later")), {
+        status: 404,
+        message: /isn't there/,
+    });
+    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "notes.txt")), {
+        status: 400,
+        message: /is a file, not a folder/,
+    });
+    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "notes.txt", "in")), {
+        status: 400,
+        message: /inside a file/,
+    });
+    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "dangling")), {
+        status: 400,
+        message: /link to nothing/,
+    });
+    symlinkSync(join(root, "picked", "loop-b"), join(root, "picked", "loop-a"));
+    symlinkSync(join(root, "picked", "loop-a"), join(root, "picked", "loop-b"));
+    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "loop-a")), {
+        status: 400,
+        message: /link to nothing/,
+    });
+});
