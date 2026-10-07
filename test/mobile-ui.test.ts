@@ -39,6 +39,8 @@ let first: ConversationId;
 let second: ConversationId;
 /** A session whose reply has a table and a code block. */
 let rich: ConversationId;
+/** A conversation taller than the screen, to scroll up in and come back down from. */
+let long: ConversationId;
 
 /** Run a script in the page and read back the JSON it returns. */
 async function inPage<T>(script: string): Promise<T> {
@@ -180,6 +182,16 @@ before(async () => {
             "```",
         ].join("\n"),
     );
+    long = await newSession(app);
+
+    for (let turn = 1; turn <= 6; turn++) {
+        await say(
+            app,
+            long,
+            Array.from({ length: 20 }, (_, line) => `- Turn ${turn}, line ${line + 1}`).join("\n"),
+        );
+    }
+
     page = await browsers.open(1);
     await page.setViewport(VIEWPORTS.mobile);
     await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
@@ -919,6 +931,43 @@ test(
         await reach({ files: false, layers: 0 }, "closed");
     },
 );
+
+test("the way to the bottom goes to the bottom, and scrolling works after it", real, async () => {
+    const where = () =>
+        inPage<{ gap: number; top: number; jump: boolean; overflow: string; coarse: boolean }>(`
+            const scroller = document.querySelector(".pane > .scroller");
+
+            return JSON.stringify({
+                gap: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight,
+                top: scroller.scrollTop,
+                jump: document.querySelector(".jump") !== null,
+                overflow: scroller.style.overflowY,
+                coarse: matchMedia("(pointer: coarse)").matches,
+            });
+        `);
+
+    await fresh();
+    await goTo(long);
+    await slid();
+    await until(async () => (await where()).top > 0, "the conversation, at its bottom");
+    assert.equal((await where()).coarse, true, "a touch screen, where a scroller glides");
+
+    // Up to the top, as a thumb would: the way back down shows.
+    await page.evaluate(`document.querySelector(".pane > .scroller").scrollTop = 0`);
+    await until(async () => (await where()).jump, "the way to the bottom");
+    await tap(".jump");
+    await until(async () => {
+        const now = await where();
+
+        return now.gap < 2 && !now.jump && now.overflow === "";
+    }, "the bottom, with scrolling back on");
+
+    // It stays there, and the conversation still scrolls by hand.
+    await page.evaluate(`document.querySelector(".pane > .scroller").scrollTop = 0`);
+    await until(async () => (await where()).top === 0, "scrolled up by hand");
+    await back();
+    await reach({ path: "/" }, "the list");
+});
 
 test(
     "on a phone, an invite lasts as long as chosen, and the one it replaces ends",
