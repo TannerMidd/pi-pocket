@@ -1,4 +1,7 @@
-/** `/a/:conversation/:artifact/:version`: an artifact as its own page, in a sandbox with no way into the app. */
+/**
+ * `/a/:conversation/:artifact/:version`: an artifact as its own page, in a sandbox with no way into the app. `/a/frame`:
+ * the page that runs HTML from a reply, once someone taps Run, in the same sandbox.
+ */
 import type { ServerResponse } from "node:http";
 import { marked } from "marked";
 import type { PocketApp } from "../app.ts";
@@ -10,6 +13,37 @@ import { conversationId, escapeHtml, send } from "./io.ts";
 const ARTIFACT_CSP =
     "sandbox allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads; frame-ancestors 'self'";
 
+/**
+ * The page a reply's HTML runs in once someone taps Run (`web/run-frame.js`). It runs only what its parent sends it, and
+ * only as the app's own sandboxed frame: with an opaque origin, from a parent at the app's address. The HTML then
+ * replaces the page and reports its height, so the frame fits it. Like an artifact, it can reach the network, not the
+ * app.
+ */
+export const RUN_FRAME = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Preview</title></head><body><script>
+(() => {
+    if (self.origin !== "null" || window.parent === window) {
+        return;
+    }
+
+    // The page's height is its body's with its margins: the document's own is never less than the frame. "fills" says
+    // the page is as tall as its frame, as a page sized by it (100vh) is.
+    const size = '<script>(() => { const post = () => { const body = document.body; const style = body && getComputedStyle(body); const height = body ? body.scrollHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom) : document.documentElement.scrollHeight; parent.postMessage({ type: "pocket-run-size", height: Math.ceil(height), fills: document.documentElement.scrollHeight <= innerHeight + 1 && height >= innerHeight - 1 }, "*"); }; new ResizeObserver(post).observe(document.documentElement); addEventListener("load", post); post(); })();<' + '/script>';
+
+    addEventListener("message", (event) => {
+        const data = event.data;
+
+        if (event.source !== window.parent || event.origin !== location.origin || data?.type !== "pocket-run" || typeof data.html !== "string") {
+            return;
+        }
+
+        document.open();
+        document.write(data.html + size);
+        document.close();
+    });
+    parent.postMessage({ type: "pocket-run-ready" }, "*");
+})();
+</script></body></html>`;
+
 export async function artifact(
     app: PocketApp,
     response: ServerResponse,
@@ -18,6 +52,15 @@ export async function artifact(
 ): Promise<void> {
     if (user === undefined) {
         throw new HttpError(401, "Sign in first");
+    }
+
+    if (parts.length === 1 && parts[0] === "frame") {
+        return send(response, 200, RUN_FRAME, "text/html; charset=utf-8", {
+            "content-security-policy": ARTIFACT_CSP,
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "cache-control": "no-cache",
+        });
     }
 
     const [conv, id, version] = parts;

@@ -734,10 +734,11 @@ kbd {
     }
     :root[data-tiling="on"][data-focus="sidebar"] .sidebar::after,
     :root[data-tiling="on"][data-focus="browser"] .browser::after,
+    :root[data-tiling="on"][data-focus="files-tile"] .files-tile::after,
     :root[data-tiling="on"][data-focus="people"] .people::after,
     :root[data-tiling="on"]:not([data-focus="sidebar"]):not([data-focus="browser"]):not(
-            [data-focus="people"]
-        ):not([data-focus="peeks"])
+            [data-focus="files-tile"]
+        ):not([data-focus="people"]):not([data-focus="peeks"])
         .pane::after {
         opacity: 1;
     }
@@ -791,6 +792,16 @@ kbd {
     padding: calc(env(safe-area-inset-top) + 0.35rem) 0.4rem 0.35rem;
     border-bottom: 1px solid var(--line);
     background: var(--bg);
+}
+
+/* Phones: the top bar's buttons a little narrower, so the session's title keeps room beside them. */
+@media (max-width: 480px) {
+    .topbar {
+        gap: 0;
+    }
+    .topbar > .icon-button {
+        width: 36px;
+    }
 }
 
 .title {
@@ -1102,7 +1113,7 @@ kbd {
     border-color: var(--accent-line);
 }
 
-.md.streaming > :last-child::after {
+.md.streaming > :last-child:not(.md-part)::after {
     content: "█";
     margin-left: 1px;
     color: var(--accent);
@@ -3320,6 +3331,60 @@ button.chip:hover {
     overflow-y: auto;
 }
 
+/* Above the folders: Show hidden, and New folder. */
+.dir-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+.dir-tools .check {
+    margin-bottom: 0;
+}
+
+/* A new folder's name, in the list where it will show. */
+.new-folder {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.4rem 0.35rem 0.7rem;
+    margin-bottom: 0.25rem;
+    border: 1px solid var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.new-folder input {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+.new-folder .icon-button {
+    width: 32px;
+    height: 32px;
+    color: var(--muted);
+}
+
+/* A typed path that is not there yet, with Create it. */
+.folder-missing {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem 0.6rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--warn-line);
+    background: var(--warn-soft);
+    font-size: 0.82rem;
+    color: var(--body);
+    overflow-wrap: anywhere;
+}
+
 .check {
     display: flex;
     gap: 0.4rem;
@@ -5364,6 +5429,923 @@ textarea.notes {
     }
 }
 
+/* ─── Diff viewer ──────────────────────────────────────────── */
+
+/* One file's diff: a header that sticks while its lines scroll by, then the lines in a table, one or two sides. */
+.dv {
+    border: 1px solid var(--line);
+    background: var(--code-bg);
+    min-width: 0;
+}
+
+.dv-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.2rem;
+    padding: 0.25rem 0.45rem;
+    background: var(--card-2);
+    border-bottom: 1px solid var(--line);
+    font-size: 0.8rem;
+}
+
+.dv.folded .dv-head {
+    border-bottom: 0;
+}
+
+.dv.viewed .dv-head {
+    background: var(--card);
+}
+
+.dv.viewed .dv-name {
+    color: var(--muted);
+}
+
+.dv-fold {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    color: var(--muted);
+}
+
+.dv-fold:hover {
+    color: var(--text);
+}
+
+.dv-head .change-kind {
+    flex: none;
+    width: 1.2rem;
+    font-size: 0.68rem;
+}
+
+.dv-title {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    text-align: left;
+    color: inherit;
+}
+
+/* A long path gives up its folders before its name. */
+.dv-path {
+    display: flex;
+    min-width: 0;
+    font-family: var(--mono);
+    white-space: nowrap;
+}
+
+.dv-dir {
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 1ch;
+    white-space: nowrap;
+    font-family: var(--mono);
+}
+
+.dv-name {
+    color: var(--text);
+    flex: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dv-counts {
+    display: inline-flex;
+    gap: 0.35rem;
+    flex: none;
+    font: 0.74rem var(--mono);
+}
+
+.dv-bar {
+    display: inline-flex;
+    gap: 1px;
+    flex: none;
+}
+
+.dv-bar i {
+    width: 7px;
+    height: 7px;
+    background: var(--line-strong);
+}
+
+.dv-bar i.add {
+    background: var(--ok);
+}
+
+.dv-bar i.del {
+    background: var(--err);
+}
+
+.dv-chip {
+    flex: none;
+    padding: 0 0.35rem;
+    font-size: 0.68rem;
+}
+
+.dv-chip.warn {
+    color: var(--warn);
+    border-color: var(--warn-line);
+}
+
+.dv-tool.icon-button {
+    width: 28px;
+    height: 28px;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.dv-tool.icon-button:hover {
+    color: var(--text);
+}
+
+.dv-tool.danger {
+    width: auto;
+    padding: 0 0.4rem;
+    color: var(--err);
+}
+
+.dv-viewed {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex: none;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid var(--line);
+    font-size: 0.72rem;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.dv-viewed:hover {
+    border-color: var(--edge);
+    color: var(--text);
+}
+
+.dv-viewed.on {
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+}
+
+.dv-viewed input {
+    width: auto;
+    margin: 0;
+    accent-color: var(--ok);
+}
+
+@media (max-width: 520px) {
+    .dv-bar,
+    .dv-viewed span {
+        display: none;
+    }
+}
+
+.dv-scroll {
+    overflow-x: auto;
+}
+
+.dv-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font: 0.76rem/1.55 var(--mono);
+    color: var(--body);
+    tab-size: 4;
+}
+
+/* Without wrapping, a long line scrolls the diff sideways instead of breaking. */
+.dv:not(.wrap) .dv-table {
+    width: max-content;
+    min-width: 100%;
+}
+
+.dv-col-n {
+    width: 3.6em;
+}
+
+@media (max-width: 520px) {
+    .dv-col-n {
+        width: 2.9em;
+    }
+}
+
+.dv-n {
+    padding: 0 0.55em 0 0.3em;
+    text-align: right;
+    vertical-align: top;
+    color: var(--faint);
+    user-select: none;
+    white-space: nowrap;
+}
+
+/* Numbers are drawn, not written: copying lines leaves them out. */
+.dv-n::before {
+    content: attr(data-n);
+}
+
+.dv-n.go {
+    cursor: pointer;
+}
+
+.dv-n.go:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.dv-code {
+    position: relative;
+    padding: 0 0.8em 0 1.5em;
+    vertical-align: top;
+    white-space: pre;
+}
+
+.dv.wrap .dv-code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.dv-code::before {
+    content: attr(data-sign);
+    position: absolute;
+    left: 0.45em;
+    user-select: none;
+}
+
+.dv-code:empty::after {
+    content: " ";
+}
+
+.dv-code.add,
+.dv-n.add {
+    background: color-mix(in srgb, var(--ok) 11%, transparent);
+}
+
+.dv-code.del,
+.dv-n.del {
+    background: color-mix(in srgb, var(--err) 11%, transparent);
+}
+
+.dv-n.add,
+.dv-code.add::before {
+    color: var(--ok);
+}
+
+.dv-n.del,
+.dv-code.del::before {
+    color: var(--err);
+}
+
+.dv-code.add mark {
+    background: color-mix(in srgb, var(--ok) 32%, transparent);
+    color: inherit;
+}
+
+.dv-code.del mark {
+    background: color-mix(in srgb, var(--err) 32%, transparent);
+    color: inherit;
+}
+
+/* The side of a split row with no line: hatched, as an absence rather than an empty line. */
+.dv-code.none,
+.dv-n.none {
+    background: repeating-linear-gradient(
+        -45deg,
+        transparent 0 5px,
+        color-mix(in srgb, var(--o-fg) 4%, transparent) 5px 6px
+    );
+}
+
+.dv-table.split .dv-code + .dv-n {
+    border-left: 1px solid var(--line);
+}
+
+.dv-hunk td {
+    padding: 0.2rem 0.7rem;
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    color: var(--muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dv-context {
+    margin-left: 0.8em;
+    color: var(--body);
+}
+
+.dv-gap td {
+    padding: 0.1rem 0.4rem;
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    text-align: center;
+    border-block: 1px solid var(--line);
+}
+
+.dv-gap button {
+    padding: 0.15rem 0.6rem;
+    color: var(--accent);
+    font: 0.72rem var(--mono);
+}
+
+.dv-gap button:hover {
+    background: var(--hover);
+}
+
+.dv-reading {
+    color: var(--muted);
+    font: 0.72rem var(--mono);
+}
+
+.dv-note td {
+    padding: 0 0.8rem 0 calc(7.2em + 1.5em);
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-style: italic;
+}
+
+.dv-empty {
+    margin: 0;
+    padding: 0.7rem 0.8rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.dv-empty .link {
+    margin-left: 0.4rem;
+}
+
+.dv-wait {
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--line);
+    border-top: 0;
+}
+
+.dv-settings {
+    display: inline-flex;
+    gap: 0.3rem;
+}
+
+.chip.on {
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+
+/* A diff in a tool card or a reply: it scrolls inside a bound, like the card's other output. */
+.dv-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.dv-block .dv-head {
+    position: static;
+}
+
+/* ─── Review ─────────────────────────────────────────────── */
+
+.dr {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    outline: none;
+    min-width: 0;
+}
+
+.dr-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+.dr-where {
+    flex: 1 1 12rem;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 0.74rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dr-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    font-size: 0.78rem;
+}
+
+.dr-stats strong {
+    color: var(--text);
+}
+
+.dr-progress {
+    width: 64px;
+    height: 4px;
+    background: var(--line);
+    overflow: hidden;
+}
+
+.dr-progress i {
+    display: block;
+    height: 100%;
+    background: var(--ok);
+    transition: width var(--t-in) var(--ease-out);
+}
+
+.dr-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.dr-filter,
+.ft-filter {
+    flex: 1;
+    min-width: 7rem;
+    height: 32px;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.8rem;
+}
+
+.dr-main {
+    display: grid;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+.dr.wide .dr-main {
+    grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
+    align-items: start;
+}
+
+.dr-tree {
+    padding: 0.3rem 0;
+    border: 1px solid var(--line);
+    background: var(--card);
+    font-size: 0.78rem;
+    max-height: 40vh;
+    overflow: auto;
+}
+
+.dr.wide .dr-tree {
+    position: sticky;
+    top: 0;
+    max-height: calc(100dvh - 10rem);
+}
+
+.dr-row,
+.ft-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    min-height: 1.7rem;
+    padding: 0.15rem 0.5rem 0.15rem calc(0.5rem + var(--depth, 0) * 0.85rem);
+    text-align: left;
+    color: var(--body);
+    white-space: nowrap;
+}
+
+.dr-row:hover,
+.ft-row:hover {
+    background: var(--hover);
+}
+
+.dr-row.on,
+.ft-row.on {
+    background: var(--accent-soft);
+    color: var(--text);
+    box-shadow: inset 2px 0 var(--accent);
+}
+
+.dr-row.dir {
+    color: var(--muted);
+}
+
+.dr-row .change-kind {
+    flex: none;
+    width: 1.1rem;
+    font-size: 0.64rem;
+}
+
+.dr-row.seen .dr-name {
+    color: var(--muted);
+}
+
+.dr-name,
+.ft-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dr-pi {
+    color: var(--spark);
+    font-size: 0.7rem;
+}
+
+.dr-tail {
+    margin-left: auto;
+    padding-left: 0.4rem;
+    color: var(--ok);
+    font-size: 0.7rem;
+}
+
+.dr-tail .dv-counts {
+    font-size: 0.68rem;
+}
+
+.dr-files {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+.dr-file {
+    scroll-margin-top: 0.3rem;
+}
+
+/* Going to a change (n, p) leaves room for the file's header, which sticks at the top. */
+.dr .dv-row,
+.dr .dv-hunk {
+    scroll-margin-top: 2.6rem;
+}
+
+.dr-clean {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 2.5rem 1rem;
+    color: var(--ok);
+    font-size: 0.85rem;
+}
+
+.dr-clean p {
+    margin: 0;
+    color: var(--muted);
+}
+
+.dr-pionly .list-item {
+    font-size: 0.8rem;
+}
+
+/* ─── Files tile ───────────────────────────────────────────── */
+
+/* Phones and narrow windows: over the conversation, as the Browser panel is. Wide screens: a window beside it. */
+.files-tile {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    animation: popin var(--t-in) var(--ease-out);
+}
+
+.files-resize {
+    display: none;
+}
+
+@media (max-width: 1099px) {
+    :root[data-tiling="on"] .files-tile.window {
+        border: 0;
+    }
+    .files-tile.window::after {
+        display: none !important;
+    }
+}
+
+@media (min-width: 1100px) {
+    .layout.filing .files-tile {
+        position: relative;
+        inset: auto;
+        z-index: auto;
+        flex: 0 0 var(--files-w, 44%);
+        max-width: calc(100% - 440px);
+        height: 100dvh;
+        border-left: 1px solid var(--line);
+        animation-delay: 90ms;
+    }
+    :root[data-tiling="on"] .layout.filing .files-tile {
+        height: auto;
+    }
+    .files-resize {
+        display: block;
+        left: -7px;
+        right: auto;
+    }
+}
+
+.files-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: calc(env(safe-area-inset-top) + 0.3rem) 0.35rem 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.files-bar .icon-button {
+    width: 34px;
+    height: 34px;
+}
+
+.files-tabs {
+    display: flex;
+    align-self: stretch;
+}
+
+.files-tabs button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition:
+        color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+.files-tabs button:hover {
+    color: var(--text);
+}
+
+.files-tabs button.on {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+.files-count {
+    min-width: 1.3rem;
+    padding: 0 0.3rem;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.68rem;
+    text-align: center;
+}
+
+.files-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+/* As wide as the tile, never as wide as what is inside: a long line or a wide page scrolls within it instead. */
+.files-bar,
+.files-body {
+    width: 100%;
+}
+
+.files-body[hidden] {
+    display: none;
+}
+
+.files-body > .dr {
+    padding: 0.6rem 0.7rem 1.2rem;
+}
+
+/* Files: the tree, and the open file beside it when the tile is wide enough, or instead of it when not. */
+.ft {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+}
+
+.ft-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.ft.side .ft-pane {
+    flex: 0 0 clamp(210px, 34%, 300px);
+    border-right: 1px solid var(--line);
+}
+
+.ft-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.45rem 0.4rem 0.3rem 0.5rem;
+}
+
+.ft-tools .icon-button {
+    width: 32px;
+    height: 32px;
+    color: var(--muted);
+}
+
+.ft-tools .icon-button:hover {
+    color: var(--text);
+}
+
+.ft-fold-all {
+    transform: rotate(180deg);
+}
+
+.ft-root {
+    padding: 0.1rem 0.7rem 0.35rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-tree {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: 1rem;
+    font-size: 0.8rem;
+}
+
+.ft-row {
+    padding-left: calc(0.4rem + var(--depth, 0) * 0.9rem);
+}
+
+.ft-row .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.ft-row.dir > .icon:not(.chev) {
+    color: var(--accent);
+}
+
+.ft-spacer {
+    width: 12px;
+    flex: none;
+}
+
+.ft-row.dot .ft-name {
+    color: var(--muted);
+}
+
+.ft-row.changed.modified .ft-name,
+.ft-row.changed.renamed .ft-name {
+    color: var(--warn);
+}
+
+.ft-row.changed.new .ft-name,
+.ft-row.changed.added .ft-name {
+    color: var(--ok);
+}
+
+.ft-row.changed.deleted .ft-name {
+    color: var(--err);
+    text-decoration: line-through;
+}
+
+.ft-kind {
+    margin-left: auto;
+    padding-left: 0.4rem;
+    font: 0.66rem var(--mono);
+}
+
+.ft-kind.modified,
+.ft-kind.renamed {
+    color: var(--warn);
+}
+
+.ft-kind.new,
+.ft-kind.added {
+    color: var(--ok);
+}
+
+.ft-kind.deleted {
+    color: var(--err);
+}
+
+.ft-dot {
+    width: 5px;
+    height: 5px;
+    margin-left: auto;
+    background: var(--warn);
+    flex: none;
+}
+
+.ft-row.match {
+    padding-left: 0.7rem;
+}
+
+.ft-row mark {
+    background: none;
+    color: var(--accent);
+    font-weight: 800;
+}
+
+.ft-parent {
+    min-width: 0;
+    margin-left: auto;
+    padding-left: 0.6rem;
+    color: var(--muted);
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+}
+
+.ft-note {
+    padding: 0.5rem 0.8rem;
+}
+
+.ft-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+.ft-view-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 42px;
+    padding: 0 0.35rem 0 0.7rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+}
+
+.ft-view-head .icon-button {
+    width: 32px;
+    height: 32px;
+}
+
+.ft-view-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.84rem;
+    color: var(--text);
+}
+
+.ft-view .file-viewer {
+    padding: 0.5rem 0.6rem 1.2rem;
+}
+
+.ft-empty {
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    color: var(--faint);
+}
+
+/* The file viewer, in the tile and the sheet: a bar of what the file is and what can be done with it, then the file. */
+.file-viewer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.file-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.file-tools .file-path {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-tools .icon-button {
+    width: 32px;
+    height: 32px;
+}
+
 /* ─── Browser ──────────────────────────────────────────────── */
 
 /* Phones and narrow windows: the page full screen, over the conversation and under sheets. Wide screens: a window
@@ -5952,4 +6934,185 @@ textarea.notes {
 /* Ctrl+R: messages sent before. */
 .history-text {
     color: var(--text);
+}
+
+/* ─── Syntax and rich markdown ─────────────────────────────── */
+
+/* Syntax colors, from the theme's own palette so every Omarchy theme colors code its way. */
+.hl-kw {
+    color: var(--o-magenta);
+}
+
+.hl-str {
+    color: var(--o-green);
+}
+
+.hl-com {
+    color: var(--faint);
+    font-style: italic;
+}
+
+.hl-num,
+.hl-lit {
+    color: var(--o-orange);
+}
+
+.hl-fn {
+    color: var(--o-blue);
+}
+
+.hl-type,
+.hl-attr {
+    color: var(--o-yellow);
+}
+
+.hl-op,
+.hl-prop,
+.hl-meta {
+    color: var(--o-cyan);
+}
+
+.hl-tag,
+.hl-re,
+.hl-var {
+    color: var(--o-red);
+}
+
+/* A run of HTML between the blocks the app draws itself: its children lay out as the reply's own. */
+.md-part {
+    display: contents;
+}
+
+.md > .md-part:first-child > :first-child {
+    margin-top: 0;
+}
+
+.md > .md-part:last-child > :last-child {
+    margin-bottom: 0;
+}
+
+.md.streaming > .md-part:last-child > :last-child::after {
+    content: "█";
+    margin-left: 1px;
+    color: var(--accent);
+    animation: blink 1s steps(2) infinite;
+}
+
+/* A code block's bar: its language, what it can show, and Copy. */
+.code-head {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.9rem;
+    padding: 0.15rem 0.3rem 0.15rem 0.7rem;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    font: 0.72rem var(--mono);
+    color: var(--muted);
+}
+
+.code-lang {
+    text-transform: lowercase;
+}
+
+.code-head .copy {
+    position: static;
+    margin-left: auto;
+    opacity: 0.8;
+}
+
+.rich-tabs {
+    display: inline-flex;
+    margin-left: 0.4rem;
+    border: 1px solid var(--line);
+}
+
+.rich-tabs button,
+.rich-run {
+    padding: 0.1rem 0.5rem;
+    font: inherit;
+    color: var(--muted);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.rich-tabs button + button {
+    border-left: 1px solid var(--line);
+}
+
+.rich-tabs button:hover,
+.rich-run:hover {
+    color: var(--text);
+    background: var(--hover);
+}
+
+.rich-tabs button.on {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.rich-run {
+    border: 1px solid var(--line);
+    color: var(--ok);
+}
+
+.rich-run.on {
+    color: var(--err);
+}
+
+/* A page and an image, drawn as a browser would: on white, whatever the theme. */
+.html-preview,
+.run-frame {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--line);
+    background: #fff;
+}
+
+.rich-svg {
+    display: block;
+    max-width: 100%;
+    max-height: 70vh;
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+    background: #fff;
+    cursor: zoom-in;
+}
+
+.code.rich > .dv-block {
+    max-height: none;
+}
+
+.rich-note {
+    margin: 0;
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+}
+
+/* A long code block, folded to its first lines until asked for the rest. */
+.code.long:not(.open) pre {
+    max-height: 22em;
+    overflow: hidden;
+    mask-image: linear-gradient(#000 75%, transparent);
+}
+
+.code-more {
+    display: block;
+    width: 100%;
+    padding: 0.3rem;
+    border: 1px solid var(--line);
+    border-top: 0;
+    background: var(--card);
+    color: var(--accent);
+    font: 0.74rem var(--mono);
+}
+
+.code-more:hover {
+    background: var(--hover);
+}
+
+.file-tools .button.on {
+    color: var(--err);
 }

@@ -5,6 +5,7 @@ import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
+import { FilesButton, FilesPanel, filesAvailable, toggleFiles } from "./files-panel.js";
 import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
@@ -18,6 +19,8 @@ import {
     togglePeeks,
 } from "./peeks.js";
 import { Drawer, Rail, ResizeHandle, SessionList, workspaceOrder } from "./sessions.js";
+// Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
+import "./rich.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
 import { SignIn } from "./signin.js";
@@ -26,6 +29,7 @@ import {
     attempt,
     canSteer,
     dismiss,
+    filesShown,
     navigate,
     notify,
     openSheet,
@@ -79,6 +83,7 @@ function Topbar() {
         }
         <${PeeksButton} />
         <${PeopleButton} />
+        <${FilesButton} />
         <${BrowserButton} />
         <button
             class="icon-button badge-host"
@@ -186,15 +191,16 @@ function App() {
     const inConversation = state.conversationId !== null;
     const rail = prefs().sidebar === "rail";
     const browsing = inConversation && state.browserOpen && browserAvailable() && !state.missing;
-    const people = !browsing && peopleDocked(state);
+    const filing = filesShown(state);
+    const people = !browsing && !filing && peopleDocked(state);
     const peeking = peeksWanted(state);
     const tiles = peeking ? peekTiles(state) : [];
     // The column takes the place beside the conversation when Browser and People leave it free; otherwise a strip,
     // which only shows when there are tiles.
-    const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !people;
+    const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !filing && !people;
 
     return html`<div
-        class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""}`}
+        class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""}`}
     >
         <aside class="sidebar window">
             ${rail ? html`<${Rail} />` : html`<${SessionList} />`}
@@ -221,9 +227,14 @@ function App() {
         </div>
         ${
             inConversation &&
-            html`<${PeekHost} shown=${peekColumn} tiles=${tiles} replaced=${browsing || people} />`
+            html`<${PeekHost}
+                shown=${peekColumn}
+                tiles=${tiles}
+                replaced=${browsing || filing || people}
+            />`
         }
         ${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
+        ${filing && html`<${FilesPanel} key=${state.conversationId} />`}
         ${inConversation && html`<${PeopleHost} shown=${people} browsing=${browsing} />`}
         <${Drawer} />
         <${Sheets} />
@@ -247,8 +258,9 @@ function focusWindow(event) {
     }
 
     const name =
-        ["sidebar", "browser", "people", "peeks"].find((each) => win.classList.contains(each)) ??
-        "pane";
+        ["sidebar", "browser", "files-tile", "people", "peeks"].find((each) =>
+            win.classList.contains(each),
+        ) ?? "pane";
 
     if (document.documentElement.dataset.focus !== name) {
         document.documentElement.dataset.focus = name;
@@ -370,6 +382,13 @@ addEventListener("keydown", (event) => {
         if (event.code === "KeyB" && store.state.conversationId !== null && browserAvailable()) {
             event.preventDefault();
             toggleBrowser();
+
+            return;
+        }
+
+        if (event.code === "KeyE" && filesAvailable()) {
+            event.preventDefault();
+            toggleFiles();
 
             return;
         }

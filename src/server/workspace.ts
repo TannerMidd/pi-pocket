@@ -1,11 +1,11 @@
 /**
  * A conversation's folder on this machine, as people reach it through the app: which files a person may load or read,
- * the file viewer, the files for `@` mentions, the Changes sheet, and uploads. The operations people call directly
- * check who may do them; the path helpers (`conversationPath`, `conversationFile`, `readableFile`, `uploadDirectory`)
- * leave seeing the conversation to their callers.
+ * the file viewer, the files for `@` mentions, the Changes sheet, uploads, and new folders from the folder picker. The
+ * operations people call directly check who may do them; the path helpers (`conversationPath`, `conversationFile`,
+ * `readableFile`, `uploadDirectory`) leave seeing the conversation to their callers.
  */
 import { mkdirSync, realpathSync, statSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -59,6 +59,49 @@ export class Workspace {
         }
 
         return absolute;
+    }
+
+    /**
+     * Make a folder to start a session in or move one to, with any folders missing above it, for someone who may browse
+     * folders (`/api/fs`): who can steer, and was not invited to one session. A folder already there is fine: it is the
+     * one asked for. Returns its path.
+     */
+    makeFolder(user: User, path: string): string {
+        this.#app.requireSteer(user);
+
+        if (user.sessions !== undefined) {
+            throw new HttpError(403, "You were invited to one session.");
+        }
+
+        const written = path.trim();
+
+        if (written === "" || written.includes("\0")) {
+            throw new HttpError(400, "Name the folder to make.");
+        }
+
+        const expanded = expandHome(written);
+
+        if (!isAbsolute(expanded)) {
+            throw new HttpError(400, "Give the folder's whole path, from / or ~.");
+        }
+
+        const absolute = resolve(expanded);
+
+        try {
+            mkdirSync(absolute, { recursive: true });
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+
+            throw new HttpError(
+                409,
+                code === "EEXIST" || code === "ENOTDIR"
+                    ? `${absolute} is a file, or inside one.`
+                    : `Could not make ${absolute}: ${describe(error)}`,
+            );
+        }
+
+        // Made, or a folder already: either way it must be a folder now.
+        return this.checkDirectory(absolute);
     }
 
     /** A path as a conversation means it: absolute, `~/…`, or relative to the conversation's working directory. */

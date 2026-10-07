@@ -3,7 +3,7 @@
  * its tool calls, so nothing new is stored), and, when the folder is in a git repository, every uncommitted change
  * there, with each file's diff on request.
  */
-import { rm } from "node:fs/promises";
+import { lstat, rm } from "node:fs/promises";
 import { devNull } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { type GitOptions, git as runGit } from "./git.ts";
@@ -21,11 +21,17 @@ export type ChangedFile = {
     removed?: number;
     /** Pi wrote or edited it in this session. */
     byPi: boolean;
+    /**
+     * Changes whenever the file does (its size and modification time), so a browser knows its diff is new even when
+     * the counts stay the same; absent for a file that is gone.
+     */
+    version?: string;
 };
 
 export type Changes = {
     /** The repository the folder is in; absent when it is in none. */
-    repo?: { root: string; branch?: string };
+    /** `head` is the last commit's id, which the diffs are against; absent before the first commit. */
+    repo?: { root: string; branch?: string; head?: string };
     files: ChangedFile[];
     /** Changed files left out of `files`, past the most it lists. */
     more: number;
@@ -163,6 +169,17 @@ export function parseNumstat(output: string): Map<string, { added?: number; remo
     return counts;
 }
 
+/** A file's size and modification time, which change when it does; undefined when it is not there. */
+async function versionOf(file: string): Promise<string | undefined> {
+    try {
+        const info = await lstat(file);
+
+        return `${info.size}:${Math.round(info.mtimeMs)}`;
+    } catch {
+        return undefined;
+    }
+}
+
 /** Where a folder is in its repository, as git writes paths: `app/` for the folder app, empty at the top. */
 async function prefixOf(cwd: string): Promise<string> {
     return (await git(cwd, ["rev-parse", "--show-prefix"])).trim();
@@ -194,6 +211,10 @@ export async function changesIn(
         (name) => name.trim(),
         () => undefined,
     );
+    const head = await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
+        (id) => id.trim() || undefined,
+        () => undefined,
+    );
     const prefix = onlyHere ? await prefixOf(cwd) : "";
     const changed = parseStatus(
         await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
@@ -213,19 +234,29 @@ export async function changesIn(
                       "--no-textconv",
                   ]),
               );
-    const files = status.map(({ code, path }): ChangedFile => ({
-        path,
-        kind: kindOf(code),
-        ...counts.get(path),
-        byPi: edits.has(join(root, path)),
-    }));
+    const versions = await Promise.all(status.map(({ path }) => versionOf(join(root, path))));
+    const files = status.map(({ code, path }, index): ChangedFile => {
+        const version = versions[index];
+
+        return {
+            path,
+            kind: kindOf(code),
+            ...counts.get(path),
+            byPi: edits.has(join(root, path)),
+            ...(version === undefined ? {} : { version }),
+        };
+    });
     const shown = new Set(files.map((file) => join(root, file.path)));
     const piOnly = [...edits]
         .filter(([path]) => !shown.has(path))
         .map(([path, entryId]) => ({ path: relative(root, path), entryId }));
 
     return {
-        repo: { root, ...(branch === undefined ? {} : { branch }) },
+        repo: {
+            root,
+            ...(branch === undefined ? {} : { branch }),
+            ...(head === undefined ? {} : { head }),
+        },
         files,
         more: changed.length - status.length,
         piOnly,

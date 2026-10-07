@@ -156,6 +156,16 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
     const viewer = app.config.addUser("Vee", "viewer").user;
 
     await assert.rejects(app.workspace.changes(id, viewer), { status: 403 });
+
+    // A new file has no counts, and an edit can keep them: its version still says it changed.
+    const versionOf = async (path: string) =>
+        (await app.workspace.changes(id, owner(app))).files.find((file) => file.path === path)
+            ?.version;
+    const before = await versionOf("notes/todo.md");
+
+    assert.ok(before);
+    writeFileSync(join(repo, "notes/todo.md"), "- two, and longer\n");
+    assert.notEqual(await versionOf("notes/todo.md"), before);
 });
 
 test("files a codemode script wrote are Pi's too, shown at the reply that ran it", async () => {
