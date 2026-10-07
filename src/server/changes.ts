@@ -46,7 +46,7 @@ const MAX_FILES = 500;
 const MAX_DIFF = 300_000;
 const GIT_TIMEOUT_MS = 15_000;
 
-/** Git for the Changes sheet: quick, with room for a long diff. */
+/** Git for Changes: quick, with room for a long diff. */
 const git = (cwd: string, args: string[], options: GitOptions = {}) =>
     runGit(cwd, args, { timeoutMs: GIT_TIMEOUT_MS, maxBuffer: MAX_DIFF * 4, ...options });
 /**

@@ -53,7 +53,7 @@ Globals:
 - \`store(key, value)\` and \`load(key)\` keep JSON values across codemode calls in this conversation.
 - \`ALL_TOOLS\` lists the tools a script can call.`;
 
-/** One call a script made. `path`: the file it worked on, when it names one; the Changes sheet looks for writes. */
+/** One call a script made. `path`: the file it worked on, when it names one; Changes looks for writes. */
 type CallRecord = {
     name: string;
     status: "running" | "ok" | "error" | "cancelled";

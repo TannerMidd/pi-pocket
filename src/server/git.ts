@@ -1,8 +1,8 @@
 /**
- * Git as Pi Pocket runs it for itself (the Changes sheet, worktrees): without a file system monitor, without optional
- * locks so it never gets in the way of Pi's own git commands, with paths taken literally (a file named `*` is that
- * file, not every file), and in English, so a failure can be told from another by what git says. Programs a repository configures, such as clean and smudge filters, still run, as they do for
- * any git command there.
+ * Git as Pi Pocket runs it for itself (Changes, worktrees): without a file system monitor, without optional locks so
+ * it never gets in the way of Pi's own git commands, with paths taken literally (a file named `*` is that file, not
+ * every file), and in English, so a failure can be told from another by what git says. Programs a repository
+ * configures, such as clean and smudge filters, still run, as they do for any git command there.
  */
 import { execFile } from "node:child_process";
 

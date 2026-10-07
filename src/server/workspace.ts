@@ -58,6 +58,10 @@ export class Workspace {
                 throw new HttpError(400, `${absolute} is inside a file, not a folder.`);
             }
 
+            if (code === "ELOOP") {
+                throw new HttpError(400, `${absolute} is a link to nothing.`);
+            }
+
             if (code !== "ENOENT") {
                 throw new HttpError(400, `Could not open ${absolute}: ${describe(error)}`);
             }

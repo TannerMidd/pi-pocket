@@ -195,9 +195,11 @@ function gapLines(gap, shown, text) {
     return { top, bottom, left: total - fromTop - fromBottom };
 }
 
-/** A hunk with one side empty is a whole file, with nothing around it: a new or deleted file, or one that was empty. */
-const wholeFile = (hunk) =>
-    (hunk.oldStart === 0 && hunk.oldCount === 0) || (hunk.newStart === 0 && hunk.newCount === 0);
+/**
+ * A diff that is a whole file, with nothing around it: a new or deleted one. By its kind, not its hunk: `-U0` writes an
+ * insertion at the top of a file as `@@ -0,0 +1 @@` too.
+ */
+const wholeFile = (file) => file.kind === "added" || file.kind === "new" || file.kind === "deleted";
 
 /** Unchanged lines a review's diff shows around each change (`src/server/changes.ts` asks git for that many). */
 const CONTEXT = 3;
@@ -450,11 +452,7 @@ function DiffFile({
     useEffect(() => setShown({}), [file]);
     // A diff cut short cannot say where its last hunk ends, so the lines after it are not known either.
     const canExpand =
-        expand &&
-        path !== "" &&
-        file.hunks.length > 0 &&
-        !wholeFile(file.hunks[0]) &&
-        !file.truncated;
+        expand && path !== "" && file.hunks.length > 0 && !wholeFile(file) && !file.truncated;
     const asked = Object.values(shown).some((each) => each.top + each.bottom > 0);
     const fetched = useFileText(
         path,
@@ -584,7 +582,7 @@ function DiffFile({
                 (hunk, index) => html`<tbody key=${index}>
                     ${expandable && gapRows(index)}
                     ${
-                        !wholeFile(hunk) &&
+                        !wholeFile(file) &&
                         (!expandable || (hunk.context && hiddenBefore(index) > 0)) &&
                         html`<tr class="dv-hunk">
                             <td colspan=${columns}>

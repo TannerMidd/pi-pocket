@@ -564,4 +564,10 @@ test("the folder picker makes a new folder, nested ones too, for people who may 
         status: 400,
         message: /link to nothing/,
     });
+    symlinkSync(join(root, "picked", "loop-b"), join(root, "picked", "loop-a"));
+    symlinkSync(join(root, "picked", "loop-a"), join(root, "picked", "loop-b"));
+    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "loop-a")), {
+        status: 400,
+        message: /link to nothing/,
+    });
 });
