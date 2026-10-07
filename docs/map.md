@@ -27,7 +27,7 @@ A module split into parts keeps its name for the part others import, with the re
 | `projection.ts`         | Entries as compact JSON for browsers; `usageCost`                                                                                                                                                                                                                     |
 | `entry-format.ts`       | The kinds of Pi Pocket's own entries, and the markers it writes into message text (`[from: …]`, attached files). Stored data and the web app depend on their exact values                                                                                             |
 | `docs.ts`               | Every durable document Pi Pocket defines                                                                                                                                                                                                                              |
-| `host.ts`, `reload.ts`  | `PocketHost` (what extensions get) and `Approvals`; the extension loader: built-ins in `ORDER`, drop-ins, live reload                                                                                                                                                 |
+| `host.ts`, `reload.ts`  | `PocketHost` (what extensions get) and `Approvals`; the extension loader: built-ins in `ORDER`, drop-ins (never with a name Pi Pocket keeps, `BUILT_IN_TOOLS`), live reload                                                                                           |
 | `lock.ts`               | One process per data folder                                                                                                                                                                                                                                           |
 | `errors.ts`, `paths.ts` | `HttpError`, `describe`, and input checks; `~` paths                                                                                                                                                                                                                  |
 
@@ -157,7 +157,7 @@ Plain ES modules, loaded as they are. `store.js` holds the shared state, and not
 - **A command:** a method in `commands.ts` (check access first), a route in `http/conversation-routes.ts` (or `http/api.ts` for one that is not about a conversation), an action in `store.js`, then the UI.
 - **A sheet:** a component in `web/sheets/`, a case in `sheetBody` (`web/sheets.js`), and `openSheet({ type })` where it opens.
 - **Something back should close** (a screen over the conversation, a view that takes another's place on a phone): `useBack(open, close)` from `web/back.js` in the component that shows it. Sheets already have it.
-- **A built-in extension:** a file in `extensions/`, its place in `ORDER` and its title in `TITLES` (`reload.ts`), and the order asserted in `test/app.test.ts`.
+- **A built-in extension:** a file in `extensions/` (its extension named `pocket-…`), its place in `ORDER`, its title in `TITLES`, and its tools in `BUILT_IN_TOOLS` (`reload.ts`), and the order asserted in `test/app.test.ts`.
 - **A slash command:** `web/commands.js`.
 
 ## Rules that are easy to break
