@@ -3,7 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ConfigStore, Role, User } from "./config.ts";
 
 export const COOKIE = "pocket_auth";
-const INVITE_TTL_MS = 15 * 60_000;
+
+/** How long an invite may last, in minutes: 15 minutes (the default, and always for an owner invite), an hour, a day, or a week. */
+export const INVITE_MINUTES = [15, 60, 24 * 60, 7 * 24 * 60] as const;
+export type InviteMinutes = (typeof INVITE_MINUTES)[number];
 
 export function parseCookies(header: string | undefined): Record<string, string> {
     const out: Record<string, string> = {};
@@ -73,14 +76,16 @@ export function clearAuthCookie(response: ServerResponse): void {
     response.setHeader("set-cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
-/** What an invite grants: a role, and optionally a single session instead of all of them. */
-export type InviteGrant = { role: Exclude<Role, "owner">; session?: string };
+/**
+ * What an invite grants: a role, and optionally a single session instead of all of them. An owner invite signs a device
+ * in as the owner, with the owner's token: it is never for one session.
+ */
+export type InviteGrant =
+    { role: Exclude<Role, "owner">; session?: string } | { role: "owner"; session?: never };
 
-type Invite = InviteGrant & { expiresAt: number; createdBy: string };
-
+/** Invites live in `config.json` (by their codes' hashes), so one that lasts a day or a week outlives a restart. */
 export class Auth {
     readonly #config: ConfigStore;
-    readonly #invites = new Map<string, Invite>();
 
     constructor(config: ConfigStore) {
         this.#config = config;
@@ -106,11 +111,12 @@ export class Auth {
         return this.#config.userByToken(token);
     }
 
+    /** A new invite that lasts `minutes`; an owner invite always lasts 15, the least. */
     createInvite(
         by: User,
         grant: InviteGrant = { role: "guest" },
-    ): { code: string; expiresAt: number } {
-        this.#prune();
+        minutes: InviteMinutes = 15,
+    ): { code: string; expiresAt: number; minutes: InviteMinutes } {
         // Unambiguous characters, easy to type on a phone.
         const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
         const bytes = randomBytes(10);
@@ -120,45 +126,60 @@ export class Auth {
             code += alphabet[byte % alphabet.length];
         }
 
-        const expiresAt = Date.now() + INVITE_TTL_MS;
+        const lasts = grant.role === "owner" ? INVITE_MINUTES[0] : minutes;
+        const expiresAt = Date.now() + lasts * 60_000;
 
-        this.#invites.set(code, { ...grant, expiresAt, createdBy: by.id });
+        this.#config.addInvite(code, { ...grant, expiresAt, createdBy: by.id });
 
-        return { code, expiresAt };
+        return { code, expiresAt, minutes: lasts };
+    }
+
+    /** End an invite before its time, if `by` made it: when the sheet that showed it moves on to another. */
+    cancelInvite(code: string, by: User): void {
+        if (this.#config.invite(code)?.createdBy === by.id) {
+            this.#config.removeInvite(code);
+        }
     }
 
     /** The grant of a live invite, or undefined when it expired or was used. */
     invite(code: string): InviteGrant | undefined {
-        this.#prune();
-        const invite = this.#invites.get(code);
+        const invite = this.#config.invite(code);
 
-        return invite === undefined
-            ? undefined
-            : {
-                  role: invite.role,
-                  ...(invite.session === undefined ? {} : { session: invite.session }),
-              };
+        if (invite === undefined) {
+            return undefined;
+        }
+
+        return invite.role === "owner" || invite.session === undefined
+            ? { role: invite.role }
+            : { role: invite.role, session: invite.session };
     }
 
     inviteValid(code: string): boolean {
         return this.invite(code) !== undefined;
     }
 
-    /** Spend an invite on a new device: a user with the invite's role and scope, and its own token. */
+    /**
+     * Spend an invite on a new device: a user with the invite's role and scope, and its own token. An owner invite makes
+     * no one new: the device gets the owner and the owner's token. Either way the invite is gone, used or not.
+     */
     redeem(code: string, name: string): { user: User; token: string } | undefined {
-        this.#prune();
-        const invite = this.#invites.get(code);
+        const invite = this.#config.invite(code);
 
-        if (invite === undefined) {
+        if (invite === undefined || !this.#config.removeInvite(code)) {
             return undefined;
         }
 
-        this.#invites.delete(code);
         // The person who made it must still be allowed to: not removed, not view only, not limited to one session.
         const creator = this.#config.userById(invite.createdBy);
 
         if (creator === undefined || creator.role === "viewer" || creator.sessions !== undefined) {
             return undefined;
+        }
+
+        if (invite.role === "owner") {
+            return creator.role === "owner"
+                ? { user: creator, token: this.#config.ownerToken }
+                : undefined;
         }
 
         const clean = name.replace(/\s+/g, " ").trim().slice(0, 40) || "Guest";
@@ -168,15 +189,5 @@ export class Auth {
             invite.role,
             invite.session === undefined ? undefined : [invite.session],
         );
-    }
-
-    #prune(): void {
-        const now = Date.now();
-
-        for (const [code, invite] of this.#invites) {
-            if (invite.expiresAt < now) {
-                this.#invites.delete(code);
-            }
-        }
     }
 }

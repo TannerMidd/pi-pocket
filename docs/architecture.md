@@ -15,7 +15,6 @@ Some state lives in this process alone, and a restart forgets it. For example:
 - which tool calls wait for approval;
 - the browser's pages;
 - when each run ended, which peek tiles use;
-- invites, which last 15 minutes anyway;
 - provider sign-ins in progress.
 
 ## Who owns what
@@ -103,7 +102,7 @@ Where the other checks live:
 
 - **Commands and collaboration** check steering and driving themselves (`requireSteer`, `requireDriver`). They are called from routes, from tasks, and from each other.
 - **Owner-only settings** are checked in `http/api.ts`: extension modules, provider sign-ins, restart. Changing people's access and the approval rule is checked in `app.ts`.
-- **Invites** are checked in `http/api.ts` too: viewers and people invited to one session cannot create them.
+- **Invites** are checked in `http/api.ts` too: viewers and people invited to one session cannot create them, and only the owner makes an owner invite. An invite lasts one of `INVITE_MINUTES` (`auth.ts`; an owner invite, always 15) and is kept in `config.json` by its code's hash, so a day's or a week's outlives a restart. Only whoever made one ends it early (`POST /api/invite/cancel`), as the invite sheet does with the one it showed when its settings change, and with one that answers after it closed. One person keeps at most `MAX_INVITES` (`config.ts`) live, their oldest ending first; removing someone ends theirs, and a new owner token ends owner invites not yet used.
 - **The workspace's path helpers** (`conversationFile`, `readableFile`) leave seeing the conversation to their caller.
 
 Each browser tab is a `Client` (`room.ts`), fed by an event stream or by long polling (`http/events.ts`). On connecting, a tab gets:

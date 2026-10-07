@@ -34,6 +34,17 @@ export interface User {
     budget?: number;
 }
 
+/** An invite not yet used, kept by its code's sha256 (the code itself is only shown to whoever made it). */
+export interface StoredInvite {
+    codeHash: string;
+    role: Role;
+    /** The one session it is for; absent means every session. Never set for an owner invite. */
+    session?: string;
+    expiresAt: number;
+    /** Who made it: it works only while they may still invite. */
+    createdBy: string;
+}
+
 export interface ModelChoice {
     provider: string;
     modelId: string;
@@ -45,6 +56,8 @@ interface PocketConfig {
     /** Printed in the login URL at every start. Keep this file private. */
     ownerToken: string;
     users: User[];
+    /** Invites not yet used: kept here so one that lasts a day or a week outlives a restart. */
+    invites?: StoredInvite[];
     lastModel?: ModelChoice;
     /** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
     disabledExtensions?: string[];
@@ -71,6 +84,9 @@ function sameHash(a: string, b: string): boolean {
 
     return left.length === right.length && timingSafeEqual(left, right);
 }
+
+/** The most invites one person keeps live at once. */
+export const MAX_INVITES = 50;
 
 /** `config.json` in the data directory, written atomically with mode 0600. */
 export class ConfigStore {
@@ -245,14 +261,72 @@ export class ConfigStore {
         this.save();
     }
 
+    /** Remove someone (never the owner), and the invites they made, which could no longer be used. */
     removeUser(id: string): void {
         this.#config.users = this.#config.users.filter(
             (user) => user.id !== id || user.role === "owner",
         );
+
+        if (!this.#config.users.some((user) => user.id === id)) {
+            this.#config.invites = this.#config.invites?.filter(
+                (invite) => invite.createdBy !== id,
+            );
+        }
+
         this.save();
     }
 
-    /** Replace the owner token, signing out every device that used the old one. */
+    /** Keep a new invite. A person keeps at most `MAX_INVITES` live: beyond that, their oldest ends. */
+    addInvite(code: string, invite: Omit<StoredInvite, "codeHash">): void {
+        this.#pruneInvites();
+        const theirs = (this.#config.invites ?? []).filter(
+            (each) => each.createdBy === invite.createdBy,
+        );
+        const ending = new Set(theirs.slice(0, Math.max(0, theirs.length - MAX_INVITES + 1)));
+
+        this.#config.invites = [
+            ...(this.#config.invites ?? []).filter((each) => !ending.has(each)),
+            { codeHash: hashToken(code), ...invite },
+        ];
+        this.save();
+    }
+
+    /** A live invite by its code, or undefined when there is none or it expired. */
+    invite(code: string): StoredInvite | undefined {
+        this.#pruneInvites();
+        const hash = hashToken(code);
+
+        return this.#config.invites?.find((invite) => sameHash(invite.codeHash, hash));
+    }
+
+    /** Remove an invite, and say whether it was there (and live). */
+    removeInvite(code: string): boolean {
+        const found = this.invite(code);
+
+        if (found === undefined) {
+            return false;
+        }
+
+        this.#config.invites = this.#config.invites?.filter((invite) => invite !== found);
+        this.save();
+
+        return true;
+    }
+
+    #pruneInvites(): void {
+        const now = Date.now();
+        const live = (this.#config.invites ?? []).filter((invite) => invite.expiresAt >= now);
+
+        if (live.length !== (this.#config.invites ?? []).length) {
+            this.#config.invites = live;
+            this.save();
+        }
+    }
+
+    /**
+     * Replace the owner token, signing out every device that used the old one. Owner invites not yet used go too: one
+     * spent later would hand out the new token.
+     */
     rotateOwnerToken(): string {
         const token = newToken();
 
@@ -261,6 +335,10 @@ export class ConfigStore {
 
         if (owner !== undefined) {
             owner.tokenHash = hashToken(token);
+        }
+
+        if (this.#config.invites !== undefined) {
+            this.#config.invites = this.#config.invites.filter((invite) => invite.role !== "owner");
         }
 
         this.save();

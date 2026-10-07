@@ -12,7 +12,9 @@ import {
     type Auth,
     COOKIE,
     clearAuthCookie,
+    INVITE_MINUTES,
     type InviteGrant,
+    type InviteMinutes,
     origin,
     parseCookies,
     quickTunnelHost,
@@ -57,8 +59,17 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
     };
 
-    /** What an invite may grant: viewers and people invited to one session cannot invite anyone. */
+    /**
+     * What an invite may grant: viewers and people invited to one session cannot invite anyone, and only the owner can
+     * sign a device in as the owner (never for one session).
+     */
     const inviteGrant = (user: User, body: { role?: unknown; session?: unknown }): InviteGrant => {
+        if (body.role === "owner") {
+            requireOwner(user);
+
+            return { role: "owner" };
+        }
+
         if (user.role === "viewer" || user.sessions !== undefined) {
             throw new HttpError(403, "Only people with access to every session can invite others.");
         }
@@ -76,6 +87,21 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         return { role, session: String(session) };
+    };
+
+    /** How long an invite lasts, in minutes: one of `INVITE_MINUTES`, 15 when not said. */
+    const inviteMinutes = (body: { minutes?: unknown }): InviteMinutes => {
+        if (body.minutes === undefined) {
+            return 15;
+        }
+
+        const minutes = INVITE_MINUTES.find((each) => each === body.minutes);
+
+        if (minutes === undefined) {
+            throw new HttpError(400, "An invite lasts 15 minutes, an hour, a day, or a week.");
+        }
+
+        return minutes;
     };
 
     /** A guest signed in by a cookie set on a Cloudflare quick tunnel can only come back through it: remember which one. */
@@ -451,9 +477,27 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, { ok: true });
         }
 
-        if (first === "invite" && method === "POST") {
-            const grant = inviteGrant(user, await readJson(request));
-            const invite = auth.createInvite(user, grant);
+        if (first === "invite" && second === "cancel" && method === "POST") {
+            const body = (await readJson(request)) as { code?: unknown };
+
+            if (typeof body.code !== "string") {
+                throw new HttpError(400, "Say which invite.");
+            }
+
+            // Only whoever made it ends it; for anyone else it stays as it was, and nothing says whether it exists.
+            auth.cancelInvite(body.code, user);
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (first === "invite" && second === undefined && method === "POST") {
+            const body = (await readJson(request)) as {
+                role?: unknown;
+                session?: unknown;
+                minutes?: unknown;
+            };
+            const grant = inviteGrant(user, body);
+            const invite = auth.createInvite(user, grant, inviteMinutes(body));
             const here = origin(request);
             const loopback = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?$/.test(
                 here,
@@ -467,10 +511,15 @@ export function createApi(options: HttpOptions, auth: Auth) {
             const tunnel = loopback ? app.access?.url : undefined;
             const base = tunnel ?? lan[0] ?? here;
             const link = `${base}/join/${invite.code}`;
+            // An invite whose QR code could not be made is never shown: it ends rather than stay live, unseen.
             const svg = await QRCode.toString(link, {
                 type: "svg",
                 margin: 1,
                 color: { dark: "#000000", light: "#ffffff" },
+            }).catch((error: unknown) => {
+                auth.cancelInvite(invite.code, user);
+
+                throw error;
             });
 
             return json(response, 200, {

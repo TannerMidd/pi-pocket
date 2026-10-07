@@ -919,3 +919,117 @@ test(
         await reach({ files: false, layers: 0 }, "closed");
     },
 );
+
+test(
+    "on a phone, an invite lasts as long as chosen, and the one it replaces ends",
+    real,
+    async () => {
+        const code = () =>
+            inPage<string | null>(
+                `return JSON.stringify(document.querySelector(".invite-code-value")?.textContent.replace(/\\s/g, "") ?? null)`,
+            );
+        const help = () =>
+            inPage<string>(
+                `return JSON.stringify(document.querySelector(".sheet p.muted").textContent)`,
+            );
+        const status = async (invite: string | null) =>
+            (await fetch(`${base}/join/${invite}`)).status;
+
+        await fresh();
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "invite" })`);
+        await until(async () => (await code()) !== null, "the first invite");
+        const first = await code();
+
+        assert.match(await help(), /expires in 15 minutes/);
+        await page.evaluate(
+            `[...document.querySelectorAll(".sheet .segmented button")].find((each) => each.textContent.trim() === "1 week").click()`,
+        );
+        await until(async () => ![null, first].includes(await code()), "the week's invite");
+        const week = await code();
+
+        assert.match(await help(), /expires in a week/);
+        assert.equal(await status(week), 200);
+        await until(async () => (await status(first)) === 410, "the 15 minutes' invite, ended");
+
+        // An owner invite always lasts 15 minutes: nothing to choose.
+        await tap('.sheet label.check input[type="checkbox"]');
+        await until(async () => ![null, week].includes(await code()), "the owner's invite");
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify([...document.querySelectorAll(".sheet .label")].some((each) => each.textContent === "Expires after"))`,
+            ),
+            false,
+        );
+        assert.match(await help(), /expires in 15 minutes/);
+        await until(async () => (await status(week)) === 410, "the week's invite, ended");
+        await tap('.sheet label.check input[type="checkbox"]');
+        await until(async () => (await code()) !== null, "a guest's invite again");
+        const steer = await code();
+
+        // Not for a frame does the sheet show an invite made for other settings: View only shows no Steer invite.
+        await page.evaluate(`
+            window.frames = [];
+            const watch = () => {
+                const on = document.querySelector(".sheet .segmented .on")?.textContent.trim();
+                const code = document.querySelector(".invite-code-value")?.textContent.replace(/\\s/g, "");
+
+                window.frames.push([on, code ?? null]);
+
+                if (window.frames.length < 60) {
+                    requestAnimationFrame(watch);
+                }
+            };
+
+            requestAnimationFrame(watch);
+            [...document.querySelectorAll(".sheet .segmented button")].find((each) => each.textContent.trim() === "View only").click();
+        `);
+        await until(async () => ![null, steer].includes(await code()), "the view-only invite");
+        const frames = await inPage<[string, string | null][]>(
+            `return JSON.stringify(window.frames)`,
+        );
+
+        assert.ok(
+            !frames.some(([on, shown]) => on === "View only" && shown === steer),
+            "no frame shows the Steer invite under View only",
+        );
+        const viewOnly = await code();
+
+        // New invite makes another and leaves the one before working; closing leaves the last one working.
+        await tap(".sheet .button.wide:last-of-type");
+        await until(async () => ![null, viewOnly].includes(await code()), "another invite");
+        const another = await code();
+
+        assert.equal(await status(viewOnly), 200, "the one before New invite still works");
+        await back();
+        await reach({ sheet: null, layers: 0 }, "closed");
+        assert.equal(await status(another), 200, "the last one shown still works");
+
+        // An invite that cannot be made says so, and New invite tries again. (A sheet opened again while it still slides
+        // away is the same sheet: wait until it is gone.)
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sheet") === null)`,
+                )) === true,
+            "the sheet, gone",
+        );
+        await page.evaluate(`
+            window.realFetch = window.fetch;
+            window.fetch = (url, ...rest) =>
+                String(url).endsWith("/api/invite") ? Promise.reject(new TypeError("offline")) : window.realFetch(url, ...rest);
+        `);
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "invite" })`);
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("Tap New invite to try again") === true)`,
+                )) === true,
+            "the way to try again",
+        );
+        await page.evaluate(`window.fetch = window.realFetch`);
+        await tap(".sheet .button.wide:last-of-type");
+        await until(async () => (await code()) !== null, "the invite, at the second try");
+        await back();
+        await reach({ sheet: null, layers: 0 }, "closed");
+    },
+);
