@@ -8,6 +8,19 @@
 let
   cfg = config.services.pi-pocket;
   extensionNames = map builtins.baseNameOf cfg.extensions;
+  skillsDir =
+    if cfg.skills == null then
+      null
+    else
+      pkgs.linkFarm "pi-pocket-skills" (
+        lib.imap0 (index: source: {
+          # Pi keeps the first skill of each name; preserve the declared traversal order.
+          name = lib.fixedWidthString (lib.stringLength (toString (lib.length cfg.skills))) "0" (
+            toString index
+          );
+          path = source;
+        }) cfg.skills
+      );
 in
 {
   options.services.pi-pocket = {
@@ -95,6 +108,23 @@ in
       description = "Extra Chromium flags. Pi Pocket splits these on whitespace.";
     };
 
+    skills = lib.mkOption {
+      type = lib.types.nullOr (lib.types.listOf lib.types.path);
+      default = null;
+      example = lib.literalExpression "[ ./skills/my-skill ./skills/collection ]";
+      description = ''
+        Skill directories or collections to expose in the service user's Pi skills
+        directory (~/.pi/agent/skills, or skills under PI_CODING_AGENT_DIR). Each path
+        gets its own link, preserving SKILL.md files and their supporting files.
+        Null leaves unmanaged skills alone and removes a previously managed link.
+        An empty list manages an empty skills directory. Changing the list replaces
+        the whole managed directory link, so removed skills leave no stale links.
+        Existing unmanaged directories are never overwritten: move them aside before
+        opting in. This directory is shared with Pi CLI when using the same agent
+        directory, and is read-only; use project skills for editable additions.
+      '';
+    };
+
     extensions = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
@@ -167,6 +197,27 @@ in
       after = [ "network-online.target" ];
       path = cfg.extraPackages;
       preStart = ''
+        agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+        case "$agent_dir" in
+          '~') agent_dir="$HOME" ;;
+          '~/'*) agent_dir="$HOME/''${agent_dir#\~/}" ;;
+        esac
+        skills_dir="$agent_dir/skills"
+        if [ -L "$skills_dir" ]; then
+          # Recognize our store link even if its old target has been garbage-collected.
+          case "$(readlink -- "$skills_dir")" in
+            ${builtins.storeDir}/*-pi-pocket-skills) rm -- "$skills_dir" ;;
+          esac
+        fi
+        ${lib.optionalString (cfg.skills != null) ''
+          if [ -e "$skills_dir" ] || [ -L "$skills_dir" ]; then
+            echo "Pi Pocket will not overwrite unmanaged skills at $skills_dir; move them aside before setting services.pi-pocket.skills." >&2
+            exit 1
+          fi
+          mkdir -p -- "$agent_dir"
+          ln -s -- ${skillsDir} "$skills_dir"
+        ''}
+
         directory=${lib.escapeShellArg "${cfg.dataDir}/extensions"}
         rm -rf -- "$directory"
         mkdir -p -- "$directory"
