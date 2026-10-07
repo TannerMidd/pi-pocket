@@ -12,6 +12,11 @@
   outputs =
     inputs@{ flake-parts, nixpkgs-x86_64-darwin, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      flake.nixosModules = rec {
+        default = pi-pocket;
+        pi-pocket = import ./nix/module.nix;
+      };
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
