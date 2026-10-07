@@ -813,13 +813,38 @@ kbd {
     background: var(--bg);
 }
 
-/* Phones: the top bar's buttons a little narrower, so the session's title keeps room beside them. */
-@media (max-width: 480px) {
+/*
+ * Below the sidebar's width the top bar leads back to the session list, each button a thumb wide. On phones it keeps
+ * only the buttons with something to say (a page open, artifacts made, people here, peek tiles on): the menu's tiles
+ * open the rest.
+ */
+@media (max-width: 699px) {
+    .topbar .quiet {
+        display: none;
+    }
+}
+
+@media (max-width: 959px) {
     .topbar {
         gap: 0;
+        padding-left: 0.15rem;
     }
-    .topbar > .icon-button {
-        width: 36px;
+    /* The list is the whole screen here, not a sidebar to fold. */
+    .sidebar-fold {
+        display: none !important;
+    }
+    .topbar > .icon-button,
+    .topbar > .people-button {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+    }
+    .topbar-back {
+        color: var(--text);
+    }
+    .topbar-back .badge {
+        top: 2px;
+        right: 0;
     }
 }
 
@@ -1091,6 +1116,10 @@ kbd {
 .md table:not(.dv-table) :is(td, th) {
     border: 1px solid var(--line);
     padding: 0.25rem 0.5rem;
+    /* Words break only when longer than the cell can be, and a cell keeps room for a few words: a crowded table
+     * scrolls sideways instead of crushing its columns. */
+    overflow-wrap: break-word;
+    min-width: 12ch;
 }
 
 .md blockquote {
@@ -5387,6 +5416,12 @@ textarea.notes {
     color: var(--ok);
 }
 
+/* The command a tile asks about opens its session too, as the rest of the tile does: there it shows whole. */
+.peek-ask-host {
+    display: contents;
+    cursor: pointer;
+}
+
 .peek-actions {
     display: inline-flex;
     gap: 0.3rem;
@@ -5936,14 +5971,25 @@ textarea.notes {
     font-size: 0.8rem;
 }
 
+/* The folder gives way when there is no room; the branch, a way to switch it, stays in sight. */
 .dr-where {
     flex: 1 1 12rem;
     min-width: 0;
+    display: flex;
+    align-items: baseline;
     color: var(--muted);
     font-size: 0.74rem;
+    white-space: pre;
+}
+
+.dr-path {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+}
+
+.dr-where > :not(.dr-path) {
+    flex: none;
 }
 
 .dr-stats {
@@ -7228,4 +7274,505 @@ textarea.notes {
 
 .file-tools .button.on {
     color: var(--err);
+}
+
+/* ─── Phones: places, pushed screens, and going back ───────── */
+
+/* The menu's tiles: the session's places, a thumb wide each, four to a row. */
+.places {
+    display: grid;
+    /* Four to a row, or three where larger text would cut their names short. */
+    grid-template-columns: repeat(auto-fill, minmax(max(4.6rem, 22%), 1fr));
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+
+.place {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 68px;
+    padding: 0.55rem 0.25rem 0.45rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    color: var(--body);
+    animation: rise-in 0.34s var(--ease-out) backwards;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out),
+        transform 90ms var(--ease-out);
+}
+
+.place:hover {
+    border-color: var(--edge);
+    background: var(--card-2);
+    color: var(--text);
+}
+
+.place:active {
+    background: var(--pressed);
+    transform: scale(0.96);
+}
+
+.place.on {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.place-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 26px;
+}
+
+.place-icon .badge {
+    top: -6px;
+    right: -10px;
+}
+
+.place-icon .browser-dot {
+    top: -2px;
+    right: -4px;
+}
+
+.place-label {
+    max-width: 100%;
+    font-size: 0.74rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * Phones: a session opened slides in from the right, and going back brings the list (or the session before) in from
+ * the left, so where back goes is where things came from. `data-route` is set while it slides (back.js).
+ */
+@media (max-width: 959px) {
+    /* Held inside the window: a scroller sliding in from the right (a route, a swipe's lean) would make the page wider
+     * than the screen, and a phone's browser widen and pan its view to fit. */
+    .pane {
+        overflow-x: clip;
+    }
+    :root[data-route="forward"] .pane > .scroller {
+        animation: route-forward 0.32s var(--ease-out);
+    }
+    :root[data-route="back"] .pane > .scroller,
+    :root[data-route="back"] .home-list {
+        animation: route-back 0.32s var(--ease-out);
+    }
+}
+
+@keyframes route-forward {
+    from {
+        opacity: 0;
+        transform: translateX(24%);
+    }
+}
+
+@keyframes route-back {
+    from {
+        opacity: 0;
+        transform: translateX(-24%);
+    }
+}
+
+/* Back the browser already showed with its own slide: what it closes goes at once (back.js). */
+:root[data-back-shown] .leaving {
+    display: none !important;
+}
+
+/* Phones: the places, beside the message box where a thumb reaches (composer.js). Elsewhere the top bar has them. */
+.composer-row .places-button {
+    display: none;
+}
+
+@media (max-width: 699px) {
+    .composer-row .places-button {
+        display: inline-grid;
+        width: 40px;
+        height: 40px;
+        margin-left: -0.25rem;
+    }
+    .composer-row .places-button .browser-dot {
+        top: 7px;
+        right: 7px;
+    }
+    /* Room for it: the model's name gives way first, and the thinking level shows on the model picker. */
+    .composer-row .model-chip {
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+    .composer-row .model-chip .muted {
+        display: none;
+    }
+}
+
+/* A swipe's mark: back, or the place a swipe on the conversation opens, following the finger in from its side. */
+.swipe-mark {
+    position: fixed;
+    top: 0;
+    z-index: 60;
+    height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0 0.8rem;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    color: var(--muted);
+    font-size: 0.82rem;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+    pointer-events: none;
+    opacity: 0;
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.swipe-mark[data-side="left"] {
+    left: 0;
+}
+
+.swipe-mark[data-side="right"] {
+    right: 0;
+}
+
+.swipe-mark.armed {
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+}
+
+.swipe-mark.going {
+    transition:
+        transform 0.2s var(--ease-out),
+        opacity 0.2s var(--ease-out);
+}
+
+/* The Files tile's way back to the conversation, where the tile covers it. */
+.files-bar .files-back {
+    width: 44px;
+    height: 44px;
+    color: var(--text);
+}
+
+/*
+ * Where they cover the conversation, the Files tile and the Browser panel are screens pushed over it: they slide in
+ * from the right, as a phone's screens do. So does a file opened in the tile over its tree.
+ */
+@media (max-width: 1099px) {
+    /* Past the tiled windows' pop-in, which would otherwise win. */
+    :root .layout > .files-tile.window,
+    :root .layout > .browser.window {
+        animation: push-in 0.36s var(--ease-out);
+    }
+    :root .layout > .files-tile.window.leaving,
+    :root .layout > .browser.window.leaving {
+        animation: push-out 0.24s var(--ease-in-out) forwards;
+    }
+}
+
+@keyframes push-in {
+    from {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes push-out {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+/*
+ * A file open where the tile is too narrow for it beside the tree is a screen of its own, over the whole tile (the
+ * tile is the nearest positioned box): its header, with the way back to the tree, is the only one. The tree stays
+ * underneath as it was, scrolled where it was.
+ */
+.ft:not(.side) > .ft-view {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: var(--bg);
+    animation: push-in 0.32s var(--ease-out);
+}
+
+.ft:not(.side) > .ft-view.leaving {
+    animation: push-out 0.24s var(--ease-in-out) forwards;
+}
+
+/* Under a file that covers the whole tile, the tile's bar is out of reach of taps, keys, and screen readers too. */
+@media (max-width: 1099px) {
+    .files-tile:has(> .files-body:not([hidden]) > .ft:not(.side) > .ft-view:not(.leaving))
+        > .files-bar {
+        visibility: hidden;
+    }
+}
+
+.ft:not(.side) > .ft-view > .ft-view-head {
+    padding-top: env(safe-area-inset-top);
+}
+
+/* Docked beside the conversation, the tile keeps its tabs and its close button above the file. */
+@media (min-width: 1100px) {
+    .layout.filing .ft {
+        position: relative;
+    }
+    .layout.filing .ft:not(.side) > .ft-view > .ft-view-head {
+        padding-top: 0;
+    }
+}
+
+/* Touch: rows and controls a thumb tall. */
+@media (pointer: coarse) {
+    .files-tabs button {
+        min-height: 44px;
+        padding: 0.45rem 0.9rem;
+        font-size: 0.88rem;
+    }
+    .ft-tools .icon-button,
+    .ft-view-head .icon-button {
+        width: 44px;
+        height: 44px;
+    }
+    .ft-view-head {
+        min-height: 48px;
+        padding-left: 0.2rem;
+    }
+    .ft-view-name {
+        font-size: 0.92rem;
+    }
+    .ft-filter {
+        min-height: 42px;
+    }
+    .ft-tree {
+        font-size: 0.92rem;
+    }
+    .ft-row {
+        min-height: 44px;
+        gap: 0.5rem;
+        padding-left: calc(0.6rem + var(--depth, 0) * 1rem);
+    }
+    .ft-row .icon {
+        width: 16px;
+        height: 16px;
+    }
+    .ft-row .chev {
+        width: 14px;
+        height: 14px;
+    }
+    .ft-spacer {
+        width: 14px;
+    }
+    .dr-row {
+        min-height: 40px;
+    }
+    .browser-bar .icon-button {
+        width: 40px;
+        height: 40px;
+    }
+    .browser-address input {
+        height: 40px;
+    }
+}
+
+/*
+ * Phones: the Browser panel's bar as an in-app browser's. Close and the address on the first row, the page's tools
+ * spread a thumb apart on the second.
+ */
+@media (max-width: 700px) {
+    .browser-bar {
+        flex-wrap: wrap;
+        justify-content: space-between;
+        row-gap: 0.2rem;
+        padding-bottom: 0.2rem;
+    }
+    .browser-bar > .browser-close {
+        order: -2;
+    }
+    .browser-bar > .browser-address {
+        order: -1;
+        flex: 1 1 calc(100% - 52px);
+        margin-right: 0;
+    }
+}
+
+/*
+ * Touch: every control a thumb can hit, at least about 40px each way. Buttons, tabs, and chips grow where there is
+ * room. Inline controls (a code block's Copy, a reply's actions, the status line's branch) keep their look and get a
+ * taller hit area instead: padding with a matching negative margin, so nothing around them moves.
+ */
+@media (pointer: coarse) {
+    .button {
+        min-height: 44px;
+    }
+    .button.small {
+        min-height: 38px;
+        padding-inline: 0.8rem;
+    }
+    .segmented button,
+    .session-tabs button {
+        min-height: 42px;
+    }
+    .group-head {
+        min-height: 40px;
+    }
+    .me-row {
+        min-height: 44px;
+    }
+    .sessions-head .button {
+        min-height: 40px;
+    }
+    .search .icon-button.small {
+        width: 40px;
+        height: 40px;
+    }
+    /* Thumb-sized already: a hit area past it would take taps meant for the end of the search. */
+    .search .icon-button.small::before {
+        content: none;
+    }
+    .composer-row .chip {
+        min-height: 36px;
+    }
+    .browser-servers .chip,
+    .dr-tools .chip {
+        min-height: 38px;
+    }
+    .dr-filter {
+        min-height: 40px;
+    }
+    .dv-tool.icon-button,
+    .file-tools .icon-button {
+        width: 40px;
+        height: 40px;
+    }
+    .dv-fold {
+        width: 36px;
+        height: 36px;
+        margin-left: -0.3rem;
+    }
+    .dv-title {
+        align-self: stretch;
+        align-items: center;
+    }
+    .dv-viewed {
+        min-height: 36px;
+        /* Its label hides on a phone: the checkbox alone, centered in a thumb's width. */
+        min-width: 42px;
+        justify-content: center;
+        padding-inline: 0.6rem;
+    }
+    .check {
+        min-height: 40px;
+    }
+    /* Boxed ones (Copy, tabs, Run, a reaction) keep their box; an invisible layer past it takes the tap. */
+    .code-head .copy,
+    .rich-tabs button,
+    .rich-run,
+    .answer-actions .reaction {
+        position: relative;
+        /* Above what follows (a preview's frame), so the layer past the box takes the tap there too. */
+        z-index: 1;
+    }
+    /* Over them, as they scroll by: the way to the bottom keeps its taps. */
+    .jump {
+        z-index: 2;
+    }
+    .code-head .copy::after,
+    .rich-tabs button::after,
+    .rich-run::after,
+    .answer-actions .reaction::after {
+        content: "";
+        position: absolute;
+        inset: -12px -2px;
+    }
+    /* The status line's branch sits low: room below it, so its hit area stays on the screen, and above the message
+     * box's bottom edge, which its hit area reaches into. */
+    .status-line {
+        position: relative;
+        z-index: 1;
+        padding-bottom: 0.6rem;
+    }
+    .answer-actions > button:not(.reaction),
+    .status-line .branch,
+    .link.small,
+    .running-head .link,
+    .dr-branch {
+        padding-block: 11px;
+        margin-block: -11px;
+    }
+    .answer-actions > button:not(.reaction) {
+        min-width: 40px;
+        justify-content: center;
+        padding-inline: 6px;
+        margin-inline: -6px;
+    }
+    .answer-actions .reaction.add {
+        min-width: 40px;
+        justify-content: center;
+    }
+    .answer-actions {
+        gap: 0.6rem 1rem;
+    }
+    /* A switch and a small icon button (a chip's ×, Stop quoting) keep their size; their hit area reaches past it. */
+    .switch::before,
+    .icon-button.small::before {
+        content: "";
+        position: absolute;
+        inset: -10px -4px;
+    }
+    .icon-button.small::before {
+        inset: -8px;
+    }
+    .command,
+    .artifact-link {
+        min-height: 42px;
+    }
+    /* A peek tile's header opens its session; Allow, Deny, and Open answer from the tile. */
+    .peek-strip .peek-head {
+        min-height: 40px;
+    }
+    .peek-actions .button.small {
+        min-height: 38px;
+    }
+    .peek-seen {
+        width: 38px;
+        height: 38px;
+    }
+    .pop-menu-link {
+        padding-block: 11px;
+        margin-block: -11px;
+    }
+}
+
+/*
+ * Phones: a diff's header in two lines when it would squeeze the file's name. The name keeps the first line beside
+ * the fold, and the counts and the file's tools take the second.
+ */
+@media (max-width: 480px) {
+    .dv-head {
+        flex-wrap: wrap;
+        row-gap: 0;
+    }
+    .dv-head > .dv-title {
+        flex: 1 1 calc(100% - 5rem);
+    }
+    .dv-head > .dv-counts {
+        margin-left: 2.4rem;
+    }
+    .dv-head > .dv-bar {
+        margin-right: auto;
+    }
+    /* Going to a change (n, p) clears the header's two lines. */
+    .dr .dv-row,
+    .dr .dv-hunk {
+        scroll-margin-top: 6.4rem;
+    }
 }

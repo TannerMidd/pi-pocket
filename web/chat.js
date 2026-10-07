@@ -27,7 +27,7 @@ import { copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
 const coarse = matchMedia("(pointer: coarse)").matches;
 
 /** Chat messages from others that this browser has not seen yet. Activity lines do not count. */
-function chatUnread(state = store.state) {
+export function chatUnread(state = store.state) {
     return state.chat.filter(
         (message) =>
             message.kind !== "event" &&
@@ -57,8 +57,9 @@ export function PeopleButton() {
             ? "Chat"
             : `Chat with ${others.map((person) => person.name).join(", ")}`;
 
+    // Quiet on phones with no one else here and nothing unread: the menu has the chat.
     return html`<button
-        class=${`people-button badge-host ${docked ? "on" : ""}`}
+        class=${`people-button badge-host ${docked ? "on" : ""} ${others.length === 0 && unread === 0 ? "quiet" : ""}`}
         aria-label=${label}
         aria-pressed=${docked}
         title=${label}

@@ -2,7 +2,7 @@
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Avatar } from "./avatar.js";
-import { TypingLine } from "./chat.js";
+import { chatUnread, TypingLine } from "./chat.js";
 import {
     loadTemplates,
     parseCommand,
@@ -1005,6 +1005,15 @@ export function Composer() {
                 }
                 <div
                     class="composer"
+                    onClick=${(event) => {
+                        // The box is one target: a tap on its padding or between its buttons goes to the text.
+                        if (
+                            event.target === event.currentTarget ||
+                            event.target.classList.contains("composer-row")
+                        ) {
+                            box.current?.focus();
+                        }
+                    }}
                     onDragOver=${(event) => event.preventDefault()}
                     onDrop=${(event) => {
                         event.preventDefault();
@@ -1056,6 +1065,7 @@ export function Composer() {
                         enterkeyhint=${coarse ? "enter" : "send"}
                     ></textarea>
                     <div class="composer-row">
+                        <${PlacesButton} />
                         <button
                             class="icon-button"
                             aria-label="Attach files"
@@ -1132,6 +1142,27 @@ export function Composer() {
         }
         <${StatusLine} />
     </footer>`;
+}
+
+/**
+ * Phones: the session's places (Files, Changes, the browser…) from beside the message box, where a thumb reaches; the
+ * top bar's buttons are a stretch with one hand. A dot when the chat has news or a page is open.
+ */
+function PlacesButton() {
+    const { browser } = store.state;
+    const news =
+        (collab() && chatUnread() > 0) ||
+        (browser?.open && browser.url !== "" && browser.url !== "about:blank");
+
+    return html`<button
+        class="icon-button places-button badge-host"
+        aria-label="Places: Files, Changes, Browser, and more"
+        title="Places (or swipe up here)"
+        onClick=${() => openSheet({ type: "places" })}
+    >
+        <${Icon} name="grid" />
+        ${news && html`<span class="browser-dot" aria-hidden="true"></span>`}
+    </button>`;
 }
 
 function StatusLine() {

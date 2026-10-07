@@ -3,11 +3,12 @@
 // covers the screen on phones. Alt+E, the top bar's folder button, the launcher, or /files show and hide it.
 
 import { useEffect, useRef, useState } from "preact/hooks";
+import { useBack } from "./back.js";
 import { DiffReview, KIND_LETTERS, reloadChanges, useChanges, useWidth } from "./diff.js";
 import { loadFiles, suggestFiles } from "./files.js";
 import { FileView } from "./sheets/file.js";
-import { actions, canSteer, closePeople, store } from "./store.js";
-import { html, Icon, Loader, Marked, shortPath } from "./ui.js";
+import { actions, canSteer, closePeople, panelsBeside, store } from "./store.js";
+import { html, Icon, Loader, Marked, shortPath, usePresence } from "./ui.js";
 
 const OPEN_KEY = "pocket.files";
 const TAB_KEY = "pocket.filesTab";
@@ -278,8 +279,11 @@ if (savedWidth > 0) {
     document.documentElement.style.setProperty("--files-w", `${savedWidth}px`);
 }
 
-/** The Files tab: the tree, a filter over every file in the folder, and the open file. */
-function FilesTab({ changes }) {
+/**
+ * The Files tab: the tree, a filter over every file in the folder, and the open file. `covering`: the tile covers the
+ * screen and is not on its way out, so back closes a file that hides the tree.
+ */
+function FilesTab({ changes, covering }) {
     const { conversationId: id, view, server, filesTarget } = store.state;
     const root = view.agent?.cwd ?? view.conversation?.cwd ?? "";
     const [expanded, setExpanded] = useState(() => readExpanded(id));
@@ -351,9 +355,22 @@ function FilesTab({ changes }) {
         scrollToRow(path);
     };
 
-    const pick = (path, line) => {
-        setSelected({ path, line });
+    /** Open a file; `from`, the tab it was asked for from, for back to go back to. */
+    const pick = (path, line, from) => {
+        setSelected({ path, line, from });
         reveal(path);
+    };
+
+    /** Close the file, as back does: where it covers the tree, back to the tab it came from. */
+    const closeFile = () => {
+        const from = selected?.from;
+
+        setSelected(null);
+
+        // After the rest of this back: when it closes the tile too (back to the list), the tile's tab stays as it is.
+        if (!side && from && from !== "files") {
+            queueMicrotask(() => store.state.filesOpen && setTab(from));
+        }
     };
 
     // A path tapped in the conversation while the tile is open, once the folder it may be relative to is known.
@@ -366,7 +383,7 @@ function FilesTab({ changes }) {
                   ? `${server.home}${filesTarget.path.slice(1)}`
                   : `${root}/${filesTarget.path.replace(/^\.\//, "")}`;
 
-            pick(absolute, filesTarget.line);
+            pick(absolute, filesTarget.line, filesTarget.from);
         }
     }, [filesTarget?.n, root]);
 
@@ -458,8 +475,45 @@ function FilesTab({ changes }) {
         pick,
     };
 
-    const showTree = side || !selected;
-    const name = selected?.path.split("/").pop();
+    // Where the file covers the tree, back goes back to the tree; the file slides away over it (kept a moment after).
+    useBack(covering && Boolean(selected) && width > 0 && !side, closeFile);
+    const [kept] = usePresence(selected, 240);
+    const shown = selected ?? (side ? null : kept);
+    const covered = !side && Boolean(selected);
+    const name = shown?.path.split("/").pop();
+    const coveredNow = useRef(covered);
+
+    coveredNow.current = covered;
+    // Focus follows the file: into its header when it covers the tree (whose row it was on goes inert), and back to
+    // its row when it goes, unless something else took focus meanwhile.
+    useEffect(() => {
+        if (!covered) {
+            return undefined;
+        }
+
+        const box = ref.current;
+        const path = selected.path;
+
+        if (document.activeElement === document.body || box?.contains(document.activeElement)) {
+            box?.querySelector(".ft-view:not(.leaving) .ft-view-head button")?.focus({
+                preventScroll: true,
+            });
+        }
+
+        return () => {
+            const left = document.activeElement;
+
+            if (
+                !coveredNow.current &&
+                box?.isConnected &&
+                (left === document.body || box.querySelector(".ft-view")?.contains(left))
+            ) {
+                box.querySelector(`.ft-row[data-path="${CSS.escape(path)}"]`)?.focus({
+                    preventScroll: true,
+                });
+            }
+        };
+    }, [covered, selected?.path]);
 
     // The folder is known once the conversation's view arrives.
     if (root === "") {
@@ -467,104 +521,108 @@ function FilesTab({ changes }) {
     }
 
     return html`<div class=${`ft ${side ? "side" : ""}`} ref=${ref}>
-        ${
-            showTree &&
-            html`<div class="ft-pane">
-                <div class="ft-tools">
-                    <input
-                        type="search"
-                        class="ft-filter"
-                        placeholder="Go to file"
-                        value=${query}
-                        onInput=${(event) => setQuery(event.currentTarget.value)}
-                        onKeyDown=${(event) => {
-                            if (event.key === "Escape" && query !== "") {
-                                event.stopPropagation();
-                                setQuery("");
-                            } else if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                ref.current?.querySelector(".ft-tree .ft-row[data-path]")?.focus();
-                            }
-                        }}
-                        autocapitalize="off"
-                        autocomplete="off"
-                        spellcheck="false"
-                    />
-                    <button
-                        class="icon-button"
-                        type="button"
-                        title="Fold every folder"
-                        aria-label="Fold every folder"
-                        onClick=${() => update(() => new Set())}
-                    >
-                        <${Icon} name="down" size=${16} class="ft-fold-all" />
-                    </button>
-                    <button
-                        class="icon-button"
-                        type="button"
-                        title="Look again"
-                        aria-label="Refresh"
-                        onClick=${() => {
-                            folders.clear();
-                            setVersion(version + 1);
-                            reloadChanges(id);
-                        }}
-                    >
-                        <${Icon} name="reload" size=${16} />
-                    </button>
-                </div>
-                <div class="ft-root mono" title=${root}>${shortPath(root, server?.home)}</div>
-                <div class="ft-tree" role="tree" aria-label="Files" onKeyDown=${onTreeKey}>
-                    ${
-                        query === ""
-                            ? html`<${TreeFolder} path=${root} depth=${0} ctx=${ctx} />`
-                            : html`<${Matches}
-                                  query=${query}
-                                  root=${root}
-                                  onPick=${(path, dir) => {
-                                      setQuery("");
+        <div
+            class="ft-pane"
+            inert=${covered}
+            aria-hidden=${covered ? "true" : undefined}
+        >
+            <div class="ft-tools">
+                <input
+                    type="search"
+                    class="ft-filter"
+                    placeholder="Go to file"
+                    value=${query}
+                    onInput=${(event) => setQuery(event.currentTarget.value)}
+                    onKeyDown=${(event) => {
+                        if (event.key === "Escape" && query !== "") {
+                            event.stopPropagation();
+                            setQuery("");
+                        } else if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            ref.current?.querySelector(".ft-tree .ft-row[data-path]")?.focus();
+                        }
+                    }}
+                    autocapitalize="off"
+                    autocomplete="off"
+                    spellcheck="false"
+                />
+                <button
+                    class="icon-button"
+                    type="button"
+                    title="Fold every folder"
+                    aria-label="Fold every folder"
+                    onClick=${() => update(() => new Set())}
+                >
+                    <${Icon} name="down" size=${16} class="ft-fold-all" />
+                </button>
+                <button
+                    class="icon-button"
+                    type="button"
+                    title="Look again"
+                    aria-label="Refresh"
+                    onClick=${() => {
+                        folders.clear();
+                        setVersion(version + 1);
+                        reloadChanges(id);
+                    }}
+                >
+                    <${Icon} name="reload" size=${16} />
+                </button>
+            </div>
+            <div class="ft-root mono" title=${root}>${shortPath(root, server?.home)}</div>
+            <div class="ft-tree" role="tree" aria-label="Files" onKeyDown=${onTreeKey}>
+                ${
+                    query === ""
+                        ? html`<${TreeFolder} path=${root} depth=${0} ctx=${ctx} />`
+                        : html`<${Matches}
+                              query=${query}
+                              root=${root}
+                              onPick=${(path, dir) => {
+                                  setQuery("");
 
-                                      if (dir) {
-                                          reveal(path, true);
-                                      } else {
-                                          pick(path);
-                                      }
-                                  }}
-                              />`
-                    }
-                </div>
-            </div>`
-        }
+                                  if (dir) {
+                                      reveal(path, true);
+                                  } else {
+                                      pick(path);
+                                  }
+                              }}
+                          />`
+                }
+            </div>
+        </div>
         ${
-            selected
-                ? html`<div class="ft-view">
+            shown
+                ? html`<div class=${`ft-view ${selected ? "" : "leaving"}`} inert=${!selected}>
                       <div class="ft-view-head">
                           ${
                               !side &&
                               html`<button
                                   class="icon-button"
                                   type="button"
-                                  aria-label="Back to the files"
-                                  onClick=${() => setSelected(null)}
+                                  aria-label=${shown.from === "changes" ? "Back to Changes" : "Back to the files"}
+                                  onClick=${closeFile}
                               >
-                                  <${Icon} name="back" size=${18} />
+                                  <${Icon} name="back" size=${22} />
                               </button>`
                           }
-                          <strong class="ft-view-name" title=${selected.path}>${name}</strong>
-                          <button
-                              class="icon-button"
-                              type="button"
-                              aria-label="Close the file"
-                              title="Close the file"
-                              onClick=${() => setSelected(null)}
-                          >
-                              <${Icon} name="close" size=${16} />
-                          </button>
+                          <strong class="ft-view-name" title=${shown.path}>${name}</strong>
+                          ${
+                              side &&
+                              html`<button
+                                  class="icon-button"
+                                  type="button"
+                                  aria-label="Close the file"
+                                  title="Close the file"
+                                  onClick=${() => setSelected(null)}
+                              >
+                                  <${Icon} name="close" size=${16} />
+                              </button>`
+                          }
                       </div>
                       <${FileView}
-                          key=${`${selected.path}:${selected.line ?? ""}:${head}`}
-                          path=${selected.path}
-                          line=${selected.line}
+                          key=${`${shown.path}:${shown.line ?? ""}:${head}`}
+                          path=${shown.path}
+                          line=${shown.line}
                           onOpen=${(path) => pick(path)}
                       />
                   </div>`
@@ -577,15 +635,36 @@ function FilesTab({ changes }) {
     </div>`;
 }
 
-export function FilesPanel() {
+export function FilesPanel({ leaving = false }) {
     const { filesTab } = store.state;
     const { changes } = useChanges(true);
     // Pi's edits git does not list count too: outside a repository, they are all there is.
     const count = changes ? changes.files.length + changes.piOnly.length : 0;
 
-    return html`<section class="files-tile window" aria-label="Files">
+    const beside = panelsBeside();
+
+    // Over the conversation, back closes the tile.
+    useBack(!beside && !leaving, () => setFilesOpen(false));
+
+    return html`<section
+        class=${`files-tile window ${leaving ? "leaving" : ""}`}
+        aria-label="Files"
+        inert=${leaving}
+    >
         <${ResizeEdge} />
         <header class="files-bar">
+            ${
+                !beside &&
+                html`<button
+                    class="icon-button files-back"
+                    type="button"
+                    aria-label="Back to the conversation"
+                    title="Back (Alt+E)"
+                    onClick=${() => setFilesOpen(false)}
+                >
+                    <${Icon} name="back" size=${22} />
+                </button>`
+            }
             <div class="files-tabs" role="tablist">
                 <button
                     type="button"
@@ -603,23 +682,26 @@ export function FilesPanel() {
                     class=${filesTab === "changes" ? "on" : ""}
                     onClick=${() => setTab("changes")}
                 >
-                    <${Icon} name="fork" size=${15} /> Changes
+                    <${Icon} name="diff" size=${15} /> Changes
                     ${count > 0 && html`<span class="files-count">${count}</span>`}
                 </button>
             </div>
             <span class="grow"></span>
-            <button
-                class="icon-button"
-                type="button"
-                aria-label="Close the files"
-                title="Close (Alt+E)"
-                onClick=${() => setFilesOpen(false)}
-            >
-                <${Icon} name="close" size=${18} />
-            </button>
+            ${
+                beside &&
+                html`<button
+                    class="icon-button"
+                    type="button"
+                    aria-label="Close the files"
+                    title="Close (Alt+E)"
+                    onClick=${() => setFilesOpen(false)}
+                >
+                    <${Icon} name="close" size=${18} />
+                </button>`
+            }
         </header>
         <div class="files-body" role="tabpanel" aria-label="Files" hidden=${filesTab !== "files"}>
-            <${FilesTab} changes=${changes} />
+            <${FilesTab} changes=${changes} covering=${!beside && !leaving} />
         </div>
         <div
             class="files-body"
@@ -627,7 +709,7 @@ export function FilesPanel() {
             aria-label="Changes"
             hidden=${filesTab !== "changes"}
         >
-            <${DiffReview} active=${filesTab === "changes"} />
+            <${DiffReview} active=${filesTab === "changes"} covering=${!beside && !leaving} />
         </div>
     </section>`;
 }
