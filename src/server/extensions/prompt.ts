@@ -1,16 +1,19 @@
 /**
- * The system prompt: who the agent is, how to behave on a phone-sized screen, the project's AGENTS.md files, Pi's
- * skills, and the working directory. Sections render before every request; only changed sections are sent again, so
- * everything here is stable between requests unless a file on disk changed.
+ * The system prompt: who the agent is, how to behave on a phone-sized screen, where Pi Pocket's documentation is, the
+ * project's AGENTS.md files, Pi's skills, and the working directory. Sections render before every request; only
+ * changed sections are sent again, so everything here is stable between requests unless a file on disk changed.
  *
  * Edit freely: saving this file reloads it into the running server.
  */
+import { join, resolve } from "node:path";
 import {
     formatSkillsForPrompt,
+    getDocsPath,
     loadProjectContextFiles,
     loadSkills,
 } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
+import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
 
 const PREAMBLE = `You are Pi, a coding agent running inside Pi Pocket: a durable, multiplayer web app built on Pi Durable. People talk to you from a browser, often a phone, and several people can share one conversation. When more than one person uses this server, each message starts with [from: Name].
@@ -23,6 +26,22 @@ const GUIDELINES = `- Keep replies short and easy to read on a small screen. Lea
 - To show the user an image file from this machine (a screenshot, a chart, a picture), embed it in your reply with Markdown: ![short description](/absolute/path.png). Paths relative to the working directory work too. Files the user attaches are saved on the server; their paths are listed in the message.
 - Before running something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
 - Do not commit, push, publish, or deploy unless asked.`;
+
+/**
+ * Where Pi Pocket's documentation for agents is, as Pi's prompt says where Pi's is: to read only when it is
+ * needed.
+ */
+function docs(dataDir: string): string {
+    const code = resolve(APP_ROOT);
+    const folder = join(code, "docs");
+
+    return `Pi Pocket documentation (read only when someone asks about Pi Pocket itself: how it works, changing how you behave in it, extending it, or changing its code):
+- Start here: ${join(folder, "index.md")}
+- Pi Pocket's code is in ${code}; its data (people, settings, sessions) in ${dataDir}. Change the data through the app, never by editing its files, except extensions/ in it, where drop-in extensions go.
+- When asked about: changing how you behave without code, such as instructions, AGENTS.md, skills, or prompt templates (docs/customizing.md); a new tool, prompt section, or hook (docs/extensions.md, with working examples in docs/examples/); changing Pi Pocket's own code while it runs (docs/self-editing.md); where its code is (docs/map.md); how its parts depend on each other (docs/architecture.md); what a feature does (docs/features.md)
+- Resolve docs/... under ${code}, not the working directory. Read a doc completely, and follow its links, before changing anything.
+- Pi's own documentation (skills, prompt templates, models, providers, settings): ${getDocsPath()}`;
+}
 
 const STALE_MS = 30_000;
 
@@ -82,6 +101,7 @@ export default function createPrompt(host: PocketHost) {
         sections: [
             section("preamble", () => PREAMBLE, { tag: false }),
             section("guidelines", () => GUIDELINES),
+            section("pocket_docs", () => docs(host.dataDir)),
             section("project_context", (input) => load(cwdOf(input)).context),
             section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
             section("environment", (input) => {

@@ -154,3 +154,77 @@ test("a drop-in that is on gives Pi its tools and hooks, reloads when edited, an
         app.detach(tab.client);
     }
 });
+
+/** A drop-in with one extension, and one tool in it when `tool` is given. */
+const named = (extension: string, tool?: string) => `/** ${extension}, for the names test. */
+import { Type } from "@earendil-works/pi-ai";
+import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+
+export default () =>
+	defineExtension({
+		name: "${extension}",
+		tools: [${
+            tool === undefined
+                ? ""
+                : `defineTool({ name: "${tool}", description: "x", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "${extension}" }] }) })`
+        }],
+	});
+`;
+
+test("a drop-in cannot take a name Pi Pocket keeps, or one another module has: it is refused, and says why", async () => {
+    const refused = async (file: string, source: string, why: RegExp) => {
+        writeFileSync(join(dropIns, file), source);
+        await assert.rejects(app.setExtensionEnabled(owner(app), file, true), why);
+        const [listed] = module(file);
+
+        assert.match(listed?.error ?? "", why, `${file} says why`);
+        assert.deepEqual(listed?.extensions, [], `${file} installed nothing`);
+    };
+
+    // Lancet Guard's name, while the guard is off: turning it on later would replace the drop-in, and the drop-in
+    // turned off would remove the guard.
+    await refused("guard-twin.ts", named("pocket-guard"), /pocket-guard is Pi Pocket's own/);
+    await refused("my-tools.ts", named("coding-tools"), /coding-tools is Pi Pocket's own/);
+    await refused("my-bash.ts", named("my-bash", "bash"), /bash is a built-in tool's/);
+    await refused("my-browser.ts", named("my-browser", "browser"), /browser is a built-in tool's/);
+
+    // Another drop-in's: the first one in keeps it.
+    writeFileSync(join(dropIns, "first.ts"), named("first", "greet"));
+    await app.setExtensionEnabled(owner(app), "first.ts", true);
+    assert.deepEqual(module("first.ts")[0]?.extensions, [{ name: "first", tools: ["greet"] }]);
+    await refused(
+        "second.ts",
+        named("second", "greet"),
+        /first\.ts already has a tool named greet/,
+    );
+    await refused(
+        "third.ts",
+        named("first"),
+        /first\.ts already installs an extension named first/,
+    );
+
+    // An edit that takes such a name is refused too, and the version that loaded keeps running.
+    writeFileSync(join(dropIns, "first.ts"), named("first", "bash"));
+    await assert.rejects(app.loader.reload("first.ts"), /bash is a built-in tool's/);
+    assert.deepEqual(module("first.ts")[0]?.extensions, [{ name: "first", tools: ["greet"] }]);
+    // Reloading its own working version is not a clash with itself.
+    writeFileSync(join(dropIns, "first.ts"), named("first", "greet"));
+    await app.loader.reload("first.ts");
+    assert.equal(module("first.ts")[0]?.error, undefined);
+});
+
+test("the built-in tool names a drop-in may not take are every tool the built-ins install", async () => {
+    const { BUILT_IN_TOOLS } = await import("../src/server/reload.ts");
+    const { CodingTools } = await import("@earendil-works/pi-durable/tools");
+    // Every built-in module, on or off, as it would install.
+    const installed = [
+        ...(CodingTools.tools ?? []).map((tool) => tool.name),
+        ...app.loader
+            .list()
+            .filter((each) => each.source === "built-in" && each.enabled)
+            .flatMap((each) => each.extensions.flatMap((extension) => extension.tools)),
+    ];
+
+    assert.ok(installed.length >= 9, "the built-ins are on");
+    assert.deepEqual([...installed].sort(), [...BUILT_IN_TOOLS].sort());
+});

@@ -1,11 +1,19 @@
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { canGoBack, goBack, goHome, replaceAddress, startHistory, useBack } from "./back.js";
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
-import { FilesButton, FilesPanel, filesAvailable, toggleFiles } from "./files-panel.js";
+import {
+    FilesButton,
+    FilesPanel,
+    filesAvailable,
+    setFilesOpen,
+    toggleFiles,
+} from "./files-panel.js";
+import { startEdgeBack, startSwipes } from "./gestures.js";
 import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
@@ -33,6 +41,7 @@ import {
     navigate,
     notify,
     openSheet,
+    panelsBeside,
     peopleDocked,
     scoped,
     start,
@@ -40,7 +49,13 @@ import {
 } from "./store.js";
 import { prefs, setPrefs, startTheme } from "./theme.js";
 import { Transcript } from "./transcript.js";
-import { APPLE, Boot, html, Icon, shortPath, usePresence } from "./ui.js";
+import { APPLE, Boot, html, Icon, iconPath, shortPath, usePresence } from "./ui.js";
+
+/**
+ * Back to the session list, where it is not beside the conversation: back past the sessions opened from it, as a
+ * phone's back would go, or to it in this session's place when history does not lead there.
+ */
+const toSessions = () => goHome(() => navigate(null, { replace: true }));
 
 function Topbar() {
     const { view, server } = store.state;
@@ -53,14 +68,21 @@ function Topbar() {
               ? `⎇ ${view.branch?.branch ?? conversation.worktree.branch}`
               : shortPath(view.agent?.cwd ?? conversation?.cwd, server?.home);
     const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
+    // Other sessions waiting for an approval, counted on the way back to them.
+    const waiting = store.state.sessions.filter(
+        (session) =>
+            session.waiting && !session.archived && session.id !== store.state.conversationId,
+    ).length;
 
     return html`<header class="topbar">
         <button
-            class="icon-button"
-            aria-label="Sessions"
-            onClick=${() => store.set({ drawer: true })}
+            class="icon-button badge-host topbar-back"
+            aria-label=${waiting > 0 ? `Back to sessions, ${waiting} waiting for you` : "Back to sessions"}
+            title="Sessions"
+            onClick=${toSessions}
         >
-            <${Icon} name="menu" />
+            <${Icon} name="back" size=${22} />
+            ${waiting > 0 && html`<span class="badge warn">${waiting}</span>`}
         </button>
         <button class="title" onClick=${() => conversation && openSheet({ type: "menu" })}>
             <div class="title-main">
@@ -86,7 +108,7 @@ function Topbar() {
         <${FilesButton} />
         <${BrowserButton} />
         <button
-            class="icon-button badge-host"
+            class=${`icon-button badge-host ${artifacts > 0 ? "" : "quiet"}`}
             aria-label="Artifacts"
             onClick=${() => openSheet({ type: "artifacts" })}
         >
@@ -154,6 +176,8 @@ function Notices() {
 function LauncherHost() {
     const [open, leaving] = usePresence(store.state.launcher || null, 150);
 
+    useBack(Boolean(store.state.launcher), () => store.set({ launcher: false }));
+
     return open ? html`<${Launcher} leaving=${leaving} />` : null;
 }
 
@@ -169,6 +193,20 @@ function PeopleHost({ shown, replaced }) {
     }
 
     return html`<${PeoplePanel} leaving=${leaving} />`;
+}
+
+/**
+ * The Browser panel or the Files tile. Where it covers the conversation it is a screen pushed over it, kept a moment
+ * after it closes so it can slide away; beside the conversation it goes at once.
+ */
+function PanelHost({ shown, panel }) {
+    const [kept, leaving] = usePresence(shown || null, 240);
+
+    if (kept === null || (leaving && panelsBeside())) {
+        return null;
+    }
+
+    return html`<${panel} leaving=${leaving} />`;
 }
 
 function App() {
@@ -236,8 +274,12 @@ function App() {
                 replaced=${browsing || filing || people}
             />`
         }
-        ${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
-        ${filing && html`<${FilesPanel} key=${state.conversationId} />`}
+        <${PanelHost}
+            key=${`browser:${state.conversationId}`}
+            shown=${browsing}
+            panel=${BrowserPanel}
+        />
+        <${PanelHost} key=${`files:${state.conversationId}`} shown=${filing} panel=${FilesPanel} />
         ${inConversation && html`<${PeopleHost} shown=${people} replaced=${browsing || filing} />`}
         <${Drawer} />
         <${Sheets} />
@@ -444,6 +486,38 @@ addEventListener("blur", altUp);
 
 // The whole tree re-renders from the store; Preact's diff keeps that cheap. Batched per microtask.
 startTheme();
+// Where the session list is not beside the conversation, a conversation opened straight away gets it under it, so back
+// goes to the list rather than out of the app.
+startHistory({ home: !wide() });
+startEdgeBack();
+// One hand on a phone: on the conversation, swipe right to go back and left for the Files tile; swipe up from the
+// message box for the places.
+startSwipes((where) => {
+    const { conversationId, view, missing } = store.state;
+
+    if (conversationId === null || !view.conversation || missing) {
+        return {};
+    }
+
+    if (where === "files") {
+        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+    }
+
+    // Back to the list, or to the session before when that is where back goes.
+    const toList = !canGoBack() || history.state?.pocket?.back === 1;
+
+    return {
+        right: {
+            path: iconPath("back"),
+            label: toList ? "Sessions" : "Back",
+            run: () => (canGoBack() ? goBack() : toSessions()),
+        },
+        left: filesAvailable()
+            ? { path: iconPath("folder"), label: "Files", run: () => setFilesOpen(true) }
+            : null,
+        up: () => openSheet({ type: "places" }),
+    };
+});
 const root = document.getElementById("app");
 let queued = false;
 
@@ -462,7 +536,7 @@ render(html`<${App} />`, root);
 
 // A notification's link can ask for the chat: `/s/12?chat=1`.
 if (new URLSearchParams(location.search).has("chat")) {
-    history.replaceState({}, "", location.pathname);
+    replaceAddress(location.pathname);
     openSheet({ type: "chat" });
 }
 
@@ -474,7 +548,7 @@ start();
 const shared = new URLSearchParams(location.search).get("share");
 
 if (shared !== null) {
-    history.replaceState({}, "", location.pathname);
+    replaceAddress(location.pathname);
     takeShare(shared).then(
         (share) =>
             share

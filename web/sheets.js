@@ -9,7 +9,7 @@ import { ExtensionsSheet } from "./sheets/extensions.js";
 import { FileSheet } from "./sheets/file.js";
 import { FindSheet } from "./sheets/find.js";
 import { CwdSheet } from "./sheets/folder.js";
-import { MenuSheet } from "./sheets/menu.js";
+import { MenuSheet, PlacesSheet } from "./sheets/menu.js";
 import { MessageSheet } from "./sheets/message.js";
 import { ModelPicker } from "./sheets/model.js";
 import { InviteSheet, PeopleSheet } from "./sheets/people.js";
@@ -21,8 +21,63 @@ import { SpendSheet } from "./sheets/spend.js";
 import { TextSheet } from "./sheets/text.js";
 import { ArtifactsSheet, ArtifactViewer, ImageViewer } from "./sheets/viewers.js";
 import { WorktreeSheet } from "./sheets/worktree.js";
+import { addLayer, removeLayer } from "./back.js";
 import { actions, api, store } from "./store.js";
 import { Boundary, html, usePresence } from "./ui.js";
+
+// ─── Back ─────────────────────────────────────────────────────────────────────────
+
+/** What tells sheets apart: the same one changing (its query, say) stays one step back. */
+const sheetKey = (sheet) => `${sheet.type}:${sheet.entryId ?? sheet.id ?? ""}`;
+
+/**
+ * The sheets opened one from another, oldest first (the menu, then the model picker it opened): each is a step back,
+ * so back from one shows the sheet before it. `{ key, sheet, layer }`.
+ */
+const trail = [];
+/** The conversation the trail's sheets were opened in: another one (a notice's link, with its sheet) starts afresh. */
+let trailIn = store.state.conversationId;
+
+store.subscribe(({ sheet, conversationId }) => {
+    if (!sheet || conversationId !== trailIn) {
+        trailIn = conversationId;
+
+        for (const step of trail.splice(0)) {
+            removeLayer(step.layer);
+        }
+    }
+
+    if (!sheet) {
+        return;
+    }
+
+    const key = sheetKey(sheet);
+    const at = trail.findIndex((step) => step.key === key);
+
+    // The same sheet, or one opened before it, shown again: the steps after it are gone.
+    if (at !== -1) {
+        for (const step of trail.splice(at + 1)) {
+            removeLayer(step.layer);
+        }
+
+        trail[at].sheet = sheet;
+
+        return;
+    }
+
+    const step = { key, sheet, layer: null };
+
+    step.layer = addLayer(() => {
+        const index = trail.indexOf(step);
+
+        if (index !== -1) {
+            trail.splice(index);
+        }
+
+        store.set({ sheet: trail.at(-1)?.sheet ?? null });
+    });
+    trail.push(step);
+});
 
 /**
  * The open sheet, if any. A sheet that closes stays a moment longer, marked as leaving, so it can animate out; one sheet
@@ -92,6 +147,9 @@ function sheetBody(sheet) {
             break;
         case "menu":
             body = html`<${MenuSheet} />`;
+            break;
+        case "places":
+            body = view.conversation ? html`<${PlacesSheet} />` : null;
             break;
         case "chat":
             body = view.conversation ? html`<${ChatSheet} />` : null;

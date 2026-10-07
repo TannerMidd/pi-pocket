@@ -5,6 +5,7 @@ import htm from "htm";
 import { marked } from "marked";
 import { Component, h } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useDragToClose } from "./gestures.js";
 import { highlight, langOf } from "./highlight.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
 
@@ -476,10 +477,11 @@ export function openFile(path) {
     const target = { path: match ? match[1] : path, line: match ? Number(match[2]) : undefined };
 
     if (filesShown()) {
+        // From the tile's Changes tab, back from the file goes back there (files-panel.js).
         store.set((state) => ({
             sheet: null,
             filesTab: "files",
-            filesTarget: { ...target, n: (state.filesTarget?.n ?? 0) + 1 },
+            filesTarget: { ...target, from: state.filesTab, n: (state.filesTarget?.n ?? 0) + 1 },
         }));
 
         return;
@@ -706,6 +708,7 @@ const ICONS = {
     artifact: "M4 5h16v14H4zM4 9h16M8 5v4",
     folder: "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z",
     file: "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5",
+    diff: "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5M9 11.5h6M12 8.5v6M9 17.5h6",
     back: "M15 18l-6-6 6-6",
     chevron: "M9 6l6 6-6 6",
     down: "M6 9l6 6 6-6",
@@ -720,6 +723,7 @@ const ICONS = {
     command: "M9 6a3 3 0 10-3 3h12a3 3 0 10-3-3v12a3 3 0 103-3H6a3 3 0 103 3z",
     sidebar: "M4 4h16v16H4zM9 4v16",
     tiles: "M3 5h12v14H3zM17 5h4v6h-4zM17 13h4v6h-4z",
+    grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
     pin: "M9 4h6M10 4v6l-3 4h10l-3-4V4M12 14v6",
     palette:
         "M12 3a9 9 0 100 18c1 0 1.5-.8 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.8.7-1.5 1.5-1.5H16a5 5 0 005-5c0-4.4-4-7.8-9-7.8zM7.5 12.5h.01M9.5 8h.01M14.5 8h.01M17 11.5h.01",
@@ -739,6 +743,9 @@ const ICONS = {
     terminal: "M4 5h16v14H4zM8 10l2 2-2 2M12 14h4",
     fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
 };
+
+/** An icon's SVG path, for marks drawn outside Preact (gestures.js). */
+export const iconPath = (name) => ICONS[name] ?? "";
 
 /** Text with the letters at `hits` (indexes) marked, as matches of what someone searched for. */
 export function Marked({ text, hits }) {
@@ -966,9 +973,14 @@ export class Boundary extends Component {
     }
 }
 
+/** Sheets come up from the bottom edge below this width, and drag back down to close; above it they are popups. */
+const BOTTOM_SHEETS = matchMedia("(max-width: 699px)");
+
 /** A bottom sheet on phones, a centered dialog on wide screens. */
 export function Sheet({ title, onClose, children, wide = false, actions = null }) {
     const ref = useRef(null);
+
+    useDragToClose(ref, { dir: "down", onClose, enabled: BOTTOM_SHEETS.matches });
 
     useEffect(() => {
         const onKey = (event) => event.key === "Escape" && onClose();

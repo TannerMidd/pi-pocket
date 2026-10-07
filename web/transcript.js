@@ -858,6 +858,31 @@ function NoteEntry({ entry }) {
 /** How long a `!` command's row may wait for its entry: past the server's limit for a command, something went wrong. */
 const PENDING_MS = 11 * 60_000;
 
+/** A touch screen, where scrollers glide on after a flick and their scroll bars take no room. */
+const COARSE = matchMedia("(pointer: coarse)");
+
+/**
+ * Straight to the bottom of `element`. On an iPhone a scroller can still be gliding from a flick when the way to the
+ * bottom is tapped, and WebKit keeps the glide's place over one set from script: the screen goes blank, and the next
+ * touch carries on from where it was. Not scrolling for two frames ends the glide, so the jump holds. (Elsewhere a
+ * scroll bar that went for a moment would shift the page.)
+ */
+function toBottom(element) {
+    element.scrollTop = element.scrollHeight;
+
+    if (!COARSE.matches) {
+        return;
+    }
+
+    element.style.overflowY = "hidden";
+    requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+            element.style.overflowY = "";
+            element.scrollTop = element.scrollHeight;
+        }),
+    );
+}
+
 /** `!` commands this tab started that have no entry yet: still running, or waiting for Pi to finish its turn. */
 function PendingShells({ conversationId, rows }) {
     const pending = store.state.pendingShells.filter(
@@ -1272,9 +1297,10 @@ export function Transcript() {
             showJump &&
             html`<button
                 class="jump"
+                aria-label="To the bottom"
                 onClick=${() => {
                     stick.current = true;
-                    scroller.current.scrollTop = scroller.current.scrollHeight;
+                    toBottom(scroller.current);
                     setShowJump(false);
                 }}
             >

@@ -3,6 +3,7 @@
 // screens show it as a window beside the conversation; phones show it full screen.
 
 import { useEffect, useRef, useState } from "preact/hooks";
+import { useBack } from "./back.js";
 import {
     browserApi,
     browserAvailable,
@@ -12,7 +13,7 @@ import {
     setBrowserOpen,
     toggleBrowser,
 } from "./browser.js";
-import { api, attempt, canSteer, notify, store } from "./store.js";
+import { api, attempt, canSteer, notify, panelsBeside, store } from "./store.js";
 import { APPLE, html, Icon, Spinner } from "./ui.js";
 
 const WIDTH_KEY = "pocket.browserWidth";
@@ -707,7 +708,7 @@ if (savedWidth > 0) {
 /** The page may close again after it opens (a crash, a long while unused): open it by itself at most this often. */
 const REOPEN_MS = 2 * 60_000;
 
-export function BrowserPanel() {
+export function BrowserPanel({ leaving = false }) {
     const { conversationId, browser: state, me, view } = store.state;
     // Using the page takes what steering Pi takes: while take turns is on, the wheel.
     const turns = view.turns;
@@ -725,6 +726,9 @@ export function BrowserPanel() {
     const wasOpen = useRef(false);
     const stageRef = useRef(null);
     const typeInput = useRef(null);
+
+    // Over the conversation, back closes the panel.
+    useBack(!panelsBeside() && !leaving, () => setBrowserOpen(false));
 
     if (open) {
         wasOpen.current = true;
@@ -842,7 +846,11 @@ export function BrowserPanel() {
         </div>`;
     }
 
-    return html`<section class="browser window" aria-label="Browser">
+    return html`<section
+        class=${`browser window ${leaving ? "leaving" : ""}`}
+        aria-label="Browser"
+        inert=${leaving}
+    >
         <${ResizeEdge} />
         <header class="browser-bar">
             <button
@@ -953,7 +961,7 @@ export function BrowserPanel() {
                 </button>`
             }
             <button
-                class="icon-button"
+                class="icon-button browser-close"
                 aria-label="Close the browser"
                 title="Close the browser (Alt+B)"
                 onClick=${() => setBrowserOpen(false)}
@@ -1007,8 +1015,9 @@ export function BrowserButton() {
 
     const live = state?.open && state.url !== "" && state.url !== "about:blank";
 
+    // Quiet on phones with no page open: the menu has the browser.
     return html`<button
-        class=${`icon-button badge-host ${browserOpen ? "on" : ""}`}
+        class=${`icon-button badge-host ${browserOpen ? "on" : live ? "" : "quiet"}`}
         aria-label="Browser"
         title="Browser (Alt+B)"
         onClick=${toggleBrowser}
