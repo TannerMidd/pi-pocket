@@ -1,48 +1,15 @@
 // The model picker: a menu under the model chip, searchable once there are many models.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, openSheet, store } from "../store.js";
-import { formatTokens, html, Icon } from "../ui.js";
+import { anchorStyle, formatTokens, html, Icon, popAnchor } from "../ui.js";
 
 /** Models past this many get a search box in the picker. */
 const MODEL_SEARCH_AT = 8;
 
 const coarsePointer = matchMedia("(pointer: coarse)").matches;
 
-/**
- * Where the model picker opens: above the message box's model chip and aligned with it, within what shows of the page
- * (a phone's keyboard can cover the chip), and as tall as its models need up to a menu's height. Null, for the middle
- * of the screen, when the chip is gone or scrolled away, or has too little room above it.
- */
-function modelAnchor() {
-    const rect = document.querySelector(".model-chip")?.getBoundingClientRect();
-
-    if (!rect || rect.width === 0) {
-        return null;
-    }
-
-    const top = visualViewport?.offsetTop ?? 0;
-    const bottom = top + (visualViewport?.height ?? innerHeight);
-    const at = Math.min(rect.top, bottom - 8);
-    const room = at - top - 14;
-
-    if (rect.bottom < top || room < 220) {
-        return null;
-    }
-
-    const width = Math.min(420, innerWidth - 16);
-
-    return {
-        left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
-        bottom: innerHeight - at + 6,
-        width,
-        height: Math.min(540, room),
-    };
-}
-
-const anchorStyle = (anchor) =>
-    anchor
-        ? `left:${anchor.left}px;bottom:${anchor.bottom}px;width:${anchor.width}px;max-height:${anchor.height}px`
-        : "";
+/** Where the picker opens: above the message box's model chip (`popAnchor`). */
+const modelAnchor = () => popAnchor(".model-chip");
 
 /**
  * The model picker: a menu that opens up from the message box's model chip, with the current model first and checked,
@@ -102,7 +69,7 @@ export function ModelPicker() {
         }
 
         keyed.current = false;
-        list.current?.querySelector(".model-row.on")?.scrollIntoView({ block: "nearest" });
+        list.current?.querySelector(".pop-menu-row.on")?.scrollIntoView({ block: "nearest" });
     }, [active]);
 
     const pick = (model) =>
@@ -141,7 +108,7 @@ export function ModelPicker() {
         onClick=${(event) => event.target === event.currentTarget && closeSheet()}
     >
         <section
-            class=${`model-pop ${anchor ? "" : "free"}`}
+            class=${`pop-menu ${anchor ? "" : "free"}`}
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"
@@ -149,15 +116,15 @@ export function ModelPicker() {
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
-            <header class="model-pop-head">
+            <header class="pop-menu-head">
                 <span>Model</span>
-                <button class="model-pop-link" onClick=${() => openSheet({ type: "providers" })}>
+                <button class="pop-menu-link" onClick=${() => openSheet({ type: "providers" })}>
                     <${Icon} name="key" size=${13} /> Providers
                 </button>
             </header>
             ${
                 searchable &&
-                html`<label class="search model-pop-search">
+                html`<label class="search pop-menu-search">
                     <${Icon} name="search" size=${15} />
                     <input
                         ref=${search}
@@ -170,31 +137,31 @@ export function ModelPicker() {
                     />
                 </label>`
             }
-            <div class="model-list" ref=${list} role="listbox" aria-label="Models">
+            <div class="pop-menu-list" ref=${list} role="listbox" aria-label="Models">
                 ${
                     models.length === 0 &&
-                    html`<p class="muted model-pop-note">
+                    html`<p class="muted pop-menu-note">
                         No models are available. Add a provider first.
                     </p>`
                 }
                 ${
                     models.length > 0 &&
                     shown.length === 0 &&
-                    html`<p class="muted model-pop-note">No model matches “${query.trim()}”.</p>`
+                    html`<p class="muted pop-menu-note">No model matches “${query.trim()}”.</p>`
                 }
                 ${shown.map(
                     (model, index) => html`<button
                         key=${`${model.provider}/${model.id}`}
-                        class=${`model-row ${index === active ? "on" : ""}`}
+                        class=${`pop-menu-row ${index === active ? "on" : ""}`}
                         role="option"
                         aria-selected=${isCurrent(model)}
                         title=${`${model.provider}/${model.id} · ${formatTokens(model.contextWindow)} context${model.images ? " · images" : ""}`}
                         onMouseMove=${() => index !== active && setPicked(index)}
                         onClick=${() => pick(model)}
                     >
-                        <span class="model-row-text">
-                            <span class="model-row-name">${model.name}</span>
-                            <span class="model-row-sub">${model.provider}</span>
+                        <span class="pop-menu-row-text">
+                            <span class="pop-menu-row-name">${model.name}</span>
+                            <span class="pop-menu-row-sub">${model.provider}</span>
                         </span>
                         ${isCurrent(model) && html`<${Icon} name="check" size=${14} />`}
                     </button>`,
@@ -202,7 +169,7 @@ export function ModelPicker() {
             </div>
             ${
                 agent?.reasoning &&
-                html`<div class="model-pop-foot">
+                html`<div class="pop-menu-foot">
                     <div class="label">Thinking</div>
                     <div class="segmented model-levels" role="radiogroup" aria-label="Thinking">
                         ${levels.map(

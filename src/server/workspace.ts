@@ -1,6 +1,6 @@
 /**
  * A conversation's folder on this machine, as people reach it through the app: which files a person may load or read,
- * the file viewer, the files for `@` mentions, the Changes sheet, uploads, and new folders from the folder picker. The
+ * the file viewer, the files for `@` mentions, Changes, its git branch, uploads, and new folders from the folder picker. The
  * operations people call directly check who may do them; the path helpers (`conversationPath`, `conversationFile`,
  * `readableFile`, `uploadDirectory`) leave seeing the conversation to their callers.
  */
@@ -9,12 +9,22 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import {
+    type Branches,
+    branchesIn,
+    gitDirOf,
+    type Head,
+    headOf,
+    isRemoteBranch,
+    localName,
+    switchBranch,
+    validBranchName,
+} from "./branches.ts";
 import { type Changes, changesIn, diffOf, revertFile } from "./changes.ts";
 import type { User } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
 import { displayPath, expandHome } from "./paths.ts";
-import { inRepository } from "./worktrees.ts";
 
 export class Workspace {
     readonly #app: PocketApp;
@@ -26,22 +36,116 @@ export class Workspace {
     /** The files in each folder, for `@` mentions. */
     readonly #files = new FileLists();
 
-    /** Folders known to be in a git repository or not, for a minute: views ask on every update. */
-    readonly #repositories = new Map<string, { inside: boolean; at: number }>();
+    /**
+     * Where each folder's repository keeps its files, for a minute: views ask on every update. A folder in none is
+     * asked about again after a few seconds, so one Pi has just run `git init` in shows its branch soon.
+     */
+    readonly #gitDirs = new Map<string, { gitDir: string | undefined; at: number }>();
+
+    #gitDir(cwd: string): string | undefined {
+        const known = this.#gitDirs.get(cwd);
+
+        if (
+            known !== undefined &&
+            Date.now() - known.at < (known.gitDir === undefined ? 5000 : 60_000)
+        ) {
+            return known.gitDir;
+        }
+
+        const gitDir = gitDirOf(cwd);
+
+        this.#gitDirs.set(cwd, { gitDir, at: Date.now() });
+
+        return gitDir;
+    }
 
     /** Whether a folder is in a git repository. */
     inRepository(cwd: string): boolean {
-        const known = this.#repositories.get(cwd);
+        return this.#gitDir(cwd) !== undefined;
+    }
 
-        if (known !== undefined && Date.now() - known.at < 60_000) {
-            return known.inside;
+    /** What a conversation's folder has checked out, for its view: its repository's HEAD file, read as it is now. */
+    head(id: ConversationId): Head | undefined {
+        const gitDir = this.#gitDir(this.#app.cwdOf(id));
+
+        return gitDir === undefined ? undefined : headOf(gitDir);
+    }
+
+    /** The branches of a session's repository, for the branch sheet: for people who can steer, as Changes is. */
+    async branches(id: ConversationId, user: User): Promise<Branches> {
+        this.#app.requireSee(user, id);
+        this.#app.requireSteer(user);
+
+        const cwd = this.#app.cwdOf(id);
+
+        if (this.#gitDir(cwd) === undefined) {
+            throw new HttpError(404, "This session's folder is not in a git repository.");
         }
 
-        const inside = inRepository(cwd);
+        return branchesIn(cwd).catch((error: unknown) => {
+            throw new HttpError(409, describe(error));
+        });
+    }
 
-        this.#repositories.set(cwd, { inside, at: Date.now() });
+    /**
+     * Switch a session's folder to another branch: one there already, a new one from what is checked out (`create`),
+     * or a new one following a remote branch (`track`). It changes the files under Pi, so as with moving the session to
+     * another folder it takes the right to drive, someone not invited to one session only, and Pi not working; Pi is
+     * told with its next message.
+     */
+    async switchBranch(
+        id: ConversationId,
+        user: User,
+        request: { name?: unknown; create?: unknown; track?: unknown },
+    ): Promise<{ branch: string }> {
+        this.#app.requireSee(user, id);
+        this.#app.requireSteer(user);
 
-        return inside;
+        if (user.sessions !== undefined) {
+            throw new HttpError(403, "You were invited to one session.");
+        }
+
+        await this.#app.requireDriver(id, user);
+
+        const track = typeof request.track === "string" ? request.track : undefined;
+        const name =
+            typeof request.name === "string" ? request.name.trim() : track && localName(track);
+        const cwd = this.#app.cwdOf(id);
+
+        if (track !== undefined && !(await isRemoteBranch(cwd, track))) {
+            throw new HttpError(400, `${track} is not a remote branch here.`);
+        }
+
+        if (!name || !(await validBranchName(cwd, name))) {
+            throw new HttpError(400, `${name ? `“${name}”` : "That"} cannot be a branch name.`);
+        }
+
+        if (this.#app.isBusy(id)) {
+            throw new HttpError(
+                409,
+                "Pi is working here: wait for it, or stop it, before switching branches.",
+            );
+        }
+
+        const before = this.head(id);
+
+        await switchBranch(cwd, {
+            name,
+            create: request.create === true,
+            ...(track ? { track } : {}),
+        }).catch((error: unknown) => {
+            throw new HttpError(409, describe(error));
+        });
+        const from = before !== undefined && "branch" in before ? ` from ${before.branch}` : "";
+        const what =
+            request.create === true || track !== undefined
+                ? `made the branch ${name}${track ? `, following ${track},` : ""} and switched to it${from}`
+                : `switched the branch${from} to ${name}`;
+
+        await this.#app.commands.note(id, user, what);
+        await this.#app.collab.activity(id, user, what);
+
+        return { branch: name };
     }
 
     /** A folder to work in, as its whole path: a 404 when it is not there, so the folder picker can offer to make it. */

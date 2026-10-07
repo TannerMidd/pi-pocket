@@ -21,7 +21,7 @@
  *   Sessions                       the sidebar: tabs, groups, rows, selection, its foot
  *   The rail, The home screen
  *   Sheets                         sheets on phones, popups on wide screens, the drawer
- *   Model picker
+ *   Pop-up menus                   the model and branch pickers
  *   Sheet parts and controls       sheet heads and bodies, menu rows, fields, buttons, segmented choices, checks,
  *                                  providers, invites
  *   Artifact viewer, Images
@@ -32,9 +32,12 @@
  *   Launcher, Appearance
  *   Sign in                        the app's sign-in screen
  *   Small glue                     the sheet host, viewers leaving, search keys, unread dots
- *   People panel, Peek tiles, Browser
+ *   People panel, Peek tiles
+ *   Diff viewer, Review            one file's diff, and every change in the folder file by file
+ *   Files tile, Browser            the docked panels
  *   Files, commands, and find      file paths and mentions, `!` commands and notes, changes, the file viewer, find,
  *                                  messages sent before
+ *   Syntax and rich markdown       code colors, and pages, images, and diffs drawn in replies
  */
 
 /* ─── Fonts, tokens, and the reset ───────────────────────────── */
@@ -1832,6 +1835,27 @@ button.chip:hover {
     color: var(--warn);
 }
 
+/* The git branch: a tap opens the branch picker. A long name gives way to the rest of the bar. */
+.status-line .branch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 24ch;
+    font: inherit;
+    color: var(--muted);
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+.status-line .branch > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-line button.branch:hover {
+    color: var(--accent);
+}
+
 /* ─── Extensions ───────────────────────────────────────────── */
 
 .extension {
@@ -2932,15 +2956,15 @@ button.chip:hover {
     }
 }
 
-/* ─── Model picker ──────────────────────────────────────────── */
+/* ─── Pop-up menus: the model and branch pickers ───────────── */
 
-/* A menu up from the message box's model chip, over the conversation without dimming it. */
+/* A menu up from the control that opens it (the model chip, the branch), over the conversation without dimming it. */
 .pop-overlay {
     background: none;
     animation: none;
 }
 
-.model-pop {
+.pop-menu {
     position: fixed;
     display: flex;
     flex-direction: column;
@@ -2948,36 +2972,36 @@ button.chip:hover {
     border: 1px solid var(--line-strong);
     box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
     outline: none;
-    animation: model-pop-in var(--t-in) var(--ease-out);
+    animation: pop-menu-in var(--t-in) var(--ease-out);
 }
 
 /* No chip to open from: in the middle of the screen. */
-.model-pop.free {
+.pop-menu.free {
     position: relative;
     width: min(420px, calc(100vw - 16px));
     max-height: 80dvh;
     margin: auto;
 }
 
-.leaving .model-pop {
-    animation: model-pop-out var(--t-out) linear forwards;
+.leaving .pop-menu {
+    animation: pop-menu-out var(--t-out) linear forwards;
 }
 
-@keyframes model-pop-in {
+@keyframes pop-menu-in {
     from {
         opacity: 0;
         transform: translateY(8px);
     }
 }
 
-@keyframes model-pop-out {
+@keyframes pop-menu-out {
     to {
         opacity: 0;
         transform: translateY(8px);
     }
 }
 
-.model-pop-head {
+.pop-menu-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2989,7 +3013,7 @@ button.chip:hover {
     color: var(--text);
 }
 
-.model-pop-link {
+.pop-menu-link {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -2999,27 +3023,27 @@ button.chip:hover {
     transition: color var(--t-hover) var(--ease-out);
 }
 
-.model-pop-link:hover {
+.pop-menu-link:hover {
     color: var(--accent);
 }
 
-.model-pop-search {
+.pop-menu-search {
     margin: 0.5rem 0.6rem 0.25rem;
 }
 
 /* The field's frame shows the focus. */
-.model-pop-search input:focus-visible {
+.pop-menu-search input:focus-visible {
     outline: none;
 }
 
-.model-list {
+.pop-menu-list {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
 
-.model-row {
+.pop-menu-row {
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -3030,46 +3054,88 @@ button.chip:hover {
     color: var(--text);
 }
 
-.model-row:last-child {
+.pop-menu-row:last-child {
     border-bottom: 0;
 }
 
-.model-row.on {
+.pop-menu-row.on {
     background: var(--card-2);
     box-shadow: inset 0 0 0 1px var(--edge);
 }
 
-.model-row-text {
+.pop-menu-row-text {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
 }
 
-.model-row-name {
+.pop-menu-row-name {
     font-size: 0.86rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.model-row-sub {
+.pop-menu-row-sub {
     font-size: 0.7rem;
     color: var(--muted);
 }
 
-.model-row .icon {
+.pop-menu-row .icon {
     color: var(--accent);
 }
 
-.model-pop-note {
+.pop-menu-note {
     margin: 0;
     padding: 0.6rem 0.8rem;
 }
 
-.model-pop-foot {
+.pop-menu-foot {
     padding: 0.4rem 0.8rem 0.7rem;
     border-top: 1px solid var(--line);
+}
+
+.pop-menu-foot p {
+    margin: 0.2rem 0 0;
+}
+
+/* A heading between a menu's groups of rows. */
+.pop-menu-label {
+    padding: 0.55rem 0.8rem 0.25rem;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+}
+
+/* The branch picker: what is checked out beside its title, and how far each branch is from its remote one. */
+.branch-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 400;
+    color: var(--muted);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.branch-track {
+    flex: none;
+    font: 0.7rem var(--mono);
+    color: var(--muted);
+}
+
+.branch-track.warn {
+    color: var(--warn);
+}
+
+/* A branch checked out in another worktree: listed, but switched to only there. */
+.pop-menu-row.elsewhere {
+    color: var(--muted);
 }
 
 /* Thinking: one bar of levels, the chosen one outlined. Past the general segmented rules, which come later. */

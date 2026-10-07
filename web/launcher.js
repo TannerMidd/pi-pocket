@@ -7,6 +7,7 @@ import { planAvailable, schedulesAvailable } from "./commands.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { togglePeeks } from "./peeks.js";
 import { setArchived, workspaceOrder } from "./sessions.js";
+import { branchAvailable, headLabel } from "./sheets/branch.js";
 import {
     actions,
     attempt,
@@ -159,6 +160,13 @@ function actionItems() {
                 detail: "review what changed, file by file",
                 icon: "fork",
                 run: () => toggleFiles("changes"),
+            },
+        conversation &&
+            branchAvailable() && {
+                label: "Switch branch",
+                detail: `on ${headLabel(view.branch)}`,
+                icon: "fork",
+                run: () => openSheet({ type: "branch" }),
             },
         conversation &&
             collab() && {

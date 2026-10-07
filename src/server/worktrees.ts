@@ -30,19 +30,6 @@ async function repositoryOf(cwd: string): Promise<string | undefined> {
     );
 }
 
-/** Whether a folder is in a git repository, by looking for `.git` in it and the folders above: cheap, no git run. */
-export function inRepository(cwd: string): boolean {
-    for (let folder = cwd; ; folder = dirname(folder)) {
-        if (existsSync(join(folder, ".git"))) {
-            return true;
-        }
-
-        if (dirname(folder) === folder) {
-            return false;
-        }
-    }
-}
-
 /** Copy the repository's new (untracked, not ignored) files into the worktree. Returns the ones left out for size. */
 async function copyNewFiles(root: string, into: string): Promise<string[]> {
     const skipped: string[] = [];

@@ -1,6 +1,7 @@
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
 import { browserAvailable, openInBrowser, toggleBrowser } from "./browser.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
+import { branchAvailable } from "./sheets/branch.js";
 import { togglePeeks } from "./peeks.js";
 import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import { chooseTheme, THEMES } from "./theme.js";
@@ -334,6 +335,13 @@ const COMMANDS = [
         description: "Review the folder's uncommitted changes, file by file",
         available: filesAvailable,
         run: () => toggleFiles("changes"),
+    },
+    {
+        name: "branch",
+        args: "[name]",
+        description: "Switch the folder to another git branch, or make one",
+        available: branchAvailable,
+        run: (arg) => openSheet({ type: "branch", query: arg }),
     },
     {
         name: "peek",

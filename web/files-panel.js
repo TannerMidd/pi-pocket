@@ -286,6 +286,8 @@ function FilesTab({ changes }) {
     const [selected, setSelectedState] = useState(() => readOpen(id));
     const [query, setQuery] = useState("");
     const [version, setVersion] = useState(0);
+    // Another branch has other files: the tree and the open file are read again when it changes.
+    const head = JSON.stringify(view.branch);
     const ref = useRef(null);
     const width = useWidth(ref);
     const side = width >= SIDE_BY_SIDE;
@@ -451,7 +453,7 @@ function FilesTab({ changes }) {
         selected: selected?.path,
         changed,
         changedDirs,
-        version,
+        version: `${version}:${head}`,
         toggle,
         pick,
     };
@@ -560,7 +562,7 @@ function FilesTab({ changes }) {
                           </button>
                       </div>
                       <${FileView}
-                          key=${`${selected.path}:${selected.line ?? ""}`}
+                          key=${`${selected.path}:${selected.line ?? ""}:${head}`}
                           path=${selected.path}
                           line=${selected.line}
                           onOpen=${(path) => pick(path)}

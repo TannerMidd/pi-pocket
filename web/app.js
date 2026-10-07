@@ -50,7 +50,7 @@ function Topbar() {
         conversation?.kind === "subagent"
             ? `subagent of ${conversation.parent?.title ?? "?"}`
             : conversation?.worktree
-              ? `⎇ ${conversation.worktree.branch}`
+              ? `⎇ ${view.branch?.branch ?? conversation.worktree.branch}`
               : shortPath(view.agent?.cwd ?? conversation?.cwd, server?.home);
     const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
 

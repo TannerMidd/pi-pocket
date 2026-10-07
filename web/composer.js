@@ -24,6 +24,7 @@ import {
     typing,
     uid,
 } from "./store.js";
+import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { formatBytes, formatTokens, html, Icon, Marked, modelLabel, Spinner } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
@@ -1144,6 +1145,24 @@ function StatusLine() {
             html`<span class="warn">
                 ${connection === "connecting" ? "connecting…" : "reconnecting…"}
             </span>`,
+        );
+    }
+
+    // The git branch, first as in an editor's status bar: a tap switches it.
+    if (view.branch) {
+        const label = html`<${Icon} name="fork" size=${11} />
+            <span>${headLabel(view.branch)}</span>`;
+
+        parts.push(
+            branchAvailable()
+                ? html`<button
+                      class="branch"
+                      title=${view.branch.detached ? "No branch: switch to one" : "Switch or make a branch"}
+                      onClick=${() => openSheet({ type: "branch" })}
+                  >
+                      ${label}
+                  </button>`
+                : html`<span class="branch" title="The git branch">${label}</span>`,
         );
     }
 

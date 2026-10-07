@@ -13,7 +13,8 @@ import {
     parseDiff,
 } from "./diff-parse.js";
 import { highlight, highlightLines, langOf } from "./highlight.js";
-import { actions, attempt, canSteer, notify, store } from "./store.js";
+import { branchAvailable } from "./sheets/branch.js";
+import { actions, attempt, canSteer, notify, openSheet, store } from "./store.js";
 import { html, Icon, Loader, openFile, shortPath } from "./ui.js";
 
 // ─── Preferences ────────────────────────────────────────────────────────────────────
@@ -1424,7 +1425,19 @@ export function DiffReview({ active = true, autoFocus = false }) {
             ${
                 changes.repo
                     ? html`<span class="dr-where mono">
-                          ${shortPath(changes.repo.root, server?.home)}${changes.repo.branch ? html` · <span title="Branch">⎇ ${changes.repo.branch}</span>` : ""}
+                          ${shortPath(changes.repo.root, server?.home)}${changes.repo.branch && " · "}${
+                              changes.repo.branch &&
+                              (branchAvailable()
+                                  ? html`<button
+                                        class="link dr-branch"
+                                        type="button"
+                                        title="Switch or make a branch"
+                                        onClick=${() => openSheet({ type: "branch" })}
+                                    >
+                                        ⎇ ${changes.repo.branch}
+                                    </button>`
+                                  : html`<span title="Branch">⎇ ${changes.repo.branch}</span>`)
+                          }
                       </span>`
                     : html`<span class="muted small">Not a git repository: only Pi's edits are listed.</span>`
             }

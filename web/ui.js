@@ -1009,6 +1009,43 @@ export function Sheet({ title, onClose, children, wide = false, actions = null }
     </div>`;
 }
 
+/**
+ * Where a menu opens from the control `selector` names: above it and aligned with it, within what shows of the page (a
+ * phone's keyboard can cover it), and as tall as its rows need up to a menu's height. Null, for the middle of the
+ * screen, when the control is gone or scrolled away, or has too little room above it.
+ */
+export function popAnchor(selector) {
+    const rect = document.querySelector(selector)?.getBoundingClientRect();
+
+    if (!rect || rect.width === 0) {
+        return null;
+    }
+
+    const top = visualViewport?.offsetTop ?? 0;
+    const bottom = top + (visualViewport?.height ?? innerHeight);
+    const at = Math.min(rect.top, bottom - 8);
+    const room = at - top - 14;
+
+    if (rect.bottom < top || room < 220) {
+        return null;
+    }
+
+    const width = Math.min(420, innerWidth - 16);
+
+    return {
+        left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
+        bottom: innerHeight - at + 6,
+        width,
+        height: Math.min(540, room),
+    };
+}
+
+/** A `popAnchor` as a menu's style: nothing for the middle of the screen. */
+export const anchorStyle = (anchor) =>
+    anchor
+        ? `left:${anchor.left}px;bottom:${anchor.bottom}px;width:${anchor.width}px;max-height:${anchor.height}px`
+        : "";
+
 /** The short name of a model for chips: "Claude Opus 5.5" stays, long ids lose their date suffix. */
 export function modelLabel(agent) {
     if (!agent?.model) {

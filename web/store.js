@@ -45,6 +45,7 @@ const emptyView = () => ({
     plan: { on: false },
     schedules: [],
     goal: null,
+    branch: null,
 });
 
 export const store = {
@@ -359,6 +360,8 @@ function applyView(data) {
                 schedules: data.schedules ?? base.schedules,
                 // No goal is null, which the server sends too: only a missing field keeps the last value.
                 goal: data.goal === undefined ? base.goal : data.goal,
+                // What the folder has checked out: `{ branch }` or `{ detached }`, and null outside a repository.
+                branch: data.branch === undefined ? base.branch : data.branch,
             },
             missing: null,
         };
@@ -773,6 +776,8 @@ export const actions = {
     view: (path) => api(`c/${current()}/view?path=${encodeURIComponent(path)}`),
     /** What changed in the session's folder: git's uncommitted changes, and Pi's edits. */
     changes: (id = current()) => api(`c/${id}/changes`),
+    branches: () => api(`c/${current()}/branches`),
+    switchBranch: (target) => api(`c/${current()}/branch`, target),
     /** Undo the uncommitted changes to one file. */
     revert: (path) => api(`c/${current()}/changes/revert`, { path }),
     abort: () => api(`c/${current()}/abort`, {}),
