@@ -3,9 +3,10 @@
  * its tool calls, so nothing new is stored), and, when the folder is in a git repository, every uncommitted change
  * there, with each file's diff on request.
  */
+import { realpathSync } from "node:fs";
 import { lstat, rm } from "node:fs/promises";
 import { devNull } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { type GitOptions, git as runGit } from "./git.ts";
 import type { ClientEntry } from "./projection.ts";
 
@@ -51,11 +52,53 @@ const EDITORS = new Set(["write", "edit"]);
 /** The codemode tool's name (`extensions/codemode.ts`): its results list the calls a script made. */
 const CODEMODE = "codemode";
 
+/** Resolve a possibly missing path through its nearest existing ancestor. */
+function realpathWithMissingTail(path: string): string {
+    const missing: string[] = [];
+    let ancestor = path;
+
+    while (true) {
+        try {
+            return resolve(realpathSync(ancestor), ...missing);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+
+            if (code !== "ENOENT" && code !== "ENOTDIR") {
+                return path;
+            }
+
+            const parent = dirname(ancestor);
+
+            if (parent === ancestor) {
+                return path;
+            }
+
+            missing.unshift(basename(ancestor));
+            ancestor = parent;
+        }
+    }
+}
+
+/** Resolve a recorded tool path lexically, canonicalizing it only for repository-backed sessions. */
+function piEditPath(cwd: string, path: string, canonicalize: boolean): string {
+    const absolute = resolve(cwd, path);
+
+    if (!canonicalize) {
+        return absolute;
+    }
+
+    return realpathWithMissingTail(absolute);
+}
+
 /**
  * The files Pi wrote or edited, by absolute path, with the newest of its replies that did: its own calls, and the
  * ones its codemode scripts made, which their results list.
  */
-function piEdits(entries: readonly ClientEntry[], cwd: string): Map<string, number> {
+function piEdits(
+    entries: readonly ClientEntry[],
+    cwd: string,
+    canonicalize = false,
+): Map<string, number> {
     const edits = new Map<string, number>();
     /** The reply that made each tool call, by call id. */
     const callers = new Map<string, number>();
@@ -71,7 +114,7 @@ function piEdits(entries: readonly ClientEntry[], cwd: string): Map<string, numb
                 const path = block.args.path;
 
                 if (EDITORS.has(block.name) && typeof path === "string" && path !== "") {
-                    edits.set(resolve(cwd, path), entry.id);
+                    edits.set(piEditPath(cwd, path, canonicalize), entry.id);
                 }
             }
         } else if (entry.kind === "toolResult" && entry.name === CODEMODE) {
@@ -92,7 +135,10 @@ function piEdits(entries: readonly ClientEntry[], cwd: string): Map<string, numb
                     continue;
                 }
 
-                edits.set(resolve(cwd, call.path), callers.get(entry.callId) ?? entry.id);
+                edits.set(
+                    piEditPath(cwd, call.path, canonicalize),
+                    callers.get(entry.callId) ?? entry.id,
+                );
             }
         }
     }
@@ -194,12 +240,13 @@ export async function changesIn(
     entries: readonly ClientEntry[],
     onlyHere = false,
 ): Promise<Changes> {
-    const edits = piEdits(entries, cwd);
     let root: string;
 
     try {
         root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
     } catch {
+        const edits = piEdits(entries, cwd);
+
         return {
             files: [],
             more: 0,
@@ -207,6 +254,7 @@ export async function changesIn(
         };
     }
 
+    const edits = piEdits(entries, cwd, true);
     const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).then(
         (name) => name.trim(),
         () => undefined,

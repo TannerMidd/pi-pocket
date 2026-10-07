@@ -12,7 +12,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -63,9 +63,57 @@ const route: FauxResponseStep = (request) => {
         );
     }
 
+    if (text.endsWith("write through link")) {
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("write", {
+                    path: "../symlinked-ancestor-target/new.txt",
+                    content: "Pi's file\n",
+                }),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.endsWith("write parent")) {
+        return fauxAssistantMessage(
+            [fauxToolCall("write", { path: "../top.txt", content: "Pi's file\n" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
     if (text.endsWith("write outside")) {
         return fauxAssistantMessage(
             [fauxToolCall("write", { path: "../outside.txt", content: "x\n" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.includes("write absolute:")) {
+        const path = text.slice(text.indexOf("write absolute:") + "write absolute:".length).trim();
+
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("write", {
+                    path,
+                    content: "absolute edit\n",
+                }),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.includes("script absolute:")) {
+        const path = text
+            .slice(text.indexOf("script absolute:") + "script absolute:".length)
+            .trim();
+
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("codemode", {
+                    code: `await tools.write({ path: ${JSON.stringify(path)}, content: "absolute script\\n" });`,
+                }),
+            ],
             { stopReason: "toolUse" },
         );
     }
@@ -115,7 +163,7 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
 
     const changes = await app.workspace.changes(id, owner(app));
 
-    assert.equal(changes.repo?.root, repo);
+    assert.equal(changes.repo?.root, realpathSync(repo));
     assert.match(changes.repo?.branch ?? "", /^(main|master)$/);
     assert.deepEqual(
         changes.files.map(({ path, kind, added, removed, byPi }) => ({
@@ -201,6 +249,89 @@ function repository(name: string, files: Record<string, string>): string {
 
     return folder;
 }
+
+function symlinkDirectory(target: string, link: string): void {
+    symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+}
+
+test("absolute direct-write paths through a symlinked cwd are attributed to Pi", async () => {
+    const folder = repository("absolute-direct", { "seed.txt": "seed\n" });
+    const alias = join(root, "absolute-direct-alias");
+
+    symlinkDirectory(folder, alias);
+    const id = await newSession(app, alias);
+
+    const path = join(alias, "direct.txt");
+
+    await say(app, id, `write absolute: ${path}`);
+    assert.equal(existsSync(path), true, "the write created its target file");
+    const changes = await app.workspace.changes(id, owner(app));
+
+    assert.equal(changes.files.find((file) => file.path === "direct.txt")?.byPi, true);
+});
+
+test("absolute codemode paths through a symlinked cwd are attributed to Pi", async () => {
+    const folder = repository("absolute-codemode", { "seed.txt": "seed\n" });
+    const alias = join(root, "absolute-codemode-alias");
+
+    symlinkDirectory(folder, alias);
+    const id = await newSession(app, alias);
+
+    const path = join(alias, "scripted.txt");
+
+    await say(app, id, `script absolute: ${path}`);
+    assert.equal(existsSync(path), true, "the codemode write created its target file");
+    const changes = await app.workspace.changes(id, owner(app));
+
+    assert.equal(changes.files.find((file) => file.path === "scripted.txt")?.byPi, true);
+});
+
+test("a parent-relative write from a symlinked cwd stays outside its repository", async () => {
+    const folder = repository("symlinked-cwd", {
+        "app/seed.txt": "seed\n",
+        "top.txt": "seed\n",
+    });
+    const alias = join(root, "symlinked-cwd-alias");
+
+    writeFileSync(join(folder, "top.txt"), "changed by a person\n");
+    symlinkDirectory(join(folder, "app"), alias);
+    const id = await newSession(app, alias);
+
+    await say(app, id, "write parent");
+    assert.equal(existsSync(join(root, "top.txt")), true);
+    const changes = await app.workspace.changes(id, owner(app));
+
+    assert.deepEqual(
+        changes.files.map((file) => ({ path: file.path, byPi: file.byPi })),
+        [{ path: "top.txt", byPi: false }],
+    );
+    assert.deepEqual(
+        changes.piOnly.map((file) => file.path),
+        [join("..", "top.txt")],
+    );
+});
+
+test("a missing new leaf through a symlinked ancestor resolves to its repository path", async () => {
+    const folder = repository("symlinked-ancestor", { "app/seed.txt": "seed\n" });
+    const cwdAlias = join(root, "symlinked-ancestor-cwd");
+    const escapedAlias = join(root, "symlinked-ancestor-target");
+
+    symlinkDirectory(join(folder, "app"), cwdAlias);
+    symlinkDirectory(join(folder, "app"), escapedAlias);
+    const id = await newSession(app, cwdAlias);
+
+    await say(app, id, "write through link");
+    const path = join(folder, "app", "new.txt");
+
+    assert.equal(existsSync(path), true);
+    rmSync(path);
+    const changes = await app.workspace.changes(id, owner(app));
+
+    assert.deepEqual(
+        changes.piOnly.map((file) => file.path),
+        [join("app", "new.txt")],
+    );
+});
 
 test("someone invited to one session sees the changes in its folder, not the rest of the repository", async () => {
     const shared = repository("shared", {

@@ -14,7 +14,7 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -464,7 +464,20 @@ test("everyone signed in gets the desktop's theme colors; only the owner gets it
         join(current, "theme", "wall.png"),
         Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"),
     );
-    symlinkSync(join(current, "theme", "wall.png"), join(current, "background"));
+    let hasWallpaper = true;
+
+    try {
+        symlinkSync(join(current, "theme", "wall.png"), join(current, "background"), "file");
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+
+        if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES")) {
+            throw error;
+        }
+
+        hasWallpaper = false;
+    }
+
     const server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
@@ -477,24 +490,40 @@ test("everyone signed in gets the desktop's theme colors; only the owner gets it
             headers: { authorization: `Bearer ${token}` },
         });
     const realHome = process.env.HOME;
+    const realUserProfile = process.env.USERPROFILE;
 
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
 
     try {
         type Theme = { theme: { name: string; wallpaper: boolean; stamp: string } };
         const owner = (await (await call(app.config.ownerToken, "theme")).json()) as Theme;
 
         assert.equal(owner.theme.name, "gruvbox");
-        assert.equal(owner.theme.wallpaper, true);
+        assert.equal(owner.theme.wallpaper, hasWallpaper);
         assert.ok(!owner.theme.stamp.includes(home), "the stamp names no paths");
         const theirs = (await (await call(guest.token, "theme")).json()) as Theme;
 
         assert.equal(theirs.theme.name, "gruvbox");
         assert.equal(theirs.theme.wallpaper, false);
         assert.equal((await call(guest.token, "theme/wallpaper")).status, 403);
-        assert.equal((await call(app.config.ownerToken, "theme/wallpaper")).status, 200);
+        assert.equal(
+            (await call(app.config.ownerToken, "theme/wallpaper")).status,
+            hasWallpaper ? 200 : 404,
+        );
     } finally {
-        process.env.HOME = realHome;
+        if (realHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = realHome;
+        }
+
+        if (realUserProfile === undefined) {
+            delete process.env.USERPROFILE;
+        } else {
+            process.env.USERPROFILE = realUserProfile;
+        }
+
         app.config.removeUser(guest.user.id);
         server.closeAllConnections();
         server.close();
@@ -1544,7 +1573,7 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
         writeFileSync(join(root, "outside.png"), png);
         assert.equal(
             app.workspace.conversationFile(vee, id, "inside.png"),
-            join(work, "inside.png"),
+            realpathSync(join(work, "inside.png")),
         );
         assert.throws(
             () => app.workspace.conversationFile(vee, id, join(root, "outside.png")),
