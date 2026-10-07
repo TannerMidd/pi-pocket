@@ -86,7 +86,7 @@ marked.setOptions({ gfm: true, breaks: false });
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
 /** Text as HTML that shows it as written. */
-export const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[char]);
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[char]);
 
 /** A fence's language as it may be kept: a short name of safe characters, or nothing. */
 const FENCE_NAME = /^[\w+#.-]{1,24}$/;
@@ -146,7 +146,7 @@ const localImage = (src) =>
     /^data:image\//i.test(src);
 
 /** Code blocks past this size show without colors: coloring them would hold up the conversation. */
-const COLOR_LIMIT = 200_000;
+export const COLOR_LIMIT = 200_000;
 /** Code blocks longer than this many lines fold to their first lines, once they are written whole. */
 const LONG_CODE = 40;
 
@@ -373,7 +373,7 @@ const MARKDOWN_CACHE = 500;
  * order, and evicting the oldest insert would miss on every row once a thread outgrew the cache. Text still changing
  * (`cache` false) is not kept, and its long code blocks are not folded while they grow.
  */
-export function markdownParts(text, conversationId = currentConversation(), cache = true) {
+function markdownParts(text, conversationId = currentConversation(), cache = true) {
     const key = `${conversationId ?? ""}\u0000${text}`;
     let out = markdownCache.get(key);
 
@@ -397,13 +397,6 @@ export function markdownParts(text, conversationId = currentConversation(), cach
     }
 
     return out;
-}
-
-/** Markdown to sanitized HTML, every code block drawn as code. */
-export function markdown(text, conversationId = currentConversation(), cache = true) {
-    return markdownParts(text, conversationId, cache)
-        .map((part) => part.html)
-        .join("");
 }
 
 /** What draws a code block that shows more than code (`rich.js`), given once at load: ui.js does not import it. */

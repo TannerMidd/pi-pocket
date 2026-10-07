@@ -772,7 +772,7 @@ export const actions = {
     /** A file or folder for the viewer. */
     view: (path) => api(`c/${current()}/view?path=${encodeURIComponent(path)}`),
     /** What changed in the session's folder: git's uncommitted changes, and Pi's edits. */
-    changes: () => api(`c/${current()}/changes`),
+    changes: (id = current()) => api(`c/${id}/changes`),
     /** Undo the uncommitted changes to one file. */
     revert: (path) => api(`c/${current()}/changes/revert`, { path }),
     abort: () => api(`c/${current()}/abort`, {}),

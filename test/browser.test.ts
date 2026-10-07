@@ -444,7 +444,7 @@ test(
                     .equals(Buffer.from([0xff, 0xd8])),
             );
             assert.equal(jpegSize(shot.data).height, 800);
-            assert.equal(shot.shrunk, false);
+            assert.equal(shot.scale, 1);
 
             // A huge page comes back small enough for a model to take: too large an image breaks the conversation.
             await page.evaluate("document.body.style.cssText = 'width: 2600px; height: 6000px'; 1");
@@ -456,7 +456,8 @@ test(
                 `${whole.width}×${whole.height}`,
             );
             assert.ok(Math.max(image.width, image.height) <= SHOT_MAX, JSON.stringify(image));
-            assert.ok(image.height > SHOT_MAX * 0.95 && whole.shrunk, JSON.stringify(image));
+            assert.ok(image.height > SHOT_MAX * 0.95, JSON.stringify(image));
+            assert.equal(Math.round(whole.height * whole.scale), image.height);
             await page.evaluate("document.body.style.cssText = ''; scrollTo(0, 0); 1");
 
             // A link to a new tab opens in this page: there is one page per conversation.

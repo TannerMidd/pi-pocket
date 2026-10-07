@@ -2,26 +2,47 @@
 // changed between a removed line and the line that replaced it. No DOM here: web/diff.js draws what this returns.
 
 /**
- * A parsed diff: `{ files }`, each file `{ path, oldPath, kind, binary, hunks, added, removed }`, each hunk `{ oldStart,
- * newStart, oldEnd, newEnd, context, lines }`, and each line `{ type: "ctx" | "add" | "del" | "note", text, old, new }`.
- * `old` and `new` are line numbers in the old and new file; a note ("\ No newline at end of file") has neither.
+ * A parsed diff: `{ files }`, each file `{ path, oldPath, kind, binary, mode, truncated, hunks, added, removed }`, with
+ * `kind` "modified", "added", "deleted", or "renamed". Each hunk is `{ oldStart, oldCount, newStart, newCount, oldEnd,
+ * newEnd, context, lines }`: its `@@` header, and the last line it shows on each side. Each line is `{ type: "ctx" |
+ * "add" | "del" | "note", text, old, new }`, `old` and `new` its numbers in the old and new file; a note ("\ No newline
+ * at end of file") has neither.
  */
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
 /** The line the server puts where it cut a long diff short (`src/server/changes.ts`). */
 const TRUNCATED = /^… the rest of the diff is left out …$/;
 
+/** The C escapes git writes in a quoted path, besides `\"`, `\\`, and bytes in octal. */
+const ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+
+/** A path as git writes it: in C quotes when it holds odd characters (`"caf\303\251.txt"`), else bare. */
+function unquote(path) {
+    if (!/^".*"$/.test(path)) {
+        return path;
+    }
+
+    const encoder = new TextEncoder();
+    // Pieces of text, and between them the escapes, each one byte.
+    const bytes = path
+        .slice(1, -1)
+        .split(/(\\[0-7]{3}|\\.)/)
+        .flatMap((piece, index) => {
+            if (index % 2 === 0) {
+                return [...encoder.encode(piece)];
+            }
+
+            const code = piece.slice(1);
+
+            return code.length === 3 ? parseInt(code, 8) : (ESCAPES[code] ?? code.charCodeAt(0));
+        });
+
+    return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
 /** A path from a `---` or `+++` line, or a `diff --git` header: without its `a/` or `b/`, and unquoted. */
 function cleanPath(raw) {
-    let path = raw.replace(/\t.*$/, "").trim();
-
-    if (path.startsWith('"') && path.endsWith('"')) {
-        try {
-            path = JSON.parse(path);
-        } catch {
-            path = path.slice(1, -1);
-        }
-    }
+    const path = unquote(raw.replace(/\t.*$/, "").trim());
 
     if (path === "/dev/null") {
         return null;
@@ -30,13 +51,37 @@ function cleanPath(raw) {
     return path.replace(/^[ab]\//, "");
 }
 
+/**
+ * The two paths of a `diff --git` line, as written. Bare paths can hold spaces, so this splits as git does: where the
+ * halves name the same file, which they do unless the file was renamed, and then its `rename` lines say the paths.
+ */
+function headerPaths(rest) {
+    const quoted =
+        /^("(?:[^"\\]|\\.)*") (.+)$/.exec(rest) ?? /^(.+) ("(?:[^"\\]|\\.)*")$/.exec(rest);
+
+    if (quoted) {
+        return [quoted[1], quoted[2]];
+    }
+
+    const half = (rest.length - 1) / 2;
+    const [left, right] = [rest.slice(0, half), rest.slice(half + 1)];
+
+    if (rest[half] === " " && cleanPath(left) === cleanPath(right)) {
+        return [left, right];
+    }
+
+    const at = rest.indexOf(" b/");
+
+    return at > 0 ? [rest.slice(0, at), rest.slice(at + 1)] : rest.split(" ", 2);
+}
+
 function newFile() {
     return {
         path: "",
         oldPath: null,
         kind: "modified",
         binary: false,
-        /** Only its mode changed (made executable, say), when it has no hunks. */
+        /** Its mode changed: made executable, say. */
         mode: false,
         /** The server left the end of the diff out: it was too long. */
         truncated: false,
@@ -91,13 +136,10 @@ export function parseUnified(text) {
 
         if (line.startsWith("diff --git ")) {
             startFile();
-            const match = /^diff --git (?:"?a\/)?(.+?)"? (?:"?b\/)?(.+?)"?$/.exec(line);
+            const [before, after = before] = headerPaths(line.slice(11));
 
-            if (match) {
-                file.oldPath = match[1];
-                file.path = match[2];
-            }
-
+            file.oldPath = cleanPath(before);
+            file.path = cleanPath(after) ?? "";
             continue;
         }
 
@@ -192,10 +234,10 @@ export function parseUnified(text) {
             file.kind = "deleted";
         } else if (line.startsWith("rename from ")) {
             file.kind = "renamed";
-            file.oldPath = line.slice(12);
+            file.oldPath = unquote(line.slice(12));
         } else if (line.startsWith("rename to ")) {
             file.kind = "renamed";
-            file.path = line.slice(10);
+            file.path = unquote(line.slice(10));
         } else if (line.startsWith("Binary files ") || line === "GIT binary patch") {
             file.binary = true;
         } else if (line.startsWith("old mode ") || line.startsWith("new mode ")) {
@@ -234,7 +276,7 @@ export function parseEditDiff(text, path = "") {
         const match = /^([+\- ])\s*(\d+) (.*)$/.exec(line) ?? /^([+\- ])\s*(\d+)$/.exec(line);
 
         if (!match) {
-            // `...` or anything else: a gap, and the next line starts a new hunk.
+            // A line of `...` is a gap: the next line starts a new hunk. Any other line is not part of the diff.
             if (hunk !== null && /^\s*\.\.\.\s*$/.test(line)) {
                 hunk = null;
             }
@@ -555,7 +597,8 @@ function trimRanges(ranges, text) {
 
 // ─── Marking words in highlighted code ──────────────────────────────────────────────
 
-const PIECES = /(<[^>]+>)|(&[#a-z0-9]+;)|([^<&]+)/gi;
+/** Highlighted HTML in pieces: tags, entities (one character of text each), and text, a lone `&` or `<` included. */
+const PIECES = /(<[^>]+>)|(&[#a-z0-9]+;)|([^<&]+|[<&])/gi;
 
 /**
  * Highlighted HTML with the character ranges `ranges` (of its text, not its markup) wrapped in `<mark>`. A mark closes

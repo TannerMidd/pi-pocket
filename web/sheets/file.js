@@ -46,10 +46,10 @@ function useLines(file, path) {
 
 /**
  * A file of the session, read-only: text with line numbers and colors (Markdown shows rendered too), an image, or a
- * folder to browse. `line` scrolls to and marks that line. `onOpen` opens an entry of a folder; `tools` shows the
- * viewer's buttons (copy, mention, preview) in a bar of its own, for places without a header to put them in.
+ * folder to browse, under a bar with its path and the viewer's buttons (copy, mention, preview). `line` scrolls to and
+ * marks that line. `onOpen` opens an entry of a folder.
  */
-export function FileView({ path, line, onOpen = openFile, tools = true, onLoad }) {
+export function FileView({ path, line, onOpen = openFile, onLoad }) {
     const [file, setFile] = useState(null);
     const [error, setError] = useState(null);
     const markdown = isMarkdown(path);
@@ -100,25 +100,22 @@ export function FileView({ path, line, onOpen = openFile, tools = true, onLoad }
     const name = shown.replace(/\/$/, "").split("/").pop() || shown;
 
     return html`<div class="file-viewer">
-        ${
-            tools &&
-            html`<div class="file-tools">
-                <span class="muted small mono file-path" title=${file?.path ?? path}>
-                    ${shown}
-                    ${file?.size !== undefined ? ` · ${formatBytes(file.size)}` : ""}
-                    ${file?.kind === "text" ? ` · ${lines.length} lines` : ""}
-                </span>
-                <${FileActions}
-                    file=${file}
-                    shown=${shown}
-                    previewable=${markdown || page}
-                    preview=${preview}
-                    onPreview=${setPreview}
-                    running=${page && preview ? running : null}
-                    onRun=${setRunning}
-                />
-            </div>`
-        }
+        <div class="file-tools">
+            <span class="muted small mono file-path" title=${file?.path ?? path}>
+                ${shown}
+                ${file?.size !== undefined ? ` · ${formatBytes(file.size)}` : ""}
+                ${file?.kind === "text" ? ` · ${lines.length} ${lines.length === 1 ? "line" : "lines"}` : ""}
+            </span>
+            <${FileActions}
+                file=${file}
+                shown=${shown}
+                previewable=${markdown || page}
+                preview=${preview}
+                onPreview=${setPreview}
+                running=${page && preview ? running : null}
+                onRun=${setRunning}
+            />
+        </div>
         ${error && html`<p class="muted">${error}</p>`}
         ${!file && !error && html`<${Loader} label="Opening" />`}
         ${
@@ -178,7 +175,7 @@ export function FileView({ path, line, onOpen = openFile, tools = true, onLoad }
         ${
             file?.kind === "text" &&
             !preview &&
-            html`<div class=${`file-view ${colored ? "hl" : ""}`} ref=${body}>${rows}</div>
+            html`<div class="file-view" ref=${body}>${rows}</div>
             ${
                 !all &&
                 lines.length > FILE_LINES &&

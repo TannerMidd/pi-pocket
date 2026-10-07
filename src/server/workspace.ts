@@ -4,7 +4,7 @@
  * operations people call directly check who may do them; the path helpers (`conversationPath`, `conversationFile`,
  * `readableFile`, `uploadDirectory`) leave seeing the conversation to their callers.
  */
-import { mkdirSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -44,18 +44,32 @@ export class Workspace {
         return inside;
     }
 
+    /** A folder to work in, as its whole path: a 404 when it is not there, so the folder picker can offer to make it. */
     checkDirectory(path: string): string {
         const absolute = resolve(expandHome(path.trim() === "" ? "~" : path.trim()));
-        let ok = false;
+        let found;
 
         try {
-            ok = statSync(absolute).isDirectory();
-        } catch {
-            ok = false;
+            found = statSync(absolute);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+
+            if (code === "ENOTDIR") {
+                throw new HttpError(400, `${absolute} is inside a file, not a folder.`);
+            }
+
+            if (code !== "ENOENT") {
+                throw new HttpError(400, `Could not open ${absolute}: ${describe(error)}`);
+            }
+
+            // Not there, unless it is a link to nowhere: that cannot be made a folder either.
+            throw lstatSync(absolute, { throwIfNoEntry: false }) === undefined
+                ? new HttpError(404, `${absolute} isn't there.`)
+                : new HttpError(400, `${absolute} is a link to nothing.`);
         }
 
-        if (!ok) {
-            throw new HttpError(400, `${absolute} is not a directory`);
+        if (!found.isDirectory()) {
+            throw new HttpError(400, `${absolute} is a file, not a folder.`);
         }
 
         return absolute;
@@ -92,11 +106,14 @@ export class Workspace {
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
 
+            // A file in the way, or a link that leads nowhere (or in a loop): the path cannot be a folder.
             throw new HttpError(
                 409,
                 code === "EEXIST" || code === "ENOTDIR"
                     ? `${absolute} is a file, or inside one.`
-                    : `Could not make ${absolute}: ${describe(error)}`,
+                    : code === "ENOENT" || code === "ELOOP"
+                      ? `${absolute} is a broken link, or inside one.`
+                      : `Could not make ${absolute}: ${describe(error)}`,
             );
         }
 

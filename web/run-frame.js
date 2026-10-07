@@ -1,9 +1,12 @@
 // HTML from a reply, run: in the server's sandboxed frame page (`/a/frame`), only once someone taps Run. The frame has
 // an opaque origin, as artifacts do: it can run scripts and reach the network, never the app or its cookies.
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { html } from "./ui.js";
 
-/** The sandbox's permissions: those of the artifact viewer's frame (`sheets/viewers.js`), so its popups stay sandboxed. */
+/**
+ * The sandbox's permissions: those of the artifact viewer's frame (`sheets/viewers.js`). A frame gets only what both this
+ * and its page's own policy allow, so without `allow-popups-to-escape-sandbox` here its popups stay sandboxed.
+ */
 const SANDBOX =
     "allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads";
 /** How tall a frame may grow to fit its page: past it, the page scrolls inside. */
@@ -49,7 +52,8 @@ export function RunFrame({ source, title = "Preview" }) {
     const ref = useRef(null);
     const [height, fitHeight, resetFit] = useFitHeight(240, MIN_HEIGHT, MAX_HEIGHT);
 
-    useEffect(() => {
+    // Listening from the moment the frame is in the page, before it can load: it says it is ready only once.
+    useLayoutEffect(() => {
         const onMessage = (event) => {
             const frame = ref.current;
             const data = event.data;

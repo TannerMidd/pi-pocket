@@ -103,6 +103,14 @@
     --err-soft: color-mix(in srgb, var(--o-red) 9%, transparent);
     --err-line: color-mix(in srgb, var(--o-red) 55%, transparent);
     --code-bg: var(--o-bg-dark);
+    /* Syntax colors, from the theme's own palette so every Omarchy theme colors code its way. */
+    --hl-kw: var(--o-magenta);
+    --hl-str: var(--o-green);
+    --hl-num: var(--o-orange);
+    --hl-fn: var(--o-blue);
+    --hl-type: var(--o-yellow);
+    --hl-op: var(--o-cyan);
+    --hl-tag: var(--o-red);
     --active: var(--o-active);
     --scrim: color-mix(in srgb, var(--o-bg-darker) 62%, transparent);
     --radius: 0;
@@ -139,6 +147,14 @@
     --ok: color-mix(in oklab, var(--o-green) 78%, var(--o-fg));
     --err: color-mix(in oklab, var(--o-red) 85%, var(--o-fg));
     --accent-fill: color-mix(in oklab, var(--o-accent) 76%, var(--o-fg));
+    /* Code's colors further still: halfway, yellow (the lightest) more, so each reads at 3:1 or better. */
+    --hl-kw: color-mix(in oklab, var(--o-magenta) 50%, var(--o-fg));
+    --hl-str: color-mix(in oklab, var(--o-green) 50%, var(--o-fg));
+    --hl-num: color-mix(in oklab, var(--o-orange) 50%, var(--o-fg));
+    --hl-fn: color-mix(in oklab, var(--o-blue) 50%, var(--o-fg));
+    --hl-type: color-mix(in oklab, var(--o-yellow) 40%, var(--o-fg));
+    --hl-op: color-mix(in oklab, var(--o-cyan) 50%, var(--o-fg));
+    --hl-tag: color-mix(in oklab, var(--o-red) 50%, var(--o-fg));
 }
 
 * {
@@ -1062,14 +1078,14 @@ kbd {
     color: var(--body);
 }
 
-.md table {
+/* A reply's own tables; a diff it shows draws its table itself. */
+.md table:not(.dv-table) {
     border-collapse: collapse;
     display: block;
     overflow-x: auto;
 }
 
-.md td,
-.md th {
+.md table:not(.dv-table) :is(td, th) {
     border: 1px solid var(--line);
     padding: 0.25rem 0.5rem;
 }
@@ -5491,6 +5507,11 @@ textarea.notes {
     color: inherit;
 }
 
+/* A renamed file's old path, before its new one. */
+.dv-was {
+    margin-right: 0.5ch;
+}
+
 /* A long path gives up its folders before its name. */
 .dv-path {
     display: flex;
@@ -5626,14 +5647,28 @@ textarea.notes {
     min-width: 100%;
 }
 
-.dv-col-n {
-    width: 3.6em;
+/* Side by side, the two halves stay as wide as each other however long their lines. */
+.dv:not(.wrap) .dv-table.split col:not(.dv-col-n) {
+    width: 50%;
+}
+
+.dv:not(.wrap) .dv-table.split .dv-n {
+    min-width: var(--dv-n);
+}
+
+/* A number column's width, which notes under the lines count past too. */
+.dv {
+    --dv-n: 3.6em;
 }
 
 @media (max-width: 520px) {
-    .dv-col-n {
-        width: 2.9em;
+    .dv {
+        --dv-n: 2.9em;
     }
+}
+
+.dv-col-n {
+    width: var(--dv-n);
 }
 
 .dv-n {
@@ -5763,11 +5798,19 @@ textarea.notes {
     font: 0.72rem var(--mono);
 }
 
+/* A note under a line ("No newline at end of file") starts where the code does: past the numbers, and the sign. */
 .dv-note td {
-    padding: 0 0.8rem 0 calc(7.2em + 1.5em);
+    padding: 0 0.8rem 0 calc(2 * var(--dv-n) + 1.5em);
     color: var(--muted);
-    font-size: 0.7rem;
     font-style: italic;
+}
+
+.dv-table.split .dv-note td {
+    padding-left: calc(var(--dv-n) + 1.5em);
+}
+
+.dv-note span {
+    font-size: 0.7rem;
 }
 
 .dv-empty {
@@ -5775,6 +5818,10 @@ textarea.notes {
     padding: 0.7rem 0.8rem;
     color: var(--muted);
     font-size: 0.82rem;
+}
+
+.dv-empty.err {
+    color: var(--err);
 }
 
 .dv-empty .link {
@@ -5790,11 +5837,6 @@ textarea.notes {
 .dv-settings {
     display: inline-flex;
     gap: 0.3rem;
-}
-
-.chip.on {
-    color: var(--accent);
-    border-color: var(--accent-line);
 }
 
 /* A diff in a tool card or a reply: it scrolls inside a bound, like the card's other output. */
@@ -5917,6 +5959,15 @@ textarea.notes {
     text-align: left;
     color: var(--body);
     white-space: nowrap;
+}
+
+/* The files tree steps in a little further than the changes tree: it nests deeper, with a chevron on each folder. */
+.ft-row {
+    padding-left: calc(0.4rem + var(--depth, 0) * 0.9rem);
+}
+
+.ft-row.muted {
+    color: var(--muted);
 }
 
 .dr-row:hover,
@@ -6178,10 +6229,6 @@ textarea.notes {
     overflow: auto;
     padding-bottom: 1rem;
     font-size: 0.8rem;
-}
-
-.ft-row {
-    padding-left: calc(0.4rem + var(--depth, 0) * 0.9rem);
 }
 
 .ft-row .icon {
@@ -6938,13 +6985,13 @@ textarea.notes {
 
 /* ─── Syntax and rich markdown ─────────────────────────────── */
 
-/* Syntax colors, from the theme's own palette so every Omarchy theme colors code its way. */
+/* Syntax colors: the --hl- colors, darker in light themes. */
 .hl-kw {
-    color: var(--o-magenta);
+    color: var(--hl-kw);
 }
 
 .hl-str {
-    color: var(--o-green);
+    color: var(--hl-str);
 }
 
 .hl-com {
@@ -6954,28 +7001,28 @@ textarea.notes {
 
 .hl-num,
 .hl-lit {
-    color: var(--o-orange);
+    color: var(--hl-num);
 }
 
 .hl-fn {
-    color: var(--o-blue);
+    color: var(--hl-fn);
 }
 
 .hl-type,
 .hl-attr {
-    color: var(--o-yellow);
+    color: var(--hl-type);
 }
 
 .hl-op,
 .hl-prop,
 .hl-meta {
-    color: var(--o-cyan);
+    color: var(--hl-op);
 }
 
 .hl-tag,
 .hl-re,
 .hl-var {
-    color: var(--o-red);
+    color: var(--hl-tag);
 }
 
 /* A run of HTML between the blocks the app draws itself: its children lay out as the reply's own. */

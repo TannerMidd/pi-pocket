@@ -29,6 +29,7 @@ export const RUN_FRAME = `<!doctype html><html><head><meta charset="utf-8"><meta
     // the page is as tall as its frame, as a page sized by it (100vh) is.
     const size = '<script>(() => { const post = () => { const body = document.body; const style = body && getComputedStyle(body); const height = body ? body.scrollHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom) : document.documentElement.scrollHeight; parent.postMessage({ type: "pocket-run-size", height: Math.ceil(height), fills: document.documentElement.scrollHeight <= innerHeight + 1 && height >= innerHeight - 1 }, "*"); }; new ResizeObserver(post).observe(document.documentElement); addEventListener("load", post); post(); })();<' + '/script>';
 
+    // Only the app's own page may send it HTML. location.origin is this page's address, not its opaque origin.
     addEventListener("message", (event) => {
         const data = event.data;
 

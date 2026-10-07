@@ -7,7 +7,7 @@ import { DiffBlock } from "./diff.js";
 import { highlight, langOf } from "./highlight.js";
 import { RunFrame, useFitHeight } from "./run-frame.js";
 import { notify } from "./store.js";
-import { copyText, html, setRichBlock } from "./ui.js";
+import { COLOR_LIMIT, copyText, html, setRichBlock } from "./ui.js";
 
 // ─── A page, previewed ──────────────────────────────────────────────────────────────
 
@@ -25,16 +25,27 @@ const MAX_HEIGHT = 1200;
 
 /**
  * The page a preview shows, always in standards mode (a page written without a doctype would otherwise lay out in
- * quirks mode). Parsed without running or loading anything, it loses what could reach out or move it
- * elsewhere before a tap: refreshes and other `http-equiv` meta, links (stylesheets, prefetches), and bases; then the
- * preview's policy goes first in its head. A fragment gets a plain page around it.
+ * quirks mode). Parsed without running or loading anything, it loses what could run, reach out, or move it elsewhere
+ * before a tap: scripts and event handlers, frames and embeds, refreshes and other `http-equiv` meta, links
+ * (stylesheets, prefetches), and bases; then the preview's policy goes first in its head. The sandbox and the policy
+ * would stop them all as well. A fragment gets a plain page around it.
  */
 export function previewDocument(source) {
     const fragment = !/<(?:!doctype|html|head|body)[\s>]/i.test(source);
     const page = new DOMParser().parseFromString(source, "text/html");
 
-    for (const node of page.querySelectorAll("meta[http-equiv], link, base")) {
+    for (const node of page.querySelectorAll(
+        "script, iframe, frame, object, embed, meta[http-equiv], link, base",
+    )) {
         node.remove();
+    }
+
+    for (const element of page.querySelectorAll("*")) {
+        for (const { name } of [...element.attributes]) {
+            if (/^on/i.test(name)) {
+                element.removeAttribute(name);
+            }
+        }
     }
 
     const meta = (name, value) => {
@@ -84,10 +95,10 @@ export function HtmlPreview({ source, title = "Preview" }) {
             return;
         }
 
-        const page = frame.contentDocument;
+        const shown = frame.contentDocument;
         const style = getComputedStyle(body);
         // Everything in the body, text outside any element included, and each box (for those placed out of the flow).
-        const range = page.createRange();
+        const range = shown.createRange();
 
         range.selectNodeContents(body);
         const bottom = Math.max(
@@ -96,7 +107,7 @@ export function HtmlPreview({ source, title = "Preview" }) {
         );
         const content =
             bottom +
-            page.documentElement.scrollTop +
+            shown.documentElement.scrollTop +
             parseFloat(style.paddingBottom) +
             parseFloat(style.borderBottomWidth) +
             parseFloat(style.marginBottom);
@@ -158,7 +169,8 @@ function RichBlock({ kind, lang, source, streaming }) {
     const [running, setRunning] = useState(false);
     const code = streaming || view === "code";
     const colored = useMemo(
-        () => (code ? highlight(source, langOf(lang) ?? kind) : ""),
+        () =>
+            code && source.length <= COLOR_LIMIT ? highlight(source, langOf(lang) ?? kind) : null,
         [code, source, lang, kind],
     );
 
@@ -174,7 +186,10 @@ function RichBlock({ kind, lang, source, streaming }) {
     let body;
 
     if (code) {
-        body = html`<pre><code dangerouslySetInnerHTML=${{ __html: colored }}></code></pre>`;
+        body =
+            colored === null
+                ? html`<pre><code>${source}</code></pre>`
+                : html`<pre><code dangerouslySetInnerHTML=${{ __html: colored }}></code></pre>`;
     } else if (kind === "html") {
         body = running
             ? html`<${RunFrame} source=${source} />`
@@ -233,9 +248,6 @@ function RichBlock({ kind, lang, source, streaming }) {
 setRichBlock(RichBlock);
 
 // ─── Code elsewhere ────────────────────────────────────────────────────────────────────
-
-/** Past this size, code shows without colors: coloring it would hold up the conversation. */
-const COLOR_LIMIT = 200_000;
 
 /** Code with syntax colors for `lang` (a language, or a path to tell it by), as a `pre` with the class given. */
 export function Highlighted({ text, lang, class: className = "" }) {

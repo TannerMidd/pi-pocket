@@ -233,3 +233,132 @@ test("an emoji that changed is marked whole", () => {
         "the build is <mark>😁</mark> today",
     );
 });
+
+test("paths with spaces, quotes, or letters past ASCII read as git means them", () => {
+    const { files } = parseDiff(`diff --git a/my pic.png b/my pic.png
+index bdc955b..8835708 100644
+Binary files a/my pic.png and b/my pic.png differ
+diff --git a/run me.sh b/run me.sh
+old mode 100644
+new mode 100755
+diff --git a/old name.txt b/new name.txt
+similarity index 100%
+rename from old name.txt
+rename to new name.txt
+diff --git "a/caf\\303\\251.txt" "b/th\\303\\251.txt"
+similarity index 100%
+rename from "caf\\303\\251.txt"
+rename to "th\\303\\251.txt"
+diff --git "a/quote\\"d.txt" "b/quote\\"d.txt"
+index bca70f3..6178079 100644
+--- "a/quote\\"d.txt"
++++ "b/quote\\"d.txt"
+@@ -1 +1 @@
+-q
++b
+`);
+
+    assert.deepEqual(
+        files.map(({ path, oldPath, kind }) => [kind, oldPath, path]),
+        [
+            ["modified", "my pic.png", "my pic.png"],
+            ["modified", "run me.sh", "run me.sh"],
+            ["renamed", "old name.txt", "new name.txt"],
+            ["renamed", "café.txt", "thé.txt"],
+            ["modified", 'quote"d.txt', 'quote"d.txt'],
+        ],
+    );
+    assert.deepEqual(
+        files.map(({ binary, mode }) => [binary, mode]),
+        [
+            [true, false],
+            [false, true],
+            [false, false],
+            [false, false],
+            [false, false],
+        ],
+    );
+});
+
+test("any text parses without throwing, and changed words always fit their lines", () => {
+    // A small seeded generator: the same cases on every run, so a failure can be run again.
+    let seed = 7;
+    const random = () => ((seed = (seed * 48271) % 2147483647) / 2147483647) as number;
+    const pick = <T>(items: T[]) => items[Math.floor(random() * items.length)]!;
+    const pieces = [
+        "diff --git a/x b/x",
+        "--- a/x",
+        "+++ b/x",
+        "--- /dev/null",
+        "+++ /dev/null",
+        "@@ -1,3 +1,3 @@",
+        "@@ -0,0 +1 @@",
+        "@@ -5 +5,0 @@ fn",
+        "@@ broken",
+        "\\ No newline at end of file",
+        "rename from a b",
+        'rename to "c\\303\\251"',
+        "Binary files a/x and b/x differ",
+        "old mode 100644",
+        "+added",
+        "-removed",
+        " context",
+        "",
+        "+ 12 edit",
+        "- 3 gone",
+        "  4 kept",
+        "...",
+        "… the rest of the diff is left out …",
+        "plain words",
+    ];
+    const words = ["a", "b", "const", "=", "😀", "x1", " ", "&", "<b>", "\t"];
+
+    for (let round = 0; round < 2000; round++) {
+        const text = Array.from({ length: 1 + Math.floor(random() * 14) }, () => pick(pieces)).join(
+            random() < 0.2 ? "\r\n" : "\n",
+        );
+        const { files } = parseDiff(text, random() < 0.5 ? "x.js" : "");
+
+        for (const file of files) {
+            for (const hunk of file.hunks) {
+                const rows = hunkRows(hunk);
+                const shown = rows.flatMap((row) => [row.left, row.right]).filter(Boolean);
+
+                assert.ok(
+                    hunk.lines.every((line) => shown.includes(line)),
+                    `every line drawn: ${JSON.stringify(text)}`,
+                );
+            }
+        }
+
+        const line = () =>
+            Array.from({ length: Math.floor(random() * 12) }, () => pick(words)).join("");
+        const [before, after] = [line(), line()];
+        const marks = wordDiff(before, after);
+
+        for (const [ranges, source] of marks
+            ? [[marks.left, before] as const, [marks.right, after] as const]
+            : []) {
+            let end = 0;
+
+            for (const [from, to] of ranges) {
+                assert.ok(
+                    from >= end && to > from && to <= source.length,
+                    JSON.stringify({ before, after, marks }),
+                );
+                end = to;
+            }
+
+            // Escaped as the highlighter writes it, and as it is: a stray & or < is text too.
+            for (const html of [source.replace(/&/g, "&amp;").replace(/</g, "&lt;"), source]) {
+                if (html === source && /<[^>]*>|&[#a-z0-9]+;/i.test(source)) {
+                    continue;
+                }
+
+                const plain = markRanges(html, ranges).replace(/<\/?mark>/g, "");
+
+                assert.equal(plain, html, "marks add nothing but marks");
+            }
+        }
+    }
+});

@@ -2,8 +2,8 @@
 // changes. It docks beside the conversation where the Browser and People panels do (one of them at a time), and
 // covers the screen on phones. Alt+E, the top bar's folder button, the launcher, or /files show and hide it.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { DiffReview, reloadChanges, useChanges } from "./diff.js";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { DiffReview, KIND_LETTERS, reloadChanges, useChanges, useWidth } from "./diff.js";
 import { loadFiles, suggestFiles } from "./files.js";
 import { FileView } from "./sheets/file.js";
 import { actions, canSteer, closePeople, store } from "./store.js";
@@ -71,6 +71,8 @@ function setTab(tab) {
 
 /** Folders' entries, per conversation and folder, kept while the tile is open again and again. */
 const folders = new Map();
+/** How many folders are kept: the oldest go first. */
+const FOLDERS_KEPT = 300;
 /** Folders the tree shows open, per conversation: kept for the tab, so a reload keeps the tree as it was. */
 const expandedKey = (id) => `pocket.filesTree.${id}`;
 
@@ -96,15 +98,12 @@ function readExpanded(id) {
 /** Folders the tree never shows: git's own. */
 const HIDDEN = new Set([".git"]);
 
-function useFolder(id, path, wanted, version) {
+/** A folder's entries, `{ entries, truncated }` or `{ entries, error }`: the kept ones at once, then read again. */
+function useFolder(id, path, version) {
     const key = `${id}\u0000${path}`;
     const [state, setState] = useState(() => folders.get(key) ?? null);
 
     useEffect(() => {
-        if (!wanted) {
-            return;
-        }
-
         let live = true;
 
         if (folders.has(key)) {
@@ -119,9 +118,15 @@ function useFolder(id, path, wanted, version) {
                         : [];
                 const next = { entries, truncated: folder.truncated === true };
 
-                folders.set(key, next);
-
+                // A later read may have answered first: only the latest is kept.
                 if (live) {
+                    folders.delete(key);
+
+                    if (folders.size >= FOLDERS_KEPT) {
+                        folders.delete(folders.keys().next().value);
+                    }
+
+                    folders.set(key, next);
                     setState(next);
                 }
             },
@@ -131,14 +136,14 @@ function useFolder(id, path, wanted, version) {
         return () => {
             live = false;
         };
-    }, [key, wanted, version]);
+    }, [key, version]);
 
     return state;
 }
 
 /** One folder's entries in the tree, and the open folders under it. */
 function TreeFolder({ path, depth, ctx }) {
-    const folder = useFolder(ctx.id, path, true, ctx.version);
+    const folder = useFolder(ctx.id, path, ctx.version);
 
     if (folder === null) {
         return html`<div class="ft-row muted" style=${`--depth:${depth}`}>…</div>`;
@@ -186,8 +191,6 @@ function TreeFolder({ path, depth, ctx }) {
     }`;
 }
 
-const KIND_LETTERS = { modified: "M", added: "A", deleted: "D", renamed: "R", new: "N" };
-
 /** Files across the whole folder that match what was typed, as the @ menu matches them. */
 function Matches({ query, root, onPick }) {
     const found = suggestFiles(query);
@@ -206,7 +209,8 @@ function Matches({ query, root, onPick }) {
                 type="button"
                 class="ft-row match"
                 role="option"
-                onClick=${() => onPick(`${root}/${entry.path.replace(/\/$/, "")}`, entry.dir)}
+                data-path=${`${root}/${entry.path.replace(/\/$/, "")}`}
+                onClick=${(event) => onPick(event.currentTarget.dataset.path, entry.dir)}
             >
                 <${Icon} name=${entry.dir ? "folder" : "file"} size=${14} />
                 <span class="ft-name"><${Marked} text=${entry.name} hits=${entry.nameHits} /></span>
@@ -217,30 +221,6 @@ function Matches({ query, root, onPick }) {
 }
 
 // ─── The tile ──────────────────────────────────────────────────────────────────────
-
-/** The width of an element, kept current as it resizes. */
-function useWidth(ref) {
-    const [width, setWidth] = useState(0);
-
-    useLayoutEffect(() => {
-        const element = ref.current;
-
-        if (!element) {
-            return;
-        }
-
-        setWidth(element.clientWidth);
-        const observer = new ResizeObserver(([entry]) =>
-            setWidth(Math.round(entry.contentRect.width)),
-        );
-
-        observer.observe(element);
-
-        return () => observer.disconnect();
-    }, []);
-
-    return width;
-}
 
 /** Drag the tile's left edge to resize it on wide screens; double-click goes back to the usual width. */
 function ResizeEdge() {
@@ -331,9 +311,13 @@ function FilesTab({ changes }) {
             return next;
         });
 
-    /** Scroll the tree to a path's row, once its folder has loaded. */
+    /** Scroll the tree to a path's row, once its folder has loaded, while the tile is open. */
     const scrollToRow = (path, tries = 12) => {
-        const row = ref.current?.querySelector(`.ft-row[data-path="${CSS.escape(path)}"]`);
+        if (!ref.current) {
+            return;
+        }
+
+        const row = ref.current.querySelector(`.ft-row[data-path="${CSS.escape(path)}"]`);
 
         if (row) {
             row.scrollIntoView({ block: "nearest" });
@@ -469,7 +453,7 @@ function FilesTab({ changes }) {
         changedDirs,
         version,
         toggle,
-        pick: (path) => pick(path),
+        pick,
     };
 
     const showTree = side || !selected;
@@ -495,6 +479,9 @@ function FilesTab({ changes }) {
                             if (event.key === "Escape" && query !== "") {
                                 event.stopPropagation();
                                 setQuery("");
+                            } else if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                ref.current?.querySelector(".ft-tree .ft-row[data-path]")?.focus();
                             }
                         }}
                         autocapitalize="off"
@@ -591,7 +578,8 @@ function FilesTab({ changes }) {
 export function FilesPanel() {
     const { filesTab } = store.state;
     const { changes } = useChanges(true);
-    const count = changes?.files.length ?? 0;
+    // Pi's edits git does not list count too: outside a repository, they are all there is.
+    const count = changes ? changes.files.length + changes.piOnly.length : 0;
 
     return html`<section class="files-tile window" aria-label="Files">
         <${ResizeEdge} />
@@ -628,10 +616,15 @@ export function FilesPanel() {
                 <${Icon} name="close" size=${18} />
             </button>
         </header>
-        <div class="files-body" hidden=${filesTab !== "files"}>
+        <div class="files-body" role="tabpanel" aria-label="Files" hidden=${filesTab !== "files"}>
             <${FilesTab} changes=${changes} />
         </div>
-        <div class="files-body" hidden=${filesTab !== "changes"}>
+        <div
+            class="files-body"
+            role="tabpanel"
+            aria-label="Changes"
+            hidden=${filesTab !== "changes"}
+        >
             <${DiffReview} active=${filesTab === "changes"} />
         </div>
     </section>`;

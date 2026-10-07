@@ -33,16 +33,14 @@ function readPrefs() {
 let diffPrefs = readPrefs();
 
 /** How diffs show on this device: `layout` is auto, split, or unified; `wrap` breaks long lines instead of scrolling. */
-export const getDiffPrefs = () => diffPrefs;
-
-export function setDiffPrefs(patch) {
+function setDiffPrefs(patch) {
     diffPrefs = { ...diffPrefs, ...patch };
     localStorage.setItem(PREFS_KEY, JSON.stringify(diffPrefs));
     store.set({});
 }
 
 /** The width of an element, kept current as it resizes. */
-function useWidth(ref) {
+export function useWidth(ref) {
     const [width, setWidth] = useState(0);
 
     useLayoutEffect(() => {
@@ -69,9 +67,13 @@ function useWidth(ref) {
 const layoutFor = (width) =>
     diffPrefs.layout === "auto" ? (width >= SPLIT_FROM ? "split" : "unified") : diffPrefs.layout;
 
+/** The layout after `layout`, as the layout button and `s` step through them. */
+const nextLayout = (layout) => ({ auto: "split", split: "unified", unified: "auto" })[layout];
+
 // ─── One file ──────────────────────────────────────────────────────────────────────
 
-const KIND_LETTERS = { modified: "M", added: "A", deleted: "D", renamed: "R", new: "N" };
+/** A change's kind as one letter, as git status writes it; `new` is a file git does not track yet. */
+export const KIND_LETTERS = { modified: "M", added: "A", deleted: "D", renamed: "R", new: "N" };
 /** A file with more changed lines than this waits for a tap before it draws. */
 const BIG_DIFF = 1200;
 /** Hidden lines shown per tap on a long gap. */
@@ -193,6 +195,28 @@ function gapLines(gap, shown, text) {
     return { top, bottom, left: total - fromTop - fromBottom };
 }
 
+/** A hunk with one side empty is a whole file, with nothing around it: a new or deleted file, or one that was empty. */
+const wholeFile = (hunk) =>
+    (hunk.oldStart === 0 && hunk.oldCount === 0) || (hunk.newStart === 0 && hunk.newCount === 0);
+
+/** Unchanged lines a review's diff shows around each change (`src/server/changes.ts` asks git for that many). */
+const CONTEXT = 3;
+
+/**
+ * Where a file ends, when its diff says: its last hunk shows fewer unchanged lines after its last change than a diff
+ * shows around one, or a note that the file has no newline at its end.
+ */
+function endOf(file) {
+    const lines = file.hunks.at(-1).lines;
+    const changed = lines.findLastIndex((line) => line.type === "add" || line.type === "del");
+    const after = lines.slice(changed + 1);
+
+    return after.some((line) => line.type === "note") ||
+        after.filter((line) => line.type === "ctx").length < CONTEXT
+        ? file.hunks.at(-1).newEnd
+        : undefined;
+}
+
 /** The unchanged runs between hunks, in new-file line numbers, with how far old numbers are behind there. */
 function gapsOf(file, length) {
     const gaps = [];
@@ -208,8 +232,8 @@ function gapsOf(file, length) {
         shift = hunk.newEnd - hunk.oldEnd;
     }
 
-    // After the last hunk, as far as the file goes, once it is known.
-    gaps.push({ from: next, to: length ?? next - 1, shift });
+    // After the last hunk, as far as the file goes, once that is known.
+    gaps.push({ from: next, to: length ?? next - 1, shift, open: length === undefined });
 
     return gaps;
 }
@@ -257,7 +281,9 @@ function UnifiedRows({ rows, colored, marks, onLine }) {
         const row = rows[at];
 
         if (row.kind === "note") {
-            out.push(html`<tr class="dv-note"><td colspan="3">${row.left.text}</td></tr>`);
+            out.push(html`<tr class="dv-note">
+                <td colspan="3"><span>${row.left.text}</span></td>
+            </tr>`);
             continue;
         }
 
@@ -306,7 +332,9 @@ function UnifiedRows({ rows, colored, marks, onLine }) {
 function SplitRows({ rows, colored, marks, onLine }) {
     return rows.map((row) => {
         if (row.kind === "note") {
-            return html`<tr class="dv-note"><td colspan="4">${row.left.text}</td></tr>`;
+            return html`<tr class="dv-note">
+                <td colspan="4"><span>${row.left.text}</span></td>
+            </tr>`;
         }
 
         const change = row.kind === "change";
@@ -388,7 +416,7 @@ function GapRow({ left, columns, onShow, first, last }) {
  * `open` and `onToggle` fold it; `loading` says its lines are on their way. Colors, pairs, and rows are worked out only
  * for a diff that is drawn, and the table is made again only when what it shows changes.
  */
-export function DiffFile({
+function DiffFile({
     file,
     path = "",
     version = "",
@@ -420,7 +448,13 @@ export function DiffFile({
 
     // Another version of the diff has other gaps: what was shown of the old ones does not apply.
     useEffect(() => setShown({}), [file]);
-    const canExpand = expand && path !== "" && file.kind !== "deleted" && file.hunks.length > 0;
+    // A diff cut short cannot say where its last hunk ends, so the lines after it are not known either.
+    const canExpand =
+        expand &&
+        path !== "" &&
+        file.hunks.length > 0 &&
+        !wholeFile(file.hunks[0]) &&
+        !file.truncated;
     const asked = Object.values(shown).some((each) => each.top + each.bottom > 0);
     const fetched = useFileText(
         path,
@@ -445,7 +479,7 @@ export function DiffFile({
     const text = matches && fetched !== null ? fetched : null;
     const expandable = canExpand && matches;
     const gaps = useMemo(
-        () => (expandable ? gapsOf(file, text?.length) : []),
+        () => (expandable ? gapsOf(file, text?.length ?? endOf(file)) : []),
         [file, expandable, text?.length],
     );
 
@@ -505,8 +539,8 @@ export function DiffFile({
                 </tr>`;
             }
 
-            // The end of the file is unknown until it is read: offer to show what follows the last hunk.
-            if (index === gaps.length - 1 && text === null) {
+            // Where the file ends is not known until it is read: offer to show what follows the last hunk.
+            if (gap.open) {
                 return html`<tr class="dv-gap">
                     <td colspan=${columns}>
                         <button type="button" onClick=${() => show(index, "top")}>↓ Show more</button>
@@ -550,6 +584,7 @@ export function DiffFile({
                 (hunk, index) => html`<tbody key=${index}>
                     ${expandable && gapRows(index)}
                     ${
+                        !wholeFile(hunk) &&
                         (!expandable || (hunk.context && hiddenBefore(index) > 0)) &&
                         html`<tr class="dv-hunk">
                             <td colspan=${columns}>
@@ -614,7 +649,7 @@ export function DiffFile({
 }
 
 /** The path as a folder and a name, the name brighter: what changed is easier to find at the end of a long path. */
-export function PathLabel({ path }) {
+function PathLabel({ path }) {
     const at = path.lastIndexOf("/");
 
     return html`<span class="dv-path" title=${path}>
@@ -623,15 +658,19 @@ export function PathLabel({ path }) {
     </span>`;
 }
 
-/** A change bar's five cells. */
-export function ChangeBar({ added, removed }) {
+/** A change bar's five cells; none for a file with no lines counted, binary say. */
+function ChangeBar({ added, removed }) {
+    if (added + removed === 0) {
+        return null;
+    }
+
     return html`<span class="dv-bar" aria-hidden="true">
         ${changeCells(added, removed).map((cell) => html`<i class=${cell}></i>`)}
     </span>`;
 }
 
 /** Lines added and removed, as +12 −3. */
-export function ChangeCounts({ added, removed }) {
+function ChangeCounts({ added, removed }) {
     return html`<span class="dv-counts">
         ${added > 0 && html`<span class="ok">+${added}</span>`}
         ${removed > 0 && html`<span class="err">−${removed}</span>`}
@@ -641,6 +680,10 @@ export function ChangeCounts({ added, removed }) {
 /** A file's header bar: fold, what kind of change, its path, the counts, and Viewed. */
 function FileHead({ file, tools, viewed, onViewed, open, onToggle, note }) {
     const kind = file.kind;
+    const title =
+        kind === "renamed" && file.oldPath && file.oldPath !== file.path
+            ? html`<span class="dv-dir dv-was">${file.oldPath} →</span><${PathLabel} path=${file.path} />`
+            : html`<${PathLabel} path=${file.path} />`;
 
     return html`<header class="dv-head">
         ${
@@ -656,13 +699,11 @@ function FileHead({ file, tools, viewed, onViewed, open, onToggle, note }) {
             </button>`
         }
         <span class=${`change-kind ${kind}`} title=${kind}>${KIND_LETTERS[kind] ?? "M"}</span>
-        <button class="dv-title" type="button" onClick=${onToggle ?? undefined}>
-            ${
-                kind === "renamed" && file.oldPath && file.oldPath !== file.path
-                    ? html`<span class="dv-dir">${file.oldPath} → </span><${PathLabel} path=${file.path} />`
-                    : html`<${PathLabel} path=${file.path} />`
-            }
-        </button>
+        ${
+            onToggle
+                ? html`<button class="dv-title" type="button" onClick=${onToggle}>${title}</button>`
+                : html`<span class="dv-title">${title}</span>`
+        }
         ${note}
         <${ChangeCounts} added=${file.added} removed=${file.removed} />
         <${ChangeBar} added=${file.added} removed=${file.removed} />
@@ -705,14 +746,14 @@ export function DiffBlock({ text, path = "", bare = false }) {
 // ─── Settings bar ────────────────────────────────────────────────────────────────────
 
 /** Unified or split, and wrapping: the same on every diff of this device. */
-export function DiffSettings() {
+function DiffSettings() {
     const { layout, wrap } = diffPrefs;
-    const next = { auto: "split", split: "unified", unified: "auto" }[layout];
+    const next = nextLayout(layout);
 
     return html`<span class="dv-settings">
         <button
             type="button"
-            class="chip"
+            class="chip toggle"
             title=${`Layout: ${layout}. Tap for ${next} (s)`}
             onClick=${() => setDiffPrefs({ layout: next })}
         >
@@ -720,7 +761,7 @@ export function DiffSettings() {
         </button>
         <button
             type="button"
-            class=${`chip ${wrap ? "on" : ""}`}
+            class=${`chip toggle ${wrap ? "on" : ""}`}
             title="Wrap long lines (w)"
             aria-pressed=${wrap ? "true" : "false"}
             onClick=${() => setDiffPrefs({ wrap: !wrap })}
@@ -755,7 +796,7 @@ const BUSY_MAX = 8000;
 /** What changed, per conversation: the last answer, and the request on its way, shared by everything that shows it. */
 const changesCache = new Map();
 
-/** Ask again for what changed in this conversation's folder, at most once at a time. */
+/** Ask again for what changed in a conversation's folder, at most once at a time. */
 export function reloadChanges(id = store.state.conversationId) {
     const known = changesCache.get(id) ?? { data: null, error: null, pending: null };
 
@@ -763,7 +804,7 @@ export function reloadChanges(id = store.state.conversationId) {
         return known.pending;
     }
 
-    known.pending = actions.changes().then(
+    known.pending = actions.changes(id).then(
         (data) => Object.assign(known, { data, error: null, pending: null, at: Date.now() }),
         (failure) => Object.assign(known, { error: failure.message, pending: null }),
     );
@@ -864,7 +905,15 @@ function fetchDiff(id, path) {
                 const text = await response.text();
 
                 if (!response.ok) {
-                    throw new Error(JSON.parse(text).error ?? `HTTP ${response.status}`);
+                    let failure;
+
+                    try {
+                        failure = JSON.parse(text).error;
+                    } catch {
+                        // Not the server's answer (a proxy's page, say): the status says enough.
+                    }
+
+                    throw new Error(failure ?? `HTTP ${response.status}`);
                 }
 
                 resolve(text);
@@ -990,6 +1039,7 @@ function TreeNode({ node, depth, current, viewed, onPick }) {
             type="button"
             key=${file.path}
             class=${`dr-row file ${current === file.path ? "on" : ""} ${viewed(file) ? "seen" : ""}`}
+            aria-current=${current === file.path ? "true" : undefined}
             style=${`--depth:${depth}`}
             title=${file.path}
             onClick=${() => onPick(file.path)}
@@ -1090,6 +1140,17 @@ function ReviewFile({
     // Undoing a file that is new since the last commit deletes it: the buttons say so.
     const fresh = file.kind === "new" || file.kind === "added";
 
+    // The first tap asks; a second within a few seconds undoes.
+    useEffect(() => {
+        if (!undoing) {
+            return;
+        }
+
+        const timer = setTimeout(() => setUndoing(false), 4000);
+
+        return () => clearTimeout(timer);
+    }, [undoing]);
+
     const undo = () =>
         undoing
             ? attempt(async () => {
@@ -1102,7 +1163,7 @@ function ReviewFile({
                   );
                   onChanged();
               })
-            : (setUndoing(true), setTimeout(() => setUndoing(false), 4000));
+            : setUndoing(true);
 
     const tools = html`${
         file.kind !== "deleted" &&
@@ -1336,7 +1397,7 @@ export function DiffReview({ active = true, autoFocus = false }) {
 
             setViewed(path, isViewed({ path }) ? undefined : (prints.current[path] ?? "?"));
         } else if (key === "s") {
-            const next = { auto: "split", split: "unified", unified: "auto" }[diffPrefs.layout];
+            const next = nextLayout(diffPrefs.layout);
 
             setDiffPrefs({ layout: next });
             notify("info", `Diffs: ${next}.`);
@@ -1407,7 +1468,7 @@ export function DiffReview({ active = true, autoFocus = false }) {
                     all.some((file) => file.byPi) &&
                     html`<button
                         type="button"
-                        class=${`chip ${onlyPi ? "on" : ""}`}
+                        class=${`chip toggle ${onlyPi ? "on" : ""}`}
                         aria-pressed=${onlyPi ? "true" : "false"}
                         title="Only the files Pi edited"
                         onClick=${() => setOnlyPi(!onlyPi)}
@@ -1420,7 +1481,7 @@ export function DiffReview({ active = true, autoFocus = false }) {
                     !wide &&
                     html`<button
                         type="button"
-                        class=${`chip ${treeOpen ? "on" : ""}`}
+                        class=${`chip toggle ${treeOpen ? "on" : ""}`}
                         onClick=${() => setTreeOpen(!treeOpen)}
                     >
                         Files

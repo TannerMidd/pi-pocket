@@ -113,7 +113,7 @@ export default function createBrowser(host: PocketHost) {
             x: Type.Optional(
                 Type.Number({
                     description:
-                        "click, hover: a point in CSS pixels of the viewport, as seen in a screenshot.",
+                        "click, hover: a point in CSS pixels of the viewport, as seen in a screenshot (one shown smaller says how to scale its points).",
                 }),
             ),
             y: Type.Optional(Type.Number()),
@@ -267,9 +267,15 @@ export default function createBrowser(host: PocketHost) {
                 case "screenshot": {
                     const shot = await run(page.screenshot({ fullPage: args.fullPage === true }));
 
+                    // Models refuse bigger images once a conversation holds many, so a big page comes back smaller.
+                    const smaller =
+                        shot.scale < 1
+                            ? `, shown at ${Math.round(shot.width * shot.scale)}×${Math.round(shot.height * shot.scale)}: multiply a point in it by ${(1 / shot.scale).toFixed(2)} for CSS pixels`
+                            : "";
+
                     image = { type: "image", data: shot.data, mimeType: "image/jpeg" };
                     lines.push(
-                        `Screenshot of ${args.fullPage === true ? "the whole page" : "the viewport"}, ${shot.width}×${shot.height} CSS pixels${shot.shrunk === true ? ", the image shrunk to at most 2000 pixels a side" : ""}.`,
+                        `Screenshot of ${args.fullPage === true ? "the whole page" : "the viewport"}, ${shot.width}×${shot.height} CSS pixels${smaller}.`,
                     );
                     break;
                 }

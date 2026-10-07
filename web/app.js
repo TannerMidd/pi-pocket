@@ -157,11 +157,14 @@ function LauncherHost() {
     return open ? html`<${Launcher} leaving=${leaving} />` : null;
 }
 
-/** The People panel, kept on screen a moment after it closes so it can slide out. Not when the browser takes its place. */
-function PeopleHost({ shown, browsing }) {
+/**
+ * The People panel, kept on screen a moment after it closes so it can slide out. Not when the Browser panel or the Files
+ * tile takes its place.
+ */
+function PeopleHost({ shown, replaced }) {
     const [kept, leaving] = usePresence(shown || null, 180);
 
-    if (kept === null || (leaving && browsing)) {
+    if (kept === null || (leaving && replaced)) {
         return null;
     }
 
@@ -235,7 +238,7 @@ function App() {
         }
         ${browsing && html`<${BrowserPanel} key=${state.conversationId} />`}
         ${filing && html`<${FilesPanel} key=${state.conversationId} />`}
-        ${inConversation && html`<${PeopleHost} shown=${people} browsing=${browsing} />`}
+        ${inConversation && html`<${PeopleHost} shown=${people} replaced=${browsing || filing} />`}
         <${Drawer} />
         <${Sheets} />
         <${LauncherHost} />

@@ -5,7 +5,11 @@ import { actions, api, attempt, closeSheet, navigate, notify, store } from "../s
 import { html, Icon, Sheet, shortPath } from "../ui.js";
 
 /** A folder's path with a name added: `/a` and `b` make `/a/b`, `/` and `b` make `/b`. */
-const inside = (folder, name) => `${folder.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
+const joined = (folder, name) => `${folder.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
+
+/** Whether a failure says a folder is not there yet, and so could be made: only a whole path, as the server makes no other. */
+const notThere = (error, target) =>
+    error.status === 404 && /isn't there/.test(error.message) && /^\s*[~/]/.test(target);
 
 /** The name of a new folder in `folder`: Enter or Create makes it, Esc or × lets it go. */
 function NewFolder({ folder, onMake, onCancel }) {
@@ -77,7 +81,7 @@ export function CwdSheet({ mode }) {
             },
             (error) => {
                 // A path that is not there yet can be made from here; any other trouble is a notice.
-                if (/is not a directory/.test(error.message)) {
+                if (notThere(error, target)) {
                     setMissing(target);
                 } else {
                     notify("error", error.message);
@@ -106,7 +110,7 @@ export function CwdSheet({ mode }) {
             }
         } catch (error) {
             // Typed but not there: offer to make it, rather than only saying so.
-            if (/is not a directory/.test(error.message)) {
+            if (notThere(error, target)) {
                 setMissing(target);
             } else {
                 notify("error", error.message);
@@ -190,7 +194,7 @@ export function CwdSheet({ mode }) {
                     naming &&
                     html`<${NewFolder}
                         folder=${shortPath(listing.path, home)}
-                        onMake=${(name) => make(inside(listing.path, name))}
+                        onMake=${(name) => make(joined(listing.path, name))}
                         onCancel=${() => setNaming(false)}
                     />`
                 }

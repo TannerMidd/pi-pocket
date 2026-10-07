@@ -1161,11 +1161,12 @@ export class BrowserPage {
 
     /**
      * A JPEG of the viewport, or of the whole page (up to 8000 CSS pixels tall). The size it reports is in CSS pixels;
-     * the image itself is at most `SHOT_MAX` pixels on its longer side (`shrunk` when that made it smaller).
+     * the image itself is at most `SHOT_MAX` pixels on its longer side, `scale` image pixels to a CSS pixel (1 unless
+     * that made it smaller).
      */
     async screenshot(
         options: { fullPage?: boolean } = {},
-    ): Promise<{ data: string; width: number; height: number; shrunk: boolean }> {
+    ): Promise<{ data: string; width: number; height: number; scale: number }> {
         this.usedAt = Date.now();
         const scale = 1 / this.#viewport.scale;
 
@@ -1185,7 +1186,7 @@ export class BrowserPage {
                 60_000,
             );
 
-            return { data: String(shot.data), width, height, shrunk: fit(width, height) < 1 };
+            return { data: String(shot.data), width, height, scale: fit(width, height) };
         }
 
         const metrics = await this.#send("Page.getLayoutMetrics");
@@ -1217,7 +1218,7 @@ export class BrowserPage {
             data: String(shot.data),
             width: this.#viewport.width,
             height: this.#viewport.height,
-            shrunk: fit(view.clientWidth, view.clientHeight) < 1,
+            scale: fit(view.clientWidth, view.clientHeight),
         };
     }
 

@@ -4,7 +4,6 @@ import { ChatSheet } from "./chat.js";
 import { NotificationsSheet } from "./notify.js";
 import { ShareSheet } from "./share.js";
 import { AppearanceSheet } from "./sheets/appearance.js";
-import { ChangesSheet } from "./sheets/changes.js";
 import { ExtensionsSheet } from "./sheets/extensions.js";
 import { FileSheet } from "./sheets/file.js";
 import { FindSheet } from "./sheets/find.js";
@@ -103,9 +102,6 @@ function sheetBody(sheet) {
             break;
         case "worktree":
             body = html`<${WorktreeSheet} />`;
-            break;
-        case "changes":
-            body = view.conversation ? html`<${ChangesSheet} />` : null;
             break;
         case "file":
             body = view.conversation
