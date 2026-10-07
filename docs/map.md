@@ -1,6 +1,6 @@
 # Project map
 
-Where things are in Pi Pocket, for agents working on it. [AGENTS.md](../AGENTS.md) has the rules for editing it while it runs; [architecture.md](architecture.md) explains how the parts depend on each other and the orderings they rely on; [features.md](features.md) says what each feature does.
+Where things are in Pi Pocket, for agents working on it. [index.md](index.md) lists every guide; [AGENTS.md](../AGENTS.md) and [self-editing.md](self-editing.md) have the rules for editing it while it runs; [architecture.md](architecture.md) explains how the parts depend on each other and the orderings they rely on; [features.md](features.md) says what each feature does.
 
 ## Processes
 
@@ -104,7 +104,7 @@ A module split into parts keeps its name for the part others import, with the re
 
 ## Extensions: `src/server/extensions/`
 
-Each default-exports `(host: PocketHost) => Extension | Extension[]` and is installed in this order: `prompt` (system prompt), `artifacts` (artifact tool), `browser` (browser tool and its prompt section; through `host.browsers`), `subagents` (subagent tool and its tasks), `schedules` (schedule tool; installs the schedule task), `goals` (hook after each answer), `plan` (tool hook and prompt section), `guard` (tool hook that asks for approval), `codemode` (codemode tool; a script's calls go through the same hooks).
+Each default-exports `(host: PocketHost) => Extension | Extension[]` and is installed in this order: `prompt` (system prompt, with where Pi Pocket's docs are), `artifacts` (artifact tool), `browser` (browser tool and its prompt section; through `host.browsers`), `subagents` (subagent tool and its tasks), `schedules` (schedule tool; installs the schedule task), `goals` (hook after each answer), `plan` (tool hook and prompt section), `guard` (tool hook that asks for approval), `codemode` (codemode tool; a script's calls go through the same hooks).
 
 ## Web: `web/` (Preact and htm, no build)
 
@@ -172,4 +172,4 @@ Plain ES modules, loaded as they are. `store.js` holds the shared state, and not
 
 ## Tests: `test/`
 
-`npm test` runs every `*.test.ts` with Node's test runner. `helpers.ts` provides a scripted model (`scriptedModel(route)`: `faux-1`, `faux-2`, `faux-vision`), `openApp` (the same data folder again is a restart; `now` moves the clock), `newSession`, `say`, `until`, and `fakeTab`. The scripted model costs nothing: spend tests write `pi.usage` themselves. `browser.test.ts` drives a real Chromium, where one is installed, for the built-in browser, and `peeks-ui.test.ts` and `mobile-ui.test.ts` load the whole web app in it and test peek tiles, and the app at phone size, there. The rest of the web app has no tests: check a change to it in a browser.
+`npm test` runs every `*.test.ts` with Node's test runner. `helpers.ts` provides a scripted model (`scriptedModel(route)`: `faux-1`, `faux-2`, `faux-vision`), `openApp` (the same data folder again is a restart; `now` moves the clock), `newSession`, `say`, `until`, and `fakeTab`. The scripted model costs nothing: spend tests write `pi.usage` themselves. `browser.test.ts` drives a real Chromium, where one is installed, for the built-in browser, and `peeks-ui.test.ts` and `mobile-ui.test.ts` load the whole web app in it and test peek tiles, and the app at phone size, there. `docs-examples.test.ts` loads the example extensions in `docs/examples/` as drop-ins, and checks the docs' links and the prompt's paths to them. The rest of the web app has no tests: check a change to it in a browser, on a copy (`node test/serve.ts`: this folder's code, its own temporary data, a scripted model).
