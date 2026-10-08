@@ -23,7 +23,7 @@
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Atkinson+Hyperlegible+Next:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=JetBrains+Mono:wght@400;500;700&display=swap"
             rel="stylesheet"
         />
         <style>
@@ -44,9 +44,8 @@
                 --sub: #b83280;
                 --crash: #c53030;
                 --on-ink: #f8fafb;
-                --display: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
-                --body:
-                    "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", sans-serif;
+                --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+                --body: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
                 --mono:
                     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
                 --r: 6px;
@@ -155,9 +154,8 @@
                 font-size: 14px;
             }
             .toc .brand {
-                font: 800 15px/1.1 var(--display);
-                font-stretch: 120%;
-                letter-spacing: 0.01em;
+                font: 700 15px/1.1 var(--display);
+                letter-spacing: -0.01em;
                 display: flex;
                 align-items: center;
                 gap: 8px;
@@ -289,18 +287,17 @@
                 margin: 0;
             }
             h2 {
-                font-weight: 800;
-                font-stretch: 118%;
+                font-weight: 700;
                 font-size: clamp(30px, 4.2vw, 46px);
-                line-height: 1.02;
-                letter-spacing: -0.012em;
+                line-height: 1.05;
+                letter-spacing: -0.03em;
                 margin-top: 14px;
             }
             h3 {
-                font-weight: 700;
-                font-stretch: 110%;
+                font-weight: 650;
                 font-size: 20px;
                 line-height: 1.2;
+                letter-spacing: -0.015em;
             }
             .lede {
                 font-size: 19px;
@@ -617,19 +614,18 @@
                 font-weight: 700;
             }
             .hero h1 {
-                font-weight: 900;
-                font-stretch: 125%;
+                font-weight: 800;
                 font-size: clamp(56px, 11vw, 132px);
-                line-height: 0.86;
-                letter-spacing: -0.03em;
+                line-height: 0.9;
+                letter-spacing: -0.055em;
                 margin-top: 18px;
             }
             .hero h1 .dur {
                 color: var(--commit);
             }
             .thesis {
-                font: 700 clamp(22px, 3.1vw, 32px)/1.2 var(--display);
-                font-stretch: 105%;
+                font: 600 clamp(22px, 3.1vw, 32px)/1.2 var(--display);
+                letter-spacing: -0.02em;
                 margin-top: 26px;
                 max-width: 26ch;
                 text-wrap: balance;
@@ -663,7 +659,7 @@
                 gap: 6px;
                 padding: 14px;
                 overflow: hidden;
-                height: 112px;
+                height: 134px;
                 align-items: stretch;
                 mask-image: linear-gradient(90deg, transparent, #000 8%, #000 100%);
                 -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 100%);
@@ -671,7 +667,7 @@
             }
             .cell {
                 flex: none;
-                width: 116px;
+                width: 140px;
                 border: 1px solid var(--rule);
                 border-radius: 4px;
                 background: var(--paper);
@@ -719,8 +715,8 @@
             }
             .breath b {
                 display: block;
-                font: 700 17px/1.25 var(--display);
-                font-stretch: 108%;
+                font: 650 17px/1.25 var(--display);
+                letter-spacing: -0.01em;
                 margin-bottom: 6px;
             }
             .breath p {
@@ -829,8 +825,8 @@
                 color: var(--ink-2);
             }
             .layer .nm {
-                font: 700 18px/1.15 var(--display);
-                font-stretch: 112%;
+                font: 650 18px/1.15 var(--display);
+                letter-spacing: -0.015em;
             }
             .layer .sub {
                 display: block;
@@ -1371,8 +1367,8 @@
                 flex-wrap: wrap;
             }
             .tally b {
-                font: 800 26px var(--display);
-                font-stretch: 110%;
+                font: 700 26px var(--display);
+                letter-spacing: -0.02em;
                 display: block;
                 line-height: 1;
                 font-variant-numeric: tabular-nums;
@@ -1980,8 +1976,7 @@
                 color: var(--ink-2);
             }
             .score {
-                font: 800 18px var(--display);
-                font-stretch: 110%;
+                font: 700 18px var(--display);
             }
 
             .next-part {
@@ -2002,15 +1997,15 @@
             }
             .next-part h3 {
                 font-size: clamp(24px, 3.4vw, 34px);
-                font-stretch: 118%;
-                font-weight: 800;
+                font-weight: 700;
+                letter-spacing: -0.025em;
             }
             .next-part p {
                 margin: 6px 0 0;
                 color: var(--ink-2);
             }
             .next-part .go {
-                font: 800 40px var(--display);
+                font: 500 40px var(--display);
                 color: var(--commit);
             }
             footer.foot {
@@ -3107,7 +3102,7 @@
                             ["entry", "pi.system"],
                             ["task", "gen: request"],
                         ],
-                        [["doc", "pi.live attempt 1"]],
+                        [["doc", "pi.live request"]],
                         [["doc", "pi.live partial"]],
                         [
                             ["entry", "pi.assistant"],
@@ -3132,7 +3127,7 @@
                         ],
                         [["task", "gen running"]],
                         [["task", "gen: request"]],
-                        [["doc", "pi.live attempt 1"]],
+                        [["doc", "pi.live request"]],
                         [["doc", "pi.live partial"]],
                         [
                             ["entry", "pi.assistant"],
@@ -3949,7 +3944,7 @@
       <div class="mem-row"><span>Reserved</span><span>${inflight.length ? inflight.map((t) => chip("task", `${t.id} ${t.name}`)).join(" ") : '<span class="muted">nothing</span>'}</span></div>
       <div class="mem-row"><span>Stream buffer</span><span class="buf ${M.buf ? "" : "empty"}">${M.buf ? esc(M.buf) : "empty"}</span></div>
       <div class="mem-row"><span>Registry</span><span>${chip("doc", "coding")} ${chip("doc", "read")} ${chip("doc", "bash")}</span></div>`
-                            : `<div style="font:800 26px var(--display);color:var(--crash);font-stretch:115%">Process killed</div>
+                            : `<div style="font:700 26px var(--display);letter-spacing:-0.02em;color:var(--crash)">Process killed</div>
       <div class="mem-row"><span>Lost</span><span>${M.lost ? `<span class="buf lost">${esc(M.lost)}</span>` : '<span class="muted">nothing: no uncommitted bytes</span>'}</span></div>
       <div class="mem-row"><span>Kept</span><span>all ${S.seq} commits in storage</span></div>`;
                         // ledger
