@@ -1486,6 +1486,9 @@
                 min-height: 20px;
                 margin-top: 6px;
             }
+            .toast.info {
+                color: var(--ink-2);
+            }
 
             /* ---------- task tree (checkout) ---------- */
             .ck {
@@ -2143,10 +2146,13 @@
                     <div class="eyebrow">Purpose</div>
                     <h2>Durable state for agent applications</h2>
                     <p class="lede">
-                        The Pi coding agent is for one person in one terminal. It keeps its state in
-                        memory. If the process stops, the run is lost. Pi Durable is a harness for
-                        agent applications. These applications run for a long time, have more than
-                        one user, continue after a restart, and change their code during operation.
+                        The Pi coding agent is for one person in one terminal. It saves its session
+                        in a file. But a run is in the memory of the process. If the process stops,
+                        the run stops. Then you tell the agent to continue. Pi Durable is a harness
+                        for agent applications. These applications run for a long time, have more
+                        than one user, continue after a restart, and change their code during
+                        operation. The table compares Pi Durable with a usual agent loop that keeps
+                        its state in memory.
                     </p>
                     <div class="bench">
                         <div class="bench-head"><span class="title">Comparison</span></div>
@@ -2192,7 +2198,9 @@
                                     </tr>
                                     <tr>
                                         <td>You try a different path</td>
-                                        <td class="bad">You copy the transcript manually.</td>
+                                        <td class="bad">
+                                            You must make a copy of the history yourself.
+                                        </td>
                                         <td class="good">
                                             You fork from an entry. The fork gets the history up to
                                             that entry. Each document follows its fork policy.
@@ -2201,7 +2209,7 @@
                                     <tr>
                                         <td>The tool code changes</td>
                                         <td class="bad">
-                                            You restart the process. The run is lost.
+                                            You restart the process. The current run stops.
                                         </td>
                                         <td class="good">
                                             You install the new extension. Running calls use the old
@@ -2212,8 +2220,8 @@
                                         <td>The context is full</td>
                                         <td class="bad">The agent stops to make a summary.</td>
                                         <td class="good">
-                                            A background task makes a summary. The harness adds it
-                                            at the next turn boundary.
+                                            A background task makes a summary while the agent works.
+                                            The harness adds it at the next boundary.
                                         </td>
                                     </tr>
                                 </tbody>
@@ -2391,7 +2399,8 @@
                                 </div>
                                 <div class="pane">
                                     <h4>
-                                        <span>Documents</span><span class="muted">built in</span>
+                                        <span>Documents</span
+                                        ><span class="muted">built in, and the submission</span>
                                     </h4>
                                     <div class="pb docs" id="sim-docs"></div>
                                 </div>
@@ -2408,13 +2417,19 @@
                                     <b>Reopen and resume()</b>. The run continues without a click.
                                 </li>
                                 <li>
-                                    Set <code>replay: "safe"</code> on <code>bash</code>. Do step 2
-                                    again. The tool runs again and does not give an interrupted
-                                    result.
+                                    Set <code>replay: "safe"</code> on <code>bash</code> before
+                                    <code>bash</code> starts. Do step 2 again.
+                                    <code>bash</code> runs again. <code>read</code> keeps the
+                                    default value, <code>"unsafe"</code>.
+                                </li>
+                                <li>
+                                    Kill the process during the first answer, after a flush. The
+                                    committed part stays in the transcript as an aborted answer.
                                 </li>
                                 <li>
                                     Kill the process when a chunk is dashed. The harness loses only
-                                    that chunk. A chunk is a maximum of 100 ms of output.
+                                    that chunk. A chunk is approximately 100 ms of output. A chunk
+                                    of large tool output can be longer.
                                 </li>
                             </ol>
                         </div>
@@ -2481,7 +2496,8 @@
                         A conversation is busy while a run continues. A submission during a run goes
                         into the <span class="k doc">pi.inbox</span> document. The harness adds it
                         to the transcript at a boundary. A boundary is the end of a tool round or
-                        the end of the run. The submission type sets the boundary.
+                        the end of the run. The submission type sets the boundary. A submission to
+                        an idle conversation goes into the transcript immediately.
                     </p>
                     <div class="bench">
                         <div class="bench-head">
@@ -2531,7 +2547,8 @@
                                             <td>End of the current tool round</td>
                                             <td>
                                                 The submission joins the current run. The next model
-                                                request includes it.
+                                                request includes it. If the run ends first, the
+                                                steer starts the next run.
                                             </td>
                                         </tr>
                                         <tr>
@@ -2562,11 +2579,12 @@
                                 </table>
                             </div>
                             <p class="small muted" style="margin: 10px 0 0">
-                                By default, each boundary adds one steer and one follow-up. Set
+                                Each boundary adds all queued writes. By default, it also adds one
+                                steer. The end of a run also adds one follow-up. To add all queued
+                                steers or follow-ups at one time, set
                                 <code>steeringMode: "all"</code> or
-                                <code>followUpMode: "all"</code> to add all queued items at one
-                                time. Use <code>submission.abort()</code> to remove a queued
-                                submission.
+                                <code>followUpMode: "all"</code> in the harness settings. Use
+                                <code>submission.abort()</code> to remove a queued submission.
                             </p>
                         </div>
                     </div>
@@ -2598,7 +2616,7 @@
                         <div class="bench-body ck">
                             <div class="pane">
                                 <h4>
-                                    <span>harness.taskGraph()</span
+                                    <span>Task tree</span
                                     ><span class="muted" id="ck-phase">idle</span>
                                 </h4>
                                 <div class="pb">
@@ -2633,9 +2651,9 @@
                     <div class="prose">
                         <p>
                             <b>Subagents use the same ownership model.</b> A subagent is a
-                            conversation that the task of a tool call owns. If the tool call aborts,
-                            the child conversation also aborts. The parent stays busy until the
-                            child is idle.
+                            conversation that the task of a tool call owns. If the tool call aborts
+                            or fails, the child conversation also aborts. The parent stays busy
+                            until the child is idle.
                         </p>
                         <p>
                             A task with <code>{ background: true }</code> is a boundary. The work
@@ -2658,6 +2676,13 @@
                                 aria-label="Task status lifecycle"
                                 style="width: 100%; height: auto; display: block; min-width: 0"
                             ></svg>
+                            <p class="small muted" style="margin: 8px 0 0">
+                                The outcome <code>faulted</code> shows that a task broke the task
+                                rules, for example with an error that it did not catch. If the
+                                harness aborts a task that no installed code can run, the task goes
+                                directly from pending or waiting to terminal, with the outcome
+                                <code>orphaned</code>.
+                            </p>
                         </div>
                     </div>
                 </section>
@@ -2667,12 +2692,13 @@
                     <div class="eyebrow">Application state</div>
                     <h2>Documents and forks</h2>
                     <p class="lede">
-                        A document is typed JSON. The harness stores it with the transcript and
-                        changes it in the same commits. Thus the document and the transcript agree
-                        after a crash. Each document kind has a <b>scope</b>, a
-                        <b>history</b> setting (<code>latest</code> or <code>rewindable</code>), and
-                        a <b>fork policy</b>. The fork policy sets the start value in a fork. Select
-                        a fork point and a fork policy.
+                        A document is typed JSON. The harness stores it with the transcript. One
+                        commit can change documents and add entries together. Thus, if a commit
+                        changes a document and the transcript, the two agree after a crash. Each
+                        document kind has a <b>scope</b>: session, conversation, or task. A
+                        conversation document also has a <b>history</b> setting (<code>latest</code>
+                        or <code>rewindable</code>) and a <b>fork policy</b>. The fork policy sets
+                        the start value in a fork. Select a fork point and a fork policy.
                     </p>
                     <div class="bench">
                         <div class="bench-head">
@@ -2708,7 +2734,7 @@
                                 class="code"
                             ><span class="f">const</span> Todos = <span class="f">defineDoc</span>&lt;{ items: string[] }&gt;({
   kind: <span class="s">"app.todos"</span>, version: 1, scope: <span class="s">"conversation"</span>,
-  history: <span class="s">"latest"</span>,            <span class="c">// or "rewindable": read old values with snapshotAsOf()</span>
+  history: <span class="s" id="fk-hist">"rewindable"</span>, <span class="c" id="fk-hist-c">// "asOf" needs "rewindable": it reads old values</span>
   fork: <span class="h"><span class="s" id="fk-code">"asOf"</span></span>,  <span class="c">// what a fork starts with</span>
   initial: () =&gt; ({ items: [] }),
 });
@@ -2720,21 +2746,24 @@
                         <ul>
                             <li>
                                 <span class="k doc">pi.agent</span>: model, thinking level,
-                                extensions, tools, instructions, and working directory. The harness
-                                stores these as names.
+                                extensions, tools, instructions, and working directory. It stores
+                                the model as a provider and a model ID. It stores extensions and
+                                tools as names, not as code.
                             </li>
                             <li>
                                 <span class="k doc">pi.provider</span>: a UUIDv7 session identity
                                 for provider prompt caches.
                             </li>
                             <li>
-                                <span class="k doc">pi.live</span>: the streamed answer and the
-                                running tools.
+                                <span class="k doc">pi.live</span>: the current run, the streamed
+                                answer, the tools that run, and the compactions that are in
+                                progress.
                             </li>
                             <li><span class="k doc">pi.inbox</span>: queued submissions.</li>
                             <li>
-                                <span class="k doc">pi.usage</span>: tokens and cost for each model
-                                and each tool. This includes failed attempts.
+                                <span class="k doc">pi.usage</span>: tokens and cost for each model,
+                                and for each tool that reports usage. Failed and aborted attempts
+                                are included.
                             </li>
                         </ul>
                         <p>A fork gets a new provider identity.</p>
@@ -2827,10 +2856,12 @@
                     <h2>Background compaction</h2>
                     <p class="lede">
                         When a conversation gets long, a compaction task makes a summary of older
-                        entries. The task adds a <span class="k entry">pi.compaction</span> entry
-                        before the first entry that it keeps. The agent continues to work during the
-                        compaction. Storage keeps the older entries, and history tools can find
-                        them. Move the slider to change the number of tokens.
+                        entries. The task adds a <span class="k entry">pi.compaction</span> entry at
+                        the end of the transcript. This entry points to the first entry that the
+                        task keeps. After this, the model gets the summary instead of the entries
+                        before that entry. The agent continues to work during the compaction.
+                        Storage keeps the older entries. Thus your tools can still read them. Move
+                        the slider to change the number of tokens.
                     </p>
                     <div class="bench">
                         <div class="bench-head">
@@ -2920,7 +2951,8 @@
                             A slow watch keeps a maximum of 100 frames that it did not deliver.
                             After that, the harness replaces these frames with one frame that
                             contains the newest view. The harness commits partial answers and tool
-                            output a maximum of one time every 100 ms.
+                            output a maximum of one time every 100 ms. For large tool output, the
+                            interval is longer.
                             <code>watchEvents()</code> makes coding-agent events from commits, for
                             example <code>message_update</code> and
                             <code>tool_execution_start</code>.
@@ -2933,9 +2965,10 @@
                     <div class="eyebrow">Storage</div>
                     <h2>Storage backends</h2>
                     <p class="lede">
-                        The harness keeps only the working set in memory. Older messages stay on
-                        disk until the harness needs them. Only one process can use a storage at a
-                        time.
+                        With SQLite, the harness keeps only the working set in memory. Older
+                        messages stay on disk until the harness needs them. The JSONL backend keeps
+                        all of its records in memory. Use only one process for a storage at a time.
+                        The storage does not prevent access by a second process.
                     </p>
                     <div class="stores">
                         <div class="store">
@@ -3062,40 +3095,50 @@
                 /* ================= HERO TAPE ================= */
                 (() => {
                     const tape = $("#tape");
+                    // One answered input with one tool call, commit by commit, then an app commit.
                     const KINDS = [
                         [
+                            ["sub", "s1 placed"],
                             ["entry", "pi.user"],
                             ["task", "+pi.generation"],
-                            ["sub", "s1 running"],
                         ],
+                        [["task", "gen running"]],
                         [
-                            ["task", "gen running"],
                             ["entry", "pi.system"],
+                            ["task", "gen: request"],
                         ],
-                        [["doc", "pi.live partial"]],
+                        [["doc", "pi.live attempt 1"]],
                         [["doc", "pi.live partial"]],
                         [
                             ["entry", "pi.assistant"],
-                            ["task", "+pi.tool ×2"],
                             ["doc", "pi.usage"],
+                            ["task", "+pi.tool"],
+                            ["task", "gen waiting"],
                         ],
+                        [["task", "tool running"]],
                         [
-                            ["task", "tool running"],
-                            ["doc", "pi.live output"],
+                            ["task", "tool intent"],
+                            ["doc", "pi.live tool"],
                         ],
+                        [["doc", "pi.live output"]],
                         [
                             ["entry", "pi.tool-result"],
                             ["task", "tool done"],
                         ],
+                        [["task", "gen running"]],
                         [
-                            ["entry", "pi.tool-result"],
+                            ["task", "gen done"],
                             ["task", "+pi.generation"],
                         ],
+                        [["task", "gen running"]],
+                        [["task", "gen: request"]],
+                        [["doc", "pi.live attempt 1"]],
                         [["doc", "pi.live partial"]],
                         [
                             ["entry", "pi.assistant"],
-                            ["sub", "s1 done"],
                             ["doc", "pi.usage"],
+                            ["sub", "s1 done"],
+                            ["task", "gen done"],
                         ],
                         [
                             ["doc", "app.todos"],
@@ -3138,7 +3181,7 @@
                             h: "Your app",
                             d: "The harness has no UI. Your app opens the harness, sends input, and shows the committed state.",
                             li: [
-                                "<code>Harness.open(storage, { models, registry, settings, env })</code>",
+                                "<code>Harness.open(storage, { models, registry, settings, env }, ctx)</code>",
                                 "<code>harness.root()</code>, <code>createConversation()</code>, <code>fork()</code>",
                                 "<code>conversation.submit()</code> with <code>whenBusy</code> and <code>requestId</code>",
                                 "<code>viewState()</code>, <code>watch()</code>, <code>watchEvents()</code>, <code>taskGraph()</code>",
@@ -3150,7 +3193,7 @@
                             s: "tools, sections, hooks, wraps, tasks",
                             tags: [["doc", "install()"]],
                             h: "Extensions and the registry",
-                            d: "The harness gets all code other than its built-in tasks from named extensions. Your process installs these extensions in a registry.",
+                            d: "Tools, prompt sections, hooks, wraps, and your tasks are in named extensions. Your process installs these extensions in a registry.",
                             li: [
                                 "The registry is not in storage. Conversations store extension names.",
                                 "An install with an existing name replaces the old extension in one step. The harness can continue to run.",
@@ -3171,8 +3214,8 @@
                             li: [
                                 "<code>pi.generation</code> calls the model. It owns the <code>pi.tool</code> tasks of its tool calls.",
                                 "Compaction tasks, the inbox and its boundaries, and retries.",
-                                "It gets the agent of each conversation (<code>pi.agent</code>) from the registry.",
-                                "It makes the execution environment for each call from the <code>cwd</code> of the conversation.",
+                                "It finds the code for the stored agent settings of each conversation (<code>pi.agent</code>) in the registry.",
+                                "For each tool call and each system prompt that it makes, it calls your <code>env</code> function with the conversation and its <code>cwd</code>.",
                             ],
                         },
                         {
@@ -3188,7 +3231,7 @@
                             li: [
                                 "All changes go through <b>one sequence of atomic commits</b>. Each commit has a sequence number.",
                                 "Conversations contain entries that do not change. A fork shows the entries of its parent up to the fork point.",
-                                "Documents are typed JSON with a scope, a history setting, and a fork policy.",
+                                "Documents are typed JSON with a scope. Conversation documents also have a history setting and a fork policy.",
                                 "Subscribers get the operations of each commit.",
                             ],
                         },
@@ -3201,9 +3244,9 @@
                             d: "The storage interface is small. It commits a set of writes, and it reads and scans records.",
                             li: [
                                 "There are three backends: memory, SQLite, and JSONL.",
-                                "The SQLite and JSONL cores do not use Node APIs. They also run on Bun and in Cloudflare Durable Objects.",
-                                "Only the working set is in memory. Older messages stay on disk.",
-                                "Only one process can use a storage at a time.",
+                                "The SQLite and JSONL cores do not use Node APIs. With a small adapter, they also run on Bun and in Cloudflare Durable Objects.",
+                                "With SQLite, only the working set is in memory. Older messages stay on disk. JSONL keeps all of its records in memory.",
+                                "Use only one process for a storage at a time. The storage does not prevent access by a second process.",
                             ],
                         },
                     ];
@@ -3264,7 +3307,7 @@
                             "var(--entry)",
                             "Entry",
                             "One record that does not change: <code>pi.user</code>, <code>pi.assistant</code>, <code>pi.tool-result</code>, <code>pi.system</code>, <code>pi.reset</code>, <code>pi.compaction</code>, or a kind that you define.",
-                            "tx.entry(Kind, data)",
+                            "tx.appendEntry(Kind, conversationId, { data })",
                         ],
                         [
                             "commit",
@@ -3305,14 +3348,14 @@
                             "agent",
                             "var(--doc)",
                             "Agent",
-                            "The settings of a conversation: model, thinking level, extensions, tools, instructions, and cwd. <code>pi.agent</code> stores these as names.",
+                            "The settings of a conversation: model, thinking level, extensions, tools, instructions, and cwd. <code>pi.agent</code> stores extensions and tools as names, not code.",
                             "configure({ model })",
                         ],
                         [
                             "ext",
                             "var(--doc)",
                             "Extension",
-                            "A named set of tools, prompt sections, hooks, wraps, and tasks. All code that you add to the harness is in extensions.",
+                            "A named set of tools, prompt sections, hooks, wraps, and tasks. Most code that you add is in extensions. The storage, the models, and the <code>env</code> function go to <code>Harness.open()</code>.",
                             "defineExtension({ name })",
                         ],
                         [
@@ -3330,6 +3373,8 @@
                 })();
 
                 /* ================= SIMULATOR ================= */
+                // Each commit below matches a commit of Pi Durable 1.0.2 (generation.ts, tool.ts,
+                // scheduler.ts, submissions.ts). Streams are shortened to a few chunks.
                 (() => {
                     const GEN1 = ["I'll run the tests ", "and read auth.ts ", "to see what fails."];
                     const OUT = [
@@ -3338,18 +3383,34 @@
                         "  expected 302, received 200\n",
                         "1 failed · 47 passed\n",
                     ];
-                    const GEN2 = [
-                        "The guard compares ",
-                        '"/home/" with "/home", ',
-                        "so the redirect never fires. ",
-                        "Fix line 42 of auth.ts.",
-                    ];
-                    const GEN2_INT = [
-                        "The test run was cut off. ",
-                        "Its output so far ",
-                        "shows one failure in login. ",
-                        "Should I rerun it?",
-                    ];
+                    const READ =
+                        '41  if (path === "/home/") {\n42    return redirect(302, "/home")';
+                    const GEN2 = {
+                        ok: [
+                            "The guard compares ",
+                            '"/home/" with "/home", ',
+                            "so the redirect never fires. ",
+                            "Fix line 42 of auth.ts.",
+                        ],
+                        bash: [
+                            "The test run was interrupted. ",
+                            'auth.ts compares "/home/" with "/home", ',
+                            "which can stop the redirect. ",
+                            "Should I run the tests again?",
+                        ],
+                        read: [
+                            "The login test gets 200, not 302. ",
+                            "The read of auth.ts was interrupted, ",
+                            "so I cannot see the guard yet. ",
+                            "Should I read it again?",
+                        ],
+                        both: [
+                            "Both calls were interrupted. ",
+                            "I have no test output ",
+                            "and no file contents yet. ",
+                            "Should I run them again?",
+                        ],
+                    };
                     const QUESTION = "Why does the login test fail?";
 
                     let S,
@@ -3361,6 +3422,7 @@
                         };
                     const safe = $("#sim-safe");
 
+                    // S is storage: it survives a kill. M is process memory: a kill loses it.
                     function fresh() {
                         S = {
                             seq: 0,
@@ -3369,9 +3431,8 @@
                             entries: [],
                             tasks: {},
                             order: [],
-                            live: null,
                             usage: { tokens: 0, cost: 0 },
-                            interrupted: false,
+                            system: false,
                         };
                         M = {
                             alive: true,
@@ -3379,9 +3440,9 @@
                             pid: 48213,
                             buf: "",
                             bufTask: null,
-                            recovered: [],
                             lost: "",
                             sched: "idle",
+                            started: {},
                         };
                     }
                     function commit(writes, narr) {
@@ -3399,289 +3460,383 @@
                             name,
                             owner,
                             status: "pending",
-                            attempt: 1,
+                            phase: kind === "pi.tool" ? "call" : "prepare",
                             progress: 0,
+                            replay: null,
                         };
                         S.order.push(id);
                         return S.tasks[id];
                     };
-
-                    function script(t) {
-                        return t.id === "g1"
-                            ? GEN1
-                            : t.id === "t1"
-                              ? OUT
-                              : S.interrupted
-                                ? GEN2_INT
-                                : GEN2;
+                    const failedTool = (name) =>
+                        S.entries.some(
+                            (e) => e.kind === "pi.tool-result" && e.err && e.tool === name,
+                        );
+                    function scriptOf(t) {
+                        if (t.id === "g1") return GEN1;
+                        if (t.id === "t1") return OUT;
+                        const b = failedTool("bash"),
+                            r = failedTool("read");
+                        return GEN2[b && r ? "both" : b ? "bash" : r ? "read" : "ok"];
                     }
 
-                    // Stream one chunk into memory, or flush memory to a commit.
+                    // Buffer one chunk in memory, or commit the buffered chunk to pi.live.
                     function stream(t, done) {
-                        if (M.buf) {
-                            const n = M.bufN;
+                        if (M.buf && M.bufTask === t.id) {
                             M.buf = "";
-                            M.bufN = 0;
-                            t.progress += n;
-                            const label =
-                                t.kind === "pi.tool"
-                                    ? "pi.live: tool output"
-                                    : "pi.live: partial answer";
-                            return commit([["doc", label]], {
-                                t: `Flush: the harness commits the buffered ${t.kind === "pi.tool" ? "output" : "text"} to pi.live. After this commit, the data stays after a crash. All clients can see it.`,
-                                api: "pi.live is committed at most every 100 ms",
-                            });
+                            M.bufTask = null;
+                            t.progress++;
+                            const tool = t.kind === "pi.tool";
+                            return commit(
+                                [
+                                    [
+                                        "doc",
+                                        tool
+                                            ? `pi.live: ${t.name} output`
+                                            : `pi.live: ${t.id} partial`,
+                                    ],
+                                ],
+                                {
+                                    t: `Flush: the harness commits the buffered ${tool ? "output" : "text"} to pi.live. After this commit, the data stays after a crash. All clients can see it.`,
+                                    api: tool
+                                        ? "tool output: a minimum of 100 ms between commits"
+                                        : "partial answer: a maximum of one commit every 100 ms",
+                                },
+                            );
                         }
-                        const sc = script(t);
+                        const sc = scriptOf(t);
                         if (t.progress < sc.length) {
                             M.buf = sc[t.progress];
-                            M.bufN = 1;
                             M.bufTask = t.id;
                             say(
                                 `${t.kind === "pi.tool" ? "bash writes" : "The model sends"} a chunk. The chunk is only in process memory (dashed). A crash now loses the chunk.`,
-                                "chunk received, not yet stored",
+                                "chunk received, not yet committed",
                             );
                             return;
                         }
                         done();
                     }
 
+                    function genStep(t) {
+                        const rec = t.recovered;
+                        delete t.recovered;
+                        if (t.phase === "prepare") {
+                            const sys = !S.system;
+                            if (sys) {
+                                S.system = true;
+                                S.entries.push({
+                                    kind: "pi.system",
+                                    text: "sections: preamble · cwd · tools: read, bash",
+                                });
+                            }
+                            t.phase = "request";
+                            commit(
+                                [
+                                    ...(sys ? [["entry", "+pi.system"]] : []),
+                                    ["task", `${t.id} phase: request`],
+                                ],
+                                sys
+                                    ? {
+                                          t: "Phase prepare makes the system prompt from the sections of the selected extensions. The prompt is new. Thus one commit stores it as a pi.system entry and moves the task to phase request. Now the model, the prompt, and the tools of this request do not change.",
+                                          api: 'section("cwd", (input) => input.env?.cwd)',
+                                      }
+                                    : {
+                                          t: "Phase prepare makes the system prompt again. The prompt did not change. Thus the harness does not add a pi.system entry. The start of the request stays the same. This keeps the provider prompt caches valid. The commit moves the task to phase request.",
+                                          api: "only what changed is stored and sent again",
+                                      },
+                            );
+                            return;
+                        }
+                        if (t.phase === "request") {
+                            if (!M.started[t.id]) {
+                                M.started[t.id] = true;
+                                const partial = scriptOf(t).slice(0, t.progress).join("");
+                                const writes = [];
+                                if (partial) {
+                                    S.entries.push({
+                                        kind: "pi.assistant",
+                                        text: partial,
+                                        aborted: true,
+                                    });
+                                    S.usage.tokens += 1210;
+                                    S.usage.cost += 0.006;
+                                    writes.push(
+                                        ["entry", "+pi.assistant (aborted)"],
+                                        ["doc", "pi.usage"],
+                                    );
+                                }
+                                t.progress = 0;
+                                writes.push(["doc", `pi.live: ${t.id} attempt 1`]);
+                                commit(
+                                    writes,
+                                    partial
+                                        ? {
+                                              t: 'Phase request starts again after the crash. Part of the answer is in storage. This commit stores that part as a pi.assistant entry with the mark "aborted". The partial answer stays in the transcript, but the model does not get aborted entries. Then the harness sends the same request again.',
+                                              api: "a committed partial becomes an aborted pi.assistant entry",
+                                          }
+                                        : rec
+                                          ? {
+                                                t: "Phase request starts again after the crash. No part of the answer is in storage. Thus the harness only records that the request is in progress. Then it sends the request again.",
+                                                api: "an interrupted model request is sent again",
+                                            }
+                                          : {
+                                                t: "Phase request first commits to pi.live that a request is in progress. Then the harness sends the request to the model.",
+                                                api: "models.streamSimple(model, { messages }, options)",
+                                            },
+                                );
+                                return;
+                            }
+                            return stream(t, () => (t.id === "g1" ? toolRound(t) : answer(t)));
+                        }
+                        finishRound(t);
+                    }
+
+                    function toolRound(g) {
+                        M.started[g.id] = false;
+                        S.entries.push({
+                            kind: "pi.assistant",
+                            text: GEN1.join(""),
+                            calls: ["bash npm test", "read src/auth.ts"],
+                        });
+                        task("t1", "pi.tool", "bash", g.id);
+                        task("t2", "pi.tool", "read", g.id);
+                        g.status = "waiting";
+                        g.phase = "tools";
+                        g.progress = 0; // the commit deletes the streamed answer from pi.live
+                        S.usage.tokens += 1840;
+                        S.usage.cost += 0.011;
+                        commit(
+                            [
+                                ["entry", "+pi.assistant (2 tool calls)"],
+                                ["doc", "pi.usage"],
+                                ["task", "+t1 bash, +t2 read"],
+                                ["task", "g1 → waiting"],
+                            ],
+                            {
+                                t: "The response is complete. One commit stores the assistant entry and its usage. The same commit creates a pi.tool task for each tool call and sets g1 to waiting. The generation owns the tool tasks.",
+                                api: "pi.generation owns pi.tool × n and waits for them",
+                            },
+                        );
+                    }
+
+                    function finishRound(g) {
+                        g.status = "completed";
+                        task("g2", "pi.generation", "generation", null);
+                        commit(
+                            [
+                                ["task", "+pi.generation g2"],
+                                ["task", "g1 → completed"],
+                            ],
+                            {
+                                t: "Phase tools runs the afterTools hooks. Then one commit examines the inbox for the end of the tool round. The same commit creates the next generation, g2, and completes g1. The run continues with g2.",
+                                api: "afterTools hooks, then the postTools boundary",
+                            },
+                        );
+                    }
+
+                    function answer(g) {
+                        M.started[g.id] = false;
+                        g.status = "completed";
+                        S.sub.status = "done";
+                        S.entries.push({ kind: "pi.assistant", text: scriptOf(g).join("") });
+                        S.usage.tokens += 2310;
+                        S.usage.cost += 0.014;
+                        commit(
+                            [
+                                ["entry", "+pi.assistant (answer)"],
+                                ["doc", "pi.usage"],
+                                ["sub", "s1 → done"],
+                                ["task", "g2 → completed"],
+                            ],
+                            {
+                                t: 'One commit stores the final answer and its usage. The same commit examines the inbox for the end of the run. It also sets the submission to done and completes g2. Then submission.wait() returns status "done".',
+                                api: 'const settled = await submission.wait(ctx) // { status: "done" }',
+                            },
+                        );
+                        M.sched = "idle";
+                    }
+
+                    function toolStep(t) {
+                        const rec = t.recovered;
+                        delete t.recovered;
+                        if (t.phase === "call") {
+                            t.phase = "execute";
+                            t.replay = t.name === "bash" && safe.checked ? "safe" : "unsafe";
+                            M.started[t.id] = true;
+                            commit(
+                                [
+                                    ["task", `${t.id} intent: execute`],
+                                    ["doc", `pi.live: ${t.name} running`],
+                                ],
+                                {
+                                    t: `${rec ? `${t.id} did not commit its intent before the crash. Thus its call phase started again from the beginning. The tool did not run yet, so this is safe. ` : ""}${t.name}: the arguments are valid, and no beforeTool hook blocked the call. One commit stores the intent: the final arguments and replay: "${t.replay}". Then execute() runs.`,
+                                    api:
+                                        t.replay === "safe"
+                                            ? '{ ...createBashTool(), replay: "safe" }'
+                                            : `${t.name}: replay "unsafe", the default value for all tools`,
+                                },
+                            );
+                            return;
+                        }
+                        if (!M.started[t.id]) {
+                            // Recovery after the intent: rerun only if the stored and the current policy are both "safe".
+                            const now = t.name === "bash" && safe.checked;
+                            if (t.replay === "safe" && now) {
+                                M.started[t.id] = true;
+                                t.progress = 0;
+                                commit([["doc", `pi.live: ${t.name} output cleared`]], {
+                                    t: 'Recovery: the intent has replay: "safe", and the tool still has it. The harness removes the committed output and runs the call again from the beginning.',
+                                    api: '{ ...createBashTool(), replay: "safe" }',
+                                });
+                                return;
+                            }
+                            const so = t.name === "bash" ? OUT.slice(0, t.progress).join("") : "";
+                            S.entries.push({
+                                kind: "pi.tool-result",
+                                tool: t.name,
+                                err: true,
+                                text: `Tool ${t.name} was interrupted and may have partially run`,
+                                out: so || "(no output committed)",
+                            });
+                            t.status = "failed";
+                            const why =
+                                t.replay === "safe"
+                                    ? 'the intent has replay: "safe", but the tool does not have it now. To run again, the call must have "safe" in the intent and in the tool.'
+                                    : now
+                                      ? 'the intent has replay: "unsafe", because the box was off when the call started. To run again, the call must have "safe" in the intent and in the tool.'
+                                      : `${t.name} does not have replay: "safe". No built-in tool has this setting. A second run can do the same work two times. Thus the harness does not run the call again.`;
+                            commit(
+                                [
+                                    ["entry", `+pi.tool-result ${t.name} (interrupted)`],
+                                    ["task", `${t.id} → failed`],
+                                ],
+                                {
+                                    t: `Recovery: ${why} The model gets an interrupted error result with the committed output. Then the model decides the next step.`,
+                                    api: 'no replay: "safe" → interrupted error result',
+                                },
+                            );
+                            return;
+                        }
+                        if (t.name === "read") {
+                            t.status = "completed";
+                            M.started[t.id] = false;
+                            S.entries.push({
+                                kind: "pi.tool-result",
+                                tool: "read",
+                                text: "src/auth.ts (118 lines)",
+                                out: READ,
+                            });
+                            commit(
+                                [
+                                    ["entry", "+pi.tool-result read"],
+                                    ["task", "t2 → completed"],
+                                ],
+                                {
+                                    t: "read completes first. One commit stores its result entry and its terminal status.",
+                                    api: "execute() returned { content }",
+                                },
+                            );
+                            return;
+                        }
+                        stream(t, () => {
+                            t.status = "completed";
+                            M.started[t.id] = false;
+                            S.entries.push({
+                                kind: "pi.tool-result",
+                                tool: "bash",
+                                text: "exit 1",
+                                out: OUT.join(""),
+                            });
+                            commit(
+                                [
+                                    ["entry", "+pi.tool-result bash"],
+                                    ["task", "t1 → completed"],
+                                ],
+                                {
+                                    t: "bash stops. Its streamed output becomes the result. One commit stores the result entry and the terminal status of the task.",
+                                    api: "api.output() streams; it becomes the result if execute() returns no content",
+                                },
+                            );
+                        });
+                    }
+
                     function next() {
                         if (!M.alive) return false;
                         const T = S.tasks;
                         if (!S.sub) {
-                            S.sub = { id: "s1", status: "running" };
+                            S.sub = { id: "s1", status: "placed" };
                             S.entries.push({ kind: "pi.user", text: QUESTION });
                             task("g1", "pi.generation", "generation", null);
                             commit(
                                 [
-                                    ["sub", "+submission s1"],
+                                    ["sub", "+s1 placed"],
                                     ["entry", "+pi.user"],
                                     ["task", "+pi.generation g1"],
+                                    ["doc", "pi.live: run s1"],
                                 ],
                                 {
-                                    t: "submit() stores the input. One commit stores the submission, the pi.user entry, and a pending generation task.",
+                                    t: "submit() stores the input. The conversation is idle. Thus one commit stores the submission with the status placed, the pi.user entry, and a pending generation task. This task controls the run.",
                                     api: `root.submit({ type: "input", content: "${QUESTION}" }, ctx)`,
                                 },
                             );
                             M.sched = "running";
                             return true;
                         }
-                        if (M.recovered.length) {
-                            const id = M.recovered.shift();
-                            const t = T[id];
-                            if (t.kind === "pi.generation") {
-                                t.attempt++;
-                                t.progress = 0;
-                                t.status = "running";
-                                commit(
-                                    [
-                                        ["task", `${id} running · attempt ${t.attempt}`],
-                                        ["doc", "pi.live: partial cleared"],
-                                    ],
-                                    {
-                                        t: `Recovery: ${id} had a model request in progress when the process stopped. A partial answer is not final. Thus the harness sends the model request again.`,
-                                        api: "interrupted model requests are resent",
-                                    },
-                                );
-                            } else if (id === "t2") {
-                                t.attempt++;
-                                t.status = "running";
-                                commit([["task", `t2 read · attempt ${t.attempt}`]], {
-                                    t: 'Recovery: read has replay: "safe". A second read of a file causes no problem. Thus the harness runs it again.',
-                                    api: 'defineTool({ name: "read", replay: "safe", … })',
-                                });
-                            } else if (safe.checked) {
-                                t.attempt++;
-                                t.progress = 0;
-                                t.status = "running";
-                                commit(
-                                    [
-                                        ["task", `t1 bash · attempt ${t.attempt}`],
-                                        ["doc", "pi.live: output cleared"],
-                                    ],
-                                    {
-                                        t: 'Recovery: bash has replay: "safe" in this run. Thus the harness runs the call again from the start.',
-                                        api: 'createBashTool({ replay: "safe" })',
-                                    },
-                                );
-                            } else {
-                                t.status = "interrupted";
-                                const so = OUT.slice(0, t.progress).join("");
-                                S.entries.push({
-                                    kind: "pi.tool-result",
-                                    tool: "bash",
-                                    err: true,
-                                    text: "interrupted",
-                                    out: so || "(no output committed)",
-                                });
-                                S.interrupted = true;
-                                commit(
-                                    [
-                                        ["entry", "+pi.tool-result (interrupted)"],
-                                        ["task", "t1 → failed"],
-                                    ],
-                                    {
-                                        t: 'Recovery: bash does not have replay: "safe". A second run can cause damage, so the harness does not run it again. The model gets an interrupted error result with the committed output. The model then decides the next step.',
-                                        api: 'tool without replay: "safe" → interrupted error result',
-                                    },
-                                );
-                            }
-                            return true;
-                        }
-                        const g1 = T.g1,
-                            t1 = T.t1,
-                            t2 = T.t2,
-                            g2 = T.g2;
-                        if (g1.status === "pending") {
-                            g1.status = "running";
-                            commit([["task", "g1 → running"]], {
-                                t: "The scheduler starts the generation task. The running status is a checkpoint. If the process stops now, a new process knows that this request was in progress.",
-                                api: "harness.resume() starts the scheduler",
-                            });
-                            return true;
-                        }
-                        if (g1.status === "running") {
-                            if (!S.entries.some((e) => e.kind === "pi.system")) {
-                                S.entries.push({
-                                    kind: "pi.system",
-                                    text: "sections: preamble · cwd · tools: read, bash",
-                                });
-                                commit([["entry", "+pi.system"]], {
-                                    t: "The harness makes the system prompt from the sections of the selected extensions. The prompt is new, so the harness stores it as a pi.system entry. The harness does not send a prompt again if it does not change. This keeps provider caches valid.",
-                                    api: 'section("cwd", (input) => input.env?.cwd)',
-                                });
-                                return true;
-                            }
-                            stream(g1, () => {
-                                S.entries.push({
-                                    kind: "pi.assistant",
-                                    text: GEN1.join(""),
-                                    calls: ["bash npm test", "read src/auth.ts"],
-                                });
-                                task("t1", "pi.tool", "bash", "g1");
-                                task("t2", "pi.tool", "read", "g1");
-                                g1.status = "waiting";
-                                S.usage.tokens += 1840;
-                                S.usage.cost += 0.011;
-                                commit(
-                                    [
-                                        ["entry", "+pi.assistant (2 tool calls)"],
-                                        ["task", "+t1 bash, +t2 read"],
-                                        ["task", "g1 → waiting"],
-                                        ["doc", "pi.usage"],
-                                    ],
-                                    {
-                                        t: "The response is complete. One commit stores the assistant entry and creates a pi.tool task for each tool call. The generation owns these tasks. The same commit sets the generation to waiting and adds usage.",
-                                        api: "pi.generation owns pi.tool × n and waits for them",
-                                    },
-                                );
-                            });
-                            return true;
-                        }
-                        if (g1.status === "waiting") {
-                            if (t1.status === "pending") {
-                                t1.status = "running";
-                                t2.status = "running";
-                                commit(
-                                    [
-                                        ["task", "t1 → running"],
-                                        ["task", "t2 → running"],
-                                    ],
-                                    {
-                                        t: 'The harness commits the intent of each call before execute() runs. With toolExecution: "parallel", the two calls start at the same time.',
-                                        api: 'settings: { toolExecution: "parallel" }',
-                                    },
-                                );
-                                return true;
-                            }
-                            if (t2.status === "running") {
-                                t2.status = "completed";
-                                S.entries.push({
-                                    kind: "pi.tool-result",
-                                    tool: "read",
-                                    text: "src/auth.ts (118 lines)",
-                                    out: '41  if (path === "/home/") {\n42    return redirect(302, "/home")',
-                                });
-                                commit(
-                                    [
-                                        ["entry", "+pi.tool-result read"],
-                                        ["task", "t2 → completed"],
-                                    ],
-                                    {
-                                        t: "read completes first. One commit stores its result entry and its terminal status.",
-                                        api: "execute() returned { content }",
-                                    },
-                                );
-                                return true;
-                            }
-                            if (t1.status === "running") {
-                                stream(t1, () => {
-                                    t1.status = "completed";
-                                    S.entries.push({
-                                        kind: "pi.tool-result",
-                                        tool: "bash",
-                                        text: "exit 1",
-                                        out: OUT.join(""),
-                                    });
-                                    commit(
-                                        [
-                                            ["entry", "+pi.tool-result bash"],
-                                            ["task", "t1 → completed"],
-                                        ],
-                                        {
-                                            t: "bash stops. The streamed output becomes the result. One commit stores the result and the terminal status of the task.",
-                                            api: "api.output() streams; it becomes the result if execute() returns no content",
-                                        },
-                                    );
-                                });
-                                return true;
-                            }
-                            g1.status = "completed";
-                            task("g2", "pi.generation", "generation", null);
+                        // The scheduler reserves every task that can run, in one commit.
+                        const all = S.order.map((id) => T[id]);
+                        const ready = all.filter(
+                            (t) =>
+                                t.status === "pending" ||
+                                (t.status === "waiting" &&
+                                    all
+                                        .filter((c) => c.owner === t.id)
+                                        .every(
+                                            (c) =>
+                                                c.status === "completed" || c.status === "failed",
+                                        )),
+                        );
+                        if (ready.length) {
+                            const woken = ready.filter((t) => t.status === "waiting");
+                            const rec = ready.filter((t) => t.recovered);
+                            ready.forEach((t) => (t.status = "running"));
+                            const ids = ready.map((t) => t.id).join(", ");
                             commit(
-                                [
-                                    ["task", "g1 → completed"],
-                                    ["task", "+pi.generation g2"],
-                                ],
-                                {
-                                    t: "All tools of the round are complete. In the same commit, the generation gives the run to the next generation task.",
-                                    api: "afterTools hooks run here",
-                                },
+                                ready.map((t) => ["task", `${t.id} → running`]),
+                                rec.length
+                                    ? {
+                                          t: `The scheduler reserves ${ids} in one commit. Each task runs again from its saved checkpoint: ${rec.map((t) => `${t.id} in phase ${t.phase}`).join(", ")}.`,
+                                          api: "harness.resume() starts the scheduler",
+                                      }
+                                    : woken.length
+                                      ? {
+                                            t: `All tools of the round are complete. Thus the scheduler reserves ${ids} again. ${ids} continues in phase tools.`,
+                                            api: 'waiting on [t1, t2] · policy "allSettled"',
+                                        }
+                                      : {
+                                            t: `The scheduler reserves ${ids} in one commit. The status running is a checkpoint. If the process stops now, the next process sets ${ready.length > 1 ? "them" : "it"} back to pending and runs ${ready.length > 1 ? "them" : "it"} again.`,
+                                            api: "harness.resume() starts the scheduler",
+                                        },
                             );
+                            M.sched = "running";
                             return true;
                         }
-                        if (g2 && g2.status === "pending") {
-                            g2.status = "running";
-                            commit([["task", "g2 → running"]], {
-                                t: "The second generation sends the transcript to the model. The transcript now has the two tool results.",
-                                api: "",
-                            });
+                        // Run one step of a running task: intents first, then recovery, then read, then the rest.
+                        const rank = (t) =>
+                            t.kind === "pi.tool" && t.phase === "call"
+                                ? 0
+                                : t.kind === "pi.tool" && !M.started[t.id]
+                                  ? 1
+                                  : t.name === "read"
+                                    ? 2
+                                    : 3;
+                        const t = all
+                            .filter((x) => x.status === "running")
+                            .sort((a, b) => rank(a) - rank(b))[0];
+                        if (t) {
+                            if (t.kind === "pi.generation") genStep(t);
+                            else toolStep(t);
                             return true;
                         }
-                        if (g2 && g2.status === "running") {
-                            stream(g2, () => {
-                                g2.status = "completed";
-                                S.sub.status = "done";
-                                S.entries.push({ kind: "pi.assistant", text: script(g2).join("") });
-                                S.usage.tokens += 2310;
-                                S.usage.cost += 0.014;
-                                commit(
-                                    [
-                                        ["entry", "+pi.assistant (answer)"],
-                                        ["task", "g2 → completed"],
-                                        ["sub", "s1 → done"],
-                                        ["doc", "pi.usage"],
-                                    ],
-                                    {
-                                        t: 'One commit stores the final answer, the completed task, and the completed submission. submission.wait() then returns status "done".',
-                                        api: 'const settled = await submission.wait(ctx) // { status: "done" }',
-                                    },
-                                );
-                                M.sched = "idle";
-                            });
-                            return true;
-                        }
+                        M.sched = "idle";
                         say(
                             "The run is complete. Storage has all of the steps. Click Reset to try a crash.",
                             "await harness.close(ctx)",
@@ -3694,6 +3849,7 @@
                         M.lost = M.buf;
                         M.alive = false;
                         M.buf = "";
+                        M.bufTask = null;
                         M.sched = "gone";
                         say(
                             `SIGKILL. The process stopped. ${M.lost ? `Its memory is lost. This includes the chunk that was not committed ("${M.lost.trim()}").` : "No uncommitted data was in memory, so no data is lost."} Storage has ${S.seq} commits.`,
@@ -3708,25 +3864,33 @@
                             proc: M.proc + 1,
                             pid: M.pid + 1377,
                             buf: "",
-                            recovered: running.slice(),
+                            bufTask: null,
                             lost: "",
-                            sched:
-                                running.length || (S.sub && S.sub.status !== "done")
-                                    ? "running"
-                                    : "idle",
-                            reopened: true,
+                            sched: S.sub && S.sub.status !== "done" ? "running" : "idle",
+                            started: {},
                         };
                         S.commits.push({ reopen: true, proc: M.proc });
                         const pending = S.sub && S.sub.status !== "done";
+                        if (running.length) {
+                            running.forEach((id) => {
+                                S.tasks[id].status = "pending";
+                                S.tasks[id].recovered = true;
+                            });
+                            S.seq++;
+                            S.commits.push({
+                                seq: S.seq,
+                                writes: running.map((id) => ["task", `${id} → pending`]),
+                            });
+                        }
                         say(
                             !S.sub
                                 ? "A new process opens the same storage and calls resume(). Storage is empty, so there is no work to continue. Click Run to send the input."
                                 : !pending
                                   ? "A new process opens the same storage and calls resume(). The run is complete, so there is no work to continue."
                                   : running.length
-                                    ? `A new process opens the same storage and calls resume(). The tasks with the committed status running (${running.join(", ")}) show as pending until they run again. Waiting tasks run no code. They continue to wait.`
-                                    : "A new process opens the same storage and calls resume(). No task was in progress, so the work continues.",
-                            "const harness = await Harness.open(storage, …); harness.resume();",
+                                    ? `A new process opens the same storage. One commit sets the tasks that were running (${running.join(", ")}) back to pending. Waiting tasks stay waiting and run no code. resume() starts the scheduler.`
+                                    : "A new process opens the same storage. No task was running. resume() starts the scheduler, and the work continues.",
+                            "const harness = await Harness.open(storage, …, ctx); harness.resume();",
                         );
                         render();
                         // resume() starts the scheduler, so the work continues without a click.
@@ -3751,7 +3915,7 @@
                         };
                         const loop = () => {
                             tick();
-                            if (timer) timer = setInterval(tick, reduce ? 1400 : 950);
+                            if (timer) timer = setInterval(tick, reduce ? 1400 : 850);
                         };
                         if (delay) {
                             timer = setTimeout(loop, delay);
@@ -3761,27 +3925,28 @@
                         }
                     }
 
-                    function statusOf(t) {
-                        return M.alive && M.recovered && M.recovered.includes(t.id)
-                            ? "recovered"
-                            : t.status;
-                    }
+                    const label = (t) =>
+                        t.status === "failed"
+                            ? "failed · interrupted"
+                            : t.status === "pending" && t.recovered
+                              ? `pending ↺ · ${t.phase}`
+                              : t.status === "pending" || t.status === "running"
+                                ? `${t.status} · ${t.phase}`
+                                : t.status;
                     function render() {
+                        const T = S.tasks;
+                        const all = S.order.map((id) => T[id]);
                         // process pane
                         const proc = $("#sim-proc");
                         proc.classList.toggle("dead", !M.alive);
                         $("#sim-hb").innerHTML = M.alive
                             ? `<i></i><span>process ${M.proc} · pid ${M.pid}</span>`
                             : `<i></i><span>killed</span>`;
-                        const inflight = S.order.filter(
-                            (id) =>
-                                ["running"].includes(S.tasks[id].status) &&
-                                !(M.recovered || []).includes(id),
-                        );
+                        const inflight = all.filter((t) => t.status === "running");
                         $("#sim-mem").innerHTML = M.alive
                             ? `
       <div class="mem-row"><span>Scheduler</span><span>${esc(M.sched)}</span></div>
-      <div class="mem-row"><span>In flight</span><span>${inflight.length ? inflight.map((id) => chip("task", `${id} ${S.tasks[id].name}`)).join(" ") : '<span class="muted">nothing</span>'}</span></div>
+      <div class="mem-row"><span>Reserved</span><span>${inflight.length ? inflight.map((t) => chip("task", `${t.id} ${t.name}`)).join(" ") : '<span class="muted">nothing</span>'}</span></div>
       <div class="mem-row"><span>Stream buffer</span><span class="buf ${M.buf ? "" : "empty"}">${M.buf ? esc(M.buf) : "empty"}</span></div>
       <div class="mem-row"><span>Registry</span><span>${chip("doc", "coding")} ${chip("doc", "read")} ${chip("doc", "bash")}</span></div>`
                             : `<div style="font:800 26px var(--display);color:var(--crash);font-stretch:115%">Process killed</div>
@@ -3800,7 +3965,7 @@
                                   .join("")
                             : `<div class="empty">No commits yet. Storage is empty.</div>`;
                         led.scrollTop = led.scrollHeight;
-                        // transcript
+                        // transcript: committed entries, then the committed pi.live stream
                         const tx = $("#sim-tx");
                         let html = S.entries
                             .map((e) => {
@@ -3809,66 +3974,76 @@
                                 if (e.kind === "pi.system")
                                     return `<div class="te sys"><span class="kk">pi.system</span><span class="small muted">${esc(e.text)}</span></div>`;
                                 if (e.kind === "pi.assistant")
-                                    return `<div class="te"><span class="kk">pi.assistant</span>${esc(e.text)}${e.calls ? `<div class="row" style="margin-top:4px;gap:4px">${e.calls.map((c) => chip("task", c)).join("")}</div>` : ""}</div>`;
+                                    return `<div class="te${e.aborted ? " err" : ""}"><span class="kk">pi.assistant${e.aborted ? " · aborted · not sent to the model" : ""}</span>${esc(e.text)}${e.calls ? `<div class="row" style="margin-top:4px;gap:4px">${e.calls.map((c) => chip("task", c)).join("")}</div>` : ""}</div>`;
                                 return `<div class="te ${e.err ? "err" : ""}"><span class="kk">pi.tool-result · ${esc(e.tool)}${e.err ? " · interrupted" : ""}</span>${esc(e.text)}<pre>${esc(e.out)}</pre></div>`;
                             })
                             .join("");
-                        // live (ghost) entry from pi.live
-                        const liveT = S.order
-                            .map((id) => S.tasks[id])
-                            .find((t) => t.status === "running" && t.id !== "t2");
-                        if (liveT || (M.buf && M.bufTask)) {
-                            const t = liveT || S.tasks[M.bufTask];
-                            const sc = script(t);
-                            const committed = sc.slice(0, t.progress).join("");
-                            const pending = M.alive && M.buf && M.bufTask === t.id ? M.buf : "";
-                            if (committed || pending) {
-                                const label =
-                                    t.kind === "pi.tool"
-                                        ? `pi.live · ${t.name} output`
-                                        : "pi.live · streaming answer";
-                                const body =
-                                    t.kind === "pi.tool"
-                                        ? `<pre>${esc(committed)}${pending ? `<span class="unc">${esc(pending)}</span>` : ""}</pre>`
-                                        : `${esc(committed)}${pending ? `<span class="unc">${esc(pending)}</span>` : ""}`;
-                                html += `<div class="te ghost"><span class="kk">${label}</span>${body}</div>`;
-                            }
+                        const liveT = all.find(
+                            (t) =>
+                                (t.status === "running" || t.status === "pending") &&
+                                (t.kind === "pi.generation"
+                                    ? t.phase === "request"
+                                    : t.name === "bash") &&
+                                (t.progress > 0 || (M.alive && M.bufTask === t.id)),
+                        );
+                        if (liveT) {
+                            const committed = scriptOf(liveT).slice(0, liveT.progress).join("");
+                            const pending = M.alive && M.bufTask === liveT.id ? M.buf : "";
+                            const tool = liveT.kind === "pi.tool";
+                            const lab = tool
+                                ? `pi.live · ${liveT.name} output`
+                                : "pi.live · streaming answer";
+                            const unc = pending ? `<span class="unc">${esc(pending)}</span>` : "";
+                            const body = tool
+                                ? `<pre>${esc(committed)}${unc}</pre>`
+                                : `${esc(committed)}${unc}`;
+                            html += `<div class="te ghost"><span class="kk">${lab}</span>${body}</div>`;
                         }
                         tx.innerHTML = html || `<div class="tx-empty">Empty transcript.</div>`;
                         tx.scrollTop = tx.scrollHeight;
                         // tree
-                        const T = S.tasks;
                         const node = (t, depth) =>
-                            `<div class="tn ${depth ? "c" + depth : ""}">${chip("task", t.kind)}<span>${esc(t.id)}${t.kind === "pi.tool" ? " " + esc(t.name) : ""}</span><span class="st ${statusOf(t)}">${statusOf(t) === "recovered" ? "pending ↺" : statusOf(t) === "interrupted" ? "failed · interrupted" : statusOf(t)}</span>${t.attempt > 1 ? `<span class="small muted">attempt ${t.attempt}</span>` : ""}</div>`;
+                            `<div class="tn ${depth ? "c" + depth : ""}">${chip("task", t.kind)}<span>${esc(t.id)}${t.kind === "pi.tool" ? " " + esc(t.name) : ""}</span><span class="st ${t.status === "pending" && t.recovered ? "recovered" : t.status}">${esc(label(t))}</span></div>`;
                         let tree = `<div class="tn">${chip("entry", "conversation")}<span>root</span></div>`;
-                        S.order
-                            .filter((id) => !T[id].owner)
-                            .forEach((id) => {
-                                tree += node(T[id], 1);
-                                S.order
-                                    .filter((c) => T[c].owner === id)
-                                    .forEach((c) => {
-                                        tree += node(T[c], 2);
-                                    });
+                        all.filter((t) => !t.owner).forEach((t) => {
+                            tree += node(t, 1);
+                            all.filter((c) => c.owner === t.id).forEach((c) => {
+                                tree += node(c, 2);
                             });
+                        });
                         $("#sim-tree").innerHTML = tree;
-                        // docs
-                        const live =
-                            S.order
-                                .map((id) => T[id])
-                                .filter((t) => t.status === "running")
-                                .map((t) => t.id)
-                                .join(", ") || "—";
+                        // documents and the submission
+                        const gen = all.filter((t) => t.kind === "pi.generation").pop();
+                        const tools = all.filter((t) => t.kind === "pi.tool" && t.owner === "g1");
+                        const round =
+                            T.g1 && T.g1.status !== "completed" && tools.length
+                                ? " · tools: " +
+                                  tools
+                                      .map(
+                                          (t) =>
+                                              `${t.name} ${t.status === "completed" || t.status === "failed" ? "done" : t.phase === "execute" ? "running" : "pending"}`,
+                                      )
+                                      .join(", ")
+                                : "";
+                        const live = !S.sub
+                            ? "—"
+                            : S.sub.status === "done"
+                              ? "no run"
+                              : `run: s1 → ${gen.id}${round}`;
                         $("#sim-docs").innerHTML = `
-      <div class="d"><b>pi.inbox</b><span>${S.sub ? `s1 · ${S.sub.status}` : "empty"}</span></div>
-      <div class="d"><b>pi.live</b><span>${S.seq ? "running: " + live : "—"}</span></div>
+      <div class="d"><b>submission s1</b><span>${S.sub ? S.sub.status : "—"}</span></div>
+      <div class="d"><b>pi.inbox</b><span>${S.sub ? "empty: s1 was placed immediately" : "empty"}</span></div>
+      <div class="d"><b>pi.live</b><span>${esc(live)}</span></div>
       <div class="d"><b>pi.usage</b><span>${S.usage.tokens.toLocaleString()} tok · $${S.usage.cost.toFixed(3)}</span></div>
       <div class="d"><b>pi.agent</b><span>gpt-6-sol · high · [coding]</span></div>
       <div class="d"><b>pi.provider</b><span>0199c3e2-…-7a41</span></div>`;
                         // narration & buttons
                         $("#sim-narr").innerHTML =
                             `<p>${esc(lastNarr.t)}</p>${lastNarr.api ? `<div class="api">${esc(lastNarr.api)}</div>` : ""}`;
-                        const finished = S.sub && S.sub.status === "done";
+                        const finished =
+                            S.sub &&
+                            S.sub.status === "done" &&
+                            !all.some((t) => t.status === "running");
                         $("#sim-run").disabled = !M.alive || (finished && !timer);
                         $("#sim-step").disabled = !M.alive || finished;
                         $("#sim-kill").disabled = !M.alive;
@@ -3886,7 +4061,10 @@
                     $("#sim-reset").addEventListener("click", () => {
                         stop();
                         fresh();
-                        say("Reset. The storage is empty.", "new MemoryStorage()");
+                        say(
+                            "Reset. The storage is a new, empty session.sqlite file.",
+                            'await openNodeSqliteStorage("session.sqlite")',
+                        );
                         render();
                     });
                     fresh();
@@ -3983,51 +4161,73 @@
                 })();
 
                 /* ================= INBOX ================= */
+                // Boundary rules from inbox.ts and generation.ts in Pi Durable 1.0.2.
                 (() => {
                     // A run: gen, tools, gen, tools, gen (answer). Position u is measured in segments.
+                    // tools: the end of the segment is a postTools boundary. end: a final boundary.
                     const BASE = [
-                        ["gen", "generation"],
-                        ["tools", "tool round"],
-                        ["gen", "generation"],
-                        ["tools", "tool round"],
-                        ["gen", "answer"],
-                        ["idle", "idle"],
+                        { k: "gen", l: "generation" },
+                        { k: "tools", l: "tool round", tools: true },
+                        { k: "gen", l: "generation" },
+                        { k: "tools", l: "tool round", tools: true },
+                        { k: "gen", l: "answer", end: true },
+                        { k: "idle", l: "idle" },
                     ];
                     let segs,
                         u = 0,
                         q = [],
                         placed = [],
                         marks = [],
-                        run2 = false,
+                        runs = 1,
                         n = 0,
                         timerId;
                     const lane = $("#ib-lane");
+                    // info: a normal event; otherwise an error, such as ConversationBusy.
+                    const toast = (t, info = true) => {
+                        $("#ib-toast").textContent = t;
+                        $("#ib-toast").classList.toggle("info", info);
+                    };
                     const reset = () => {
-                        segs = BASE.map((s) => s.slice());
+                        segs = BASE.map((s) => ({ ...s }));
                         u = 0;
                         q = [];
                         placed = [];
                         marks = [];
-                        run2 = false;
+                        runs = 1;
                         n = 0;
-                        $("#ib-toast").textContent = "";
+                        toast("");
                         draw();
                     };
                     const idx = () => Math.min(segs.length - 1, Math.floor(u));
-                    const busy = () => segs[idx()][0] !== "idle";
+                    const busy = () => segs[idx()].k !== "idle";
+                    // A new run (one tool round, then the answer) starts where the idle segment is.
+                    const startRun = (at) => {
+                        runs++;
+                        segs.splice(
+                            at,
+                            0,
+                            { k: "run2", l: `run ${runs}: tools`, tools: true },
+                            { k: "run2", l: `run ${runs}: answer`, end: true },
+                        );
+                    };
                     const draw = () => {
                         $("#ib-segs").innerHTML = segs
-                            .map(([k, l]) => `<div class="sg ${k}">${esc(l)}</div>`)
+                            .map((s) => `<div class="sg ${s.k}">${esc(s.l)}</div>`)
                             .join("");
                         $("#ib-head").style.left = (u / segs.length) * 100 + "%";
                         lane.querySelectorAll(".mark").forEach((m) => m.remove());
-                        marks.forEach((m, i) => {
+                        // Marks at the same boundary sit side by side: the first is centered on it.
+                        const right = {};
+                        marks.forEach((m) => {
                             const el = document.createElement("span");
                             el.className = "mark " + m.k;
                             el.style.left = (m.at / segs.length) * 100 + "%";
-                            el.style.bottom = -2 - (i % 2) * 0 + "px";
                             el.textContent = m.label;
                             lane.appendChild(el);
+                            const w = el.offsetWidth;
+                            const x = m.at in right ? right[m.at] + 3 : -w / 2;
+                            el.style.transform = `translateX(${x}px)`;
+                            right[m.at] = x + w;
                         });
                         $("#ib-q").innerHTML = q.length
                             ? q
@@ -4046,15 +4246,16 @@
                                   .join("")
                             : `<span class="muted small">Nothing yet.</span>`;
                     };
-                    // A boundary places every write and the first steer; at "final" also the first follow-up.
+                    // A boundary places every write and the first steer; at "final" also the first
+                    // follow-up. User items placed at "final" start the next run.
                     const place = (boundary, at) => {
-                        const pick = q.filter((x) => x.k === "write");
-                        const st = q.find((x) => x.k === "steer");
-                        if (st) pick.push(st);
-                        if (boundary === "final") {
-                            const f = q.find((x) => x.k === "follow-up");
-                            if (f) pick.push(f);
-                        }
+                        // Writes first, then user items, each in submission order.
+                        const users = [q.find((x) => x.k === "steer")];
+                        if (boundary === "final") users.push(q.find((x) => x.k === "follow-up"));
+                        const pick = [
+                            ...q.filter((x) => x.k === "write"),
+                            ...users.filter(Boolean).sort((a, b) => a.n - b.n),
+                        ];
                         pick.forEach((x) => {
                             q.splice(q.indexOf(x), 1);
                             placed.push({
@@ -4067,16 +4268,13 @@
                                 at,
                                 label: x.k,
                             });
-                            if (x.k === "follow-up" && !run2) {
-                                run2 = true;
-                                segs.splice(
-                                    segs.length - 1,
-                                    0,
-                                    ["run2", "run 2"],
-                                    ["run2", "run 2: answer"],
-                                );
-                            }
                         });
+                        if (boundary === "final" && pick.some((x) => x.k !== "write")) {
+                            startRun(at);
+                            toast(
+                                "The run ended, and user input was in the inbox. In one commit, the harness placed the input and started the next run.",
+                            );
+                        }
                     };
                     const tick = () => {
                         if (!busy()) return;
@@ -4085,9 +4283,8 @@
                         const after = idx();
                         if (after !== before) {
                             const prev = segs[before];
-                            if (prev[0] === "tools") place("postTools", after);
-                            else if (prev[1] === "answer" || prev[1] === "run 2: answer")
-                                place("final", after);
+                            if (prev.tools) place("postTools", after);
+                            else if (prev.end) place("final", after);
                         }
                         draw();
                     };
@@ -4097,25 +4294,40 @@
                         write: ["user opened auth.ts", "doc"],
                     };
                     const add = (k) => {
-                        $("#ib-toast").textContent = "";
-                        if (k === "reject") {
-                            $("#ib-toast").textContent = busy()
-                                ? 'submit() throws ConversationBusy. The conversation is busy, and whenBusy: "reject" does not queue the input.'
-                                : "The harness accepts the input. The conversation is idle, so a run starts immediately.";
+                        toast("");
+                        if (k === "reject" && busy()) {
+                            toast(
+                                'submit() throws ConversationBusy. The conversation is busy, and whenBusy: "reject" does not queue the input.',
+                                false,
+                            );
                             return;
                         }
                         n++;
+                        const kind = k === "reject" ? "follow-up" : k;
                         const item = {
-                            k,
-                            cls: TEXT[k][1],
-                            text: TEXT[k][0] + (n > 3 ? ` (${n})` : ""),
+                            k: kind,
+                            n,
+                            cls: TEXT[kind][1],
+                            text: TEXT[kind][0] + (n > 3 ? ` (${n})` : ""),
                         };
                         if (!busy()) {
                             placed.push({
                                 ...item,
-                                entry: k === "write" ? "app.note" : "pi.user",
-                                where: "idle: added immediately",
+                                entry: kind === "write" ? "app.note" : "pi.user",
+                                where: "idle: placed immediately",
                             });
+                            if (kind === "write") {
+                                toast(
+                                    "The conversation is idle. Thus the harness adds the entry immediately. A write does not start a run.",
+                                );
+                            } else {
+                                const at = idx();
+                                startRun(at);
+                                u = at;
+                                toast(
+                                    "The conversation is idle. Thus the harness places the input immediately and starts a run.",
+                                );
+                            }
                             return draw();
                         }
                         q.push(item);
@@ -4169,7 +4381,7 @@
                             pending: "var(--ink-2)",
                             decide: "var(--task)",
                         })[s.split(" ")[0]] || "var(--ink-2)";
-                    const filled = (s) => /^(completed|failed)/.test(s);
+                    const filled = (s) => /^(completed|failed|aborted)/.test(s);
                     const draw = () => {
                         const box = (x, y, w, h, title, s, sub) => {
                             const c = color(s),
@@ -4205,7 +4417,7 @@
                                 st.refunds.includes(i) ? "refunded" : "",
                             );
                         });
-                        h += `<text x="10" y="262" font-family="var(--mono)" font-size="10.5" fill="var(--ink-2)">lines go to the owner · dashed: no code runs</text>`;
+                        h += `<text x="10" y="262" font-family="var(--mono)" font-size="10.5" fill="var(--ink-2)">lines go to the owner · dashed: no code runs · filled: terminal</text>`;
                         svg.innerHTML = h;
                         logEl.innerHTML = logs.length
                             ? logs
@@ -4240,10 +4452,10 @@
                         );
                         await sleep(700);
                         if (!alive()) return;
-                        st.pays = cards.map((c, i) =>
-                            kind === "decline" && i === 1 ? "running" : "running · charge",
+                        st.pays = cards.map(() => "running · charge");
+                        L(
+                            "The scheduler reserves the payments. They run their <b>charge</b> phase in parallel.",
                         );
-                        L("The payments start their <b>charge</b> phase in parallel.");
                         await sleep(600);
                         if (!alive()) return;
                         if (kind === "decline") {
@@ -4255,7 +4467,7 @@
                             await sleep(700);
                             if (!alive()) return;
                             L(
-                                "failFast: the first failure aborts the other payments. Abort starts at the lowest level.",
+                                "failFast: one payment failed. Thus the harness aborts the other payments of the checkout.",
                             );
                             for (const i of [0, 2, 3]) {
                                 st.pays[i] = "aborted";
@@ -4268,7 +4480,7 @@
                             }
                             st.checkout = "running · decide";
                             L(
-                                "The checkout does not abort. It continues in phase <b>decide</b> and reads the outcomes.",
+                                "All payments are terminal. The checkout does not abort. It continues in phase <b>decide</b> and reads the outcomes.",
                             );
                             await sleep(700);
                             if (!alive()) return;
@@ -4277,16 +4489,15 @@
                             L("The checkout commits <b>failed</b>: payment failed.");
                             return;
                         }
-                        st.pays = st.pays.map(() => "sleeping");
                         L(
-                            "Each payment made its charge. Each payment is now in a durable <code>runtime.sleep()</code> until the bank confirms.",
+                            "Each payment made its charge. Each one now waits in <code>runtime.sleep()</code> until the time saved in its checkpoint. The timer is in memory. The time is in storage.",
                         );
                         await sleep(800);
                         if (!alive()) return;
                         if (kind === "cancel") {
-                            st.checkout = "aborting";
+                            st.checkout = "waiting · abort-marked";
                             L(
-                                "<b>harness.abortTask(checkout)</b>. Abort starts with the child tasks.",
+                                "<b>harness.abortTask(checkout)</b> marks the checkout and its child tasks for abort. Abort starts at the bottom: the payments abort first.",
                             );
                             await sleep(600);
                             if (!alive()) return;
@@ -4301,7 +4512,7 @@
                             }
                             st.checkout = "aborted";
                             L(
-                                "All payments are complete. Then the abort handler of the checkout runs. Status: <b>aborted</b>.",
+                                "All payments are terminal. Then the abort handler of the checkout runs. Outcome: <b>aborted</b>.",
                             );
                             return;
                         }
@@ -4316,13 +4527,13 @@
                             st.proc = 2;
                             st.pays = st.pays.map(() => "pending");
                             L(
-                                "A new process opens the same SQLite file. The tasks show as <b>pending</b> at their last checkpoint.",
+                                "A new process opens the same SQLite file. The payments had the status running. Thus they show as <b>pending</b> at their last checkpoint. The checkout continues to wait.",
                             );
                             await sleep(800);
                             if (!alive()) return;
-                            st.pays = st.pays.map(() => "sleeping");
+                            st.pays = st.pays.map(() => "running · charge");
                             L(
-                                "Each task continues in phase charge at its saved wake-up time. No card gets a second charge.",
+                                "Each payment runs phase <b>charge</b> again from the beginning. Then it waits until the time in its checkpoint. Because the charge can run two times, the bank call must use a key, for example <code>payment-${task.id}</code>. With the key, the bank charges each card only one time.",
                             );
                             await sleep(700);
                             if (!alive()) return;
@@ -4366,32 +4577,42 @@
                             "var(--task)",
                             "outcome is set, owned work still runs",
                         ],
-                        ["terminal", 680, 90, "var(--ink)", "completed · failed · aborted"],
+                        [
+                            "terminal",
+                            680,
+                            90,
+                            "var(--ink)",
+                            "completed · failed · aborted",
+                            "orphaned · faulted",
+                        ],
                     ];
                     const pos = Object.fromEntries(nodes.map((n) => [n[0], n]));
-                    const edge = (a, b, label, bend = 0) => {
+                    // dx moves the label to the right.
+                    const edge = (a, b, label, bend = 0, dx = 0) => {
                         const [, x1, y1] = pos[a],
                             [, x2, y2] = pos[b];
                         const sx = x1 + 58,
                             ex = x2 - 58;
                         const mx = (sx + ex) / 2,
                             my = (y1 + y2) / 2 + bend;
-                        return `<path d="M${sx} ${y1} Q${mx} ${my} ${ex} ${y2}" fill="none" stroke="var(--ink-2)" stroke-width="1.3" marker-end="url(#ah)"/>${label ? `<text x="${mx}" y="${bend > 0 ? my + 16 : my - 10}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--ink-2)">${label}</text>` : ""}`;
+                        return `<path d="M${sx} ${y1} Q${mx} ${my} ${ex} ${y2}" fill="none" stroke="var(--ink-2)" stroke-width="1.3" marker-end="url(#ah)"/>${label ? `<text x="${mx + dx}" y="${bend > 0 ? my + 16 : my - 10}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--ink-2)">${label}</text>` : ""}`;
                     };
                     let lh = `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--ink-2)"/></marker></defs>`;
                     lh += edge("pending", "running", "scheduler");
                     lh += edge("running", "waiting", "commit waiting", -6);
                     lh += edge("running", "completing", "", 6);
                     lh += edge("running", "terminal", "commit outcome", 0);
-                    lh += edge("waiting", "terminal", "", 0);
-                    lh += edge("completing", "terminal", "owned work complete", 10);
+                    lh += edge("completing", "terminal", "owned work complete", 10, 8);
                     lh += `<path d="M420 23 Q330 0 250 72" fill="none" stroke="var(--ink-2)" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#ah)"/><text x="300" y="16" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--ink-2)">child tasks complete → next phase</text>`;
-                    nodes.forEach(([n, x, y, c, d]) => {
+                    nodes.forEach(([n, x, y, c, d, d2]) => {
                         lh += `<rect x="${x - 58}" y="${y - 17}" width="116" height="34" rx="17" fill="var(--sheet)" stroke="${c}" stroke-width="1.8" ${n === "waiting" || n === "completing" ? 'stroke-dasharray="5 4"' : ""}/><text x="${x}" y="${y + 4}" text-anchor="middle" font-family="var(--mono)" font-size="12" font-weight="700" fill="${c}">${n}</text>`;
                         lh +=
                             n === "waiting"
                                 ? `<text x="${x + 64}" y="${y + 4}" font-family="var(--body)" font-size="10.5" fill="var(--ink-2)">${esc(d)}</text>`
-                                : `<text x="${x}" y="${y + 32}" text-anchor="middle" font-family="var(--body)" font-size="10.5" fill="var(--ink-2)">${esc(d)}</text>`;
+                                : `<text x="${x}" y="${y + 32}" text-anchor="middle" font-family="var(--body)" font-size="10.5" fill="var(--ink-2)">${esc(d)}</text>` +
+                                  (d2
+                                      ? `<text x="${x}" y="${y + 46}" text-anchor="middle" font-family="var(--body)" font-size="10.5" fill="var(--ink-2)">${esc(d2)}</text>`
+                                      : "");
                     });
                     life.innerHTML = lh;
                 })();
@@ -4445,7 +4666,7 @@
                             {
                                 initial:
                                     '<b>"initial"</b>: the fork starts with the value from <code>initial()</code>. Use it for state that belongs to one path only, for example a scratchpad.',
-                                asOf: `<b>"asOf"</b>: the fork gets the value of the parent at the fork point, e${cut + 1}. The todo list agrees with the transcript of the fork. Use it for state that follows the conversation.`,
+                                asOf: `<b>"asOf"</b>: the fork gets the value of the parent at the fork point, e${cut + 1}. The todo list agrees with the transcript of the fork. Use it for state that follows the conversation. This policy needs <code>history: "rewindable"</code>. That setting keeps old values.`,
                                 current:
                                     '<b>"current"</b>: the fork copies the current value of the parent. This includes items added after the fork point. Use it for shared settings.',
                             }[policy] +
@@ -4453,6 +4674,11 @@
                             (cut + 1) +
                             ". Then it continues independently with a new provider identity.";
                         $("#fk-code").textContent = `"${policy}"`;
+                        $("#fk-hist").textContent = policy === "asOf" ? '"rewindable"' : '"latest"';
+                        $("#fk-hist-c").textContent =
+                            policy === "asOf"
+                                ? '// "asOf" needs "rewindable": it reads old values'
+                                : '// or "rewindable": read old values with snapshotAsOf()';
                         $$("#fk-policy button").forEach((b) =>
                             b.setAttribute("aria-pressed", b.dataset.p === policy),
                         );
@@ -4478,19 +4704,19 @@
                 (() => {
                     const H = {
                         beforeRequest: [
-                            "Replaces the messages of one request.",
+                            "Runs before each request attempt. It also runs after a recovery. It can replace the messages of that request only.",
                             "Remove long tool output before the model gets it, or add a reminder.",
                             "hook(GenerationTask, { beforeRequest: (req) => ({ messages: trim(req.messages) }) })",
                         ],
                         afterResponse: [
-                            "Reads a model response when it arrives.",
+                            "Gets each complete model response before the harness uses it. Error responses are included. It cannot change the response.",
                             "Log the response, score it, or save a memo for later.",
-                            "hook(GenerationTask, { afterResponse: (res) => audit(res) })",
+                            "hook(GenerationTask, { afterResponse: (message) => audit(message) })",
                         ],
                         afterTools: [
-                            "Runs when all tools of a round are complete.",
-                            "Run a formatter after edits, before the model gets the results.",
-                            "hook(GenerationTask, { afterTools: (results) => … })",
+                            "Runs when all tools of a round are complete, before the next request. It gets the ID of the assistant entry and the IDs of the result entries.",
+                            "Run a formatter one time after the edits of a round.",
+                            "hook(GenerationTask, { afterTools: (assistant, results) => … })",
                         ],
                         onYield: [
                             "Runs when the model gives a final answer. It can continue the run with a new user message.",
@@ -4498,27 +4724,27 @@
                             'hook(GenerationTask, { onYield: (answer) => needsMore(answer) ? { continue: "Keep going." } : undefined })',
                         ],
                         beforeTool: [
-                            "Blocks a call or changes its arguments before execute() runs.",
+                            "Runs after validation and before the harness commits the intent. It can block the call or change its arguments. The harness validates changed arguments again.",
                             "A plan mode, or a guard that blocks rm -rf.",
                             'hook(ToolTask, { beforeTool: (call) => call.name === "bash" ? { block: "bash is disabled here" } : undefined })',
                         ],
                         afterTool: [
-                            "Replaces the result of a tool.",
+                            "Runs after execute() and before the harness stores the result entry. It can replace the result.",
                             "Remove secrets from the output.",
-                            "hook(ToolTask, { afterTool: (result) => redact(result) })",
+                            "hook(ToolTask, { afterTool: (call, result) => redact(result) })",
                         ],
                     };
                     const gen = [
-                        ["prepare", "make sections, select tools", ["beforeRequest"]],
-                        ["request", "stream from the model", ["afterResponse"]],
+                        ["prepare", "make sections, select tools", []],
+                        ["request", "stream from the model", ["beforeRequest", "afterResponse"]],
                         ["tool round", "pi.tool × n", ["afterTools"]],
                         ["yield", "final answer", ["onYield"]],
                     ];
                     const tool = [
-                        ["validate", "TypeBox args", []],
-                        ["intent", "committed", ["beforeTool"]],
-                        ["execute", "env: files, shell", []],
-                        ["result", "pi.tool-result", ["afterTool"]],
+                        ["validate", "TypeBox args", ["beforeTool"]],
+                        ["intent", "committed", []],
+                        ["execute", "env: files, shell", ["afterTool"]],
+                        ["result", "pi.tool-result", []],
                     ];
                     let sel = "beforeTool";
                     const stage = (s) =>
@@ -4552,7 +4778,7 @@
                         narr = "Click Call count. While the call runs, click Install count v2.";
                     const draw = () => {
                         $("#rl-reg").innerHTML =
-                            `<div class="regx"><span>coding</span><span class="ver v1">v1</span></div><div class="regx"><span>count</span><span class="ver v${ver}">v${ver}</span></div><div class="small muted" style="margin-top:4px">Conversations store the names <code>["coding","count"]</code>. The harness gets the code each time it uses the extension.</div>`;
+                            `<div class="regx"><span>coding</span><span class="ver v1">v1</span></div><div class="regx"><span>count</span><span class="ver v${ver}">v${ver}</span></div><div class="small muted" style="margin-top:4px"><code>pi.agent</code> stores extension names, for example <code>["coding","count"]</code>. It does not store code. If <code>pi.agent</code> has no names, the conversation uses the default list in the harness settings. If there is no default list, it uses all installed extensions. The harness finds the names in the registry each time that it uses them.</div>`;
                         $("#rl-calls").innerHTML = calls.length
                             ? calls
                                   .map(
@@ -4629,7 +4855,7 @@
                             state = "context too long: compact, then retry one time";
                             color = "var(--crash)";
                             text =
-                                "The provider rejected the request because it is too long. The generation task compacts and sends the request again one time. If a summary cuts before the start of the current context, its status is stale.";
+                                "The provider rejected the request because it is too long. The generation stores the error response. The model does not get this response. The generation then waits for a compaction that it owns. Then it prepares the request again and sends it one more time. If the compaction gives no summary, the run stops with a model error.";
                             ctx = [
                                 ["sum", "summary", 1],
                                 ["keep", "kept ~20k", 2],
@@ -4638,7 +4864,7 @@
                             state = "manual compaction";
                             color = "var(--doc)";
                             text =
-                                'root.compact("Keep the failing test names") starts a compaction now. The instructions are optional. abort() (Esc) cancels it. If the conversation is idle, the harness adds the summary immediately. If not, it adds the summary at the next turn boundary.';
+                                'root.compact("Keep the failing test names", ctx) starts a compaction now. The instructions are optional. It is not a background task. Thus root.abort() (Esc) cancels it. If the conversation is idle, the harness adds the summary immediately. If not, it adds the summary at the next boundary.';
                             ctx = [
                                 ["sum", "summary", 1],
                                 ["keep", "kept ~20k", 2],
@@ -4647,7 +4873,7 @@
                             state = "reset with a handoff note";
                             color = "var(--entry)";
                             text =
-                                'root.reset("We were fixing the flaky login test. Continue.") starts a new context from a note. The model does not get the older entries. The entries stay in storage, and history tools can find them. An agent can use a reset to give its work to a new context.';
+                                'root.reset("We were fixing the flaky login test. Continue.", ctx) starts a new context from a note. The model does not get the older entries. The entries stay in storage. Thus your tools can still read them. A tool result can also request a reset with a handoff note. This gives the work to a new context.';
                             ctx = [
                                 ["old", "older entries (in storage, not sent)", 4],
                                 ["sum", "pi.reset · note", 1],
@@ -4662,7 +4888,7 @@
                             state = "compaction in background";
                             color = "var(--commit-ink)";
                             text =
-                                "The token count is above the background limit. A compaction task makes a summary of older entries while the agent continues to work. At the next turn boundary, the harness adds a pi.compaction entry before the first entry that it keeps.";
+                                "The token count is above the background limit. A compaction task makes a summary of older entries. The agent continues to work at the same time. When the summary is ready, the harness adds a pi.compaction entry at the next boundary. If the conversation is idle, it adds the entry immediately. Then the model gets the summary instead of the entries before the first kept entry. A newer reset or compaction can start a context after the kept entry. In that case, the summary is stale, and the harness does not add it.";
                             ctx = [
                                 ["old", "summary in progress", 3],
                                 ["keep", "recent ~20k unchanged", 1],
@@ -4709,64 +4935,69 @@
                 })();
 
                 /* ================= WATCH ================= */
+                // A watch queues one frame per commit and delivers them one at a time. At 100
+                // undelivered frames, the next commit replaces them with one frame of the whole
+                // newest view (observation.ts in Pi Durable 1.0.2). New frames queue behind it.
                 (() => {
+                    const MAX = 100;
                     let seq = 0,
+                        lastSnap = -1000,
                         clients,
                         timerId = null;
-                    const mk = (name, kind) => ({
-                        name,
-                        kind,
-                        seen: 0,
-                        q: [],
-                        snap: false,
-                        joinedAt: null,
-                    });
+                    const mk = (name, kind) => ({ name, kind, seen: 0, q: [], joinedAt: null });
                     const reset = () => {
                         seq = 0;
                         clients = [mk("TUI", "watch()"), mk("Laptop · web", "watch()")];
                     };
                     reset();
                     const slow = $("#w-slow");
+                    const isSlow = (c) => slow.checked && c.name.startsWith("Laptop");
                     let narr =
                         "Click Stream commits. Each client applies the operations of each commit to its view.";
                     const draw = () => {
                         $("#w-clients").innerHTML =
                             clients
                                 .map((c) => {
-                                    const isSlow = slow.checked && c.name.startsWith("Laptop");
-                                    const qs = c.snap
-                                        ? `<i class="snap" title="one snapshot frame"></i>`
-                                        : c.q.map(() => "<i></i>").join("");
-                                    return `<div class="client"><h5><span>${esc(c.name)}</span>${chip(isSlow ? "crash" : "task", isSlow ? "slow" : "live")}</h5>
+                                    const qs = c.q
+                                        .map((f) =>
+                                            f.snap
+                                                ? `<i class="snap" title="one frame with the whole view"></i>`
+                                                : "<i></i>",
+                                        )
+                                        .join("");
+                                    const snaps = c.q.filter((f) => f.snap).length;
+                                    return `<div class="client"><h5><span>${esc(c.name)}</span>${chip(isSlow(c) ? "crash" : "task", isSlow(c) ? "slow" : "live")}</h5>
         <div class="muted">${esc(c.kind)}${c.joinedAt != null ? ` · joined at #${c.joinedAt}` : ""}</div>
         <div class="q" aria-label="undelivered frames">${qs}</div>
-        <div><span class="seen">#${c.seen}</span> <span class="muted">view at · ${c.snap ? "1 snapshot frame" : c.q.length + " frames in queue"}</span></div></div>`;
+        <div><span class="seen">#${c.seen}</span> <span class="muted">${c.kind.startsWith("watch") ? `view at · ${c.q.length} frame${c.q.length === 1 ? "" : "s"} in queue${snaps ? ", 1 with the whole view" : ""}` : "live read-only view"}</span></div></div>`;
                                 })
                                 .join("") +
                             `<div class="client" style="border-style:dashed"><h5><span>Storage</span>${chip("commit", "head")}</h5><div class="muted">one sequence of commits</div><div class="q"></div><div><span class="seen">#${seq}</span></div></div>`;
                         $("#w-narr").innerHTML = `<p>${narr}</p>`;
                     };
+                    // Deliver the oldest queued frame.
+                    const deliver = (c) => {
+                        const f = c.q.shift();
+                        if (f) c.seen = f.seq;
+                    };
                     const tick = () => {
                         seq++;
                         clients.forEach((c) => {
-                            const isSlow = slow.checked && c.name.startsWith("Laptop");
-                            if (isSlow) {
-                                if (c.snap) return;
-                                c.q.push(seq);
-                                if (c.q.length >= 100) {
-                                    c.q = [];
-                                    c.snap = true;
-                                    narr =
-                                        "The laptop has 100 frames that it did not get. The harness replaces them with <b>one frame that contains the newest view</b>. The laptop skips the old frames and shows the current state.";
-                                } else if (c.q.length % 10 === 0)
-                                    narr = `The laptop is ${c.q.length} frames behind. The watch keeps the frames in sequence, to a maximum of 100.`;
-                                if (Math.random() < 0.12 && !c.snap) {
-                                    c.q.shift();
-                                    c.seen = Math.max(c.seen, seq - c.q.length);
-                                }
-                            } else {
-                                c.seen = seq;
+                            if (!c.kind.startsWith("watch")) {
+                                c.seen = seq; // viewState(): a live read-only view, no frame queue
+                                return;
                             }
+                            if (c.q.length >= MAX) {
+                                c.q = [{ seq, snap: true }];
+                                lastSnap = seq;
+                                narr =
+                                    "The laptop has 100 frames that it did not get. The next commit replaces them with <b>one frame that contains the whole newest view</b>. New frames go into the queue after it.";
+                            } else {
+                                c.q.push({ seq });
+                                if (isSlow(c) && c.q.length % 10 === 0 && seq - lastSnap > 40)
+                                    narr = `The laptop is ${c.q.length} frames behind. Its watch delivers the frames in sequence, one at a time.`;
+                            }
+                            if (!isSlow(c) || Math.random() < 0.12) deliver(c);
                         });
                         if (seq >= 160) {
                             clearInterval(timerId);
@@ -4804,26 +5035,17 @@
                         narr = `The phone connects at commit #${seq}. It gets the <b>current view</b> immediately: transcript, streamed text, running tools, inbox, and usage. The harness does not replay old commits.`;
                         draw();
                     };
-                    slow.addEventListener("change", () => {
-                        const lap = clients[1];
-                        if (!slow.checked && (lap.q.length || lap.snap)) {
-                            lap.q = [];
-                            lap.snap = false;
-                            lap.seen = seq;
-                            narr =
-                                "The connection is normal again. The laptop gets its queued frames and shows the current state.";
-                        }
-                        draw();
-                    });
-                    // apply snapshot when the slow client catches up
+                    // The slow laptop works off its queue faster than commits arrive once it is fast again.
                     setInterval(() => {
                         const lap = clients[1];
-                        if (lap && lap.snap && timerId) {
-                            lap.snap = false;
-                            lap.seen = seq;
-                            lap.q = [];
-                        }
-                    }, 2600);
+                        if (!lap || isSlow(lap) || !lap.q.length) return;
+                        for (let i = 0; i < 8; i++) deliver(lap);
+                        if (!lap.q.length)
+                            narr =
+                                "The connection is normal again. The laptop got its queued frames and shows the current state.";
+                        draw();
+                    }, 60);
+                    slow.addEventListener("change", draw);
                     draw();
                 })();
 
@@ -4838,7 +5060,7 @@
                                 "The run is lost",
                             ],
                             1,
-                            'Only tools with replay: "safe" run again. For other tools, the model gets an interrupted error result and decides the next step.',
+                            'A call runs again only if its tool had replay: "safe" at the intent commit and still has it. No built-in tool has this setting. For other calls, the model gets an interrupted error result with the committed output. Then the model decides the next step.',
                         ],
                         [
                             "What is the maximum data that a crash can lose from a streamed answer?",
@@ -4848,7 +5070,7 @@
                                 "Approximately 100 ms of streamed output",
                             ],
                             2,
-                            "The harness commits partial answers and tool output a maximum of one time every 100 ms. Data after the last flush is only in memory.",
+                            "The harness commits a streamed answer a maximum of one time every 100 ms. Text after the last commit is only in memory. Thus a crash loses approximately the last 100 ms. The committed part stays as an aborted answer.",
                         ],
                         [
                             "After a timeout, a client sends a submit again with the same requestId. What does the client get?",
@@ -4880,7 +5102,7 @@
                             "The todo document of a fork must agree with the transcript of the fork. Which fork policy do you use?",
                             ['"initial"', '"current"', '"asOf"'],
                             2,
-                            '"asOf" gives the value of the parent at the fork point.',
+                            '"asOf" gives the value of the parent at the fork point. For this policy, the document must have history: "rewindable".',
                         ],
                     ];
                     const box = $("#qz");

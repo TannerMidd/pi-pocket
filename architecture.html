@@ -1666,7 +1666,9 @@
                         <div class="panel tl">
                             <div class="rates">
                                 <div class="rate"><b>90 ms</b><span>a room's changes</span></div>
-                                <div class="rate"><b>400 ms</b><span>the session list</span></div>
+                                <div class="rate">
+                                    <b>400 ms</b><span>the session list, when it changes</span>
+                                </div>
                                 <div class="rate"><b>1 s</b><span>peek tiles</span></div>
                             </div>
                             <div class="diagram-scroll">
@@ -1682,6 +1684,16 @@
                                 ><span
                                     ><i style="background: var(--people)"></i>update sent to tabs
                                     (the number shows the commits in the update)</span
+                                ><span
+                                    ><i
+                                        style="
+                                            background: var(--commit);
+                                            width: 4px;
+                                            height: 14px;
+                                            vertical-align: -3px;
+                                        "
+                                    ></i
+                                    >tall: the commit changes the session list</span
                                 >
                             </div>
                             <div class="row">
@@ -1702,10 +1714,11 @@
                         <p class="eyebrow">attribution.ts · requests.ts</p>
                         <h2>Attribution of work</h2>
                         <p class="lede">
-                            The request id of a message to Pi contains the name of a person. Pi
-                            works for the person who wrote the newest message. Spend, approvals,
-                            schedules, and subagents all use <code>requesterOf</code> to find this
-                            person. Click an action to see the result.
+                            The request id of a message to Pi can contain the ID of a person. Pi
+                            works for the person of the newest message that has a person in its id.
+                            Spend, approvals, schedules, and subagents all use
+                            <code>requesterOf</code> to find this person. Click an action to see the
+                            result.
                         </p>
                     </div>
                     <div class="panel attr">
@@ -1726,9 +1739,10 @@
                     <p class="note" style="margin-top: 12px">
                         <code>u:&lt;user&gt;:&lt;key&gt;</code> is a message that a person wrote.
                         <code>p:&lt;user&gt;:&lt;key&gt;</code> is a message sent for a person, for
-                        example a scheduled message or a subagent task. If no person is known, Pi
-                        Pocket charges the person who started the session. If that person is not
-                        known, it charges the owner.
+                        example a scheduled message that Pi set up, or the task of a subagent. A
+                        schedule that a person set up sends a <code>u:</code> message for that
+                        person. If no person is known, Pi Pocket charges the person who started the
+                        session. If that person is not known, it charges the owner.
                     </p>
                 </section>
 
@@ -1739,8 +1753,9 @@
                         <h2>Crash recovery rules</h2>
                         <p class="lede">
                             Pi Durable supplies tasks, checkpoints, and atomic commits. Pi Pocket
-                            uses them for the rules below. Thus, a restart at any time causes no
-                            change that a person can see.
+                            uses them for the rules below. Thus, a restart loses no stored work. Pi
+                            does not get a message two times. A restart loses only the data in
+                            memory. The right column of the table below shows this data.
                         </p>
                     </div>
                     <div class="rules">
@@ -1748,19 +1763,25 @@
                             <span class="tag t-commit">commit, then show</span>
                             <h3>Show only stored data</h3>
                             <p>
-                                Tabs show only committed state. Pi Pocket documents change in the
-                                same commits as the transcript. Thus, the documents and the
-                                transcript always agree after a crash.
+                                Tabs show only committed state. Pi Pocket keeps its documents in the
+                                same storage as the transcript. Each change is an atomic commit.
+                                Changes that must agree are in one commit, for example a fork and
+                                its documents. Pi Pocket records the author of a message in a second
+                                commit. At startup, it repairs the authors that a crash did not
+                                record.
                             </p>
                         </div>
                         <div class="panel rule">
                             <span class="tag t-sub">request ids</span>
                             <h3>Send one time</h3>
                             <p>
-                                Each message to Pi has a request id. Pi Pocket can send a message
-                                again after a retry, a resend, or a restart. The request id then
-                                finds the stored message, so Pi gets it only one time. This applies
-                                to <code>!</code> commands and scheduled messages too.
+                                Each message to Pi has a request id. If Pi Pocket sends a message
+                                again with the same id, Pi Durable finds the stored message. Thus Pi
+                                gets the message only one time. Scheduled messages and subagent
+                                reports use the request id after a restart. A <code>!</code> command
+                                keeps its id until the server accepts it. Pi Pocket stores this id
+                                in <code>pocket.shell-requests</code>. Thus a second try after a
+                                lost reply runs the command only one time.
                             </p>
                         </div>
                         <div class="panel rule">
@@ -1777,20 +1798,20 @@
                             <span class="tag t-crash">replay: "safe"</span>
                             <h3>Run again only if safe</h3>
                             <p>
-                                Artifact calls and schedule calls are replay-safe. Browser clicks
-                                and codemode scripts are not replay-safe. After a crash, the model
-                                gets a message that the call stopped. Then the model examines the
-                                result.
+                                Artifact calls and schedule calls are replay-safe. Other calls are
+                                not replay-safe. Examples are bash, browser, and codemode calls.
+                                After a crash, the model gets a message that such a call stopped.
+                                Then the model examines the result.
                             </p>
                         </div>
                         <div class="panel rule">
                             <span class="tag t-task">durable tasks</span>
                             <h3>Durable timers</h3>
                             <p>
-                                A scheduled message is a task that sleeps in the harness. If a
-                                restart occurs before the scheduled time, the task continues to
-                                sleep. If a restart occurs after the scheduled time, Pi Pocket sends
-                                the message immediately, one time.
+                                A scheduled message is a task. Its send time is in the
+                                <code>pocket.schedules</code> document. If a restart occurs before
+                                that time, the task sleeps again. If a restart occurs after that
+                                time, Pi Pocket sends the message immediately, one time.
                             </p>
                         </div>
                         <div class="panel rule">
@@ -1798,8 +1819,9 @@
                             <h3>Fork policy per document</h3>
                             <p>
                                 Each document kind tells if a fork copies it or starts it empty. In
-                                the same commit, the fork setup removes copied pins and authors that
-                                come after the fork point.
+                                the commit that makes the fork, Pi Pocket empties the copied chat.
+                                It also removes the copied pins after the fork point, and the copied
+                                authors of later messages.
                             </p>
                         </div>
                     </div>
@@ -1819,7 +1841,7 @@
                         </div>
                         <div class="ledger">
                             <div>
-                                <h3>Stored · read again by #recover</h3>
+                                <h3>Stored · read again after the restart</h3>
                                 <ul class="items dur" id="durItems"></ul>
                             </div>
                             <div>
@@ -1840,9 +1862,9 @@
                         <h2>Data storage</h2>
                         <p class="lede">
                             Pi Pocket documents are in <code>pocket.sqlite</code>, together with the
-                            Pi Durable documents: the transcript, the agent settings, the inbox, the
-                            live run, and usage. Each document kind tells what a fork gets. Click
-                            "Fork at reply 5" to see the result.
+                            transcript and the Pi Durable documents: the agent settings, the
+                            provider ID, the inbox, the live run, and usage. Each document kind
+                            tells what a fork gets. Click "Fork at reply 5" to see the result.
                         </p>
                     </div>
                     <div class="panel fork">
@@ -1891,7 +1913,7 @@
                         <p class="lede">
                             Pi Pocket adds most of its agent features as Pi Durable extensions. The
                             server installs them in the sequence below. Each extension uses one or
-                            more of four parts: sections, tools, hooks, and tasks.
+                            more of four parts: prompt sections, tools, hooks, and tasks.
                         </p>
                     </div>
                     <div class="exts" id="exts"></div>
@@ -2365,7 +2387,7 @@
                         c: "var(--sub)",
                         main: true,
                         wire: "calls",
-                        text: "The HTTP server parses a request, checks it, calls a part, and writes the answer. It keeps no state, except invites and the pollers of the event streams. Each request that changes data must have an X-Pocket header.",
+                        text: "The HTTP server parses a request, checks it, calls a part, and writes the answer. Its only state is the list of long-polling tabs. Invites are in config.json. Each request that changes data must have an X-Pocket header.",
                         owns: [
                             "/api routes",
                             "event stream",
@@ -2381,17 +2403,22 @@
                         c: "var(--commit)",
                         main: true,
                         wire: "commits · one commit listener",
-                        text: "PocketApp is the core. It makes the parts of the app and gives each part a reference to the app. Each commit goes through its one listener, which keeps memory the same as storage.",
+                        text: "PocketApp is the core. It makes the parts of the app. Most parts get a reference to the app. It keeps one room for each open session. Each commit goes through its one listener, which keeps memory the same as storage.",
                         owns: [
-                            "rooms",
                             "commands",
                             "collab",
-                            "alerts",
+                            "attribution",
                             "spend",
+                            "approvals",
+                            "alerts",
                             "schedules",
                             "goals",
-                            "changes",
-                            "worktrees",
+                            "shell",
+                            "workspace",
+                            "transcripts",
+                            "providers",
+                            "browsers",
+                            "rooms",
                         ],
                     },
                     harness: {
@@ -2422,14 +2449,14 @@
                         name: "Launcher",
                         path: "src/launcher/",
                         c: "var(--ink-2)",
-                        text: "The launcher runs the server as a child process. It starts the server again after exit code 75 or after a crash. It also keeps the tunnel open: this device, LAN, Cloudflare, or Tailscale.",
+                        text: "The launcher runs the server as a child process. It starts the server again after exit code 75 or after a crash. It also sets how other devices get access: this device only, the local network, a Cloudflare tunnel, or Tailscale. A tunnel stays open during a restart.",
                         owns: ["access menu", "supervisor", "cloudflared", "QR code", "owner link"],
                     },
                     exts: {
                         name: "Extensions",
                         path: "src/server/extensions/",
                         c: "var(--doc)",
-                        text: "Extensions supply tools, hooks, prompt sections, and tasks to the harness. The server installs an extension again after each edit. Extensions that the owner adds load after the built-in extensions.",
+                        text: "Extensions supply tools, hooks, prompt sections, and tasks to the harness. The server installs an extension again after each edit. Extensions that the owner adds load after the built-in extensions. They stay off until the owner turns them on.",
                         owns: [
                             "prompt",
                             "artifacts",
@@ -2453,12 +2480,12 @@
                         name: "Pi",
                         path: "~/.pi/agent/",
                         c: "var(--sub)",
-                        text: "This folder contains sign-ins, settings, skills, and prompt templates. Pi Pocket and the Pi command line use the same folder. It also contains Lancet Guard if you install it.",
+                        text: "This folder contains sign-ins, settings, skills, and prompt templates. Pi Pocket and the Pi command line use the same folder. If you install Lancet Guard as a Pi package, it is in this folder too. Its settings file, ~/.pi/lancet-guard.json, turns it on or off. In Pi Pocket, the guard extension must also be on.",
                         owns: [
                             "provider sign-ins",
                             "skills",
                             "prompt templates",
-                            "lancet-guard.json",
+                            "specpi-lancet-guard",
                         ],
                     },
                 };
@@ -2550,7 +2577,7 @@
                     [
                         "commit",
                         "pdocs",
-                        "A chat message, a pin, or a plan mode change is in the same commit as the transcript. Thus, they always agree after a crash.",
+                        "Each change to a pocket.* document is an atomic commit, in the same storage as the transcript. Changes that must agree are in one commit. For example, a fork and its documents are one commit, and a schedule and its task are one commit.",
                     ],
                     [
                         "watch",
@@ -2575,7 +2602,7 @@
                     [
                         "doc",
                         "pdocs",
-                        "Pi Pocket defines 18 pocket.* kinds with defineDoc. Examples are chat, pins, notes, schedules, and spend.",
+                        "Pi Pocket defines 18 pocket.* kinds: 17 with defineDoc, and the artifact bodies with defineDocFamily. Examples are chat, pins, notes, schedules, and spend.",
                     ],
                     [
                         "doc",
@@ -2585,7 +2612,7 @@
                     [
                         "task",
                         "sched",
-                        "A scheduled message is a task that sleeps in the harness. It continues to sleep after a restart.",
+                        "A scheduled message is a task. Its send time is in a document. Thus, after a restart, the task sleeps again until that time.",
                     ],
                     [
                         "task",
@@ -2610,7 +2637,7 @@
                     [
                         "replay",
                         "restart",
-                        "Artifact calls and schedule calls run again after a crash. Browser clicks and codemode calls return as interrupted.",
+                        "Artifact calls and schedule calls run again after a crash. Other calls, for example bash, browser, and codemode calls, return as interrupted.",
                     ],
                     [
                         "hooks",
@@ -2630,7 +2657,7 @@
                     [
                         "section",
                         "prompt",
-                        "The prompt contains guidelines for a phone screen, the AGENTS.md files of the project, the Pi skills, and the working directory. The harness renders it before each request.",
+                        "The prompt contains guidelines for a phone screen, the location of the Pi Pocket docs, the AGENTS.md files of the project, the Pi skills, and the working directory. The harness renders it before each request.",
                     ],
                     [
                         "section",
@@ -2661,7 +2688,7 @@
                     [
                         "usage",
                         "spend",
-                        "The spend of a conversation is its pi.usage total. Above the limit, Pi Pocket refuses new messages and stops the running work.",
+                        "The spend of a conversation is its pi.usage total. The owner can set a limit for a session or a person. Above the limit, Pi Pocket refuses new messages and stops the current run.",
                     ],
                 ];
                 const mapL = $("#mapL"),
@@ -2752,16 +2779,16 @@
                 /* ---------- Message path ---------- */
                 const STEPS = [
                     {
-                        file: "web/composer.js",
+                        file: "web/store.js",
                         name: "Send with an id",
-                        text: "The tab sends the message to /api/c/:id/submit with its own id. If the tab sends again after a network error, Pi gets the message only one time.",
-                        code: 'POST /api/c/12/submit\nX-Pocket: 1\n{ text: "fix the redirect loop", id: "k7f2" }',
+                        text: "The tab sends the message to /api/c/:id/submit with a new key. The server makes the request id from this key and the ID of the person.",
+                        code: 'POST /api/c/12/submit\nX-Pocket: 1\n{ text: "fix the redirect loop", requestId: "k7f2" }',
                     },
                     {
                         file: "commands.ts",
                         name: "Check, then queue",
-                        text: "The server checks the role, the invite scope, take turns, and spend limits. It expands a prompt template. The message goes into the inbox with a request id that identifies the author. If Pi is busy, the message joins the run as a steer or waits as a follow-up.",
-                        code: 'requireSteer(user, 12)\nsubmit({ type: "input", content,\n  requestId: "u:ana:k7f2", whenBusy })',
+                        text: "The server checks the invite scope, the role, take turns, and spend limits. It expands a prompt template. Then it submits the message with a request id that identifies the author. If Pi is idle, a run starts. If Pi is busy, the message goes into the inbox. A steer joins the run. A follow-up waits.",
+                        code: 'requireSee(user, 12); requireDriver(12, user)\nspend.check(user, 12)\nconversation.submit({ type: "input", content,\n  requestId: "u:ana:k7f2", whenBusy })',
                     },
                     {
                         file: "pi-durable",
@@ -2891,10 +2918,11 @@
                 const SPAN = 3000,
                     X0 = 110,
                     X1 = 505;
+                // [name, ms, y, only commits that change the session list]
                 const LANES = [
-                    ["room", 90, 70],
-                    ["session list", 400, 120],
-                    ["peek tiles", 1000, 170],
+                    ["room", 90, 70, false],
+                    ["session list", 400, 120, true],
+                    ["peek tiles", 1000, 170, false],
                 ];
                 const xs = (t) => X0 + (t / SPAN) * (X1 - X0);
                 function genCommits() {
@@ -2928,14 +2956,19 @@
                 let tlAnim = null;
                 function drawTimeline() {
                     const commits = genCommits();
+                    // A run that starts or ends, a chat message, or a session change: the list changes.
+                    const listCommits = commits.filter(
+                        (c, i) => i === 0 || i === commits.length - 1 || Math.random() < 0.08,
+                    );
+                    const laneCommits = (only) => (only ? listCommits : commits);
                     let s = `<text x="10" y="34" font-family="var(--mono)" font-size="11" fill="var(--ink-2)">commits</text>`;
                     s += `<line x1="${X0}" y1="30" x2="${X1}" y2="30" stroke="var(--rule)"/>`;
                     for (const c of commits)
-                        s += `<rect class="tc" data-t="${c}" x="${xs(c) - 1.5}" y="20" width="3" height="20" rx="1" fill="var(--commit)"/>`;
-                    for (const [name, ms, y] of LANES) {
+                        s += `<rect class="tc" data-t="${c}" x="${xs(c) - 1.5}" y="${listCommits.includes(c) ? 14 : 20}" width="3" height="${listCommits.includes(c) ? 26 : 20}" rx="1" fill="var(--commit)"/>`;
+                    for (const [name, ms, y, only] of LANES) {
                         s += `<text x="10" y="${y + 4}" font-family="var(--mono)" font-size="11" fill="var(--ink-2)">${name}</text>`;
                         s += `<line x1="${X0}" y1="${y}" x2="${X1}" y2="${y}" stroke="var(--rule)"/>`;
-                        for (const [t, n] of flushes(commits, ms)) {
+                        for (const [t, n] of flushes(laneCommits(only), ms)) {
                             s += `<g class="tf" data-t="${t}"><circle cx="${xs(t)}" cy="${y}" r="${Math.min(10, 4 + n)}" fill="var(--people)"/>`;
                             if (n > 1)
                                 s += `<text x="${xs(t)}" y="${y - 13}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--ink-2)">${n}</text>`;
@@ -2946,7 +2979,9 @@
                         s += `<text x="${xs(t)}" y="200" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--ink-2)">${t / 1000}s</text>`;
                     s += `<line id="tlHead" x1="${X0}" y1="12" x2="${X0}" y2="186" stroke="var(--ink)" stroke-width="1" opacity=".5"/>`;
                     tlSvg.innerHTML = s;
-                    const totals = LANES.map(([, ms]) => flushes(commits, ms).length);
+                    const totals = LANES.map(
+                        ([, ms, , only]) => flushes(laneCommits(only), ms).length,
+                    );
                     tlSvg.setAttribute(
                         "aria-label",
                         `${commits.length} commits make ${totals[0]} room updates, ${totals[1]} session list updates, and ${totals[2]} peek tile updates.`,
@@ -2985,9 +3020,15 @@
                     },
                     {
                         b: "The schedule of Ben starts at 8:00",
-                        id: "p:ben:sched-3",
+                        id: "u:ben:schedule-41-0",
                         who: "ben",
-                        log: "A schedule sent this message for Ben. Pi now works for Ben.",
+                        log: "Ben set up this schedule. Thus the message is his own message. Pi now works for Ben.",
+                    },
+                    {
+                        b: "A schedule that Pi set up for Ana starts",
+                        id: "p:ana:schedule-42-0",
+                        who: "ana",
+                        log: "Pi set up this schedule when it worked for Ana. Pi Pocket sends the message for Ana. Pi now works for Ana.",
                     },
                     {
                         b: "Pi starts a subagent",
@@ -3003,19 +3044,21 @@
                     },
                     {
                         b: "A message with no person",
-                        id: "no person in the id",
-                        none: true,
+                        id: "schedule:43-0",
                         log: "A message with no person in the id does not change the person that Pi works for.",
                     },
                 ];
-                let cur = "owner",
+                // cur: whom Pi works for (requesterOf); null until a message names a person.
+                // Then spend goes to the person who started the session: here, the owner.
+                let cur = null,
                     spend = { ana: 0, ben: 0, owner: 0 };
+                const payer = () => cur ?? "owner";
                 const acts = $("#acts"),
                     bars = $("#bars"),
                     alog = $("#alog");
                 function renderWho() {
-                    const [n, c] = PEOPLE[cur];
-                    $("#whoAv").textContent = n[0];
+                    const [n, c] = cur ? PEOPLE[cur] : ["No person yet", "var(--ink-2)"];
+                    $("#whoAv").textContent = cur ? n[0] : "?";
                     $("#whoAv").style.background = c;
                     $("#whoName").textContent = n;
                     const max = Math.max(0.2, ...Object.values(spend));
@@ -3043,9 +3086,9 @@
                         addLog(a.log);
                         if (!a.none) {
                             const cost = a.sub ? 0.09 : 0.05;
-                            spend[cur] += cost;
+                            spend[payer()] += cost;
                             addLog(
-                                `Pi runs a turn${a.sub ? " (subagent)" : ""}. Cost $${cost.toFixed(2)}, charged to ${PEOPLE[cur][0]}.`,
+                                `Pi runs a turn${a.sub ? " (subagent)" : ""}. Cost $${cost.toFixed(2)}, charged to ${PEOPLE[payer()][0]}${cur ? "" : ", who started the session"}.`,
                             );
                         }
                         renderWho();
@@ -3053,11 +3096,11 @@
                     acts.append(b);
                 });
                 $("#aReset").addEventListener("click", () => {
-                    cur = "owner";
+                    cur = null;
                     spend = { ana: 0, ben: 0, owner: 0 };
                     alog.innerHTML = "";
                     addLog(
-                        "No person has written a message. Spend goes to the person who started the session. If that person is not known, spend goes to the owner.",
+                        "No message names a person yet. Spend goes to the person who started the session, here the owner. If that person is not known, spend goes to the owner.",
                     );
                     renderWho();
                 });
@@ -3079,7 +3122,10 @@
                     ["The last address of the browser", "pocket.browser opens it again"],
                 ];
                 const MEM = [
-                    ["Who is connected, typing, or away", "tabs connect again and send hello"],
+                    [
+                        "Who is connected, typing, or away",
+                        "tabs connect again, and each gets a hello",
+                    ],
                     ["Calls that wait for approval", "the hook runs again and asks"],
                     ["Text typed into a browser page", "the page opens again with no text"],
                     ["The end time of each run (peek tiles)", "lost"],
@@ -3163,7 +3209,7 @@
                 ];
                 const POL = {
                     adds: "adds a session",
-                    own: "starts a new one",
+                    own: "starts empty, then gets a new line",
                     cut: "copies up to the fork point",
                     copy: "copies",
                     empty: "starts empty",
@@ -3196,7 +3242,7 @@
                 $("#forkBtn").addEventListener("click", () => {
                     forkGrid.classList.remove("pre");
                     $("#forkPoint").textContent =
-                        `Fork at reply ${AT} · one commit wrote all documents below`;
+                        `Fork at reply ${AT} · one commit makes the fork and sets up these documents`;
                 });
                 $("#forkReset").addEventListener("click", () => {
                     forkGrid.classList.add("pre");
@@ -3207,13 +3253,13 @@
                 const EXTS = [
                     [
                         "prompt.ts",
-                        "The system prompt. It contains guidelines for a phone screen, the AGENTS.md files of the project, the Pi skills, and the working directory. Always on.",
+                        "The system prompt. It contains guidelines for a phone screen, the location of the Pi Pocket docs, the AGENTS.md files of the project, the Pi skills, and the working directory. Always on.",
                         ["section"],
                     ],
                     [
                         "artifacts.ts",
                         "HTML, Markdown, and SVG artifacts with versions. They open in a sandbox. Replay-safe: a second run finds the version that the first run wrote.",
-                        ["tool"],
+                        ["tool", "section"],
                     ],
                     [
                         "browser.ts",
@@ -3223,12 +3269,12 @@
                     [
                         "subagents.ts",
                         "Background subagents. An anchor task owns each subagent. A reporter task sends each answer back.",
-                        ["tool", "tasks"],
+                        ["tool", "tasks", "section"],
                     ],
                     [
                         "schedules.ts",
                         "Scheduled messages, and a tool that Pi uses to schedule its own follow-ups.",
-                        ["tool", "task"],
+                        ["tool", "task", "section"],
                     ],
                     [
                         "goals.ts",
@@ -3248,7 +3294,7 @@
                     [
                         "codemode.ts",
                         "Scripts that call the other tools in a QuickJS sandbox. Each call goes through the same hooks as a direct call.",
-                        ["tool"],
+                        ["tool", "section"],
                     ],
                 ];
                 const TAGC = {
