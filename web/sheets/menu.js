@@ -1,7 +1,9 @@
 // The menu: what can be done in this session and in the app.
 import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
+import { chatUnread } from "../chat.js";
 import { schedulesAvailable } from "../commands.js";
 import { filesAvailable, setFilesOpen } from "../files-panel.js";
+import { peeksOn, togglePeeks } from "../peeks.js";
 import { setArchived } from "../sessions.js";
 import {
     actions,
@@ -17,8 +19,116 @@ import {
     store,
 } from "../store.js";
 import { isPinned, paletteOf, togglePin } from "../theme.js";
-import { branchAvailable, headLabel } from "./branch.js";
-import { copyText, html, item, Sheet, shortPath } from "../ui.js";
+import { branchAvailable } from "./branch.js";
+import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
+
+/**
+ * The session's places as big tiles at the top of the menu: Files, Changes, the browser, artifacts, the chat, find,
+ * the branch, and peek tiles. On a phone the top bar keeps only the buttons with something to say; these are always
+ * here, a thumb's width each.
+ */
+function Places() {
+    const { view, browser, browserOpen, server } = store.state;
+    const conversation = view.conversation;
+
+    if (!conversation) {
+        return null;
+    }
+
+    const live = browser?.open && browser.url !== "" && browser.url !== "about:blank";
+    const unread = collab() ? chatUnread() : 0;
+    const places = [
+        filesAvailable() && {
+            id: "files",
+            icon: "folder",
+            label: "Files",
+            run: () => setFilesOpen(true, "files"),
+        },
+        filesAvailable() && {
+            id: "changes",
+            icon: "diff",
+            label: "Changes",
+            run: () => setFilesOpen(true, "changes"),
+        },
+        browserAvailable() && {
+            id: "browser",
+            icon: "globe",
+            label: "Browser",
+            on: browserOpen,
+            dot: live,
+            run: () => {
+                setBrowserOpen(true);
+                closeSheet();
+            },
+        },
+        {
+            id: "artifacts",
+            icon: "artifact",
+            label: "Artifacts",
+            count: view.artifacts.length,
+            run: () => openSheet({ type: "artifacts" }),
+        },
+        collab() && {
+            id: "chat",
+            icon: "chat",
+            label: "Chat",
+            count: unread,
+            counted: "unread",
+            run: () => openSheet({ type: "chat" }),
+        },
+        { id: "find", icon: "search", label: "Find", run: () => openSheet({ type: "find" }) },
+        branchAvailable() && {
+            id: "branch",
+            icon: "fork",
+            label: "Branch",
+            run: () => openSheet({ type: "branch" }),
+        },
+        server?.peeks === true && {
+            id: "peeks",
+            icon: "tiles",
+            label: "Peeks",
+            on: peeksOn(),
+            run: () => {
+                togglePeeks();
+                closeSheet();
+            },
+        },
+    ].filter(Boolean);
+
+    return html`<nav class="places" aria-label="Places">
+        ${places.map(
+            (place) => html`<button
+                key=${place.id}
+                type="button"
+                class=${`place ${place.on ? "on" : ""}`}
+                data-place=${place.id}
+                aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.dot ? `${place.label}, a page open` : place.label}
+                aria-pressed=${place.on === undefined ? undefined : place.on ? "true" : "false"}
+                onClick=${place.run}
+            >
+                <span class="place-icon badge-host">
+                    <${Icon} name=${place.icon} size=${22} />
+                    ${place.count > 0 && html`<span class="badge">${place.count}</span>`}
+                    ${place.dot && html`<span class="browser-dot" aria-hidden="true"></span>`}
+                </span>
+                <span class="place-label">${place.label}</span>
+            </button>`,
+        )}
+    </nav>`;
+}
+
+/**
+ * The places alone, in a short sheet that stays near the bottom edge: what the button beside the message box and a
+ * swipe up from it open on a phone, a thumb's reach away. The rest of the menu is a row below.
+ */
+export function PlacesSheet() {
+    const conversation = store.state.view.conversation;
+
+    return html`<${Sheet} title=${conversation?.title ?? "Open"} onClose=${closeSheet}>
+        <${Places} />
+        ${item("Session menu", () => openSheet({ type: "menu" }), "rename, context, settings")}
+    <//>`;
+}
 
 export function MenuSheet() {
     const { view, me, server } = store.state;
@@ -37,7 +147,7 @@ export function MenuSheet() {
     const instructions = view.agent?.instructions;
 
     return html`<${Sheet} title=${conversation?.title ?? "Menu"} onClose=${closeSheet}>
-        ${conversation && collab() && item("People here", () => openSheet({ type: "chat" }), "chat, pinned, notes")}
+        <${Places} />
         ${
             conversation &&
             collab() &&
@@ -85,20 +195,16 @@ export function MenuSheet() {
         ${
             conversation &&
             browserAvailable() &&
+            store.state.browserOpen &&
             item(
-                store.state.browserOpen ? "Close the browser" : "Browser",
+                "Close the browser",
                 () => {
-                    setBrowserOpen(!store.state.browserOpen);
+                    setBrowserOpen(false);
                     closeSheet();
                 },
-                (store.state.browser?.open && displayUrl(store.state.browser.url)) ||
-                    "see and test pages with Pi",
+                store.state.browser?.open && displayUrl(store.state.browser.url),
             )
         }
-        ${conversation && branchAvailable() && item("Branch", () => openSheet({ type: "branch" }), headLabel(view.branch))}
-        ${conversation && item("Find in session", () => openSheet({ type: "find" }), "messages, commands, files")}
-        ${conversation && filesAvailable() && item("Files", () => setFilesOpen(true, "files"), "browse the folder, read files")}
-        ${conversation && filesAvailable() && item("Changes", () => setFilesOpen(true, "changes"), "review what changed")}
         ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
         ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
         ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}

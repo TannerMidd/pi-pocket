@@ -1,6 +1,8 @@
 // The session list (sidebar, drawer, and home screen), the folded rail, and the order and archiving of sessions.
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar, initials } from "./avatar.js";
+import { useBack } from "./back.js";
+import { useDragToClose } from "./gestures.js";
 import {
     actions,
     canSteer,
@@ -336,10 +338,16 @@ const TABS = [
     ["archived", "Archived"],
 ];
 
+/**
+ * What the full list searched for and how far it was scrolled, kept while the tab lives: on a phone the list goes when a
+ * session opens, and back from the session shows it again as it was.
+ */
+const listKept = { query: "", scroll: 0 };
+
 export function SessionList({ compact = false }) {
     const { sessions, sessionsLoaded, server, me, pinned } = store.state;
     const canStart = canSteer() && !scoped();
-    const [query, setQuery] = useState("");
+    const [query, setQueryState] = useState(() => (compact ? "" : listKept.query));
     const [tab, setTabState] = useState(() => (prefs().group === "folder" ? "folders" : "recent"));
     const [closed, setClosed] = useState(readClosed);
     const [selected, setSelectedState] = useState(() => new Set());
@@ -353,6 +361,21 @@ export function SessionList({ compact = false }) {
     const tabs = useRef(null);
     const needle = query.trim().toLowerCase();
     const archived = tab === "archived";
+
+    const setQuery = (next) => {
+        if (!compact) {
+            listKept.query = next;
+        }
+
+        setQueryState(next);
+    };
+
+    // Scrolled back to where it was, once its rows are there.
+    useLayoutEffect(() => {
+        if (!compact && sessionsLoaded && list.current) {
+            list.current.scrollTop = listKept.scroll;
+        }
+    }, [sessionsLoaded]);
 
     const setSelected = (next) => {
         picked.current = next;
@@ -648,7 +671,7 @@ export function SessionList({ compact = false }) {
             ${
                 !compact &&
                 html`<button
-                    class="icon-button"
+                    class="icon-button sidebar-fold"
                     title="Fold the sidebar"
                     aria-label="Fold the sidebar"
                     onClick=${() => setPrefs({ sidebar: "rail" })}
@@ -716,7 +739,11 @@ export function SessionList({ compact = false }) {
             )}
             <${Slide} box=${tabBar} axis="x" />
         </div>
-        <div class="session-items" ref=${list}>
+        <div
+            class="session-items"
+            ref=${list}
+            onScroll=${(event) => !compact && (listKept.scroll = event.currentTarget.scrollTop)}
+        >
             <${Slide} box=${indicator} />
             ${!sessionsLoaded && html`<${LoadingSessions} />`}
             ${
@@ -973,6 +1000,11 @@ export function ResizeHandle() {
 
 export function Drawer() {
     const [open, leaving] = usePresence(store.state.drawer || null, 200);
+    const ref = useRef(null);
+    const close = () => store.set({ drawer: false });
+
+    useBack(store.state.drawer === true, close);
+    useDragToClose(ref, { dir: "left", onClose: close, enabled: Boolean(open) && !leaving });
 
     if (!open) {
         return null;
@@ -981,9 +1013,9 @@ export function Drawer() {
     return html`<div class=${leaving ? "leaving" : ""} inert=${leaving}>
         <div
             class="overlay drawer-overlay"
-            onClick=${(event) => event.target === event.currentTarget && store.set({ drawer: false })}
+            onClick=${(event) => event.target === event.currentTarget && close()}
         >
-            <aside class="drawer"><${SessionList} compact=${true} /></aside>
+            <aside class="drawer" ref=${ref}><${SessionList} compact=${true} /></aside>
         </div>
     </div>`;
 }

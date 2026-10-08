@@ -210,7 +210,7 @@ export function peekTiles(state = store.state) {
 }
 
 /** Peek tiles are turned on in this browser. */
-const peeksOn = () => prefs().peeks === true;
+export const peeksOn = () => prefs().peeks === true;
 
 /** Peeks show in this session: turned on, a server that sends them, and a session open. */
 export function peeksWanted(state = store.state) {
@@ -248,8 +248,9 @@ export function PeeksButton() {
             (session) => session.waiting && !session.archived && session.id !== conversationId,
         );
 
+    // Quiet on phones while off: the top bar's way back to the sessions counts those waiting there.
     return html`<button
-        class=${`icon-button badge-host ${on ? "on" : ""}`}
+        class=${`icon-button badge-host ${on ? "on" : "quiet"}`}
         aria-label="Peek tiles"
         aria-pressed=${on}
         title=${on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)"}
@@ -636,7 +637,12 @@ class PeekTile extends Component {
                           )
                 }
             </div>
-            ${approval && html`<${PeekAsk} approval=${approval} compact=${compact} />`}
+            ${
+                approval &&
+                html`<div class="peek-ask-host" onClick=${open}>
+                    <${PeekAsk} approval=${approval} compact=${compact} />
+                </div>`
+            }
             <div class="peek-foot">
                 <span class="peek-status">${label}</span>
                 ${

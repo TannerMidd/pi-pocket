@@ -53,6 +53,26 @@ const TITLES: Record<string, string> = {
     "codemode.ts": "Codemode",
 };
 
+/**
+ * Names Pi Pocket keeps for itself, whether the module that uses them is on or off. Installing an extension, or a tool,
+ * with a name already taken replaces it in place, so a drop-in that used one would quietly replace a built-in (or be
+ * replaced by it when the built-in is turned on), and turning the drop-in off would remove the built-in too.
+ */
+const RESERVED_EXTENSIONS = /^(pocket-.*|coding-tools)$/;
+
+/** The tools of Pi Durable's coding tools and of the built-in modules. A test checks it against what they install. */
+export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
+    "read",
+    "write",
+    "edit",
+    "bash",
+    "artifact",
+    "browser",
+    "subagent",
+    "schedule",
+    "codemode",
+]);
+
 /** Pi Pocket's own modules, or the owner's from the drop-in folder. */
 export type ModuleSource = "built-in" | "drop-in";
 
@@ -313,6 +333,11 @@ export class ExtensionLoader {
 
         const built = loaded.default(this.#host);
         const extensions = (Array.isArray(built) ? built : [built]) as Extension[];
+
+        if (module.source === "drop-in") {
+            this.#checkNames(file, extensions);
+        }
+
         const previous = this.#installed.get(file) ?? [];
 
         for (const extension of extensions) {
@@ -329,6 +354,57 @@ export class ExtensionLoader {
         this.#errors.delete(file);
 
         return extensions;
+    }
+
+    /**
+     * Refuse a drop-in that would take a name Pi Pocket keeps, or one another module installed: installing it would
+     * replace that one. Throws before anything is installed, so a version that loaded before keeps running.
+     */
+    #checkNames(file: string, extensions: readonly Extension[]): void {
+        const owners = new Map<string, string>();
+        const tools = new Map<string, string>();
+
+        for (const [other, installed] of this.#installed) {
+            if (other === file) {
+                continue;
+            }
+
+            for (const extension of installed) {
+                owners.set(extension.name, other);
+
+                for (const tool of extension.tools ?? []) {
+                    tools.set(tool.name, other);
+                }
+            }
+        }
+
+        for (const extension of extensions) {
+            if (RESERVED_EXTENSIONS.test(extension.name)) {
+                throw new Error(
+                    `the extension name ${extension.name} is Pi Pocket's own: give it a name of your own`,
+                );
+            }
+
+            if (owners.has(extension.name)) {
+                throw new Error(
+                    `${owners.get(extension.name)} already installs an extension named ${extension.name}: give it a name of your own`,
+                );
+            }
+
+            for (const tool of extension.tools ?? []) {
+                if (BUILT_IN_TOOLS.has(tool.name)) {
+                    throw new Error(
+                        `the tool name ${tool.name} is a built-in tool's: give it a name of your own`,
+                    );
+                }
+
+                if (tools.has(tool.name)) {
+                    throw new Error(
+                        `${tools.get(tool.name)} already has a tool named ${tool.name}: give it a name of your own`,
+                    );
+                }
+            }
+        }
     }
 
     /** Watch both folders and reload a module shortly after it changes. Keeps the old code when the new one fails. */

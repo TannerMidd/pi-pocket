@@ -1,0 +1,3409 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <title>Pi Pocket on Pi Durable · Pi Pocket</title>
+        <meta
+            name="description"
+            content="An interactive guide to how Pi Pocket uses Pi Durable: the commit listener, attribution, crash recovery rules, documents, and extensions."
+        />
+        <link rel="canonical" href="https://tannermidd.github.io/pi-pocket/architecture.html" />
+        <link rel="icon" href="icon.svg" type="image/svg+xml" />
+        <meta property="og:type" content="article" />
+        <meta property="og:site_name" content="Pi Pocket" />
+        <meta property="og:title" content="Pi Pocket on Pi Durable" />
+        <meta
+            property="og:description"
+            content="An interactive guide to how Pi Pocket uses Pi Durable: the commit listener, attribution, crash recovery rules, documents, and extensions."
+        />
+        <meta
+            property="og:url"
+            content="https://tannermidd.github.io/pi-pocket/architecture.html"
+        />
+        <meta property="og:image" content="https://tannermidd.github.io/pi-pocket/og.png" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            /* Layout: flight-recorder ledger. Gridded paper, a sticky contents rail on wide screens, sections as instrument panels. */
+            :root {
+                --paper: #eef1f3;
+                --sheet: #f8fafb;
+                --ink: #142029;
+                --ink-2: #4a5a66;
+                --rule: #c9d2d9;
+                --grid: rgba(20, 32, 41, 0.06);
+                --commit: #d97a00;
+                --commit-ink: #9a5200;
+                --entry: #2b6cb0;
+                --task: #2f855a;
+                --doc: #8a4fbf;
+                --sub: #b83280;
+                --crash: #c53030;
+                --people: #0b8a8c;
+                --wash: color-mix(in srgb, var(--ink) 5%, transparent);
+                --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+                --body: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+                --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+            }
+            @media (prefers-color-scheme: dark) {
+                :root:not([data-theme="light"]) {
+                    --paper: #0f151a;
+                    --sheet: #161e25;
+                    --ink: #e3e9ed;
+                    --ink-2: #93a3ae;
+                    --rule: #2a3640;
+                    --grid: rgba(227, 233, 237, 0.05);
+                    --commit: #ffa43a;
+                    --commit-ink: #ffb55c;
+                    --entry: #63a4f0;
+                    --task: #4fc08d;
+                    --doc: #b88ceb;
+                    --sub: #ee77b8;
+                    --crash: #ff6b6b;
+                    --people: #3cc8c9;
+                    color-scheme: dark;
+                }
+            }
+            :root[data-theme="dark"] {
+                --paper: #0f151a;
+                --sheet: #161e25;
+                --ink: #e3e9ed;
+                --ink-2: #93a3ae;
+                --rule: #2a3640;
+                --grid: rgba(227, 233, 237, 0.05);
+                --commit: #ffa43a;
+                --commit-ink: #ffb55c;
+                --entry: #63a4f0;
+                --task: #4fc08d;
+                --doc: #b88ceb;
+                --sub: #ee77b8;
+                --crash: #ff6b6b;
+                --people: #3cc8c9;
+                color-scheme: dark;
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+            html {
+                scroll-behavior: smooth;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                html {
+                    scroll-behavior: auto;
+                }
+                *,
+                *::before,
+                *::after {
+                    transition: none !important;
+                    animation: none !important;
+                }
+            }
+            body {
+                background-color: var(--paper);
+                background-image:
+                    linear-gradient(var(--grid) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+                background-size: 24px 24px;
+                color: var(--ink);
+                font: 16px/1.6 var(--body);
+                padding-inline: 16px;
+                padding-block: 0 64px;
+            }
+            a {
+                color: var(--entry);
+                text-underline-offset: 3px;
+            }
+            code,
+            .mono {
+                font-family: var(--mono);
+                font-size: 0.86em;
+            }
+            code {
+                background: var(--wash);
+                padding: 1px 5px;
+                border-radius: 4px;
+                overflow-wrap: anywhere;
+            }
+            button {
+                font: inherit;
+                color: inherit;
+            }
+            :focus-visible {
+                outline: 2px solid var(--commit);
+                outline-offset: 2px;
+            }
+
+            .shell {
+                max-width: 1240px;
+                margin: 0 auto;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr);
+                gap: 40px;
+            }
+            @media (min-width: 1100px) {
+                .shell {
+                    grid-template-columns: 200px minmax(0, 1fr);
+                }
+            }
+
+            /* Contents */
+            .toc {
+                position: sticky;
+                top: env(safe-area-inset-top, 0px);
+                z-index: 5;
+                background: var(--paper);
+                margin-inline: -16px;
+                padding: 10px 16px;
+                border-bottom: 1px solid var(--rule);
+                display: flex;
+                gap: 8px;
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+            .toc::-webkit-scrollbar {
+                display: none;
+            }
+            .toc a {
+                flex: none;
+                font: 500 12px/1 var(--mono);
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+                text-decoration: none;
+                padding: 8px 10px;
+                border: 1px solid var(--rule);
+                border-radius: 999px;
+                background: var(--sheet);
+            }
+            .toc a:hover,
+            .toc a.on {
+                color: var(--ink);
+                border-color: var(--people);
+            }
+            .toc .crumb {
+                display: none;
+            }
+            @media (min-width: 1100px) {
+                .toc {
+                    top: calc(env(safe-area-inset-top, 0px) + 24px);
+                    align-self: start;
+                    flex-direction: column;
+                    margin: 0;
+                    padding: 0;
+                    border: 0;
+                    background: none;
+                    gap: 2px;
+                    margin-top: 40px;
+                }
+                .toc .crumb {
+                    display: block;
+                    font: 700 11px/1.4 var(--mono);
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    color: var(--ink-2);
+                    margin-bottom: 12px;
+                }
+                .toc a {
+                    border: 0;
+                    border-left: 2px solid var(--rule);
+                    border-radius: 0;
+                    background: none;
+                    padding: 7px 12px;
+                    text-transform: none;
+                    letter-spacing: 0;
+                    font: 500 13px/1.3 var(--body);
+                }
+                .toc a.on {
+                    border-left-color: var(--people);
+                    color: var(--ink);
+                }
+            }
+
+            main {
+                min-width: 0;
+                display: grid;
+                gap: 72px;
+                padding-top: 32px;
+            }
+            section {
+                min-width: 0;
+                scroll-margin-top: 72px;
+            }
+
+            .eyebrow {
+                font: 700 11px/1.4 var(--mono);
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                margin: 0 0 10px;
+            }
+            .eyebrow::before {
+                content: "";
+                width: 18px;
+                height: 2px;
+                background: var(--people);
+            }
+            h1,
+            h2,
+            h3 {
+                font-family: var(--display);
+                text-wrap: balance;
+                margin: 0;
+            }
+            h1 {
+                font-size: clamp(52px, 7.4vw, 100px);
+                font-weight: 800;
+                line-height: 0.92;
+                letter-spacing: -0.05em;
+            }
+            h2 {
+                font-size: clamp(28px, 4.4vw, 44px);
+                font-weight: 700;
+                line-height: 1.05;
+                letter-spacing: -0.03em;
+            }
+            h3 {
+                font-size: 18px;
+                font-weight: 650;
+                line-height: 1.2;
+                letter-spacing: -0.015em;
+            }
+            .lede {
+                font-size: 18px;
+                max-width: 64ch;
+                color: var(--ink-2);
+                margin: 14px 0 0;
+            }
+            p {
+                max-width: 66ch;
+            }
+            .head {
+                margin-bottom: 24px;
+            }
+
+            .panel {
+                background: var(--sheet);
+                border: 1px solid var(--rule);
+                border-radius: 6px;
+            }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+                border: 1px solid var(--rule);
+                background: var(--sheet);
+                border-radius: 6px;
+                padding: 8px 14px;
+                font: 600 13px/1.2 var(--mono);
+                letter-spacing: 0.02em;
+                box-shadow: 0 1px 0 var(--rule);
+            }
+            .btn:hover {
+                border-color: var(--ink-2);
+            }
+            .btn.primary {
+                background: var(--ink);
+                color: var(--paper);
+                border-color: var(--ink);
+            }
+            .btn[disabled] {
+                opacity: 0.45;
+                cursor: default;
+            }
+            .row {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+
+            .tag {
+                display: inline-block;
+                font: 600 10.5px/1 var(--mono);
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                padding: 4px 6px;
+                border-radius: 3px;
+                border: 1px solid currentColor;
+            }
+            .t-commit {
+                color: var(--commit-ink);
+            }
+            .t-entry {
+                color: var(--entry);
+            }
+            .t-task {
+                color: var(--task);
+            }
+            .t-doc {
+                color: var(--doc);
+            }
+            .t-sub {
+                color: var(--sub);
+            }
+            .t-crash {
+                color: var(--crash);
+            }
+            .t-people {
+                color: var(--people);
+            }
+
+            /* Hero */
+            .hero {
+                display: grid;
+                gap: 32px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            @media (min-width: 900px) {
+                .hero {
+                    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+                    align-items: start;
+                }
+            }
+            .hero .crumb {
+                font: 700 12px/1 var(--mono);
+                letter-spacing: 0.16em;
+                color: var(--people);
+                margin-bottom: 18px;
+            }
+            .thesis {
+                font: 600 clamp(20px, 2.6vw, 26px)/1.3 var(--display);
+                letter-spacing: -0.02em;
+                margin: 22px 0 0;
+                max-width: 30ch;
+            }
+            .thesis b {
+                color: var(--people);
+                font-weight: 700;
+            }
+            .facts {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px 14px;
+                margin-top: 22px;
+                font: 500 12px/1.4 var(--mono);
+                color: var(--ink-2);
+            }
+            .facts span::before {
+                content: "▪ ";
+                color: var(--people);
+            }
+
+            .stack {
+                padding: 14px;
+                display: grid;
+                gap: 10px;
+            }
+            .stack-main {
+                display: grid;
+                gap: 0;
+            }
+            .layer {
+                width: 100%;
+                text-align: left;
+                cursor: pointer;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 2px 10px;
+                align-items: baseline;
+                padding: 12px 14px;
+                border: 1px solid var(--rule);
+                background: var(--paper);
+                border-radius: 6px;
+            }
+            .layer b {
+                font: 700 15px/1.2 var(--display);
+            }
+            .layer span {
+                font: 500 11.5px/1 var(--mono);
+                color: var(--ink-2);
+            }
+            .layer small {
+                grid-column: 1 / -1;
+                font: 500 12px/1.4 var(--mono);
+                color: var(--ink-2);
+            }
+            .layer:hover {
+                border-color: var(--ink-2);
+            }
+            .layer[aria-pressed="true"] {
+                border-color: var(--lc, var(--people));
+                box-shadow: inset 4px 0 0 var(--lc, var(--people));
+            }
+            .wire {
+                height: 22px;
+                display: grid;
+                place-items: center;
+                font: 500 10.5px/1 var(--mono);
+                color: var(--ink-2);
+                letter-spacing: 0.04em;
+                position: relative;
+            }
+            .wire::before {
+                content: "";
+                position: absolute;
+                left: 50%;
+                top: 0;
+                bottom: 0;
+                width: 1px;
+                background: var(--rule);
+            }
+            .wire em {
+                position: relative;
+                background: var(--sheet);
+                padding: 0 6px;
+                font-style: normal;
+            }
+            .side-layers {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                gap: 8px;
+                padding-top: 6px;
+                border-top: 1px dashed var(--rule);
+            }
+            .side-layers .layer {
+                padding: 9px 10px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .side-layers .layer span {
+                overflow-wrap: anywhere;
+                line-height: 1.3;
+            }
+            .side-layers .layer b {
+                font-size: 13px;
+            }
+            .layer-detail {
+                padding: 14px 16px;
+                border-radius: 6px;
+                background: var(--paper);
+                border: 1px solid var(--rule);
+                min-height: 120px;
+            }
+            .layer-detail h3 {
+                margin-bottom: 6px;
+            }
+            .layer-detail p {
+                margin: 0 0 8px;
+                font-size: 14.5px;
+            }
+            .chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .chip {
+                font: 500 11.5px/1 var(--mono);
+                padding: 5px 7px;
+                border-radius: 4px;
+                background: var(--wash);
+                color: var(--ink);
+            }
+
+            /* Mapping */
+            .map {
+                position: relative;
+                padding: 18px;
+                display: grid;
+                gap: 18px 64px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            @media (min-width: 760px) {
+                .map {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                }
+            }
+            .map svg.links {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                overflow: visible;
+                display: none;
+            }
+            @media (min-width: 760px) {
+                .map svg.links {
+                    display: block;
+                }
+            }
+            .map-col h3 {
+                font: 700 11px/1.4 var(--mono);
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+                margin-bottom: 10px;
+            }
+            .map-list {
+                display: grid;
+                gap: 6px;
+                position: relative;
+                z-index: 1;
+            }
+            .node {
+                width: 100%;
+                text-align: left;
+                cursor: pointer;
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                justify-content: space-between;
+                padding: 8px 10px;
+                border: 1px solid var(--rule);
+                border-radius: 6px;
+                background: var(--sheet);
+                font-size: 14px;
+                line-height: 1.25;
+            }
+            .node .k {
+                font: 600 10px/1 var(--mono);
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+                flex: none;
+            }
+            .node:hover {
+                border-color: var(--ink-2);
+            }
+            .node.lit {
+                border-color: var(--people);
+                background: color-mix(in srgb, var(--people) 10%, var(--sheet));
+            }
+            .node.sel {
+                border-color: var(--commit);
+                background: color-mix(in srgb, var(--commit) 12%, var(--sheet));
+            }
+            .map.has-sel .node:not(.lit):not(.sel) {
+                opacity: 0.45;
+            }
+            .map-detail {
+                grid-column: 1 / -1;
+                padding: 14px 16px;
+                background: var(--paper);
+                border: 1px solid var(--rule);
+                border-radius: 6px;
+                position: relative;
+                z-index: 1;
+            }
+            .map-detail h3 {
+                margin-bottom: 8px;
+            }
+            .map-detail ul {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                display: grid;
+                gap: 8px;
+            }
+            .map-detail li {
+                display: grid;
+                grid-template-columns: minmax(0, 12em) minmax(0, 1fr);
+                gap: 4px 14px;
+                font-size: 14.5px;
+            }
+            .map-detail li b {
+                font: 600 12.5px/1.5 var(--mono);
+                color: var(--people);
+            }
+            @media (max-width: 560px) {
+                .map-detail li {
+                    grid-template-columns: minmax(0, 1fr);
+                }
+            }
+
+            /* Request path */
+            .path {
+                padding: 18px;
+                display: grid;
+                gap: 18px;
+            }
+            .stations {
+                display: grid;
+                grid-template-columns: repeat(6, minmax(0, 1fr));
+                gap: 0;
+                position: relative;
+            }
+            .stations::before {
+                content: "";
+                position: absolute;
+                left: 8%;
+                right: 8%;
+                top: 22px;
+                height: 2px;
+                background: var(--rule);
+            }
+            .station {
+                position: relative;
+                display: grid;
+                justify-items: center;
+                gap: 8px;
+                text-align: center;
+                cursor: pointer;
+                background: none;
+                border: 0;
+                padding: 0 4px;
+            }
+            .station .dot {
+                width: 46px;
+                height: 46px;
+                border-radius: 50%;
+                border: 2px solid var(--rule);
+                background: var(--sheet);
+                display: grid;
+                place-items: center;
+                font: 700 15px/1 var(--mono);
+                color: var(--ink-2);
+                transition: all 0.25s;
+            }
+            .station .nm {
+                font: 600 11.5px/1.3 var(--mono);
+                color: var(--ink-2);
+                overflow-wrap: anywhere;
+            }
+            .station.done .dot {
+                border-color: var(--people);
+                color: var(--people);
+            }
+            .station.cur .dot {
+                border-color: var(--commit);
+                background: var(--commit);
+                color: var(--sheet);
+                transform: scale(1.08);
+            }
+            .station.cur .nm {
+                color: var(--ink);
+            }
+            .pkt {
+                position: absolute;
+                top: 15px;
+                width: 16px;
+                height: 16px;
+                margin-left: -8px;
+                border-radius: 3px;
+                background: var(--sub);
+                transition: left 0.5s cubic-bezier(0.6, 0.05, 0.3, 1);
+                box-shadow: 0 0 0 4px color-mix(in srgb, var(--sub) 25%, transparent);
+                pointer-events: none;
+            }
+            @media (max-width: 640px) {
+                .stations {
+                    grid-template-columns: minmax(0, 1fr);
+                    gap: 6px;
+                }
+                .stations::before {
+                    left: 22px;
+                    right: auto;
+                    top: 10px;
+                    bottom: 10px;
+                    width: 2px;
+                    height: auto;
+                }
+                .station {
+                    grid-template-columns: 46px minmax(0, 1fr);
+                    justify-items: start;
+                    text-align: left;
+                    align-items: center;
+                }
+                .pkt {
+                    display: none;
+                }
+            }
+            .path-body {
+                display: grid;
+                gap: 18px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            @media (min-width: 860px) {
+                .path-body {
+                    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+                }
+            }
+            .step-card {
+                padding: 16px;
+                background: var(--paper);
+                border: 1px solid var(--rule);
+                border-radius: 6px;
+            }
+            .step-card .file {
+                font: 600 12px/1 var(--mono);
+                color: var(--people);
+            }
+            .step-card h3 {
+                margin: 8px 0;
+                font-size: 20px;
+            }
+            .step-card p {
+                margin: 0 0 10px;
+            }
+            .step-card pre {
+                margin: 0;
+                font: 500 12.5px/1.5 var(--mono);
+                background: var(--wash);
+                padding: 10px 12px;
+                border-radius: 4px;
+                overflow-x: auto;
+            }
+            .devices svg {
+                width: 100%;
+                height: auto;
+                display: block;
+            }
+
+            /* Commit listener */
+            .two {
+                display: grid;
+                gap: 18px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            @media (min-width: 900px) {
+                .two {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                }
+            }
+            .coord {
+                padding: 18px;
+            }
+            .coord svg,
+            .tl svg,
+            .sub-svg svg,
+            .reload svg {
+                width: 100%;
+                height: auto;
+                display: block;
+            }
+            .diagram-scroll {
+                overflow-x: auto;
+            }
+            .tl {
+                padding: 18px;
+                display: grid;
+                gap: 12px;
+            }
+            .legend {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px 16px;
+                font: 500 12px/1.4 var(--mono);
+                color: var(--ink-2);
+            }
+            .legend i {
+                display: inline-block;
+                width: 10px;
+                height: 10px;
+                border-radius: 2px;
+                margin-right: 6px;
+                vertical-align: -1px;
+            }
+            .note {
+                font-size: 14px;
+                color: var(--ink-2);
+                margin: 0;
+            }
+            .rates {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 8px;
+            }
+            .rate {
+                padding: 10px;
+                border: 1px solid var(--rule);
+                border-radius: 6px;
+                background: var(--paper);
+            }
+            .rate b {
+                display: block;
+                font: 700 22px/1 var(--display);
+                letter-spacing: -0.02em;
+                font-variant-numeric: tabular-nums;
+            }
+            .rate span {
+                font: 500 11.5px/1.3 var(--mono);
+                color: var(--ink-2);
+            }
+
+            /* Attribution */
+            .attr {
+                padding: 18px;
+                display: grid;
+                gap: 18px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            @media (min-width: 900px) {
+                .attr {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                }
+            }
+            .acts {
+                display: grid;
+                gap: 8px;
+            }
+            .act {
+                text-align: left;
+                cursor: pointer;
+                padding: 10px 12px;
+                border: 1px solid var(--rule);
+                background: var(--paper);
+                border-radius: 6px;
+                display: grid;
+                gap: 4px;
+            }
+            .act:hover {
+                border-color: var(--ink-2);
+            }
+            .act b {
+                font-size: 14.5px;
+            }
+            .act code {
+                justify-self: start;
+                color: var(--sub);
+            }
+            .who {
+                padding: 14px;
+                border-radius: 6px;
+                border: 1px solid var(--rule);
+                background: var(--paper);
+                display: grid;
+                gap: 14px;
+            }
+            .who-now {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+            }
+            .who-now .lab {
+                font: 700 11px/1 var(--mono);
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+            }
+            .avatar {
+                display: inline-grid;
+                place-items: center;
+                width: 34px;
+                height: 34px;
+                border-radius: 50%;
+                font: 700 14px/1 var(--display);
+                color: var(--sheet);
+            }
+            .who-name {
+                font: 700 22px/1 var(--display);
+                letter-spacing: -0.02em;
+            }
+            .bars {
+                display: grid;
+                gap: 8px;
+            }
+            .bar {
+                display: grid;
+                grid-template-columns: 64px minmax(0, 1fr) 64px;
+                gap: 10px;
+                align-items: center;
+                font: 500 12.5px/1 var(--mono);
+            }
+            .bar .track {
+                height: 14px;
+                background: var(--wash);
+                border-radius: 3px;
+                overflow: hidden;
+            }
+            .bar .fill {
+                height: 100%;
+                width: 0;
+                transition: width 0.5s;
+            }
+            .bar .amt {
+                text-align: right;
+                font-variant-numeric: tabular-nums;
+            }
+            .log {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                display: grid;
+                gap: 4px;
+                font: 500 12px/1.45 var(--mono);
+                max-height: 172px;
+                overflow: auto;
+            }
+            .log li {
+                padding: 5px 8px;
+                border-left: 2px solid var(--rule);
+                background: var(--wash);
+                border-radius: 0 4px 4px 0;
+                overflow-wrap: anywhere;
+            }
+            .log li.flash {
+                border-left-color: var(--commit);
+            }
+
+            /* Crash rules */
+            .rules {
+                display: grid;
+                gap: 10px;
+                grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+            }
+            .rule {
+                padding: 16px;
+                display: grid;
+                gap: 6px;
+                align-content: start;
+            }
+            .rule p {
+                margin: 0;
+                font-size: 14.5px;
+            }
+            .restart {
+                margin-top: 18px;
+                padding: 18px;
+                display: grid;
+                gap: 14px;
+            }
+            .ledger {
+                display: grid;
+                gap: 14px;
+                grid-template-columns: minmax(0, 1fr);
+            }
+            @media (min-width: 860px) {
+                .ledger {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                }
+            }
+            .ledger h3 {
+                font: 700 11px/1.4 var(--mono);
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+                margin-bottom: 8px;
+            }
+            .items {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                display: grid;
+                gap: 6px;
+            }
+            .item {
+                display: grid;
+                grid-template-columns: 14px minmax(0, 1fr) auto;
+                gap: 10px;
+                align-items: center;
+                padding: 9px 10px;
+                border: 1px solid var(--rule);
+                background: var(--paper);
+                border-radius: 6px;
+                font-size: 14px;
+                transition:
+                    background 0.3s,
+                    border-color 0.3s;
+            }
+            .item .led {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--commit);
+            }
+            .items.mem .item .led {
+                background: var(--people);
+            }
+            .item .st {
+                font: 600 11px/1.2 var(--mono);
+                color: var(--ink-2);
+                text-align: right;
+                max-width: 18ch;
+            }
+            .item small {
+                display: block;
+                color: var(--ink-2);
+                font-size: 12.5px;
+            }
+            .restarting .items.mem .item {
+                border-color: var(--crash);
+                background: color-mix(in srgb, var(--crash) 8%, var(--paper));
+            }
+            .restarting .items.mem .item .led {
+                background: var(--crash);
+            }
+            .restarted .items.dur .item {
+                border-color: var(--commit);
+            }
+            .restarted .items.mem .item .led {
+                background: var(--rule);
+            }
+            .boot {
+                font: 500 12.5px/1.5 var(--mono);
+                background: var(--ink);
+                color: var(--paper);
+                padding: 10px 12px;
+                border-radius: 4px;
+                min-height: 3.2em;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+
+            /* Fork demo */
+            .fork {
+                padding: 18px;
+                display: grid;
+                gap: 14px;
+            }
+            .fork-grid {
+                display: grid;
+                gap: 0;
+            }
+            .frow {
+                display: grid;
+                grid-template-columns: minmax(0, 12em) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 9em);
+                gap: 12px;
+                align-items: center;
+                padding: 7px 0;
+                border-bottom: 1px solid var(--rule);
+                font-size: 13.5px;
+            }
+            .frow.headrow {
+                font: 700 10.5px/1.3 var(--mono);
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+                color: var(--ink-2);
+            }
+            .frow .kind {
+                font: 600 12.5px/1.3 var(--mono);
+                color: var(--doc);
+                overflow-wrap: anywhere;
+            }
+            .frow .desc {
+                display: block;
+                font: 400 12px/1.35 var(--body);
+                color: var(--ink-2);
+            }
+            .cells {
+                display: flex;
+                gap: 2px;
+            }
+            .cells i {
+                flex: 1;
+                height: 14px;
+                border-radius: 2px;
+                background: var(--doc);
+                opacity: 0.85;
+                transition:
+                    opacity 0.35s,
+                    background 0.35s;
+            }
+            .cells i.off {
+                background: var(--rule);
+                opacity: 0.6;
+            }
+            .cells i.cut {
+                background: var(--rule);
+                opacity: 0.35;
+            }
+            .cells i.own {
+                background: var(--people);
+            }
+            .frow .pol {
+                font: 600 11px/1.3 var(--mono);
+                color: var(--ink-2);
+            }
+            .fork-grid.pre .fcol {
+                visibility: hidden;
+            }
+            @media (max-width: 680px) {
+                .frow {
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                }
+                .frow .pcol-h,
+                .frow .fcol-h {
+                    display: none;
+                }
+                .frow .kind {
+                    grid-column: 1 / -1;
+                }
+            }
+            .forkpoint {
+                font: 500 12px/1.4 var(--mono);
+                color: var(--ink-2);
+            }
+            .files {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .file {
+                padding: 8px 10px;
+                border: 1px dashed var(--rule);
+                border-radius: 6px;
+                font-size: 13px;
+                background: var(--paper);
+            }
+            .file b {
+                font: 600 12.5px/1.3 var(--mono);
+                display: block;
+            }
+
+            /* Extensions */
+            .exts {
+                display: grid;
+                gap: 10px;
+                grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+            }
+            .ext {
+                padding: 14px;
+                display: grid;
+                gap: 8px;
+                align-content: start;
+            }
+            .ext h3 {
+                font-family: var(--mono);
+                font-size: 14px;
+            }
+            .ext p {
+                margin: 0;
+                font-size: 14px;
+            }
+            .ext .row {
+                gap: 5px;
+            }
+            .sub-svg {
+                margin-top: 18px;
+                padding: 18px;
+                display: grid;
+                gap: 10px;
+            }
+
+            /* Reload */
+            .reload {
+                padding: 18px;
+                display: grid;
+                gap: 14px;
+            }
+            .picker {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .picker button[aria-pressed="true"] {
+                border-color: var(--commit);
+                background: color-mix(in srgb, var(--commit) 12%, var(--sheet));
+            }
+            .lane {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 8px;
+            }
+            @media (max-width: 640px) {
+                .lane {
+                    grid-template-columns: minmax(0, 1fr);
+                }
+            }
+            .lstep {
+                padding: 12px;
+                border: 1px solid var(--rule);
+                border-radius: 6px;
+                background: var(--paper);
+                font-size: 14px;
+                position: relative;
+            }
+            .lstep b {
+                display: block;
+                font: 600 12px/1.3 var(--mono);
+                color: var(--ink-2);
+                margin-bottom: 4px;
+            }
+            .lstep.on {
+                border-color: var(--commit);
+                box-shadow: inset 0 3px 0 var(--commit);
+            }
+            .lstep.on b {
+                color: var(--commit-ink);
+            }
+
+            footer {
+                margin-top: 24px;
+                padding-top: 24px;
+                border-top: 1px solid var(--rule);
+                display: flex;
+                gap: 16px 28px;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                font: 500 13px/1.4 var(--mono);
+            }
+            footer .back {
+                font: 700 20px/1.2 var(--display);
+                letter-spacing: -0.02em;
+                text-decoration: none;
+                color: var(--ink);
+            }
+            footer .back:hover {
+                color: var(--people);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shell">
+            <nav class="toc" aria-label="Contents">
+                <span class="crumb">Pi Pocket</span>
+                <a href="#top">Overview</a>
+                <a href="#mapping">Feature map</a>
+                <a href="#message">Path of a message</a>
+                <a href="#listener">Commit listener</a>
+                <a href="#who">Attribution of work</a>
+                <a href="#crash">Crash recovery</a>
+                <a href="#state">Data storage</a>
+                <a href="#extensions">Extensions</a>
+                <a href="#reload">Reload and restart</a>
+            </nav>
+
+            <main>
+                <!-- HERO -->
+                <section id="top" class="hero">
+                    <div>
+                        <div class="crumb">PI DURABLE · PART 2</div>
+                        <h1>Pi Pocket</h1>
+                        <p class="thesis">
+                            Pi Pocket is a web app for Pi agents. It uses Pi Durable to run the
+                            agent and adds <b>multiple users</b>, <b>phone access</b>, and
+                            <b>remote access</b>.
+                        </p>
+                        <p class="lede">
+                            The server is one Node.js process with one SQLite file. The web app has
+                            no build step. Pi Durable commits each step before a tab shows it. Pi
+                            Pocket sends these commits to all tabs, so many people can watch and
+                            control one session from a phone or a computer.
+                        </p>
+                        <div class="facts">
+                            <span>TypeScript, no build</span><span>Preact + htm</span
+                            ><span>SQLite through Pi Durable</span><span>Node.js 22.19+</span
+                            ><span>v0.11.0</span>
+                        </div>
+                        <p class="note" style="margin-top: 18px">
+                            Click a layer on the right to see its parts.
+                        </p>
+                    </div>
+                    <div class="panel stack">
+                        <div class="stack-main" id="stackMain"></div>
+                        <div class="side-layers" id="stackSide"></div>
+                        <div class="layer-detail" id="layerDetail" aria-live="polite"></div>
+                    </div>
+                </section>
+
+                <!-- MAPPING -->
+                <section id="mapping">
+                    <div class="head">
+                        <p class="eyebrow">Dependencies</p>
+                        <h2>Feature map</h2>
+                        <p class="lede">
+                            The left column shows the Pi Durable primitives. The right column shows
+                            the Pi Pocket features that use them. Select an item in a column to see
+                            the related items.
+                        </p>
+                    </div>
+                    <div class="panel map" id="map">
+                        <svg class="links" id="mapLinks" aria-hidden="true"></svg>
+                        <div class="map-col">
+                            <h3>Pi Durable primitive</h3>
+                            <div class="map-list" id="mapL"></div>
+                        </div>
+                        <div class="map-col">
+                            <h3>Pi Pocket feature</h3>
+                            <div class="map-list" id="mapR"></div>
+                        </div>
+                        <div class="map-detail" id="mapDetail" aria-live="polite"></div>
+                    </div>
+                </section>
+
+                <!-- MESSAGE PATH -->
+                <section id="message">
+                    <div class="head">
+                        <p class="eyebrow">Request path</p>
+                        <h2>Path of a message</h2>
+                        <p class="lede">
+                            A person sends a message from a phone. Pi answers, and all open tabs
+                            show the answer. The six steps below occur in this sequence.
+                        </p>
+                    </div>
+                    <div class="panel path">
+                        <div class="row">
+                            <button class="btn primary" id="pathPlay" type="button">Play</button>
+                            <button class="btn" id="pathBack" type="button">Back</button>
+                            <button class="btn" id="pathNext" type="button">Next</button>
+                        </div>
+                        <div class="stations" id="stations"><div class="pkt" id="pkt"></div></div>
+                        <div class="path-body">
+                            <div class="step-card" id="stepCard" aria-live="polite"></div>
+                            <div class="devices" id="devices"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- COMMIT LISTENER -->
+                <section id="listener">
+                    <div class="head">
+                        <p class="eyebrow">app.ts · #committed</p>
+                        <h2>Commit listener</h2>
+                        <p class="lede">
+                            Pi Durable sends the changes of each commit in no fixed order. Pi Pocket
+                            uses one listener with two passes to process them. Thus, the order in
+                            which listeners register has no effect on spend.
+                        </p>
+                    </div>
+                    <div class="two">
+                        <div class="panel coord">
+                            <div class="diagram-scroll">
+                                <svg
+                                    viewBox="0 0 520 330"
+                                    role="img"
+                                    aria-label="The listener processes the usage change of a commit first. Then it processes each document change and submission change."
+                                >
+                                    <defs>
+                                        <marker
+                                            id="ah"
+                                            viewBox="0 0 10 10"
+                                            refX="9"
+                                            refY="5"
+                                            markerWidth="7"
+                                            markerHeight="7"
+                                            orient="auto-start-reverse"
+                                        >
+                                            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)" />
+                                        </marker>
+                                    </defs>
+                                    <rect
+                                        x="10"
+                                        y="20"
+                                        width="150"
+                                        height="150"
+                                        rx="6"
+                                        fill="var(--paper)"
+                                        stroke="var(--commit)"
+                                        stroke-width="2"
+                                    />
+                                    <text
+                                        x="22"
+                                        y="42"
+                                        font-family="var(--mono)"
+                                        font-size="11"
+                                        font-weight="700"
+                                        fill="var(--commit-ink)"
+                                        letter-spacing="1.2"
+                                    >
+                                        ONE COMMIT
+                                    </text>
+                                    <rect
+                                        x="22"
+                                        y="56"
+                                        width="126"
+                                        height="26"
+                                        rx="3"
+                                        fill="var(--doc)"
+                                        opacity=".18"
+                                    />
+                                    <text
+                                        x="30"
+                                        y="73"
+                                        font-family="var(--mono)"
+                                        font-size="11"
+                                        fill="var(--ink)"
+                                    >
+                                        doc: pi.live
+                                    </text>
+                                    <rect
+                                        x="22"
+                                        y="88"
+                                        width="126"
+                                        height="26"
+                                        rx="3"
+                                        fill="var(--commit)"
+                                        opacity=".2"
+                                    />
+                                    <text
+                                        x="30"
+                                        y="105"
+                                        font-family="var(--mono)"
+                                        font-size="11"
+                                        fill="var(--ink)"
+                                    >
+                                        doc: pi.usage
+                                    </text>
+                                    <rect
+                                        x="22"
+                                        y="120"
+                                        width="126"
+                                        height="26"
+                                        rx="3"
+                                        fill="var(--sub)"
+                                        opacity=".18"
+                                    />
+                                    <text
+                                        x="30"
+                                        y="137"
+                                        font-family="var(--mono)"
+                                        font-size="11"
+                                        fill="var(--ink)"
+                                    >
+                                        submission u:ana:7
+                                    </text>
+                                    <text
+                                        x="22"
+                                        y="190"
+                                        font-family="var(--body)"
+                                        font-size="11.5"
+                                        fill="var(--ink-2)"
+                                    >
+                                        changes come in any order
+                                    </text>
+
+                                    <rect
+                                        x="210"
+                                        y="20"
+                                        width="300"
+                                        height="70"
+                                        rx="6"
+                                        fill="var(--sheet)"
+                                        stroke="var(--commit)"
+                                        stroke-width="1.5"
+                                    />
+                                    <text
+                                        x="224"
+                                        y="42"
+                                        font-family="var(--mono)"
+                                        font-size="10.5"
+                                        font-weight="700"
+                                        fill="var(--commit-ink)"
+                                        letter-spacing="1"
+                                    >
+                                        PASS 1 · USAGE FIRST
+                                    </text>
+                                    <text
+                                        x="224"
+                                        y="62"
+                                        font-family="var(--mono)"
+                                        font-size="12"
+                                        fill="var(--ink)"
+                                    >
+                                        spend.usageChanged
+                                    </text>
+                                    <text
+                                        x="224"
+                                        y="79"
+                                        font-family="var(--body)"
+                                        font-size="11.5"
+                                        fill="var(--ink-2)"
+                                    >
+                                        charge the person Pi worked for before this commit
+                                    </text>
+
+                                    <rect
+                                        x="210"
+                                        y="110"
+                                        width="300"
+                                        height="130"
+                                        rx="6"
+                                        fill="var(--sheet)"
+                                        stroke="var(--rule)"
+                                        stroke-width="1.5"
+                                    />
+                                    <text
+                                        x="224"
+                                        y="132"
+                                        font-family="var(--mono)"
+                                        font-size="10.5"
+                                        font-weight="700"
+                                        fill="var(--ink-2)"
+                                        letter-spacing="1"
+                                    >
+                                        PASS 2 · EACH CHANGE
+                                    </text>
+                                    <rect
+                                        x="224"
+                                        y="142"
+                                        width="272"
+                                        height="40"
+                                        rx="4"
+                                        fill="var(--doc)"
+                                        opacity=".12"
+                                    />
+                                    <text
+                                        x="234"
+                                        y="159"
+                                        font-family="var(--mono)"
+                                        font-size="12"
+                                        fill="var(--ink)"
+                                    >
+                                        #documentCommitted
+                                    </text>
+                                    <text
+                                        x="234"
+                                        y="175"
+                                        font-family="var(--body)"
+                                        font-size="11"
+                                        fill="var(--ink-2)"
+                                    >
+                                        busy runs, agents, session list, room docs
+                                    </text>
+                                    <rect
+                                        x="224"
+                                        y="188"
+                                        width="272"
+                                        height="40"
+                                        rx="4"
+                                        fill="var(--sub)"
+                                        opacity=".12"
+                                    />
+                                    <text
+                                        x="234"
+                                        y="205"
+                                        font-family="var(--mono)"
+                                        font-size="12"
+                                        fill="var(--ink)"
+                                    >
+                                        attribution.submissionCommitted
+                                    </text>
+                                    <text
+                                        x="234"
+                                        y="221"
+                                        font-family="var(--body)"
+                                        font-size="11"
+                                        fill="var(--ink-2)"
+                                    >
+                                        record the author (in setImmediate)
+                                    </text>
+
+                                    <path
+                                        d="M160 101 C185 101 185 55 208 55"
+                                        fill="none"
+                                        stroke="var(--commit)"
+                                        stroke-width="2"
+                                        marker-end="url(#ah)"
+                                    />
+                                    <path
+                                        d="M160 70 C190 70 185 162 222 162"
+                                        fill="none"
+                                        stroke="var(--ink-2)"
+                                        stroke-width="1.4"
+                                        marker-end="url(#ah)"
+                                    />
+                                    <path
+                                        d="M160 133 C190 133 190 208 222 208"
+                                        fill="none"
+                                        stroke="var(--ink-2)"
+                                        stroke-width="1.4"
+                                        marker-end="url(#ah)"
+                                    />
+                                    <path
+                                        d="M360 90 L360 108"
+                                        fill="none"
+                                        stroke="var(--ink-2)"
+                                        stroke-width="1.4"
+                                        marker-end="url(#ah)"
+                                    />
+
+                                    <rect
+                                        x="210"
+                                        y="262"
+                                        width="300"
+                                        height="56"
+                                        rx="6"
+                                        fill="var(--paper)"
+                                        stroke="var(--people)"
+                                        stroke-width="1.5"
+                                    />
+                                    <text
+                                        x="224"
+                                        y="284"
+                                        font-family="var(--mono)"
+                                        font-size="10.5"
+                                        font-weight="700"
+                                        fill="var(--people)"
+                                        letter-spacing="1"
+                                    >
+                                        THEN · ROOMS, TILES, LIST
+                                    </text>
+                                    <text
+                                        x="224"
+                                        y="304"
+                                        font-family="var(--body)"
+                                        font-size="11.5"
+                                        fill="var(--ink-2)"
+                                    >
+                                        batched and sent to tabs (right)
+                                    </text>
+                                    <path
+                                        d="M360 240 L360 260"
+                                        fill="none"
+                                        stroke="var(--ink-2)"
+                                        stroke-width="1.4"
+                                        marker-end="url(#ah)"
+                                    />
+                                </svg>
+                            </div>
+                            <p class="note">
+                                All of these steps are synchronous. A commit listener must not call
+                                the session APIs of the harness. Thus, a write that the listener
+                                causes (the record of an author) runs later, in
+                                <code>setImmediate</code>. With separate listeners, their
+                                registration order would change who pays, and nobody could see this
+                                rule.
+                            </p>
+                        </div>
+                        <div class="panel tl">
+                            <div class="rates">
+                                <div class="rate"><b>90 ms</b><span>a room's changes</span></div>
+                                <div class="rate">
+                                    <b>400 ms</b><span>the session list, when it changes</span>
+                                </div>
+                                <div class="rate"><b>1 s</b><span>peek tiles</span></div>
+                            </div>
+                            <div class="diagram-scroll">
+                                <svg
+                                    id="tlSvg"
+                                    viewBox="0 0 520 210"
+                                    role="img"
+                                    aria-label="Commits come at random times. Each feed sends a maximum of one batched update in each interval."
+                                ></svg>
+                            </div>
+                            <div class="legend">
+                                <span><i style="background: var(--commit)"></i>commit</span
+                                ><span
+                                    ><i style="background: var(--people)"></i>update sent to tabs
+                                    (the number shows the commits in the update)</span
+                                ><span
+                                    ><i
+                                        style="
+                                            background: var(--commit);
+                                            width: 4px;
+                                            height: 14px;
+                                            vertical-align: -3px;
+                                        "
+                                    ></i
+                                    >tall: the commit changes the session list</span
+                                >
+                            </div>
+                            <div class="row">
+                                <button class="btn" id="tlNew" type="button">
+                                    Make new commits</button
+                                ><span class="note"
+                                    >A streamed answer makes a commit approximately every 100 ms.
+                                    Tabs get fewer updates than there are commits.</span
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- WHO PI WORKS FOR -->
+                <section id="who">
+                    <div class="head">
+                        <p class="eyebrow">attribution.ts · requests.ts</p>
+                        <h2>Attribution of work</h2>
+                        <p class="lede">
+                            The request id of a message to Pi can contain the ID of a person. Pi
+                            works for the person of the newest message that has a person in its id.
+                            Spend, approvals, schedules, and subagents all use
+                            <code>requesterOf</code> to find this person. Click an action to see the
+                            result.
+                        </p>
+                    </div>
+                    <div class="panel attr">
+                        <div class="acts" id="acts"></div>
+                        <div class="who">
+                            <div class="who-now">
+                                <span class="lab">Pi works for</span
+                                ><span class="avatar" id="whoAv"></span
+                                ><span class="who-name" id="whoName"></span>
+                            </div>
+                            <div class="bars" id="bars"></div>
+                            <ul class="log" id="alog" aria-live="polite"></ul>
+                            <div class="row">
+                                <button class="btn" id="aReset" type="button">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="note" style="margin-top: 12px">
+                        <code>u:&lt;user&gt;:&lt;key&gt;</code> is a message that a person wrote.
+                        <code>p:&lt;user&gt;:&lt;key&gt;</code> is a message sent for a person, for
+                        example a scheduled message that Pi set up, or the task of a subagent. A
+                        schedule that a person set up sends a <code>u:</code> message for that
+                        person. If no person is known, Pi Pocket charges the person who started the
+                        session. If that person is not known, it charges the owner.
+                    </p>
+                </section>
+
+                <!-- CRASH RULES -->
+                <section id="crash">
+                    <div class="head">
+                        <p class="eyebrow">Durability</p>
+                        <h2>Crash recovery rules</h2>
+                        <p class="lede">
+                            Pi Durable supplies tasks, checkpoints, and atomic commits. Pi Pocket
+                            uses them for the rules below. Thus, a restart loses no stored work. Pi
+                            does not get a message two times. A restart loses only the data in
+                            memory. The right column of the table below shows this data.
+                        </p>
+                    </div>
+                    <div class="rules">
+                        <div class="panel rule">
+                            <span class="tag t-commit">commit, then show</span>
+                            <h3>Show only stored data</h3>
+                            <p>
+                                Tabs show only committed state. Pi Pocket keeps its documents in the
+                                same storage as the transcript. Each change is an atomic commit.
+                                Changes that must agree are in one commit, for example a fork and
+                                its documents. Pi Pocket records the author of a message in a second
+                                commit. At startup, it repairs the authors that a crash did not
+                                record.
+                            </p>
+                        </div>
+                        <div class="panel rule">
+                            <span class="tag t-sub">request ids</span>
+                            <h3>Send one time</h3>
+                            <p>
+                                Each message to Pi has a request id. If Pi Pocket sends a message
+                                again with the same id, Pi Durable finds the stored message. Thus Pi
+                                gets the message only one time. Scheduled messages and subagent
+                                reports use the request id after a restart. A <code>!</code> command
+                                keeps its id until the server accepts it. Pi Pocket stores this id
+                                in <code>pocket.shell-requests</code>. Thus a second try after a
+                                lost reply runs the command only one time.
+                            </p>
+                        </div>
+                        <div class="panel rule">
+                            <span class="tag t-task">memos</span>
+                            <h3>Ask one time</h3>
+                            <p>
+                                A hook keeps its result in the memo of its task. Examples are the
+                                answer to an approval and the result of a goal check. After a
+                                restart, the hook runs again and reads the memo. It does not ask
+                                again.
+                            </p>
+                        </div>
+                        <div class="panel rule">
+                            <span class="tag t-crash">replay: "safe"</span>
+                            <h3>Run again only if safe</h3>
+                            <p>
+                                Artifact calls and schedule calls are replay-safe. Other calls are
+                                not replay-safe. Examples are bash, browser, and codemode calls.
+                                After a crash, the model gets a message that such a call stopped.
+                                Then the model examines the result.
+                            </p>
+                        </div>
+                        <div class="panel rule">
+                            <span class="tag t-task">durable tasks</span>
+                            <h3>Durable timers</h3>
+                            <p>
+                                A scheduled message is a task. Its send time is in the
+                                <code>pocket.schedules</code> document. If a restart occurs before
+                                that time, the task sleeps again. If a restart occurs after that
+                                time, Pi Pocket sends the message immediately, one time.
+                            </p>
+                        </div>
+                        <div class="panel rule">
+                            <span class="tag t-doc">fork policies</span>
+                            <h3>Fork policy per document</h3>
+                            <p>
+                                Each document kind tells if a fork copies it or starts it empty. In
+                                the commit that makes the fork, Pi Pocket empties the copied chat.
+                                It also removes the copied pins after the fork point, and the copied
+                                authors of later messages.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="panel restart" id="restart">
+                        <div class="row" style="justify-content: space-between">
+                            <div>
+                                <h3>Server restart</h3>
+                                <p class="note">
+                                    Amber items are in <code>pocket.sqlite</code>. Teal items are
+                                    only in the memory of the process.
+                                </p>
+                            </div>
+                            <button class="btn primary" id="rsBtn" type="button">
+                                Restart server
+                            </button>
+                        </div>
+                        <div class="ledger">
+                            <div>
+                                <h3>Stored · read again after the restart</h3>
+                                <ul class="items dur" id="durItems"></ul>
+                            </div>
+                            <div>
+                                <h3>In memory · lost at restart</h3>
+                                <ul class="items mem" id="memItems"></ul>
+                            </div>
+                        </div>
+                        <div class="boot" id="boot" aria-live="polite">
+                            $ pi-pocket running · pid 48211
+                        </div>
+                    </div>
+                </section>
+
+                <!-- STATE -->
+                <section id="state">
+                    <div class="head">
+                        <p class="eyebrow">docs.ts</p>
+                        <h2>Data storage</h2>
+                        <p class="lede">
+                            Pi Pocket documents are in <code>pocket.sqlite</code>, together with the
+                            transcript and the Pi Durable documents: the agent settings, the
+                            provider ID, the inbox, the live run, and usage. Each document kind
+                            tells what a fork gets. Click "Fork at reply 5" to see the result.
+                        </p>
+                    </div>
+                    <div class="panel fork">
+                        <div class="row" style="justify-content: space-between">
+                            <span class="forkpoint" id="forkPoint">Parent session · 8 replies</span>
+                            <div class="row">
+                                <button class="btn primary" id="forkBtn" type="button">
+                                    Fork at reply 5</button
+                                ><button class="btn" id="forkReset" type="button">Undo</button>
+                            </div>
+                        </div>
+                        <div class="fork-grid pre" id="forkGrid"></div>
+                        <div class="legend">
+                            <span><i style="background: var(--doc)"></i>copied content</span
+                            ><span
+                                ><i style="background: var(--people)"></i>new content in the
+                                fork</span
+                            ><span><i style="background: var(--rule)"></i>empty or removed</span>
+                        </div>
+                    </div>
+                    <h3 style="margin: 22px 0 10px">
+                        Outside the database, in <code>~/.pi-pocket/</code>
+                    </h3>
+                    <div class="files">
+                        <div class="file">
+                            <b>config.json</b>people, roles, hashed tokens, settings
+                        </div>
+                        <div class="file"><b>push.json</b>VAPID keys, push subscriptions</div>
+                        <div class="file"><b>uploads/</b>files sent to Pi</div>
+                        <div class="file"><b>worktrees/</b>sessions' git worktrees</div>
+                        <div class="file"><b>extensions/</b>extensions that the owner adds</div>
+                        <div class="file"><b>browser/</b>the profile of the built-in browser</div>
+                    </div>
+                    <p class="note" style="margin-top: 10px">
+                        Pi Pocket writes the config files atomically, with mode 0600. Do not rename
+                        a document kind. Pi Durable compares the scope, history, and fork settings
+                        of each kind with the stored data.
+                    </p>
+                </section>
+
+                <!-- EXTENSIONS -->
+                <section id="extensions">
+                    <div class="head">
+                        <p class="eyebrow">src/server/extensions/</p>
+                        <h2>Extensions</h2>
+                        <p class="lede">
+                            Pi Pocket adds most of its agent features as Pi Durable extensions. The
+                            server installs them in the sequence below. Each extension uses one or
+                            more of four parts: prompt sections, tools, hooks, and tasks.
+                        </p>
+                    </div>
+                    <div class="exts" id="exts"></div>
+
+                    <div class="panel sub-svg">
+                        <h3>Subagent structure</h3>
+                        <p class="note">
+                            This structure comes from Pi Durable example 23. Each subagent is a
+                            separate conversation. A background anchor task owns it, so Esc in the
+                            parent does not stop it. A reporter task sends each answer back to the
+                            parent.
+                        </p>
+                        <div class="diagram-scroll">
+                            <svg
+                                viewBox="0 0 760 300"
+                                role="img"
+                                aria-label="The subagent tool call in the parent conversation makes an anchor task. The anchor task owns the child conversation. A reporter task sends a message to the child and sends the answer to the parent as a follow-up."
+                            >
+                                <defs>
+                                    <marker
+                                        id="ah2"
+                                        viewBox="0 0 10 10"
+                                        refX="9"
+                                        refY="5"
+                                        markerWidth="7"
+                                        markerHeight="7"
+                                        orient="auto-start-reverse"
+                                    >
+                                        <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)" />
+                                    </marker>
+                                </defs>
+                                <!-- parent -->
+                                <rect
+                                    x="10"
+                                    y="20"
+                                    width="220"
+                                    height="260"
+                                    rx="6"
+                                    fill="var(--paper)"
+                                    stroke="var(--entry)"
+                                    stroke-width="1.5"
+                                />
+                                <text
+                                    x="24"
+                                    y="44"
+                                    font-family="var(--mono)"
+                                    font-size="10.5"
+                                    font-weight="700"
+                                    fill="var(--entry)"
+                                    letter-spacing="1"
+                                >
+                                    PARENT CONVERSATION
+                                </text>
+                                <rect
+                                    x="24"
+                                    y="58"
+                                    width="192"
+                                    height="26"
+                                    rx="3"
+                                    fill="var(--entry)"
+                                    opacity=".14"
+                                />
+                                <text
+                                    x="34"
+                                    y="75"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    pi.user "divide the work"
+                                </text>
+                                <rect
+                                    x="24"
+                                    y="92"
+                                    width="192"
+                                    height="44"
+                                    rx="3"
+                                    fill="var(--task)"
+                                    opacity=".16"
+                                    stroke="var(--task)"
+                                />
+                                <text
+                                    x="34"
+                                    y="110"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    tool: subagent spawn
+                                </text>
+                                <text
+                                    x="34"
+                                    y="127"
+                                    font-family="var(--body)"
+                                    font-size="10.5"
+                                    fill="var(--ink-2)"
+                                >
+                                    not replay-safe · returns immediately
+                                </text>
+                                <rect
+                                    x="24"
+                                    y="144"
+                                    width="192"
+                                    height="26"
+                                    rx="3"
+                                    fill="var(--entry)"
+                                    opacity=".14"
+                                />
+                                <text
+                                    x="34"
+                                    y="161"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    pi.assistant … idle
+                                </text>
+                                <rect
+                                    x="24"
+                                    y="226"
+                                    width="192"
+                                    height="40"
+                                    rx="3"
+                                    fill="var(--sub)"
+                                    opacity=".14"
+                                    stroke="var(--sub)"
+                                />
+                                <text
+                                    x="34"
+                                    y="243"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    follow-up input
+                                </text>
+                                <text
+                                    x="34"
+                                    y="259"
+                                    font-family="var(--body)"
+                                    font-size="10.5"
+                                    fill="var(--ink-2)"
+                                >
+                                    the subagent answer, one time
+                                </text>
+
+                                <!-- anchor -->
+                                <rect
+                                    x="290"
+                                    y="70"
+                                    width="170"
+                                    height="70"
+                                    rx="6"
+                                    fill="var(--sheet)"
+                                    stroke="var(--task)"
+                                    stroke-width="1.5"
+                                    stroke-dasharray="5 3"
+                                />
+                                <text
+                                    x="302"
+                                    y="92"
+                                    font-family="var(--mono)"
+                                    font-size="10.5"
+                                    font-weight="700"
+                                    fill="var(--task)"
+                                    letter-spacing="1"
+                                >
+                                    ANCHOR TASK
+                                </text>
+                                <text
+                                    x="302"
+                                    y="110"
+                                    font-family="var(--mono)"
+                                    font-size="10.5"
+                                    fill="var(--ink)"
+                                >
+                                    pocket.subagent-anchor
+                                </text>
+                                <text
+                                    x="302"
+                                    y="127"
+                                    font-family="var(--body)"
+                                    font-size="10.5"
+                                    fill="var(--ink-2)"
+                                >
+                                    background · ends at once
+                                </text>
+
+                                <!-- reporter -->
+                                <rect
+                                    x="290"
+                                    y="190"
+                                    width="170"
+                                    height="70"
+                                    rx="6"
+                                    fill="var(--sheet)"
+                                    stroke="var(--task)"
+                                    stroke-width="1.5"
+                                    stroke-dasharray="5 3"
+                                />
+                                <text
+                                    x="302"
+                                    y="212"
+                                    font-family="var(--mono)"
+                                    font-size="10.5"
+                                    font-weight="700"
+                                    fill="var(--task)"
+                                    letter-spacing="1"
+                                >
+                                    REPORTER TASK
+                                </text>
+                                <text
+                                    x="302"
+                                    y="230"
+                                    font-family="var(--mono)"
+                                    font-size="10.5"
+                                    fill="var(--ink)"
+                                >
+                                    pocket.subagent-reporter
+                                </text>
+                                <text
+                                    x="302"
+                                    y="247"
+                                    font-family="var(--body)"
+                                    font-size="10.5"
+                                    fill="var(--ink-2)"
+                                >
+                                    deliver → report
+                                </text>
+
+                                <!-- child -->
+                                <rect
+                                    x="520"
+                                    y="20"
+                                    width="230"
+                                    height="260"
+                                    rx="6"
+                                    fill="var(--paper)"
+                                    stroke="var(--entry)"
+                                    stroke-width="1.5"
+                                />
+                                <text
+                                    x="534"
+                                    y="44"
+                                    font-family="var(--mono)"
+                                    font-size="10.5"
+                                    font-weight="700"
+                                    fill="var(--entry)"
+                                    letter-spacing="1"
+                                >
+                                    CHILD CONVERSATION
+                                </text>
+                                <text
+                                    x="534"
+                                    y="62"
+                                    font-family="var(--body)"
+                                    font-size="10.5"
+                                    fill="var(--ink-2)"
+                                >
+                                    a person can open it and send messages
+                                </text>
+                                <rect
+                                    x="534"
+                                    y="76"
+                                    width="202"
+                                    height="26"
+                                    rx="3"
+                                    fill="var(--entry)"
+                                    opacity=".14"
+                                />
+                                <text
+                                    x="544"
+                                    y="93"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    pi.user (task)
+                                </text>
+                                <rect
+                                    x="534"
+                                    y="108"
+                                    width="202"
+                                    height="26"
+                                    rx="3"
+                                    fill="var(--task)"
+                                    opacity=".14"
+                                />
+                                <text
+                                    x="544"
+                                    y="125"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    pi.generation · tools…
+                                </text>
+                                <rect
+                                    x="534"
+                                    y="140"
+                                    width="202"
+                                    height="26"
+                                    rx="3"
+                                    fill="var(--entry)"
+                                    opacity=".14"
+                                />
+                                <text
+                                    x="544"
+                                    y="157"
+                                    font-family="var(--mono)"
+                                    font-size="11"
+                                    fill="var(--ink)"
+                                >
+                                    pi.assistant (answer)
+                                </text>
+
+                                <path
+                                    d="M216 114 C255 114 255 100 288 100"
+                                    fill="none"
+                                    stroke="var(--ink-2)"
+                                    stroke-width="1.4"
+                                    marker-end="url(#ah2)"
+                                />
+                                <text
+                                    x="234"
+                                    y="94"
+                                    font-family="var(--mono)"
+                                    font-size="10"
+                                    fill="var(--ink-2)"
+                                >
+                                    creates
+                                </text>
+                                <path
+                                    d="M460 100 C490 100 490 60 518 60"
+                                    fill="none"
+                                    stroke="var(--task)"
+                                    stroke-width="2"
+                                    marker-end="url(#ah2)"
+                                />
+                                <text
+                                    x="466"
+                                    y="76"
+                                    font-family="var(--mono)"
+                                    font-size="10"
+                                    fill="var(--task)"
+                                >
+                                    owns
+                                </text>
+                                <path
+                                    d="M460 214 C495 214 495 89 532 89"
+                                    fill="none"
+                                    stroke="var(--sub)"
+                                    stroke-width="1.4"
+                                    marker-end="url(#ah2)"
+                                />
+                                <text
+                                    x="482"
+                                    y="172"
+                                    text-anchor="end"
+                                    font-family="var(--mono)"
+                                    font-size="10"
+                                    fill="var(--sub)"
+                                >
+                                    delivers
+                                </text>
+                                <path
+                                    d="M532 155 C500 155 500 236 462 236"
+                                    fill="none"
+                                    stroke="var(--ink-2)"
+                                    stroke-width="1.4"
+                                    stroke-dasharray="3 3"
+                                    marker-end="url(#ah2)"
+                                />
+                                <text
+                                    x="476"
+                                    y="270"
+                                    font-family="var(--mono)"
+                                    font-size="10"
+                                    fill="var(--ink-2)"
+                                >
+                                    waits
+                                </text>
+                                <path
+                                    d="M290 246 C260 246 250 246 218 246"
+                                    fill="none"
+                                    stroke="var(--sub)"
+                                    stroke-width="2"
+                                    marker-end="url(#ah2)"
+                                />
+                                <text
+                                    x="238"
+                                    y="238"
+                                    font-family="var(--mono)"
+                                    font-size="10"
+                                    fill="var(--sub)"
+                                >
+                                    reports
+                                </text>
+                            </svg>
+                        </div>
+                        <p class="note">
+                            Anchors and reporters are durable tasks. After a restart, request ids
+                            prevent a reporter from sending a message or a report two times.
+                        </p>
+                    </div>
+                </section>
+
+                <!-- RELOAD -->
+                <section id="reload">
+                    <div class="head">
+                        <p class="eyebrow">Self-editing</p>
+                        <h2>Live reload and restart</h2>
+                        <p class="lede">
+                            Pi often edits Pi Pocket while Pi Pocket runs. The result of an edit
+                            depends on the file that changed. Select a file to see the result.
+                        </p>
+                    </div>
+                    <div class="panel reload">
+                        <div class="picker" id="picker"></div>
+                        <div class="lane" id="lane"></div>
+                        <p class="note" id="laneNote"></p>
+                    </div>
+                </section>
+
+                <footer>
+                    <a class="back" href="durable.html">← Part 1: Pi Durable</a>
+                    <span
+                        ><a href="./">Pi Pocket home</a> ·
+                        <a href="https://github.com/TannerMidd/pi-pocket"
+                            >github.com/TannerMidd/pi-pocket</a
+                        >
+                        · MIT license · not related to Earendil</span
+                    >
+                </footer>
+            </main>
+        </div>
+
+        <script>
+            (() => {
+                const $ = (s, r = document) => r.querySelector(s);
+                const el = (tag, attrs = {}, html = "") => {
+                    const e = document.createElement(tag);
+                    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+                    e.innerHTML = html;
+                    return e;
+                };
+                const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                const NS = "http://www.w3.org/2000/svg";
+
+                /* ---------- Hero stack ---------- */
+                const LAYERS = {
+                    browsers: {
+                        name: "Browsers",
+                        path: "web/",
+                        c: "var(--people)",
+                        main: true,
+                        wire: "JSON API · server-sent events · long polling",
+                        text: "The web app uses Preact and htm as plain ES modules, with no build step. It shows only committed state. A tab that connects again gets the full view, so all devices show the same data.",
+                        owns: [
+                            "store.js",
+                            "service worker",
+                            "push",
+                            "share target",
+                            "home-screen app",
+                            "back.js history",
+                        ],
+                    },
+                    http: {
+                        name: "HTTP server",
+                        path: "http.ts",
+                        c: "var(--sub)",
+                        main: true,
+                        wire: "calls",
+                        text: "The HTTP server parses a request, checks it, calls a part, and writes the answer. Its only state is the list of long-polling tabs. Invites are in config.json. Each request that changes data must have an X-Pocket header.",
+                        owns: [
+                            "/api routes",
+                            "event stream",
+                            "uploads",
+                            "sandboxed artifacts",
+                            "browser frames",
+                            "invites",
+                        ],
+                    },
+                    app: {
+                        name: "PocketApp",
+                        path: "app.ts",
+                        c: "var(--commit)",
+                        main: true,
+                        wire: "commits · one commit listener",
+                        text: "PocketApp is the core. It makes the parts of the app. Most parts get a reference to the app. It keeps one room for each open session. Each commit goes through its one listener, which keeps memory the same as storage.",
+                        owns: [
+                            "commands",
+                            "collab",
+                            "attribution",
+                            "spend",
+                            "approvals",
+                            "alerts",
+                            "schedules",
+                            "goals",
+                            "shell",
+                            "workspace",
+                            "transcripts",
+                            "providers",
+                            "browsers",
+                            "rooms",
+                        ],
+                    },
+                    harness: {
+                        name: "Pi Durable harness",
+                        path: "@earendil-works/pi-durable",
+                        c: "var(--task)",
+                        main: true,
+                        wire: "one file",
+                        text: "The harness runs the agent. It commits conversations, model turns, tool calls, and Pi Pocket documents atomically. A tab shows data only after the commit.",
+                        owns: ["conversations", "tasks", "documents", "extensions", "task graph"],
+                    },
+                    sqlite: {
+                        name: "SQLite",
+                        path: "~/.pi-pocket/pocket.sqlite",
+                        c: "var(--commit-ink)",
+                        main: true,
+                        text: "The database is one file in WAL mode. Only one server process can use it at a time. Thus, the server first gets the lock on the data folder.",
+                        owns: [
+                            "conversations",
+                            "entries",
+                            "tasks",
+                            "submissions",
+                            "documents",
+                            "document_revisions",
+                        ],
+                    },
+                    launcher: {
+                        name: "Launcher",
+                        path: "src/launcher/",
+                        c: "var(--ink-2)",
+                        text: "The launcher runs the server as a child process. It starts the server again after exit code 75 or after a crash. It also sets how other devices get access: this device only, the local network, a Cloudflare tunnel, or Tailscale. A tunnel stays open during a restart.",
+                        owns: ["access menu", "supervisor", "cloudflared", "QR code", "owner link"],
+                    },
+                    exts: {
+                        name: "Extensions",
+                        path: "src/server/extensions/",
+                        c: "var(--doc)",
+                        text: "Extensions supply tools, hooks, prompt sections, and tasks to the harness. The server installs an extension again after each edit. Extensions that the owner adds load after the built-in extensions. They stay off until the owner turns them on.",
+                        owns: [
+                            "prompt",
+                            "artifacts",
+                            "browser",
+                            "subagents",
+                            "schedules",
+                            "goals",
+                            "plan",
+                            "guard",
+                            "codemode",
+                        ],
+                    },
+                    chromium: {
+                        name: "Chromium",
+                        path: "browser.ts",
+                        c: "var(--entry)",
+                        text: "The server controls one headless browser with the DevTools protocol through a pipe. Each session has one page. The browser tool of Pi and the Browser panel use the same page. The browser starts on first use.",
+                        owns: ["cdp.ts", "page per session", "screenshots", "element refs"],
+                    },
+                    piagent: {
+                        name: "Pi",
+                        path: "~/.pi/agent/",
+                        c: "var(--sub)",
+                        text: "This folder contains sign-ins, settings, skills, and prompt templates. Pi Pocket and the Pi command line use the same folder. If you install Lancet Guard as a Pi package, it is in this folder too. Its settings file, ~/.pi/lancet-guard.json, turns it on or off. In Pi Pocket, the guard extension must also be on.",
+                        owns: [
+                            "provider sign-ins",
+                            "skills",
+                            "prompt templates",
+                            "specpi-lancet-guard",
+                        ],
+                    },
+                };
+                const stackMain = $("#stackMain"),
+                    stackSide = $("#stackSide"),
+                    layerDetail = $("#layerDetail");
+                function pickLayer(id) {
+                    document
+                        .querySelectorAll(".layer")
+                        .forEach((b) =>
+                            b.setAttribute("aria-pressed", String(b.dataset.id === id)),
+                        );
+                    const L = LAYERS[id];
+                    layerDetail.innerHTML = `<h3>${L.name} <span class="mono" style="color:var(--ink-2);font-weight:500">${L.path}</span></h3><p>${L.text}</p><div class="chips">${L.owns.map((o) => `<span class="chip">${o}</span>`).join("")}</div>`;
+                }
+                for (const [id, L] of Object.entries(LAYERS)) {
+                    const b = el(
+                        "button",
+                        {
+                            class: "layer",
+                            type: "button",
+                            "data-id": id,
+                            "aria-pressed": "false",
+                            style: `--lc:${L.c}`,
+                        },
+                        `<b>${L.name}</b><span>${L.path}</span>`,
+                    );
+                    b.addEventListener("click", () => pickLayer(id));
+                    if (L.main) {
+                        stackMain.append(b);
+                        if (L.wire)
+                            stackMain.append(el("div", { class: "wire" }, `<em>${L.wire}</em>`));
+                    } else stackSide.append(b);
+                }
+                pickLayer("app");
+
+                /* ---------- Mapping ---------- */
+                const PRIM = [
+                    ["harness", "Harness over one SQLite file", "core"],
+                    ["commit", "Atomic commit", "commit"],
+                    ["watch", "viewState / watch", "view"],
+                    ["submit", "submit + requestId", "inbox"],
+                    ["busy", "whenBusy: steer / follow-up", "inbox"],
+                    ["doc", "Documents + fork policy", "doc"],
+                    ["task", "Tasks + checkpoints", "task"],
+                    ["memo", "Task memos", "task"],
+                    ["replay", 'replay: "safe"', "tool"],
+                    ["hooks", "Hooks: beforeTool, onYield", "hook"],
+                    ["section", "Prompt sections", "section"],
+                    ["registry", "registry.install", "reload"],
+                    ["owned", "Task-owned conversation", "conv"],
+                    ["bg", "Background tasks", "task"],
+                    ["env", "env from cwd", "env"],
+                    ["usage", "pi.usage", "doc"],
+                ];
+                const FEAT = [
+                    ["rooms", "Multiplayer rooms", "room.ts"],
+                    ["attrib", "Attribution of work", "attribution.ts"],
+                    ["steerq", "Steer or queue", "commands.ts"],
+                    ["pdocs", "pocket.* documents", "docs.ts"],
+                    ["forks", "Forks", "commands.ts"],
+                    ["sched", "Scheduled messages", "schedules.ts"],
+                    ["goals", "Goals (done when)", "goals.ts"],
+                    ["plan", "Plan mode", "plan.ts"],
+                    ["guard", "Lancet Guard", "guard.ts"],
+                    ["prompt", "System prompt", "prompt.ts"],
+                    ["reload", "Live-reload extensions", "reload.ts"],
+                    ["subagents", "Subagents", "subagents.ts"],
+                    ["worktrees", "Worktrees", "worktrees.ts"],
+                    ["spend", "Spend limits", "spend.ts"],
+                    ["restart", "Work continues after restart", "app.ts"],
+                ];
+                const LINKS = [
+                    [
+                        "harness",
+                        "restart",
+                        "The harness opens the same file again. Then resume() continues each run that the previous process did not complete.",
+                    ],
+                    [
+                        "harness",
+                        "pdocs",
+                        "Pi Pocket keeps its state in the same storage as the transcript, in pocket.sqlite.",
+                    ],
+                    [
+                        "commit",
+                        "rooms",
+                        "One commit listener gets each commit and tells the rooms that show that conversation.",
+                    ],
+                    [
+                        "commit",
+                        "pdocs",
+                        "Each change to a pocket.* document is an atomic commit, in the same storage as the transcript. Changes that must agree are in one commit. For example, a fork and its documents are one commit, and a schedule and its task are one commit.",
+                    ],
+                    [
+                        "watch",
+                        "rooms",
+                        "Pi Pocket batches the committed view of each session and sends it as small updates. A tab that connects late starts from the current view.",
+                    ],
+                    [
+                        "submit",
+                        "attrib",
+                        "The request id contains the person: u:<user>:<key> or p:<user>:<key>.",
+                    ],
+                    [
+                        "submit",
+                        "sched",
+                        "If Pi Pocket sends a scheduled message again after a restart, the request id finds the stored submission.",
+                    ],
+                    [
+                        "busy",
+                        "steerq",
+                        "A person can change the direction of a run with a steer. A steer goes in after the current tool round. A follow-up waits until Pi answers.",
+                    ],
+                    [
+                        "doc",
+                        "pdocs",
+                        "Pi Pocket defines 18 pocket.* kinds: 17 with defineDoc, and the artifact bodies with defineDocFamily. Examples are chat, pins, notes, schedules, and spend.",
+                    ],
+                    [
+                        "doc",
+                        "forks",
+                        "The fork setting of each document (current or initial) tells if a fork copies it or starts it empty.",
+                    ],
+                    [
+                        "task",
+                        "sched",
+                        "A scheduled message is a task. Its send time is in a document. Thus, after a restart, the task sleeps again until that time.",
+                    ],
+                    [
+                        "task",
+                        "restart",
+                        "Each step makes a checkpoint. A restart continues from the last checkpoint.",
+                    ],
+                    [
+                        "task",
+                        "subagents",
+                        "Anchors and reporters are durable task definitions in an extension.",
+                    ],
+                    [
+                        "memo",
+                        "goals",
+                        "The result of the check for an answer is in the memo of the generation task. After a restart, the hook runs again, but the check does not.",
+                    ],
+                    [
+                        "memo",
+                        "guard",
+                        "The answer to an approval is in the memo of the call. After a restart, the guard does not ask again.",
+                    ],
+                    [
+                        "replay",
+                        "restart",
+                        "Artifact calls and schedule calls run again after a crash. Other calls, for example bash, browser, and codemode calls, return as interrupted.",
+                    ],
+                    [
+                        "hooks",
+                        "plan",
+                        "When plan mode is on, beforeTool blocks each call that can change data.",
+                    ],
+                    [
+                        "hooks",
+                        "guard",
+                        "beforeTool sends dangerous bash, write, and edit calls to a person for approval.",
+                    ],
+                    [
+                        "hooks",
+                        "goals",
+                        "After each final answer, a hook runs the check of the session. While the check fails, Pi continues to work.",
+                    ],
+                    [
+                        "section",
+                        "prompt",
+                        "The prompt contains guidelines for a phone screen, the location of the Pi Pocket docs, the AGENTS.md files of the project, the Pi skills, and the working directory. The harness renders it before each request.",
+                    ],
+                    [
+                        "section",
+                        "plan",
+                        "Plan mode adds a section. The section tells Pi to read files and propose a plan, and to make no changes.",
+                    ],
+                    ["section", "goals", "A section tells Pi about the check of the goal."],
+                    [
+                        "registry",
+                        "reload",
+                        "The server imports an edited extension again and installs it with the same name. A call that is running finishes with the old code.",
+                    ],
+                    [
+                        "owned",
+                        "subagents",
+                        "Each subagent is a conversation that a task owns. People can open it, watch it, and send messages to it.",
+                    ],
+                    [
+                        "bg",
+                        "subagents",
+                        "The anchor is a background task. Thus, Esc and idle waits in the parent have no effect on the child.",
+                    ],
+                    [
+                        "env",
+                        "worktrees",
+                        "A session in a worktree has its cwd in the worktree. The harness makes the environment from the current cwd at each use.",
+                    ],
+                    [
+                        "usage",
+                        "spend",
+                        "The spend of a conversation is its pi.usage total. The owner can set a limit for a session or a person. Above the limit, Pi Pocket refuses new messages and stops the current run.",
+                    ],
+                ];
+                const mapL = $("#mapL"),
+                    mapR = $("#mapR"),
+                    mapEl = $("#map"),
+                    mapSvg = $("#mapLinks"),
+                    mapDetail = $("#mapDetail");
+                const nodes = {};
+                for (const [id, label, k] of PRIM) {
+                    const b = el(
+                        "button",
+                        { class: "node", type: "button", "data-side": "L", "data-id": id },
+                        `<span>${label}</span><span class="k">${k}</span>`,
+                    );
+                    mapL.append(b);
+                    nodes["L:" + id] = b;
+                }
+                for (const [id, label, k] of FEAT) {
+                    const b = el(
+                        "button",
+                        { class: "node", type: "button", "data-side": "R", "data-id": id },
+                        `<span>${label}</span><span class="k">${k}</span>`,
+                    );
+                    mapR.append(b);
+                    nodes["R:" + id] = b;
+                }
+                const nameOf = (side, id) =>
+                    (side === "L" ? PRIM : FEAT).find((x) => x[0] === id)[1];
+                let mapSel = null;
+                function drawMap() {
+                    mapSvg.innerHTML = "";
+                    if (!mapSel) return;
+                    const box = mapEl.getBoundingClientRect();
+                    const rel = LINKS.filter(
+                        (l) => (mapSel.side === "L" ? l[0] : l[1]) === mapSel.id,
+                    );
+                    for (const [a, b] of rel) {
+                        const ra = nodes["L:" + a].getBoundingClientRect(),
+                            rb = nodes["R:" + b].getBoundingClientRect();
+                        const x1 = ra.right - box.left,
+                            y1 = ra.top + ra.height / 2 - box.top,
+                            x2 = rb.left - box.left,
+                            y2 = rb.top + rb.height / 2 - box.top;
+                        if (x2 < x1) continue;
+                        const mx = (x1 + x2) / 2;
+                        const p = document.createElementNS(NS, "path");
+                        p.setAttribute("d", `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`);
+                        p.setAttribute("fill", "none");
+                        p.setAttribute("stroke", "var(--people)");
+                        p.setAttribute("stroke-width", "2");
+                        mapSvg.append(p);
+                        for (const [cx, cy] of [
+                            [x1, y1],
+                            [x2, y2],
+                        ]) {
+                            const c = document.createElementNS(NS, "circle");
+                            c.setAttribute("cx", cx);
+                            c.setAttribute("cy", cy);
+                            c.setAttribute("r", "3.5");
+                            c.setAttribute("fill", "var(--people)");
+                            mapSvg.append(c);
+                        }
+                    }
+                }
+                function selectMap(side, id) {
+                    mapSel = { side, id };
+                    Object.values(nodes).forEach((n) => n.classList.remove("lit", "sel"));
+                    nodes[side + ":" + id].classList.add("sel");
+                    mapEl.classList.add("has-sel");
+                    const rel = LINKS.filter((l) => (side === "L" ? l[0] : l[1]) === id);
+                    for (const l of rel)
+                        nodes[side === "L" ? "R:" + l[1] : "L:" + l[0]].classList.add("lit");
+                    mapDetail.innerHTML = `<h3>${nameOf(side, id)} <span class="mono" style="color:var(--ink-2);font-weight:500">${side === "L" ? "is used by" : "uses"}</span></h3><ul>${rel.map((l) => `<li><b>${side === "L" ? nameOf("R", l[1]) : nameOf("L", l[0])}</b><span>${l[2].replace(/</g, "&lt;")}</span></li>`).join("")}</ul>`;
+                    drawMap();
+                }
+                Object.values(nodes).forEach((n) => {
+                    n.addEventListener("click", () => selectMap(n.dataset.side, n.dataset.id));
+                    n.addEventListener("mouseenter", () => {
+                        if (window.matchMedia("(hover: hover)").matches)
+                            selectMap(n.dataset.side, n.dataset.id);
+                    });
+                    n.addEventListener("focus", () => selectMap(n.dataset.side, n.dataset.id));
+                });
+                window.addEventListener("resize", drawMap);
+                selectMap("L", "hooks");
+                if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawMap);
+
+                /* ---------- Message path ---------- */
+                const STEPS = [
+                    {
+                        file: "web/store.js",
+                        name: "Send with an id",
+                        text: "The tab sends the message to /api/c/:id/submit with a new key. The server makes the request id from this key and the ID of the person.",
+                        code: 'POST /api/c/12/submit\nX-Pocket: 1\n{ text: "fix the redirect loop", requestId: "k7f2" }',
+                    },
+                    {
+                        file: "commands.ts",
+                        name: "Check, then queue",
+                        text: "The server checks the invite scope, the role, take turns, and spend limits. It expands a prompt template. Then it submits the message with a request id that identifies the author. If Pi is idle, a run starts. If Pi is busy, the message goes into the inbox. A steer joins the run. A follow-up waits.",
+                        code: 'requireSee(user, 12); requireDriver(12, user)\nspend.check(user, 12)\nconversation.submit({ type: "input", content,\n  requestId: "u:ana:k7f2", whenBusy })',
+                    },
+                    {
+                        file: "pi-durable",
+                        name: "Run as durable tasks",
+                        text: "The model request and each tool call are tasks. Each task commits its progress. Plan mode, Lancet Guard, and goals use hooks on these tasks.",
+                        code: "pi.generation → pi.assistant (tool calls)\n  pi.tool (bash)  beforeTool: plan? guard?\npi.generation → pi.assistant (answer)\n  onYield: goal check",
+                    },
+                    {
+                        file: "app.ts",
+                        name: "Process the commit",
+                        text: "The commit listener gets each commit. It counts spend first. Then it records the author, sets the session to busy, and tells the rooms that show the conversation.",
+                        code: "#committed(changes)\n  1. spend.usageChanged\n  2. #documentCommitted / submissionCommitted",
+                    },
+                    {
+                        file: "room.ts",
+                        name: "Send the changes",
+                        text: "The room waits a maximum of 90 ms to batch the changes. It changes entries into compact JSON. Then it sends each tab only the missing data on its event stream.",
+                        code: 'event: view\ndata: { entries: [+1], live: { text: "+42 chars" } }',
+                    },
+                    {
+                        file: "web/store.js",
+                        name: "Show the update",
+                        text: "The store applies the update, and Preact renders it. A tab that connects again gets the full view, so all devices show the same data.",
+                        code: "store.set(view) → subscribers → render()",
+                    },
+                ];
+                const stations = $("#stations"),
+                    pkt = $("#pkt"),
+                    stepCard = $("#stepCard"),
+                    devices = $("#devices");
+                STEPS.forEach((s, i) => {
+                    const b = el(
+                        "button",
+                        {
+                            class: "station",
+                            type: "button",
+                            "aria-label": `Step ${i + 1}: ${s.name}`,
+                        },
+                        `<span class="dot">${i + 1}</span><span class="nm">${s.file}</span>`,
+                    );
+                    b.addEventListener("click", () => {
+                        stopPlay();
+                        setStep(i);
+                    });
+                    stations.append(b);
+                });
+                devices.innerHTML = `<svg viewBox="0 0 360 230" role="img" aria-label="A phone and a laptop showing the same conversation">
+  <g id="dvLaptop">
+    <rect x="10" y="20" width="230" height="150" rx="8" fill="var(--paper)" stroke="var(--rule)" stroke-width="2"/>
+    <rect x="0" y="170" width="250" height="12" rx="4" fill="var(--rule)"/>
+    <rect x="24" y="36" width="60" height="120" rx="3" fill="var(--wash)"/>
+    <rect x="94" y="40" width="130" height="14" rx="3" fill="var(--entry)" opacity=".25"/>
+    <rect x="94" y="62" width="110" height="14" rx="3" fill="var(--sub)" opacity=".25"/>
+    <rect class="dv-new" x="94" y="84" width="130" height="34" rx="3" fill="var(--people)"/>
+  </g>
+  <g id="dvPhone">
+    <rect x="270" y="10" width="80" height="160" rx="12" fill="var(--paper)" stroke="var(--rule)" stroke-width="2"/>
+    <rect x="300" y="18" width="20" height="4" rx="2" fill="var(--rule)"/>
+    <rect x="280" y="32" width="60" height="12" rx="3" fill="var(--entry)" opacity=".25"/>
+    <rect x="280" y="50" width="50" height="12" rx="3" fill="var(--sub)" opacity=".25"/>
+    <rect class="dv-new" x="280" y="68" width="60" height="30" rx="3" fill="var(--people)"/>
+  </g>
+  <text id="dvLabel" x="180" y="214" text-anchor="middle" font-family="var(--mono)" font-size="12" fill="var(--ink-2)"></text>
+</svg>`;
+                let step = 0,
+                    playTimer = null;
+                function placePkt() {
+                    const st = stations.querySelectorAll(".station")[step];
+                    if (!st) return;
+                    const dot = st.querySelector(".dot");
+                    const sr = stations.getBoundingClientRect(),
+                        dr = dot.getBoundingClientRect();
+                    pkt.style.left = dr.left + dr.width / 2 - sr.left + "px";
+                }
+                function setStep(i) {
+                    step = Math.max(0, Math.min(STEPS.length - 1, i));
+                    stations.querySelectorAll(".station").forEach((b, j) => {
+                        b.classList.toggle("cur", j === step);
+                        b.classList.toggle("done", j < step);
+                    });
+                    const s = STEPS[step];
+                    stepCard.innerHTML = `<span class="file">${step + 1} / ${STEPS.length} · ${s.file}</span><h3>${s.name}</h3><p>${s.text}</p><pre>${s.code.replace(/</g, "&lt;")}</pre>`;
+                    const done = step === STEPS.length - 1;
+                    devices.querySelectorAll(".dv-new").forEach((r) => {
+                        r.style.opacity = done ? "1" : ".12";
+                        r.style.transition = "opacity .4s";
+                    });
+                    $("#dvLabel").textContent = done
+                        ? "all tabs show the same committed answer"
+                        : step >= 4
+                          ? "update sent"
+                          : "no commit yet";
+                    $("#pathBack").disabled = step === 0;
+                    $("#pathNext").disabled = done;
+                    placePkt();
+                }
+                function stopPlay() {
+                    clearInterval(playTimer);
+                    playTimer = null;
+                    $("#pathPlay").textContent = "Play";
+                }
+                $("#pathPlay").addEventListener("click", () => {
+                    if (playTimer) return stopPlay();
+                    if (step === STEPS.length - 1) setStep(0);
+                    $("#pathPlay").textContent = "Pause";
+                    playTimer = setInterval(
+                        () => {
+                            if (step >= STEPS.length - 1) return stopPlay();
+                            setStep(step + 1);
+                        },
+                        reduce ? 2600 : 1900,
+                    );
+                });
+                $("#pathNext").addEventListener("click", () => {
+                    stopPlay();
+                    setStep(step + 1);
+                });
+                $("#pathBack").addEventListener("click", () => {
+                    stopPlay();
+                    setStep(step - 1);
+                });
+                window.addEventListener("resize", placePkt);
+                setStep(STEPS.length - 1);
+
+                /* ---------- Coalescing timeline ---------- */
+                const tlSvg = $("#tlSvg");
+                const SPAN = 3000,
+                    X0 = 110,
+                    X1 = 505;
+                // [name, ms, y, only commits that change the session list]
+                const LANES = [
+                    ["room", 90, 70, false],
+                    ["session list", 400, 120, true],
+                    ["peek tiles", 1000, 170, false],
+                ];
+                const xs = (t) => X0 + (t / SPAN) * (X1 - X0);
+                function genCommits() {
+                    const out = [];
+                    let t = 40 + Math.random() * 60;
+                    while (t < SPAN - 60) {
+                        out.push(t);
+                        t +=
+                            Math.random() < 0.2
+                                ? 160 + Math.random() * 380
+                                : 40 + Math.random() * 90;
+                    }
+                    return out;
+                }
+                function flushes(commits, ms) {
+                    const out = [];
+                    let open = null,
+                        n = 0;
+                    for (const c of commits) {
+                        if (open !== null && c > open) {
+                            out.push([open, n]);
+                            open = null;
+                            n = 0;
+                        }
+                        if (open === null) open = c + ms;
+                        n++;
+                    }
+                    if (open !== null) out.push([Math.min(open, SPAN), n]);
+                    return out;
+                }
+                let tlAnim = null;
+                function drawTimeline() {
+                    const commits = genCommits();
+                    // A run that starts or ends, a chat message, or a session change: the list changes.
+                    const listCommits = commits.filter(
+                        (c, i) => i === 0 || i === commits.length - 1 || Math.random() < 0.08,
+                    );
+                    const laneCommits = (only) => (only ? listCommits : commits);
+                    let s = `<text x="10" y="34" font-family="var(--mono)" font-size="11" fill="var(--ink-2)">commits</text>`;
+                    s += `<line x1="${X0}" y1="30" x2="${X1}" y2="30" stroke="var(--rule)"/>`;
+                    for (const c of commits)
+                        s += `<rect class="tc" data-t="${c}" x="${xs(c) - 1.5}" y="${listCommits.includes(c) ? 14 : 20}" width="3" height="${listCommits.includes(c) ? 26 : 20}" rx="1" fill="var(--commit)"/>`;
+                    for (const [name, ms, y, only] of LANES) {
+                        s += `<text x="10" y="${y + 4}" font-family="var(--mono)" font-size="11" fill="var(--ink-2)">${name}</text>`;
+                        s += `<line x1="${X0}" y1="${y}" x2="${X1}" y2="${y}" stroke="var(--rule)"/>`;
+                        for (const [t, n] of flushes(laneCommits(only), ms)) {
+                            s += `<g class="tf" data-t="${t}"><circle cx="${xs(t)}" cy="${y}" r="${Math.min(10, 4 + n)}" fill="var(--people)"/>`;
+                            if (n > 1)
+                                s += `<text x="${xs(t)}" y="${y - 13}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--ink-2)">${n}</text>`;
+                            s += `</g>`;
+                        }
+                    }
+                    for (let t = 0; t <= SPAN; t += 500)
+                        s += `<text x="${xs(t)}" y="200" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--ink-2)">${t / 1000}s</text>`;
+                    s += `<line id="tlHead" x1="${X0}" y1="12" x2="${X0}" y2="186" stroke="var(--ink)" stroke-width="1" opacity=".5"/>`;
+                    tlSvg.innerHTML = s;
+                    const totals = LANES.map(
+                        ([, ms, , only]) => flushes(laneCommits(only), ms).length,
+                    );
+                    tlSvg.setAttribute(
+                        "aria-label",
+                        `${commits.length} commits make ${totals[0]} room updates, ${totals[1]} session list updates, and ${totals[2]} peek tile updates.`,
+                    );
+                    if (reduce) return;
+                    cancelAnimationFrame(tlAnim);
+                    const marks = [...tlSvg.querySelectorAll(".tc, .tf")];
+                    marks.forEach((m) => (m.style.opacity = ".15"));
+                    const head = $("#tlHead"),
+                        start = performance.now();
+                    const tick = (now) => {
+                        const t = Math.min(SPAN, (now - start) * 0.75);
+                        head.setAttribute("x1", xs(t));
+                        head.setAttribute("x2", xs(t));
+                        for (const m of marks) if (+m.dataset.t <= t) m.style.opacity = "1";
+                        if (t < SPAN) tlAnim = requestAnimationFrame(tick);
+                        else marks.forEach((m) => (m.style.opacity = "1"));
+                    };
+                    tlAnim = requestAnimationFrame(tick);
+                }
+                $("#tlNew").addEventListener("click", drawTimeline);
+                drawTimeline();
+
+                /* ---------- Attribution ---------- */
+                const PEOPLE = {
+                    ana: ["Ana", "var(--people)"],
+                    ben: ["Ben", "var(--sub)"],
+                    owner: ["Owner", "var(--commit)"],
+                };
+                const ACTS = [
+                    {
+                        b: "Ana sends a message",
+                        id: "u:ana:k1",
+                        who: "ana",
+                        log: "Ana wrote this message. Pi now works for Ana.",
+                    },
+                    {
+                        b: "The schedule of Ben starts at 8:00",
+                        id: "u:ben:schedule-41-0",
+                        who: "ben",
+                        log: "Ben set up this schedule. Thus the message is his own message. Pi now works for Ben.",
+                    },
+                    {
+                        b: "A schedule that Pi set up for Ana starts",
+                        id: "p:ana:schedule-42-0",
+                        who: "ana",
+                        log: "Pi set up this schedule when it worked for Ana. Pi Pocket sends the message for Ana. Pi now works for Ana.",
+                    },
+                    {
+                        b: "Pi starts a subagent",
+                        id: "p:<current>:subagent-…",
+                        sub: true,
+                        log: "The subagent works for the person that the parent worked for when it sent the last message to the subagent.",
+                    },
+                    {
+                        b: "Ana writes in the side chat",
+                        id: "pocket.chat (not a submission)",
+                        none: true,
+                        log: "The side chat is a document. Pi does not see it. There is no change.",
+                    },
+                    {
+                        b: "A message with no person",
+                        id: "schedule:43-0",
+                        log: "A message with no person in the id does not change the person that Pi works for.",
+                    },
+                ];
+                // cur: whom Pi works for (requesterOf); null until a message names a person.
+                // Then spend goes to the person who started the session: here, the owner.
+                let cur = null,
+                    spend = { ana: 0, ben: 0, owner: 0 };
+                const payer = () => cur ?? "owner";
+                const acts = $("#acts"),
+                    bars = $("#bars"),
+                    alog = $("#alog");
+                function renderWho() {
+                    const [n, c] = cur ? PEOPLE[cur] : ["No person yet", "var(--ink-2)"];
+                    $("#whoAv").textContent = cur ? n[0] : "?";
+                    $("#whoAv").style.background = c;
+                    $("#whoName").textContent = n;
+                    const max = Math.max(0.2, ...Object.values(spend));
+                    bars.innerHTML = Object.entries(PEOPLE)
+                        .map(
+                            ([k, [nm, col]]) =>
+                                `<div class="bar"><span>${nm}</span><span class="track"><span class="fill" style="width:${(spend[k] / max) * 100}%;background:${col}"></span></span><span class="amt">$${spend[k].toFixed(2)}</span></div>`,
+                        )
+                        .join("");
+                }
+                function addLog(t) {
+                    alog.querySelectorAll(".flash").forEach((x) => x.classList.remove("flash"));
+                    const li = el("li", { class: "flash" });
+                    li.textContent = t;
+                    alog.prepend(li);
+                }
+                ACTS.forEach((a) => {
+                    const b = el(
+                        "button",
+                        { class: "act", type: "button" },
+                        `<b>${a.b}</b><code>${a.id.replace(/</g, "&lt;")}</code>`,
+                    );
+                    b.addEventListener("click", () => {
+                        if (a.who) cur = a.who;
+                        addLog(a.log);
+                        if (!a.none) {
+                            const cost = a.sub ? 0.09 : 0.05;
+                            spend[payer()] += cost;
+                            addLog(
+                                `Pi runs a turn${a.sub ? " (subagent)" : ""}. Cost $${cost.toFixed(2)}, charged to ${PEOPLE[payer()][0]}${cur ? "" : ", who started the session"}.`,
+                            );
+                        }
+                        renderWho();
+                    });
+                    acts.append(b);
+                });
+                $("#aReset").addEventListener("click", () => {
+                    cur = null;
+                    spend = { ana: 0, ben: 0, owner: 0 };
+                    alog.innerHTML = "";
+                    addLog(
+                        "No message names a person yet. Spend goes to the person who started the session, here the owner. If that person is not known, spend goes to the owner.",
+                    );
+                    renderWho();
+                });
+                $("#aReset").click();
+
+                /* ---------- Restart ---------- */
+                const DUR = [
+                    [
+                        "Transcript and running tasks",
+                        "a stopped call that is not replay-safe returns as interrupted",
+                    ],
+                    ["Queued messages (pi.inbox)", "steers and follow-ups stay in the queue"],
+                    ["Chat, pins, notes, reactions", "pocket.* documents"],
+                    ["A schedule that sleeps until 8:00", "continues to sleep"],
+                    [
+                        "The approval of a bash call by Ben",
+                        "in the memo of the call; not asked again",
+                    ],
+                    ["The last address of the browser", "pocket.browser opens it again"],
+                ];
+                const MEM = [
+                    [
+                        "Who is connected, typing, or away",
+                        "tabs connect again, and each gets a hello",
+                    ],
+                    ["Calls that wait for approval", "the hook runs again and asks"],
+                    ["Text typed into a browser page", "the page opens again with no text"],
+                    ["The end time of each run (peek tiles)", "lost"],
+                    ["Provider sign-ins in progress", "must start again"],
+                ];
+                const fillItems = (ul, arr, st) => {
+                    ul.innerHTML = arr
+                        .map(
+                            ([a, b]) =>
+                                `<li class="item"><span class="led"></span><span>${a}<small>${b}</small></span><span class="st">${st}</span></li>`,
+                        )
+                        .join("");
+                };
+                const rs = $("#restart"),
+                    boot = $("#boot");
+                function rsReset() {
+                    fillItems($("#durItems"), DUR, "stored");
+                    fillItems($("#memItems"), MEM, "live");
+                    rs.classList.remove("restarting", "restarted");
+                }
+                rsReset();
+                let rsBusy = false;
+                $("#rsBtn").addEventListener("click", () => {
+                    if (rsBusy) return;
+                    rsBusy = true;
+                    rsReset();
+                    const lines = [
+                        "$ menu → Restart server",
+                        "server exits with code 75 · launcher starts it again",
+                        "get lock · load models · install extensions",
+                        "open pocket.sqlite · #recover sessions, runs, chat, authors",
+                        "subscribe to commits · prepare Lancet Guard",
+                        "harness.resume() · running work continues",
+                    ];
+                    const d = reduce ? 250 : 650;
+                    boot.textContent = lines[0];
+                    rs.classList.add("restarting");
+                    document
+                        .querySelectorAll("#memItems .st")
+                        .forEach((s) => (s.textContent = "lost"));
+                    lines.slice(1).forEach((l, i) =>
+                        setTimeout(
+                            () => {
+                                boot.textContent += "\n" + l;
+                                if (i === 1) {
+                                    rs.classList.remove("restarting");
+                                    rs.classList.add("restarted");
+                                    document
+                                        .querySelectorAll("#durItems .st")
+                                        .forEach((s) => (s.textContent = "read again"));
+                                    document
+                                        .querySelectorAll("#memItems .st")
+                                        .forEach((s) => (s.textContent = "made again"));
+                                }
+                                if (i === lines.length - 2) rsBusy = false;
+                            },
+                            d * (i + 1),
+                        ),
+                    );
+                });
+
+                /* ---------- Fork ---------- */
+                const DOCS = [
+                    ["pocket.sessions", "the session list (one for the server)", "adds"],
+                    ["pocket.chat", "the side chat and activity lines", "own"],
+                    ["pocket.authors", "who wrote each message to Pi", "cut"],
+                    ["pocket.pins", "pinned messages", "cut"],
+                    ["pocket.reactions", "emoji reactions", "copy"],
+                    ["pocket.notes", "the shared notes page", "copy"],
+                    ["pocket.plan", "plan mode", "copy"],
+                    ["pocket.decisions", "who allowed or denied each guarded call", "copy"],
+                    ["pocket.artifacts", "artifacts, bodies in pocket.artifact-body", "copy"],
+                    ["pocket.codemode-store", "values scripts keep between runs", "copy"],
+                    ["pocket.browser", "the page the browser last showed", "copy"],
+                    ["pocket.turns", "take turns: who controls, who asked", "empty"],
+                    ["pocket.subagents", "named subagents and their reporters", "empty"],
+                    ["pocket.schedules", "scheduled messages", "empty"],
+                    ["pocket.goal", "goal: the check and its attempts", "empty"],
+                    ["pocket.shell-requests", "! commands that people started", "empty"],
+                    ["pocket.spend", "spend per person (one for the server)", "none"],
+                ];
+                const POL = {
+                    adds: "adds a session",
+                    own: "starts empty, then gets a new line",
+                    cut: "copies up to the fork point",
+                    copy: "copies",
+                    empty: "starts empty",
+                    none: "not applicable",
+                };
+                const N = 8,
+                    AT = 5;
+                const forkGrid = $("#forkGrid");
+                const cells = (arr) =>
+                    `<span class="cells">${arr.map((c) => `<i class="${c}"></i>`).join("")}</span>`;
+                function parentCells() {
+                    return Array.from({ length: N }, () => "");
+                }
+                function forkCells(p) {
+                    if (p === "copy") return parentCells();
+                    if (p === "cut")
+                        return Array.from({ length: N }, (_, i) => (i < AT ? "" : "cut"));
+                    if (p === "own")
+                        return Array.from({ length: N }, (_, i) => (i === 0 ? "own" : "off"));
+                    if (p === "adds")
+                        return Array.from({ length: N }, (_, i) => (i === N - 1 ? "own" : ""));
+                    return Array.from({ length: N }, () => "off");
+                }
+                forkGrid.innerHTML =
+                    `<div class="frow headrow"><span>Document</span><span class="pcol-h">Parent</span><span class="fcol-h fcol">Fork at reply ${AT}</span><span class="fcol-h fcol">Policy</span></div>` +
+                    DOCS.map(
+                        ([k, d, p]) =>
+                            `<div class="frow"><span class="kind">${k}<span class="desc">${d}</span></span>${cells(parentCells())}<span class="fcol">${cells(forkCells(p))}</span><span class="pol fcol">${POL[p]}</span></div>`,
+                    ).join("");
+                $("#forkBtn").addEventListener("click", () => {
+                    forkGrid.classList.remove("pre");
+                    $("#forkPoint").textContent =
+                        `Fork at reply ${AT} · one commit makes the fork and sets up these documents`;
+                });
+                $("#forkReset").addEventListener("click", () => {
+                    forkGrid.classList.add("pre");
+                    $("#forkPoint").textContent = "Parent session · 8 replies";
+                });
+
+                /* ---------- Extensions ---------- */
+                const EXTS = [
+                    [
+                        "prompt.ts",
+                        "The system prompt. It contains guidelines for a phone screen, the location of the Pi Pocket docs, the AGENTS.md files of the project, the Pi skills, and the working directory. Always on.",
+                        ["section"],
+                    ],
+                    [
+                        "artifacts.ts",
+                        "HTML, Markdown, and SVG artifacts with versions. They open in a sandbox. Replay-safe: a second run finds the version that the first run wrote.",
+                        ["tool", "section"],
+                    ],
+                    [
+                        "browser.ts",
+                        "A real Chromium browser that Pi and the people in a session use together. In plan mode, Pi can only read pages.",
+                        ["tool", "section"],
+                    ],
+                    [
+                        "subagents.ts",
+                        "Background subagents. An anchor task owns each subagent. A reporter task sends each answer back.",
+                        ["tool", "tasks", "section"],
+                    ],
+                    [
+                        "schedules.ts",
+                        "Scheduled messages, and a tool that Pi uses to schedule its own follow-ups.",
+                        ["tool", "task", "section"],
+                    ],
+                    [
+                        "goals.ts",
+                        "After each final answer, it runs the check of the session. While the check fails, Pi continues. Maximum of five checks.",
+                        ["hook", "section"],
+                    ],
+                    [
+                        "plan.ts",
+                        "Plan mode. It blocks each call that can change data before the call runs.",
+                        ["hook", "section"],
+                    ],
+                    [
+                        "guard.ts",
+                        "Lancet Guard. Dangerous bash, write, and edit calls wait for approval from a person. Off by default.",
+                        ["hook"],
+                    ],
+                    [
+                        "codemode.ts",
+                        "Scripts that call the other tools in a QuickJS sandbox. Each call goes through the same hooks as a direct call.",
+                        ["tool", "section"],
+                    ],
+                ];
+                const TAGC = {
+                    section: "t-entry",
+                    tool: "t-task",
+                    tasks: "t-task",
+                    task: "t-task",
+                    hook: "t-sub",
+                };
+                $("#exts").innerHTML = EXTS.map(
+                    ([n, d, t]) =>
+                        `<div class="panel ext"><div class="row">${t.map((x) => `<span class="tag ${TAGC[x]}">${x}</span>`).join("")}</div><h3>${n}</h3><p>${d}</p></div>`,
+                ).join("");
+
+                /* ---------- Reload ---------- */
+                const KINDS = {
+                    web: {
+                        label: "web/composer.js",
+                        steps: [
+                            ["save", "The file changes on disk."],
+                            ["reload", "All open tabs load the file again immediately."],
+                            [
+                                "risk",
+                                "A syntax error makes the screen blank for all people. Use node --check to examine the file.",
+                            ],
+                            ["server", "The server continues to run. No work stops."],
+                        ],
+                        on: [0, 1, 2],
+                        note: "Web files are plain ES modules. The server sends them with no change. There is no build step.",
+                    },
+                    ext: {
+                        label: "src/server/extensions/goals.ts",
+                        steps: [
+                            ["save", "The file changes on disk."],
+                            ["import", "reload.ts imports the file again."],
+                            [
+                                "install",
+                                "registry.install with the same name replaces the extension in one step.",
+                            ],
+                            [
+                                "running work",
+                                "A call that is running finishes with the old code. If the file does not load, the last good version stays installed.",
+                            ],
+                        ],
+                        on: [0, 1, 2, 3],
+                        note: "Each task phase gets its hooks from the registry one time, at the start of the phase. The next phase, request, or call uses the new code.",
+                    },
+                    srv: {
+                        label: "src/server/commands.ts",
+                        steps: [
+                            ["save", "A restart is necessary: menu → Restart server."],
+                            [
+                                "exit 75",
+                                "The server exits with code 75. The launcher keeps the tunnel open and starts the server again.",
+                            ],
+                            ["#open", "Lock, models, extensions, storage, #recover, subscribe."],
+                            [
+                                "resume()",
+                                "Running work continues. A stopped call that is not replay-safe returns as interrupted.",
+                            ],
+                        ],
+                        on: [0, 1, 2, 3],
+                        note: "Do not restart while your own tool call runs. Finish the edit, then run npm run check and npm test. Then ask for the restart.",
+                    },
+                };
+                const picker = $("#picker"),
+                    lane = $("#lane"),
+                    laneNote = $("#laneNote");
+                let laneTimers = [];
+                function pickKind(k) {
+                    picker
+                        .querySelectorAll("button")
+                        .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.k === k)));
+                    const K = KINDS[k];
+                    lane.innerHTML = K.steps
+                        .map(([h, t]) => `<div class="lstep"><b>${h}</b>${t}</div>`)
+                        .join("");
+                    laneNote.textContent = K.note;
+                    laneTimers.forEach(clearTimeout);
+                    laneTimers = [];
+                    const els = lane.querySelectorAll(".lstep");
+                    K.on.forEach((i, j) =>
+                        laneTimers.push(
+                            setTimeout(() => els[i].classList.add("on"), reduce ? 0 : 280 * j),
+                        ),
+                    );
+                }
+                for (const [k, K] of Object.entries(KINDS)) {
+                    const b = el(
+                        "button",
+                        { class: "btn", type: "button", "data-k": k, "aria-pressed": "false" },
+                        K.label,
+                    );
+                    b.addEventListener("click", () => pickKind(k));
+                    picker.append(b);
+                }
+                pickKind("ext");
+
+                /* ---------- TOC highlight ---------- */
+                const tocLinks = [...document.querySelectorAll(".toc a")];
+                const io = new IntersectionObserver(
+                    (es) => {
+                        for (const e of es)
+                            if (e.isIntersecting)
+                                tocLinks.forEach((a) =>
+                                    a.classList.toggle(
+                                        "on",
+                                        a.getAttribute("href") === "#" + e.target.id,
+                                    ),
+                                );
+                    },
+                    { rootMargin: "-30% 0px -60% 0px" },
+                );
+                document.querySelectorAll("main > section").forEach((s) => io.observe(s));
+            })();
+        </script>
+    </body>
+</html>

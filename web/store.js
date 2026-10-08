@@ -1,4 +1,5 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
+import { onRoute, pushRoute } from "./back.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
 export function uid() {
@@ -687,8 +688,8 @@ function handleAuth(data) {
 export function navigate(conversationId, { replace = false, sheet = null } = {}) {
     const path = conversationId === null ? "/" : `/s/${conversationId}`;
 
-    if (location.pathname !== path) {
-        history[replace ? "replaceState" : "pushState"]({}, "", path);
+    if (location.pathname !== path || store.state.conversationId !== conversationId) {
+        pushRoute(path, { replace });
     }
 
     if (store.state.conversationId === conversationId && source) {
@@ -713,7 +714,8 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
     connect();
 }
 
-addEventListener("popstate", () => {
+// Back or forward to another route. Back that only closes a layer (a sheet, a panel) is back.js's.
+onRoute(() => {
     const id = routeConversation();
 
     if (id !== store.state.conversationId) {
@@ -858,6 +860,12 @@ export function revealEntry(entryId) {
 const PEOPLE_KEY = "pocket.people";
 /** Wide enough for the session list, the conversation, and a panel beside it: where the Browser panel docks too. */
 const PEOPLE_DOCK = matchMedia("(min-width: 1100px)");
+
+/**
+ * Panels (People, Browser, Files) dock beside the conversation now; narrower, the Browser panel and the Files tile cover
+ * the screen, and back closes them. A change re-renders (below).
+ */
+export const panelsBeside = () => PEOPLE_DOCK.matches;
 
 /** The People panel shows beside the conversation now. */
 export function peopleDocked(state = store.state) {

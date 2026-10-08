@@ -76,7 +76,7 @@ export async function login(
     return;
 }
 
-/** `/join/:code`: what an invite grants, and redeeming it with a name. */
+/** `/join/:code`: what an invite grants, and redeeming it with a name (or, for an owner invite, signing in as the owner). */
 export async function join(
     app: PocketApp,
     auth: Auth,
@@ -103,7 +103,8 @@ export async function join(
 
         const tunnel = quickTunnelHost(request);
 
-        if (tunnel !== undefined) {
+        // The owner is never tied to one tunnel.
+        if (tunnel !== undefined && redeemed.user.role !== "owner") {
             app.config.updateUser(redeemed.user.id, { tunnel });
         }
 
@@ -122,9 +123,29 @@ export async function join(
             410,
             page(
                 "Pi Pocket",
-                "<h1>Invite expired</h1><p>Invites last 15 minutes and work once. Ask for a new one.</p>",
+                "<h1>Invite expired</h1><p>Each invite works once, and only until it expires. Ask for a new one.</p>",
             ),
             "text/html; charset=utf-8",
+        );
+    }
+
+    if (grant.role === "owner") {
+        const current = auth.user(request);
+        // Signed in as someone else: say so, as switching accounts does.
+        const switching =
+            current !== undefined && current.role !== "owner"
+                ? `<p>This browser is signed in as ${escapeHtml(current.name)}. It will change to the owner.</p>`
+                : "";
+
+        return send(
+            response,
+            200,
+            page(
+                "Sign in as owner · Pi Pocket",
+                `<h1>Sign in as owner</h1><p>This device will sign in as you, the owner. It gets full control of Pi Pocket and of this machine.</p>${switching}<form method="post"><button type="submit">Sign in as owner</button></form>`,
+            ),
+            "text/html; charset=utf-8",
+            { "referrer-policy": "no-referrer" },
         );
     }
 

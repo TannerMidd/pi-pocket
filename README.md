@@ -131,7 +131,9 @@ npm run format  # ESLint's layout fixes, then Prettier
 npm run lint    # check the layout rules
 ```
 
-Changes to `web/` reload every open browser. Changes to `src/server/extensions/` are reinstalled into the running server. Other server changes need **Restart server** from the menu, and running work resumes afterward. [AGENTS.md](AGENTS.md) covers editing Pi Pocket safely from inside itself.
+Changes to `web/` reload every open browser. Changes to `src/server/extensions/` are reinstalled into the running server. Other server changes need **Restart server** from the menu, and running work resumes afterward. [AGENTS.md](AGENTS.md) covers editing Pi Pocket safely from inside itself, and `node test/serve.ts` runs a throwaway copy, with its own data and a scripted model, to check a change on.
+
+Pi knows where Pi Pocket's own documentation is: [docs/index.md](docs/index.md) starts it, for agents and people who change how Pi works without code ([customizing](docs/customizing.md)), write extensions ([extensions](docs/extensions.md), with [tested examples](docs/examples/)), or change Pi Pocket itself while it runs ([self-editing](docs/self-editing.md)).
 
 ## Limitations
 

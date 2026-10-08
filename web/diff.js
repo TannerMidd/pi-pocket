@@ -3,6 +3,7 @@
 // Parsing is web/diff-parse.js.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useBack } from "./back.js";
 import { jumpToEntry } from "./chat.js";
 import {
     changeCells,
@@ -1215,7 +1216,7 @@ function ReviewFile({
  * near the screen. Keys: j and k go to the next and previous file, n and p to the next and previous hunk, v marks the
  * file at the top as viewed, s switches the layout, w wrapping.
  */
-export function DiffReview({ active = true, autoFocus = false }) {
+export function DiffReview({ active = true, autoFocus = false, covering = false }) {
     const id = store.state.conversationId;
     const { server } = store.state;
     const { changes, error } = useChanges(active);
@@ -1236,6 +1237,10 @@ export function DiffReview({ active = true, autoFocus = false }) {
     const ref = useRef(null);
     const width = useWidth(ref);
     const wide = width >= 720;
+
+    // The tree of changed files over the diffs, where they do not fit side by side, in a tile that covers the screen:
+    // back folds it away.
+    useBack(covering && active && treeOpen && width > 0 && !wide, () => setTreeOpen(false));
 
     const wasActive = useRef(active);
 
@@ -1425,7 +1430,9 @@ export function DiffReview({ active = true, autoFocus = false }) {
             ${
                 changes.repo
                     ? html`<span class="dr-where mono">
-                          ${shortPath(changes.repo.root, server?.home)}${changes.repo.branch && " · "}${
+                          <span class="dr-path">${shortPath(changes.repo.root, server?.home)}</span>${
+                              changes.repo.branch && " · "
+                          }${
                               changes.repo.branch &&
                               (branchAvailable()
                                   ? html`<button
