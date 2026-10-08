@@ -2404,7 +2404,8 @@
                                 </li>
                                 <li>
                                     Click <b>Reset</b> and <b>Run</b>. When <code>bash</code> shows
-                                    output, click <b>Kill process</b>. Then click <b>Reopen</b>.
+                                    output, click <b>Kill process</b>. Then click
+                                    <b>Reopen and resume()</b>. The run continues without a click.
                                 </li>
                                 <li>
                                     Set <code>replay: "safe"</code> on <code>bash</code>. Do step 2
@@ -3716,13 +3717,20 @@
                             reopened: true,
                         };
                         S.commits.push({ reopen: true, proc: M.proc });
+                        const pending = S.sub && S.sub.status !== "done";
                         say(
-                            running.length
-                                ? `A new process opens the same storage and calls resume(). The tasks with the committed status running (${running.join(", ")}) show as pending until they run again. Waiting tasks run no code. They continue to wait.`
-                                : "A new process opens the same storage and calls resume(). No task was in progress, so the work continues.",
+                            !S.sub
+                                ? "A new process opens the same storage and calls resume(). Storage is empty, so there is no work to continue. Click Run to send the input."
+                                : !pending
+                                  ? "A new process opens the same storage and calls resume(). The run is complete, so there is no work to continue."
+                                  : running.length
+                                    ? `A new process opens the same storage and calls resume(). The tasks with the committed status running (${running.join(", ")}) show as pending until they run again. Waiting tasks run no code. They continue to wait.`
+                                    : "A new process opens the same storage and calls resume(). No task was in progress, so the work continues.",
                             "const harness = await Harness.open(storage, …); harness.resume();",
                         );
                         render();
+                        // resume() starts the scheduler, so the work continues without a click.
+                        if (pending) run(reduce ? 2600 : 2000);
                     }
 
                     function stop() {
@@ -3732,16 +3740,25 @@
                         }
                         $("#sim-run-label").textContent = "Run";
                     }
-                    function run() {
+                    // Step through the run on a timer. A delay lets the reader see the current message first.
+                    function run(delay = 0) {
                         if (timer) return stop();
                         if (!M.alive) return;
                         $("#sim-run-label").textContent = "Pause";
                         const tick = () => {
-                            if (!next()) stop();
+                            if (!next() || (S.sub && S.sub.status === "done")) stop();
                             render();
                         };
-                        tick();
-                        timer = setInterval(tick, reduce ? 1400 : 950);
+                        const loop = () => {
+                            tick();
+                            if (timer) timer = setInterval(tick, reduce ? 1400 : 950);
+                        };
+                        if (delay) {
+                            timer = setTimeout(loop, delay);
+                        } else {
+                            timer = -1;
+                            loop();
+                        }
                     }
 
                     function statusOf(t) {
