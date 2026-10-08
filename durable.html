@@ -227,9 +227,10 @@
                 }
                 .toc {
                     position: sticky;
-                    top: env(safe-area-inset-top, 0px);
+                    /* Stick at the top edge. The padding fills the area under the status bar. */
+                    top: 0;
                     z-index: 20;
-                    padding-block: 8px;
+                    padding-block: calc(8px + env(safe-area-inset-top, 0px)) 8px;
                     margin-inline: -16px;
                     padding-inline: 16px;
                     background: color-mix(in srgb, var(--paper) 92%, transparent);
@@ -321,7 +322,7 @@
 
             section.sec {
                 padding-block: 84px 12px;
-                scroll-margin-top: 64px;
+                scroll-margin-top: calc(64px + env(safe-area-inset-top, 0px));
             }
             section.sec + section.sec {
                 border-top: 1px solid var(--rule);

@@ -156,11 +156,12 @@
             /* Contents */
             .toc {
                 position: sticky;
-                top: env(safe-area-inset-top, 0px);
+                /* Stick at the top edge. The padding fills the area under the status bar. */
+                top: 0;
                 z-index: 5;
                 background: var(--paper);
                 margin-inline: -16px;
-                padding: 10px 16px;
+                padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
                 border-bottom: 1px solid var(--rule);
                 display: flex;
                 gap: 8px;
@@ -234,7 +235,7 @@
             }
             section {
                 min-width: 0;
-                scroll-margin-top: 72px;
+                scroll-margin-top: calc(72px + env(safe-area-inset-top, 0px));
             }
 
             .eyebrow {
