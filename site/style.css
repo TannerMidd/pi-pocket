@@ -179,12 +179,14 @@ code {
 .nav .wrap {
     display: flex;
     align-items: center;
-    gap: 28px;
+    gap: 20px;
     height: 62px;
 }
 
 .logo {
     display: flex;
+    flex: none;
+    white-space: nowrap;
     align-items: center;
     gap: 10px;
     color: var(--text);
@@ -203,18 +205,30 @@ code {
 
 .nav-links {
     display: flex;
-    gap: 24px;
+    gap: 18px;
     margin-left: auto;
     font-size: 13px;
 }
 
 .nav-links a {
     color: var(--muted);
+    white-space: nowrap;
 }
 
 .nav-links a:hover {
     color: var(--text);
     text-decoration: none;
+}
+
+/* The guides are separate pages, so they follow a divider after the section links. */
+.nav-links .nav-guide {
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.nav-sep {
+    width: 1px;
+    background: var(--line);
 }
 
 /* ── Hero ────────────────────────────────────────────────── */
@@ -1687,14 +1701,43 @@ code {
     }
 }
 
-/* The section links need the width of a laptop; narrower screens scroll to the sections. */
-@media (max-width: 900px) {
-    .nav-links {
+/* The section links and the guides need the full width of the page. Narrower screens show only
+   the guides and scroll to the sections. */
+@media (max-width: 1199px) {
+    .nav-links a:not(.nav-guide),
+    .nav-sep {
         display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    .nav-long {
+        display: none;
+    }
+}
+
+/* On a phone, the logo and the GitHub button show only their icons. */
+@media (max-width: 520px) {
+    .nav .wrap {
+        gap: 14px;
+    }
+
+    .nav-links {
+        gap: 14px;
+    }
+
+    .nav .logo,
+    .nav .btn {
+        font-size: 0;
+        gap: 0;
     }
 
     .nav .btn {
-        margin-left: auto;
+        padding: 0 9px;
+    }
+
+    .nav-links a {
+        font-size: 13px;
     }
 }
 
