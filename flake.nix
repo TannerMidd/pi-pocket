@@ -57,7 +57,15 @@
               ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.chromium ];
           };
 
-          checks.default = pi-pocket;
+          checks = {
+            default = pi-pocket;
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            nixos-service = import ./nix/tests/service.nix {
+              inherit pkgs;
+              package = pi-pocket;
+            };
+          };
           formatter = pkgs.nixfmt;
         };
     };

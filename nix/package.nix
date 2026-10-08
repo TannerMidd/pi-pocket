@@ -87,11 +87,11 @@ stdenv.mkDerivation {
     runHook preInstall
     npm prune --omit=dev --ignore-scripts
 
-    # Node refuses to strip TypeScript under node_modules; keep the app outside it.
+    # node refuses to strip typescript under node_modules; keep the app outside it
     app="$out/share/pi-pocket"
     mkdir -p "$app" "$out/bin"
     cp -r bin src web node_modules package.json README.md LICENSE "$app/"
-    # npm's hidden lock contains build-time tarball paths, not runtime dependencies.
+    # npm's hidden lock contains build-time tarball paths, not runtime dependencies
     rm -f "$app/node_modules/.package-lock.json"
 
     makeWrapper ${lib.getExe nodejs_24} "$out/bin/pi-pocket" \
@@ -104,6 +104,9 @@ stdenv.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
     "$out/bin/pi-pocket" --help
+    PI_POCKET_TEST_PACKAGE="$out" \
+      PI_POCKET_TEST_EXTENSION=${./tests/extension.ts} \
+      node --test ${./tests/installed.mjs}
     runHook postInstallCheck
   '';
 
