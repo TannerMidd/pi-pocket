@@ -1926,59 +1926,6 @@
                 border-radius: 4px;
             }
 
-            /* ---------- quiz ---------- */
-            .quiz {
-                display: grid;
-                gap: 14px;
-                margin-top: 28px;
-            }
-            .qq {
-                background: var(--sheet);
-                border: 1px solid var(--rule);
-                border-radius: var(--r);
-                padding: 16px;
-            }
-            .qq p.q {
-                margin: 0 0 10px;
-                font-weight: 700;
-            }
-            .qq .opts {
-                display: grid;
-                gap: 6px;
-            }
-            .qq button {
-                all: unset;
-                box-sizing: border-box;
-                cursor: pointer;
-                padding: 9px 12px;
-                border: 1px solid var(--rule);
-                border-radius: 4px;
-                font-size: 15px;
-                background: var(--paper);
-            }
-            .qq button:hover {
-                border-color: var(--ink-2);
-            }
-            .qq button:focus-visible {
-                outline: 2px solid var(--commit);
-            }
-            .qq button.right {
-                border-color: var(--task);
-                background: color-mix(in srgb, var(--task) 13%, var(--paper));
-            }
-            .qq button.wrong {
-                border-color: var(--crash);
-                background: color-mix(in srgb, var(--crash) 10%, var(--paper));
-            }
-            .qq .why {
-                margin-top: 10px;
-                font-size: 14px;
-                color: var(--ink-2);
-            }
-            .score {
-                font: 700 18px var(--display);
-            }
-
             .next-part {
                 margin-top: 64px;
                 display: grid;
@@ -2069,9 +2016,6 @@
                     </li>
                     <li>
                         <a href="#storage"><span class="n">12</span>Storage</a>
-                    </li>
-                    <li>
-                        <a href="#quiz"><span class="n">13</span>Test questions</a>
                     </li>
                 </ol>
                 <a class="part2" href="architecture.html"
@@ -3007,17 +2951,6 @@
                         ><span>record_ids</span><span>durable_metadata</span
                         ><span>durable_schema</span>
                     </div>
-                </section>
-
-                <!-- ================= QUIZ ================= -->
-                <section class="sec" id="quiz">
-                    <div class="eyebrow">Test</div>
-                    <h2>Test questions</h2>
-                    <p class="lede">
-                        Answer the six questions to check your knowledge.
-                        <span class="score" id="qz-score"></span>
-                    </p>
-                    <div class="quiz" id="qz"></div>
 
                     <a class="next-part" href="architecture.html">
                         <div>
@@ -5042,90 +4975,6 @@
                     }, 60);
                     slow.addEventListener("change", draw);
                     draw();
-                })();
-
-                /* ================= QUIZ ================= */
-                (() => {
-                    const Q = [
-                        [
-                            'The process stops while a bash call streams output. bash does not have replay: "safe". What occurs when a new process opens the storage?',
-                            [
-                                "bash runs again from the start",
-                                "The model gets an interrupted error result with the committed output",
-                                "The run is lost",
-                            ],
-                            1,
-                            'A call runs again only if its tool had replay: "safe" at the intent commit and still has it. No built-in tool has this setting. For other calls, the model gets an interrupted error result with the committed output. Then the model decides the next step.',
-                        ],
-                        [
-                            "What is the maximum data that a crash can lose from a streamed answer?",
-                            [
-                                "No data",
-                                "The full answer",
-                                "Approximately 100 ms of streamed output",
-                            ],
-                            2,
-                            "The harness commits a streamed answer a maximum of one time every 100 ms. Text after the last commit is only in memory. Thus a crash loses approximately the last 100 ms. The committed part stays as an aborted answer.",
-                        ],
-                        [
-                            "After a timeout, a client sends a submit again with the same requestId. What does the client get?",
-                            [
-                                "A ConversationBusy error",
-                                "The stored submission",
-                                "A second submission",
-                            ],
-                            1,
-                            "The requestId makes each submission occur one time only. The second submit finds the stored submission.",
-                        ],
-                        [
-                            'You submit with whenBusy: "steer" while the agent runs tools. When does the model get the input?',
-                            [
-                                "At the end of the current tool round",
-                                "At the end of the run",
-                                "Immediately, during the stream",
-                            ],
-                            0,
-                            "The harness adds a steer at the end of the current tool round. The steer joins the current run. A follow-up waits for the end of the run.",
-                        ],
-                        [
-                            "You install an extension again while one of its tools runs. Which code does the running call use?",
-                            ["The new code", "The old code", "The call aborts"],
-                            1,
-                            "Work that started continues with its code. The next call uses the new code.",
-                        ],
-                        [
-                            "The todo document of a fork must agree with the transcript of the fork. Which fork policy do you use?",
-                            ['"initial"', '"current"', '"asOf"'],
-                            2,
-                            '"asOf" gives the value of the parent at the fork point. For this policy, the document must have history: "rewindable".',
-                        ],
-                    ];
-                    const box = $("#qz");
-                    let right = 0,
-                        answered = 0;
-                    box.innerHTML = Q.map(
-                        ([q, opts], i) =>
-                            `<div class="qq" data-i="${i}"><p class="q">${i + 1}. ${esc(q)}</p><div class="opts">${opts.map((o, j) => `<button data-j="${j}">${esc(o)}</button>`).join("")}</div><div class="why" hidden></div></div>`,
-                    ).join("");
-                    box.addEventListener("click", (e) => {
-                        const b = e.target.closest("button");
-                        if (!b) return;
-                        const card = b.closest(".qq");
-                        if (card.dataset.done) return;
-                        const [, , a, why] = Q[+card.dataset.i];
-                        card.dataset.done = 1;
-                        answered++;
-                        const ok = +b.dataset.j === a;
-                        if (ok) right++;
-                        $$("button", card).forEach((x, j) => {
-                            if (j === a) x.classList.add("right");
-                            else if (x === b) x.classList.add("wrong");
-                        });
-                        const w = $(".why", card);
-                        w.hidden = false;
-                        w.textContent = (ok ? "Correct. " : "Incorrect. ") + why;
-                        $("#qz-score").textContent = `${right} / ${answered}`;
-                    });
                 })();
             })();
         </script>
