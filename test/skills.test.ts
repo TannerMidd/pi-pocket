@@ -7,6 +7,7 @@ import {
     modelTexts,
     newSession,
     openApp,
+    owner,
     root,
     say,
     scriptedModel,
@@ -17,6 +18,7 @@ import {
     mkdtempSync,
     readFileSync,
     realpathSync,
+    rmSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -148,6 +150,8 @@ test("a project's .agents/skills load only when Pi trusts the project", () => {
     assert.deepEqual(names(cwd, sources), ["everywhere", "from-settings", "pi-project", "pi-user"]);
     assert.ok(has(names(cwd, always)), "defaultProjectTrust: always trusts an undecided project");
     assert.ok(lacks(names(cwd, never)));
+    // Told no, as by defaultProjectTrust "never", its .pi/skills stay out too, as in Pi.
+    assert.ok(!names(cwd, never).includes("pi-project"));
 
     // A decision for the repository counts for the folders in it, and wins over the default.
     new ProjectTrustStore(agentDir).set(repo, true);
@@ -155,6 +159,7 @@ test("a project's .agents/skills load only when Pi trusts the project", () => {
     assert.ok(has(names(cwd, never)));
     new ProjectTrustStore(agentDir).set(cwd, false);
     assert.ok(lacks(names(cwd, always)), "the nearest decision wins");
+    assert.ok(!names(cwd, always).includes("pi-project"), "a saved no keeps .pi/skills out too");
 });
 
 test("an unreadable trust store trusts no project", () => {
@@ -259,6 +264,12 @@ test("a session has the skills Pi's CLI has in the same folder, the same one of 
         found(loadSessionSkills(cwd, sources)),
         found(await cliSkills(cwd, own, agentDir, true)),
     );
+    // Told not to trust it: exactly the CLI's, .pi/skills left out as well.
+    new ProjectTrustStore(agentDir).set(cwd, false);
+    assert.deepEqual(
+        found(loadSessionSkills(cwd, sources)),
+        found(await cliSkills(cwd, own, agentDir, false)),
+    );
 });
 
 test("a session lists them as /skill: commands and in its system prompt", async () => {
@@ -321,12 +332,13 @@ test("an undecided project with skills of its own asks; one without, or with a d
     // Nor when the trust store cannot be read: the answer could not be saved.
     writeFileSync(join(agentDir, "trust.json"), "{ not json");
     assert.deepEqual(
-        [readProjectTrust(cwd, sources)].map(({ saved, trusted, ask }) => ({
+        [readProjectTrust(cwd, sources)].map(({ saved, trusted, ask, unreadable }) => ({
             saved,
             trusted,
             ask,
+            unreadable,
         })),
-        [{ saved: null, trusted: false, ask: false }],
+        [{ saved: null, trusted: false, ask: false, unreadable: true }],
     );
     assert.throws(() => saveProjectTrust(cwd, agentDir, "trust"));
     assert.equal(readProjectTrust(base, sources).parent, dirname(base));
@@ -466,5 +478,36 @@ test("the owner answers through the API, a guest cannot, and Pi has the skills f
         server.closeAllConnections();
         server.close();
         app.config.removeUser(guest.user.id);
+    }
+});
+
+test("the app reads Pi's settings: its default trust, and its skill paths", async () => {
+    const agentDir = process.env.PI_CODING_AGENT_DIR!;
+    const project = realpathSync(mkdtempSync(join(root, "skills-settings-")));
+    const extra = realpathSync(mkdtempSync(join(root, "skills-settings-extra-")));
+
+    mkdirSync(join(project, ".git"));
+    skill(join(project, ".agents", "skills"), "by-default");
+    skill(extra, "from-pi-settings");
+    writeFileSync(
+        join(agentDir, "settings.json"),
+        JSON.stringify({ defaultProjectTrust: "always", skills: [extra] }),
+    );
+    // Opened after the settings are written: an app reads Pi's settings when it opens.
+    const other = await openApp(scriptedModel(route), join(root, "skills-settings-data"));
+
+    try {
+        const id = await newSession(other, project);
+        const commands = other.skillCommands(id).map((each) => each.name);
+
+        assert.ok(commands.includes("by-default"), "trusted by defaultProjectTrust");
+        assert.ok(commands.includes("from-pi-settings"), "found through Pi's skill paths");
+        assert.deepEqual(
+            [other.projectTrust(id, owner(other))].map(({ trusted, ask }) => ({ trusted, ask })),
+            [{ trusted: true, ask: false }],
+        );
+    } finally {
+        await other.close();
+        rmSync(join(agentDir, "settings.json"), { force: true });
     }
 });

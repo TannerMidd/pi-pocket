@@ -132,9 +132,15 @@ export const SubagentsDoc = defineDoc<{
     outbox?: PendingReport[];
     /** The task sending them, while there is one. */
     courier?: TaskId;
-    /** The names in the batch sent and still waiting in the parent's queue; and how many batches went so far. */
-    delivering?: string[];
+    /**
+     * The batch taken from the outbox, kept until it has left the parent's queue, with the request id it goes with: a
+     * courier that stops before then leaves it to the next, which sends it again under that id, so it goes once.
+     */
+    sending?: { request: string; reports: PendingReport[] };
+    /** How many batches went so far, for their request ids. */
     batches?: number;
+    /** An earlier build's names of the batch in the queue: no longer written, and cleared where found. */
+    delivering?: string[];
 }>({
     kind: "pocket.subagents",
     version: 1,

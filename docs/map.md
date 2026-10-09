@@ -51,7 +51,7 @@ A module split into parts keeps its name for the part others import, with the re
 | `schedules.ts`, `when.ts` | Scheduled messages (a durable task) and their time grammar                                                                                                                                                                                    |
 | `goals.ts`                | "Done when" checks                                                                                                                                                                                                                            |
 | `titles.ts`               | A short title for a session with a long first message, from a small model of its provider                                                                                                                                                     |
-| `prompts.ts`              | Pi's prompt templates and skills (`/skill:name`) as slash commands                                                                                                                                                                            |
+| `prompts.ts`              | Pi's prompt templates as slash commands, and `/skill:name` expanded                                                                                                                                                                           |
 | `pi-sessions.ts`          | Pi's sessions from the terminal (`~/.pi/agent/sessions/`), read and never written: listing them, and one as a new session's history, with Pi's own context of it (compactions, context edits); `commands.continuePiSession` makes the session |
 | `skills.ts`               | Which skills a session's folder has, from where Pi's CLI looks and in its order, with Pi's project trust; the system prompt and `/skill:name` both use it. Reads and saves the owner's answer to "trust this project?"                        |
 | `models.ts`               | The models people can pick, the one a conversation runs with, and finding one by name                                                                                                                                                         |
@@ -70,18 +70,18 @@ A module split into parts keeps its name for the part others import, with the re
 
 ### HTTP: `http.ts` and `http/`
 
-| File                          | Owns                                                                                                                                                            |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http.ts`                     | The one request handler: which part answers a path, and the error boundary that turns what it throws into a status                                              |
-| `http/api.ts`                 | `/api`: signing in, the `X-Pocket` header, and the app-wide routes (people, sessions, peeks, spend, folders, settings, extensions, providers, invites, restart) |
-| `http/conversation-routes.ts` | `/api/c/:id`: one conversation's routes, after the API checked that the person may see it                                                                       |
-| `http/browser-routes.ts`      | `/api/c/:id/browser`: the Browser panel's frames, console, and input                                                                                            |
-| `http/push-routes.ts`         | `/api/push`: this device's subscription, what to notify about, a test                                                                                           |
-| `http/events.ts`              | Each tab's events: the event stream (`/api/events`), or long polling (`/api/poll`) where a tunnel holds streams back                                            |
-| `http/assets.ts`              | The web app's files, the vendored modules, the app's content security policy, and image files                                                                   |
-| `http/sign-in.ts`             | `/login`, `/join/:code`, and `/share` before the service worker takes shares                                                                                    |
-| `http/artifacts.ts`           | `/a/…`: an artifact as its own page, in a sandbox; `/a/frame`, the page a reply's HTML runs in once someone taps Run                                            |
-| `http/io.ts`                  | What every route uses: reading a body, writing JSON, `ApiRequest`                                                                                               |
+| File                          | Owns                                                                                                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `http.ts`                     | The one request handler: which part answers a path, and the error boundary that turns what it throws into a status                                                                               |
+| `http/api.ts`                 | `/api`: signing in, the `X-Pocket` header, and the app-wide routes (people, sessions, Pi's sessions from the terminal, peeks, spend, folders, settings, extensions, providers, invites, restart) |
+| `http/conversation-routes.ts` | `/api/c/:id`: one conversation's routes, after the API checked that the person may see it                                                                                                        |
+| `http/browser-routes.ts`      | `/api/c/:id/browser`: the Browser panel's frames, console, and input                                                                                                                             |
+| `http/push-routes.ts`         | `/api/push`: this device's subscription, what to notify about, a test                                                                                                                            |
+| `http/events.ts`              | Each tab's events: the event stream (`/api/events`), or long polling (`/api/poll`) where a tunnel holds streams back                                                                             |
+| `http/assets.ts`              | The web app's files, the vendored modules, the app's content security policy, and image files                                                                                                    |
+| `http/sign-in.ts`             | `/login`, `/join/:code`, and `/share` before the service worker takes shares                                                                                                                     |
+| `http/artifacts.ts`           | `/a/…`: an artifact as its own page, in a sandbox; `/a/frame`, the page a reply's HTML runs in once someone taps Run                                                                             |
+| `http/io.ts`                  | What every route uses: reading a body, writing JSON, `ApiRequest`                                                                                                                                |
 
 ### The built-in browser: `browser.ts` and `browser/`
 

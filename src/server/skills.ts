@@ -1,7 +1,7 @@
 /**
  * Pi's skills for a session's folder, from the places Pi's CLI looks, in its order. The first skill of a name wins:
  *
- * 1. `.pi/skills/` in the session's folder.
+ * 1. `.pi/skills/` in the session's folder, unless Pi was told not to trust the project.
  * 2. `.agents/skills/` in the session's folder and each folder above it, nearest first, up to the root of its git
  *    repository, or to `/` outside one. Only in a project Pi trusts, below.
  * 3. The skill paths in Pi's settings.
@@ -10,9 +10,13 @@
  *
  * Pi trusts a project when its trust store (`trust.json` in Pi's folder) says so for the folder or one above it, or
  * says nothing and Pi's `defaultProjectTrust` setting is "always". Where it says nothing, the CLI asks when it starts.
- * Pi Pocket asks its owner (`readProjectTrust` says when) and saves the answer in the same store, as the CLI's `/trust`
- * does (`saveProjectTrust`); until then the project is not trusted, as when Pi runs without a terminal. Pi also asks
- * before it loads `.pi/skills/`; Pi Pocket loads those without asking, as it always has.
+ * Pi Pocket asks its owner (`readProjectTrust` says when) and saves the answer in the same store, with the three
+ * answers the CLI's `/trust` saves (`saveProjectTrust`); until then the project is not trusted, as when Pi runs without
+ * a terminal. Pi also asks before it loads `.pi/skills/`: Pi Pocket loads those until it is told not to trust the
+ * project (a saved "no", or `defaultProjectTrust` "never"), as it always has, and then leaves them out as Pi does.
+ *
+ * The search for `.agents/skills/` stops at the repository's root, as Pi's loading does; Pi's question also counts
+ * folders above the root, whose skills it never loads, so Pi Pocket does not ask about those.
  *
  * This follows `addAutoDiscoveredResources` and `collectAncestorAgentsSkillDirs` in `dist/core/package-manager.js`,
  * `resolveProjectTrusted` in `dist/core/project-trust.js`, and `getProjectTrustOptions` in `dist/core/trust-manager.js`
@@ -97,6 +101,8 @@ export type ProjectTrust = {
     skills: { name: string; description: string }[];
     /** Whether to ask the owner: the project has such skills, no decision applies, and Pi's setting is to ask. */
     ask: boolean;
+    /** Pi's trust store cannot be read: nothing is trusted, and no answer can be saved until it is mended. */
+    unreadable?: true;
 };
 
 /** A folder as the trust store names it: links resolved, when it exists. */
@@ -119,34 +125,44 @@ function savedDecision(cwd: string, agentDir: string): Saved | null | undefined 
     }
 }
 
-/** Whether Pi trusts a project with this saved decision, as it decides without asking. */
-function decides(saved: Saved | null | undefined, sources: SkillSources): boolean {
-    // An unreadable trust store trusts nothing.
+/**
+ * What Pi decided about a project, as it decides without asking: trusted, not trusted (a saved "no", or
+ * `defaultProjectTrust` "never"), or nothing yet, which includes a trust store that cannot be read.
+ */
+type Decision = "trusted" | "distrusted" | "undecided";
+
+function decides(saved: Saved | null | undefined, sources: SkillSources): Decision {
     if (saved === undefined) {
-        return false;
+        return "undecided";
     }
 
-    return saved?.trusted ?? sources.defaultProjectTrust === "always";
-}
+    if (saved !== null) {
+        return saved.trusted ? "trusted" : "distrusted";
+    }
 
-/** Whether Pi trusts the project in `cwd`, as it decides without asking. */
-function trusted(cwd: string, sources: SkillSources): boolean {
-    return decides(savedDecision(cwd, sources.agentDir), sources);
+    return sources.defaultProjectTrust === "always"
+        ? "trusted"
+        : sources.defaultProjectTrust === "never"
+          ? "distrusted"
+          : "undecided";
 }
 
 /** Where a session in `cwd` loads skills from, in order: folders, and the paths in Pi's settings as written. */
 export function skillPlaces(cwd: string, sources: SkillSources): string[] {
     const folder = resolve(cwd);
+    const own = join(folder, CONFIG_DIR_NAME, "skills");
+    const hasOwn = existsSync(own);
     const agents = projectAgentsFolders(folder, sources.home);
-    const project = [
-        join(folder, CONFIG_DIR_NAME, "skills"),
-        // Asked only when the project has such a folder: Pi needs no trust from a project without one.
-        ...(agents.length > 0 && trusted(folder, sources) ? agents : []),
-    ];
+    // The trust store is read only for a project with skills of its own: Pi needs no trust from one without.
+    const decision =
+        hasOwn || agents.length > 0
+            ? decides(savedDecision(folder, sources.agentDir), sources)
+            : "undecided";
     const user = [join(sources.agentDir, "skills"), join(sources.home, ".agents", "skills")];
 
     return [
-        ...project.filter((each) => existsSync(each)),
+        ...(hasOwn && decision !== "distrusted" ? [own] : []),
+        ...(decision === "trusted" ? agents : []),
         ...sources.settingsPaths,
         ...user.filter((each) => existsSync(each)),
     ];
@@ -183,11 +199,12 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
         ...(parent === folder ? {} : { parent }),
         saved: saved ?? null,
         defaultProjectTrust: sources.defaultProjectTrust,
-        trusted: decides(saved, sources),
+        trusted: decides(saved, sources) === "trusted",
         folders,
         skills,
         // Never about a store that cannot be read: the answer could not be saved.
         ask: folders.length > 0 && saved === null && sources.defaultProjectTrust === "ask",
+        ...(saved === undefined ? { unreadable: true as const } : {}),
     };
 }
 

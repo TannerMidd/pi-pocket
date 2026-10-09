@@ -1,14 +1,16 @@
 /**
  * Pi's sessions from the terminal, to continue in Pi Pocket. Pi keeps each in a JSONL file in its sessions folder
- * (`~/.pi/agent/sessions/`, a folder per project; or `sessionDir` in Pi's settings, or `PI_CODING_AGENT_SESSION_DIR`),
- * and finds them with `SessionManager.listAll`, as `pi -r` does. Their files are only read, never written: Pi's own
- * loader mends a file whose last line is cut off, and a `pi` still running may be writing that line.
+ * (`~/.pi/agent/sessions/`, a folder per project; or the one folder `PI_CODING_AGENT_SESSION_DIR` or `sessionDir` in
+ * Pi's settings names), and finds them all with `SessionManager.listAll`, as `pi -r` lists every folder's. Their files
+ * are only read, never written: Pi's own loader mends a file whose last line is cut off, and a `pi` still running may be
+ * writing that line.
  *
  * A session continues here as a copy of where Pi left it, its current branch. People get every message of it to read,
  * and Pi gets the context Pi itself builds from the file (`buildSessionProjection`): a compaction becomes Pi Durable's,
  * keeping the same messages, and a context edit edits the same message. Pi's system prompt, its extensions' state, and
  * its model changes stay behind; Pi Pocket's prompt and tools apply. Nothing Pi did runs again: a tool call that never
- * finished gets a result saying so.
+ * finished gets a result saying so (Pi's says "No result provided"). Where Pi would send a tool result whose call is
+ * not there (a stray one, or one whose call a context edit took out), Pi Durable leaves it out, as providers refuse it.
  */
 import { readFile, stat } from "node:fs/promises";
 import type { Message } from "@earendil-works/pi-ai";
@@ -41,8 +43,10 @@ import { HttpError } from "./errors.ts";
 /** Pi's variable for its sessions folder (`ENV_SESSION_DIR` in its config, which the package does not export). */
 const SESSION_DIR_VARIABLE = "PI_CODING_AGENT_SESSION_DIR";
 /** The largest session file read: images make big ones. */
-const MAX_SESSION_BYTES = 64 * 1024 * 1024;
-/** How many sessions a list holds, newest first. */
+const MAX_SESSION_BYTES = 32 * 1024 * 1024;
+/** How long a list of Pi's sessions answers "is this one of them?" for a preview or a continue after it. */
+const FOUND_FOR_MS = 5_000;
+/** How many sessions a list holds, newest first: a search looks through them all first. */
 const MAX_LISTED = 300;
 /** How many of its last messages a session's preview shows. */
 const PREVIEW_MESSAGES = 6;
@@ -97,10 +101,14 @@ function forModel(messages: Parameters<typeof convertToLlm>[0]): Message[] {
     return convertToLlm(messages).filter((message) => message.role !== "system");
 }
 
-/** The text of a message's text parts. */
+/** The text of a message's text parts; none for a message without content, which old or edited files can have. */
 function textOf(message: Message): string {
     if (typeof message.content === "string") {
         return message.content;
+    }
+
+    if (!Array.isArray(message.content)) {
+        return "";
     }
 
     return message.content
@@ -319,8 +327,15 @@ export class PiSessions {
         this.#app = app;
     }
 
-    /** Pi's sessions, newest first, as `pi -r` finds them. */
-    async #find(): Promise<SessionInfo[]> {
+    /** The last list, for a few seconds: reading every session's file again for each look is slow with many. */
+    #found: { at: number; list: Promise<SessionInfo[]> } | undefined;
+
+    /** Pi's sessions, newest first, as `pi -r` lists them all; `fresh` reads them again. */
+    #find(fresh = true): Promise<SessionInfo[]> {
+        if (!fresh && this.#found !== undefined && Date.now() - this.#found.at < FOUND_FOR_MS) {
+            return this.#found.list;
+        }
+
         let configured: string | undefined;
 
         try {
@@ -330,8 +345,18 @@ export class PiSessions {
         }
 
         const folder = process.env[SESSION_DIR_VARIABLE] || configured;
+        const list = folder ? SessionManager.listAll(folder) : SessionManager.listAll();
+        const found = { at: Date.now(), list };
 
-        return folder ? SessionManager.listAll(folder) : SessionManager.listAll();
+        this.#found = found;
+        // A list that failed is not kept.
+        list.catch(() => {
+            if (this.#found === found) {
+                this.#found = undefined;
+            }
+        });
+
+        return list;
     }
 
     /** The newest session here that continues each of Pi's, by its id. */
@@ -354,11 +379,18 @@ export class PiSessions {
         }
     }
 
-    /** Pi's sessions on this machine, newest first. */
-    async list(user: User): Promise<{ sessions: PiSessionSummary[] }> {
+    /** Pi's sessions on this machine, newest first; with `query`, those whose title, folder, or words have it. */
+    async list(user: User, query = ""): Promise<{ sessions: PiSessionSummary[] }> {
         this.#requireOwner(user);
         const continued = this.#continued();
-        const found = await this.#find();
+        const needle = query.trim().toLowerCase();
+        const found = (await this.#find()).filter(
+            (info) =>
+                needle === "" ||
+                [info.name ?? "", info.cwd, info.firstMessage, info.allMessagesText].some((text) =>
+                    text.toLowerCase().includes(needle),
+                ),
+        );
 
         return {
             sessions: found.slice(0, MAX_LISTED).map((info) => {
@@ -383,7 +415,11 @@ export class PiSessions {
     async read(user: User, path: string): Promise<PiSession> {
         this.#requireOwner(user);
 
-        if (!(await this.#find()).some((info) => info.path === path)) {
+        const listed = async (fresh: boolean) =>
+            (await this.#find(fresh)).some((info) => info.path === path);
+
+        // The list the sheet just showed, or, for a session new since, the list as it is now.
+        if (!(await listed(false)) && !(await listed(true))) {
             throw new HttpError(404, "Pi has no such session. It may have been deleted.");
         }
 

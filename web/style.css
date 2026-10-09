@@ -4379,7 +4379,8 @@ textarea.notes {
     color: var(--err);
 }
 
-/* Bars above the message box: who drives (take turns), plan mode, a goal, and project trust. The left edge says which. */
+/* Bars above the message box: who drives (take turns), plan mode, a goal, and project trust. The left edge says which:
+   the accent for plan mode and a goal, the warning color for a question (who drives, whether to trust). */
 .driver-bar,
 .plan-bar,
 .goal-bar,
@@ -4399,6 +4400,18 @@ textarea.notes {
 .plan-bar,
 .goal-bar {
     border-left-color: var(--accent);
+}
+
+/* The trust question keeps its words a readable width: on a phone its answers go under them, together, to the right. */
+.trust-bar > .grow {
+    flex: 1 1 15rem;
+}
+
+.trust-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-left: auto;
 }
 
 .driver-bar.mine {
@@ -7790,46 +7803,217 @@ textarea.notes {
     }
 }
 
-/* Pi's sessions from the terminal: a title over its folder (as specific as `.list-item > span:first-child`, so after
-   it), and the last messages of one. */
-.list-item > span.pi-session-name {
+/*
+ * Pi's sessions from the terminal. The list: a card per folder, a row per session (its title over how long and how
+ * recent, a tag when it continues here). One of them: what it worked with, then its last messages as a conversation,
+ * then Continue, kept in sight at the foot of the sheet.
+ */
+.pi-folder {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 0.1rem;
-    min-width: 0;
-    text-align: left;
+    gap: 0.35rem;
+    animation: rise-in 0.34s var(--ease-out) backwards;
 }
 
-.pi-session-name > span {
+.pi-folder-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0 0.15rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+
+.pi-folder-head .icon {
+    align-self: center;
+}
+
+.pi-folder-name {
+    flex: none;
+    max-width: 60%;
+    color: var(--text);
+    font-family: var(--mono);
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.pi-session > .muted {
-    flex: none;
+.pi-folder-parent {
+    min-width: 0;
+    font-family: var(--mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.pi-preview {
+.pi-folder-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin: 0.4rem 0 0.8rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
 }
 
-.pi-line > div {
+.pi-session {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    min-height: 3.2rem;
+    padding: 0.55rem 0.6rem 0.55rem 0.75rem;
+    background: none;
+    border: 0;
+    border-top: 1px solid var(--line);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.pi-session:first-child {
+    border-top: 0;
+}
+
+.pi-session:hover {
+    background: var(--card-2);
+}
+
+.pi-session:hover .pi-session-title {
+    color: var(--accent);
+}
+
+.pi-session > .icon {
+    color: var(--muted);
+}
+
+.pi-session-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.pi-session-title,
+.pi-session-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pi-session-meta {
+    color: var(--muted);
+    font-size: 0.76rem;
+}
+
+.pi-tag {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.pi-tag.behind {
+    color: var(--warn);
+    background: var(--warn-soft);
+}
+
+.pi-facts {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.3rem 0.9rem;
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+}
+
+.pi-facts > div {
+    display: contents;
+}
+
+.pi-facts dt {
+    color: var(--muted);
+}
+
+.pi-facts dd {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pi-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.3rem 0.6rem;
+    font-size: 0.85rem;
+}
+
+.pi-convo {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.pi-convo > .label {
+    margin-bottom: 0;
+}
+
+.pi-ask {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.pi-ask > div,
+.pi-reply {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-line-clamp: 6;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    font-size: 0.88rem;
 }
 
-.pi-line.user > div {
-    border-left: 2px solid var(--accent);
-    padding-left: 0.5rem;
+.pi-ask > div {
+    max-width: 85%;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-right: 2px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 0.45rem 0.7rem;
+}
+
+.pi-reply {
+    color: var(--body);
+}
+
+/* Continue stays in sight as the conversation scrolls under it. */
+.pi-continue {
+    position: sticky;
+    bottom: -1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0 -1rem -1rem;
+    padding: 0.7rem 1rem 1rem;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+}
+
+.pi-continue > p {
+    margin: 0;
 }
 
 /*

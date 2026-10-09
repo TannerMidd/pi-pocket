@@ -335,11 +335,14 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
         case FROM_PI_ENTRY: {
             const data = entry.data as Partial<FromPiData> | undefined;
 
+            // The file's name only: its folder is in the owner's home, which others need not see.
             return {
                 id,
                 kind: "fromPi",
                 title: String(data?.title ?? ""),
-                file: String(data?.file ?? ""),
+                file: String(data?.file ?? "")
+                    .split("/")
+                    .pop()!,
             };
         }
 

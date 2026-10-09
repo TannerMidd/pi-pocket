@@ -29,7 +29,6 @@ import {
     openFile,
     plainText,
     replyText,
-    shortPath,
     Spinner,
     Thinking,
     Thumb,
@@ -166,14 +165,25 @@ function UserEntry({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 
     if (REPORT.test(entry.text)) {
-        const reports = entry.text.split(NEXT_REPORT).map((part) => REPORT.exec(part));
+        // Several that arrived together came as one message: a card each. A part that is not a report's start is
+        // more of the report before it.
+        const parts = [];
 
-        // Several that arrived together came as one message: a card each.
-        return reports.every(Boolean)
-            ? html`<div class="report-group">
+        for (const part of entry.text.split(NEXT_REPORT)) {
+            if (parts.length > 0 && !REPORT.test(part)) {
+                parts[parts.length - 1] += `\n\n${part}`;
+            } else {
+                parts.push(part);
+            }
+        }
+
+        const reports = parts.map((part) => REPORT.exec(part)).filter(Boolean);
+
+        return reports.length === 1
+            ? html`<${Report} report=${reports[0]} view=${view} fresh=${fresh} />`
+            : html`<div class="report-group">
                   ${reports.map((report) => html`<${Report} report=${report} view=${view} fresh=${fresh} />`)}
-              </div>`
-            : html`<${Report} report=${REPORT.exec(entry.text)} view=${view} fresh=${fresh} />`;
+              </div>`;
     }
 
     const check = GOAL_CHECK.exec(entry.text);
@@ -750,7 +760,7 @@ function Divider({ entry }) {
     if (entry.kind === "fromPi") {
         return html`<div class="divider">
             <span>Continued from Pi in the terminal</span>
-            <div class="muted small mono">${shortPath(entry.file, store.state.server?.home)}</div>
+            <div class="muted small mono">${entry.file}</div>
         </div>`;
     }
 

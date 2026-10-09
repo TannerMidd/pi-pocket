@@ -286,7 +286,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
         // Pi's sessions from the terminal, which the owner can continue here.
         if (first === "pi-sessions" && second === undefined && method === "GET") {
-            return json(response, 200, await app.piSessions.list(user));
+            return json(
+                response,
+                200,
+                await app.piSessions.list(user, url.searchParams.get("q") ?? ""),
+            );
         }
 
         if (first === "pi-sessions" && second === "preview" && method === "GET") {

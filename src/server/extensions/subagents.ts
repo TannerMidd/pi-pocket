@@ -137,10 +137,7 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
                         ...(state.outbox ?? []),
                         { name: reporter.input.name, text: report },
                     ];
-
-                    if (!(await working(tx, state.courier))) {
-                        state.courier = await tx.createTask(Courier, null, BACKGROUND);
-                    }
+                    await startCourier(tx, runtime.conversationId);
                 }
 
                 return { status: "terminal", outcome: { status: "completed", result: null } };
@@ -152,6 +149,20 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 
 /** Tasks of a conversation that run beside its work: its Esc and idle waits do not reach them. */
 const BACKGROUND = { ownership: { kind: "conversation" }, background: true } as const;
+
+/**
+ * Start a courier for `conversationId` when reports wait, or a batch has yet to leave its queue, and none is at work:
+ * one that stopped early (faulted, aborted) left them for the next, which the next report starts. It reads the task
+ * table, which a commit can do only before it writes a task: call it before any `createTask`.
+ */
+async function startCourier(tx: Tx, conversationId: ConversationId): Promise<void> {
+    const state = await tx.doc(SubagentsDoc, conversationId);
+    const waiting = (state.outbox?.length ?? 0) > 0 || state.sending !== undefined;
+
+    if (waiting && !(await working(tx, state.courier))) {
+        state.courier = await tx.createTask(Courier, null, BACKGROUND);
+    }
+}
 
 /** Whether a task is there and can still take reports. */
 async function working(tx: Tx, task: number | undefined): Promise<boolean> {
@@ -197,12 +208,14 @@ async function leftQueue(
     }
 }
 
-type CourierState = { phase: "next" } | { phase: "send"; batch: number; text: string };
+/** `batch` and `text`: where an earlier build kept the batch, for a courier it left in "send". */
+type CourierState = { phase: "next" } | { phase: "send"; batch?: number; text?: string };
 
 /**
  * Takes all the reports waiting and sends them to the parent as one message, to steer it at its next pause, or to wake
  * it when it is idle. It sends the next ones only once that message has left the parent's queue, so the queue holds one
- * at a time; reports that arrive meanwhile go in the next. It ends when none are waiting.
+ * at a time; reports that arrive meanwhile go in the next. It ends when none are waiting. The batch it took stays in
+ * `sending` until it has left the queue, so a courier that stops early loses none: the next sends it, once.
  */
 const Courier = defineTask<null, CourierState, null>({
     name: "pocket.subagent-courier",
@@ -212,58 +225,74 @@ const Courier = defineTask<null, CourierState, null>({
         next: (courier, runtime, context) =>
             runtime.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, runtime.conversationId);
-                const reports = state.outbox ?? [];
 
-                if (reports.length === 0) {
-                    delete state.courier;
-                    delete state.delivering;
+                delete state.delivering;
 
-                    return { status: "terminal", outcome: { status: "completed", result: null } };
+                // A batch an earlier courier took and did not see leave the queue goes first, under its own id.
+                if (state.sending === undefined) {
+                    const reports = state.outbox ?? [];
+
+                    if (reports.length === 0) {
+                        delete state.courier;
+
+                        return {
+                            status: "terminal",
+                            outcome: { status: "completed", result: null },
+                        };
+                    }
+
+                    const batch = (state.batches ?? 0) + 1;
+
+                    state.batches = batch;
+                    state.outbox = [];
+                    state.sending = { request: `subagent-reports:${courier.id}:${batch}`, reports };
                 }
 
-                const batch = (state.batches ?? 0) + 1;
-
-                state.batches = batch;
-                state.outbox = [];
-                state.delivering = [...new Set(reports.map((report) => report.name))];
-
-                return {
-                    status: "running",
-                    checkpoint: {
-                        phase: "send",
-                        batch,
-                        text: reports.map((report) => report.text).join("\n\n"),
-                    },
-                };
+                return { status: "running", checkpoint: { phase: "send" } };
             }, context),
         send: async (courier, runtime, context) => {
             const checkpoint = courier.state.checkpoint as Extract<CourierState, { phase: "send" }>;
-            const parent = (await runtime.conversation(runtime.conversationId, context))!;
-            const submission = await parent.submit(
-                {
-                    type: "input",
-                    content: checkpoint.text,
-                    whenBusy: "steer",
-                    requestId: `subagent-reports:${courier.id}:${checkpoint.batch}`,
-                },
-                context,
-            );
+            const parentId = runtime.conversationId;
+            const sending =
+                checkpoint.text === undefined
+                    ? (await runtime.snapshot(SubagentsDoc, parentId, context))?.sending
+                    : {
+                          request: `subagent-reports:${courier.id}:${checkpoint.batch}`,
+                          reports: [{ name: "", text: checkpoint.text }],
+                      };
 
-            await leftQueue(runtime, runtime.conversationId, submission.id, context);
+            if (sending !== undefined) {
+                const parent = (await runtime.conversation(parentId, context))!;
+                const submission = await parent.submit(
+                    {
+                        type: "input",
+                        content: sending.reports.map((report) => report.text).join("\n\n"),
+                        whenBusy: "steer",
+                        requestId: sending.request,
+                    },
+                    context,
+                );
+
+                await leftQueue(runtime, parentId, submission.id, context);
+            }
+
             await runtime.commit(async (tx) => {
-                delete (await tx.doc(SubagentsDoc, runtime.conversationId)).delivering;
+                const state = await tx.doc(SubagentsDoc, parentId);
+
+                if (state.sending !== undefined && state.sending.request === sending?.request) {
+                    delete state.sending;
+                }
+
+                delete state.delivering;
 
                 return { status: "running", checkpoint: { phase: "next" } };
             }, context);
         },
     },
-    // Stopped with its conversation: the reports stay waiting, for the next courier.
+    // Stopped with its conversation: what waits, and the batch it took, stay for the next courier.
     abort: (_courier, runtime, context) =>
         runtime.commit(async (tx) => {
-            const state = await tx.doc(SubagentsDoc, runtime.conversationId);
-
-            delete state.courier;
-            delete state.delivering;
+            delete (await tx.doc(SubagentsDoc, runtime.conversationId)).courier;
 
             return { status: "terminal", outcome: { status: "aborted" } };
         }, context),
@@ -277,8 +306,8 @@ export default function createSubagents(host: PocketHost) {
         description:
             "Manage persistent background subagents. Actions: spawn (name, message; optional model as provider/modelId, " +
             "thinking level, and tools to allow), send (name, message; followUp: true queues it after the current answer " +
-            "instead of steering), stop (name: aborts its current work), status (one name, or all). Answers are reported " +
-            "back to you as messages when they arrive.",
+            "instead of steering), stop (name: aborts its current work), status (one name, or all). Answers come back " +
+            "to you as messages at your next pause; those that arrive together come in one.",
         parameters: Type.Object({
             action: Type.Union([
                 Type.Literal("spawn"),

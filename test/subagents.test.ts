@@ -121,11 +121,17 @@ const names = (count: number, prefix = "a") =>
 test("reports reach a working parent at its next pause, together, each once, at one extra turn at most", async () => {
     const spawned = names(12);
     const id = await orchestrate({ spawn: spawned, rounds: 8, sleep: 0.2 });
+    const tab = fakeTab(id, owner(app));
     let most = 0;
+    let reporting = false;
 
+    await app.attach(tab.client);
     await until(
         async () => {
             most = Math.max(most, await queued(id));
+            reporting ||= ((tab.field("subagents") ?? []) as { reporting?: boolean }[]).some(
+                (agent) => agent.reporting === true,
+            );
 
             return (
                 !app.isBusy(id) &&
@@ -148,6 +154,17 @@ test("reports reach a working parent at its next pause, together, each once, at 
 
     assert.equal(doc?.courier, undefined, "the courier is done");
     assert.deepEqual(doc?.outbox ?? [], []);
+    assert.equal(doc?.sending, undefined);
+    // The bar said whose reports were on their way while they were, and says none are now.
+    assert.ok(reporting, "the view said a report was on its way");
+    await until(
+        () =>
+            ((tab.field("subagents") ?? []) as { reporting?: boolean }[]).every(
+                (agent) => agent.reporting !== true,
+            ),
+        "no report on its way",
+    );
+    app.detach(tab.client);
 });
 
 test("a report reaches an idle parent at once, and the parent answers it", async () => {
@@ -295,4 +312,54 @@ test("a tab gets a subagent's peek, as for a session's tile; someone who cannot 
         app.config.removeUser(guest.user.id);
         slow = {};
     }
+});
+
+/** A batch a courier took and then stopped with (faulted, or aborted): left in `sending`, the courier gone. */
+async function stranded(id: ConversationId, request: string, text: string): Promise<void> {
+    await app.harness.commit(async (tx) => {
+        const state = await tx.doc(SubagentsDoc, id);
+
+        state.sending = { request, reports: [{ name: "lost", text }] };
+        state.courier = 999_998 as never;
+    }, context);
+}
+
+test("a batch a stopped courier left behind is delivered once, by the next one", async () => {
+    const id = await newSession(app);
+
+    await stranded(
+        id,
+        "subagent-reports:999998:1",
+        "[subagent lost answered, no reply needed] found",
+    );
+    // The next use of the subagent tool starts a courier, which sends the batch left behind first.
+    plan = { spawn: ["next"], rounds: 0, sleep: 0 };
+    rounds = 0;
+    await app.commands.submit(id, owner(app), { text: "orchestrate", requestId: "stranded" });
+    await until(async () => {
+        const got = await delivered(id);
+
+        return got.lost === 1 && got.next === 1 && !app.isBusy(id);
+    }, "the batch left behind, then the new report");
+    assert.equal((await app.harness.snapshot(SubagentsDoc, id, context))?.sending, undefined);
+});
+
+test("a batch a stopped courier had sent already is not sent again", async () => {
+    const id = await newSession(app);
+    const request = "subagent-reports:999998:7";
+    const text = "[subagent lost answered, no reply needed] found once";
+
+    // It went out before the courier stopped: the parent has it.
+    await (await app.harness.conversation(id, context))!.submit(
+        { type: "input", content: text, whenBusy: "steer", requestId: request },
+        context,
+    );
+    await until(async () => (await delivered(id)).lost === 1 && !app.isBusy(id), "the batch");
+    await stranded(id, request, text);
+    plan = { spawn: ["after"], rounds: 0, sleep: 0 };
+    rounds = 0;
+    await app.commands.submit(id, owner(app), { text: "orchestrate", requestId: "sent" });
+    await until(async () => (await delivered(id)).after === 1 && !app.isBusy(id), "the new report");
+    assert.equal((await delivered(id)).lost, 1, "under its request id, it went once");
+    assert.equal((await app.harness.snapshot(SubagentsDoc, id, context))?.sending, undefined);
 });

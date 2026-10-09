@@ -136,18 +136,22 @@ export type Person = {
     away?: boolean;
 };
 
-/** The view of one conversation, shared by every client attached to it. */
 /** The subagents with a report on its way: waiting in the outbox, or in the batch sent and still queued. */
 function reportingOf(
     doc:
-        { outbox?: readonly { name: string }[]; delivering?: readonly string[] } | null | undefined,
+        | {
+              outbox?: readonly { name: string }[];
+              sending?: { reports: readonly { name: string }[] };
+          }
+        | null
+        | undefined,
 ): Set<string> {
-    return new Set([
-        ...(doc?.outbox ?? []).map((report) => report.name),
-        ...(doc?.delivering ?? []),
-    ]);
+    return new Set(
+        [...(doc?.outbox ?? []), ...(doc?.sending?.reports ?? [])].map((report) => report.name),
+    );
 }
 
+/** The view of one conversation, shared by every client attached to it. */
 export class Room {
     readonly id: ConversationId;
     readonly clients = new Set<Client>();
@@ -567,10 +571,14 @@ export class Room {
                 recent.reverse(),
                 projectLive(view.docs["pi.live"] as LiveState | undefined),
             ),
-            // A subagent's calls wait on its session's tile, as they make the session wait.
+            // Its own calls waiting for someone; for a session, its subagents' too, as they make the session wait.
             approvals: this.#app.approvals
                 .all()
-                .filter((request) => this.#app.rootOf(request.conversationId) === this.id)
+                .filter(
+                    (request) =>
+                        request.conversationId === this.id ||
+                        this.#app.rootOf(request.conversationId) === this.id,
+                )
                 .map((request) => ({
                     id: request.id,
                     conversationId: request.conversationId,

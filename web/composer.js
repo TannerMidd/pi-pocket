@@ -71,7 +71,8 @@ const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes
 
 /** The subagents whose answers a queued message of reports carries (`extensions/subagents.ts`); null for any other. */
 function reportNames(text) {
-    if (!text?.startsWith("[subagent ")) {
+    // Only a message that starts with a report is one: a person's own may begin "[subagent " too.
+    if (!/^\[subagent \S+ (?:answered|failed)/.test(text ?? "")) {
         return null;
     }
 
@@ -823,6 +824,7 @@ export function Composer() {
     if (collab() && !canSteer()) {
         return html`<footer class="composer-wrap">
             <${TypingLine} where="pi" />
+            <${SubagentsBar} />
             <div class="view-only">
                 <span>
                     <strong>View only.</strong> You can read along, react, and chat with the people here.
@@ -859,7 +861,8 @@ export function Composer() {
                             (!blocked || item.by === me?.id) &&
                             html`<button
                                 class="icon-button small"
-                                aria-label="Withdraw"
+                                aria-label=${reportNames(item.text) ? "Discard these reports" : "Withdraw"}
+                                title=${reportNames(item.text) ? "Discard these reports: Pi will not get them" : "Withdraw"}
                                 onClick=${() => attempt(() => actions.withdraw(item.id))}
                             >
                                 <${Icon} name="close" size=${14} />

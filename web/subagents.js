@@ -8,7 +8,10 @@ import { useOnScreen } from "./peeks.js";
 import { api, attempt, canSteer, navigate, store } from "./store.js";
 import { html, Icon, Spinner, timeAgo } from "./ui.js";
 
-/** When each session's bar was put away, in this browser: it shows again once a subagent does something after. */
+/**
+ * When each session's bar was put away, in this browser, as the newest thing its subagents did then (the server's clock,
+ * as theirs is): it shows again once one does something newer.
+ */
 const AWAY_KEY = "pocket.subagentsAway";
 
 function awayMarks() {
@@ -19,8 +22,11 @@ function awayMarks() {
     }
 }
 
-function putAway(id) {
-    const marks = { ...awayMarks(), [id]: Date.now() };
+/** The server's time of the newest thing a subagent did: asked, or answered. */
+const newest = (agent) => Math.max(agent.askedAt ?? 0, agent.answeredAt ?? 0);
+
+function putAway(id, agents) {
+    const marks = { ...awayMarks(), [id]: Math.max(0, ...agents.map(newest)) };
     // The newest few sessions' marks are enough.
     const kept = Object.entries(marks)
         .sort((a, b) => b[1] - a[1])
@@ -49,9 +55,16 @@ function elapsed(ms) {
     return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
 }
 
-/** What a working subagent does this moment, from its peek: the call it runs, or what it writes. */
+/** What a working subagent does this moment, from its peek: a call waiting for someone, the one it runs, or its words. */
 function nowDoing(agent) {
-    const last = (store.state.peeks?.[agent.conversationId]?.lines ?? []).at(-1);
+    const peek = store.state.peeks?.[agent.conversationId];
+    const waiting = peek?.approvals?.[0];
+
+    if (waiting) {
+        return `Waiting for approval: ${waiting.tool} ${waiting.subject}`.trim();
+    }
+
+    const last = (peek?.lines ?? []).at(-1);
 
     if (last?.kind === "tool" && last.status === "running") {
         const call = describeCall({ name: last.name, args: last.args });
@@ -186,7 +199,7 @@ function Bar({ agents, active, open }) {
                     aria-label="Put the subagents bar away"
                     title="Put away"
                     onClick=${() => {
-                        putAway(store.state.conversationId);
+                        putAway(store.state.conversationId, agents);
                         store.set({ subagentsOpen: false });
                     }}
                 >
@@ -209,9 +222,7 @@ export function SubagentsBar() {
     const agents = view.subagents ?? [];
     const away = awayMarks()[conversationId] ?? 0;
     const active = agents.some((agent) => agent.busy || agent.reporting);
-    const fresh = agents.some(
-        (agent) => Math.max(agent.askedAt ?? 0, agent.answeredAt ?? 0) > away,
-    );
+    const fresh = agents.some((agent) => newest(agent) > away);
 
     if (agents.length === 0 || !(active || fresh)) {
         return null;

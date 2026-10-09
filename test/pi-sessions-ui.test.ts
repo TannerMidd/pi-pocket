@@ -77,6 +77,23 @@ before(async () => {
     const folder = join(process.env.PI_CODING_AGENT_DIR!, "sessions", "--work--");
 
     mkdirSync(folder, { recursive: true });
+
+    // Long titles, one without a space to break at, so the list's rows must cut them short.
+    for (const [file, title] of [
+        ["long.jsonl", "Why does the payments gateway retry three times when the bank answers 409"],
+        ["word.jsonl", "averyveryveryverylongwordwithoutanyspacesthatshouldnotbreakthesheetlayout"],
+    ] as const) {
+        const other = SessionManager.inMemory(work);
+
+        other.appendMessage({ role: "user", content: title, timestamp: 1 });
+        writeFileSync(
+            join(folder, file),
+            [other.getHeader(), ...other.getEntries()]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n") + "\n",
+        );
+    }
+
     writeFileSync(
         join(folder, "checkout.jsonl"),
         [manager.getHeader(), ...manager.getEntries()]
@@ -123,6 +140,18 @@ test(
             ),
             true,
             "the list fits the phone's width",
+        );
+        assert.deepEqual(
+            await inPage<string[]>(`
+                const sheet = document.querySelector(".sheet-body");
+                const wide = [...document.querySelectorAll(".pi-session, .pi-session-title, .pi-folder-head")]
+                    .filter((element) => element.getBoundingClientRect().right > sheet.getBoundingClientRect().right + 1)
+                    .map((element) => element.textContent.trim().slice(0, 30));
+
+                return JSON.stringify(sheet.scrollWidth > sheet.clientWidth + 1 ? ["the sheet", ...wide] : wide);
+            `),
+            [],
+            "no row runs past the sheet",
         );
         await settled();
         await page.click({ label: "Fix the checkout total" });

@@ -29,6 +29,7 @@ import {
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createHandler } from "../src/server/http.ts";
 import { readPiSession } from "../src/server/pi-sessions.ts";
+import { projectEntry } from "../src/server/projection.ts";
 
 /** The messages of the newest request to the model. */
 let requested: Message[] = [];
@@ -396,4 +397,100 @@ test("reading a session is Pi's own: a branch, an edit, and a compaction keep th
     // The branch left behind is not in it, only its summary.
     assert.doesNotMatch(JSON.stringify(read.entries), /That will not help/);
     assert.match(JSON.stringify(read.entries), /Tried doubles; it did not help/);
+});
+
+test("two compactions, the second keeping messages from before the first: Pi's context still", async () => {
+    const manager = SessionManager.inMemory(work);
+
+    manager.appendMessage({ role: "user", content: "one", timestamp: 1 });
+    manager.appendMessage(fauxAssistantMessage([fauxText("reply one")]));
+    const keptByBoth = manager.appendMessage({ role: "user", content: "two", timestamp: 2 });
+
+    manager.appendMessage(fauxAssistantMessage([fauxText("reply two")]));
+    manager.appendCompaction("First summary.", keptByBoth, 1000);
+    manager.appendMessage({ role: "user", content: "three", timestamp: 3 });
+    const keptBySecond = manager.appendMessage(fauxAssistantMessage([fauxText("reply three")]));
+
+    manager.appendCompaction("Second summary.", keptBySecond, 2000);
+    manager.appendMessage({ role: "user", content: "four", timestamp: 4 });
+    const path = save(manager, "two-compactions");
+    const { id } = await app.commands.continuePiSession(owner(app), path);
+
+    assert.deepEqual(await pocketContext(id), piContext(path));
+    assert.match(JSON.stringify(await pocketContext(id)), /Second summary/);
+    assert.doesNotMatch(JSON.stringify(await pocketContext(id)), /First summary/);
+});
+
+test("a message without content, as old or edited files have, reads; its session is named by what it can", async () => {
+    const manager = SessionManager.inMemory(work);
+
+    manager.appendMessage({ role: "user", content: "the first words", timestamp: 1 });
+    manager.appendMessage(fauxAssistantMessage([fauxText("answer")]));
+    const lines = [manager.getHeader(), ...manager.getEntries()].map((entry) =>
+        JSON.stringify(entry),
+    );
+    // Content taken out of both, as a file edited by hand might be.
+    const broken = lines.map((line) =>
+        line
+            .replace('"content":"the first words"', '"content":null')
+            .replace(/"content":\[[^\]]*\]/, '"content":null'),
+    );
+
+    const read = readPiSession(broken.join("\n"));
+
+    assert.equal(read.title, "Pi session");
+    assert.equal(read.entries.length, 2);
+});
+
+test("a tool result without its call: Pi would send it, providers refuse it, Pi Pocket leaves it out", async () => {
+    const manager = SessionManager.inMemory(work);
+
+    manager.appendMessage({ role: "user", content: "look", timestamp: 1 });
+    manager.appendMessage({
+        role: "toolResult",
+        toolCallId: "nowhere",
+        toolName: "read",
+        content: [{ type: "text", text: "a stray result" }],
+        isError: false,
+        timestamp: 2,
+    });
+    manager.appendMessage(fauxAssistantMessage([fauxText("done")]));
+    const path = save(manager, "stray");
+    const { id } = await app.commands.continuePiSession(owner(app), path);
+    const without = piContext(path).filter((message) => message.role !== "toolResult");
+
+    assert.ok(piContext(path).some((message) => message.role === "toolResult"));
+    assert.deepEqual(await pocketContext(id), without);
+});
+
+test("a search looks through every session's title, folder, and words, before the list's limit", async () => {
+    const manager = SessionManager.inMemory(work);
+
+    manager.appendMessage({
+        role: "user",
+        content: "Where is the flux capacitor wired?",
+        timestamp: 1,
+    });
+    manager.appendMessage(fauxAssistantMessage([fauxText("Behind the dashboard.")]));
+    const path = save(manager, "searchable");
+    const found = async (query: string) =>
+        (await app.piSessions.list(owner(app), query)).sessions.map((each) => each.path);
+
+    assert.ok((await found("dashboard")).includes(path), "by the words of an answer");
+    assert.ok((await found("FLUX")).includes(path), "whatever the case");
+    assert.deepEqual(await found("nothing says this anywhere"), []);
+});
+
+test("people see the session file's name, not the folder it is in", async () => {
+    const { id } = await app.commands.continuePiSession(owner(app), save(rich(), "named"));
+    const entries = await shown(id);
+    const marker = entries.find((entry) => entry.kind === "pocket.from-pi")!;
+
+    assert.match(String((marker.data as { file?: unknown }).file), /\/named\.jsonl$/, "kept whole");
+    assert.deepEqual(projectEntry(marker), {
+        id: marker.id,
+        kind: "fromPi",
+        title: "Fix the checkout total",
+        file: "named.jsonl",
+    });
 });

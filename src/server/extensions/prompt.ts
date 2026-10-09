@@ -54,7 +54,8 @@ type Resources = {
 
 export default function createPrompt(host: PocketHost) {
     // Context files and skills load once per directory, and again when the copy is older than STALE_MS, or Pi's trust
-    // store changed since: a project trusted now has skills it did not have, from the next request on.
+    // store changed since: a project trusted now has skills it did not have, from the next request on. Only answers to
+    // "trust this project?" show at once; other changes (a new skill, Pi's defaultProjectTrust) wait for STALE_MS.
     const resources = new Map<string, Resources>();
 
     const trustChanged = () => {

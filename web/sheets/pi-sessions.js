@@ -1,29 +1,91 @@
-// Pi's sessions from the terminal, which the owner can continue here: the list, and one of them before it continues.
+// Pi's sessions from the terminal, which the owner can continue here: the list, by folder, and one of them before it
+// continues, as a short conversation.
 import { useEffect, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
-import { html, Loader, Sheet, shortPath, timeAgo } from "../ui.js";
+import { html, Icon, Loader, Sheet, shortPath, timeAgo } from "../ui.js";
 
 /** Only the owner: Pi's sessions are the owner's files. */
 export const piSessionsAvailable = () => store.state.me?.role === "owner";
 
-/** Pi's sessions on this computer, newest first, with a search by title and folder. */
+const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/** A folder's last part, and the folder it is in: `pi-pocket`, `~/code`. */
+function folderParts(cwd, home) {
+    const path = shortPath(cwd, home);
+    const cut = path.replace(/\/+$/, "").lastIndexOf("/");
+
+    return cut <= 0
+        ? { name: path, parent: "" }
+        : { name: path.slice(cut + 1), parent: path.slice(0, cut) };
+}
+
+/** The sessions by folder, the folder used last first; each folder's newest first, as they come. */
+function byFolder(sessions) {
+    const folders = new Map();
+
+    for (const session of sessions) {
+        folders.set(session.cwd, [...(folders.get(session.cwd) ?? []), session]);
+    }
+
+    return [...folders];
+}
+
+function SessionRow({ session }) {
+    const pocket = session.pocket;
+
+    return html`<button
+        class="pi-session"
+        onClick=${() => openSheet({ type: "pi-session", id: session.path })}
+    >
+        <span class="pi-session-text">
+            <span class="pi-session-title">${session.title}</span>
+            <span class="pi-session-meta">
+                ${plural(session.messages, "message")} · ${timeAgo(session.modified)}
+            </span>
+        </span>
+        ${
+            pocket &&
+            html`<span class=${`pi-tag ${pocket.behind ? "behind" : ""}`}>
+                ${pocket.behind ? "Pi went on" : "in Pocket"}
+            </span>`
+        }
+        <${Icon} name="chevron" size=${14} />
+    </button>`;
+}
+
+/** Pi's sessions on this computer, by folder, with a search the server runs through all of them, words included. */
 export function PiSessionsSheet() {
     const home = store.state.server?.home;
     const [sessions, setSessions] = useState(null);
+    // Whether Pi has any at all, from the first list: a search that finds none is not "no sessions".
+    const [any, setAny] = useState(null);
     const [problem, setProblem] = useState(null);
     const [query, setQuery] = useState("");
+    const needle = query.trim();
 
     useEffect(() => {
-        actions.piSessions().then(
-            (result) => setSessions(result.sessions),
-            (error) => setProblem(error.message),
+        let current = true;
+        // A pause in typing, then the search: the first list at once.
+        const timer = setTimeout(
+            () =>
+                actions.piSessions(needle).then(
+                    (result) => {
+                        if (current) {
+                            setSessions(result.sessions);
+                            setAny((was) => was ?? result.sessions.length > 0);
+                        }
+                    },
+                    (error) => current && setProblem(error.message),
+                ),
+            needle === "" ? 0 : 250,
         );
-    }, []);
-    const needle = query.trim().toLowerCase();
-    const shown = (sessions ?? []).filter(
-        (session) =>
-            needle === "" || `${session.title}\n${session.cwd}`.toLowerCase().includes(needle),
-    );
+
+        return () => {
+            current = false;
+            clearTimeout(timer);
+        };
+    }, [needle]);
+    const folders = byFolder(sessions ?? []);
 
     return html`<${Sheet} title="Continue a Pi session" onClose=${closeSheet}>
         <p class="muted small">
@@ -31,45 +93,42 @@ export function PiSessionsSheet() {
         </p>
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${sessions === null && problem === null && html`<${Loader} label="Finding Pi's sessions" />`}
+        ${any === false && html`<p class="muted">Pi has no sessions on this computer yet.</p>`}
         ${
-            sessions?.length === 0 &&
-            html`<p class="muted">Pi has no sessions on this computer yet.</p>`
-        }
-        ${
-            sessions?.length > 0 &&
+            any === true &&
             html`<input
                 class="find-input"
                 type="search"
-                placeholder="Search by title or folder"
+                placeholder="Search titles, folders, and messages"
+                aria-label="Search Pi's sessions"
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
             />`
         }
-        <div class="group">
-            ${shown.map(
-                (session) => html`<button
-                    class="list-item pi-session"
-                    onClick=${() => openSheet({ type: "pi-session", id: session.path })}
-                >
-                    <span class="pi-session-name">
-                        <span>${session.title}</span>
-                        <span class="muted small mono">${shortPath(session.cwd, home)}</span>
-                    </span>
-                    <span class="muted small">
-                        ${session.pocket ? "in Pocket · " : ""}${timeAgo(session.modified)}
-                    </span>
-                </button>`,
-            )}
-        </div>
+        ${folders.map(([cwd, list]) => {
+            const { name, parent } = folderParts(cwd, home);
+
+            return html`<section class="pi-folder" key=${cwd}>
+                <div class="pi-folder-head" title=${cwd}>
+                    <${Icon} name="folder" size=${14} />
+                    <span class="pi-folder-name">${name}</span>
+                    ${parent && html`<span class="pi-folder-parent">${parent}</span>`}
+                </div>
+                <div class="pi-folder-list">
+                    ${list.map((session) => html`<${SessionRow} key=${session.path} session=${session} />`)}
+                </div>
+            </section>`;
+        })}
         ${
-            sessions?.length > 0 &&
-            shown.length === 0 &&
-            html`<p class="muted">No session matches “${query.trim()}”.</p>`
+            any === true &&
+            needle !== "" &&
+            sessions?.length === 0 &&
+            html`<p class="muted">No session matches “${needle}”.</p>`
         }
     <//>`;
 }
 
-/** One of Pi's sessions: where it worked, its last messages, and continuing it here. */
+/** One of Pi's sessions: where it worked and with what, its last messages, and continuing it here. */
 export function PiSessionSheet({ path }) {
     const home = store.state.server?.home;
     const [info, setInfo] = useState(null);
@@ -113,16 +172,22 @@ export function PiSessionSheet({ path }) {
     }
 
     return html`<${Sheet} title=${info.title} onClose=${closeSheet}>
-        <p class="muted small">
-            <span class="mono">${shortPath(info.cwd, home)}</span> · ${info.messages} messages${info.model ? ` · ${info.model}` : ""}
-        </p>
-        ${
-            info.model &&
-            !info.modelHere &&
-            html`<p class="muted small">
-                Its model is not signed in here: it continues with Pi Pocket's usual model.
-            </p>`
-        }
+        <dl class="pi-facts">
+            <div>
+                <dt>Folder</dt>
+                <dd class="mono" title=${info.cwd}>${shortPath(info.cwd, home)}</dd>
+            </div>
+            <div>
+                <dt>Model</dt>
+                <dd class="mono">
+                    ${info.model ?? "—"}${info.model && !info.modelHere ? html`<span class="muted"> · not signed in here</span>` : ""}
+                </dd>
+            </div>
+            <div>
+                <dt>Messages</dt>
+                <dd>${info.messages}</dd>
+            </div>
+        </dl>
         ${
             !info.cwdExists &&
             html`<div class="error-box small">
@@ -130,25 +195,37 @@ export function PiSessionSheet({ path }) {
             </div>`
         }
         ${
-            info.pocket &&
-            html`<p class="small">
-                ${info.pocket.behind ? "Continued here before Pi went on in the terminal." : "Already continued here."}${" "}
-                <button class="link" onClick=${() => open(info.pocket.id)}>Open it</button>
-            </p>`
+            info.model &&
+            !info.modelHere &&
+            html`<p class="muted small">It continues with Pi Pocket's usual model.</p>`
         }
-        <div class="pi-preview">
-            ${info.last.map(
-                (line) => html`<div class=${`pi-line ${line.role}`}>
-                    <span class="muted small">${line.role === "user" ? "You" : "Pi"}</span>
-                    <div>${line.text}</div>
-                </div>`,
-            )}
+        ${
+            info.pocket &&
+            html`<div class="pi-note">
+                <span>
+                    ${info.pocket.behind ? "Continued here before Pi went on in the terminal." : "Already continued here."}
+                </span>
+                <button class="link" onClick=${() => open(info.pocket.id)}>Open it</button>
+            </div>`
+        }
+        ${
+            info.last.length > 0 &&
+            html`<div class="pi-convo" aria-label="Its last messages">
+                <div class="label">Its last messages</div>
+                ${info.last.map((line) =>
+                    line.role === "user"
+                        ? html`<div class="pi-ask"><div>${line.text}</div></div>`
+                        : html`<div class="pi-reply">${line.text}</div>`,
+                )}
+            </div>`
+        }
+        <div class="pi-continue">
+            <button class="button primary wide" disabled=${busy || !info.cwdExists} onClick=${go}>
+                ${info.pocket ? "Continue it here again" : "Continue in Pocket"}
+            </button>
+            <p class="muted small">
+                Pi gets the conversation as Pi left it, with Pi Pocket's instructions and tools. Nothing Pi did runs again, and the session's file stays as it is.
+            </p>
         </div>
-        <button class="button primary wide" disabled=${busy || !info.cwdExists} onClick=${go}>
-            ${info.pocket ? "Continue it here again" : "Continue in Pocket"}
-        </button>
-        <p class="muted small">
-            Pi gets the conversation as Pi left it, with Pi Pocket's instructions and tools. Nothing Pi did runs again, and the session's file stays as it is.
-        </p>
     <//>`;
 }

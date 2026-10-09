@@ -3,10 +3,26 @@
 // (`/trust`, the menu) shows the decision and changes it. Answers are saved where Pi's CLI keeps its own.
 import { useEffect } from "preact/hooks";
 import { actions, attempt, closeSheet, notify, openSheet, store } from "./store.js";
-import { html, item, Loader, Sheet, shortPath } from "./ui.js";
+import { html, Icon, item, Loader, Sheet, shortPath } from "./ui.js";
 
 /** Only the owner decides which projects Pi trusts: the answer goes into Pi's own settings. */
 export const trustAvailable = () => store.state.me?.role === "owner";
+
+/** The folders whose question the owner put off in this tab ("Not now"): the sheet and `/trust` still answer it. */
+const LATER_KEY = "pocket.trustLater";
+
+function later() {
+    try {
+        return new Set(JSON.parse(sessionStorage.getItem(LATER_KEY) ?? "[]"));
+    } catch {
+        return new Set();
+    }
+}
+
+function putOff(folder) {
+    sessionStorage.setItem(LATER_KEY, JSON.stringify([...later(), folder]));
+    store.set({});
+}
 
 /** What the server said about the open conversation's project, when it was for its folder now. */
 export function currentTrust() {
@@ -54,9 +70,15 @@ function skillNames(info, most = 3) {
 /** Save the owner's answer, and show it: the bar goes, and the skills join the slash commands. */
 async function decide(choice) {
     const { conversationId, view, server } = store.state;
+    const cwd = view.agent?.cwd;
     const info = await actions.setTrust(choice);
 
-    store.set({ trust: { conversationId, cwd: view.agent?.cwd, info }, templates: null });
+    // Saved for that session's folder; this tab shows another session now: its own trust stays as it is.
+    if (store.state.conversationId !== conversationId || store.state.view.agent?.cwd !== cwd) {
+        return;
+    }
+
+    store.set({ trust: { conversationId, cwd, info }, templates: null });
 
     if (!info.trusted) {
         notify("info", "Not trusted: the project's own skills stay off. /trust changes that.");
@@ -87,25 +109,39 @@ export function TrustBar() {
     }, [conversationId, cwd, mine]);
     const info = currentTrust();
 
-    if (!mine || !info?.ask) {
+    if (!mine || !info?.ask || later().has(info.folder)) {
         return null;
     }
 
     return html`<div class="trust-bar">
         <span class="grow">
-            <strong>Trust this project?</strong> Its own skills (${skillNames(info)}) load only in a project Pi trusts.
+            <strong>Trust this project?</strong> Its skills in .agents/skills (${skillNames(info)}) load only in a project Pi trusts.
         </span>
-        <button class="link small" onClick=${() => attempt(() => decide("distrust"))}>
-            Don't trust
-        </button>
-        <button class="button small primary" onClick=${() => openSheet({ type: "trust" })}>
-            Review
-        </button>
+        <span class="trust-actions">
+            <button class="link small" onClick=${() => attempt(() => decide("distrust"))}>
+                Don't trust
+            </button>
+            <button class="button small primary" onClick=${() => openSheet({ type: "trust" })}>
+                Review
+            </button>
+            <button
+                class="icon-button"
+                aria-label="Not now"
+                title="Not now: ask again in a new tab"
+                onClick=${() => putOff(info.folder)}
+            >
+                <${Icon} name="close" size=${13} />
+            </button>
+        </span>
     </div>`;
 }
 
 /** Where the decision comes from, in a sentence. */
 function status(info, short) {
+    if (info.unreadable) {
+        return "Pi's trust store (~/.pi/agent/trust.json) cannot be read, so no project is trusted, and no answer can be saved until it is mended or deleted.";
+    }
+
     if (info.saved === null) {
         if (info.defaultProjectTrust === "always") {
             return "Trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts every project.";
@@ -115,7 +151,7 @@ function status(info, short) {
             return "Not trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts no project.";
         }
 
-        return "No decision yet. Until there is one, Pi Pocket leaves the project's own skills off.";
+        return "No decision yet. Until there is one, Pi Pocket leaves its skills in .agents/skills off.";
     }
 
     const what = info.saved.trusted ? "Trusted" : "Not trusted";

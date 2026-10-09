@@ -30,8 +30,11 @@ const decision = (folder: string) =>
     new ProjectTrustStore(process.env.PI_CODING_AGENT_DIR!).get(folder);
 
 /** A git repository with a skill of its own in `.agents/skills`, and a session working in it. */
-async function project(skill: string): Promise<{ folder: string; id: ConversationId }> {
-    const folder = realpathSync(mkdtempSync(join(root, "trust-ui-")));
+async function project(
+    skill: string,
+    within = root,
+): Promise<{ folder: string; id: ConversationId }> {
+    const folder = realpathSync(mkdtempSync(join(within, "trust-ui-")));
 
     mkdirSync(join(folder, ".git"));
     mkdirSync(join(folder, ".agents", "skills", skill), { recursive: true });
@@ -232,3 +235,53 @@ test("a guest is never asked, and has no /trust", real, async () => {
         app.config.removeUser(user.id);
     }
 });
+
+test(
+    "Not now puts the question off in this tab; the folder above, trusted, shows as such",
+    real,
+    async () => {
+        // A folder of its own above the project, so trusting it reaches no other test's project.
+        const above = realpathSync(mkdtempSync(join(root, "trust-ui-above-")));
+        const { folder, id } = await project("later", above);
+
+        await open(id);
+        await see(
+            `return JSON.stringify(document.querySelector(".trust-bar") !== null)`,
+            "the question",
+        );
+        await page.click({ label: "Not now" });
+        await see(
+            `return JSON.stringify(document.querySelector(".trust-bar") === null)`,
+            "the bar put off",
+        );
+        assert.equal(decision(folder), null, "putting it off decides nothing");
+        await page.reload();
+        await see(
+            `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+            "the session again",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        assert.equal(await inPage<string | null>(bar), null, "still put off after a reload");
+
+        // The sheet still answers it: trust the folder above, and it says so.
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "trust" })`);
+        await see(
+            `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("No decision yet") === true)`,
+            "the sheet",
+        );
+        await settled();
+        await page.click({ label: "Trust the folder above it" });
+        await see(
+            `return JSON.stringify(document.querySelector(".sheet") === null)`,
+            "the sheet closed",
+        );
+        assert.equal(decision(folder), true);
+        assert.equal(decision(above), true);
+        await settled();
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "trust" })`);
+        await see(
+            `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("Trusted, as the folder it is in") === true)`,
+            "the sheet saying where the trust comes from",
+        );
+    },
+);

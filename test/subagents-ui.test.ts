@@ -4,6 +4,7 @@
 import {
     type App,
     cleanUp,
+    context,
     lastText,
     newSession,
     openApp,
@@ -218,6 +219,23 @@ test(
         // The parent sleeps after starting them: "quick"'s report waits for its next pause, as one row.
         await says(".queued-mode", /^Report/);
         await says(".queued-text", /^from quick, on its way to Pi$/);
+        assert.equal(
+            await inPage<string | null>(
+                `return JSON.stringify(document.querySelector(".queued .icon-button")?.getAttribute("aria-label") ?? null)`,
+            ),
+            "Discard these reports",
+            "its × says what it does",
+        );
+        // A person's own message that only starts like a report is theirs, as written.
+        await app.commands.submit(id, owner(app), {
+            text: "[subagent quick] please look again",
+            requestId: `like-${id}`,
+            mode: "steer",
+        });
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".queued")].some((row) => row.textContent.includes("please look again") && row.querySelector(".queued-mode").textContent.trim().startsWith("Steer")))`,
+            "the look-alike as a steer",
+        );
 
         for (let index = 0; index < 15; index++) {
             await app.commands.submit(id, owner(app), {
@@ -228,7 +246,7 @@ test(
         }
 
         await see(
-            `return JSON.stringify(document.querySelectorAll(".queued").length === 16)`,
+            `return JSON.stringify(document.querySelectorAll(".queued").length === 17)`,
             "all of them waiting",
         );
         const sizes = await inPage<{
@@ -253,3 +271,99 @@ test(
         await app.commands.abort(id, owner(app));
     },
 );
+
+test(
+    "reports that came together show a card each; what only looks like a report's start stays in its card",
+    real,
+    async () => {
+        parentSleep = 0;
+        const id = await newSession(app);
+        const text = [
+            "[subagent alpha answered, no reply needed] First answer.",
+            "[subagent beta answered, no reply needed] Second answer.",
+            "[subagent beta answered, no reply needed and no closing bracket, so not a report's start",
+        ].join("\n\n");
+
+        await (await app.harness.conversation(id, context))!.submit(
+            {
+                type: "write",
+                entry: {
+                    kind: "pi.user",
+                    model: [{ role: "user", content: text, timestamp: Date.now() }],
+                },
+            },
+            context,
+        );
+        await page.setViewport(VIEWPORTS.mobile);
+        await page.navigate(`${base}/s/${id}`);
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".report").length > 0)`,
+            "the reports",
+        );
+        const cards = await inPage<{ name: string; text: string }[]>(`
+        return JSON.stringify([...document.querySelectorAll(".report-group .report")].map((card) => ({
+            name: card.querySelector(".report-name").textContent,
+            text: card.textContent,
+        })));
+    `);
+
+        assert.deepEqual(
+            cards.map((card) => card.name),
+            ["alpha", "beta"],
+        );
+        assert.match(cards[1]!.text, /no closing bracket/);
+    },
+);
+
+test("a viewer sees the bar, without Stop", real, async () => {
+    const id = await started(0);
+    const { user, token } = app.config.addUser("Vi", "viewer");
+    const viewer = await browsers.open(2);
+
+    try {
+        await viewer.setViewport(VIEWPORTS.mobile);
+        await viewer.navigate(`${base}/login?token=${encodeURIComponent(token)}`);
+        await until(
+            async () =>
+                JSON.parse(
+                    await viewer.evaluate(
+                        `return JSON.stringify((await import("/store.js")).store.state.me?.role === "viewer")`,
+                    ),
+                ) === true,
+            "the viewer signed in",
+        );
+        await viewer.navigate(`${base}/s/${id}`);
+        await until(
+            async () =>
+                JSON.parse(
+                    await viewer.evaluate(
+                        `return JSON.stringify(document.querySelector(".agents-count")?.textContent ?? "")`,
+                    ),
+                ) === "1 subagent working · 1 done",
+            "the bar for the viewer",
+        );
+        await viewer.evaluate(`document.querySelector(".agents-summary").click()`);
+        await until(
+            async () =>
+                JSON.parse(
+                    await viewer.evaluate(
+                        `return JSON.stringify(document.querySelectorAll(".agent-row").length)`,
+                    ),
+                ) === 2,
+            "the viewer's rows",
+        );
+        assert.equal(
+            JSON.parse(
+                await viewer.evaluate(
+                    `return JSON.stringify(document.querySelector(".agent-stop") === null)`,
+                ),
+            ),
+            true,
+            "no Stop for a viewer",
+        );
+    } finally {
+        await browsers.close(2);
+        app.config.removeUser(user.id);
+        await app.commands.abort(id, owner(app));
+    }
+});
