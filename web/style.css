@@ -629,6 +629,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
     :root:not([data-motion="full"]) .pulse,
+    :root:not([data-motion="full"]) .agents-dot.working,
     :root:not([data-motion="full"]) .session-placeholder span {
         animation: none !important;
     }
@@ -1421,6 +1422,13 @@ pre.diff .del {
     border-left-color: var(--err);
 }
 
+/* Reports that arrived together, as one message to Pi: a card each. */
+.report-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
 .report-head {
     font-size: 0.85rem;
     color: var(--muted);
@@ -1562,11 +1570,15 @@ pre.diff .del {
     margin: 0 auto;
 }
 
+/* Messages waiting for Pi: a few rows' height at most, so the conversation stays in view; more scroll inside. */
 .inbox {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
     margin-bottom: 0.35rem;
+    max-height: min(28vh, 12rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .queued {
@@ -7818,4 +7830,203 @@ textarea.notes {
 .pi-line.user > div {
     border-left: 2px solid var(--accent);
     padding-left: 0.5rem;
+}
+
+/*
+ * The subagents bar, above the message box. Folded: a dot per subagent (pulsing while it works), the counts, and what the
+ * newest one does. Unfolded: a row each, which opens it. The left edge is the accent while one works, then "done".
+ */
+.agents-bar {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--ok);
+    border-radius: var(--radius);
+    margin-bottom: 0.35rem;
+    font-size: 0.82rem;
+    overflow: hidden;
+}
+
+.agents-bar.busy {
+    border-left-color: var(--accent);
+}
+
+.agents-top {
+    display: flex;
+    align-items: center;
+    padding-right: 0.2rem;
+}
+
+.agents-summary {
+    flex: 1;
+    min-width: 0;
+    min-height: 2.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    background: none;
+    border: 0;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.agents-dots {
+    display: inline-flex;
+    gap: 3px;
+    flex: none;
+}
+
+.agents-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ok);
+}
+
+.agents-dot.working {
+    background: var(--accent);
+    animation: pulse 1.4s infinite;
+}
+
+.agents-dot.failed {
+    background: var(--err);
+}
+
+.agents-count {
+    flex: none;
+    font-weight: 600;
+}
+
+.agents-lead {
+    flex: 1;
+    min-width: 0;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agents-chevron {
+    display: inline-flex;
+    flex: none;
+    margin-left: auto;
+    color: var(--muted);
+    transform: rotate(-90deg);
+    transition: transform var(--t-in) var(--ease-out);
+}
+
+.agents-bar.open .agents-chevron {
+    transform: rotate(90deg);
+}
+
+.agents-list {
+    max-height: min(40vh, 22rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-top: 1px solid var(--line);
+}
+
+.agent-row {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+}
+
+.agent-row:last-child {
+    border-bottom: 0;
+}
+
+.agent-open {
+    flex: 1;
+    min-width: 0;
+    min-height: 2.75rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    background: none;
+    border: 0;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.agent-open:hover {
+    background: var(--card-2);
+}
+
+.agent-mark {
+    flex: none;
+    width: 1rem;
+    padding-top: 0.05rem;
+    color: var(--ok);
+    font-weight: 700;
+    text-align: center;
+}
+
+.agent-row.failed .agent-mark {
+    color: var(--err);
+}
+
+.agent-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.agent-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.5rem;
+}
+
+.agent-name {
+    font-family: var(--mono);
+    font-weight: 600;
+}
+
+.agent-when {
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-chip {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 0 0.45rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.agent-now,
+.agent-asked {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-now {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+}
+
+.agent-asked {
+    color: var(--muted);
+    font-size: 0.76rem;
+}
+
+.agent-stop {
+    flex: none;
+    margin-right: 0.2rem;
 }

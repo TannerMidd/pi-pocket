@@ -137,6 +137,17 @@ export type Person = {
 };
 
 /** The view of one conversation, shared by every client attached to it. */
+/** The subagents with a report on its way: waiting in the outbox, or in the batch sent and still queued. */
+function reportingOf(
+    doc:
+        { outbox?: readonly { name: string }[]; delivering?: readonly string[] } | null | undefined,
+): Set<string> {
+    return new Set([
+        ...(doc?.outbox ?? []).map((report) => report.name),
+        ...(doc?.delivering ?? []),
+    ]);
+}
+
 export class Room {
     readonly id: ConversationId;
     readonly clients = new Set<Client>();
@@ -157,6 +168,8 @@ export class Room {
     authors: Record<string, string> = {};
     artifacts: Record<string, ArtifactMeta> = {};
     subagents: Record<string, SubagentRecord> = {};
+    /** The subagents whose reports are on their way to this conversation: waiting, or sent and still queued. */
+    #reporting = new Set<string>();
     chat: ChatMessage[] = [];
     reactions: Record<string, Record<string, string[]>> = {};
     pins: Pin[] = [];
@@ -187,9 +200,10 @@ export class Room {
         this.artifacts = {
             ...((await harness.snapshot(ArtifactsDoc, this.id, context))?.items ?? {}),
         } as Record<string, ArtifactMeta>;
-        this.subagents = {
-            ...((await harness.snapshot(SubagentsDoc, this.id, context))?.agents ?? {}),
-        } as Record<string, SubagentRecord>;
+        const subagents = await harness.snapshot(SubagentsDoc, this.id, context);
+
+        this.subagents = { ...(subagents?.agents ?? {}) } as Record<string, SubagentRecord>;
+        this.#reporting = reportingOf(subagents);
         this.chat = [
             ...((await harness.snapshot(ChatDoc, this.id, context))?.messages ?? []),
         ] as ChatMessage[];
@@ -294,6 +308,7 @@ export class Room {
             this.artifacts = { ...((value?.items as Record<string, ArtifactMeta>) ?? {}) };
         } else if (kind === SubagentsDoc.definition.kind) {
             this.subagents = { ...((value?.agents as Record<string, SubagentRecord>) ?? {}) };
+            this.#reporting = reportingOf(value as Parameters<typeof reportingOf>[0]);
         }
 
         this.schedule();
@@ -399,6 +414,11 @@ export class Room {
                 name,
                 conversationId: record.conversationId,
                 busy: this.#app.isBusy(record.conversationId),
+                ...(record.asked === undefined ? {} : { asked: record.asked }),
+                ...(record.askedAt === undefined ? {} : { askedAt: record.askedAt }),
+                ...(record.answeredAt === undefined ? {} : { answeredAt: record.answeredAt }),
+                ...(record.failed === true ? { failed: true } : {}),
+                ...(this.#reporting.has(name) ? { reporting: true } : {}),
             })),
             authors: this.authors,
             reactions: this.reactions,

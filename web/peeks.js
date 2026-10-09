@@ -345,8 +345,11 @@ document.addEventListener("visibilitychange", () => {
     seeOpen(store.state);
 });
 
-/** Watch a scrolling list's tiles for being on screen, and tell the server once they settle. */
-function useOnScreen(list) {
+/**
+ * Watch a scrolling list's tiles (its `[data-peek]` elements) for being on screen, and tell the server once they
+ * settle. The subagents bar watches its rows this way too.
+ */
+export function useOnScreen(list) {
     const observer = useRef(null);
     const watched = useRef(new Set());
 

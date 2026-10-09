@@ -32,6 +32,7 @@ import "./rich.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
 import { SignIn } from "./signin.js";
+import { openSubagents } from "./subagents.js";
 import {
     actions,
     attempt,
@@ -94,11 +95,7 @@ function Topbar() {
         </button>
         ${
             busySubagents > 0 &&
-            html`<button
-                class="icon-button"
-                title="Subagents working"
-                onClick=${() => openSheet({ type: "menu" })}
-            >
+            html`<button class="icon-button" title="Subagents working" onClick=${openSubagents}>
                 <span class="pulse"></span>
                 <span class="count">${busySubagents}</span>
             </button>`

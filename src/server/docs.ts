@@ -103,7 +103,16 @@ export type SubagentRecord = {
     conversationId: ConversationId;
     /** Answers already reported to the parent: several messages can end in one answer, reported once. */
     reported: EntryId[];
+    /** What the parent asked it last, the start of it, and when. */
+    asked?: string;
+    askedAt?: number;
+    /** When it last answered, or failed to (`failed`), what the parent asked. */
+    answeredAt?: number;
+    failed?: boolean;
 };
+
+/** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
+export type PendingReport = { name: string; text: string };
 
 /** Values codemode scripts keep with `store(key, value)`, read back with `load(key)` in later scripts. */
 export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>({
@@ -119,6 +128,13 @@ export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>
 export const SubagentsDoc = defineDoc<{
     agents: Record<string, SubagentRecord>;
     reporters: Record<string, TaskId>;
+    /** Reports not yet sent to the parent. */
+    outbox?: PendingReport[];
+    /** The task sending them, while there is one. */
+    courier?: TaskId;
+    /** The names in the batch sent and still waiting in the parent's queue; and how many batches went so far. */
+    delivering?: string[];
+    batches?: number;
 }>({
     kind: "pocket.subagents",
     version: 1,

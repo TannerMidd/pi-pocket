@@ -36,6 +36,8 @@ import {
 } from "./ui.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
+/** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
+const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed))/;
 
 /** How a scheduled message starts (see src/server/schedules.ts). */
 const SCHEDULED = "[scheduled] ";
@@ -139,28 +141,39 @@ function MentionedText({ text }) {
     return parts;
 }
 
+/** A subagent's report: who, whether it answered or failed, and what it said. */
+function Report({ report, view, fresh }) {
+    const [, name, verb, , text] = report;
+    const child = view.subagents.find((agent) => agent.name === name);
+
+    return html`<div
+        class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}
+    >
+        <div class="report-head">
+            <span class="report-name">${name}</span> ${verb}
+            ${
+                child &&
+                html`<button class="link" onClick=${() => navigate(child.conversationId)}>
+                    Open →
+                </button>`
+            }
+        </div>
+        ${text && html`<${Collapsible} text=${text} />`}
+    </div>`;
+}
+
 function UserEntry({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
-    const report = REPORT.exec(entry.text);
 
-    if (report) {
-        const [, name, verb, , text] = report;
-        const child = view.subagents.find((agent) => agent.name === name);
+    if (REPORT.test(entry.text)) {
+        const reports = entry.text.split(NEXT_REPORT).map((part) => REPORT.exec(part));
 
-        return html`<div
-            class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}
-        >
-            <div class="report-head">
-                <span class="report-name">${name}</span> ${verb}
-                ${
-                    child &&
-                    html`<button class="link" onClick=${() => navigate(child.conversationId)}>
-                        Open →
-                    </button>`
-                }
-            </div>
-            ${text && html`<${Collapsible} text=${text} />`}
-        </div>`;
+        // Several that arrived together came as one message: a card each.
+        return reports.every(Boolean)
+            ? html`<div class="report-group">
+                  ${reports.map((report) => html`<${Report} report=${report} view=${view} fresh=${fresh} />`)}
+              </div>`
+            : html`<${Report} report=${REPORT.exec(entry.text)} view=${view} fresh=${fresh} />`;
     }
 
     const check = GOAL_CHECK.exec(entry.text);

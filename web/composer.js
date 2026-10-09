@@ -25,6 +25,7 @@ import {
     uid,
 } from "./store.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
+import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { formatBytes, formatTokens, html, Icon, Marked, modelLabel, Spinner } from "./ui.js";
 
@@ -67,6 +68,41 @@ function savePastes(id, pastes) {
 
 /** The message with each paste's placeholder replaced by what was pasted. */
 const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes[n] ?? whole);
+
+/** The subagents whose answers a queued message of reports carries (`extensions/subagents.ts`); null for any other. */
+function reportNames(text) {
+    if (!text?.startsWith("[subagent ")) {
+        return null;
+    }
+
+    return [
+        ...new Set(
+            [...text.matchAll(/\[subagent (\S+) (?:answered|failed)/g)].map((match) => match[1]),
+        ),
+    ];
+}
+
+/** What kind of message waits for Pi: a steer, one queued for after its answer, a note, or subagents' reports. */
+function queuedMode(item) {
+    const names = reportNames(item.text);
+
+    if (names) {
+        return names.length === 1 ? "Report" : "Reports";
+    }
+
+    return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queued" : "Note";
+}
+
+/** What a waiting message says; subagents' reports say whose, as their text is long. */
+function queuedText(item) {
+    const names = reportNames(item.text);
+
+    if (!names) {
+        return item.text ?? "";
+    }
+
+    return `from ${names.join(", ")}, on ${names.length === 1 ? "its" : "their"} way to Pi`;
+}
 
 /** Take turns: who drives, who asked, and the buttons to hand over, ask, or take the wheel. */
 function DriverBar() {
@@ -814,10 +850,10 @@ export function Composer() {
                 ${inbox.map(
                     (item) => html`<div class="queued">
                         <span class="queued-mode">
-                            ${item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queued" : "Note"}
+                            ${queuedMode(item)}
                             <span class="muted">${queuedBy(item)}</span>
                         </span>
-                        <span class="queued-text">${item.text ?? ""}</span>
+                        <span class="queued-text">${queuedText(item)}</span>
                         ${
                             canSteer() &&
                             (!blocked || item.by === me?.id) &&
@@ -836,6 +872,7 @@ export function Composer() {
         ${collab() && html`<${DriverBar} />`}
         <${PlanBar} blocked=${blocked} />
         <${GoalBar} />
+        <${SubagentsBar} />
         <${TrustBar} />
         ${
             blocked

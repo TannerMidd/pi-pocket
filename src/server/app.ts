@@ -768,15 +768,20 @@ export class PocketApp {
     }
 
     /**
-     * The sessions a connection shows as peek tiles on its screen now. Each gets short `peek` updates while it stays
-     * there; the rest stop, and their views close as they do when the last tab leaves. Sessions this person may not see
-     * are left out. `connection` is the id its `hello` carried; a list numbered `seq` below one already taken arrived
+     * The sessions a connection shows as peek tiles on its screen now, and the subagents its subagents bar shows. Each
+     * gets short `peek` updates while it stays there; the rest stop, and their views close as they do when the last tab
+     * leaves. Conversations this person may not see are left out. `connection` is the id its `hello` carried; a list numbered `seq` below one already taken arrived
      * late, and is dropped.
      */
     setPeeks(user: User, connection: string, ids: readonly ConversationId[], seq?: number): void {
+        // Sessions, and the subagents of sessions: the subagents bar shows what each does now.
         const wanted = new Set(
             ids
-                .filter((id) => this.#sessions[String(id)] !== undefined && this.canSee(user, id))
+                .filter(
+                    (id) =>
+                        this.#sessions[String(this.rootOf(id))] !== undefined &&
+                        this.canSee(user, id),
+                )
                 .slice(0, MAX_PEEKS),
         );
 

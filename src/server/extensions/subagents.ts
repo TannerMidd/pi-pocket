@@ -1,13 +1,16 @@
 /**
  * Persistent background subagents, after Pi Durable's example 23. One `subagent` tool spawns named subagents,
  * messages them, stops them, and lists them. Each subagent is its own conversation, so a user can open it, watch it
- * work, and talk to it. Answers are reported back to the parent as follow-up messages once they arrive.
+ * work, and talk to it. Their answers go back to the parent at its next pause: after a tool call, or at once when it is
+ * idle. Answers that arrive meanwhile wait together, and go as one message, so many subagents cost the parent one
+ * extra turn at most rather than one each, and its queue holds one message of theirs at a time.
  *
- * Everything survives a restart: anchors and reporters are durable tasks, and request IDs keep a restarted reporter
- * from delivering a message or a report twice.
+ * Everything survives a restart: anchors, reporters, and the courier that delivers reports are durable tasks, and
+ * request IDs keep a restarted task from delivering a message or a report twice.
  */
 import type { AssistantMessage, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord";
 import {
     AssistantEntry,
     type ConversationId,
@@ -16,8 +19,12 @@ import {
     defineTask,
     defineTool,
     type Extension,
+    InboxDoc,
     LiveDoc,
     section,
+    type SubmissionId,
+    type TaskRuntime,
+    type Tx,
 } from "@earendil-works/pi-durable";
 import { REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
@@ -85,7 +92,14 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
                 const next = (report?: string) =>
                     ({ status: "running", checkpoint: { phase: "report", report } }) as const;
 
+                const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
+
                 if (settled.status === "unanswered") {
+                    if (agent !== undefined) {
+                        agent.answeredAt = Date.now();
+                        agent.failed = settled.reason !== "aborted";
+                    }
+
                     return next(
                         settled.reason === "aborted"
                             ? undefined
@@ -97,43 +111,165 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
                     return next();
                 }
 
-                const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
-
                 if (agent === undefined || agent.reported.includes(settled.answer)) {
                     return next();
                 }
 
                 agent.reported.push(settled.answer);
+                agent.answeredAt = Date.now();
+                agent.failed = false;
                 const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
                     AssistantMessage | undefined;
 
                 return next(`${REPORT_PREFIX}${name} answered, no reply needed] ${textOf(answer)}`);
             }, context);
         },
-        report: async (reporter, runtime, context) => {
-            const report = reporter.state.checkpoint.report;
+        // The report waits with the others for the courier, which this starts when none is at work.
+        report: (reporter, runtime, context) =>
+            runtime.commit(async (tx) => {
+                const report = reporter.state.checkpoint.report;
 
-            if (report !== undefined) {
-                const parent = (await runtime.conversation(runtime.conversationId, context))!;
-                const input = { type: "input", content: report, whenBusy: "followUp" } as const;
+                if (report !== undefined) {
+                    const state = await tx.doc(SubagentsDoc, runtime.conversationId);
 
-                await parent.submit(
-                    { ...input, requestId: `subagent-report:${reporter.id}` },
-                    context,
-                );
-            }
+                    // Assigned whole: a document keeps its own copy of what is assigned to it.
+                    state.outbox = [
+                        ...(state.outbox ?? []),
+                        { name: reporter.input.name, text: report },
+                    ];
 
-            await runtime.commit(
-                () => ({ status: "terminal", outcome: { status: "completed", result: null } }),
-                context,
-            );
-        },
+                    if (!(await working(tx, state.courier))) {
+                        state.courier = await tx.createTask(Courier, null, BACKGROUND);
+                    }
+                }
+
+                return { status: "terminal", outcome: { status: "completed", result: null } };
+            }, context),
     },
     abort: (_reporter, runtime, context) =>
         runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 
-const GUIDE = `You can delegate to background subagents with the subagent tool. A subagent is a separate agent with its own transcript that works while you keep talking to the user; its answer comes back to you later as a message starting with "${REPORT_PREFIX}<name> answered". Use them for independent, self-contained work (research, long builds, test runs, a second opinion). Give each message everything the subagent needs: it does not see this conversation. Do not poll: wait for the report. The user can open a subagent and talk to it directly.`;
+/** Tasks of a conversation that run beside its work: its Esc and idle waits do not reach them. */
+const BACKGROUND = { ownership: { kind: "conversation" }, background: true } as const;
+
+/** Whether a task is there and can still take reports. */
+async function working(tx: Tx, task: number | undefined): Promise<boolean> {
+    if (task === undefined) {
+        return false;
+    }
+
+    const status = (await tx.task(task as never))?.state.status;
+
+    // One completing has taken its last reports already.
+    return status === "pending" || status === "running" || status === "waiting";
+}
+
+/** Wait until the submission `id` has left `conversationId`'s queue: placed, withdrawn, or aborted. */
+async function leftQueue(
+    runtime: TaskRuntime<null, CourierState, null, object>,
+    conversationId: ConversationId,
+    id: SubmissionId,
+    context: Context,
+): Promise<void> {
+    const queued = (value: { items?: readonly { id: SubmissionId }[] } | null) =>
+        (value?.items ?? []).some((item) => item.id === id);
+    const watch = await runtime.watchDoc(InboxDoc, conversationId, context);
+
+    if (watch === undefined || !queued(watch.value)) {
+        await watch?.stop();
+
+        return;
+    }
+
+    try {
+        await new Promise<void>((resolve, reject) => {
+            watch.start(async (value) => {
+                if (!queued(value)) {
+                    resolve();
+                }
+            });
+            // The watch ends with the invocation (a restart, say): the phase runs again then.
+            void watch.closed.then(() => reject(new Error("The queue's watch ended")), reject);
+        });
+    } finally {
+        await watch.stop();
+    }
+}
+
+type CourierState = { phase: "next" } | { phase: "send"; batch: number; text: string };
+
+/**
+ * Takes all the reports waiting and sends them to the parent as one message, to steer it at its next pause, or to wake
+ * it when it is idle. It sends the next ones only once that message has left the parent's queue, so the queue holds one
+ * at a time; reports that arrive meanwhile go in the next. It ends when none are waiting.
+ */
+const Courier = defineTask<null, CourierState, null>({
+    name: "pocket.subagent-courier",
+    version: 1,
+    initial: () => ({ phase: "next" }),
+    phases: {
+        next: (courier, runtime, context) =>
+            runtime.commit(async (tx) => {
+                const state = await tx.doc(SubagentsDoc, runtime.conversationId);
+                const reports = state.outbox ?? [];
+
+                if (reports.length === 0) {
+                    delete state.courier;
+                    delete state.delivering;
+
+                    return { status: "terminal", outcome: { status: "completed", result: null } };
+                }
+
+                const batch = (state.batches ?? 0) + 1;
+
+                state.batches = batch;
+                state.outbox = [];
+                state.delivering = [...new Set(reports.map((report) => report.name))];
+
+                return {
+                    status: "running",
+                    checkpoint: {
+                        phase: "send",
+                        batch,
+                        text: reports.map((report) => report.text).join("\n\n"),
+                    },
+                };
+            }, context),
+        send: async (courier, runtime, context) => {
+            const checkpoint = courier.state.checkpoint as Extract<CourierState, { phase: "send" }>;
+            const parent = (await runtime.conversation(runtime.conversationId, context))!;
+            const submission = await parent.submit(
+                {
+                    type: "input",
+                    content: checkpoint.text,
+                    whenBusy: "steer",
+                    requestId: `subagent-reports:${courier.id}:${checkpoint.batch}`,
+                },
+                context,
+            );
+
+            await leftQueue(runtime, runtime.conversationId, submission.id, context);
+            await runtime.commit(async (tx) => {
+                delete (await tx.doc(SubagentsDoc, runtime.conversationId)).delivering;
+
+                return { status: "running", checkpoint: { phase: "next" } };
+            }, context);
+        },
+    },
+    // Stopped with its conversation: the reports stay waiting, for the next courier.
+    abort: (_courier, runtime, context) =>
+        runtime.commit(async (tx) => {
+            const state = await tx.doc(SubagentsDoc, runtime.conversationId);
+
+            delete state.courier;
+            delete state.delivering;
+
+            return { status: "terminal", outcome: { status: "aborted" } };
+        }, context),
+});
+
+const GUIDE = `You can delegate to background subagents with the subagent tool. A subagent is a separate agent with its own transcript that works while you keep talking to the user; its answer comes back to you at your next pause (after a tool call, or when you are done) as a message starting with "${REPORT_PREFIX}<name> answered". Answers that arrive together come in one message. Use them for independent, self-contained work (research, long builds, test runs, a second opinion). Give each message everything the subagent needs: it does not see this conversation. Do not poll: wait for the report. The user can open a subagent and talk to it directly.`;
 
 export default function createSubagents(host: PocketHost) {
     const subagent = defineTool({
@@ -257,17 +393,13 @@ export default function createSubagents(host: PocketHost) {
 
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
-                const background = {
-                    ownership: { kind: "conversation" },
-                    background: true,
-                } as const;
 
                 if (action === "spawn") {
                     if (Object.hasOwn(state.agents, name)) {
                         return `${name} already exists; use send.`;
                     }
 
-                    const anchor = await tx.createTask(Anchor, null, background);
+                    const anchor = await tx.createTask(Anchor, null, BACKGROUND);
                     // Owned by a task of this conversation, so it starts as a copy of this agent.
                     const child = await tx.createConversation({
                         ownership: { kind: "task", taskId: anchor },
@@ -285,8 +417,13 @@ export default function createSubagents(host: PocketHost) {
                     state.agents[name] = { conversationId: child.id, reported: [] };
                 }
 
-                const conversationId = state.agents[name]!.conversationId;
+                const record = state.agents[name]!;
+                const conversationId = record.conversationId;
                 const requestedBy = host.requesterOf(api.conversationId);
+
+                // For the subagents bar: what it works on now, and since when.
+                record.asked = message.trim().slice(0, 300);
+                record.askedAt = Date.now();
                 const input = {
                     name,
                     conversationId,
@@ -295,7 +432,7 @@ export default function createSubagents(host: PocketHost) {
                     ...(requestedBy === undefined ? {} : { requestedBy }),
                 };
 
-                state.reporters[api.taskId] = await tx.createTask(Reporter, input, background);
+                state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
 
                 return action === "send" ? `Sent to ${name}.` : `Started ${name}.`;
             }, context);
@@ -309,7 +446,7 @@ export default function createSubagents(host: PocketHost) {
 
     const SubagentTools: Extension = defineExtension({
         name: "pocket-subagents",
-        tasks: [Anchor, Reporter],
+        tasks: [Anchor, Reporter, Courier],
         tools: [subagent],
         sections: [section("subagents", () => GUIDE)],
     });
