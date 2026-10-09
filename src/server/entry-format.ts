@@ -17,6 +17,15 @@ export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n"
 /** The entry kind of a command someone ran. */
 export const SHELL_ENTRY = "pocket.shell";
 
+/**
+ * The entry kind that ends a session continued from Pi in the terminal: what comes before it is Pi's. It gives the model
+ * nothing; it carries the context edits Pi had made to that history.
+ */
+export const FROM_PI_ENTRY = "pocket.from-pi";
+
+/** What that entry holds: the Pi session's id, its title, and its file. */
+export type FromPiData = { session: string; title: string; file: string };
+
 /** What a command's entry holds. */
 export type ShellData = {
     command: string;

@@ -6,7 +6,7 @@ For agents (and people) who change how Pi works in Pi Pocket, extend Pi Pocket, 
 
 - **The code:** the folder above this one (`web/`, `src/`, `docs/`, `test/`). It runs straight from these files: there is no build.
 - **The data:** `~/.pi-pocket/`, or `PI_POCKET_DIR` (the launcher shows it as **Data**). `config.json` holds people, roles, tokens, invites, and settings; `pocket.sqlite` holds every session; `extensions/` holds the owner's drop-in extensions. Change data through the app, never by editing these files: the server keeps them in memory and writes over them. The one exception is `extensions/`, where drop-ins go ([extensions.md](extensions.md)).
-- **Pi's own files:** `~/.pi/agent/` (sign-ins, models, settings, `AGENTS.md`, skills, prompt templates). Pi Pocket uses them as Pi does.
+- **Pi's own files:** `~/.pi/agent/` (sign-ins, models, settings, `AGENTS.md`, skills, prompt templates). Pi Pocket uses them as Pi does. It only reads Pi's sessions (`sessions/`), for the owner to continue one here.
 
 ## Pick the lightest change
 

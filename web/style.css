@@ -7777,3 +7777,45 @@ textarea.notes {
         scroll-margin-top: 6.4rem;
     }
 }
+
+/* Pi's sessions from the terminal: a title over its folder (as specific as `.list-item > span:first-child`, so after
+   it), and the last messages of one. */
+.list-item > span.pi-session-name {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+    min-width: 0;
+    text-align: left;
+}
+
+.pi-session-name > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pi-session > .muted {
+    flex: none;
+}
+
+.pi-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0.4rem 0 0.8rem;
+}
+
+.pi-line > div {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.pi-line.user > div {
+    border-left: 2px solid var(--accent);
+    padding-left: 0.5rem;
+}

@@ -8,6 +8,7 @@ import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { togglePeeks } from "./peeks.js";
 import { setArchived, workspaceOrder } from "./sessions.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
+import { piSessionsAvailable } from "./sheets/pi-sessions.js";
 import {
     actions,
     attempt,
@@ -92,6 +93,12 @@ function actionItems() {
             icon: "plus",
             keys: "Alt N",
             run: () => openSheet({ type: "cwd", mode: "new" }),
+        },
+        piSessionsAvailable() && {
+            label: "Continue a Pi session",
+            detail: "from Pi in the terminal",
+            icon: "terminal",
+            run: () => openSheet({ type: "pi-sessions" }),
         },
         conversationId !== null && {
             label: "All sessions",

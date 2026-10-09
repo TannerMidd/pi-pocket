@@ -812,6 +812,10 @@ export const actions = {
     trust: () => api(`c/${current()}/trust`),
     /** `trust`, `trust-parent`, or `distrust`, as Pi's `/trust` offers them. */
     setTrust: (choice) => api(`c/${current()}/trust`, { choice }),
+    /** Pi's sessions from the terminal on this machine; one of them to look at; and one continued as a new session. */
+    piSessions: () => api("pi-sessions"),
+    piSession: (path) => api(`pi-sessions/preview?path=${encodeURIComponent(path)}`),
+    continuePiSession: (path) => api("pi-sessions/continue", { path }),
     /** `when` says when, then what Pi gets: `in 2h check the deploy`. Clock times are this device's. */
     schedule: (when) =>
         api(`c/${current()}/schedules`, {
@@ -834,7 +838,7 @@ export const actions = {
 
 /** Entries that show as transcript rows. Tool results show inside their call's card instead. */
 export const isRow = (entry) =>
-    ["user", "assistant", "compaction", "reset", "shell", "note"].includes(entry.kind);
+    ["user", "assistant", "compaction", "reset", "shell", "note", "fromPi"].includes(entry.kind);
 
 /**
  * Show the transcript from this entry down when it is above the rows shown now, as for a jump to a pinned or quoted

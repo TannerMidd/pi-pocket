@@ -66,6 +66,7 @@ import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { modelList, resolveModel } from "./models.ts";
 import { configureHttp } from "./net.ts";
+import { PiSessions } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { Providers } from "./providers.ts";
@@ -151,6 +152,8 @@ export class PocketApp {
     readonly workspace = new Workspace(this);
     /** The conversation's stored history, as people read it. */
     readonly transcripts = new Transcripts(this);
+    /** Pi's sessions from the terminal, which the owner can continue here. */
+    readonly piSessions = new PiSessions(this);
     /** Each conversation's browser page, which Pi and the people in the conversation share. */
     readonly browsers: Browsers;
     readonly #clients = new Set<Client>();

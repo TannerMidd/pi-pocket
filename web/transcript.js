@@ -29,6 +29,7 @@ import {
     openFile,
     plainText,
     replyText,
+    shortPath,
     Spinner,
     Thinking,
     Thumb,
@@ -732,6 +733,14 @@ function AssistantEntry({ entry, results, slots, approvals }) {
 function Divider({ entry }) {
     const [open, setOpen] = useState(false);
 
+    // A session continued from Pi in the terminal: what is above is Pi's, from that session's file.
+    if (entry.kind === "fromPi") {
+        return html`<div class="divider">
+            <span>Continued from Pi in the terminal</span>
+            <div class="muted small mono">${shortPath(entry.file, store.state.server?.home)}</div>
+        </div>`;
+    }
+
     if (entry.kind === "reset") {
         return html`<div class="divider">
             <span>New context</span>
@@ -934,7 +943,7 @@ function EntryView({ entry, results, slots, approvals }) {
         />`;
     }
 
-    if (entry.kind === "compaction" || entry.kind === "reset") {
+    if (entry.kind === "compaction" || entry.kind === "reset" || entry.kind === "fromPi") {
         return html`<${Divider} entry=${entry} />`;
     }
 

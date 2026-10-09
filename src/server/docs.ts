@@ -28,6 +28,8 @@ export type SessionMeta = {
     budget?: number;
     /** The git worktree the session works in, when it has one of its own. */
     worktree?: Worktree;
+    /** The session of Pi's in the terminal this one continues, and how many messages its file had then. */
+    fromPi?: { session: string; count: number };
 };
 
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */

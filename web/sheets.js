@@ -20,6 +20,7 @@ import { ShortcutsSheet } from "./sheets/shortcuts.js";
 import { SpendSheet } from "./sheets/spend.js";
 import { TextSheet } from "./sheets/text.js";
 import { ArtifactsSheet, ArtifactViewer, ImageViewer } from "./sheets/viewers.js";
+import { PiSessionSheet, PiSessionsSheet, piSessionsAvailable } from "./sheets/pi-sessions.js";
 import { WorktreeSheet } from "./sheets/worktree.js";
 import { TrustSheet } from "./trust.js";
 import { addLayer, removeLayer } from "./back.js";
@@ -168,6 +169,14 @@ function sheetBody(sheet) {
             break;
         case "trust":
             body = view.conversation ? html`<${TrustSheet} />` : null;
+            break;
+        case "pi-sessions":
+            body = piSessionsAvailable() ? html`<${PiSessionsSheet} />` : null;
+            break;
+        case "pi-session":
+            body = piSessionsAvailable()
+                ? html`<${PiSessionSheet} key=${sheet.id} path=${sheet.id} />`
+                : null;
             break;
         case "file":
             body = view.conversation

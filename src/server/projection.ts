@@ -6,7 +6,9 @@ import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-dura
 import {
     ATTACHMENTS_HEADING,
     FILE_BLOCK,
+    FROM_PI_ENTRY,
     FROM_PREFIX,
+    type FromPiData,
     NOTE_ENTRY,
     SHELL_ENTRY,
     type ShellData,
@@ -50,6 +52,7 @@ export type ClientEntry =
     | { id: number; kind: "reset"; text?: string }
     | ({ id: number; kind: "shell"; truncated?: number } & ShellData)
     | { id: number; kind: "note"; text: string; name: string }
+    | { id: number; kind: "fromPi"; title: string; file: string }
     | { id: number; kind: "other"; entryKind: string };
 
 export type ClientToolSlot = {
@@ -328,6 +331,17 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
 
         case "pi.system":
             return undefined;
+
+        case FROM_PI_ENTRY: {
+            const data = entry.data as Partial<FromPiData> | undefined;
+
+            return {
+                id,
+                kind: "fromPi",
+                title: String(data?.title ?? ""),
+                file: String(data?.file ?? ""),
+            };
+        }
 
         case NOTE_ENTRY: {
             const data = entry.data as { text?: unknown; name?: unknown } | undefined;
@@ -642,6 +656,9 @@ export function peekLines(
                 break;
             case "reset":
                 lines.push({ kind: "event", text: "Context cleared" });
+                break;
+            case "fromPi":
+                lines.push({ kind: "event", text: "Continued from Pi in the terminal" });
                 break;
             default:
                 break;
