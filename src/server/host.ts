@@ -1,6 +1,14 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
-import type { ConversationId, Extension, ModelRef, TaskId } from "@earendil-works/pi-durable";
+import type {
+    ConversationId,
+    DocumentReader,
+    Extension,
+    ModelRef,
+    TaskId,
+    Tx,
+} from "@earendil-works/pi-durable";
+import type { User } from "./config.ts";
 import type { Browsers } from "./browser.ts";
 import type { Goals } from "./goals.ts";
 import type { LancetGuard } from "./lancet.ts";
@@ -103,8 +111,37 @@ export class Approvals {
     }
 }
 
+/** Feedback from a command: a private notification, or text shared in the conversation. */
+export type CommandResult =
+    | { type: "toast"; level: "info" | "warning" | "error"; message: string }
+    | { type: "card"; output: string };
+
+/** The person invoking a command and the durable task that runs it. */
+export interface CommandContext {
+    readonly user: Readonly<Pick<User, "id" | "name" | "role">>;
+    readonly conversationId: ConversationId;
+    readonly cwd: string;
+    readonly signal: AbortSignal;
+    readonly snapshot: DocumentReader["snapshot"];
+    readonly context: Context;
+    commit(change: (tx: Tx) => void | Promise<void>): Promise<void>;
+}
+
+/** A command registered while the module builds its extensions. */
+export interface ExtensionCommand {
+    name: string;
+    description: string;
+    args?: string;
+    scope: "conversation" | "global";
+    handler(args: string, context: CommandContext): CommandResult | Promise<CommandResult>;
+}
+
+/** What browsers know about a command. The id changes when its module reloads successfully. */
+export type CommandInfo = Omit<ExtensionCommand, "handler"> & { id: string; file: string };
+
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
 export interface PocketHost {
+    readonly commands: { register(command: ExtensionCommand): void };
     readonly guard: LancetGuard;
     readonly approvals: Approvals;
     readonly agentDir: string;

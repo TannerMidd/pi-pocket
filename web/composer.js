@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { Avatar } from "./avatar.js";
 import { chatUnread, TypingLine } from "./chat.js";
 import {
+    clearPendingCommand,
     loadTemplates,
     parseCommand,
     parseTemplate,
@@ -204,7 +205,7 @@ function GoalBar() {
 }
 
 export function Composer() {
-    const { view, conversationId } = store.state;
+    const { view, conversationId, me, users, server } = store.state;
     const [text, setText] = useState(() => drafts.get(conversationId));
     const [files, setFiles] = useState([]);
     const [steer, setSteer] = useState(true);
@@ -225,6 +226,7 @@ export function Composer() {
     const list = useRef(null);
     // One per `!` command: sending it again after a lost reply runs it once.
     const requestId = useRef(uid());
+    const runningCommand = useRef(false);
     const busy = view.live.busy;
     const agent = view.agent;
 
@@ -297,20 +299,32 @@ export function Composer() {
         }
 
         if (value.startsWith("/")) {
-            loadTemplates();
+            void loadTemplates().catch(() => {});
         }
 
         // A command is not a message to Pi: no "typing to Pi" for it.
         typing(value.trim() === "" || value.startsWith("/") ? null : "pi");
     };
 
+    const blocked = collab() && view.turns?.on && view.turns.driver !== me?.id;
+    const globalCommand = (command) =>
+        me?.role === "owner" && command?.extension === true && command.scope === "global";
+    const full = expandPastes(text, pastes);
+    const parsed = parseCommand(full);
+    const globalOnly =
+        blocked &&
+        me?.role === "owner" &&
+        ((server?.extensionCommands ?? []).some((command) => command.scope === "global") ||
+            globalCommand(parsed?.command));
     // Ctrl+R: what was sent before that has the words in the box.
     const recalled = searching ? searchHistory(text) : [];
     const chosenRecall = recalled[Math.min(pick, recalled.length - 1)];
-    const suggestions = hideCommands || searching ? [] : suggestCommands(text);
+    const suggestions =
+        hideCommands || searching
+            ? []
+            : suggestCommands(text).filter((command) => !blocked || globalCommand(command));
     const chosen = suggestions[Math.min(pick, suggestions.length - 1)];
-    const parsed = parseCommand(text);
-    const template = parsed ? null : parseTemplate(text);
+    const template = parsed ? null : parseTemplate(full);
     // `!command` runs in the session's folder and Pi sees it; `!!command`, only the people here.
     const shell = text.startsWith("!")
         ? { context: !text.startsWith("!!"), command: text.replace(/^!!?/, "").trim() }
@@ -357,6 +371,13 @@ export function Composer() {
 
     /** Run a slash command. The text goes away once it worked; attached files stay for the next message. */
     const runCommand = async ({ command, arg }) => {
+        if (runningCommand.current || (blocked && !globalCommand(command))) {
+            return;
+        }
+
+        runningCommand.current = true;
+        const draft = drafts.get(conversationId);
+
         setSending(true);
         const ok = await attempt(async () => {
             await command.run(arg);
@@ -364,9 +385,10 @@ export function Composer() {
             return true;
         });
 
+        runningCommand.current = false;
         setSending(false);
 
-        if (ok) {
+        if (ok && drafts.get(conversationId) === draft) {
             update("");
         }
     };
@@ -396,10 +418,18 @@ export function Composer() {
 
     /** A tapped suggestion: commands that take text, and prompt templates, fill the box; the others run at once. */
     const choose = (command) => {
+        if (blocked && !globalCommand(command)) {
+            return;
+        }
+
         if (command.args || command.template) {
             update(`/${command.name} `);
             focusEnd();
-        } else {
+        } else if (!runningCommand.current) {
+            if (command.extension) {
+                update(`/${command.name}`);
+            }
+
             runCommand({ command, arg: "" });
         }
     };
@@ -416,6 +446,7 @@ export function Composer() {
     const canSend =
         !sending &&
         !uploading &&
+        (!blocked || globalCommand(parsed?.command)) &&
         (text.trim() !== "" || files.some((file) => file.state === "done"));
 
     /** What went out stays for ↑; its pastes are done with. */
@@ -460,18 +491,16 @@ export function Composer() {
     };
 
     const send = async () => {
-        if (!canSend) {
+        if (!canSend || runningCommand.current) {
             return;
         }
-
-        const full = expandPastes(text, pastes);
 
         if (parsed) {
             if (full.length <= REMEMBER_CHARS) {
                 remember(full);
             }
 
-            return runCommand(parseCommand(full) ?? parsed);
+            return runCommand(parsed);
         }
 
         if (shell) {
@@ -705,6 +734,10 @@ export function Composer() {
     };
 
     const addFiles = (list) => {
+        if (blocked) {
+            return;
+        }
+
         for (const file of list) {
             const key = uid();
             const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
@@ -767,15 +800,16 @@ export function Composer() {
         );
     };
 
-    const placeholder = busy
-        ? steer
-            ? "Steer the current run…"
-            : "Queue a follow-up…"
-        : coarse
-          ? "Message Pi…"
-          : "Message Pi… (/ commands · @ files · ! shell)";
+    const placeholder = globalOnly
+        ? "Run a global command…"
+        : busy
+          ? steer
+              ? "Steer the current run…"
+              : "Queue a follow-up…"
+          : coarse
+            ? "Message Pi…"
+            : "Message Pi… (/ commands · @ files · ! shell)";
     const inbox = view.inbox ?? [];
-    const { me, users } = store.state;
     const queuedBy = (item) =>
         item.by === undefined
             ? ""
@@ -798,8 +832,6 @@ export function Composer() {
         </footer>`;
     }
 
-    const turns = view.turns;
-    const blocked = collab() && turns?.on && turns.driver !== me?.id;
     const level =
         agent?.thinkingLevel && agent.thinkingLevel !== "off" && agent.reasoning
             ? agent.thinkingLevel
@@ -836,7 +868,7 @@ export function Composer() {
         <${PlanBar} blocked=${blocked} />
         <${GoalBar} />
         ${
-            blocked
+            blocked && !globalOnly
                 ? html`${
                       busy &&
                       html`<div class="composer-row stop-only">
@@ -1055,6 +1087,11 @@ export function Composer() {
                         placeholder=${placeholder}
                         onInput=${(event) => {
                             setBrowsing(null);
+
+                            if (event.currentTarget.value === "") {
+                                void attempt(() => clearPendingCommand(conversationId));
+                            }
+
                             update(event.currentTarget.value, event.currentTarget.selectionStart);
                         }}
                         onKeyDown=${onKey}
@@ -1069,6 +1106,7 @@ export function Composer() {
                         <button
                             class="icon-button"
                             aria-label="Attach files"
+                            disabled=${blocked}
                             onClick=${() => picker.current?.click()}
                         >
                             <${Icon} name="clip" />
@@ -1078,6 +1116,7 @@ export function Composer() {
                             type="file"
                             multiple
                             hidden
+                            disabled=${blocked}
                             onChange=${(event) => {
                                 addFiles([...event.currentTarget.files]);
                                 event.currentTarget.value = "";
@@ -1085,6 +1124,7 @@ export function Composer() {
                         />
                         <button
                             class=${`chip model-chip ${agent?.available === false ? "warn" : ""}`}
+                            disabled=${blocked}
                             onClick=${() => openSheet({ type: "model" })}
                         >
                             <span class="glyph">✦</span> ${modelLabel(agent)}
@@ -1095,6 +1135,7 @@ export function Composer() {
                             view.conversation?.kind !== "subagent" &&
                             html`<button
                                 class=${`chip toggle ${view.plan?.on ? "on" : ""}`}
+                                disabled=${blocked}
                                 title="Plan mode: Pi reads and proposes, and changes nothing until you approve"
                                 onClick=${() => attempt(() => actions.setPlan(!view.plan?.on))}
                             >
@@ -1105,6 +1146,7 @@ export function Composer() {
                             busy &&
                             html`<button
                                 class=${`chip toggle ${steer ? "on" : ""}`}
+                                disabled=${blocked}
                                 onClick=${() => setSteer(!steer)}
                                 title="Steer joins the running work; off queues a follow-up"
                             >

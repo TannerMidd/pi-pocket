@@ -329,6 +329,17 @@ export const BrowserDoc = defineDoc<{
     initial: () => ({}),
 });
 
+/** A native command request and its task are stored together. Retries remain deduplicated across restarts. */
+export const CommandRequestDoc = defineDocFamily<{ taskId?: TaskId }, null>({
+    kind: "pocket.command-request",
+    version: 1,
+    family: true,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({}),
+});
+
 /**
  * The `!` commands people started here, by request id (`user:request`), oldest first: a request sent again after its
  * reply was lost runs its command once, also across a restart. A fork starts without them.

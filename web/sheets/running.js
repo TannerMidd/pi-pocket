@@ -33,6 +33,12 @@ export function RunningSheet() {
         navigate(id);
     };
 
+    const stopCommand = (task) => {
+        const path = task.kind === "pocket.shell" ? "shell" : "extension-commands";
+
+        return attempt(() => api(`c/${task.conversationId}/${path}/${task.id}/stop`, {}));
+    };
+
     return html`<${Sheet} title="Running now" onClose=${closeSheet}>
         ${sessions === null && html`<${Loader} label="Looking" />`}
         ${sessions?.length === 0 && html`<p class="muted">Nothing is running.</p>`}
@@ -93,10 +99,10 @@ export function RunningSheet() {
                         }
                         ${
                             steer &&
-                            task.kind === "pocket.shell" &&
+                            ["pocket.shell", "pocket.command"].includes(task.kind) &&
                             html`<button
                                 class="link small"
-                                onClick=${() => attempt(() => api(`c/${task.conversationId}/shell/${task.id}/stop`, {}))}
+                                onClick=${() => stopCommand(task)}
                             >
                                 Stop
                             </button>`

@@ -14,6 +14,7 @@ import {
     discuss,
     isRow,
     navigate,
+    notify,
     openSheet,
     store,
     TRANSCRIPT_ROWS,
@@ -21,6 +22,7 @@ import {
 import {
     ATTACHMENTS_HEADING,
     Boot,
+    copyText,
     entryImageUrl,
     fileUrl,
     html,
@@ -792,6 +794,62 @@ const SHELL_ENDS = {
 /** How many of a command's last lines show before "Show all". */
 const SHELL_LINES = 12;
 
+/** A native extension result: read-only text for the people here, not a model message. */
+function CommandEntry({ entry }) {
+    const [open, setOpen] = useState(false);
+    const [full, setFull] = useState(null);
+    const output = full ?? entry.output;
+    const lines = output.split("\n");
+    const long = lines.length > SHELL_LINES;
+
+    return html`<div class="shell-row command-row" id=${`entry-${entry.id}`}>
+        <div class=${`shell-card command-card ${open ? "open" : ""}`}>
+            <div class="shell-head">
+                <span class="mono shell-command">/${entry.command}</span>
+                <span class="muted small">${entry.name} · not shown to Pi</span>
+            </div>
+            <pre class="output">${long && !open ? `${lines.slice(0, SHELL_LINES).join("\n")}\n…` : output}</pre>
+            ${
+                long &&
+                html`<button class="link small" onClick=${() => setOpen(!open)}>
+                    ${open ? "Show less" : `Show all ${lines.length} lines`}
+                </button>`
+            }
+            ${
+                entry.truncated &&
+                full === null &&
+                html`<button
+                    class="link small"
+                    onClick=${() =>
+                        attempt(async () => {
+                            setFull((await actions.fullEntry(entry.id)).output);
+                            setOpen(true);
+                        })}
+                >
+                    Load everything
+                </button>`
+            }
+            <button
+                class="link small"
+                onClick=${() =>
+                    attempt(async () => {
+                        const text =
+                            full ??
+                            (entry.truncated
+                                ? (await actions.fullEntry(entry.id)).output
+                                : entry.output);
+
+                        setFull(text);
+                        await copyText(text);
+                        notify("info", "Copied the command output.");
+                    })}
+            >
+                Copy output
+            </button>
+        </div>
+    </div>`;
+}
+
 /** A command someone ran with `!` (or `!!`, which Pi does not see): what it printed, and how it ended. */
 function ShellEntry({ entry }) {
     const [open, setOpen] = useState(false);
@@ -915,6 +973,10 @@ function EntryView({ entry, results, slots, approvals }) {
 
     if (entry.kind === "shell") {
         return html`<${ShellEntry} entry=${entry} />`;
+    }
+
+    if (entry.kind === "command") {
+        return html`<${CommandEntry} entry=${entry} />`;
     }
 
     if (entry.kind === "note") {

@@ -55,6 +55,7 @@ import {
     TurnsDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
+import { ExtensionCommands } from "./extension-commands.ts";
 import { Goals } from "./goals.ts";
 import { type ApprovalRequest, Approvals, type PocketHost } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
@@ -128,6 +129,7 @@ export class PocketApp {
     settings!: SettingsManager;
     loader!: ExtensionLoader;
     readonly commands = new Commands(this);
+    readonly extensionCommands = new ExtensionCommands(this);
     readonly collab = new Collab(this);
     readonly alerts = new Alerts(this);
     readonly providers = new Providers(this);
@@ -253,9 +255,12 @@ export class PocketApp {
         registry.install(CodingTools);
         // Durable work of the app itself, whatever extension modules are on.
         registry.install(
-            defineExtension({ name: "pocket-core", tasks: [ResendTask, this.shell.task] }),
+            defineExtension({
+                name: "pocket-core",
+                tasks: [ResendTask, this.shell.task, this.extensionCommands.task],
+            }),
         );
-        const host: PocketHost = {
+        const host: Omit<PocketHost, "commands"> = {
             guard: this.guard,
             approvals: this.approvals,
             agentDir: getAgentDir(),
@@ -287,6 +292,7 @@ export class PocketApp {
             host,
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
+            () => this.#refreshClients(),
         );
         await this.loader.loadAll();
 
@@ -1079,6 +1085,13 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                extensionCommands: this.loader
+                    .commands()
+                    .filter(
+                        (command) =>
+                            user.role === "owner" ||
+                            (user.role === "guest" && command.scope === "conversation"),
+                    ),
                 // Tells the web app this server has people chat and typing indicators.
                 chat: true,
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).

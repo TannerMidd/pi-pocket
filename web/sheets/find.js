@@ -28,6 +28,7 @@ function searchText(entry) {
                 .filter(Boolean)
                 .join("\n");
         case "shell":
+        case "command":
             return `${entry.command}\n${entry.output}`;
         case "note":
             return `${entry.name} ${entry.text}`;
@@ -48,7 +49,7 @@ function speaker(entry) {
         return "Pi";
     }
 
-    if (entry.kind === "shell" || entry.kind === "note") {
+    if (entry.kind === "shell" || entry.kind === "command" || entry.kind === "note") {
         return entry.name;
     }
 

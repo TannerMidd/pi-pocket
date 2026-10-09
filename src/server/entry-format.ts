@@ -17,6 +17,17 @@ export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n"
 /** The entry kind of a command someone ran. */
 export const SHELL_ENTRY = "pocket.shell";
 
+/** A native extension command's read-only result, shown to people but not added to model context. */
+export const COMMAND_ENTRY = "pocket.command";
+
+export type CommandData = {
+    command: string;
+    by: string;
+    name: string;
+    output: string;
+    taskId: number;
+};
+
 /** What a command's entry holds. */
 export type ShellData = {
     command: string;

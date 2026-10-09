@@ -21,7 +21,12 @@ export type ExportInput = {
 
 /** A fenced code block that no backtick run inside `text` can close early. */
 export function fence(text: string, language = ""): string {
-    const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((run) => run[0].length));
+    let longest = 2;
+
+    for (const run of text.matchAll(/`+/g)) {
+        longest = Math.max(longest, run[0].length);
+    }
+
     const marks = "`".repeat(longest + 1);
 
     return `${marks}${language}\n${text.replace(/\n$/, "")}\n${marks}`;
@@ -172,6 +177,10 @@ export function transcriptMarkdown(input: ExportInput): string {
             );
         } else if (entry.kind === "note") {
             sections.push(`_${entry.name} ${entry.text}._`);
+        } else if (entry.kind === "command") {
+            sections.push(
+                `**${entry.name}** ran \`/${entry.command}\` (not shown to Pi):\n\n${fence(entry.output)}`,
+            );
         } else if (entry.kind === "shell") {
             const fence = entry.output.includes("```") ? "````" : "```";
 

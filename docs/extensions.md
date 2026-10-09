@@ -1,6 +1,8 @@
 # Writing extensions
 
-An extension gives Pi something new: a **tool** it can call, a **section** of its system prompt, a **hook** that checks or changes its tool calls and answers, or a durable **task**. Pi Pocket's own features are built this way (`src/server/extensions/`), and the owner can add their own without touching Pi Pocket's code.
+An extension gives Pi something new: a **tool** it can call, a **section** of its system prompt, a **hook** that checks or changes its tool calls and answers, or a durable **task**. Its module can also declare **commands for people**, for settings or status that should not require asking Pi. Pi Pocket's own features are built this way (`src/server/extensions/`), and the owner can add their own without touching Pi Pocket's code.
+
+These are native Pi Pocket extensions, not Pi's terminal extensions. Command registration does not adapt the terminal's extension API, TUI widgets, or dialogs.
 
 Extensions are Pi Durable's. Its README covers the parts in depth: `node_modules/@earendil-works/pi-durable/README.md` in Pi Pocket's folder (Extensions, Tools, System Prompt, Hooks, Your Own State). This page is what Pi Pocket adds, and how to write one that holds up.
 
@@ -46,7 +48,7 @@ export default function createClock() {
 
 Working examples, tested with every `npm test` (`test/docs-examples.test.ts`):
 
-- [examples/clock.ts](examples/clock.ts): a tool.
+- [examples/clock.ts](examples/clock.ts): a tool and a native command that share a per-session time-zone preference.
 - [examples/no-force-push.ts](examples/no-force-push.ts): a hook that blocks some bash calls, and a prompt section that says so.
 
 The file:
@@ -89,6 +91,51 @@ You cannot turn a drop-in on yourself: ask the owner to, in Menu → Extensions.
 
 The tool's description and parameters go into every request: keep them short and exact.
 
+## Commands for people
+
+A person runs a native command from the message box, not through a model tool call. Try the [clock example](examples/clock.ts): `/clock-zone Europe/Berlin` saves this session's preference and returns a notice; `/clock-zone` shows it in a card. The next ordinary call to the `clock` tool uses that preference unless it names a zone explicitly.
+
+Register commands inside the module's synchronous default-export function. A command-only module can return `[]`:
+
+```typescript
+/** Shows the folder this session works in, without asking Pi. */
+export default function createStatus(host) {
+    host.commands.register({
+        name: "acme-status",
+        description: "Show this session's working folder",
+        scope: "conversation",
+        handler: (_args, ctx) => ({ type: "card", output: ctx.cwd }),
+    });
+
+    return [];
+}
+```
+
+- `name` has no slash and matches `[a-z][a-z0-9_-]*`. Give it a prefix of your own. Built-in commands are reserved, and another enabled module cannot take the same name. For a new invocation, a same-name prompt template keeps its meaning instead of being shadowed by the extension.
+- `description` is the suggestion's text. Optional `args` is a text hint, such as `"[zone]"` or `"<value>"`, not a schema: the handler parses and checks its argument string. The server rejects `args.length > 4000`.
+- `scope: "conversation"` requires steering rights and, while taking turns, the wheel. `scope: "global"` is owner-only and remains available while someone else drives; use it for server-wide or private settings. Both run from a conversation the caller may see. Scope is an access rule, not a sandbox or a choice of document scope.
+- Declare everything before the factory returns. A successful reload replaces that module's command list; a failed build keeps the old list. Turning the module off or deleting its file removes its commands. An invocation already running keeps the handler it started with.
+
+The handler receives `(args, ctx)`. `ctx.user` has the caller's id, name, and current role; `ctx.conversationId` and `ctx.cwd` name the session and its folder. Read durable state with `ctx.snapshot(Doc, ctx.conversationId, ctx.context)`; change it with `await ctx.commit(async (tx) => { … })`. Keep external I/O outside the commit callback. Pass `ctx.signal` to cancellable work. The [clock example](examples/clock.ts) uses these same APIs for its command and tool, without keeping settings in module variables.
+
+Return one kind of feedback:
+
+- `{ type: "toast", level: "info", message: "…" }`: a notice only in the tab that invoked it. The level can be `"info"`, `"warning"`, or `"error"`. Do not use `host.notice` for private feedback: that reports to the server log and other clients too.
+- `{ type: "card", output: "…" }`: persistent plain text in the conversation, visible to everyone who may see it. HTML is text, not executable markup. Find in session and Markdown export include it. The card is not a model message and does not change whom Pi works for. Never put credentials in it.
+- Throw an `Error` for a failed invocation; its message becomes private error feedback.
+
+Arguments and results are stored with the task, and arguments may remain in browser history. This is not a secret-entry form. The command path itself does not call the model; an extension remains responsible for any other work its handler starts.
+
+### Retries and stopping
+
+Every invocation is a durable task. The browser saves an unacknowledged request in its tab's session storage. After a lost reply, retry the same text without clearing the box: the original registration and request id are reused, even after a page reload, a module rebuild, or disabling the module. A valid terminal receipt clears the saved request. An unreadable saved request blocks non-built-in slash actions rather than guessing that they should go to Pi.
+
+Clearing the box deliberately abandons that saved request. A later submission, or a fresh submission on another device, can run the operation again. Deduplication is by person, conversation, and request id, not by argument text; it is not an exactly-once guarantee.
+
+A restart does not automatically re-enter a command handler whose completion is unknown. Its receipt says it was interrupted and may have done part of its work. Known handler failures are reported as failed instead. Neither state is silently replayed.
+
+Menu → **Running now** can stop a command. Anyone who may steer the conversation can stop its conversation commands; only the owner sees or stops global commands there. Stopping signals cancellation, not rollback: external work that ignores the signal may continue. Keep handlers short; use a separate durable task for work that needs its own long-running workflow. There is no forced execution timeout or generic form/dialog API.
+
 ## Prompt sections
 
 `section(name, render, { tag })`: `render(input, context)` returns text, or `undefined` to leave the section out. By default it is wrapped in `<name>…</name>`; `{ tag: false }` leaves it bare.
@@ -105,11 +152,12 @@ Sections render before every request, and only those that changed are sent again
 
 ## The host
 
-What the default export receives. Extensions reach the app only through it; it stays the same while modules reload.
+What the default export receives. Extensions reach the app only through it. Its services stay live while modules reload; each factory call gets its own command-registration collector.
 
 | Member                           | What it is                                                                              |
 | -------------------------------- | --------------------------------------------------------------------------------------- |
 | `dataDir`, `agentDir`            | Pi Pocket's data folder; Pi's (`~/.pi/agent`)                                           |
+| `commands.register(command)`     | Declare a command during this module's factory call                                     |
 | `notice(level, message)`         | Report something to the server log and the app (`"info"`, `"warning"`, `"error"`)       |
 | `resolveModel(spec)`             | `provider/modelId` (or a bare id) to an available model, or an error naming the choices |
 | `requesterOf(conversationId)`    | The id of the person Pi works for in a session now                                      |
@@ -130,6 +178,8 @@ To type it, import the type by the absolute path of `src/server/host.ts`: `impor
 ## Testing
 
 Copy the module into a test app's data folder and turn it on, as `test/docs-examples.test.ts` does: `openApp` with a scripted model (`test/helpers.ts`), the file in `<dataDir>/extensions/`, `app.setExtensionEnabled(owner, file, true)`, then a session whose scripted model calls the tool. Nothing reaches a real provider, and nothing touches the live data.
+
+Native command examples are checked through real HTTP requests in `test/extension-command-clock.test.ts`. `test/extension-command-crash.test.ts` kills disposable child servers after an external effect, the result memo, the card, and the terminal commit. It reads SQLite before recovery and retries the original request, checking that the effect and card are not repeated. After verifying child exit and lock ownership, the test removes that child's stale PID lock so an unrelated process reusing the PID cannot block the test; task and entry data are unchanged.
 
 For a drop-in, run the test from Pi Pocket's folder with the module copied in, or check it by hand: turn it on, ask Pi to use it in a session made for the purpose, and watch Menu → Extensions and the app's notices for errors.
 

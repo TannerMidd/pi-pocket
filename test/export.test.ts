@@ -116,3 +116,58 @@ test("fences grow past any backtick run inside", () => {
     assert.equal(fence("plain"), "```\nplain\n```");
     assert.equal(fence("has ```` four", "md"), "`````md\nhas ```` four\n`````");
 });
+
+test("command cards with many backtick runs export without truncation", () => {
+    const output = "`x".repeat(200000);
+    const markdown = transcriptMarkdown({
+        title: "Many backticks",
+        cwd: "/",
+        exportedAt: new Date(0),
+        entries: [
+            {
+                id: 1,
+                kind: "command",
+                command: "status",
+                by: "owner",
+                name: "Owner",
+                output,
+                taskId: 7,
+            },
+        ],
+        authors: {},
+    });
+
+    assert.ok(markdown.includes("```\n" + output + "\n```"), "the entire card stays fenced");
+});
+
+test("command cards export their full fenced output and recorded author between Pi replies", () => {
+    const output = "x".repeat(5000) + "\n`````\n<svg onload=alert(1)>";
+
+    const markdown = transcriptMarkdown({
+        title: "Native command",
+        cwd: "/",
+        exportedAt: new Date(0),
+        entries: [
+            { id: 1, kind: "assistant", blocks: [{ type: "text", text: "Before." }] },
+            {
+                id: 2,
+                kind: "command",
+                command: "clock-zone",
+                by: "owner",
+                name: "Owner",
+                output,
+                taskId: 7,
+            },
+            { id: 3, kind: "assistant", blocks: [{ type: "text", text: "After." }] },
+        ],
+        authors: { 2: "Not the recorded author" },
+    });
+
+    assert.ok(
+        markdown.includes(fence(output)),
+        "card output stays literal and is not silently omitted or clipped",
+    );
+    assert.match(markdown, /\*\*Owner\*\* ran `\/clock-zone` \(not shown to Pi\)/);
+    assert.doesNotMatch(markdown, /Not the recorded author/);
+    assert.equal(markdown.match(/\*\*Pi\*\*/g)?.length, 2, "the card separates the two Pi replies");
+});
