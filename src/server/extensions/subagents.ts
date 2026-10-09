@@ -295,7 +295,12 @@ const Courier = defineTask<null, CourierState, null>({
             const live = await runtime.snapshot(LiveDoc, runtime.conversationId, context);
 
             if (live?.run === undefined) {
-                await pause(GATHER_MS, runtime.signal);
+                // Ended by the invocation's signal, or the phase's own, as Pi Durable's waits are.
+                const signals = [runtime.signal, context.abortSignal].filter(
+                    (signal): signal is AbortSignal => signal !== undefined,
+                );
+
+                await pause(GATHER_MS, AbortSignal.any(signals));
             }
 
             await runtime.commit(

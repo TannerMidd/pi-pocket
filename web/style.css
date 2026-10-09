@@ -1605,6 +1605,11 @@ pre.diff .del {
     overscroll-behavior: contain;
 }
 
+/* There, a swipe on the queue that reaches its end goes on to scroll the dock, to the bars below it. */
+.dock[data-capped] > .inbox {
+    overscroll-behavior: auto;
+}
+
 /* Little room for the conversation: each bar keeps one line, its words cut short, its buttons whole. */
 .dock[data-compact] > :is(.plan-bar, .goal-bar, .trust-bar) {
     flex-wrap: nowrap;

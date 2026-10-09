@@ -8,8 +8,9 @@
 // - Unfolded, the list takes it, one whole row at least: the queue keeps two rows if it can, else one, else it folds
 //   away to how many wait.
 // - The count of waiting messages shows whenever the queue does not show them all.
-// - When the bars would leave the conversation too little (a short screen with several of them), each keeps one line:
-//   its words cut short, its buttons whole. Bars that still need more than the share show whole: the dock grows past it.
+// - When the bars would leave the conversation too little (a short screen with several of them), the plan, goal, and
+//   trust bars keep one line each: their words cut short, their buttons whole. Who drives keeps its own, for the people
+//   to hand over to. Bars that still need more than the share show whole: the dock grows past it.
 // - Only where even that leaves the conversation less than a quarter of the room (a phone on its side with every bar
 //   up) does the dock stop there, and scroll: the conversation always keeps a few lines.
 //
@@ -117,7 +118,10 @@ export function fitDock(dock) {
         return sum;
     };
 
-    // Measured with the bars at their whole height and the dock at its own, so the choices hold once they are made.
+    // Measured with the bars at their whole height and the dock at its own, so the choices hold once they are made. A
+    // dock that scrolls stops scrolling while it is measured: where the reader had it is put back after.
+    const scrolled = dock.scrollTop;
+
     delete dock.dataset.compact;
     delete dock.dataset.capped;
     dock.style.maxHeight = "";
@@ -195,24 +199,36 @@ export function fitDock(dock) {
 
     const floor = Math.min(together * FLOOR, 5 * rem);
 
+    // Where the reader had the dock when the list unfolded: it goes back there when the list folds.
+    if (list && dock.dataset.listShown !== "on") {
+        dock.dataset.scrolledFrom = String(scrolled);
+    }
+
     if (together - height(dock) < floor) {
         dock.dataset.capped = "on";
         dock.style.maxHeight = `${Math.max(0, together - floor)}px`;
+        dock.scrollTop = scrolled;
 
-        // A list just unfolded in a dock that scrolls: bring it into sight, once, then leave the scrolling to the reader.
+        // A list just unfolded in a dock that scrolls: bring it into sight, once; then the scrolling is the reader's.
         const below = list
             ? list.getBoundingClientRect().bottom - dock.getBoundingClientRect().bottom
             : 0;
 
         if (list && dock.dataset.listShown !== "on" && below > 0) {
-            dock.scrollTop += below;
+            dock.scrollTop = scrolled + below;
         }
     }
 
     if (list) {
         dock.dataset.listShown = "on";
     } else {
+        // Folded again: back to where the reader had it, even as the list's going lets the dock fit for a moment.
+        if (dock.dataset.scrolledFrom !== undefined) {
+            dock.scrollTop = Number(dock.dataset.scrolledFrom);
+        }
+
         delete dock.dataset.listShown;
+        delete dock.dataset.scrolledFrom;
     }
 }
 

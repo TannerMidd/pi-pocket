@@ -685,6 +685,7 @@ test(
         for (const size of [
             VIEWPORTS.mobile,
             { width: 390, height: 560, scale: 2, mobile: true },
+            { width: 390, height: 480, scale: 2, mobile: true },
             SIDEWAYS,
         ]) {
             // A project with skills of its own, undecided: the trust bar asks.
@@ -713,7 +714,7 @@ test(
 
             // Where even one line each is too much (a phone on its side), the dock stops and scrolls, and the conversation
             // keeps a quarter of the room; elsewhere, nothing in the dock is cut.
-            const sideways = size === SIDEWAYS;
+            const sideways = size === SIDEWAYS || size.height === 480;
 
             for (const [state, measured] of [
                 ["folded", folded],
@@ -786,6 +787,107 @@ test(
             { queue: again.queueShown, count: again.count },
             { queue: true, count: null },
             "the queue comes back",
+        );
+        await app.commands.abort(id, owner(app));
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "where the dock must scroll, an unfolded list comes into sight, and folding it puts the dock back",
+    real,
+    async () => {
+        const project = realpathSync(mkdtempSync(join(root, "dock-scrolls-")));
+
+        mkdirSync(join(project, ".git"));
+        mkdirSync(join(project, ".agents", "skills", "deploy"), { recursive: true });
+        writeFileSync(
+            join(project, ".agents", "skills", "deploy", "SKILL.md"),
+            "---\nname: deploy\ndescription: Deploy.\n---\nSteps.\n",
+        );
+        const id = await crowded(
+            { width: 390, height: 400, scale: 2, mobile: true },
+            5,
+            project,
+            async (session) => {
+                await app.commands.setPlan(session, owner(app), true);
+                await app.commands.setGoal(session, owner(app), "false");
+            },
+        );
+
+        /** Where the dock is scrolled, and what of it is in its window. */
+        const seen = async () => {
+            await frames();
+
+            return JSON.parse(
+                await page.evaluate(`
+                const dock = document.querySelector(".dock");
+                const window = dock.getBoundingClientRect();
+                const inSight = (selector) => {
+                    const element = document.querySelector(selector);
+                    const box = element?.getBoundingClientRect();
+
+                    return box !== undefined && box.height > 0 && box.top >= window.top - 1 && box.bottom <= window.bottom + 1;
+                };
+
+                return JSON.stringify({
+                    capped: dock.dataset.capped === "on",
+                    scrolls: dock.scrollHeight > dock.clientHeight + 1,
+                    top: Math.round(dock.scrollTop),
+                    list: inSight(".agents-list"),
+                    count: inSight(".inbox-count"),
+                    queue: inSight(".inbox"),
+                });
+            `),
+            ) as {
+                capped: boolean;
+                scrolls: boolean;
+                top: number;
+                list: boolean;
+                count: boolean;
+                queue: boolean;
+            };
+        };
+
+        const before = await seen();
+
+        assert.deepEqual(
+            {
+                capped: before.capped,
+                scrolls: before.scrolls,
+                count: before.count,
+                queue: before.queue,
+            },
+            { capped: true, scrolls: true, count: true, queue: true },
+            "the dock scrolls, from its top: how many wait, and the queue",
+        );
+        // The reader's own place in the dock holds through a render, which measures the dock again.
+        await page.evaluate(`document.querySelector(".dock").scrollTop = 12`);
+        await page.evaluate(`(await import("/store.js")).store.set({})`);
+        assert.equal((await seen()).top, 12, "the reader's place in the dock holds");
+        // Unfolded from there, and folded again, with taps as a finger gives them (the test browser's own click scrolls
+        // its target into view first): the dock goes back to there.
+        await settled();
+        await page.evaluate(`document.querySelector(".agents-summary").click()`);
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".agent-row").length > 0)`,
+            "the rows",
+        );
+        const open = await seen();
+
+        assert.ok(open.list && open.top > 12, "the unfolded list is brought into sight");
+        await settled();
+        await page.evaluate(`document.querySelector(".agents-summary").click()`);
+        await see(
+            `return JSON.stringify(document.querySelector(".agents-list") === null)`,
+            "folded again",
+        );
+        const after = await seen();
+
+        assert.deepEqual(
+            { top: after.top, queue: after.queue },
+            { top: 12, queue: true },
+            "folded again, the dock is back where the reader had it",
         );
         await app.commands.abort(id, owner(app));
         await page.setViewport(VIEWPORTS.mobile);
