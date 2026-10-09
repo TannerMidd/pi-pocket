@@ -325,8 +325,13 @@ test("a schedule Pi sets up is the work of whom it worked for, and is cancelled 
     await say(id, "remind yourself", hal);
     await say(id, "remind yourself", ida);
     await say(id, "something else");
+    // In no order: the schedules are kept by their ids, which are random.
+    const whose = [hal.id, ida.id];
+
     assert.deepEqual(
-        (await items(id)).map((each) => [each.by, each.requestedBy]),
+        (await items(id))
+            .map((each) => [each.by, each.requestedBy])
+            .sort((a, b) => whose.indexOf(String(a[1])) - whose.indexOf(String(b[1]))),
         [
             [undefined, hal.id],
             [undefined, ida.id],
