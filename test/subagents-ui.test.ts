@@ -41,7 +41,7 @@ const route: FauxResponseStep = (request) => {
     const { role, text } = lastText(request as never);
     const subagent = /You are the subagent \\"([^\\]+)\\"/.exec(all)?.[1];
 
-    if (subagent === "slow" && role !== "toolResult") {
+    if (subagent?.startsWith("slow") && role !== "toolResult") {
         return fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 30" })], {
             stopReason: "toolUse",
         });
@@ -49,6 +49,19 @@ const route: FauxResponseStep = (request) => {
 
     if (subagent !== undefined) {
         return fauxAssistantMessage([fauxText(`${subagent}: all good`)]);
+    }
+
+    if (text === "many") {
+        return fauxAssistantMessage(
+            Array.from({ length: 15 }, (_, index) =>
+                fauxToolCall("subagent", {
+                    action: "spawn",
+                    name: `slow-${index + 1}`,
+                    message: `Check part ${index + 1} of the checkout branch and report what fails.`,
+                }),
+            ),
+            { stopReason: "toolUse" },
+        );
     }
 
     if (text === "one more") {
@@ -483,5 +496,193 @@ test(
             true,
             "folded in the other session",
         );
+    },
+);
+
+/** Heights at phone size: the screen, the conversation, what is above the message box, and the bottom row in view. */
+const heights = () =>
+    inPage<{ screen: number; conversation: number; dock: number; lastInView: boolean }>(`
+        const box = (selector) => document.querySelector(selector)?.getBoundingClientRect();
+        const scroller = box(".scroller");
+        const composer = box(".composer");
+        const rows = [...document.querySelectorAll(".transcript > *")].filter((row) => row.getBoundingClientRect().height > 0);
+        const last = rows.at(-1)?.getBoundingClientRect();
+
+        return JSON.stringify({
+            screen: innerHeight,
+            conversation: Math.round(scroller.height),
+            // From the conversation's foot to the message box, less the footer's own padding: the queue and the bars.
+            dock: Math.round(
+                composer.top -
+                    scroller.bottom -
+                    parseFloat(getComputedStyle(document.querySelector(".composer-wrap")).paddingTop),
+            ),
+            lastInView: last !== undefined && last.bottom <= scroller.bottom + 1 && last.bottom > scroller.top,
+        });
+    `);
+
+for (const [label, size] of [
+    ["a phone", VIEWPORTS.mobile],
+    ["a small phone", { width: 375, height: 667, scale: 2, mobile: true }],
+] as const) {
+    test(
+        `on ${label}, many subagents unfolded and a long queue leave the conversation most of the screen`,
+        real,
+        async () => {
+            parentSleep = 30;
+            const id = await newSession(app);
+
+            await page.setViewport(size);
+            await page.navigate(`${base}/s/${id}`);
+            await see(
+                `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+                "the session",
+            );
+            await app.commands.submit(id, owner(app), { text: "many", requestId: `many-${id}` });
+            await says(".agents-count", /^15 subagents working$/, 15_000);
+
+            for (let index = 0; index < 12; index++) {
+                await app.commands.submit(id, owner(app), {
+                    text: `Steer ${index + 1}: also look at the refunds path and the tax rounding.`,
+                    requestId: `crowd-${id}-${index}`,
+                    mode: "steer",
+                });
+            }
+
+            await see(
+                `return JSON.stringify(document.querySelectorAll(".queued").length === 12)`,
+                "the queue",
+            );
+            const folded = await heights();
+
+            await settled();
+            await page.click({ selector: ".agents-summary" });
+            await see(
+                `return JSON.stringify(document.querySelectorAll(".agent-row").length === 15)`,
+                "the rows",
+            );
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            const open = await heights();
+
+            for (const [state, measured] of [
+                ["folded", folded],
+                ["unfolded", open],
+            ] as const) {
+                assert.ok(
+                    measured.dock <= measured.screen * 0.4 + 2,
+                    `${state}: the queue and bars take ${measured.dock} of ${measured.screen}px`,
+                );
+                assert.ok(measured.lastInView, `${state}: the newest message stays in view`);
+            }
+
+            // Both still scroll to what they hold.
+            assert.equal(
+                await inPage<boolean>(`
+                    const list = document.querySelector(".agents-list");
+                    const queue = document.querySelector(".inbox");
+
+                    return JSON.stringify(list.scrollHeight > list.clientHeight && queue.scrollHeight > queue.clientHeight && list.clientHeight >= 80 && queue.clientHeight >= 60);
+                `),
+                true,
+                "the list and the queue each keep room, and scroll",
+            );
+            await app.commands.abort(id, owner(app));
+            await page.setViewport(VIEWPORTS.mobile);
+        },
+    );
+}
+
+test(
+    "on a short screen, the unfolded list takes the room, and the queue folds to how many wait",
+    real,
+    async () => {
+        parentSleep = 30;
+        const id = await newSession(app);
+
+        // A phone on its side.
+        await page.setViewport({ width: 844, height: 390, scale: 2, mobile: true });
+        await page.navigate(`${base}/s/${id}`);
+        await see(
+            `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+            "the session",
+        );
+        await app.commands.submit(id, owner(app), { text: "many", requestId: `short-${id}` });
+        await says(".agents-count", /^15 subagents working$/, 15_000);
+        await app.commands.submit(id, owner(app), {
+            text: "Only one message waiting.",
+            requestId: `short-one-${id}`,
+            mode: "steer",
+        });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".queued").length === 1)`,
+            "the queue",
+        );
+        const state = () =>
+            inPage<{ list: number; queue: boolean; count: string | null; whole: boolean }>(`
+            const shown = (selector) => {
+                const element = document.querySelector(selector);
+
+                return element !== null && element.getBoundingClientRect().height > 0;
+            };
+
+            return JSON.stringify({
+                list: Math.round(document.querySelector(".agents-list")?.getBoundingClientRect().height ?? 0),
+                queue: shown(".inbox"),
+                count: shown(".inbox-count") ? document.querySelector(".inbox-count").textContent.trim() : null,
+                // The bar as it shows holds its whole line: it is not cut short.
+                whole:
+                    document.querySelector(".agents-bar").getBoundingClientRect().height >=
+                    document.querySelector(".agents-top").getBoundingClientRect().height + 1,
+            });
+        `);
+
+        assert.deepEqual(
+            await state(),
+            { list: 0, queue: true, count: null, whole: true },
+            "folded",
+        );
+        await settled();
+        await page.click({ selector: ".agents-summary" });
+        await see(
+            `return JSON.stringify(document.querySelector(".agents-list") !== null)`,
+            "unfolded",
+        );
+        const open = await state();
+
+        assert.ok(open.list >= 80, `the list has room: ${open.list}px`);
+        assert.deepEqual(
+            { queue: open.queue, count: open.count, whole: open.whole },
+            { queue: false, count: "1 message waiting for Pi", whole: true },
+            "the queue folds to how many wait; the bar's line stays whole",
+        );
+        await settled();
+        await page.click({ selector: ".agents-summary" });
+        await see(
+            `return JSON.stringify(document.querySelector(".inbox") !== null && document.querySelector(".agents-list") === null)`,
+            "folded again",
+        );
+        assert.equal((await state()).queue, true, "the queue comes back");
+
+        // A long queue on the short screen: it gives up room, and the bar's line stays whole.
+        for (let index = 0; index < 11; index++) {
+            await app.commands.submit(id, owner(app), {
+                text: `More ${index + 1}: also look at the refunds path.`,
+                requestId: `short-more-${id}-${index}`,
+                mode: "steer",
+            });
+        }
+
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".queued").length === 12)`,
+            "the long queue",
+        );
+        const crowded = await state();
+
+        assert.deepEqual(
+            { count: crowded.count, whole: crowded.whole },
+            { count: "12 messages waiting for Pi", whole: true },
+        );
+        await app.commands.abort(id, owner(app));
+        await page.setViewport(VIEWPORTS.mobile);
     },
 );

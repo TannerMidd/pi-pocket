@@ -826,8 +826,10 @@ export function Composer() {
 
     if (collab() && !canSteer()) {
         return html`<footer class="composer-wrap">
-            <${TypingLine} where="pi" />
-            <${SubagentsBar} />
+            <div class="dock">
+                <${TypingLine} where="pi" />
+                <${SubagentsBar} />
+            </div>
             <div class="view-only">
                 <span>
                     <strong>View only.</strong> You can read along, react, and chat with the people here.
@@ -848,38 +850,47 @@ export function Composer() {
             : null;
 
     return html`<footer class="composer-wrap">
-        <${TypingLine} where="pi" />
-        ${
-            inbox.length > 0 &&
-            html`<div class="inbox">
-                ${inbox.map(
-                    (item) => html`<div class="queued">
-                        <span class="queued-mode">
-                            ${queuedMode(item)}
-                            <span class="muted">${queuedBy(item)}</span>
-                        </span>
-                        <span class="queued-text">${queuedText(item)}</span>
-                        ${
-                            canSteer() &&
-                            (!blocked || item.by === me?.id) &&
-                            html`<button
-                                class="icon-button small"
-                                aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
-                                title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
-                                onClick=${() => attempt(() => actions.withdraw(item.id))}
-                            >
-                                <${Icon} name="close" size=${14} />
-                            </button>`
-                        }
-                    </div>`,
-                )}
-            </div>`
-        }
-        ${collab() && html`<${DriverBar} />`}
-        <${PlanBar} blocked=${blocked} />
-        <${GoalBar} />
-        <${SubagentsBar} />
-        <${TrustBar} />
+        <div class=${`dock ${store.state.subagentsOpen === conversationId ? "agents-open" : ""}`}>
+            <${TypingLine} where="pi" />
+            ${
+                // How many wait: shown when the queue scrolls, and when it folds away for the subagents' list.
+                inbox.length > 0 &&
+                html`<div class=${`inbox-count ${inbox.length > 2 ? "" : "few"}`}>
+                    ${inbox.length} ${inbox.length === 1 ? "message" : "messages"} waiting for Pi
+                </div>`
+            }
+            ${
+                inbox.length > 0 &&
+                html`<div class="inbox">
+                    ${inbox.map(
+                        (item) => html`<div class="queued">
+                            <span class="queued-mode">
+                                ${queuedMode(item)}
+                                <span class="muted">${queuedBy(item)}</span>
+                            </span>
+                            <span class="queued-text">${queuedText(item)}</span>
+                            ${
+                                canSteer() &&
+                                (!blocked || item.by === me?.id) &&
+                                html`<button
+                                    class="icon-button small"
+                                    aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
+                                    title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
+                                    onClick=${() => attempt(() => actions.withdraw(item.id))}
+                                >
+                                    <${Icon} name="close" size=${14} />
+                                </button>`
+                            }
+                        </div>`,
+                    )}
+                </div>`
+            }
+            ${collab() && html`<${DriverBar} />`}
+            <${PlanBar} blocked=${blocked} />
+            <${GoalBar} />
+            <${SubagentsBar} />
+            <${TrustBar} />
+        </div>
         ${
             blocked
                 ? html`${
