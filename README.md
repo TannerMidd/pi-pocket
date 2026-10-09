@@ -48,6 +48,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Branches.** The git branch shows under the message box and follows any switch; tap it to switch to another branch, follow a remote one, or make a new one.
 - **A built-in browser.** Pi opens, reads, clicks through, and screenshots pages in a real Chromium on the server, and you watch and use the same page in the Browser panel, from a phone too: your dev server on `localhost` included.
 - **Artifacts and subagents.** Sandboxed HTML, Markdown, and SVG artifacts, and background subagents you can open and talk to.
+- **Virtual model routing.** Choose `router/auto` per conversation to classify new requests and select models by task phase. Explicit OpenAI quota exhaustion falls back to the matching HWW model; ordinary rate limits do not trigger provider switching. Routing affinity survives restarts.
 - **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
 - **Lancet Guard.** Off by default; turn it on in Menu → Extensions. With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
 - **Roles, invites, and limits.** Steer or view-only access, to every session or just one, through one-time links and QR codes, with spend limits per person and per session.

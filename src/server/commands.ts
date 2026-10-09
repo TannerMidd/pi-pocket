@@ -25,6 +25,7 @@ import type {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
+import { RouterDoc } from "./router.ts";
 import {
     AuthorsDoc,
     ChatDoc,
@@ -774,6 +775,12 @@ export class Commands {
         }
 
         await (await app.conversation(id)).reset(handoff, context);
+        await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(RouterDoc, id);
+
+            doc.epoch = (doc.epoch ?? 0) + 1;
+            doc.state = undefined;
+        }, context);
         await app.collab.activity(
             id,
             user,

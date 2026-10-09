@@ -24,6 +24,7 @@ import {
     Harness,
     type HarnessSettings,
     LiveDoc,
+    ProviderDoc,
     type LiveState,
     type Storage,
     UsageDoc,
@@ -60,6 +61,12 @@ import { type ApprovalRequest, Approvals, type PocketHost } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { modelList, resolveModel } from "./models.ts";
+import {
+    installRouterStream,
+    RouterDoc,
+    type RouterState,
+    createRouterExtension,
+} from "./router.ts";
 import { configureHttp } from "./net.ts";
 import { snippet } from "./projection.ts";
 import {
@@ -164,6 +171,7 @@ export class PocketApp {
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
+    readonly #routerSessions = new Map<string, ConversationId>();
     /** The clock durable work runs by. */
     readonly now: () => number;
 
@@ -246,11 +254,42 @@ export class PocketApp {
 
         this.models = await ModelRuntime.create();
         this.#configureModels?.(this.models);
+        const routerBridge = {
+            bind: (sessionId: string, conversationId: ConversationId) => {
+                this.#routerSessions.set(sessionId, conversationId);
+            },
+            prepare: async (conversationId: ConversationId) =>
+                this.harness.commit(
+                    async (tx) => (await tx.doc(ProviderDoc, conversationId)).sessionId,
+                    context,
+                ),
+            conversationFor: (sessionId: string) => this.#routerSessions.get(sessionId),
+            read: async (conversationId: ConversationId) => {
+                const doc = await this.harness.snapshot(RouterDoc, conversationId, context);
+
+                return { state: doc?.state, epoch: doc?.epoch ?? 0 };
+            },
+            write: (conversationId: ConversationId, state: RouterState, epoch: number) =>
+                this.harness.commit(async (tx) => {
+                    const doc = await tx.doc(RouterDoc, conversationId);
+
+                    if ((doc.epoch ?? 0) !== epoch) {
+                        return false;
+                    }
+
+                    doc.state = state;
+
+                    return true;
+                }, context),
+        };
+
+        installRouterStream(this.models, routerBridge);
         await this.models.getAvailable().catch(() => []);
 
         const registry = createRegistry();
 
         registry.install(CodingTools);
+        registry.install(createRouterExtension(routerBridge));
         // Durable work of the app itself, whatever extension modules are on.
         registry.install(
             defineExtension({ name: "pocket-core", tasks: [ResendTask, this.shell.task] }),
