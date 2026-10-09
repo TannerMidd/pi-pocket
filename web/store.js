@@ -79,6 +79,8 @@ export const store = {
         composerInsert: null,
         /** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
         templates: null,
+        /** Whether Pi trusts a conversation's project, for its own skills (`trust.js`): `{ conversationId, cwd, info }`. */
+        trust: null,
         /** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
         filesLoaded: 0,
         /** `!` commands this tab started that have no entry yet: `{ taskId, command, conversationId, at }`. */
@@ -807,6 +809,9 @@ export const actions = {
     setPlan: (on) => api(`c/${current()}/plan`, { on }),
     approvePlan: () => api(`c/${current()}/plan`, { approve: true }),
     prompts: () => api(`c/${current()}/prompts`),
+    trust: () => api(`c/${current()}/trust`),
+    /** `trust`, `trust-parent`, or `distrust`, as Pi's `/trust` offers them. */
+    setTrust: (choice) => api(`c/${current()}/trust`, { choice }),
     /** `when` says when, then what Pi gets: `in 2h check the deploy`. Clock times are this device's. */
     schedule: (when) =>
         api(`c/${current()}/schedules`, {

@@ -10,7 +10,12 @@ import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+    getAgentDir,
+    ModelRuntime,
+    SettingsManager,
+    type Skill,
+} from "@earendil-works/pi-coding-agent";
 import {
     AgentDoc,
     type AgentState,
@@ -62,12 +67,7 @@ import { takeLock } from "./lock.ts";
 import { modelList, resolveModel } from "./models.ts";
 import { configureHttp } from "./net.ts";
 import { snippet } from "./projection.ts";
-import {
-    loadPromptTemplates,
-    loadSkillCommands,
-    type PromptTemplate,
-    type SkillCommand,
-} from "./prompts.ts";
+import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, prepareDropInFolder } from "./reload.ts";
@@ -75,6 +75,14 @@ import { ResendTask } from "./resend.ts";
 import { type Client, Room, ROOM_DOCS } from "./room.ts";
 import { Schedules } from "./schedules.ts";
 import { Shell } from "./shell.ts";
+import {
+    loadSessionSkills,
+    type ProjectTrust,
+    readProjectTrust,
+    saveProjectTrust,
+    type SkillSources,
+    type TrustChoice,
+} from "./skills.ts";
 import { Spend } from "./spend.ts";
 import { Transcripts } from "./transcripts.ts";
 import { Workspace } from "./workspace.ts";
@@ -109,6 +117,8 @@ export interface OpenOptions {
     now?: () => number;
     /** The browser to run for the Browser panel and tool; null for none. Undefined finds one on this machine. */
     browser?: string | null;
+    /** The home folder, whose `.agents/skills/` every session has. Undefined is Pi's: `$HOME`. Tests use their own. */
+    home?: string;
 }
 
 export class PocketApp {
@@ -164,11 +174,13 @@ export class PocketApp {
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
+    readonly #home: string;
     /** The clock durable work runs by. */
     readonly now: () => number;
 
     private constructor(options: OpenOptions) {
         this.#configureModels = options.configureModels;
+        this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
         this.defaultCwd = options.defaultCwd;
@@ -267,6 +279,7 @@ export class PocketApp {
                     return [];
                 }
             },
+            skills: (cwd) => this.skills(cwd),
             resolveModel: (spec) => resolveModel(this.models, spec),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             notice: (level, message) => this.notice(level, message),
@@ -1496,17 +1509,64 @@ export class PocketApp {
         return this.#agents.get(id)?.cwd ?? this.#sessions[String(id)]?.cwd ?? this.defaultCwd;
     }
 
-    /** Pi's skills in a conversation's folder, to run as `/skill:name`. */
-    skillCommands(id: ConversationId): SkillCommand[] {
-        let paths: string[] = [];
+    /** What says where Pi's skills are, besides a session's folder: Pi's folder and settings, and the home folder. */
+    #skillSources(): SkillSources {
+        let settingsPaths: string[] = [];
+        let defaultProjectTrust: SkillSources["defaultProjectTrust"] = "ask";
 
         try {
-            paths = this.settings.getSkillPaths();
+            settingsPaths = this.settings.getSkillPaths();
+            defaultProjectTrust = this.settings.getDefaultProjectTrust();
         } catch {
-            // Unreadable settings: the default folders still count.
+            // Unreadable settings: the default folders still count, and no project is trusted unasked.
         }
 
-        return loadSkillCommands(this.cwdOf(id), getAgentDir(), paths);
+        return { agentDir: getAgentDir(), home: this.#home, settingsPaths, defaultProjectTrust };
+    }
+
+    /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
+    skills(cwd: string): Skill[] {
+        return loadSessionSkills(cwd, this.#skillSources());
+    }
+
+    /**
+     * Whether Pi trusts the project a conversation works in, and the project skills that wait for it. The owner's: the
+     * skills may be in folders above the session's, which someone invited to it cannot see.
+     */
+    projectTrust(id: ConversationId, user: User): ProjectTrust {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner decides which projects Pi trusts.");
+        }
+
+        return readProjectTrust(this.cwdOf(id), this.#skillSources());
+    }
+
+    /** The owner's answer to "trust this project?", saved where Pi's CLI keeps its own, as its `/trust` does. */
+    setProjectTrust(id: ConversationId, user: User, choice: TrustChoice): ProjectTrust {
+        // Before anything is saved: only the owner may read it, or answer.
+        const now = this.projectTrust(id, user);
+
+        if (choice === "trust-parent" && now.parent === undefined) {
+            throw new HttpError(400, "This folder has no folder above it.");
+        }
+
+        saveProjectTrust(this.cwdOf(id), getAgentDir(), choice);
+
+        return this.projectTrust(id, user);
+    }
+
+    /** Pi's skills in a conversation's folder, to run as `/skill:name`. */
+    skillCommands(id: ConversationId): SkillCommand[] {
+        try {
+            return this.skills(this.cwdOf(id)).map((skill) => ({
+                name: skill.name,
+                description: skill.description,
+                path: skill.filePath,
+                baseDir: skill.baseDir,
+            }));
+        } catch {
+            return [];
+        }
     }
 
     /** Pi's prompt templates, as a conversation in its folder offers them. */

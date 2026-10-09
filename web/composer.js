@@ -25,6 +25,7 @@ import {
     uid,
 } from "./store.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
+import { TrustBar } from "./trust.js";
 import { formatBytes, formatTokens, html, Icon, Marked, modelLabel, Spinner } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
@@ -835,6 +836,7 @@ export function Composer() {
         ${collab() && html`<${DriverBar} />`}
         <${PlanBar} blocked=${blocked} />
         <${GoalBar} />
+        <${TrustBar} />
         ${
             blocked
                 ? html`${

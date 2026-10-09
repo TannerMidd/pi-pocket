@@ -23,7 +23,9 @@ Keep them short and true: they go with every request, and a rule Pi cannot follo
 
 A skill is a folder with a `SKILL.md`: a name and a description at the top, the steps below. Its name and description go into the system prompt; Pi reads the rest when a task matches it, or when someone sends `/skill:name what to do`.
 
-Put one in `~/.pi/agent/skills/<name>/` (for every session), or in `.pi/skills/` or `.agents/skills/` in a project (for sessions in it). Pi's settings can add more folders. See Pi's `skills.md`. Like `AGENTS.md`, skills are read again within 30 seconds.
+Put one in `~/.pi/agent/skills/<name>/` or `~/.agents/skills/<name>/` (for every session), or in a project's `.pi/skills/` or `.agents/skills/` (for sessions in it). A project's `.agents/skills/` counts in the session's folder and each folder above it, up to the repository's root. Pi's settings can add more folders. Where two skills share a name, the project's wins. See Pi's `skills.md`. Like `AGENTS.md`, skills are read again within 30 seconds.
+
+A project's `.agents/skills/` load only in a project Pi trusts. When a session's project has some and nobody has decided, Pi Pocket asks its owner above the message box; `/trust` (or Menu → **Project trust**) shows the answer and changes it. The answer goes where Pi's CLI keeps its own (`~/.pi/agent/trust.json`), so each goes by what was decided in the other; in the CLI, trust also loads the project's `.pi` settings, extensions, and packages. `"defaultProjectTrust": "always"` (or `"never"`) in `~/.pi/agent/settings.json` answers for every project nobody decided about. (The CLI asks before a project's `.pi/skills/` too; Pi Pocket loads those either way.)
 
 ## Prompt templates: saved messages with blanks
 

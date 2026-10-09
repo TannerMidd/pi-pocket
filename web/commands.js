@@ -5,6 +5,7 @@ import { branchAvailable } from "./sheets/branch.js";
 import { togglePeeks } from "./peeks.js";
 import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import { chooseTheme, THEMES } from "./theme.js";
+import { trustAvailable } from "./trust.js";
 import { copyText, formatTokens, formatWhen, modelLabel, replyText, shortPath } from "./ui.js";
 
 const agent = () => store.state.view.agent;
@@ -360,6 +361,12 @@ const COMMANDS = [
         run: () => openSheet({ type: "providers" }),
     },
     { name: "settings", description: "Open the menu", run: () => openSheet({ type: "menu" }) },
+    {
+        name: "trust",
+        description: "Whether Pi trusts this project, for its own skills",
+        available: trustAvailable,
+        run: () => openSheet({ type: "trust" }),
+    },
     {
         name: "theme",
         args: "[name]",

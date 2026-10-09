@@ -1,5 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
+import type { Skill } from "@earendil-works/pi-coding-agent";
 import type { ConversationId, Extension, ModelRef, TaskId } from "@earendil-works/pi-durable";
 import type { Browsers } from "./browser.ts";
 import type { Goals } from "./goals.ts";
@@ -111,6 +112,8 @@ export interface PocketHost {
     readonly dataDir: string;
     /** Pi's configured extra skill paths, from its settings. */
     skillPaths(): string[];
+    /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
+    skills(cwd: string): Skill[];
     /** `provider/modelId` (or a bare model id) to an available model, or an error naming the choices. */
     resolveModel(spec: string): ModelRef;
     /** Who Pi works for in a conversation now: whose message led to its current work. */

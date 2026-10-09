@@ -4367,10 +4367,11 @@ textarea.notes {
     color: var(--err);
 }
 
-/* Bars above the message box: who drives (take turns), plan mode, and a goal. The left edge says which. */
+/* Bars above the message box: who drives (take turns), plan mode, a goal, and project trust. The left edge says which. */
 .driver-bar,
 .plan-bar,
-.goal-bar {
+.goal-bar,
+.trust-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;

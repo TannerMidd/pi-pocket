@@ -114,6 +114,7 @@ What the default export receives. Extensions reach the app only through it; it s
 | `resolveModel(spec)`             | `provider/modelId` (or a bare id) to an available model, or an error naming the choices |
 | `requesterOf(conversationId)`    | The id of the person Pi works for in a session now                                      |
 | `skillPaths()`                   | The extra skill folders in Pi's settings                                                |
+| `skills(cwd)`                    | Pi's skills for a session working in `cwd`, from every place Pi looks                   |
 | `approvals`, `guard`             | Calls waiting for a person to allow them; Lancet Guard                                  |
 | `schedules`, `goals`, `browsers` | Scheduled messages, Done when, and the built-in browser, as their extensions use them   |
 

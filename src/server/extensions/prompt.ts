@@ -5,12 +5,12 @@
  *
  * Edit freely: saving this file reloads it into the running server.
  */
+import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
     formatSkillsForPrompt,
     getDocsPath,
     loadProjectContextFiles,
-    loadSkills,
 } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
@@ -45,16 +45,31 @@ function docs(dataDir: string): string {
 
 const STALE_MS = 30_000;
 
-type Resources = { at: number; context: string | undefined; skills: string | undefined };
+type Resources = {
+    at: number;
+    trust: number;
+    context: string | undefined;
+    skills: string | undefined;
+};
 
 export default function createPrompt(host: PocketHost) {
-    // Context files and skills load once per directory, and again when the copy is older than STALE_MS.
+    // Context files and skills load once per directory, and again when the copy is older than STALE_MS, or Pi's trust
+    // store changed since: a project trusted now has skills it did not have, from the next request on.
     const resources = new Map<string, Resources>();
+
+    const trustChanged = () => {
+        try {
+            return statSync(join(host.agentDir, "trust.json")).mtimeMs;
+        } catch {
+            return 0;
+        }
+    };
 
     const load = (cwd: string): Resources => {
         const cached = resources.get(cwd);
+        const trust = trustChanged();
 
-        if (cached !== undefined && Date.now() - cached.at < STALE_MS) {
+        if (cached !== undefined && Date.now() - cached.at < STALE_MS && cached.trust === trust) {
             return cached;
         }
 
@@ -74,20 +89,14 @@ export default function createPrompt(host: PocketHost) {
         }
 
         try {
-            const loaded = loadSkills({
-                cwd,
-                agentDir: host.agentDir,
-                skillPaths: host.skillPaths(),
-                includeDefaults: true,
-            });
-            const text = formatSkillsForPrompt(loaded.skills, "read").trim();
+            const text = formatSkillsForPrompt(host.skills(cwd), "read").trim();
 
             skills = text === "" ? undefined : text;
         } catch (error) {
             host.notice("warning", `Could not load skills for ${cwd}: ${String(error)}`);
         }
 
-        const fresh = { at: Date.now(), context, skills };
+        const fresh = { at: Date.now(), trust, context, skills };
 
         resources.set(cwd, fresh);
 

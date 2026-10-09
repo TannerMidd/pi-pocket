@@ -19,6 +19,7 @@ import {
     store,
 } from "../store.js";
 import { isPinned, paletteOf, togglePin } from "../theme.js";
+import { currentTrust, trustAvailable } from "../trust.js";
 import { branchAvailable } from "./branch.js";
 import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
 
@@ -130,6 +131,26 @@ export function PlacesSheet() {
     <//>`;
 }
 
+/** The project's trust in a word, once the server said. */
+function trustHint() {
+    const info = currentTrust();
+
+    if (!info) {
+        return "";
+    }
+
+    if (info.ask) {
+        return "not decided";
+    }
+
+    // No decision, and nothing waiting for one: there is nothing to say.
+    if (info.saved === null && info.defaultProjectTrust === "ask") {
+        return "";
+    }
+
+    return info.trusted ? "trusted" : "not trusted";
+}
+
 export function MenuSheet() {
     const { view, me, server } = store.state;
     const conversation = view.conversation;
@@ -205,6 +226,7 @@ export function MenuSheet() {
                 store.state.browser?.open && displayUrl(store.state.browser.url),
             )
         }
+        ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
         ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
         ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
         ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
