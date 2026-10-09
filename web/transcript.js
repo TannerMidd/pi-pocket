@@ -1135,6 +1135,26 @@ export function Transcript() {
         return () => clearTimeout(timer);
     }, [conversationId, hasRows]);
 
+    // The conversation gets shorter or taller as what is above the message box changes (the queue, the subagents' list,
+    // a message box that grows): stay at the bottom if we were there, before the change shows.
+    useEffect(() => {
+        const element = scroller.current;
+
+        if (!element) {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            if (stick.current) {
+                element.scrollTop = element.scrollHeight;
+            }
+        });
+
+        observer.observe(element);
+
+        return () => observer.disconnect();
+    }, [view.conversation?.id]);
+
     // Images finish loading after the transcript renders and make it taller: stay at the bottom if we were there.
     useEffect(() => {
         const element = scroller.current;

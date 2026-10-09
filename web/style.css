@@ -1577,76 +1577,54 @@ pre.diff .del {
 }
 
 /*
- * What is above the message box: who is typing, the queue, and the bars. Together at most 40% of the screen, so the
- * conversation keeps the rest. The one-line bars keep their room; the queue and the subagents' list give up what is
- * needed, and scroll. Unfolded, the list takes the room: the queue shows fewer rows. Only a stack of bars taller than
- * that scrolls as a whole.
+ * What is above the message box: who is typing, the queue, and the bars. `dock.js` shares its room: the bars show
+ * whole, and the queue and the subagents' list take what is left of its share, and scroll.
  */
-.dock {
-    display: flex;
-    flex-direction: column;
-    /* Less on a short screen, such as a phone's with its keyboard up, where the conversation needs it most. */
-    max-height: min(40dvh, calc(100dvh - 20rem));
+.inbox-count {
+    display: none;
+    height: 1.25rem;
+    line-height: 1.25rem;
+    margin: 0 0 0.25rem 0.1rem;
+    color: var(--muted);
+    font-size: 0.74rem;
+}
+
+/* How many wait, when the queue does not show them all. */
+.dock[data-count="on"] > .inbox-count {
+    display: block;
+}
+
+/* Folded for the subagents' list: out of sight, its rows still laid out for `dock.js` to measure. */
+.dock[data-queue="folded"] > .inbox {
+    visibility: hidden;
+}
+
+/* Too little room even so (a phone on its side with every bar up): the dock stops, and scrolls. */
+.dock[data-capped] {
     overflow-y: auto;
     overscroll-behavior: contain;
 }
 
-.dock > * {
+/* Little room for the conversation: each bar keeps one line, its words cut short, its buttons whole. */
+.dock[data-compact] > :is(.plan-bar, .goal-bar, .trust-bar) {
+    flex-wrap: nowrap;
+}
+
+.dock[data-compact] > :is(.plan-bar, .goal-bar, .trust-bar) > .grow {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dock[data-compact] > :is(.plan-bar, .goal-bar, .trust-bar) > :not(.grow) {
     flex: none;
+    white-space: nowrap;
 }
 
-/* Each gives up room down to what it cannot do without: the queue one row, the bar its line. */
-.dock > .inbox {
-    flex: 0 1 auto;
-    min-height: 2.5rem;
-}
-
-.dock > .agents-bar {
-    flex: 0 1 auto;
-    min-height: calc(2.4rem + 2px);
-    display: flex;
-    flex-direction: column;
-}
-
-.dock > .agents-bar > .agents-top {
-    flex: none;
-}
-
-.dock > .agents-bar > .agents-list {
-    flex: 0 1 auto;
-    min-height: 0;
-}
-
-.dock.agents-open > .inbox {
-    max-height: min(14vh, 6rem);
-}
-
-.inbox-count.few {
-    display: none;
-}
-
-/*
- * A short screen (a phone on its side, or with its keyboard up) has no room for both. Unfolded, the list gets it: the
- * queue folds to how many wait, and comes back with the list folded.
- */
-@media (max-height: 560px) {
-    .dock.agents-open {
-        max-height: 40dvh;
-    }
-
-    .dock.agents-open > .inbox {
-        display: none;
-    }
-
-    .dock.agents-open > .inbox-count.few {
-        display: block;
-    }
-}
-
-.inbox-count {
-    margin: 0 0 0.25rem 0.1rem;
-    color: var(--muted);
-    font-size: 0.74rem;
+.dock[data-compact] .trust-actions {
+    gap: 0.5rem;
 }
 
 /* Messages waiting for Pi: a few rows' height at most, so the conversation stays in view; more scroll inside. */

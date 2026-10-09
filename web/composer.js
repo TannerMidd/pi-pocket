@@ -25,6 +25,7 @@ import {
     uid,
 } from "./store.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
+import { useDock } from "./dock.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { formatBytes, formatTokens, html, Icon, Marked, modelLabel, Spinner } from "./ui.js";
@@ -262,6 +263,8 @@ export function Composer() {
     const [searching, setSearching] = useState(false);
     const [inlineFiles, setInlineFiles] = useState(() => localStorage.getItem(INLINE_KEY) === "1");
     const box = useRef(null);
+    // What is above the message box, and how it shares the room with the conversation (`dock.js`).
+    const dock = useRef(null);
     const picker = useRef(null);
     const list = useRef(null);
     // One per `!` command: sending it again after a lost reply runs it once.
@@ -824,9 +827,11 @@ export function Composer() {
               ? " · you"
               : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`;
 
+    useDock(dock);
+
     if (collab() && !canSteer()) {
         return html`<footer class="composer-wrap">
-            <div class="dock">
+            <div class="dock" ref=${dock}>
                 <${TypingLine} where="pi" />
                 <${SubagentsBar} />
             </div>
@@ -850,12 +855,12 @@ export function Composer() {
             : null;
 
     return html`<footer class="composer-wrap">
-        <div class=${`dock ${store.state.subagentsOpen === conversationId ? "agents-open" : ""}`}>
+        <div class="dock" ref=${dock}>
             <${TypingLine} where="pi" />
             ${
-                // How many wait: shown when the queue scrolls, and when it folds away for the subagents' list.
+                // How many wait: shown when the queue does not show them all (`dock.js`).
                 inbox.length > 0 &&
-                html`<div class=${`inbox-count ${inbox.length > 2 ? "" : "few"}`}>
+                html`<div class="inbox-count">
                     ${inbox.length} ${inbox.length === 1 ? "message" : "messages"} waiting for Pi
                 </div>`
             }

@@ -257,19 +257,22 @@ type CourierState =
 /** How long a courier waits, for a parent that is idle, for more reports to go with the first. */
 const GATHER_MS = 2_000;
 
-/** Wait `ms`, or until `signal` ends the wait. */
+/** Wait `ms`, or until `signal` ends the wait, as Pi Durable's own waits do. */
 function pause(ms: number, signal: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, ms);
+    signal.throwIfAborted();
 
-        signal.addEventListener(
-            "abort",
-            () => {
-                clearTimeout(timer);
-                reject(signal.reason);
-            },
-            { once: true },
-        );
+    return new Promise((resolve, reject) => {
+        const stop = () => {
+            clearTimeout(timer);
+            reject(signal.reason);
+        };
+
+        const timer = setTimeout(() => {
+            signal.removeEventListener("abort", stop);
+            resolve();
+        }, ms);
+
+        signal.addEventListener("abort", stop, { once: true });
     });
 }
 

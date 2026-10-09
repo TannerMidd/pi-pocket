@@ -14,13 +14,13 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
@@ -395,6 +395,13 @@ test("a viewer sees the bar, without Stop", real, async () => {
             true,
             "no Stop for a viewer",
         );
+        // The viewer's dock shares its room as everyone's does: the unfolded list shows a whole row.
+        const measured = await dock(viewer);
+
+        assert.ok(
+            measured.list >= measured.agentRow && measured.whole,
+            `the viewer's list: ${measured.list}px`,
+        );
     } finally {
         await browsers.close(2);
         app.config.removeUser(user.id);
@@ -499,93 +506,172 @@ test(
     },
 );
 
-/** Heights at phone size: the screen, the conversation, what is above the message box, and the bottom row in view. */
-const heights = () =>
-    inPage<{ screen: number; conversation: number; dock: number; lastInView: boolean }>(`
-        const box = (selector) => document.querySelector(selector)?.getBoundingClientRect();
-        const scroller = box(".scroller");
-        const composer = box(".composer");
-        const rows = [...document.querySelectorAll(".transcript > *")].filter((row) => row.getBoundingClientRect().height > 0);
-        const last = rows.at(-1)?.getBoundingClientRect();
+/** Wait for the layout to settle: a fitted dock is set after a render, and after a size change, a frame later. */
+const frames = () =>
+    page.evaluate(
+        `await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+    );
 
-        return JSON.stringify({
-            screen: innerHeight,
-            conversation: Math.round(scroller.height),
-            // From the conversation's foot to the message box, less the footer's own padding: the queue and the bars.
-            dock: Math.round(
-                composer.top -
-                    scroller.bottom -
-                    parseFloat(getComputedStyle(document.querySelector(".composer-wrap")).paddingTop),
+type Dock = {
+    /** The dock's share of the room it and the conversation have together. */
+    share: number;
+    capped: boolean;
+    floor: number;
+    conversation: number;
+    /** Nothing in the dock reaches under the message box, and the dock does not scroll: no bar is cut. */
+    whole: boolean;
+    list: number;
+    agentRow: number;
+    queue: number;
+    queueRow: number;
+    queueScrolls: boolean;
+    listScrolls: boolean;
+    queueShown: boolean;
+    count: string | null;
+    lastInView: boolean;
+};
+
+/** The dock and the conversation as they show. */
+const dock = async (on = page) => {
+    await frames();
+
+    return JSON.parse(
+        await on.evaluate(`
+            const rect = (element) => element?.getBoundingClientRect();
+            const dock = document.querySelector(".dock");
+            const scroller = document.querySelector(".scroller");
+            const composer = rect(document.querySelector(".composer, .view-only"));
+            const list = document.querySelector(".agents-list");
+            const queue = document.querySelector(".inbox");
+            const count = document.querySelector(".inbox-count");
+            const rows = [...document.querySelectorAll(".transcript > *")].filter((row) => rect(row).height > 0);
+            const last = rect(rows.at(-1));
+            const shown = (element) => element !== null && getComputedStyle(element).visibility !== "hidden" && rect(element).height > 0;
+
+            return JSON.stringify({
+                share: rect(dock).height / (rect(dock).height + rect(scroller).height),
+                capped: dock.dataset.capped === "on",
+                // What the conversation always keeps: a quarter of the room it shares with the dock, up to 5rem.
+                floor: Math.min(
+                    0.25 * (rect(dock).height + rect(scroller).height),
+                    5 * parseFloat(getComputedStyle(document.documentElement).fontSize),
+                ),
+                conversation: Math.round(rect(scroller).height),
+                whole:
+                    dock.scrollHeight <= dock.clientHeight + 1 &&
+                    [...dock.children].every((child) => rect(child).bottom <= composer.top + 1),
+                list: Math.round(rect(list)?.height ?? 0),
+                agentRow: Math.round(rect(list?.querySelector(".agent-row"))?.height ?? 0),
+                queue: Math.round(shown(queue) ? rect(queue).height : 0),
+                queueRow: Math.round(rect(queue?.querySelector(".queued"))?.height ?? 0),
+                queueScrolls:
+                    queue !== null &&
+                    getComputedStyle(queue).overflowY !== "visible" &&
+                    queue.scrollHeight > queue.clientHeight + 1,
+                listScrolls: list !== null && list.scrollHeight > list.clientHeight + 1,
+                queueShown: shown(queue),
+                count: shown(count) ? count.textContent.trim() : null,
+                lastInView: last !== undefined && last.bottom <= rect(scroller).bottom + 1 && last.bottom > rect(scroller).top,
+            });
+        `),
+    ) as Dock;
+};
+
+/** A session at `size`, with 15 slow subagents at work and `queued` steers waiting; `before` sets up more. */
+async function crowded(
+    size: { width: number; height: number; scale: number; mobile: boolean },
+    queued: number,
+    folder?: string,
+    before?: (id: ConversationId) => Promise<void>,
+): Promise<ConversationId> {
+    parentSleep = 30;
+    const id = await newSession(app, folder);
+
+    await page.setViewport(size);
+    await page.navigate(`${base}/s/${id}`);
+    await see(
+        `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+        "the session",
+    );
+    await app.commands.submit(id, owner(app), { text: "many", requestId: `many-${id}` });
+    await says(".agents-count", /^15 subagents working$/, 15_000);
+    // The parent at its long sleep, so what is sent now waits in its queue, whatever `before` turns on (plan mode would
+    // block a sleep that had not started yet).
+    await until(
+        async () =>
+            ((await app.harness.snapshot(LiveDoc, id, context))?.tools ?? []).some(
+                (tool) => tool.name === "bash" && tool.status === "running",
             ),
-            lastInView: last !== undefined && last.bottom <= scroller.bottom + 1 && last.bottom > scroller.top,
+        "the parent at work",
+    );
+    await before?.(id);
+
+    for (let index = 0; index < queued; index++) {
+        await app.commands.submit(id, owner(app), {
+            text: `Steer ${index + 1}: also look at the refunds path and the tax rounding.`,
+            requestId: `crowd-${id}-${index}`,
+            mode: "steer",
         });
-    `);
+    }
+
+    await see(
+        `return JSON.stringify(document.querySelectorAll(".queued").length === ${queued})`,
+        "the queue",
+    );
+
+    return id;
+}
+
+/** Unfold the subagents bar, and wait for its rows. */
+async function unfold(): Promise<void> {
+    await settled();
+    await page.click({ selector: ".agents-summary" });
+    await see(
+        `return JSON.stringify(document.querySelectorAll(".agent-row").length > 0)`,
+        "the rows",
+    );
+}
+
+const SMALL_PHONE = { width: 375, height: 667, scale: 2, mobile: true };
+const SIDEWAYS = { width: 844, height: 390, scale: 2, mobile: true };
 
 for (const [label, size] of [
     ["a phone", VIEWPORTS.mobile],
-    ["a small phone", { width: 375, height: 667, scale: 2, mobile: true }],
+    ["a small phone", SMALL_PHONE],
 ] as const) {
     test(
-        `on ${label}, many subagents unfolded and a long queue leave the conversation most of the screen`,
+        `on ${label}, many subagents and a long queue leave the conversation most of the room, folded or not`,
         real,
         async () => {
-            parentSleep = 30;
-            const id = await newSession(app);
+            const id = await crowded(size, 12);
+            const folded = await dock();
 
-            await page.setViewport(size);
-            await page.navigate(`${base}/s/${id}`);
-            await see(
-                `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
-                "the session",
-            );
-            await app.commands.submit(id, owner(app), { text: "many", requestId: `many-${id}` });
-            await says(".agents-count", /^15 subagents working$/, 15_000);
-
-            for (let index = 0; index < 12; index++) {
-                await app.commands.submit(id, owner(app), {
-                    text: `Steer ${index + 1}: also look at the refunds path and the tax rounding.`,
-                    requestId: `crowd-${id}-${index}`,
-                    mode: "steer",
-                });
-            }
-
-            await see(
-                `return JSON.stringify(document.querySelectorAll(".queued").length === 12)`,
-                "the queue",
-            );
-            const folded = await heights();
-
-            await settled();
-            await page.click({ selector: ".agents-summary" });
-            await see(
-                `return JSON.stringify(document.querySelectorAll(".agent-row").length === 15)`,
-                "the rows",
-            );
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            const open = await heights();
+            await unfold();
+            const open = await dock();
 
             for (const [state, measured] of [
                 ["folded", folded],
                 ["unfolded", open],
             ] as const) {
-                assert.ok(
-                    measured.dock <= measured.screen * 0.4 + 2,
-                    `${state}: the queue and bars take ${measured.dock} of ${measured.screen}px`,
-                );
+                assert.ok(measured.share <= 0.46, `${state}: the dock takes ${measured.share}`);
+                assert.ok(measured.whole, `${state}: nothing is cut`);
                 assert.ok(measured.lastInView, `${state}: the newest message stays in view`);
+                assert.ok(
+                    measured.queueShown && measured.queueScrolls,
+                    `${state}: the queue shows, and scrolls`,
+                );
+                assert.equal(
+                    measured.count,
+                    "12 messages waiting for Pi",
+                    `${state}: how many wait`,
+                );
             }
 
-            // Both still scroll to what they hold.
-            assert.equal(
-                await inPage<boolean>(`
-                    const list = document.querySelector(".agents-list");
-                    const queue = document.querySelector(".inbox");
-
-                    return JSON.stringify(list.scrollHeight > list.clientHeight && queue.scrollHeight > queue.clientHeight && list.clientHeight >= 80 && queue.clientHeight >= 60);
-                `),
-                true,
-                "the list and the queue each keep room, and scroll",
+            assert.ok(
+                open.list >= open.agentRow && open.listScrolls,
+                "unfolded, the list shows a row and scrolls",
             );
+            assert.ok(open.queue >= open.queueRow, "the queue keeps a row");
             await app.commands.abort(id, owner(app));
             await page.setViewport(VIEWPORTS.mobile);
         },
@@ -593,94 +679,113 @@ for (const [label, size] of [
 }
 
 test(
-    "on a short screen, the unfolded list takes the room, and the queue folds to how many wait",
+    "with every bar there too, the bars show whole and the unfolded list still shows a row",
     real,
     async () => {
-        parentSleep = 30;
-        const id = await newSession(app);
+        for (const size of [
+            VIEWPORTS.mobile,
+            { width: 390, height: 560, scale: 2, mobile: true },
+            SIDEWAYS,
+        ]) {
+            // A project with skills of its own, undecided: the trust bar asks.
+            const project = realpathSync(mkdtempSync(join(root, "dock-bars-")));
 
-        // A phone on its side.
-        await page.setViewport({ width: 844, height: 390, scale: 2, mobile: true });
-        await page.navigate(`${base}/s/${id}`);
-        await see(
-            `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
-            "the session",
-        );
-        await app.commands.submit(id, owner(app), { text: "many", requestId: `short-${id}` });
-        await says(".agents-count", /^15 subagents working$/, 15_000);
-        await app.commands.submit(id, owner(app), {
-            text: "Only one message waiting.",
-            requestId: `short-one-${id}`,
-            mode: "steer",
-        });
-        await see(
-            `return JSON.stringify(document.querySelectorAll(".queued").length === 1)`,
-            "the queue",
-        );
-        const state = () =>
-            inPage<{ list: number; queue: boolean; count: string | null; whole: boolean }>(`
-            const shown = (selector) => {
-                const element = document.querySelector(selector);
-
-                return element !== null && element.getBoundingClientRect().height > 0;
-            };
-
-            return JSON.stringify({
-                list: Math.round(document.querySelector(".agents-list")?.getBoundingClientRect().height ?? 0),
-                queue: shown(".inbox"),
-                count: shown(".inbox-count") ? document.querySelector(".inbox-count").textContent.trim() : null,
-                // The bar as it shows holds its whole line: it is not cut short.
-                whole:
-                    document.querySelector(".agents-bar").getBoundingClientRect().height >=
-                    document.querySelector(".agents-top").getBoundingClientRect().height + 1,
+            mkdirSync(join(project, ".git"));
+            mkdirSync(join(project, ".agents", "skills", "deploy"), { recursive: true });
+            writeFileSync(
+                join(project, ".agents", "skills", "deploy", "SKILL.md"),
+                "---\nname: deploy\ndescription: Deploy.\n---\nSteps.\n",
+            );
+            const id = await crowded(size, 5, project, async (session) => {
+                await app.commands.setPlan(session, owner(app), true);
+                await app.commands.setGoal(session, owner(app), "false");
             });
-        `);
 
-        assert.deepEqual(
-            await state(),
-            { list: 0, queue: true, count: null, whole: true },
-            "folded",
-        );
-        await settled();
-        await page.click({ selector: ".agents-summary" });
-        await see(
-            `return JSON.stringify(document.querySelector(".agents-list") !== null)`,
-            "unfolded",
-        );
-        const open = await state();
+            await see(
+                `return JSON.stringify(["plan-bar", "goal-bar", "agents-bar", "trust-bar"].every((name) => document.querySelector("." + name) !== null))`,
+                "every bar",
+            );
+            const folded = await dock();
 
-        assert.ok(open.list >= 80, `the list has room: ${open.list}px`);
-        assert.deepEqual(
-            { queue: open.queue, count: open.count, whole: open.whole },
-            { queue: false, count: "1 message waiting for Pi", whole: true },
-            "the queue folds to how many wait; the bar's line stays whole",
-        );
-        await settled();
-        await page.click({ selector: ".agents-summary" });
-        await see(
-            `return JSON.stringify(document.querySelector(".inbox") !== null && document.querySelector(".agents-list") === null)`,
-            "folded again",
-        );
-        assert.equal((await state()).queue, true, "the queue comes back");
+            await unfold();
+            const open = await dock();
+            const at = `${size.width}x${size.height}`;
 
-        // A long queue on the short screen: it gives up room, and the bar's line stays whole.
-        for (let index = 0; index < 11; index++) {
-            await app.commands.submit(id, owner(app), {
-                text: `More ${index + 1}: also look at the refunds path.`,
-                requestId: `short-more-${id}-${index}`,
-                mode: "steer",
-            });
+            // Where even one line each is too much (a phone on its side), the dock stops and scrolls, and the conversation
+            // keeps a quarter of the room; elsewhere, nothing in the dock is cut.
+            const sideways = size === SIDEWAYS;
+
+            for (const [state, measured] of [
+                ["folded", folded],
+                ["unfolded", open],
+            ] as const) {
+                assert.ok(sideways || measured.whole, `${at} ${state}: the bars show whole`);
+                assert.ok(
+                    measured.conversation >= measured.floor - 1,
+                    `${at} ${state}: the conversation keeps ${measured.conversation}px, at least ${measured.floor}`,
+                );
+            }
+
+            assert.ok(folded.queueShown, `${at}: folded, the queue shows`);
+            assert.ok(
+                open.list >= open.agentRow,
+                `${at}: unfolded, the list shows a whole row (${open.list}px)`,
+            );
+            assert.ok(
+                open.queueShown || open.count === "5 messages waiting for Pi",
+                `${at}: the queue, or how many wait`,
+            );
+            assert.ok(open.lastInView, `${at}: the newest message stays in view`);
+            await app.commands.abort(id, owner(app));
         }
 
-        await see(
-            `return JSON.stringify(document.querySelectorAll(".queued").length === 12)`,
-            "the long queue",
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test("one waiting message shows whole, with no count and no scrolling", real, async () => {
+    const id = await crowded(VIEWPORTS.mobile, 1);
+    const measured = await dock();
+
+    assert.deepEqual(
+        {
+            shown: measured.queueShown,
+            scrolls: measured.queueScrolls,
+            count: measured.count,
+            whole: measured.whole,
+        },
+        { shown: true, scrolls: false, count: null, whole: true },
+    );
+    await app.commands.abort(id, owner(app));
+});
+
+test(
+    "on a phone on its side, the unfolded list takes the room, and the queue folds to how many wait",
+    real,
+    async () => {
+        const id = await crowded(SIDEWAYS, 1);
+
+        assert.ok((await dock()).queueShown, "folded, the queue shows");
+        await unfold();
+        const open = await dock();
+
+        assert.ok(open.list >= open.agentRow, `the list shows a whole row: ${open.list}px`);
+        assert.deepEqual(
+            { queue: open.queueShown, count: open.count, whole: open.whole },
+            { queue: false, count: "1 message waiting for Pi", whole: true },
         );
-        const crowded = await state();
+        await settled();
+        await page.click({ selector: ".agents-summary" });
+        await see(
+            `return JSON.stringify(document.querySelector(".agents-list") === null)`,
+            "folded again",
+        );
+        const again = await dock();
 
         assert.deepEqual(
-            { count: crowded.count, whole: crowded.whole },
-            { count: "12 messages waiting for Pi", whole: true },
+            { queue: again.queueShown, count: again.count },
+            { queue: true, count: null },
+            "the queue comes back",
         );
         await app.commands.abort(id, owner(app));
         await page.setViewport(VIEWPORTS.mobile);
