@@ -5,6 +5,8 @@
 import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-durable";
 import {
     ATTACHMENTS_HEADING,
+    COMMAND_ENTRY,
+    type CommandData,
     FILE_BLOCK,
     FROM_PREFIX,
     NOTE_ENTRY,
@@ -49,6 +51,7 @@ export type ClientEntry =
     | { id: number; kind: "compaction"; summary: string }
     | { id: number; kind: "reset"; text?: string }
     | ({ id: number; kind: "shell"; truncated?: number } & ShellData)
+    | ({ id: number; kind: "command"; truncated?: number } & CommandData)
     | { id: number; kind: "note"; text: string; name: string }
     | { id: number; kind: "other"; entryKind: string };
 
@@ -337,6 +340,21 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                 kind: "note",
                 text: String(data?.text ?? ""),
                 name: String(data?.name ?? "Someone"),
+            };
+        }
+
+        case COMMAND_ENTRY: {
+            const data = entry.data as CommandData;
+            const { text, clipped } = full
+                ? { text: data.output, clipped: undefined }
+                : clip(data.output, OUTPUT_LIMIT);
+
+            return {
+                id,
+                kind: "command",
+                ...data,
+                output: text,
+                ...(clipped === undefined ? {} : { truncated: clipped }),
             };
         }
 

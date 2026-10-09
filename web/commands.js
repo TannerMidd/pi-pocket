@@ -3,7 +3,7 @@ import { browserAvailable, openInBrowser, toggleBrowser } from "./browser.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { branchAvailable } from "./sheets/branch.js";
 import { togglePeeks } from "./peeks.js";
-import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
+import { actions, collab, navigate, notify, openSheet, scoped, store, uid } from "./store.js";
 import { chooseTheme, THEMES } from "./theme.js";
 import { copyText, formatTokens, formatWhen, modelLabel, replyText, shortPath } from "./ui.js";
 
@@ -21,31 +21,46 @@ const goalsAvailable = () =>
 /** How long a list of prompt templates is used before it is fetched again: someone may be writing one. */
 const TEMPLATES_FOR_MS = 30_000;
 
-/** Fetch Pi's prompt templates for this conversation, unless a fresh list is here. Call when someone types a command. */
-export function loadTemplates() {
+let templateRequest = null;
+
+/** Suggestions may use a recent list; executing a native command checks again before choosing its meaning. */
+export function loadTemplates(force = false) {
     const id = store.state.conversationId;
     const cached = store.state.templates;
 
-    if (
-        id === null ||
-        (cached?.conversationId === id && Date.now() - cached.at < TEMPLATES_FOR_MS)
-    ) {
-        return;
+    if (id === null) {
+        return Promise.resolve([]);
     }
 
-    store.set({
-        templates: {
-            conversationId: id,
-            at: Date.now(),
-            list: cached?.conversationId === id ? cached.list : [],
-        },
-    });
-    actions.prompts().then(
-        (list) =>
-            store.state.templates?.conversationId === id &&
-            store.set({ templates: { ...store.state.templates, list } }),
-        () => {},
-    );
+    if (!force && cached?.conversationId === id && Date.now() - cached.at < TEMPLATES_FOR_MS) {
+        return Promise.resolve(cached.list);
+    }
+
+    if (!force && templateRequest?.id === id) {
+        return templateRequest.promise;
+    }
+
+    const request = {
+        id,
+        promise: actions
+            .prompts(id)
+            .then((list) => {
+                if (templateRequest === request && store.state.conversationId === id) {
+                    store.set({ templates: { conversationId: id, at: Date.now(), list } });
+                }
+
+                return list;
+            })
+            .finally(() => {
+                if (templateRequest === request) {
+                    templateRequest = null;
+                }
+            }),
+    };
+
+    templateRequest = request;
+
+    return request.promise;
 }
 
 /** The prompt templates and skills (`skill:name`) known for this conversation, as entries like the app's commands. */
@@ -394,7 +409,149 @@ function setTheme(arg) {
     notify("info", `Theme: ${id === "desktop" ? "follows your desktop" : THEMES[id].name}.`);
 }
 
-const available = () => COMMANDS.filter((command) => command.available?.() ?? true);
+const commandKey = (id) => `pocket.extension-command.${store.state.me?.id}.${id}`;
+
+/** Clearing the box deliberately abandons its saved request; a network error does not. */
+export function clearPendingCommand(id) {
+    sessionStorage.removeItem(commandKey(id));
+}
+
+function savedCommand(key) {
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? "null");
+
+    if (
+        saved !== null &&
+        (typeof saved !== "object" ||
+            ["name", "args", "commandId", "requestId"].some(
+                (field) => typeof saved[field] !== "string",
+            ) ||
+            !saved.name ||
+            !saved.commandId ||
+            !saved.requestId ||
+            !["conversation", "global"].includes(saved.scope))
+    ) {
+        throw new Error(
+            "The saved command request is invalid. Clear the message box before starting another.",
+        );
+    }
+
+    return saved;
+}
+
+/** Only a terminal command receipt acknowledges this request, not merely a successful HTTP status. */
+async function sendCommand(request, id, key) {
+    const result = await actions.extensionCommand(
+        id,
+        request.commandId,
+        request.args,
+        request.requestId,
+    );
+    const feedback =
+        result?.type === "card"
+            ? typeof result.output === "string"
+            : result?.type === "toast" &&
+              ["info", "warning", "error"].includes(result.level) &&
+              typeof result.message === "string";
+
+    if (
+        !Number.isSafeInteger(result?.taskId) ||
+        result.taskId <= 0 ||
+        !["done", "failed", "interrupted", "stopped"].includes(result.status) ||
+        !feedback
+    ) {
+        throw new Error("The server did not return a valid command receipt. Retry this request.");
+    }
+
+    if (savedCommand(key)?.requestId === request.requestId) {
+        sessionStorage.removeItem(key);
+    }
+
+    if (result.type === "toast") {
+        notify(result.level, result.message);
+    }
+}
+
+async function invokeCommand(command, args) {
+    const id = store.state.conversationId;
+    const key = commandKey(id);
+    let request = savedCommand(key);
+
+    if (request?.name !== command.name || request.args !== args) {
+        const prompts = await loadTemplates(true);
+
+        if (store.state.conversationId !== id) {
+            throw new Error("The conversation changed before the command started.");
+        }
+
+        if (prompts.some((template) => template.name.toLowerCase() === command.name)) {
+            throw new Error(
+                "A prompt template now has that command name. Choose it from the refreshed list.",
+            );
+        }
+
+        request = savedCommand(key);
+
+        if (request?.name !== command.name || request.args !== args) {
+            request = {
+                name: command.name,
+                scope: command.scope,
+                commandId: command.id,
+                args,
+                requestId: uid(),
+            };
+            // Keep the original registration too: rebuilding a module must not turn a retry into a different operation.
+            sessionStorage.setItem(key, JSON.stringify(request));
+        }
+    }
+
+    await sendCommand(request, id, key);
+}
+
+/** An unacknowledged request can still be retried after its module is disabled or rebuilt. */
+function pendingCommand(match) {
+    const id = store.state.conversationId;
+
+    if (id === null || store.state.me == null) {
+        return null;
+    }
+
+    const key = commandKey(id);
+    const request = savedCommand(key);
+    const arg = (match[2] ?? "").trim();
+
+    if (request?.name !== match[1].toLowerCase() || request.args !== arg) {
+        return null;
+    }
+
+    return {
+        command: {
+            name: request.name,
+            scope: request.scope,
+            extension: true,
+            description: "Retry the previous request",
+            run: () => sendCommand(request, id, key),
+        },
+        arg,
+    };
+}
+
+/** Built-ins and existing prompt templates keep their names; extension commands use the remaining ones. */
+function extensionCommands() {
+    const prompts = new Set(templates().map((template) => template.name.toLowerCase()));
+
+    return (store.state.server?.extensionCommands ?? [])
+        .filter((command) => !prompts.has(command.name))
+        .map((command) => ({
+            ...command,
+            extension: true,
+            run: (args) => invokeCommand(command, args),
+        }));
+}
+
+const available = () => [
+    ...COMMANDS.filter((command) => command.available?.() ?? true),
+    ...extensionCommands(),
+];
 
 /** The command a message runs, or null for a message to Pi (such as one starting with a path like /etc/hosts). */
 export function parseCommand(text) {
@@ -402,6 +559,30 @@ export function parseCommand(text) {
 
     if (!match) {
         return null;
+    }
+
+    if (!COMMANDS.some((command) => command.name === match[1].toLowerCase())) {
+        try {
+            const pending = pendingCommand(match);
+
+            if (pending) {
+                return pending;
+            }
+        } catch (error) {
+            // Keep rendering, but never turn an unreadable command retry into a message to Pi.
+            return {
+                command: {
+                    name: match[1].toLowerCase(),
+                    scope: "conversation",
+                    extension: true,
+                    description: "The previous command request could not be read",
+                    run: () => {
+                        throw error;
+                    },
+                },
+                arg: (match[2] ?? "").trim(),
+            };
+        }
     }
 
     const command = available().find((each) => each.name === match[1].toLowerCase());

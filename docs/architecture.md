@@ -23,7 +23,7 @@ Some state lives in this process alone, and a restart forgets it. For example:
 
 **Its parts:**
 
-- `commands`, `collab`, `alerts`, `providers`, `schedules`, `goals`, `shell`, `spend`
+- `commands`, `extensionCommands`, `collab`, `alerts`, `providers`, `schedules`, `goals`, `shell`, `spend`
 - `workspace`, `transcripts`, `attribution`
 - `browsers`
 
@@ -111,6 +111,20 @@ Each browser tab is a `Client` (`room.ts`), fed by an event stream or by long po
 2. the session list;
 3. then, when it shows a conversation, the room's full view;
 4. then only what changed.
+
+## Native extension commands
+
+`reload.ts` gives each module factory a command-registration collector. It validates declarations before publishing the new list, retains the old list on a failed build, and removes the list when the module is unloaded. Loaded modules and pending imports keep their source directory: removing a built-in must not leave its commands behind, or let its unfinished import use an ignored drop-in's enabled flag. Registrations have opaque ids that change on successful reload. Discovery is part of each person's `hello`: viewers get no commands, and only the owner gets global commands. A changed list refreshes already connected tabs.
+
+`POST /api/c/:id/extension-commands` calls `app.extensionCommands`, not the existing message service `app.commands`. The service checks visibility and steering, then driving for conversation commands or ownership for global ones. It checks the stored person's current access again immediately before entering the handler.
+
+Admission creates a `pocket.command` background task and binds it to `CommandRequestDoc` in one commit. The key is the person and client request id within that conversation. Reusing it with different arguments or a different registration is a conflict; a retry otherwise waits for the same task and returns its receipt. The selected handler is kept in memory for the invocation. A persisted started marker and memoized result let recovery return a known result or report an interruption, without re-entering an arbitrary handler after a restart.
+
+A returned card becomes a `pocket.command` entry with only `kind` and `data`: no `model`, `head`, or `edits`. Its write request id is keyed by task, not a person's message prefix, so it neither changes `requesterOf` nor enters model context. Projection, the room's updates, the transcript, Find in session, and Markdown export treat it as committed display data. A toast travels only in the caller's HTTP receipt.
+
+The composer uses its existing command-selection and execution path. Built-ins remain protected; before a new native invocation it refreshes the template list so a same-name template is not silently replaced. An unacknowledged invocation keeps its original registration and request id in tab-local session storage. Native suggestions retain the selected full command name; dispatch matches expanded paste content, not its placeholder. Transport errors do not clear the request, and malformed receipts or unreadable saved requests do not fall through to a model submission. While someone else drives, the owner can still enter global commands, but cannot use that input for conversation commands or messages.
+
+Running now reads the task graph and the command's stored name and scope, never its arguments. Global commands are hidden from other people there. Its stop route checks access and task ownership before requesting cancellation; stopping does not undo external effects.
 
 ## The web app
 

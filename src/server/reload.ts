@@ -8,8 +8,10 @@
  * can turn modules off and on from the app. A module that is off is not loaded, and turning one off uninstalls what
  * it installed; a tool call already running still finishes.
  */
+import { randomUUID } from "node:crypto";
 import {
     type FSWatcher,
+    existsSync,
     lstatSync,
     mkdirSync,
     readdirSync,
@@ -23,7 +25,7 @@ import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Extension, Registry } from "@earendil-works/pi-durable";
 import { describe } from "./errors.ts";
-import type { ExtensionModule, PocketHost } from "./host.ts";
+import type { CommandInfo, ExtensionCommand, ExtensionModule, PocketHost } from "./host.ts";
 
 /** Built-in extension modules, in install order. Other `.ts` files in the directory load after them, by name. */
 const ORDER = [
@@ -73,6 +75,37 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "codemode",
 ]);
 
+/** Composer commands a module may not replace, whether currently available or not. */
+export const BUILT_IN_COMMANDS: ReadonlySet<string> = new Set([
+    "compact",
+    "reset",
+    "instructions",
+    "model",
+    "thinking",
+    "new",
+    "name",
+    "cwd",
+    "plan",
+    "schedule",
+    "until",
+    "stop",
+    "copy",
+    "find",
+    "session",
+    "export",
+    "resume",
+    "chat",
+    "browser",
+    "files",
+    "changes",
+    "branch",
+    "peek",
+    "artifacts",
+    "login",
+    "settings",
+    "theme",
+]);
+
 /** Pi Pocket's own modules, or the owner's from the drop-in folder. */
 export type ModuleSource = "built-in" | "drop-in";
 
@@ -93,6 +126,8 @@ export interface ExtensionInfo {
 }
 
 type Module = { file: string; directory: string; source: ModuleSource };
+
+export type RegisteredCommand = CommandInfo & Pick<ExtensionCommand, "handler">;
 
 /** Extension modules in a folder: `.ts` files, except tests and files starting with `_`. A missing folder has none. */
 function moduleFiles(directory: string): string[] {
@@ -134,14 +169,19 @@ export function prepareDropInFolder(directory: string, appModules: string): void
     symlinkSync(appModules, link, process.platform === "win32" ? "junction" : "dir");
 }
 
+type LoadVersion = { id: string; module: Module | undefined };
+
 export class ExtensionLoader {
     readonly #registry: Registry;
-    readonly #host: PocketHost;
+    readonly #host: Omit<PocketHost, "commands">;
     readonly #builtIn: string;
     readonly #dropIn: string | undefined;
     readonly #choice: (file: string) => boolean | undefined;
-    /** Extension names each file installed, to uninstall the ones a new version no longer provides. */
-    readonly #installed = new Map<string, Extension[]>();
+    /** Installed extensions and their source: deleting an ignored drop-in must not unload a built-in. */
+    readonly #installed = new Map<string, { module: Module; extensions: Extension[] }>();
+    readonly #commands = new Map<string, RegisteredCommand[]>();
+    readonly #loading = new Map<string, LoadVersion>();
+    readonly #commandsChanged: () => Promise<void>;
     readonly #errors = new Map<string, string>();
     readonly #timers = new Map<string, NodeJS.Timeout>();
     /** Drop-ins already reported for having a built-in module's name, so each is reported once. */
@@ -155,15 +195,17 @@ export class ExtensionLoader {
      */
     constructor(
         registry: Registry,
-        host: PocketHost,
+        host: Omit<PocketHost, "commands">,
         folders: { builtIn: string; dropIn?: string },
         choice: (file: string) => boolean | undefined = () => undefined,
+        commandsChanged: () => Promise<void> = () => Promise.resolve(),
     ) {
         this.#registry = registry;
         this.#host = host;
         this.#builtIn = folders.builtIn;
         this.#dropIn = folders.dropIn;
         this.#choice = choice;
+        this.#commandsChanged = commandsChanged;
     }
 
     /** Every module, built-in ones first in install order. A drop-in with a built-in's name is left out. */
@@ -242,7 +284,6 @@ export class ExtensionLoader {
             try {
                 await this.#load(module.file, false);
             } catch (error) {
-                this.#errors.set(module.file, describe(error));
                 this.#host.notice(
                     "error",
                     `Extension ${module.file} failed to load: ${describe(error)}`,
@@ -266,27 +307,38 @@ export class ExtensionLoader {
             return;
         }
 
-        this.#uninstall(file);
+        await this.#uninstall(file);
     }
 
-    #uninstall(file: string): void {
-        for (const extension of this.#installed.get(file) ?? []) {
+    async #uninstall(file: string, directory?: string): Promise<void> {
+        if (directory === undefined || this.#loading.get(file)?.module?.directory === directory) {
+            this.#loading.delete(file);
+        }
+
+        const installed = this.#installed.get(file);
+
+        if (directory !== undefined && installed?.module.directory !== directory) {
+            return;
+        }
+
+        for (const extension of installed?.extensions ?? []) {
             this.#registry.uninstall(extension);
         }
 
+        const hadCommands = (this.#commands.get(file)?.length ?? 0) > 0;
+
         this.#installed.delete(file);
+        this.#commands.delete(file);
         this.#errors.delete(file);
+
+        if (hadCommands) {
+            await this.#commandsChanged();
+        }
     }
 
     /** Import a module again and install what it builds. */
-    async reload(file: string): Promise<Extension[]> {
-        try {
-            return await this.#load(file, true);
-        } catch (error) {
-            this.#errors.set(file, describe(error));
-
-            throw error;
-        }
+    reload(file: string): Promise<Extension[]> {
+        return this.#load(file, true);
     }
 
     list(): ExtensionInfo[] {
@@ -302,7 +354,7 @@ export class ExtensionLoader {
                 summary: summary(join(module.directory, file)),
                 enabled: this.#isOn(module),
                 required: REQUIRED.has(file),
-                extensions: (this.#installed.get(file) ?? []).map((extension) => ({
+                extensions: (this.#installed.get(file)?.extensions ?? []).map((extension) => ({
                     name: extension.name,
                     tools: (extension.tools ?? []).map((tool) => tool.name),
                 })),
@@ -312,33 +364,161 @@ export class ExtensionLoader {
     }
 
     extensionNames(): string[] {
-        return [...this.#installed.values()].flat().map((extension) => extension.name);
+        return [...this.#installed.values()]
+            .flatMap((installed) => installed.extensions)
+            .map((extension) => extension.name);
+    }
+
+    /** Commands offered by the modules that loaded, without their server-side handlers. */
+    commands(): CommandInfo[] {
+        return [...this.#commands.values()].flat().map(({ handler: _handler, ...info }) => info);
+    }
+
+    /** Resolve one exact registration, rather than running a different module after a stale browser choice. */
+    command(id: string): RegisteredCommand | undefined {
+        return [...this.#commands.values()].flat().find((command) => command.id === id);
     }
 
     async #load(file: string, cacheBust: boolean): Promise<Extension[]> {
-        const module = this.#module(file);
+        const version = { id: randomUUID(), module: this.#module(file) };
+
+        this.#loading.set(file, version);
+
+        try {
+            return await this.#build(file, cacheBust, version);
+        } catch (error) {
+            if (
+                this.#loading.get(file) === version &&
+                this.#module(file)?.directory === version.module?.directory
+            ) {
+                this.#errors.set(file, describe(error));
+            }
+
+            throw error;
+        } finally {
+            if (this.#loading.get(file) === version) {
+                this.#loading.delete(file);
+            }
+        }
+    }
+
+    async #build(file: string, cacheBust: boolean, version: LoadVersion): Promise<Extension[]> {
+        const module = version.module;
 
         if (module === undefined) {
             throw new Error(`There is no extension module ${file}`);
         }
 
+        if (!this.#isOn(module)) {
+            return [];
+        }
+
         const url =
             pathToFileURL(join(module.directory, file)).href +
-            (cacheBust ? `?v=${Date.now()}` : "");
+            (cacheBust ? `?v=${version.id}` : "");
         const loaded = (await import(url)) as ExtensionModule;
+        const current = this.#module(file);
+
+        // Import can await other work. An intervening reload, disable, removal, or close wins over this one.
+        if (
+            this.#loading.get(file) !== version ||
+            current === undefined ||
+            current.directory !== module.directory ||
+            !this.#isOn(current)
+        ) {
+            return [];
+        }
 
         if (typeof loaded.default !== "function") {
             throw new Error("the module has no default export function");
         }
 
-        const built = loaded.default(this.#host);
+        const commands: RegisteredCommand[] = [];
+        let collecting = true;
+        let built: ReturnType<ExtensionModule["default"]>;
+
+        try {
+            built = loaded.default({
+                ...this.#host,
+                commands: {
+                    register: (command) => {
+                        if (!collecting) {
+                            throw new Error(
+                                "Register commands while the module builds its extensions, not afterwards.",
+                            );
+                        }
+
+                        if (command === null || typeof command !== "object") {
+                            throw new Error(
+                                "A command must have a name, description, scope, and handler.",
+                            );
+                        }
+
+                        const { name, description, scope, args, handler } = command;
+
+                        if (typeof name !== "string" || !/^[a-z][a-z0-9_-]*$/.test(name)) {
+                            throw new Error(
+                                "A command name must start with a lowercase letter and use lowercase letters, digits, hyphens, or underscores.",
+                            );
+                        }
+
+                        if (typeof description !== "string" || description.trim() === "") {
+                            throw new Error(`The command ${name} needs a description.`);
+                        }
+
+                        if (scope !== "conversation" && scope !== "global") {
+                            throw new Error(
+                                `The command ${name} needs conversation or global scope.`,
+                            );
+                        }
+
+                        if (args !== undefined && typeof args !== "string") {
+                            throw new Error(`The command ${name} args must be a text hint.`);
+                        }
+
+                        if (typeof handler !== "function") {
+                            throw new Error(`The command ${name} needs a handler.`);
+                        }
+
+                        if (BUILT_IN_COMMANDS.has(name)) {
+                            throw new Error(
+                                `The command ${name} is a built-in command: give it a name of your own.`,
+                            );
+                        }
+
+                        const other = this.commands().find(
+                            (each) => each.file !== file && each.name === name,
+                        );
+
+                        if (other !== undefined || commands.some((each) => each.name === name)) {
+                            throw new Error(
+                                `${other?.file ?? file} already has a command named ${name}.`,
+                            );
+                        }
+
+                        commands.push({
+                            id: randomUUID(),
+                            file,
+                            name,
+                            description,
+                            scope,
+                            handler,
+                            ...(args === undefined ? {} : { args }),
+                        });
+                    },
+                },
+            });
+        } finally {
+            collecting = false;
+        }
+
         const extensions = (Array.isArray(built) ? built : [built]) as Extension[];
 
         if (module.source === "drop-in") {
             this.#checkNames(file, extensions);
         }
 
-        const previous = this.#installed.get(file) ?? [];
+        const previous = this.#installed.get(file)?.extensions ?? [];
 
         for (const extension of extensions) {
             this.#registry.install(extension);
@@ -350,8 +530,15 @@ export class ExtensionLoader {
             }
         }
 
-        this.#installed.set(file, extensions);
+        const commandsChanged = commands.length > 0 || (this.#commands.get(file)?.length ?? 0) > 0;
+
+        this.#installed.set(file, { module, extensions });
+        this.#commands.set(file, commands);
         this.#errors.delete(file);
+
+        if (commandsChanged) {
+            await this.#commandsChanged();
+        }
 
         return extensions;
     }
@@ -369,7 +556,7 @@ export class ExtensionLoader {
                 continue;
             }
 
-            for (const extension of installed) {
+            for (const extension of installed.extensions) {
                 owners.set(extension.name, other);
 
                 for (const tool of extension.tools ?? []) {
@@ -442,10 +629,20 @@ export class ExtensionLoader {
 
         const module = this.#module(file);
 
-        // A drop-in that was removed takes away what it installed.
-        if (module === undefined && directory === this.#dropIn && this.#installed.has(file)) {
-            this.#uninstall(file);
-            this.#host.notice("info", `Removed the drop-in extension ${file}.`);
+        // Removal belongs to the directory that installed or is importing the module, not just its basename.
+        if (
+            !existsSync(join(directory, file)) &&
+            (this.#installed.get(file)?.module.directory === directory ||
+                this.#loading.get(file)?.module?.directory === directory)
+        ) {
+            void this.#uninstall(file, directory).then(
+                () =>
+                    this.#host.notice(
+                        "info",
+                        `Removed the ${directory === this.#builtIn ? "built-in" : "drop-in"} extension ${file}.`,
+                    ),
+                (error: unknown) => this.#host.notice("warning", describe(error)),
+            );
 
             return;
         }
@@ -460,8 +657,13 @@ export class ExtensionLoader {
             file,
             setTimeout(() => {
                 this.#timers.delete(file);
+                const current = this.#module(file);
 
-                if (!this.enabled(file)) {
+                if (
+                    current === undefined ||
+                    current.directory !== directory ||
+                    !this.#isOn(current)
+                ) {
                     return;
                 }
 
@@ -486,6 +688,8 @@ export class ExtensionLoader {
     }
 
     close(): void {
+        this.#loading.clear();
+
         for (const watcher of this.#watchers) {
             watcher.close();
         }
