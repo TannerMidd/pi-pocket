@@ -62,6 +62,7 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
     data = "/var/lib/pi-pocket"
     declared = data + "/extensions/extension.ts"
     owner_file = data + "/extensions/owner.ts"
+    manifest = data + "/extensions/.nix-managed-extensions"
     token = ""
     session_id = 0
 
@@ -189,11 +190,9 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
             for user in config["users"]
         )
 
-    def check_owner_removed() -> None:
-        vm.succeed("test ! -e " + owner_file)
-        wait_extensions(
-            lambda modules: not any(module["file"] == "owner.ts" for module in modules)
-        )
+    def check_owner_preserved() -> None:
+        vm.succeed("cmp " + owner_file + " " + data + "/owner-saved.ts")
+        wait_loaded("owner.ts", "v2", owner=True)
 
     try:
         vm.start()
@@ -216,6 +215,9 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
             )
             vm.succeed("test ! -L " + declared)
             vm.succeed("cmp " + declared + " /etc/pi-pocket-test/v1.ts")
+            assert vm.succeed(as_user("cat " + manifest)).splitlines() == [
+                "extension.ts"
+            ]
             vm.succeed("test -L " + data + "/extensions/node_modules")
             wait_extensions(
                 lambda modules: any(
@@ -264,15 +266,16 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
             owner_marker = cast(Probe, read_json(data + "/owner-runtime-probe.json"))
             assert owner_marker == {"pid": server_pid, "version": "v2"}
             assert main_pid() == launcher_pid
+            vm.succeed(as_user("cp " + owner_file + " " + data + "/owner-saved.ts"))
 
-        with phase("service restart resets edits and deletes manual additions"):
+        with phase("service restart resets managed edits and preserves owner additions"):
             vm.succeed("systemctl restart pi-pocket.service")
             vm.wait_for_unit("pi-pocket.service")
             wait_loaded("extension.ts", "v1")
             assert main_pid() != launcher_pid
             assert probe()["version"] == "v1"
             vm.succeed("cmp " + declared + " /etc/pi-pocket-test/v1.ts")
-            check_owner_removed()
+            check_owner_preserved()
             check_persistent_state()
 
         with phase("new generation installs changed declared extension"):
@@ -283,11 +286,11 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
             wait_loaded("extension.ts", "v2")
             assert probe()["version"] == "v2"
             vm.succeed("cmp " + declared + " /etc/pi-pocket-test/v2.ts")
+            check_owner_preserved()
             check_persistent_state()
-            create_owner()
 
         with phase(
-            "empty declaration clears all drop-ins, not config or durable sessions"
+            "empty declaration removes only managed extensions, preserving owner state"
         ):
             vm.succeed(
                 base_system + "/specialisation/empty/bin/switch-to-configuration test"
@@ -295,12 +298,13 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
             vm.wait_for_unit("pi-pocket.service")
             vm.wait_for_open_port(8787)
             vm.succeed("test ! -e " + declared)
-            check_owner_removed()
+            check_owner_preserved()
             wait_extensions(
                 lambda modules: (
-                    not any(module["source"] == "drop-in" for module in modules)
+                    not any(module["file"] == "extension.ts" for module in modules)
                 )
             )
+            vm.succeed("test ! -s " + manifest)
             files = vm.succeed(
                 as_user(
                     "find "
@@ -308,7 +312,15 @@ def run_service_test(vm: QemuMachine, phase: Subtest) -> None:
                     + "/extensions -mindepth 1 -maxdepth 1 -printf '%f\\n'"
                 )
             ).splitlines()
-            assert files == ["node_modules"]
+            assert set(files) == {"node_modules", "owner.ts", ".nix-managed-extensions"}
+            check_persistent_state()
+
+        with phase("repeated empty service start preserves owner extensions"):
+            vm.succeed("systemctl restart pi-pocket.service")
+            vm.wait_for_unit("pi-pocket.service")
+            check_owner_preserved()
+            vm.succeed("test ! -e " + declared)
+            vm.succeed("test ! -s " + manifest)
             check_persistent_state()
 
     except Exception:

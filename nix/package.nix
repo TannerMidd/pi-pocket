@@ -40,11 +40,14 @@ stdenv.mkDerivation {
       ../src
       ../web
       ../test
+      ../docs
       ../package.json
       ../package-lock.json
       ../tsconfig.json
       ../eslint.config.js
       ../README.md
+      ../AGENTS.md
+      ../SECURITY.md
       ../LICENSE
     ];
   };
@@ -90,7 +93,7 @@ stdenv.mkDerivation {
     # node refuses to strip typescript under node_modules; keep the app outside it
     app="$out/share/pi-pocket"
     mkdir -p "$app" "$out/bin"
-    cp -r bin src web node_modules package.json README.md LICENSE "$app/"
+    cp -r bin src web docs node_modules package.json README.md AGENTS.md SECURITY.md LICENSE "$app/"
     # npm's hidden lock contains build-time tarball paths, not runtime dependencies
     rm -f "$app/node_modules/.package-lock.json"
 

@@ -22,10 +22,15 @@ service restart, and switches to prebuilt NixOS specialisations with changed and
 empty extension declarations. These are real configuration activations, without
 needing a network-dependent `nixos-rebuild` inside the VM.
 
-The tests deliberately distinguish package and module behaviour. The package
-preserves owner-created extensions and live edits. **The current NixOS module
-resets the entire extensions directory on every service start, even with
-`extensions = []`: owner additions disappear and declared files revert to their
-Nix sources.** The service test characterises this destructive behaviour; it does
-not endorse it as the desired policy. Changing extension ownership should update
-those assertions along with the module.
+The package preserves owner-created extensions and live edits. The NixOS module
+also preserves owner additions across service starts and configuration changes.
+It records declared filenames in `extensions/.nix-managed-extensions`: service
+starts restore those copies from Nix and remove retired declarations. An empty
+list removes only previously managed extensions. Pocket's in-app restart does
+not reset managed edits. New declarations cannot overwrite unmanaged files;
+move a colliding file aside before declaring it. Existing installations without
+a manifest are treated as unmanaged too.
+
+The `extension-management` flake check exercises the file reconciliation directly,
+including collisions, invalid manifests and symlinks. It verifies that cleanup
+never follows a file symlink or replaces an unmanaged extensions directory.
