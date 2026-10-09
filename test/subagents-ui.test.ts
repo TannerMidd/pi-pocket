@@ -196,9 +196,15 @@ test(
         // Stop: it stops, and the bar says they are done, with a way to put it away.
         await settled();
         await page.click({ label: "Stop slow" });
-        await says(".agents-count", /^1 done · 1 stopped$/, 15_000);
+        await says(".agents-count", /^1 stopped · 1 done$/, 15_000);
         await says(".agent-row.stopped .agent-name", /^slow$/);
         assert.equal(app.isBusy(id), false);
+        // The stopped one's report goes to Pi first; then the bar can be put away.
+        await see(
+            `return JSON.stringify(document.querySelector('[aria-label="Put the subagents bar away"]') !== null)`,
+            "the way to put it away",
+            15_000,
+        );
         await settled();
         await page.click({ label: "Put the subagents bar away" });
         await see(
@@ -431,7 +437,13 @@ test(
 
         await until(() => app.isBusy(slow.conversationId), "slow busy");
         await (await app.harness.conversation(slow.conversationId, context))!.abort(context);
-        await says(".agents-count", /^1 done · 1 stopped$/, 15_000);
+        await says(".agents-count", /^1 stopped · 1 done$/, 15_000);
+        // The stopped one's report goes to Pi first; then the bar can be put away.
+        await see(
+            `return JSON.stringify(document.querySelector('[aria-label="Put the subagents bar away"]') !== null)`,
+            "the way to put it away",
+            15_000,
+        );
         await settled();
         await page.click({ label: "Put the subagents bar away" });
         await see(

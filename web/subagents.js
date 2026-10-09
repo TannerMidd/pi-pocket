@@ -90,16 +90,17 @@ function nowDoing(agent) {
     return "Thinking…";
 }
 
-/** Working first, newest asked first; then the rest, newest answer first. */
+/** The order of the states, in the dots and the rows: working, then trouble, then done. */
+const RANK = { working: 0, failed: 1, stopped: 2, done: 3 };
+
+/** By state; working ones newest asked first, the rest newest answer first. */
 function ordered(agents) {
-    return [...agents].sort((a, b) =>
-        a.busy !== b.busy
-            ? a.busy
-                ? -1
-                : 1
-            : a.busy
-              ? (b.askedAt ?? 0) - (a.askedAt ?? 0)
-              : (b.answeredAt ?? 0) - (a.answeredAt ?? 0),
+    return [...agents].sort(
+        (a, b) =>
+            RANK[stateOf(a)] - RANK[stateOf(b)] ||
+            (a.busy
+                ? (b.askedAt ?? 0) - (a.askedAt ?? 0)
+                : (b.answeredAt ?? 0) - (a.answeredAt ?? 0)),
     );
 }
 
@@ -148,7 +149,8 @@ function Bar({ agents, active, open }) {
     const count = (status) => agents.filter((agent) => stateOf(agent) === status).length;
     const working = agents.filter((agent) => agent.busy);
     const lead = ordered(working)[0];
-    const kinds = ["working", "done", "stopped", "failed"].filter((status) => count(status) > 0);
+    // Trouble first: on a phone the end of the line may not fit.
+    const kinds = ["working", "failed", "stopped", "done"].filter((status) => count(status) > 0);
     // "3 subagents working" when one kind says it all; "2 working · 1 done · 1 failed", short for a phone, when not.
     const summary =
         kinds.length === 1

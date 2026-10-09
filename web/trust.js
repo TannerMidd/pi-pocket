@@ -190,7 +190,9 @@ function status(info, short) {
             return "Not trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts no project.";
         }
 
-        return "No decision yet. Until there is one, Pi Pocket leaves its skills in .agents/skills off.";
+        return info.skills.length > 0
+            ? "No decision yet. Until there is one, Pi Pocket leaves its skills in .agents/skills off."
+            : "No decision yet.";
     }
 
     const what = info.saved.trusted ? "Trusted" : "Not trusted";

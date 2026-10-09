@@ -444,3 +444,23 @@ test("a subagent that is stopped says so: Pi is told it will not answer", async 
         slow = {};
     }
 });
+
+test("an idle parent gets reports that finish a moment apart in one message", async () => {
+    slow = { s1: 0.1, s2: 0.3, s3: 0.5, s4: 0.7, s5: 0.9, s6: 1.1 };
+    const id = await orchestrate({ spawn: Object.keys(slow), rounds: 0, sleep: 0 });
+
+    await until(
+        async () => Object.keys(await delivered(id)).length === 6 && !app.isBusy(id),
+        "the six reports",
+        15_000,
+    );
+    const messages = (await (await app.harness.conversation(id, context))!.context(context))
+        .messages;
+    const carrying = messages.filter(
+        (message) =>
+            message.role === "user" && JSON.stringify(message.content).includes("[subagent "),
+    );
+
+    assert.equal(carrying.length, 1, "in one message, so Pi answers them once");
+    slow = {};
+});

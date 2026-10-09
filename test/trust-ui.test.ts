@@ -316,6 +316,13 @@ test(
             `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("In .pi/skills: lint-only. They load unless you choose Don't trust.") === true)`,
             "the sheet on .pi/skills",
         );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".sheet").textContent.includes(".agents/skills off"))`,
+            ),
+            false,
+            "nothing about .agents/skills, which it has none of",
+        );
         const label = await inPage<{ lines: number; fits: boolean }>(`
         const row = [...document.querySelectorAll(".trust-choice")].find((each) => each.textContent.startsWith("Trust the folder above it"));
         const words = row.querySelector(".trust-choice-text > span");

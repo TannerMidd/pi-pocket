@@ -1,9 +1,9 @@
 /**
  * Persistent background subagents, after Pi Durable's example 23. One `subagent` tool spawns named subagents,
  * messages them, stops them, and lists them. Each subagent is its own conversation, so a user can open it, watch it
- * work, and talk to it. Their answers go back to the parent at its next pause: after a tool call, or at once when it is
- * idle. Answers that arrive meanwhile wait together, and go as one message, so many subagents cost the parent one
- * extra turn at most rather than one each, and its queue holds one message of theirs at a time.
+ * work, and talk to it. Their answers go back to the parent at its next pause: after a tool call, or, when it is idle,
+ * a moment after. Answers that arrive meanwhile wait together, and go as one message, so many subagents cost the
+ * parent one extra turn at most rather than one each, and its queue holds one message of theirs at a time.
  *
  * Everything survives a restart: anchors, reporters, and the courier that delivers reports are durable tasks, and
  * request IDs keep a restarted task from delivering a message or a report twice.
@@ -251,19 +251,55 @@ async function leftQueue(
 }
 
 /** `batch` and `text`: where an earlier build kept the batch, for a courier it left in "send". */
-type CourierState = { phase: "next" } | { phase: "send"; batch?: number; text?: string };
+type CourierState =
+    { phase: "gather" } | { phase: "next" } | { phase: "send"; batch?: number; text?: string };
+
+/** How long a courier waits, for a parent that is idle, for more reports to go with the first. */
+const GATHER_MS = 2_000;
+
+/** Wait `ms`, or until `signal` ends the wait. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+
+        signal.addEventListener(
+            "abort",
+            () => {
+                clearTimeout(timer);
+                reject(signal.reason);
+            },
+            { once: true },
+        );
+    });
+}
 
 /**
  * Takes all the reports waiting and sends them to the parent as one message, to steer it at its next pause, or to wake
- * it when it is idle. It sends the next ones only once that message has left the parent's queue, so the queue holds one
- * at a time; reports that arrive meanwhile go in the next. It ends when none are waiting. The batch it took stays in
- * `sending` until it has left the queue, so a courier that stops early loses none: the next sends it, once.
+ * it when it is idle, after a moment for others. It sends the next ones only once that message has left the parent's
+ * queue, so the queue holds one at a time; reports that arrive meanwhile join it there, or go in the next. It ends
+ * when none are waiting. The batch it took stays in `sending` until it has left the queue, so a courier that stops
+ * early loses none: the next sends it, once.
  */
 const Courier = defineTask<null, CourierState, null>({
     name: "pocket.subagent-courier",
     version: 1,
-    initial: () => ({ phase: "next" }),
+    initial: () => ({ phase: "gather" }),
     phases: {
+        // A parent that is idle would start a turn for the first report alone: subagents started together often finish
+        // a moment apart, so it waits that moment for theirs. A busy parent takes the batch at its next pause, and
+        // reports that come meanwhile join it in its queue.
+        gather: async (_courier, runtime, context) => {
+            const live = await runtime.snapshot(LiveDoc, runtime.conversationId, context);
+
+            if (live?.run === undefined) {
+                await pause(GATHER_MS, runtime.signal);
+            }
+
+            await runtime.commit(
+                () => ({ status: "running", checkpoint: { phase: "next" } }),
+                context,
+            );
+        },
         next: (courier, runtime, context) =>
             runtime.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, runtime.conversationId);

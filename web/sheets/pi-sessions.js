@@ -98,7 +98,7 @@ export function PiSessionsSheet() {
     }, [sessions]);
     // Straight to the search where there are keys to type it with.
     useEffect(() => {
-        if (any && matchMedia("(pointer: fine)").matches) {
+        if (any && !matchMedia("(pointer: coarse)").matches) {
             box.current?.focus({ preventScroll: true });
         }
     }, [any]);
