@@ -142,8 +142,10 @@ function MentionedText({ text }) {
 
 /** A subagent's report: who, whether it answered or failed, and what it said. */
 function Report({ report, view, fresh }) {
-    const [, name, verb, , text] = report;
+    const [, name, verb, after, text] = report;
     const child = view.subagents.find((agent) => agent.name === name);
+    // A failed one says why: "failed: stopped before it answered", "failed: Bad request".
+    const why = verb === "failed" ? after.replace(/^:\s*/, "") : "";
 
     return html`<div
         class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}
@@ -157,6 +159,7 @@ function Report({ report, view, fresh }) {
                 </button>`
             }
         </div>
+        ${why && html`<div class="report-why">${why}</div>`}
         ${text && html`<${Collapsible} text=${text} />`}
     </div>`;
 }
@@ -164,7 +167,8 @@ function Report({ report, view, fresh }) {
 function UserEntry({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 
-    if (REPORT.test(entry.text)) {
+    // A report has nobody's name on it: a person's message that looks like one is theirs.
+    if (REPORT.test(entry.text) && entry.from === undefined && !view.authors?.[entry.id]) {
         // Several that arrived together came as one message: a card each. A part that is not a report's start is
         // more of the report before it.
         const parts = [];

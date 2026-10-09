@@ -112,6 +112,14 @@ async function delivered(id: ConversationId, on = app): Promise<Record<string, n
     return counts;
 }
 
+/** The messages the parent got, as one text. */
+const parentText = async (id: ConversationId, on = app) =>
+    JSON.stringify(
+        (await (await on.harness.conversation(id, context))!.context(context)).messages.filter(
+            (message) => message.role === "user",
+        ),
+    );
+
 const queued = async (id: ConversationId, on = app) =>
     (await on.harness.snapshot(InboxDoc, id, context))?.items.length ?? 0;
 
@@ -266,7 +274,10 @@ test("the view tells the subagents bar what each was asked, when it answered, an
         assert.equal(typeof byName.fine?.askedAt, "number");
         assert.equal(byName.fine?.failed, undefined);
         assert.equal(byName.broken?.failed, true);
+        assert.match(String((byName.broken as { error?: string }).error), /Bad request/);
         assert.match(JSON.stringify(await delivered(id)), /"broken":1/);
+        // Pi is told why, too.
+        assert.match(await parentText(id), /\[subagent broken failed: [^\]]*Bad request[^\]]*\]/);
     } finally {
         app.detach(tab.client);
         failing = new Set();
@@ -362,4 +373,74 @@ test("a batch a stopped courier had sent already is not sent again", async () =>
     await until(async () => (await delivered(id)).after === 1 && !app.isBusy(id), "the new report");
     assert.equal((await delivered(id)).lost, 1, "under its request id, it went once");
     assert.equal((await app.harness.snapshot(SubagentsDoc, id, context))?.sending, undefined);
+});
+
+test("reports that arrive while a batch waits in the queue join it: Pi gets them in one message", async () => {
+    slow = { later: 0.6, last: 1.2 };
+    const id = await orchestrate({ spawn: ["first", "later", "last"], rounds: 1, sleep: 3 });
+
+    const names = async () => {
+        const items = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+
+        return items.map((item) =>
+            [...JSON.stringify(item).matchAll(/\[subagent (\S+) answered/g)].map(
+                (match) => match[1],
+            ),
+        );
+    };
+
+    // While the parent sleeps, the queue holds one message, and it grows to all three.
+    await until(
+        async () => JSON.stringify(await names()) === '[["first","later","last"]]',
+        "one row with all three",
+        8_000,
+    );
+    await until(
+        async () => Object.keys(await delivered(id)).length === 3 && !app.isBusy(id),
+        "the reports",
+        15_000,
+    );
+    assert.deepEqual(await delivered(id), { first: 1, later: 1, last: 1 }, "each once");
+    const messages = (await (await app.harness.conversation(id, context))!.context(context))
+        .messages;
+    const carrying = messages.filter(
+        (message) =>
+            message.role === "user" && JSON.stringify(message.content).includes("[subagent "),
+    );
+
+    assert.equal(carrying.length, 1, "in one message");
+    slow = {};
+});
+
+test("a subagent that is stopped says so: Pi is told it will not answer", async () => {
+    slow = { halted: 20 };
+    const id = await orchestrate({ spawn: ["halted"], rounds: 0, sleep: 0 });
+    const tab = fakeTab(id, owner(app));
+
+    try {
+        await app.attach(tab.client);
+        await until(async () => {
+            const child = (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.halted;
+
+            return child !== undefined && app.isBusy(child.conversationId);
+        }, "the subagent at work");
+        const child = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.halted!;
+
+        await (await app.harness.conversation(child.conversationId, context))!.abort(context);
+        await until(async () => (await delivered(id)).halted === 1, "its report");
+        assert.match(
+            await parentText(id),
+            /\[subagent halted failed: stopped before it answered\]/,
+        );
+        await until(
+            () =>
+                ((tab.field("subagents") ?? []) as { name: string; stopped?: boolean }[]).some(
+                    (agent) => agent.name === "halted" && agent.stopped === true,
+                ),
+            "the bar told it stopped",
+        );
+    } finally {
+        app.detach(tab.client);
+        slow = {};
+    }
 });

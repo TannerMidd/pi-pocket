@@ -106,9 +106,10 @@ export type SubagentRecord = {
     /** What the parent asked it last, the start of it, and when. */
     asked?: string;
     askedAt?: number;
-    /** When it last answered, or failed to (`failed`), what the parent asked. */
+    /** When it last answered, or failed to (`failed`), what the parent asked; and why it failed, or that it was stopped. */
     answeredAt?: number;
     failed?: boolean;
+    error?: string;
 };
 
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
@@ -251,6 +252,9 @@ export const DecisionsDoc = defineDoc<{ calls: Record<string, Decision> }>({
 
 /** The text a subagent report starts with; the UI renders these as report cards. */
 export const REPORT_PREFIX = "[subagent ";
+
+/** Why a subagent that was stopped did not answer, in its report and its record. */
+export const STOPPED = "stopped before it answered";
 
 /** Plan mode: while on, Pi reads and proposes, and anything that would change something is blocked. */
 export const PlanDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({

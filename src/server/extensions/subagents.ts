@@ -26,7 +26,7 @@ import {
     type TaskRuntime,
     type Tx,
 } from "@earendil-works/pi-durable";
-import { REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
+import { REPORT_PREFIX, STOPPED, SubagentsDoc } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
 import { requestFor } from "../requests.ts";
 
@@ -95,16 +95,16 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
                 const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
 
                 if (settled.status === "unanswered") {
+                    const why = whyUnanswered(settled.reason, settled.detail);
+
                     if (agent !== undefined) {
                         agent.answeredAt = Date.now();
-                        agent.failed = settled.reason !== "aborted";
+                        agent.failed = true;
+                        agent.error = why;
                     }
 
-                    return next(
-                        settled.reason === "aborted"
-                            ? undefined
-                            : `${REPORT_PREFIX}${name} failed: ${settled.reason}]`,
-                    );
+                    // Stopped too: Pi may be waiting for its answer, and is told none comes.
+                    return next(`${REPORT_PREFIX}${name} failed: ${why}]`);
                 }
 
                 if (settled.type !== "input") {
@@ -118,26 +118,43 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
                 agent.reported.push(settled.answer);
                 agent.answeredAt = Date.now();
                 agent.failed = false;
+                delete agent.error;
                 const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
                     AssistantMessage | undefined;
 
                 return next(`${REPORT_PREFIX}${name} answered, no reply needed] ${textOf(answer)}`);
             }, context);
         },
-        // The report waits with the others for the courier, which this starts when none is at work.
+        // The report waits with the others for the courier, which this starts when none is at work. A batch still in the
+        // parent's queue takes it too: it is taken back out, and goes again with this one, so the queue holds one
+        // message of reports, with all of them.
         report: (reporter, runtime, context) =>
             runtime.commit(async (tx) => {
                 const report = reporter.state.checkpoint.report;
 
                 if (report !== undefined) {
-                    const state = await tx.doc(SubagentsDoc, runtime.conversationId);
+                    const id = runtime.conversationId;
+                    const state = await tx.doc(SubagentsDoc, id);
+                    // Reads first: a commit reads the tables only before it writes one.
+                    const queued = await queuedBatch(tx, id, state.sending?.request);
+                    const idle = !(await working(tx, state.courier));
+                    const taken = queued === undefined ? [] : (state.sending?.reports ?? []);
+
+                    if (queued !== undefined) {
+                        await unqueue(tx, id, queued);
+                        delete state.sending;
+                    }
 
                     // Assigned whole: a document keeps its own copy of what is assigned to it.
                     state.outbox = [
+                        ...taken,
                         ...(state.outbox ?? []),
                         { name: reporter.input.name, text: report },
                     ];
-                    await startCourier(tx, runtime.conversationId);
+
+                    if (idle) {
+                        state.courier = await tx.createTask(Courier, null, BACKGROUND);
+                    }
                 }
 
                 return { status: "terminal", outcome: { status: "completed", result: null } };
@@ -150,18 +167,43 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 /** Tasks of a conversation that run beside its work: its Esc and idle waits do not reach them. */
 const BACKGROUND = { ownership: { kind: "conversation" }, background: true } as const;
 
-/**
- * Start a courier for `conversationId` when reports wait, or a batch has yet to leave its queue, and none is at work:
- * one that stopped early (faulted, aborted) left them for the next, which the next report starts. It reads the task
- * table, which a commit can do only before it writes a task: call it before any `createTask`.
- */
-async function startCourier(tx: Tx, conversationId: ConversationId): Promise<void> {
-    const state = await tx.doc(SubagentsDoc, conversationId);
-    const waiting = (state.outbox?.length ?? 0) > 0 || state.sending !== undefined;
-
-    if (waiting && !(await working(tx, state.courier))) {
-        state.courier = await tx.createTask(Courier, null, BACKGROUND);
+/** Why a subagent did not answer, for its report and its row: what went wrong, in a line, or that it was stopped. */
+function whyUnanswered(reason: string, detail: unknown): string {
+    if (reason === "aborted") {
+        return STOPPED;
     }
+
+    const text = typeof detail === "string" && detail.trim() !== "" ? detail : reason;
+
+    // One line, and no "]", which ends a report's head.
+    return text.replace(/\s+/g, " ").replace(/]/g, ")").trim().slice(0, 200);
+}
+
+/** The submission of the batch `request`, while it waits in `conversationId`'s queue; undefined once it has left. */
+async function queuedBatch(
+    tx: Tx,
+    conversationId: ConversationId,
+    request: string | undefined,
+): Promise<SubmissionId | undefined> {
+    if (request === undefined) {
+        return undefined;
+    }
+
+    const record = await tx.submissionByRequest(conversationId, request);
+
+    return record?.status === "queued" ? record.id : undefined;
+}
+
+/** Take a waiting batch back out of the queue, as withdrawing it does, to send its reports again with more. */
+async function unqueue(tx: Tx, conversationId: ConversationId, id: SubmissionId): Promise<void> {
+    const items = (await tx.doc(InboxDoc, conversationId)).items;
+    const index = items.findIndex((item) => item.id === id);
+
+    if (index !== -1) {
+        items.splice(index, 1);
+    }
+
+    tx.settleSubmission(id, { status: "unanswered", reason: "merged" });
 }
 
 /** Whether a task is there and can still take reports. */

@@ -14,6 +14,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import {
+    existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -302,7 +303,11 @@ test("an undecided project with skills of its own asks; one without, or with a d
     const asked = readProjectTrust(cwd, sources);
 
     assert.deepEqual(
-        { ...asked, skills: asked.skills.map((each) => each.name).sort() },
+        {
+            ...asked,
+            skills: asked.skills.map((each) => each.name).sort(),
+            ownSkills: asked.ownSkills.map((each) => each.name),
+        },
         {
             folder: cwd,
             parent: repo,
@@ -311,6 +316,7 @@ test("an undecided project with skills of its own asks; one without, or with a d
             trusted: false,
             folders: [join(cwd, ".agents", "skills"), join(repo, ".agents", "skills")],
             skills: ["here", "repo-wide"],
+            ownSkills: ["pi-project"],
             ask: true,
         },
     );
@@ -510,4 +516,51 @@ test("the app reads Pi's settings: its default trust, and its skill paths", asyn
         await other.close();
         rmSync(join(agentDir, "settings.json"), { force: true });
     }
+});
+
+test("with a trust store that cannot be read, no answer is taken: it says so", async () => {
+    const app = await started();
+    const store = join(process.env.PI_CODING_AGENT_DIR!, "trust.json");
+    const before = existsSync(store) ? readFileSync(store, "utf8") : undefined;
+    const project = realpathSync(mkdtempSync(join(root, "skills-unreadable-")));
+
+    mkdirSync(join(project, ".git"));
+    skill(join(project, ".agents", "skills"), "blocked");
+    const id = await newSession(app, project);
+
+    writeFileSync(store, "{ not json");
+
+    try {
+        assert.equal(app.projectTrust(id, owner(app)).unreadable, true);
+        assert.throws(
+            () => app.setProjectTrust(id, owner(app), "trust"),
+            (error: { status?: number; message?: string }) =>
+                error.status === 409 && /cannot be read/.test(error.message ?? ""),
+        );
+        assert.equal(readFileSync(store, "utf8"), "{ not json", "left as it was");
+    } finally {
+        if (before === undefined) {
+            rmSync(store, { force: true });
+        } else {
+            writeFileSync(store, before);
+        }
+    }
+});
+
+test("a project with only .pi/skills says what Don't trust does to them", async () => {
+    const app = await started();
+    const project = realpathSync(mkdtempSync(join(root, "skills-pi-only-")));
+
+    mkdirSync(join(project, ".git"));
+    skill(join(project, ".pi", "skills"), "lint-only");
+    const id = await newSession(app, project);
+    const info = app.projectTrust(id, owner(app));
+
+    assert.deepEqual(
+        { ask: info.ask, own: info.ownSkills.map((each) => each.name), agents: info.skills },
+        { ask: false, own: ["lint-only"], agents: [] },
+    );
+    assert.ok(app.skillCommands(id).some((each) => each.name === "lint-only"));
+    app.setProjectTrust(id, owner(app), "distrust");
+    assert.ok(!app.skillCommands(id).some((each) => each.name === "lint-only"));
 });

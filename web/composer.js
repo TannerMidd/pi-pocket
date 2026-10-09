@@ -83,9 +83,12 @@ function reportNames(text) {
     ];
 }
 
+/** The subagents a waiting message carries reports from; null for a person's message, which has who sent it. */
+const queuedReports = (item) => (item.by === undefined ? reportNames(item.text) : null);
+
 /** What kind of message waits for Pi: a steer, one queued for after its answer, a note, or subagents' reports. */
 function queuedMode(item) {
-    const names = reportNames(item.text);
+    const names = queuedReports(item);
 
     if (names) {
         return names.length === 1 ? "Report" : "Reports";
@@ -96,7 +99,7 @@ function queuedMode(item) {
 
 /** What a waiting message says; subagents' reports say whose, as their text is long. */
 function queuedText(item) {
-    const names = reportNames(item.text);
+    const names = queuedReports(item);
 
     if (!names) {
         return item.text ?? "";
@@ -861,8 +864,8 @@ export function Composer() {
                             (!blocked || item.by === me?.id) &&
                             html`<button
                                 class="icon-button small"
-                                aria-label=${reportNames(item.text) ? "Discard these reports" : "Withdraw"}
-                                title=${reportNames(item.text) ? "Discard these reports: Pi will not get them" : "Withdraw"}
+                                aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
+                                title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
                                 onClick=${() => attempt(() => actions.withdraw(item.id))}
                             >
                                 <${Icon} name="close" size=${14} />

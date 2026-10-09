@@ -26,6 +26,7 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import { SubagentsDoc } from "../src/server/docs.ts";
 
 const chromium = findBrowser();
 const real = {
@@ -48,6 +49,13 @@ const route: FauxResponseStep = (request) => {
 
     if (subagent !== undefined) {
         return fauxAssistantMessage([fauxText(`${subagent}: all good`)]);
+    }
+
+    if (text === "one more") {
+        return fauxAssistantMessage(
+            [fauxToolCall("subagent", { action: "spawn", name: "extra", message: "One more." })],
+            { stopReason: "toolUse" },
+        );
     }
 
     if (text === "orchestrate") {
@@ -157,7 +165,7 @@ test(
         const id = await started(0);
 
         // Folded: the counts, and what the one working does, from its peek.
-        await says(".agents-count", /^1 subagent working · 1 done$/);
+        await says(".agents-count", /^1 working · 1 done$/);
         await says(".agents-lead", /^slow: >_ sleep 30$/);
         assert.equal(
             await inPage<boolean>(
@@ -188,7 +196,8 @@ test(
         // Stop: it stops, and the bar says they are done, with a way to put it away.
         await settled();
         await page.click({ label: "Stop slow" });
-        await says(".agents-count", /^2 subagents done$/, 15_000);
+        await says(".agents-count", /^1 done · 1 stopped$/, 15_000);
+        await says(".agent-row.stopped .agent-name", /^slow$/);
         assert.equal(app.isBusy(id), false);
         await settled();
         await page.click({ label: "Put the subagents bar away" });
@@ -282,6 +291,7 @@ test(
             "[subagent alpha answered, no reply needed] First answer.",
             "[subagent beta answered, no reply needed] Second answer.",
             "[subagent beta answered, no reply needed and no closing bracket, so not a report's start",
+            "[subagent gamma failed: Bad request]",
         ].join("\n\n");
 
         await (await app.harness.conversation(id, context))!.submit(
@@ -309,9 +319,14 @@ test(
 
         assert.deepEqual(
             cards.map((card) => card.name),
-            ["alpha", "beta"],
+            ["alpha", "beta", "gamma"],
         );
         assert.match(cards[1]!.text, /no closing bracket/);
+        assert.equal(
+            await textOf(".report.failed .report-why"),
+            "Bad request",
+            "a failed one says why",
+        );
     },
 );
 
@@ -339,7 +354,7 @@ test("a viewer sees the bar, without Stop", real, async () => {
                     await viewer.evaluate(
                         `return JSON.stringify(document.querySelector(".agents-count")?.textContent ?? "")`,
                     ),
-                ) === "1 subagent working · 1 done",
+                ) === "1 working · 1 done",
             "the bar for the viewer",
         );
         await viewer.evaluate(`document.querySelector(".agents-summary").click()`);
@@ -367,3 +382,94 @@ test("a viewer sees the bar, without Stop", real, async () => {
         await app.commands.abort(id, owner(app));
     }
 });
+
+test(
+    "a person's message that looks like a report is theirs: a steer in the queue, a message in the conversation",
+    real,
+    async () => {
+        const id = await started(6);
+        const lookalike = "[subagent zed answered, no reply needed] this is my own message";
+
+        await says(".queued-mode", /^Report/);
+        await app.commands.submit(id, owner(app), {
+            text: lookalike,
+            requestId: `own-${id}`,
+            mode: "steer",
+        });
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".queued")].some((row) => row.textContent.includes("this is my own message") && row.querySelector(".queued-mode").textContent.trim().startsWith("Steer")))`,
+            "the look-alike as a steer",
+        );
+        // Once Pi has it, it shows as the person's message, not as a report card.
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".bubble")].some((bubble) => bubble.textContent.includes("this is my own message")))`,
+            "the look-alike as a message",
+            20_000,
+        );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify([...document.querySelectorAll(".report-name")].some((name) => name.textContent === "zed"))`,
+            ),
+            false,
+        );
+    },
+);
+
+test(
+    "put away, the bar counts only what came after; unfolded, it stays unfolded in its own session only",
+    real,
+    async () => {
+        const first = await started(0);
+
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, first, context))?.agents.slow !==
+                undefined,
+            "slow at work",
+        );
+        const slow = (await app.harness.snapshot(SubagentsDoc, first, context))!.agents.slow!;
+
+        await until(() => app.isBusy(slow.conversationId), "slow busy");
+        await (await app.harness.conversation(slow.conversationId, context))!.abort(context);
+        await says(".agents-count", /^1 done · 1 stopped$/, 15_000);
+        await settled();
+        await page.click({ label: "Put the subagents bar away" });
+        await see(
+            `return JSON.stringify(document.querySelector(".agents-bar") === null)`,
+            "put away",
+        );
+        await app.commands.submit(first, owner(app), {
+            text: "one more",
+            requestId: `more-${first}`,
+        });
+        await says(".agents-count", /^1 subagent done$/, 15_000);
+
+        // Unfolded here, then another session with subagents: there it starts folded.
+        await settled();
+        await page.click({ selector: ".agents-summary" });
+        await see(
+            `return JSON.stringify(document.querySelector(".agents-list") !== null)`,
+            "unfolded",
+        );
+        // Another session with subagents, opened from inside the app, as a person goes to it.
+        parentSleep = 0;
+        const second = await newSession(app);
+
+        await app.commands.submit(second, owner(app), {
+            text: "orchestrate",
+            requestId: `go-${second}`,
+        });
+        await page.evaluate(`(await import("/store.js")).navigate(${Number(second)})`);
+        await see(
+            `return JSON.stringify(location.pathname === "/s/${Number(second)}" && document.querySelector(".agents-bar") !== null)`,
+            "the other session's bar",
+        );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".agents-list") === null)`,
+            ),
+            true,
+            "folded in the other session",
+        );
+    },
+);

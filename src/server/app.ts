@@ -1554,6 +1554,13 @@ export class PocketApp {
         // Before anything is saved: only the owner may read it, or answer.
         const now = this.projectTrust(id, user);
 
+        if (now.unreadable) {
+            throw new HttpError(
+                409,
+                "Pi's trust store (~/.pi/agent/trust.json) cannot be read, so no answer can be saved. Mend or delete it first.",
+            );
+        }
+
         if (choice === "trust-parent" && now.parent === undefined) {
             throw new HttpError(400, "This folder has no folder above it.");
         }

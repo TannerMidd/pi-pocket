@@ -1,6 +1,6 @@
 // Pi's sessions from the terminal, which the owner can continue here: the list, by folder, and one of them before it
 // continues, as a short conversation.
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
 import { html, Icon, Loader, Sheet, shortPath, timeAgo } from "../ui.js";
 
@@ -62,6 +62,10 @@ export function PiSessionsSheet() {
     const [problem, setProblem] = useState(null);
     const [query, setQuery] = useState("");
     const needle = query.trim();
+    const box = useRef(null);
+    const results = useRef(null);
+    // The list's height as it first showed: fewer results while searching keep the sheet that tall, so the box stays put.
+    const [floor, setFloor] = useState(0);
 
     useEffect(() => {
         let current = true;
@@ -87,6 +91,18 @@ export function PiSessionsSheet() {
     }, [needle]);
     const folders = byFolder(sessions ?? []);
 
+    useLayoutEffect(() => {
+        if (floor === 0 && needle === "" && sessions?.length > 0 && results.current) {
+            setFloor(results.current.offsetHeight);
+        }
+    }, [sessions]);
+    // Straight to the search where there are keys to type it with.
+    useEffect(() => {
+        if (any && matchMedia("(pointer: fine)").matches) {
+            box.current?.focus({ preventScroll: true });
+        }
+    }, [any]);
+
     return html`<${Sheet} title="Continue a Pi session" onClose=${closeSheet}>
         <p class="muted small">
             Sessions of Pi in the terminal on this computer. One continues here as a new session; its file stays as it is.
@@ -99,32 +115,39 @@ export function PiSessionsSheet() {
             html`<input
                 class="find-input"
                 type="search"
-                placeholder="Search titles, folders, and messages"
-                aria-label="Search Pi's sessions"
+                ref=${box}
+                placeholder="Search sessions"
+                aria-label="Search Pi's sessions: titles, folders, and messages"
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
             />`
         }
-        ${folders.map(([cwd, list]) => {
-            const { name, parent } = folderParts(cwd, home);
+        <div
+            class="pi-results"
+            ref=${results}
+            style=${floor > 0 ? `min-height:${floor}px` : ""}
+        >
+            ${folders.map(([cwd, list]) => {
+                const { name, parent } = folderParts(cwd, home);
 
-            return html`<section class="pi-folder" key=${cwd}>
-                <div class="pi-folder-head" title=${cwd}>
-                    <${Icon} name="folder" size=${14} />
-                    <span class="pi-folder-name">${name}</span>
-                    ${parent && html`<span class="pi-folder-parent">${parent}</span>`}
-                </div>
-                <div class="pi-folder-list">
-                    ${list.map((session) => html`<${SessionRow} key=${session.path} session=${session} />`)}
-                </div>
-            </section>`;
-        })}
-        ${
-            any === true &&
-            needle !== "" &&
-            sessions?.length === 0 &&
-            html`<p class="muted">No session matches “${needle}”.</p>`
-        }
+                return html`<section class="pi-folder" key=${cwd}>
+                    <div class="pi-folder-head" title=${cwd}>
+                        <${Icon} name="folder" size=${14} />
+                        <span class="pi-folder-name">${name}</span>
+                        ${parent && html`<span class="pi-folder-parent">${parent}</span>`}
+                    </div>
+                    <div class="pi-folder-list">
+                        ${list.map((session) => html`<${SessionRow} key=${session.path} session=${session} />`)}
+                    </div>
+                </section>`;
+            })}
+            ${
+                any === true &&
+                needle !== "" &&
+                sessions?.length === 0 &&
+                html`<p class="muted">No session matches “${needle}”.</p>`
+            }
+        </div>
     <//>`;
 }
 
@@ -171,11 +194,12 @@ export function PiSessionSheet({ path }) {
         <//>`;
     }
 
-    return html`<${Sheet} title=${info.title} onClose=${closeSheet}>
+    return html`<${Sheet} title="Pi session" onClose=${closeSheet}>
+        <h3 class="pi-title">${info.title}</h3>
         <dl class="pi-facts">
             <div>
                 <dt>Folder</dt>
-                <dd class="mono" title=${info.cwd}>${shortPath(info.cwd, home)}</dd>
+                <dd class="mono">${shortPath(info.cwd, home)}</dd>
             </div>
             <div>
                 <dt>Model</dt>

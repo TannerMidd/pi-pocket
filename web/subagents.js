@@ -35,8 +35,15 @@ function putAway(id, agents) {
     localStorage.setItem(AWAY_KEY, JSON.stringify(Object.fromEntries(kept)));
 }
 
-/** Unfold the bar, as the top bar's count of working subagents does. */
-export const openSubagents = () => store.set({ subagentsOpen: true });
+/** Unfold the bar, as the top bar's count of working subagents does: for this session only. */
+export const openSubagents = () => store.set({ subagentsOpen: store.state.conversationId });
+
+/** Where a subagent is: working, done, stopped, or failed. */
+const stateOf = (agent) =>
+    agent.busy ? "working" : agent.stopped ? "stopped" : agent.failed ? "failed" : "done";
+
+/** The mark a row starts with, for a subagent that is not working. */
+const MARKS = { done: "✓", stopped: "■", failed: "!" };
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -98,15 +105,15 @@ function ordered(agents) {
 
 function AgentRow({ agent }) {
     const stop = () => attempt(() => api(`c/${agent.conversationId}/abort`, {}));
-    const status = agent.busy ? "working" : agent.failed ? "failed" : "done";
+    const status = stateOf(agent);
     const when = agent.busy
         ? agent.askedAt && elapsed(agent.askedAt)
-        : agent.answeredAt && `${agent.failed ? "failed" : "done"} ${timeAgo(agent.answeredAt)}`;
+        : agent.answeredAt && `${status} ${timeAgo(agent.answeredAt)}`;
 
     return html`<div class=${`agent-row ${status}`} data-peek=${agent.conversationId}>
         <button class="agent-open" onClick=${() => navigate(agent.conversationId)}>
             <span class="agent-mark" aria-hidden="true">
-                ${agent.busy ? html`<${Spinner} />` : agent.failed ? "!" : "✓"}
+                ${agent.busy ? html`<${Spinner} />` : MARKS[status]}
             </span>
             <span class="agent-main">
                 <span class="agent-head">
@@ -115,6 +122,7 @@ function AgentRow({ agent }) {
                     ${agent.reporting && html`<span class="agent-chip">report on its way to Pi</span>`}
                 </span>
                 ${agent.busy && html`<span class="agent-now">${nowDoing(agent)}</span>`}
+                ${status === "failed" && agent.error && html`<span class="agent-error">${agent.error}</span>`}
                 ${agent.asked && html`<span class="agent-asked">${agent.asked}</span>`}
             </span>
         </button>
@@ -137,17 +145,16 @@ function AgentRow({ agent }) {
 function Bar({ agents, active, open }) {
     const box = useRef(null);
     const [, rerender] = useState(0);
+    const count = (status) => agents.filter((agent) => stateOf(agent) === status).length;
     const working = agents.filter((agent) => agent.busy);
-    const failed = agents.filter((agent) => !agent.busy && agent.failed);
-    const done = agents.length - working.length - failed.length;
     const lead = ordered(working)[0];
-    const counts =
-        working.length > 0
-            ? [`${plural(working.length, "subagent")} working`, done > 0 && `${done} done`]
-            : [`${plural(done, "subagent")} done`];
-    const summary = [...counts, failed.length > 0 && `${failed.length} failed`]
-        .filter(Boolean)
-        .join(" · ");
+    const kinds = ["working", "done", "stopped", "failed"].filter((status) => count(status) > 0);
+    // "3 subagents working" when one kind says it all; "2 working · 1 done · 1 failed", short for a phone, when not.
+    const summary =
+        kinds.length === 1
+            ? `${plural(agents.length, "subagent")} ${kinds[0]}`
+            : kinds.map((status) => `${count(status)} ${status}`).join(" · ");
+    const shown = ordered(agents);
 
     // The rows' and the folded line's peeks: what each working subagent does now.
     useOnScreen(box);
@@ -169,18 +176,18 @@ function Bar({ agents, active, open }) {
         <div class="agents-top">
             <button
                 class="agents-summary"
+                aria-label=${`Subagents: ${summary}`}
                 aria-expanded=${open}
-                onClick=${() => store.set({ subagentsOpen: !open })}
+                onClick=${() =>
+                    store.set({ subagentsOpen: open ? null : store.state.conversationId })}
             >
                 <span class="agents-dots" aria-hidden="true">
-                    ${ordered(agents)
+                    ${shown
                         .slice(0, 6)
                         .map(
-                            (agent) =>
-                                html`<span
-                                    class=${`agents-dot ${agent.busy ? "working" : agent.failed ? "failed" : "done"}`}
-                                ></span>`,
+                            (agent) => html`<span class=${`agents-dot ${stateOf(agent)}`}></span>`,
                         )}
+                    ${shown.length > 6 && html`<span class="agents-more">+${shown.length - 6}</span>`}
                 </span>
                 <span class="agents-count">${summary}</span>
                 ${
@@ -200,7 +207,7 @@ function Bar({ agents, active, open }) {
                     title="Put away"
                     onClick=${() => {
                         putAway(store.state.conversationId, agents);
-                        store.set({ subagentsOpen: false });
+                        store.set({ subagentsOpen: null });
                     }}
                 >
                     <${Icon} name="close" size=${13} />
@@ -210,23 +217,30 @@ function Bar({ agents, active, open }) {
         ${
             open &&
             html`<div class="agents-list">
-                ${ordered(agents).map((agent) => html`<${AgentRow} key=${agent.name} agent=${agent} />`)}
+                ${shown.map((agent) => html`<${AgentRow} key=${agent.name} agent=${agent} />`)}
             </div>`
         }
     </div>`;
 }
 
-/** This session's subagents, while one works or has a report on its way, and after until put away. */
+/**
+ * This session's subagents, while one works or has a report on its way, and after until put away. Once put away, it
+ * counts and lists only those that did something since.
+ */
 export function SubagentsBar() {
     const { view, conversationId, subagentsOpen } = store.state;
-    const agents = view.subagents ?? [];
     const away = awayMarks()[conversationId] ?? 0;
-    const active = agents.some((agent) => agent.busy || agent.reporting);
-    const fresh = agents.some((agent) => newest(agent) > away);
+    const agents = (view.subagents ?? []).filter(
+        (agent) => agent.busy || agent.reporting || newest(agent) > away,
+    );
 
-    if (agents.length === 0 || !(active || fresh)) {
+    if (agents.length === 0) {
         return null;
     }
 
-    return html`<${Bar} agents=${agents} active=${active} open=${subagentsOpen === true} />`;
+    return html`<${Bar}
+        agents=${agents}
+        active=${agents.some((agent) => agent.busy || agent.reporting)}
+        open=${subagentsOpen === conversationId}
+    />`;
 }

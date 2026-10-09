@@ -153,6 +153,41 @@ test(
             [],
             "no row runs past the sheet",
         );
+
+        // A search that finds fewer leaves the box where it was, under the thumb.
+        const boxTop = () =>
+            inPage<number>(
+                `return JSON.stringify(Math.round(document.querySelector(".find-input").getBoundingClientRect().top))`,
+            );
+
+        // Measured where it rests, past the sheet's rise.
+        await settled();
+        const before = await boxTop();
+
+        await page.type({ selector: ".find-input" }, "checkout");
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".pi-session").length === 1)`,
+            "one result",
+        );
+        assert.equal(await boxTop(), before, "the search box stays put");
+        await page.type({ selector: ".find-input" }, "");
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".pi-session").length === 3)`,
+            "all again",
+        );
+
+        // A long title shows whole in its preview.
+        await settled();
+        await page.click({ label: "Why does the payments gateway retry" });
+        await see(
+            `return JSON.stringify(document.querySelector(".pi-title")?.textContent === "Why does the payments gateway retry three times when the bank answers 409")`,
+            "the whole title",
+        );
+        await page.evaluate(`history.back()`);
+        await see(
+            `return JSON.stringify(document.querySelector(".pi-folder") !== null)`,
+            "the list again",
+        );
         await settled();
         await page.click({ label: "Fix the checkout total" });
         await shows("Floats drift; I will use integer cents.");

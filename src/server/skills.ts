@@ -99,6 +99,8 @@ export type ProjectTrust = {
     folders: string[];
     /** The skills in them. */
     skills: { name: string; description: string }[];
+    /** The skills in its `.pi/skills/`, which load unless Pi was told not to trust it. */
+    ownSkills: { name: string; description: string }[];
     /** Whether to ask the owner: the project has such skills, no decision applies, and Pi's setting is to ask. */
     ask: boolean;
     /** Pi's trust store cannot be read: nothing is trusted, and no answer can be saved until it is mended. */
@@ -184,15 +186,18 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
     const parent = dirname(folder);
     const saved = savedDecision(cwd, sources.agentDir);
     const folders = projectAgentsFolders(resolve(cwd), sources.home);
-    const skills =
-        folders.length === 0
+    const own = join(resolve(cwd), CONFIG_DIR_NAME, "skills");
+    const skillsIn = (paths: string[]) =>
+        paths.length === 0
             ? []
             : loadSkills({
                   cwd,
                   agentDir: sources.agentDir,
-                  skillPaths: folders,
+                  skillPaths: paths,
                   includeDefaults: false,
               }).skills.map(({ name, description }) => ({ name, description }));
+    const skills = skillsIn(folders);
+    const ownSkills = skillsIn(existsSync(own) ? [own] : []);
 
     return {
         folder,
@@ -202,6 +207,7 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
         trusted: decides(saved, sources) === "trusted",
         folders,
         skills,
+        ownSkills,
         // Never about a store that cannot be read: the answer could not be saved.
         ask: folders.length > 0 && saved === null && sources.defaultProjectTrust === "ask",
         ...(saved === undefined ? { unreadable: true as const } : {}),

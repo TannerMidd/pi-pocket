@@ -3,7 +3,7 @@
 // (`/trust`, the menu) shows the decision and changes it. Answers are saved where Pi's CLI keeps its own.
 import { useEffect } from "preact/hooks";
 import { actions, attempt, closeSheet, notify, openSheet, store } from "./store.js";
-import { html, Icon, item, Loader, Sheet, shortPath } from "./ui.js";
+import { html, Icon, Loader, Sheet, shortPath } from "./ui.js";
 
 /** Only the owner decides which projects Pi trusts: the answer goes into Pi's own settings. */
 export const trustAvailable = () => store.state.me?.role === "owner";
@@ -57,8 +57,8 @@ export function loadTrust({ force = false } = {}) {
 }
 
 /** The skills' names, a few of them: "deploy, review, and 3 more". */
-function skillNames(info, most = 3) {
-    const names = info.skills.map((skill) => skill.name);
+function skillNames(skills, most = 3) {
+    const names = skills.map((skill) => skill.name);
 
     if (names.length <= most) {
         return names.join(", ");
@@ -91,7 +91,7 @@ async function decide(choice) {
             ? `${shortPath(info.parent, server?.home)} and the folders in it`
             : "this project";
     const skills =
-        info.skills.length > 0 ? ` Pi has its skills from now on: ${skillNames(info)}.` : "";
+        info.skills.length > 0 ? ` Pi has its skills from now on: ${skillNames(info.skills)}.` : "";
 
     notify("info", `Trusted ${where}.${skills}`);
 }
@@ -115,7 +115,7 @@ export function TrustBar() {
 
     return html`<div class="trust-bar">
         <span class="grow">
-            <strong>Trust this project?</strong> Its skills in .agents/skills (${skillNames(info)}) load only in a project Pi trusts.
+            <strong>Trust this project?</strong> Its skills in .agents/skills (${skillNames(info.skills)}) load only in a project Pi trusts.
         </span>
         <span class="trust-actions">
             <button class="link small" onClick=${() => attempt(() => decide("distrust"))}>
@@ -134,6 +134,45 @@ export function TrustBar() {
             </button>
         </span>
     </div>`;
+}
+
+/** An answer in the sheet: what it does, the folder it is about when that is not this one, and whether it is saved. */
+function Choice({ label, detail, current, onClick }) {
+    return html`<button class="list-item trust-choice" onClick=${onClick}>
+        <span class="trust-choice-text">
+            <span>${label}</span>
+            ${detail && html`<span class="muted small mono">${detail}</span>`}
+        </span>
+        ${current && html`<span class="trust-current">✓ current</span>`}
+    </button>`;
+}
+
+/** Whether Pi was told not to trust the project: a saved "no", or its setting for undecided projects. */
+const distrusted = (info) =>
+    !info.trusted &&
+    (info.saved?.trusted === false ||
+        (info.saved === null && info.defaultProjectTrust === "never"));
+
+/** What the project's own skills do here, a sentence for each place they are in. */
+function ownSkillsText(info) {
+    const list = (skills) => skillNames(skills, 8);
+    const texts = [];
+
+    if (info.skills.length > 0) {
+        texts.push(
+            `In .agents/skills: ${list(info.skills)}. ${info.trusted ? "Pi has them." : "They load once you trust it."}`,
+        );
+    }
+
+    if (info.ownSkills.length > 0) {
+        texts.push(
+            `In .pi/skills: ${list(info.ownSkills)}. ${distrusted(info) ? "They stay off while it is not trusted." : "They load unless you choose Don't trust."}`,
+        );
+    }
+
+    return texts.length > 0
+        ? texts
+        : ["It has no skills of its own, so this changes nothing in Pi Pocket here."];
 }
 
 /** Where the decision comes from, in a sentence. */
@@ -180,39 +219,40 @@ export function TrustSheet() {
             await decide(choice);
             closeSheet();
         });
-    const saved = (path, trusted) =>
-        info.saved?.path === path && info.saved.trusted === trusted ? "current" : "";
+    const saved = (path, trusted) => info.saved?.path === path && info.saved.trusted === trusted;
 
     return html`<${Sheet} title="Project trust" onClose=${closeSheet}>
         <p class="mono small">${short(info.folder)}</p>
         <p>${status(info, short)}</p>
-        <p>
-            ${
-                info.skills.length > 0
-                    ? `Its own skills, in .agents/skills: ${skillNames(info, 8)}. ${info.trusted ? "Pi has them." : "They load once you trust it."}`
-                    : "It has no skills in .agents/skills, so this changes nothing in Pi Pocket here."
-            }
-        </p>
+        ${ownSkillsText(info).map((text) => html`<p>${text}</p>`)}
         <p class="muted small">
             Pi's CLI goes by the same decision, saved in ~/.pi/agent/trust.json. There, trusting a project also loads its .pi settings, extensions, and packages, which run code on this machine. Trust only folders whose contents you trust.
         </p>
         ${
-            trustAvailable()
-                ? html`<div class="group">
-                    ${item("Trust this folder", () => choose("trust"), saved(info.folder, true))}
-                    ${
-                        info.parent &&
-                        item(
-                            "Trust the folder above it",
-                            () => choose("trust-parent"),
-                            [short(info.parent), saved(info.parent, true)]
-                                .filter(Boolean)
-                                .join(" · "),
-                        )
-                    }
-                    ${item("Don't trust", () => choose("distrust"), saved(info.folder, false))}
-                </div>`
-                : html`<p class="muted small">Only the owner can change this.</p>`
+            !trustAvailable()
+                ? html`<p class="muted small">Only the owner can change this.</p>`
+                : !info.unreadable &&
+                  html`<div class="group">
+                      <${Choice}
+                          label="Trust this folder"
+                          current=${saved(info.folder, true)}
+                          onClick=${() => choose("trust")}
+                      />
+                      ${
+                          info.parent &&
+                          html`<${Choice}
+                              label="Trust the folder above it"
+                              detail=${short(info.parent)}
+                              current=${saved(info.parent, true)}
+                              onClick=${() => choose("trust-parent")}
+                          />`
+                      }
+                      <${Choice}
+                          label="Don't trust"
+                          current=${saved(info.folder, false)}
+                          onClick=${() => choose("distrust")}
+                      />
+                  </div>`
         }
     <//>`;
 }

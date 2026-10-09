@@ -1444,6 +1444,12 @@ pre.diff .del {
     font-family: var(--mono);
 }
 
+.report-why {
+    color: var(--err);
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+}
+
 .approval {
     border: 2px solid var(--warn);
     background: var(--warn-soft);
@@ -4405,6 +4411,26 @@ textarea.notes {
 /* The trust question keeps its words a readable width: on a phone its answers go under them, together, to the right. */
 .trust-bar > .grow {
     flex: 1 1 15rem;
+}
+
+/* An answer in the trust sheet: what it does over the folder it is about, which wraps rather than squeezes it. */
+.list-item > span.trust-choice-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    min-width: 0;
+    text-align: left;
+}
+
+.trust-choice-text > .mono {
+    overflow-wrap: anywhere;
+}
+
+.trust-current {
+    flex: none;
+    color: var(--accent);
+    font-size: 0.78rem;
 }
 
 .trust-actions {
@@ -7947,9 +7973,21 @@ textarea.notes {
 .pi-facts dd {
     margin: 0;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+}
+
+/* The session's whole title, however long: the sheet's own title is short. */
+.pi-title {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.pi-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
 }
 
 .pi-note {
@@ -8078,9 +8116,24 @@ textarea.notes {
     background: var(--err);
 }
 
+.agents-dot.stopped {
+    background: var(--muted);
+}
+
+.agents-more {
+    margin-left: 2px;
+    color: var(--muted);
+    font-size: 0.7rem;
+    line-height: 7px;
+}
+
 .agents-count {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agents-lead {
@@ -8156,6 +8209,16 @@ textarea.notes {
 
 .agent-row.failed .agent-mark {
     color: var(--err);
+}
+
+.agent-row.stopped .agent-mark {
+    color: var(--muted);
+}
+
+.agent-error {
+    color: var(--err);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
 }
 
 .agent-main {

@@ -128,7 +128,7 @@ test(
 
         await page.click({ label: "Review" });
         await see(
-            `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("Its own skills, in .agents/skills: deploy.") === true)`,
+            `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("In .agents/skills: deploy. They load once you trust it.") === true)`,
             "the sheet, with what trusting it loads",
         );
         assert.equal(decision(folder), null, "looking decides nothing");
@@ -187,7 +187,7 @@ test("Don't trust stops the question, and /trust changes the answer", real, asyn
         await inPage<string>(
             `return JSON.stringify([...document.querySelectorAll(".sheet .list-item")].find((row) => row.textContent.startsWith("Don't trust"))?.textContent ?? "")`,
         ),
-        "Don't trustcurrent",
+        "Don't trust✓ current",
         "the saved answer is marked",
     );
     await settled();
@@ -282,6 +282,55 @@ test(
         await see(
             `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("Trusted, as the folder it is in") === true)`,
             "the sheet saying where the trust comes from",
+        );
+    },
+);
+
+test(
+    "a project with only .pi/skills: no question, and the sheet says what Don't trust does",
+    real,
+    async () => {
+        // A long folder name, so the folder above it is a long path in the sheet.
+        const deep = join(
+            root,
+            "a-folder-with-a-rather-long-name-for-a-phone",
+            "and-another-one-inside-it",
+        );
+
+        mkdirSync(deep, { recursive: true });
+        const folder = realpathSync(mkdtempSync(join(deep, "pi-only-")));
+
+        mkdirSync(join(folder, ".git"));
+        mkdirSync(join(folder, ".pi", "skills", "lint-only"), { recursive: true });
+        writeFileSync(
+            join(folder, ".pi", "skills", "lint-only", "SKILL.md"),
+            "---\nname: lint-only\ndescription: Lint.\n---\nLint.\n",
+        );
+        const id = await newSession(app, folder);
+
+        await open(id);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        assert.equal(await inPage<string | null>(bar), null, "nothing to ask: no .agents/skills");
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "trust" })`);
+        await see(
+            `return JSON.stringify(document.querySelector(".sheet")?.textContent.includes("In .pi/skills: lint-only. They load unless you choose Don't trust.") === true)`,
+            "the sheet on .pi/skills",
+        );
+        const label = await inPage<{ lines: number; fits: boolean }>(`
+        const row = [...document.querySelectorAll(".trust-choice")].find((each) => each.textContent.startsWith("Trust the folder above it"));
+        const words = row.querySelector(".trust-choice-text > span");
+        const height = parseFloat(getComputedStyle(words).lineHeight) || 20;
+
+        return JSON.stringify({
+            lines: Math.round(words.getBoundingClientRect().height / height),
+            fits: row.getBoundingClientRect().right <= document.querySelector(".sheet-body").getBoundingClientRect().right + 1,
+        });
+    `);
+
+        assert.deepEqual(
+            label,
+            { lines: 1, fits: true },
+            "its words on one line, the path under them",
         );
     },
 );

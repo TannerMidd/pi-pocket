@@ -36,6 +36,7 @@ import {
     type Schedule,
     ScheduleDoc,
     type SubagentRecord,
+    STOPPED,
     SubagentsDoc,
     type Turns,
     TurnsDoc,
@@ -422,6 +423,10 @@ export class Room {
                 ...(record.askedAt === undefined ? {} : { askedAt: record.askedAt }),
                 ...(record.answeredAt === undefined ? {} : { answeredAt: record.answeredAt }),
                 ...(record.failed === true ? { failed: true } : {}),
+                ...(record.failed === true && record.error === STOPPED ? { stopped: true } : {}),
+                ...(record.failed === true && record.error !== undefined && record.error !== STOPPED
+                    ? { error: record.error }
+                    : {}),
                 ...(this.#reporting.has(name) ? { reporting: true } : {}),
             })),
             authors: this.authors,

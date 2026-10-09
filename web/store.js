@@ -81,8 +81,8 @@ export const store = {
         templates: null,
         /** Whether Pi trusts a conversation's project, for its own skills (`trust.js`): `{ conversationId, cwd, info }`. */
         trust: null,
-        /** The subagents bar shows a row for each (`subagents.js`). */
-        subagentsOpen: false,
+        /** The conversation whose subagents bar shows a row for each subagent (`subagents.js`); null for none. */
+        subagentsOpen: null,
         /** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
         filesLoaded: 0,
         /** `!` commands this tab started that have no entry yet: `{ taskId, command, conversationId, at }`. */
