@@ -9,7 +9,7 @@
  * request IDs keep a restarted task from delivering a message or a report twice.
  */
 import type { AssistantMessage, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { Type } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, Type } from "@earendil-works/pi-ai";
 import type { Context } from "@earendil-works/chord";
 import {
     AssistantEntry,
@@ -30,6 +30,7 @@ import {
 import { type PendingReport, REPORT_PREFIX, STOPPED, SubagentsDoc } from "../docs.ts";
 import { describe } from "../errors.ts";
 import type { PocketHost } from "../host.ts";
+import { THINKING_LEVELS } from "../models.ts";
 import { requestFor } from "../requests.ts";
 
 function textOf(message: AssistantMessage | undefined): string {
@@ -38,7 +39,8 @@ function textOf(message: AssistantMessage | undefined): string {
         .join("");
 }
 
-const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+/** Why a report says its subagent went idle: its run ended without taking the message, and none will. */
+const IDLE = "went idle without taking the message; send it again";
 
 /**
  * A subagent's conversation is owned by an anchor: a background task that finishes at once. Background tasks are a
@@ -89,7 +91,42 @@ function reporterFor(Courier: CourierTask) {
                         ? `subagent:${reporter.id}`
                         : requestFor(requestedBy, `subagent-${reporter.id}`);
                 const submission = await subagent.submit({ ...request, requestId }, context);
-                const settled = await submission.wait(context);
+                // Pi Durable leaves a failed run's inbox alone, so a queued follow-up waits for a boundary that never
+                // comes: once the subagent is idle with it still queued, withdraw it, which ends the wait below.
+                const watch = await runtime.watchDoc(LiveDoc, conversationId, context);
+                let withdrawn = false;
+                // The withdrawal under way, if any. It settles the wait below before it can say it withdrew.
+                let withdrawing: Promise<unknown> = Promise.resolve();
+                let settled: Awaited<ReturnType<typeof submission.wait>>;
+
+                try {
+                    if (watch !== undefined) {
+                        // Once withdrawn it stays so: a later call finds the submission settled, which changes nothing.
+                        const strand = async (live: NonNullable<typeof watch>["value"]) => {
+                            if (live !== null && live.run === undefined) {
+                                const abort = submission.abort(context);
+
+                                withdrawing = abort;
+
+                                if ((await abort) === "aborted") {
+                                    withdrawn = true;
+                                }
+                            }
+                        };
+
+                        // A listener is never called inline, so the value it started on is this one's to check.
+                        await strand(watch.value);
+                        watch.start(strand);
+                    }
+
+                    settled = await submission.wait(context);
+                } finally {
+                    // On every way out, so no watch outlives the phase.
+                    await watch?.stop();
+                    // Stopping leaves a call under way running. Its reaction to the withdrawal was added first, so it
+                    // sets `withdrawn` before this goes on. A failed withdrawal surfaces where it was made.
+                    await withdrawing.catch(() => {});
+                }
 
                 await runtime.commit(async (tx) => {
                     const next = (report?: string) =>
@@ -98,7 +135,9 @@ function reporterFor(Courier: CourierTask) {
                     const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
 
                     if (settled.status === "unanswered") {
-                        const why = whyUnanswered(settled.reason, settled.detail);
+                        const why = withdrawn
+                            ? IDLE
+                            : whyUnanswered(settled.reason, settled.detail);
 
                         if (agent !== undefined) {
                             agent.answeredAt = Date.now();
@@ -596,7 +635,15 @@ export default function createSubagents(host: PocketHost) {
             model: Type.Optional(
                 Type.String({ description: "spawn only: provider/modelId. Default: your model." }),
             ),
-            thinking: Type.Optional(Type.Union(THINKING.map((level) => Type.Literal(level)))),
+            thinking: Type.Optional(
+                Type.Union(
+                    THINKING_LEVELS.map((level) => Type.Literal(level)),
+                    {
+                        description:
+                            "spawn only: its thinking level. One its model lacks becomes the nearest it has.",
+                    },
+                ),
+            ),
             tools: Type.Optional(
                 Type.Array(Type.String(), {
                     description: "spawn only: the tool names it may use. Default: your tools.",
@@ -692,6 +739,22 @@ export default function createSubagents(host: PocketHost) {
 
                           return found;
                       });
+            // TypeBox infers no type from a union built from a list; the schema itself checks the value.
+            const asked = args.thinking as ModelThinkingLevel | undefined;
+            let wanted = asked;
+            let thinking = asked;
+
+            // As the model picker does: the level asked for, or else the one it starts with as a copy of this agent, and
+            // when its model lacks that level, the nearest one it has.
+            if (action === "spawn" && (asked !== undefined || model !== undefined)) {
+                const parent = await api.agent(context);
+                const ref = model ?? parent.model;
+                const found =
+                    ref === undefined ? undefined : api.models.getModel(ref.provider, ref.modelId);
+
+                wanted = asked ?? parent.thinkingLevel;
+                thinking = found === undefined ? wanted : clampThinkingLevel(found, wanted);
+            }
 
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
@@ -711,9 +774,7 @@ export default function createSubagents(host: PocketHost) {
                         extensions: { remove: [SubagentTools] },
                         instructions: `You are the subagent "${name}". You work for another agent, not directly for a person, although a person may open your conversation and talk to you. Answer requests completely but concisely: your final answer is what gets reported back.`,
                         ...(model === undefined ? {} : { model }),
-                        ...(args.thinking === undefined
-                            ? {}
-                            : { thinkingLevel: args.thinking as ModelThinkingLevel }),
+                        ...(thinking === undefined ? {} : { thinkingLevel: thinking }),
                         ...(tools === undefined ? {} : { tools }),
                     });
                     state.agents[name] = { conversationId: child.id, reported: [] };
@@ -736,7 +797,13 @@ export default function createSubagents(host: PocketHost) {
 
                 state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
 
-                return action === "send" ? `Sent to ${name}.` : `Started ${name}.`;
+                if (action === "send") {
+                    return `Sent to ${name}.`;
+                }
+
+                return thinking === wanted
+                    ? `Started ${name}.`
+                    : `Started ${name}, thinking at ${thinking}: its model has no ${wanted}.`;
             }, context);
             const current = (await api.snapshot(SubagentsDoc, api.conversationId, context))?.agents[
                 name

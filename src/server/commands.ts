@@ -39,6 +39,7 @@ import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY } from "./entr
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
+import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
 import { expandPromptTemplate, expandSkillCommand } from "./prompts.ts";
@@ -70,7 +71,6 @@ export interface SubmitRequest {
     inlineFiles?: boolean;
 }
 
-export const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 /** Attached images that also go to the model itself, when it takes images. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
@@ -777,12 +777,9 @@ export class Commands {
 
         if (
             optionalText(request.thinkingLevel, "thinkingLevel") !== undefined &&
-            !THINKING_LEVELS.has(request.thinkingLevel!)
+            !isThinkingLevel(request.thinkingLevel)
         ) {
-            throw new HttpError(
-                400,
-                `thinkingLevel must be one of ${[...THINKING_LEVELS].join(", ")}`,
-            );
+            throw new HttpError(400, `thinkingLevel must be one of ${THINKING_LEVELS.join(", ")}`);
         }
 
         optionalText(request.cwd, "cwd");

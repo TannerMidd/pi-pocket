@@ -54,7 +54,7 @@ A module split into parts keeps its name for the part others import, with the re
 | `prompts.ts`              | Pi's prompt templates as slash commands, and `/skill:name` expanded                                                                                                                                                                           |
 | `pi-sessions.ts`          | Pi's sessions from the terminal (`~/.pi/agent/sessions/`), read and never written: listing them, and one as a new session's history, with Pi's own context of it (compactions, context edits); `commands.continuePiSession` makes the session |
 | `skills.ts`               | Which skills a session's folder has, from where Pi's CLI looks and in its order, with Pi's project trust; the system prompt and `/skill:name` both use it. Reads and saves the owner's answer to "trust this project?"                        |
-| `models.ts`               | The models people can pick, the one a conversation runs with, and finding one by name                                                                                                                                                         |
+| `models.ts`               | The models people can pick, the one a conversation runs with, finding one by name, and the thinking levels                                                                                                                                    |
 | `running.ts`              | Running now, from Pi Durable's task graph                                                                                                                                                                                                     |
 
 ### A conversation's folder and history

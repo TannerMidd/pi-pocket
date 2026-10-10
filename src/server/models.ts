@@ -1,7 +1,36 @@
-/** Models as browsers see them: the ones available, the one a conversation runs with, and finding one by name. */
-import { type Api, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
+/**
+ * Models as browsers see them: the ones available, the one a conversation runs with, finding one by name, and the
+ * thinking levels.
+ */
+import {
+    type Api,
+    getSupportedThinkingLevels,
+    type Model,
+    type ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentState, ModelRef } from "@earendil-works/pi-durable";
+
+// A record, so a level Pi adds fails the type check until it is here too.
+const LEVELS: Record<ModelThinkingLevel, true> = {
+    off: true,
+    minimal: true,
+    low: true,
+    medium: true,
+    high: true,
+    xhigh: true,
+    max: true,
+};
+
+/** Every thinking level, lowest first: what a session's model picker, the default model, and the subagent tool take. */
+export const THINKING_LEVELS: readonly ModelThinkingLevel[] = Object.freeze(
+    Object.keys(LEVELS) as ModelThinkingLevel[],
+);
+
+/** Whether `level` names a thinking level. */
+export function isThinkingLevel(level: unknown): level is ModelThinkingLevel {
+    return typeof level === "string" && Object.hasOwn(LEVELS, level);
+}
 
 type ModelSummary = {
     provider: string;
