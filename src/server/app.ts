@@ -43,7 +43,7 @@ import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
-import { Commands, THINKING_LEVELS } from "./commands.ts";
+import { Commands } from "./commands.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
 import {
     ArtifactBodyDoc,
@@ -65,7 +65,7 @@ import { Goals } from "./goals.ts";
 import { type ApprovalRequest, Approvals, type PocketHost } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
-import { modelList, resolveModel } from "./models.ts";
+import { isThinkingLevel, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { configureHttp } from "./net.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
@@ -2002,13 +2002,11 @@ export class PocketApp {
         if (
             typeof asked.provider !== "string" ||
             typeof asked.modelId !== "string" ||
-            (asked.thinkingLevel !== undefined &&
-                (typeof asked.thinkingLevel !== "string" ||
-                    !THINKING_LEVELS.has(asked.thinkingLevel)))
+            (asked.thinkingLevel !== undefined && !isThinkingLevel(asked.thinkingLevel))
         ) {
             throw new HttpError(
                 400,
-                `defaultModel must be null, or { provider, modelId, thinkingLevel? } with thinkingLevel one of ${[...THINKING_LEVELS].join(", ")}`,
+                `defaultModel must be null, or { provider, modelId, thinkingLevel? } with thinkingLevel one of ${THINKING_LEVELS.join(", ")}`,
             );
         }
 

@@ -9,7 +9,7 @@
  * request IDs keep a restarted task from delivering a message or a report twice.
  */
 import type { AssistantMessage, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { Type } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, Type } from "@earendil-works/pi-ai";
 import type { Context } from "@earendil-works/chord";
 import {
     AssistantEntry,
@@ -30,6 +30,7 @@ import {
 import { type PendingReport, REPORT_PREFIX, STOPPED, SubagentsDoc } from "../docs.ts";
 import { describe } from "../errors.ts";
 import type { PocketHost } from "../host.ts";
+import { THINKING_LEVELS } from "../models.ts";
 import { requestFor } from "../requests.ts";
 
 function textOf(message: AssistantMessage | undefined): string {
@@ -37,8 +38,6 @@ function textOf(message: AssistantMessage | undefined): string {
         .flatMap((part) => (part.type === "text" ? [part.text] : []))
         .join("");
 }
-
-const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 /** Why a report says its subagent went idle: its run ended without taking the message, and none will. */
 const IDLE = "went idle without taking the message; send it again";
@@ -627,7 +626,15 @@ export default function createSubagents(host: PocketHost) {
             model: Type.Optional(
                 Type.String({ description: "spawn only: provider/modelId. Default: your model." }),
             ),
-            thinking: Type.Optional(Type.Union(THINKING.map((level) => Type.Literal(level)))),
+            thinking: Type.Optional(
+                Type.Union(
+                    THINKING_LEVELS.map((level) => Type.Literal(level)),
+                    {
+                        description:
+                            "spawn only: its thinking level. One its model lacks becomes the nearest it has.",
+                    },
+                ),
+            ),
             tools: Type.Optional(
                 Type.Array(Type.String(), {
                     description: "spawn only: the tool names it may use. Default: your tools.",
@@ -723,6 +730,19 @@ export default function createSubagents(host: PocketHost) {
 
                           return found;
                       });
+            // As the model picker does: a level the subagent's model lacks becomes the nearest one it has.
+            const asked = args.thinking as ModelThinkingLevel | undefined;
+            let thinking = asked;
+
+            if (action === "spawn" && thinking !== undefined) {
+                const ref = model ?? (await api.agent(context)).model;
+                const found =
+                    ref === undefined ? undefined : api.models.getModel(ref.provider, ref.modelId);
+
+                if (found !== undefined) {
+                    thinking = clampThinkingLevel(found, thinking);
+                }
+            }
 
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
@@ -742,9 +762,7 @@ export default function createSubagents(host: PocketHost) {
                         extensions: { remove: [SubagentTools] },
                         instructions: `You are the subagent "${name}". You work for another agent, not directly for a person, although a person may open your conversation and talk to you. Answer requests completely but concisely: your final answer is what gets reported back.`,
                         ...(model === undefined ? {} : { model }),
-                        ...(args.thinking === undefined
-                            ? {}
-                            : { thinkingLevel: args.thinking as ModelThinkingLevel }),
+                        ...(thinking === undefined ? {} : { thinkingLevel: thinking }),
                         ...(tools === undefined ? {} : { tools }),
                     });
                     state.agents[name] = { conversationId: child.id, reported: [] };
@@ -767,7 +785,13 @@ export default function createSubagents(host: PocketHost) {
 
                 state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
 
-                return action === "send" ? `Sent to ${name}.` : `Started ${name}.`;
+                if (action === "send") {
+                    return `Sent to ${name}.`;
+                }
+
+                return thinking === asked
+                    ? `Started ${name}.`
+                    : `Started ${name}, thinking at ${thinking}: its model has no ${asked}.`;
             }, context);
             const current = (await api.snapshot(SubagentsDoc, api.conversationId, context))?.agents[
                 name
