@@ -1031,3 +1031,117 @@ test(
         await app.commands.abort(id, owner(app));
     },
 );
+
+test(
+    "the board: the rail opens it with every count; arrows move the focus, Enter opens the square focused, Esc closes it",
+    real,
+    async () => {
+        const id = await started(0);
+
+        await says(".agents-count", /^1 working · 1 done$/, 15_000);
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/s/${id}`);
+        await see(
+            `return JSON.stringify(document.querySelector(".rail-agents") !== null)`,
+            "the rail",
+        );
+        await page.click({ selector: ".rail-agents" });
+        // Every session's count, this one's and those before it in this file.
+        await says(".board-sub", /^\d+ in \d+ sessions?$/);
+        const row = `[...document.querySelectorAll(".board-row")].find((each) => each.querySelector(".board-cells .board-cell[data-agent]") && [...each.querySelectorAll(".board-cell")].length === 2)`;
+
+        await see(
+            `return JSON.stringify(${row}?.querySelector(".board-summary")?.textContent.trim() === "1 working · 1 done")`,
+            "the session's counts",
+        );
+
+        // Focus on the first square; the arrow takes the focus, and the selection, to the next.
+        await page.evaluate(`${row}.querySelector(".board-cell").focus()`);
+        await page.press("ArrowRight");
+        const focused = await inPage<{ agent: string | null; selected: boolean }>(`
+        const cell = document.activeElement;
+
+        return JSON.stringify({ agent: cell?.getAttribute("data-agent") ?? null, selected: cell?.getAttribute("aria-pressed") === "true" });
+    `);
+
+        assert.ok(
+            focused.agent !== null && focused.selected,
+            `the focus went with the selection: ${JSON.stringify(focused)}`,
+        );
+        // Enter opens the square that has the focus.
+        await page.press("Enter");
+        await see(
+            `return JSON.stringify(location.pathname === "/s/${focused.agent}" && document.querySelector(".board") === null)`,
+            "the subagent it focused, open",
+        );
+
+        // Again (past the step back that closing it took), and Esc closes it.
+
+        await settled();
+
+        await page.click({ selector: ".rail-agents" });
+        await see(
+            `return JSON.stringify(document.querySelector(".board") !== null)`,
+            "the board again",
+        );
+        await page.press("Escape");
+        await see(
+            `return JSON.stringify(document.querySelector(".board") === null)`,
+            "closed by Esc",
+        );
+        await app.commands.abort(id, owner(app));
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "the board on a phone: stopped ones say stopped, and a swipe right goes back",
+    real,
+    async () => {
+        const id = await started(0);
+        const slow = async () =>
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.slow;
+
+        await until(
+            async () => (await slow()) !== undefined && app.isBusy((await slow())!.conversationId),
+            "slow at work",
+        );
+        await app.commands.abort((await slow())!.conversationId, owner(app));
+        await says(".agents-count", /^1 stopped · 1 done$/, 15_000);
+        await page.evaluate(`(await import("/store.js")).store.set({ board: true })`);
+        await see(
+            `return JSON.stringify(document.querySelector(".board.phone") !== null)`,
+            "the board, at phone size",
+        );
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".board-summary")].some((each) => each.textContent.trim() === "1 stopped · 1 done"))`,
+            "stopped apart from done",
+        );
+        await settled();
+        await page.evaluate(`
+        const target = document.querySelector(".board-list");
+        const touch = (x) => new Touch({ identifier: 1, target, clientX: x, clientY: 400 });
+        const fire = (type, x) =>
+            target.dispatchEvent(
+                new TouchEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    touches: type === "touchend" ? [] : [touch(x)],
+                    changedTouches: [touch(x)],
+                }),
+            );
+
+        fire("touchstart", 80);
+
+        for (let x = 100; x <= 260; x += 20) {
+            fire("touchmove", x);
+        }
+
+        fire("touchend", 260);
+    `);
+        await see(
+            `return JSON.stringify(document.querySelector(".board") === null)`,
+            "back from the board",
+        );
+    },
+);

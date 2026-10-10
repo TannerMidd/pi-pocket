@@ -945,14 +945,20 @@ export function RailNav({ foldable = false, folded = false }) {
         ${
             !folded &&
             html`<span class="rail-gap"></span>
-                <button
-                    class="rail-button on"
-                    title=${foldable ? `Sessions · fold to numbers (${keys})` : "Sessions"}
-                    aria-current="page"
-                    onClick=${foldable ? fold : undefined}
-                >
-                    <${Icon} name="chat" size=${18} />
-                </button>
+                ${
+                    foldable
+                        ? html`<button
+                              class="rail-button on"
+                              title=${`Sessions · fold to numbers (${keys})`}
+                              aria-current="page"
+                              onClick=${fold}
+                          >
+                              <${Icon} name="chat" size=${18} />
+                          </button>`
+                        : html`<span class="rail-button on" title="Sessions" aria-current="page">
+                              <${Icon} name="chat" size=${18} />
+                          </span>`
+                }
                 <span class="rail-fill"></span>`
         }
         ${
@@ -980,7 +986,14 @@ export function RailNav({ foldable = false, folded = false }) {
         <button
             class=${`rail-button rail-agents ${live > 0 ? "lit" : ""} ${board ? "open" : ""}`}
             title="Subagents in every session"
-            aria-label=${live > 0 ? `Subagents, ${live} at work` : "Subagents"}
+            aria-label=${[
+                "Subagents",
+                live > 0 && `${live} at work`,
+                agents.waiting > 0 && `${agents.waiting} waiting for approval`,
+                agents.failed > 0 && `${agents.failed} failed`,
+            ]
+                .filter(Boolean)
+                .join(", ")}
             aria-pressed=${board}
             onClick=${toggleBoard}
         >

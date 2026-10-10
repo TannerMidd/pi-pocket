@@ -513,6 +513,11 @@ startEdgeBack();
 startSwipes((where) => {
     const { conversationId, view, missing } = store.state;
 
+    // The subagents board in the conversation's place (or the home screen's): right goes back, as its × does.
+    if (where === "board") {
+        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+    }
+
     if (conversationId === null || !view.conversation || missing) {
         return {};
     }

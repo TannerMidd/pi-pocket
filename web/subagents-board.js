@@ -73,11 +73,16 @@ function summaryOf(counts, { short = false } = {}) {
             (state) => counts[state] > 0 && !["stopped", "done"].includes(state),
         );
 
+        // Only finished ones left: those stopped, apart from those done.
+        const finished = ["stopped", "done"]
+            .filter((state) => counts[state] > 0)
+            .map((state) => `${counts[state]} ${state}`);
+
         return parts.length > 0
             ? parts
                   .map((state) => `${counts[state]} ${state === "waiting" ? "approve" : state}`)
                   .join(" · ")
-            : `${totalOf(counts)} done`;
+            : finished.join(" · ");
     }
 
     return STATES.filter((state) => counts[state] > 0)
@@ -472,13 +477,22 @@ export function SubagentsBoard() {
         }
 
         if (event.key === "Enter") {
-            // A focused button takes its own Enter, but for a square, and the rail's button that opened the board.
-            const own =
-                target instanceof HTMLButtonElement &&
-                !target.classList.contains("board-cell") &&
-                !target.classList.contains("rail-agents");
+            // On a square, the square: the one that has the focus, whichever is selected. Any other button takes its
+            // own Enter (the rail's, which opened the board, closes it); elsewhere, the one selected opens.
+            const cell = target instanceof Element ? target.closest(".board-cell") : null;
 
-            if (chosen && !own) {
+            if (cell !== null) {
+                const agent = byId.get(Number(cell.getAttribute("data-agent")));
+
+                if (agent) {
+                    event.preventDefault();
+                    open(agent);
+                }
+
+                return;
+            }
+
+            if (chosen && !(target instanceof HTMLButtonElement)) {
                 event.preventDefault();
                 open(chosen);
             }
@@ -529,9 +543,11 @@ export function SubagentsBoard() {
         }
 
         setSelected(grid[row][column]);
-        box.current
-            ?.querySelector(`.board-cell[data-agent="${grid[row][column]}"]`)
-            ?.scrollIntoView({ block: "nearest" });
+        // The focus goes with the selection, so what a screen reader says and what Enter opens are the square shown.
+        const cell = box.current?.querySelector(`.board-cell[data-agent="${grid[row][column]}"]`);
+
+        cell?.focus({ preventScroll: true });
+        cell?.scrollIntoView({ block: "nearest" });
     };
 
     useEffect(() => {

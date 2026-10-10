@@ -7860,10 +7860,20 @@ textarea.notes {
     .segmented button {
         min-height: 42px;
     }
-    /* iOS zooms into a text field under 16px as it takes focus. */
+    /* iOS zooms into a text field under 16px as it takes focus. (The board's field is styled after this: hence
+     * the board in its selector.) */
     .sessions .search input,
-    .board-search input {
+    .board .board-search input,
+    .new-folder input,
+    .launcher-input input {
         font-size: 16px;
+    }
+    /* Rows a thumb can take, and that answer the press. */
+    .session {
+        height: 40px;
+    }
+    .session:active {
+        background: var(--pressed);
     }
     /* The session list keeps its look; its tabs, folds, and clear button take a taller tap. */
     .session-tabs button::after,
@@ -7894,8 +7904,12 @@ textarea.notes {
     .new-button::before {
         inset: -6px -3px;
     }
+    /* Rows of filters far enough apart that their taps do not overlap (after the board's own gap, hence .board). */
+    .board .board-legend {
+        row-gap: 16px;
+    }
     .board-filter::before {
-        inset: -10px -4px;
+        inset: -8px -4px;
     }
     .group-head {
         position: relative;
@@ -9221,8 +9235,8 @@ textarea.notes {
 }
 
 .board.phone .board-cell {
-    width: 30px;
-    height: 30px;
+    width: 36px;
+    height: 36px;
     font-size: 0.72rem;
 }
 

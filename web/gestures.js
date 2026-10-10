@@ -374,9 +374,9 @@ function scrollsSideways(target, root) {
  * One-handed swipes on a phone, with passive listeners so scrolling never waits on them. On the conversation, sideways:
  * right goes back, left opens a place (the Files tile), each with a mark that follows the finger and lights when
  * letting go would act; the conversation leans a little the same way. In the Files tile, right goes back too. Up from
- * the message box (not its text, nor the queue and bars above it) opens the places. `swipes(where)` says, when a touch
- * starts on `"conversation"` or `"files"`, what each does now: `{ right, left }` as `{ path, label, run }`, and `up` as
- * a function, or none.
+ * the message box (not its text, nor the queue and bars above it) opens the places; on the subagents board, right goes
+ * back. `swipes(where)` says, when a touch starts on `"conversation"`, `"files"`, or `"board"`, what each does now:
+ * `{ right, left }` as `{ path, label, run }`, and `up` as a function, or none.
  */
 export function startSwipes(swipes) {
     let swipe = null;
@@ -420,8 +420,16 @@ export function startSwipes(swipes) {
                 return;
             }
 
-            const root = target.closest?.(".pane > .scroller, .files-tile:not(.leaving)");
-            const acts = swipes(root?.classList.contains("files-tile") ? "files" : "conversation");
+            const root = target.closest?.(
+                ".pane > .scroller, .files-tile:not(.leaving), .board.phone",
+            );
+            const acts = swipes(
+                root?.classList.contains("files-tile")
+                    ? "files"
+                    : root?.classList.contains("board")
+                      ? "board"
+                      : "conversation",
+            );
             const at = {
                 x: touch.clientX,
                 y: touch.clientY,
