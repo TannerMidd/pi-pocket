@@ -95,6 +95,8 @@ function reporterFor(Courier: CourierTask) {
                 // comes: once the subagent is idle with it still queued, withdraw it, which ends the wait below.
                 const watch = await runtime.watchDoc(LiveDoc, conversationId, context);
                 let withdrawn = false;
+                // The withdrawal under way, if any. It settles the wait below before it can say it withdrew.
+                let withdrawing: Promise<unknown> = Promise.resolve();
                 let settled: Awaited<ReturnType<typeof submission.wait>>;
 
                 try {
@@ -102,7 +104,11 @@ function reporterFor(Courier: CourierTask) {
                         // Once withdrawn it stays so: a later call finds the submission settled, which changes nothing.
                         const strand = async (live: NonNullable<typeof watch>["value"]) => {
                             if (live !== null && live.run === undefined) {
-                                if ((await submission.abort(context)) === "aborted") {
+                                const abort = submission.abort(context);
+
+                                withdrawing = abort;
+
+                                if ((await abort) === "aborted") {
                                     withdrawn = true;
                                 }
                             }
@@ -117,6 +123,9 @@ function reporterFor(Courier: CourierTask) {
                 } finally {
                     // On every way out, so no watch outlives the phase.
                     await watch?.stop();
+                    // Stopping leaves a call under way running. Its reaction to the withdrawal was added first, so it
+                    // sets `withdrawn` before this goes on. A failed withdrawal surfaces where it was made.
+                    await withdrawing.catch(() => {});
                 }
 
                 await runtime.commit(async (tx) => {
@@ -730,18 +739,21 @@ export default function createSubagents(host: PocketHost) {
 
                           return found;
                       });
-            // As the model picker does: a level the subagent's model lacks becomes the nearest one it has.
+            // TypeBox infers no type from a union built from a list; the schema itself checks the value.
             const asked = args.thinking as ModelThinkingLevel | undefined;
+            let wanted = asked;
             let thinking = asked;
 
-            if (action === "spawn" && thinking !== undefined) {
-                const ref = model ?? (await api.agent(context)).model;
+            // As the model picker does: the level asked for, or else the one it starts with as a copy of this agent, and
+            // when its model lacks that level, the nearest one it has.
+            if (action === "spawn" && (asked !== undefined || model !== undefined)) {
+                const parent = await api.agent(context);
+                const ref = model ?? parent.model;
                 const found =
                     ref === undefined ? undefined : api.models.getModel(ref.provider, ref.modelId);
 
-                if (found !== undefined) {
-                    thinking = clampThinkingLevel(found, thinking);
-                }
+                wanted = asked ?? parent.thinkingLevel;
+                thinking = found === undefined ? wanted : clampThinkingLevel(found, wanted);
             }
 
             const result = await api.commit(async (tx) => {
@@ -789,9 +801,9 @@ export default function createSubagents(host: PocketHost) {
                     return `Sent to ${name}.`;
                 }
 
-                return thinking === asked
+                return thinking === wanted
                     ? `Started ${name}.`
-                    : `Started ${name}, thinking at ${thinking}: its model has no ${asked}.`;
+                    : `Started ${name}, thinking at ${thinking}: its model has no ${wanted}.`;
             }, context);
             const current = (await api.snapshot(SubagentsDoc, api.conversationId, context))?.agents[
                 name

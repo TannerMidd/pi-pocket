@@ -1,4 +1,7 @@
-/** Models as browsers see them: the ones available, the one a conversation runs with, and finding one by name. */
+/**
+ * Models as browsers see them: the ones available, the one a conversation runs with, finding one by name, and the
+ * thinking levels.
+ */
 import {
     type Api,
     getSupportedThinkingLevels,
@@ -20,7 +23,9 @@ const LEVELS: Record<ModelThinkingLevel, true> = {
 };
 
 /** Every thinking level, lowest first: what a session's model picker, the default model, and the subagent tool take. */
-export const THINKING_LEVELS = Object.keys(LEVELS) as ModelThinkingLevel[];
+export const THINKING_LEVELS: readonly ModelThinkingLevel[] = Object.freeze(
+    Object.keys(LEVELS) as ModelThinkingLevel[],
+);
 
 /** Whether `level` names a thinking level. */
 export function isThinkingLevel(level: unknown): level is ModelThinkingLevel {

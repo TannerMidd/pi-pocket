@@ -1,5 +1,6 @@
-// The thinking level the subagent tool gives a subagent: any a session's model picker offers, max included, and when
-// its model lacks the one asked for, the nearest one it has, as the picker gives, with Pi told so.
+// The thinking level the subagent tool gives a subagent: any a session's model picker offers, max included; and when
+// its model lacks the one asked for, or the one it starts with from Pi, the nearest one it has, as the picker gives,
+// with Pi told so.
 import { type App, cleanUp, context, lastText, openApp, owner, until, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
@@ -13,12 +14,15 @@ import {
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { SubagentsDoc } from "../src/server/docs.ts";
 
-/** The parent spawns as its message says: `spawn <name> <level> [model]`. Subagents answer, and the parent is done. */
+/**
+ * The parent spawns as its message says: `spawn <name> <level> [model]`, with `-` for no level. Subagents answer, and
+ * the parent is done.
+ */
 const route: FauxResponseStep = (request) => {
     const { role, text } = lastText(request as never);
     const asked = /spawn (\S+) (\S+)(?: (\S+))?$/.exec(text);
 
-    if (role === "user" && asked !== null && !text.includes("You are the subagent")) {
+    if (role === "user" && asked !== null) {
         const [, name, thinking, model] = asked;
 
         return fauxAssistantMessage(
@@ -27,7 +31,7 @@ const route: FauxResponseStep = (request) => {
                     action: "spawn",
                     name: name!,
                     message: "Think about it.",
-                    thinking: thinking!,
+                    ...(thinking === "-" ? {} : { thinking }),
                     ...(model === undefined ? {} : { model }),
                 }),
             ],
@@ -62,13 +66,16 @@ after(async () => {
     cleanUp();
 });
 
-/** A session on `modelId` whose Pi spawns as `text` says; the subagent's thinking level, and what the tool answered. */
-async function spawn(modelId: string, text: string) {
+/**
+ * A session on `modelId` at `thinkingLevel` whose Pi spawns as `text` says; the subagent's thinking level, and what the
+ * tool answered.
+ */
+async function spawn(modelId: string, text: string, thinkingLevel = "off") {
     const { id } = await app.commands.createSession(owner(app), { cwd: work });
 
     await app.commands.configure(id, owner(app), {
         model: { provider: "faux", modelId },
-        thinkingLevel: "off",
+        thinkingLevel,
     });
     await app.commands.submit(id, owner(app), { text, requestId: `spawn-${id}` });
 
@@ -101,6 +108,15 @@ test("a level its model lacks becomes the nearest it has, and Pi is told", async
 
     assert.equal(thinking, "high");
     assert.match(answer, /Started capped, thinking at high: its model has no max\./);
+});
+
+test("with a model of its own and no level, the level it starts with from Pi fits its model", async () => {
+    const { thinking, answer } = await spawn("deep", "spawn kept - faux/thinker", "max");
+
+    assert.equal(thinking, "high");
+    assert.match(answer, /Started kept, thinking at high: its model has no max\./);
+    // On Pi's own model, Pi's own level stays.
+    assert.equal((await spawn("deep", "spawn twin - faux/deep", "max")).thinking, "max");
 });
 
 test("without a model of its own, a subagent's level fits the model it shares with Pi", async () => {
