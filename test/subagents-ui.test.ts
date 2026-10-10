@@ -94,6 +94,8 @@ const route: FauxResponseStep = (request) => {
 };
 
 let app: App;
+/** The scripted model: it has a number of answers, which the tests in this file come close to using up. */
+let model: ReturnType<typeof scriptedModel>;
 let server: Server;
 let browsers: Browsers;
 let page: BrowserPage;
@@ -144,7 +146,8 @@ before(async () => {
         return;
     }
 
-    app = await openApp(scriptedModel(route));
+    model = scriptedModel(route);
+    app = await openApp(model);
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
@@ -903,6 +906,72 @@ test(
             { top: after.top, queue: after.queue },
             { top: 12, queue: true },
             "folded again, the dock is back where the reader had it",
+        );
+        await app.commands.abort(id, owner(app));
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "a finger scrolling the queue or the subagents list scrolls them, and does not open the places",
+    real,
+    async () => {
+        // Fresh answers: those before have used up most of them.
+        model.setResponses(Array.from({ length: 200 }, () => route));
+        const id = await crowded(VIEWPORTS.mobile, 12);
+
+        await unfold();
+
+        /** A finger on the middle of `selector`, moving up `by` pixels, then let go: is a sheet open after it? */
+        const swipeUp = async (selector: string, by: number) => {
+            await settled();
+            await page.evaluate(`
+            const target = document.querySelector(${JSON.stringify(selector)});
+            const box = target.getBoundingClientRect();
+            const x = box.left + box.width / 2;
+            const y = box.top + box.height / 2;
+            const touch = (at) => new Touch({ identifier: 1, target, clientX: x, clientY: at });
+            const fire = (type, at) =>
+                target.dispatchEvent(
+                    new TouchEvent(type, {
+                        bubbles: true,
+                        cancelable: true,
+                        touches: type === "touchend" ? [] : [touch(at)],
+                        changedTouches: [touch(at)],
+                    }),
+                );
+
+            fire("touchstart", y);
+
+            for (let moved = 10; moved <= ${by}; moved += 10) {
+                fire("touchmove", y - moved);
+            }
+
+            fire("touchend", y - ${by});
+        `);
+            await settled();
+
+            return inPage<string | null>(
+                `return JSON.stringify((await import("/store.js")).store.state.sheet?.type ?? null)`,
+            );
+        };
+
+        assert.equal(
+            await swipeUp(".agents-list .agent-row", 120),
+            null,
+            "the list scrolls, no places",
+        );
+        assert.equal(await swipeUp(".inbox .queued", 120), null, "the queue scrolls, no places");
+        // Up from the message box itself still opens them.
+        assert.equal(
+            await swipeUp(".composer .model-chip", 80),
+            "places",
+            "the places, from the box",
+        );
+        await page.evaluate(`history.back()`);
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.sheet === null)`,
+            "the places closed",
         );
         await app.commands.abort(id, owner(app));
         await page.setViewport(VIEWPORTS.mobile);
