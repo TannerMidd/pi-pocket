@@ -970,6 +970,67 @@ test("the way to the bottom goes to the bottom, and scrolling works after it", r
 });
 
 test(
+    "while a finger is on the conversation, a change under it does not move it; after, it stays at the bottom",
+    real,
+    async () => {
+        const gap = () =>
+            inPage<number>(`
+            const scroller = document.querySelector(".pane > .scroller");
+
+            return JSON.stringify(Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight));
+        `);
+        const finger = (type: "touchstart" | "touchend") =>
+            page.evaluate(`
+            const scroller = document.querySelector(".pane > .scroller");
+            const touch = new Touch({ identifier: 1, target: scroller, clientX: 200, clientY: 300 });
+
+            scroller.dispatchEvent(
+                new TouchEvent("${type}", {
+                    bubbles: true,
+                    touches: ${type === "touchstart" ? "[touch]" : "[]"},
+                    changedTouches: [touch],
+                }),
+            );
+        `);
+        // The message box grows, as with a long draft: the conversation above it gets shorter.
+        const box = (px: number) =>
+            page.evaluate(
+                `document.querySelector(".composer textarea").style.minHeight = "${px}px"`,
+            );
+
+        await fresh();
+        await goTo(long);
+        await slid();
+        await until(async () => (await gap()) < 2, "the bottom");
+        // A few frames for the resize to be seen, as it is before the next paint: the conversation stays put.
+        const frames = () =>
+            page.evaluate(
+                `await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150))))`,
+            );
+
+        await finger("touchstart");
+        await box(160);
+        await frames();
+        assert.ok((await gap()) > 40, "left where the finger holds it");
+        await finger("touchend");
+        await page.evaluate(`
+        const scroller = document.querySelector(".pane > .scroller");
+
+        scroller.scrollTop = scroller.scrollHeight;
+    `);
+        await until(async () => (await gap()) < 2, "the bottom again");
+        // Past any glide: a change keeps it at the bottom, as before.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await box(260);
+        await frames();
+        assert.ok((await gap()) < 2, "kept at the bottom");
+        await box(0);
+        await back();
+        await reach({ path: "/" }, "the list");
+    },
+);
+
+test(
     "on a phone, an invite lasts as long as chosen, and the one it replaces ends",
     real,
     async () => {

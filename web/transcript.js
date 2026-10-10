@@ -894,6 +894,9 @@ function NoteEntry({ entry }) {
 /** How long a `!` command's row may wait for its entry: past the server's limit for a command, something went wrong. */
 const PENDING_MS = 11 * 60_000;
 
+/** How long a scroller may glide on after a finger lets go of it, at most. */
+const GLIDE_MS = 3000;
+
 /** A touch screen, where scrollers glide on after a flick and their scroll bars take no room. */
 const COARSE = matchMedia("(pointer: coarse)");
 
@@ -1144,15 +1147,48 @@ export function Transcript() {
             return;
         }
 
+        // Not while a finger moves it, or it glides after one: where it goes is the person's, and on an iPhone a scroll
+        // set from script mid-glide does not hold (see `toBottom`).
+        let touching = false;
+        // Never yet: the page's clock starts at 0 when it loads, so 0 would read as a finger let go just now.
+        let released = -Infinity;
+        let moved = -Infinity;
+
+        const down = () => {
+            touching = true;
+        };
+
+        const up = () => {
+            touching = false;
+            released = performance.now();
+        };
+
+        const scrolled = () => {
+            moved = performance.now();
+        };
+
+        const gliding = () =>
+            touching ||
+            (performance.now() - released < GLIDE_MS && performance.now() - moved < 100);
         const observer = new ResizeObserver(() => {
-            if (stick.current) {
+            if (stick.current && !gliding()) {
                 element.scrollTop = element.scrollHeight;
             }
         });
 
+        element.addEventListener("touchstart", down, { passive: true });
+        element.addEventListener("touchend", up, { passive: true });
+        element.addEventListener("touchcancel", up, { passive: true });
+        element.addEventListener("scroll", scrolled, { passive: true });
         observer.observe(element);
 
-        return () => observer.disconnect();
+        return () => {
+            observer.disconnect();
+            element.removeEventListener("touchstart", down);
+            element.removeEventListener("touchend", up);
+            element.removeEventListener("touchcancel", up);
+            element.removeEventListener("scroll", scrolled);
+        };
     }, [view.conversation?.id]);
 
     // Images finish loading after the transcript renders and make it taller: stay at the bottom if we were there.
