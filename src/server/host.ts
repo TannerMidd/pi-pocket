@@ -120,6 +120,13 @@ export interface PocketHost {
     requesterOf(conversationId: ConversationId): string | undefined;
     /** Report something odd to the log and the connected clients. */
     notice(level: "info" | "warning" | "error", message: string): void;
+    /**
+     * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
+     * spend limit its session or whoever pays there reached. Undefined when it may.
+     */
+    heldBack(conversationId: ConversationId): string | undefined;
+    /** Call `listener` whenever the owner changes a spend limit; returns how to stop. */
+    onLimitsChanged(listener: () => void): () => void;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "list" | "task">;
     /** Sessions' goals: the goals extension runs their checks and counts them. */

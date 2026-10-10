@@ -7878,13 +7878,18 @@ textarea.notes {
     }
     /* New and the board's filters keep their look and take a thumb-tall tap. */
     .new-button,
-    .board-filter {
+    .board-filter,
+    .agents-held .link {
         position: relative;
     }
     .new-button::before,
-    .board-filter::before {
+    .board-filter::before,
+    .agents-held .link::before {
         content: "";
         position: absolute;
+    }
+    .agents-held .link::before {
+        inset: -12px -8px;
     }
     .new-button::before {
         inset: -6px -3px;
@@ -8376,6 +8381,27 @@ textarea.notes {
 
 .agents-bar.open .agents-chevron {
     transform: rotate(90deg);
+}
+
+/* Reports a spend limit holds back: why, and the way to raise it (subagents.js). */
+.agents-held {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.6rem;
+    padding: 0.35rem 0.75rem 0.45rem;
+    border-top: 1px solid var(--line);
+    color: var(--warn);
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+.agents-held .link {
+    font-size: inherit;
+}
+
+.agents-bar:has(.agents-held) {
+    border-left-color: var(--warn);
 }
 
 .agents-list {

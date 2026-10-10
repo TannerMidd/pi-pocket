@@ -9,6 +9,7 @@ import {
     newSession,
     openApp,
     owner,
+    recordCost,
     root,
     scriptedModel,
     until,
@@ -978,5 +979,55 @@ test(
         );
         await app.commands.abort(id, owner(app));
         await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "past a spend limit, the bar says the reports wait, with Raise it for the owner; raised, they go",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await page.setViewport(VIEWPORTS.mobile);
+        await page.navigate(`${base}/s/${id}`);
+        await see(
+            `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+            "the session",
+        );
+        // Spent past a limit; Pi is asked anyway, as a report or a schedule asks it, and starts its subagents.
+        await recordCost(app, id, 2);
+        await app.spend.setSessionBudget(owner(app), id, 1);
+        parentSleep = 0;
+        await (await app.harness.conversation(id, context))!.submit(
+            { type: "input", content: "orchestrate", requestId: `held-${id}` },
+            context,
+        );
+        await says(
+            ".agents-held",
+            /^Reports wait: this session reached its \$1\.00 spend limit\. ?Raise it$/,
+            20_000,
+        );
+
+        // The owner's way to raise it: the Spend sheet.
+
+        await settled();
+
+        await page.click({ selector: ".agents-held button" });
+
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.sheet?.type === "spend")`,
+
+            "the Spend sheet",
+        );
+
+        await page.evaluate(`history.back()`);
+
+        await app.spend.setSessionBudget(owner(app), id, null);
+        await see(
+            `return JSON.stringify(document.querySelector(".agents-held") === null)`,
+            "the line gone once raised",
+            15_000,
+        );
+        await app.commands.abort(id, owner(app));
     },
 );

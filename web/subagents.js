@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { describeCall } from "./calls.js";
 import { fromServer, useOnScreen } from "./peeks.js";
-import { api, attempt, canSteer, navigate, store } from "./store.js";
+import { api, attempt, canSteer, navigate, openSheet, store } from "./store.js";
 import { html, Icon, Spinner, timeAgo } from "./ui.js";
 
 /**
@@ -143,8 +143,26 @@ function AgentRow({ agent }) {
     </div>`;
 }
 
+/**
+ * Reports a spend limit holds back: why they wait, and for the owner the way to raise it. They go once it is raised.
+ */
+function Held({ why }) {
+    const owner = store.state.me?.role === "owner";
+
+    return html`<div class="agents-held" role="status">
+        <span>Reports wait: ${why}.</span>
+        ${
+            owner
+                ? html`<button class="link" onClick=${() => openSheet({ type: "spend" })}>
+                      Raise it
+                  </button>`
+                : html`<span>They go once the owner raises it.</span>`
+        }
+    </div>`;
+}
+
 /** The bar, while it shows: its hooks watch its rows for peeks, and tick the elapsed times. */
-function Bar({ agents, active, open }) {
+function Bar({ agents, active, open, held }) {
     const box = useRef(null);
     const [, rerender] = useState(0);
     const count = (status) => agents.filter((agent) => stateOf(agent) === status).length;
@@ -220,6 +238,7 @@ function Bar({ agents, active, open }) {
                 </button>`
             }
         </div>
+        ${held && html`<${Held} why=${held} />`}
         ${
             open &&
             html`<div class="agents-list">
@@ -246,6 +265,7 @@ export function SubagentsBar() {
 
     return html`<${Bar}
         agents=${agents}
+        held=${view.subagentsHeld}
         active=${agents.some((agent) => agent.busy || agent.reporting)}
         open=${subagentsOpen === conversationId}
     />`;

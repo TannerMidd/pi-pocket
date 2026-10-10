@@ -365,6 +365,8 @@ export class PocketApp {
             resolveModel: (spec) => resolveModel(this.models, spec),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             notice: (level, message) => this.notice(level, message),
+            heldBack: (conversationId) => this.spend.heldBack(conversationId),
+            onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             schedules: this.schedules,
             goals: this.goals,
             browsers: this.browsers,

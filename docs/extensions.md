@@ -107,16 +107,18 @@ Sections render before every request, and only those that changed are sent again
 
 What the default export receives. Extensions reach the app only through it; it stays the same while modules reload.
 
-| Member                           | What it is                                                                              |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| `dataDir`, `agentDir`            | Pi Pocket's data folder; Pi's (`~/.pi/agent`)                                           |
-| `notice(level, message)`         | Report something to the server log and the app (`"info"`, `"warning"`, `"error"`)       |
-| `resolveModel(spec)`             | `provider/modelId` (or a bare id) to an available model, or an error naming the choices |
-| `requesterOf(conversationId)`    | The id of the person Pi works for in a session now                                      |
-| `skillPaths()`                   | The extra skill folders in Pi's settings                                                |
-| `skills(cwd)`                    | Pi's skills for a session working in `cwd`, from every place Pi looks                   |
-| `approvals`, `guard`             | Calls waiting for a person to allow them; Lancet Guard                                  |
-| `schedules`, `goals`, `browsers` | Scheduled messages, Done when, and the built-in browser, as their extensions use them   |
+| Member                           | What it is                                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `dataDir`, `agentDir`            | Pi Pocket's data folder; Pi's (`~/.pi/agent`)                                                      |
+| `notice(level, message)`         | Report something to the server log and the app (`"info"`, `"warning"`, `"error"`)                  |
+| `resolveModel(spec)`             | `provider/modelId` (or a bare id) to an available model, or an error naming the choices            |
+| `requesterOf(conversationId)`    | The id of the person Pi works for in a session now                                                 |
+| `skillPaths()`                   | The extra skill folders in Pi's settings                                                           |
+| `skills(cwd)`                    | Pi's skills for a session working in `cwd`, from every place Pi looks                              |
+| `heldBack(conversationId)`       | Why work Pi would start there with nobody asking may not start now (a spend limit), or `undefined` |
+| `onLimitsChanged(listener)`      | Call `listener` when the owner changes a spend limit; returns how to stop                          |
+| `approvals`, `guard`             | Calls waiting for a person to allow them; Lancet Guard                                             |
+| `schedules`, `goals`, `browsers` | Scheduled messages, Done when, and the built-in browser, as their extensions use them              |
 
 To type it, import the type by the absolute path of `src/server/host.ts`: `import type { PocketHost } from "/path/to/pi-pocket/src/server/host.ts";`. A type import is gone when the module runs, so the path only matters to the type checker.
 

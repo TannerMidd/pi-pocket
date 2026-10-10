@@ -47,6 +47,7 @@ const emptyView = () => ({
     schedules: [],
     goal: null,
     branch: null,
+    subagentsHeld: null,
 });
 
 export const store = {
@@ -369,6 +370,9 @@ function applyView(data) {
                 schedules: data.schedules ?? base.schedules,
                 // No goal is null, which the server sends too: only a missing field keeps the last value.
                 goal: data.goal === undefined ? base.goal : data.goal,
+                // Why subagents' reports wait (a spend limit), or null when none do: the subagents bar says it.
+                subagentsHeld:
+                    data.subagentsHeld === undefined ? base.subagentsHeld : data.subagentsHeld,
                 // What the folder has checked out: `{ branch }` or `{ detached }`, and null outside a repository.
                 branch: data.branch === undefined ? base.branch : data.branch,
             },

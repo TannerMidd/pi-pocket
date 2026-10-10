@@ -38,6 +38,8 @@ export class Spend {
     /** Runs being stopped for a limit, until they end: each is stopped, and announced, once. */
     readonly #stopping = new Set<ConversationId>();
     #timer: NodeJS.Timeout | undefined;
+    /** Told when the owner changes a limit: work held back by one may go now. */
+    readonly #limits = new Set<() => void>();
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -229,6 +231,19 @@ export class Spend {
             : `${reached.person.name} reached their ${dollars(reached.budget)} spend limit`;
     }
 
+    /** Call `listener` whenever the owner changes a session's or a person's limit; returns how to stop. */
+    onLimitsChanged(listener: () => void): () => void {
+        this.#limits.add(listener);
+
+        return () => this.#limits.delete(listener);
+    }
+
+    #limitsChanged(): void {
+        for (const listener of this.#limits) {
+            listener();
+        }
+    }
+
     /** A conversation's run ended: a new one there is stopped again if it goes past a limit. */
     runEnded(id: ConversationId): void {
         this.#stopping.delete(id);
@@ -280,6 +295,7 @@ export class Spend {
                 meta.budget = amount;
             }
         }, context);
+        this.#limitsChanged();
         await this.#app.collab.activity(
             id,
             user,
@@ -305,6 +321,7 @@ export class Spend {
         const amount = budgetOf(budget);
 
         this.#app.config.updateUser(userId, { budget: amount });
+        this.#limitsChanged();
     }
 
     /** Spend as this person may see it: the owner sees everything, others their own sessions and themselves. */
@@ -340,6 +357,7 @@ export class Spend {
 
     close(): void {
         clearTimeout(this.#timer);
+        this.#limits.clear();
     }
 }
 

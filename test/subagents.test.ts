@@ -1,7 +1,7 @@
 // Subagents' reports: they reach a working parent at its next pause, all those waiting together as one message, each
 // once, without a turn of the parent's per report; a restart, a withdrawn batch, or a stale courier loses none. And
 // what the subagents bar is told about each subagent, and its live peek; and what the session list and the subagents
-// board are told about every session's.
+// board are told about every session's. Past a spend limit, reports wait, and go once it is raised.
 import {
     type App,
     cleanUp,
@@ -11,6 +11,7 @@ import {
     newSession,
     openApp,
     owner,
+    recordCost,
     root,
     scriptedModel,
     until,
@@ -36,7 +37,9 @@ const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxToo
 
 const route: FauxResponseStep = (request) => {
     const all = JSON.stringify((request as { messages: unknown[] }).messages);
-    const { role, text } = lastText(request as never);
+    const { role, text: said } = lastText(request as never);
+    // With more than one person on the server, a message starts with who sent it.
+    const text = said.replace(/^\[from: [^\]]+\] /, "");
     const subagent = /You are the subagent \\"([^\\]+)\\"/.exec(all)?.[1];
 
     if (subagent !== undefined) {
@@ -764,4 +767,151 @@ test("the board keeps a session's newest finished subagents, and every one that 
         done.sort(),
         Array.from({ length: 24 }, (_, index) => `done-${index + 6}`).sort(),
     );
+});
+
+/** The subagents document of `id`: why its reports wait, if they do, and what waits. */
+const held = async (id: ConversationId) => {
+    const doc = await app.harness.snapshot(SubagentsDoc, id, context);
+
+    return {
+        why: doc?.held,
+        waiting: (doc?.outbox ?? []).length + (doc?.sending?.reports.length ?? 0),
+    };
+};
+
+test("past its spend limit, an idle parent starts no turn for a report: it waits, says why, and goes once the limit is raised", async () => {
+    slow = { paid: 2 };
+    const id = await orchestrate({ spawn: ["paid"], rounds: 0, sleep: 0 });
+
+    await until(
+        async () =>
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.paid !== undefined &&
+            !app.isBusy(id),
+        "the subagent at work, the parent idle",
+    );
+    // Spent past a limit set now: nothing runs to be stopped, but nothing new may start.
+    await recordCost(app, id, 2);
+    await app.spend.setSessionBudget(owner(app), id, 1);
+    await until(() => app.spend.heldBack(id) !== undefined, "the limit reached");
+    await until(async () => (await held(id)).why !== undefined, "the report held back", 15_000);
+    assert.match(String((await held(id)).why), /this session reached its \$1\.00 spend limit/);
+    // Longer than a courier gathers for an idle parent: still nothing reached Pi, and Pi did not start.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    assert.deepEqual(await delivered(id), {});
+    assert.equal(app.isBusy(id), false);
+    assert.equal(await queued(id), 0);
+    assert.equal((await held(id)).waiting, 1);
+
+    // Raised: it goes at once, once, and Pi answers it.
+    await app.spend.setSessionBudget(owner(app), id, null);
+    await until(
+        async () => (await delivered(id)).paid === 1 && !app.isBusy(id),
+        "the report, after the raise",
+        10_000,
+    );
+    assert.deepEqual(await held(id), { why: undefined, waiting: 0 });
+    slow = {};
+});
+
+test("reports waiting in the parent's queue when a spend limit stops it wait again, and go once the limit is raised", async () => {
+    const id = await orchestrate({ spawn: ["queued-a", "queued-b"], rounds: 1, sleep: 8 });
+
+    await until(
+        async () => (await queued(id)) === 1,
+        "the reports waiting in the busy parent's queue",
+        15_000,
+    );
+    // Past the limit while it works: the run is stopped, and its queue withdrawn with it.
+    await app.spend.setSessionBudget(owner(app), id, 1);
+    await recordCost(app, id, 2);
+    await until(() => !app.isBusy(id), "the parent stopped", 15_000);
+    await until(async () => (await held(id)).why !== undefined, "the reports held back", 15_000);
+    assert.equal((await held(id)).waiting, 2);
+    assert.equal(await queued(id), 0);
+    assert.deepEqual(await delivered(id), {});
+
+    await app.spend.setSessionBudget(owner(app), id, null);
+    await until(
+        async () => {
+            const got = await delivered(id);
+
+            return got["queued-a"] === 1 && got["queued-b"] === 1 && !app.isBusy(id);
+        },
+        "both reports, after the raise",
+        15_000,
+    );
+    assert.deepEqual(await delivered(id), { "queued-a": 1, "queued-b": 1 });
+    assert.deepEqual(await held(id), { why: undefined, waiting: 0 });
+});
+
+test("reports a spend limit holds back still wait after a restart, and go once it is raised", async () => {
+    const data = join(root, "subagents-held-restart");
+    let first: App | undefined = await openApp(scriptedModel(route), data);
+
+    // It answers once the limit is there.
+    slow = { "kept-back": 3 };
+    const id = await orchestrate({ spawn: ["kept-back"], rounds: 0, sleep: 0 }, first);
+    const heldOn = async (on: App) => (await on.harness.snapshot(SubagentsDoc, id, context))?.held;
+
+    try {
+        await until(() => !first!.isBusy(id), "the parent idle");
+        await recordCost(first, id, 2);
+        await first.spend.setSessionBudget(owner(first), id, 1);
+        // Before the report: the courier finds the limit when it comes.
+        await until(async () => (await heldOn(first!)) !== undefined, "held back", 15_000);
+        await first.close();
+        first = undefined;
+        await app.close();
+        app = await openApp(scriptedModel(route), data);
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        assert.deepEqual(await delivered(id), {}, "nothing went at the restart");
+        assert.match(String(await heldOn(app)), /spend limit/);
+        await app.spend.setSessionBudget(owner(app), id, 5);
+        await until(
+            async () => (await delivered(id))["kept-back"] === 1 && !app.isBusy(id),
+            "the report, after the raise",
+            15_000,
+        );
+        assert.equal(await heldOn(app), undefined);
+    } finally {
+        slow = {};
+        await first?.close();
+        // Closed already if the test failed after it stepped aside.
+        await app.close().catch(() => {});
+        app = await openApp(scriptedModel(route), join(root, "subagents-data"));
+    }
+});
+
+test("past a person's spend limit, reports their work led to wait, saying whose limit, and go once it is raised", async () => {
+    const payer = app.config.addUser("Paying", "guest");
+
+    try {
+        slow = { theirs: 2 };
+        plan = { spawn: ["theirs"], rounds: 0, sleep: 0 };
+        rounds = 0;
+        const id = await newSession(app);
+
+        await app.commands.submit(id, payer.user, { text: "orchestrate", requestId: `paid-${id}` });
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.theirs !==
+                    undefined && !app.isBusy(id),
+            "the subagent at work, the parent idle",
+        );
+        await recordCost(app, id, 2);
+        app.spend.setPersonBudget(owner(app), payer.user.id, 1);
+        await until(async () => (await held(id)).why !== undefined, "held back", 15_000);
+        assert.match(String((await held(id)).why), /^Paying reached their \$1\.00 spend limit$/);
+        assert.deepEqual(await delivered(id), {});
+
+        app.spend.setPersonBudget(owner(app), payer.user.id, null);
+        await until(
+            async () => (await delivered(id)).theirs === 1 && !app.isBusy(id),
+            "the report, after the raise",
+            15_000,
+        );
+    } finally {
+        slow = {};
+        app.config.removeUser(payer.user.id);
+    }
 });

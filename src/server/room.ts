@@ -207,6 +207,8 @@ export class Room {
     subagents: Record<string, SubagentRecord> = {};
     /** The subagents whose reports are on their way to this conversation: waiting, or sent and still queued. */
     #reporting = new Set<string>();
+    /** Why their reports wait, while a spend limit holds them back. */
+    #held: string | undefined;
     chat: ChatMessage[] = [];
     reactions: Record<string, Record<string, string[]>> = {};
     pins: Pin[] = [];
@@ -241,6 +243,7 @@ export class Room {
 
         this.subagents = { ...(subagents?.agents ?? {}) } as Record<string, SubagentRecord>;
         this.#reporting = reportingOf(subagents);
+        this.#held = subagents?.held;
         this.chat = [
             ...((await harness.snapshot(ChatDoc, this.id, context))?.messages ?? []),
         ] as ChatMessage[];
@@ -346,6 +349,7 @@ export class Room {
         } else if (kind === SubagentsDoc.definition.kind) {
             this.subagents = { ...((value?.agents as Record<string, SubagentRecord>) ?? {}) };
             this.#reporting = reportingOf(value as Parameters<typeof reportingOf>[0]);
+            this.#held = typeof value?.held === "string" ? value.held : undefined;
         }
 
         this.schedule();
@@ -455,6 +459,8 @@ export class Room {
                     this.#reporting.has(name),
                 ),
             ),
+            // Reports on their way that a spend limit holds back, and why: the subagents bar says so.
+            subagentsHeld: this.#reporting.size > 0 ? (this.#held ?? null) : null,
             authors: this.authors,
             reactions: this.reactions,
             pins: this.pins,

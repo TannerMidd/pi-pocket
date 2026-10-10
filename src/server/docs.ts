@@ -140,6 +140,11 @@ export const SubagentsDoc = defineDoc<{
     sending?: { request: string; reports: PendingReport[] };
     /** How many batches went so far, for their request ids. */
     batches?: number;
+    /**
+     * Why the reports wait, while a spend limit holds them back: the parent would start a turn for them that its
+     * session, or whoever pays there, may not pay for. They go when the limit is raised.
+     */
+    held?: string;
     /** An earlier build's names of the batch in the queue: no longer written, and cleared where found. */
     delivering?: string[];
 }>({
