@@ -132,7 +132,16 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
             runtime.commit(async (tx) => {
                 const report = reporter.state.checkpoint.report;
 
-                if (report !== undefined) {
+                // Before 0.12 a reporter sent its report itself, under this request: one stopped by a restart (an
+                // upgrade) after sending it, and before it ended, has nothing left to send.
+                const sentBefore =
+                    report !== undefined &&
+                    (await tx.submissionByRequest(
+                        runtime.conversationId,
+                        `subagent-report:${reporter.id}`,
+                    )) !== undefined;
+
+                if (report !== undefined && !sentBefore) {
                     const id = runtime.conversationId;
                     const state = await tx.doc(SubagentsDoc, id);
                     // Reads first: a commit reads the tables only before it writes one.

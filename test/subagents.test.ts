@@ -21,7 +21,7 @@ import { after, before, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
+import { type ConversationId, InboxDoc, type TaskId } from "@earendil-works/pi-durable";
 import { SubagentsDoc } from "../src/server/docs.ts";
 
 /** What the parent does: the subagents it starts, then how many rounds of `sleep` it works through. */
@@ -219,6 +219,54 @@ test("a courier that is gone does not strand reports: the next report starts ano
 
         return got.x === 1 && got.y === 1 && !app.isBusy(id);
     }, "both reports");
+});
+
+test("a report a reporter from before 0.12 sent itself, before a restart cut it off, is not sent again", async () => {
+    slow = { early: 2 };
+    const id = await orchestrate({ spawn: ["early"], rounds: 0, sleep: 0 });
+    let reporter: TaskId | undefined;
+
+    await until(async () => {
+        const graph = await app.harness.taskGraph(context);
+
+        try {
+            reporter = Object.values(graph.value.tasks).find(
+                (node) => node.kind === "pocket.subagent-reporter" && node.conversationId === id,
+            )?.id;
+        } finally {
+            graph.dispose();
+        }
+
+        return reporter !== undefined;
+    }, "the reporter");
+    // As 0.11's reporter sent it, under its own request, before it ended: the new one must see it went already.
+    await (await app.harness.conversation(id, context))!.submit(
+        {
+            type: "input",
+            content: "[subagent early answered, no reply needed] result of early",
+            whenBusy: "followUp",
+            requestId: `subagent-report:${reporter}`,
+        },
+        context,
+    );
+    await until(
+        async () => {
+            const graph = await app.harness.taskGraph(context);
+
+            try {
+                return graph.value.tasks[reporter!] === undefined && !app.isBusy(id);
+            } finally {
+                graph.dispose();
+            }
+        },
+        "the reporter, done",
+        15_000,
+    );
+    // Long enough for a courier's gather and send, had the report gone to the outbox too.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    assert.deepEqual(await delivered(id), { early: 1 });
+    assert.equal(await queued(id), 0);
+    slow = {};
 });
 
 test("reports waiting in the parent's queue across a restart arrive once", async () => {
