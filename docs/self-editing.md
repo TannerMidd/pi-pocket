@@ -17,7 +17,7 @@ So a change to an extension module and to other server code goes live in halves:
 
 ## After every save
 
-- **`web/*.js`:** `node --check web/<file>.js` at once, before anything else. If the app went blank, this says why. Check the change in a browser (below): there are tests for some of the web app (`test/mobile-ui.test.ts`, `test/peeks-ui.test.ts`), not all of it.
+- **`web/*.js`:** `node --check web/<file>.js` at once, before anything else. If the app went blank, this says why. Check the change in a browser (below): there are tests for some of the web app (`test/mobile-ui.test.ts`, `test/peeks-ui.test.ts`, `test/subagents-ui.test.ts`, `test/trust-ui.test.ts`, `test/pi-sessions-ui.test.ts`), not all of it.
 - **An extension module:** watch for the reload notice, or its error, in the app.
 - **Other server code:** `npm run check`.
 

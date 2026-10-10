@@ -18,7 +18,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, beforeEach, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -82,6 +82,12 @@ let app: App;
 
 before(async () => {
     app = await openApp(scriptedModel(route), join(root, "subagents-data"));
+});
+
+// What the scripted model does starts plain in every test, however the one before ended.
+beforeEach(() => {
+    slow = {};
+    failing = new Set();
 });
 
 after(async () => {
@@ -281,7 +287,9 @@ test("reports waiting in the parent's queue across a restart arrive once", async
         await until(async () => (await queued(id, first)) === 1, "the reports waiting");
         await first.close();
         first = undefined;
-        // The parent's `sleep` was cut off: it does not run again, and the parent goes on from there.
+        // The parent's `sleep` was cut off: it does not run again, and the parent goes on from there. The shared
+        // app steps aside meanwhile: one app per data folder in the process.
+        await app.close();
         app = await openApp(scriptedModel(route), data);
         await until(
             async () => Object.keys(await delivered(id)).length === 3 && !app.isBusy(id),
@@ -291,7 +299,8 @@ test("reports waiting in the parent's queue across a restart arrive once", async
         assert.deepEqual(await delivered(id), { r0: 1, r1: 1, r2: 1 });
     } finally {
         await first?.close();
-        await app.close();
+        // Closed already if the test failed after it stepped aside.
+        await app.close().catch(() => {});
         app = await openApp(scriptedModel(route), join(root, "subagents-data"));
     }
 });
