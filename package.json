@@ -42,7 +42,7 @@
         "marked": "^18.1.0",
         "preact": "^11.0.1",
         "qrcode": "^1.5.4",
-        "undici": "8.11.2"
+        "undici": "8.10.2"
     },
     "devDependencies": {
         "@stylistic/eslint-plugin": "5.10.0",
