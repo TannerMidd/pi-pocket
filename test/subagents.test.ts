@@ -30,6 +30,8 @@ let plan = { spawn: [] as string[], rounds: 0, sleep: 0.2 };
 /** Subagents that run a `sleep` of so many seconds before they answer; and ones whose model fails. */
 let slow: Record<string, number> = {};
 let failing = new Set<string>();
+/** Subagents whose model fails once their tool round comes back, so their run ends in error mid-flight. */
+let lateFail = new Set<string>();
 let parentCalls = 0;
 let rounds = 0;
 
@@ -43,7 +45,7 @@ const route: FauxResponseStep = (request) => {
     const subagent = /You are the subagent \\"([^\\]+)\\"/.exec(all)?.[1];
 
     if (subagent !== undefined) {
-        if (failing.has(subagent)) {
+        if (failing.has(subagent) || (lateFail.has(subagent) && role === "toolResult")) {
             return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Bad request" });
         }
 
@@ -63,6 +65,22 @@ const route: FauxResponseStep = (request) => {
             plan.spawn.map((name) =>
                 call("subagent", { action: "spawn", name, message: `Check ${name}, please.` }),
             ),
+            { stopReason: "toolUse" },
+        );
+    }
+
+    const nudge = /^nudge (\S+)$/.exec(text);
+
+    if (nudge !== null) {
+        return fauxAssistantMessage(
+            [
+                call("subagent", {
+                    action: "send",
+                    name: nudge[1]!,
+                    message: "One more thing.",
+                    followUp: true,
+                }),
+            ],
             { stopReason: "toolUse" },
         );
     }
@@ -88,6 +106,7 @@ before(async () => {
 beforeEach(() => {
     slow = {};
     failing = new Set();
+    lateFail = new Set();
 });
 
 after(async () => {
@@ -504,6 +523,58 @@ test("a subagent that is stopped says so: Pi is told it will not answer", async 
     } finally {
         app.detach(tab.client);
         slow = {};
+    }
+});
+
+test("a subagent whose run fails while a follow-up waits reports it, instead of waiting for an answer none brings", async () => {
+    slow = { strand: 4 };
+    lateFail = new Set(["strand"]);
+    const id = await orchestrate({ spawn: ["strand"], rounds: 0, sleep: 0 });
+
+    try {
+        await until(async () => {
+            const child = (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.strand;
+
+            return child !== undefined && app.isBusy(child.conversationId);
+        }, "the subagent at work");
+        const child = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.strand!
+            .conversationId;
+
+        // A follow-up while it works waits in its inbox for the run that would place it. Its run ends in error
+        // instead, and Pi Durable leaves that inbox alone: nothing places it, and nothing ends the wait.
+        await app.commands.submit(id, owner(app), {
+            text: "nudge strand",
+            requestId: `nudge-${id}`,
+        });
+        await until(async () => (await queued(child)) === 1, "the follow-up queued");
+
+        await until(
+            async () => (await delivered(id)).strand === 2 && !app.isBusy(id),
+            "both reports",
+            25_000,
+        );
+        assert.match(await parentText(id), /\[subagent strand failed: [^\]]*Bad request[^\]]*\]/);
+        assert.match(
+            await parentText(id),
+            /\[subagent strand failed: went idle without taking the message/,
+        );
+        assert.equal(await queued(child), 0);
+
+        await until(async () => {
+            const graph = await app.harness.taskGraph(context);
+
+            try {
+                return !Object.values(graph.value.tasks).some(
+                    (node) =>
+                        node.kind === "pocket.subagent-reporter" && node.conversationId === id,
+                );
+            } finally {
+                graph.dispose();
+            }
+        }, "no reporter left waiting");
+    } finally {
+        slow = {};
+        lateFail = new Set();
     }
 });
 
