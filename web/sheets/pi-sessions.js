@@ -157,6 +157,8 @@ export function PiSessionSheet({ path }) {
     const [info, setInfo] = useState(null);
     const [problem, setProblem] = useState(null);
     const [busy, setBusy] = useState(false);
+    // Set at once, not at the next render: a second tap in the same moment must not make a second copy.
+    const going = useRef(false);
 
     useEffect(() => {
         actions.piSession(path).then(setInfo, (error) => setProblem(error.message));
@@ -167,7 +169,12 @@ export function PiSessionSheet({ path }) {
         navigate(id);
     };
 
-    const go = () =>
+    const go = () => {
+        if (going.current) {
+            return;
+        }
+
+        going.current = true;
         attempt(async () => {
             setBusy(true);
 
@@ -180,9 +187,11 @@ export function PiSessionSheet({ path }) {
                     "Continued from Pi. Pi has the conversation as Pi left it; nothing it did runs again.",
                 );
             } finally {
+                going.current = false;
                 setBusy(false);
             }
         });
+    };
 
     if (info === null) {
         return html`<${Sheet} title="Pi session" onClose=${closeSheet}>

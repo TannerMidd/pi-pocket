@@ -1348,10 +1348,12 @@ export class PocketApp {
                 const chat = this.#lastChat.get(id);
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
                 const counts = countSubagents(subagents.get(id) ?? []);
+                // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
+                const { fromPi: _fromPi, ...shown } = meta;
 
                 return {
                     id: Number(id),
-                    ...meta,
+                    ...shown,
                     busy,
                     waiting: waiting.has(id),
                     ...(endedAt === undefined ? {} : { endedAt }),

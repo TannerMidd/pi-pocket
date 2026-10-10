@@ -75,6 +75,9 @@ export type PiSession = {
     edits: { target: string; messages: Message[] }[];
 };
 
+/** One of Pi's sessions as listed: what Pi says of it, and what a search looks through (lower case). */
+type Listed = { info: SessionInfo; words: string };
+
 /** A session file Pi Pocket cannot continue, and why, in words for people. */
 export class PiSessionError extends Error {}
 
@@ -356,11 +359,17 @@ export class PiSessions {
         this.#app = app;
     }
 
-    /** The last list, for a few seconds: reading every session's file again for each look is slow with many. */
-    #found: { at: number; list: Promise<SessionInfo[]> } | undefined;
+    /**
+     * The last list, for a few seconds: reading every session's file again for each look, or each letter of a search,
+     * is slow with many. It holds the words of every session, so it is let go when its time is up.
+     */
+    #found: { at: number; list: Promise<Listed[]> } | undefined;
 
-    /** Pi's sessions, newest first, as `pi -r` lists them all; `fresh` reads them again. */
-    #find(fresh = true): Promise<SessionInfo[]> {
+    /**
+     * Pi's sessions, newest first, as `pi -r` lists them all, each with what a search looks through, in lower case:
+     * made once per list, not for every letter typed. `fresh` reads them again.
+     */
+    #find(fresh = true): Promise<Listed[]> {
         if (!fresh && this.#found !== undefined && Date.now() - this.#found.at < FOUND_FOR_MS) {
             return this.#found.list;
         }
@@ -374,10 +383,32 @@ export class PiSessions {
         }
 
         const folder = process.env[SESSION_DIR_VARIABLE] || configured;
-        const list = folder ? SessionManager.listAll(folder) : SessionManager.listAll();
+        const list = (folder ? SessionManager.listAll(folder) : SessionManager.listAll()).then(
+            (infos) =>
+                infos.map((info) => {
+                    const words = [
+                        info.name ?? "",
+                        info.cwd,
+                        info.firstMessage,
+                        info.allMessagesText,
+                    ]
+                        .join("\n")
+                        .toLowerCase();
+
+                    // Kept once, as the search's words: a session's whole text is the bulk of the list.
+                    info.allMessagesText = "";
+
+                    return { info, words };
+                }),
+        );
         const found = { at: Date.now(), list };
 
         this.#found = found;
+        setTimeout(() => {
+            if (this.#found === found) {
+                this.#found = undefined;
+            }
+        }, FOUND_FOR_MS).unref();
         // A list that failed is not kept.
         list.catch(() => {
             if (this.#found === found) {
@@ -394,8 +425,10 @@ export class PiSessions {
 
         // Newest first: the first one seen of each is the one to open.
         for (const session of this.#app.sessions()) {
-            if (session.fromPi !== undefined && !found.has(session.fromPi.session)) {
-                found.set(session.fromPi.session, { id: session.id, count: session.fromPi.count });
+            const from = this.#app.sessionMeta(session.id as unknown as ConversationId)?.fromPi;
+
+            if (from !== undefined && !found.has(from.session)) {
+                found.set(from.session, { id: session.id, count: from.count });
             }
         }
 
@@ -413,13 +446,10 @@ export class PiSessions {
         this.#requireOwner(user);
         const continued = this.#continued();
         const needle = query.trim().toLowerCase();
-        const found = (await this.#find()).filter(
-            (info) =>
-                needle === "" ||
-                [info.name ?? "", info.cwd, info.firstMessage, info.allMessagesText].some((text) =>
-                    text.toLowerCase().includes(needle),
-                ),
-        );
+        // Opening the list reads it again; a search narrows the one just read.
+        const found = (await this.#find(needle === ""))
+            .filter((each) => needle === "" || each.words.includes(needle))
+            .map((each) => each.info);
 
         return {
             sessions: found.slice(0, MAX_LISTED).map((info) => {
@@ -445,19 +475,30 @@ export class PiSessions {
         this.#requireOwner(user);
 
         const listed = async (fresh: boolean) =>
-            (await this.#find(fresh)).some((info) => info.path === path);
+            (await this.#find(fresh)).some((each) => each.info.path === path);
 
         // The list the sheet just showed, or, for a session new since, the list as it is now.
         if (!(await listed(false)) && !(await listed(true))) {
             throw new HttpError(404, "Pi has no such session. It may have been deleted.");
         }
 
-        if ((await stat(path)).size > MAX_SESSION_BYTES) {
+        // Gone since the list was read (it is kept a few seconds), or unreadable: as Pi not having it.
+        const missing = (error: unknown) => {
+            if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+                throw new HttpError(404, "Pi has no such session. It may have been deleted.");
+            }
+
+            throw error;
+        };
+
+        if ((await stat(path).catch(missing)).size > MAX_SESSION_BYTES) {
             throw new HttpError(413, "This Pi session is too large to continue here.");
         }
 
+        const text = await readFile(path, "utf8").catch(missing);
+
         try {
-            return readPiSession(await readFile(path, "utf8"));
+            return readPiSession(text);
         } catch (error) {
             if (error instanceof PiSessionError) {
                 throw new HttpError(400, error.message);

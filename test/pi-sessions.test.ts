@@ -13,9 +13,9 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep, Message } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -552,9 +552,73 @@ test("a search looks through every session's title, folder, and words, before th
     const found = async (query: string) =>
         (await app.piSessions.list(owner(app), query)).sessions.map((each) => each.path);
 
+    // As the sheet does: it opens on the whole list, read again, and a search narrows that one.
+    await found("");
     assert.ok((await found("dashboard")).includes(path), "by the words of an answer");
     assert.ok((await found("FLUX")).includes(path), "whatever the case");
     assert.deepEqual(await found("nothing says this anywhere"), []);
+});
+
+test("typing a search narrows the list the sheet opened on, without reading every file again", async () => {
+    const reads = { count: 0 };
+    const listAll = SessionManager.listAll;
+
+    SessionManager.listAll = ((...args: Parameters<typeof listAll>) => {
+        reads.count++;
+
+        return listAll(...args);
+    }) as typeof listAll;
+
+    try {
+        await app.piSessions.list(owner(app), "");
+
+        for (const query of ["f", "fl", "flu", "flux"]) {
+            await app.piSessions.list(owner(app), query);
+        }
+
+        assert.equal(reads.count, 1, "one read for the list and its search");
+    } finally {
+        SessionManager.listAll = listAll;
+    }
+});
+
+test("a session deleted since the list was read is not found, and one too large is refused", async () => {
+    const gone = save(rich(), "deleted-since");
+
+    await app.piSessions.list(owner(app), "");
+    rmSync(gone);
+    await assert.rejects(app.piSessions.preview(owner(app), gone), { status: 404 });
+
+    // Over 32 MiB: one message as long as that.
+    const big = join(sessions, "--big--", "2026-10-09T10-00-00-000Z_big.jsonl");
+
+    mkdirSync(dirname(big), { recursive: true });
+    writeFileSync(
+        big,
+        [
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "big",
+                timestamp: "2026-10-09T10:00:00.000Z",
+                cwd: work,
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "m",
+                parentId: null,
+                timestamp: "2026-10-09T10:00:01.000Z",
+                message: { role: "user", content: "x".repeat(33 * 1024 * 1024), timestamp: 1 },
+            }),
+        ].join("\n"),
+    );
+
+    try {
+        await app.piSessions.list(owner(app), "");
+        await assert.rejects(app.piSessions.preview(owner(app), big), { status: 413 });
+    } finally {
+        rmSync(dirname(big), { recursive: true, force: true });
+    }
 });
 
 test("people see the session file's name, not the folder it is in", async () => {
