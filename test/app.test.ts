@@ -773,6 +773,12 @@ test("viewers read and chat but never steer; people invited to one session see o
             /not shared/,
         );
         await assert.rejects(app.commands.createSession(scoped, { cwd: work }), /one session/);
+        // Nor move it elsewhere: what they may read is its folder.
+        await assert.rejects(
+            app.commands.configure(id, scoped, { cwd: "/etc" }),
+            /cannot move it to another folder/,
+        );
+        assert.equal(app.cwdOf(id), work);
         const tab = fakeTab(other, scoped);
 
         await app.attach(tab.client);

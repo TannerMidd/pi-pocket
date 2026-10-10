@@ -780,6 +780,15 @@ export class Commands {
         }
 
         optionalText(request.cwd, "cwd");
+
+        // Someone invited to one session sees files in its folder only: moving it would move what they see.
+        if (request.cwd !== undefined && user.sessions !== undefined) {
+            throw new HttpError(
+                403,
+                "You were invited to one session and cannot move it to another folder.",
+            );
+        }
+
         const conversation = await app.conversation(id);
         const current = await app.agentState(id);
         const ref = request.model ?? current?.model;
