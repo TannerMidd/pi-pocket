@@ -1,5 +1,6 @@
 // Running now: everything Pi is doing, across sessions.
 import { useEffect, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { api, attempt, canSteer, closeSheet, navigate, notify } from "../store.js";
 import { html, Loader, Sheet, Spinner } from "../ui.js";
 
@@ -33,9 +34,9 @@ export function RunningSheet() {
         navigate(id);
     };
 
-    return html`<${Sheet} title="Running now" onClose=${closeSheet}>
-        ${sessions === null && html`<${Loader} label="Looking" />`}
-        ${sessions?.length === 0 && html`<p class="muted">Nothing is running.</p>`}
+    return html`<${Sheet} title=${t("Running now")} onClose=${closeSheet}>
+        ${sessions === null && html`<${Loader} label=${t("Looking")} />`}
+        ${sessions?.length === 0 && html`<p class="muted">${t("Nothing is running.")}</p>`}
         ${sessions?.map(
             (session) => html`<div class="running" key=${session.id}>
                 <div class="running-head">
@@ -55,7 +56,7 @@ export function RunningSheet() {
                             class="button small"
                             onClick=${() => attempt(() => api(`c/${session.id}/abort`, {}))}
                         >
-                            Stop
+                            ${t("Stop")}
                         </button>`
                     }
                 </div>
@@ -77,7 +78,7 @@ export function RunningSheet() {
                                 class="link small"
                                 onClick=${() => attempt(() => api(`c/${task.conversationId}/schedules/${encodeURIComponent(task.scheduleId)}/cancel`, {}))}
                             >
-                                Cancel
+                                ${t("Cancel")}
                             </button>`
                         }
                         ${
@@ -88,7 +89,7 @@ export function RunningSheet() {
                                 class="link small"
                                 onClick=${() => attempt(() => api(`c/${task.conversationId}/abort`, {}))}
                             >
-                                Stop
+                                ${t("Stop")}
                             </button>`
                         }
                         ${
@@ -98,7 +99,7 @@ export function RunningSheet() {
                                 class="link small"
                                 onClick=${() => attempt(() => api(`c/${task.conversationId}/shell/${task.id}/stop`, {}))}
                             >
-                                Stop
+                                ${t("Stop")}
                             </button>`
                         }
                         <span class="muted small mono">${task.status}</span>

@@ -1,5 +1,6 @@
 // The keyboard shortcuts, as a list. The keys themselves are handled in app.js.
 import { closeSheet } from "../store.js";
+import { t } from "../i18n.js";
 import { html, Keys, Sheet } from "../ui.js";
 
 const SHORTCUTS = [
@@ -31,15 +32,15 @@ const SHORTCUTS = [
 ];
 
 export function ShortcutsSheet() {
-    return html`<${Sheet} title="Keyboard shortcuts" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Keyboard shortcuts")} onClose=${closeSheet}>
         <dl class="shortcuts">
             ${SHORTCUTS.map(
                 ([keys, text]) => html`<dt><${Keys} keys=${keys} /></dt>
-                <dd>${text}</dd>`,
+                <dd>${t(text)}</dd>`,
             )}
         </dl>
         <p class="muted small">
-            In the launcher, start with <kbd>></kbd> for actions, <kbd>@</kbd> for sessions, or <kbd>#</kbd> for themes. Arrowing onto a theme shows it; Enter keeps it.
+            ${t("In the launcher, start with > for actions, @ for sessions, or # for themes. Arrowing onto a theme shows it; Enter keeps it.")}
         </p>
     <//>`;
 }

@@ -56,6 +56,53 @@ The file:
 - has a file name no built-in module has (a drop-in named `browser.ts` is not loaded). Files that start with `_` or end in `.test.ts` are not modules: use them for helpers and tests. A helper is not reloaded when it changes, even when the module that imports it is: a change to it takes a restart. Keep what you will change often in the module itself.
 - starts with a `/** … */` comment whose first sentence says what it does.
 
+### UI locale packs (data only)
+
+A Pocket extension may also return optional `uiLocales` data alongside its ordinary tools, sections, hooks, or tasks. The shape is:
+
+```typescript
+type PocketUiLocale = {
+    locale: string; // a canonical BCP 47 language tag, such as "zh-CN"
+    label: string;
+    default?: boolean;
+    strings: Record<string, string>;
+    templates?: Record<string, string>;
+};
+type PocketExtension = Extension & { uiLocales?: PocketUiLocale[] };
+```
+
+Use exact English source strings as keys. `strings` handles a key with no parameters; `templates` handles a source template with named placeholders:
+
+```typescript
+import { defineExtension } from "@earendil-works/pi-durable";
+
+export default function createUiLocale() {
+    return {
+        ...defineExtension({ name: "example-ui-locale" }),
+        uiLocales: [
+            {
+                locale: "zh-CN",
+                label: "简体中文",
+                default: true,
+                strings: { Files: "文件" },
+                templates: {
+                    "Back to sessions, {{count}} waiting for you":
+                        "返回会话列表，{{count}} 项待你处理",
+                },
+            },
+        ],
+    };
+}
+```
+
+The web app translates only where its code explicitly calls `t("Files")` or `t("Back to sessions, {{count}} waiting for you", { count })`. Missing keys stay in English. A source template and its translation must contain the same set of placeholder names; for example, both templates above contain `{{count}}`. Interpolated values are inserted as-is; they are not looked up or translated again. This is not a DOM-wide translation pass: user messages, names, paths, model names, logs, and other dynamic content are not translated automatically.
+
+The loader accepts locale packs only as validated data; their strings and templates are sent to the browser, not extension JavaScript. The same locale cannot be registered by multiple loaded extensions; a conflicting or invalid module is rejected. A drop-in still starts off. Its locale data follows the extension lifecycle: turning it off or removing it removes the pack, editing an enabled module reloads it, and a failed reload leaves the previous extension and pack running.
+
+Only signed-in clients receive the available packs, as `hello.server.uiLocales` (also through the authenticated `/api/me` response). There is no public dictionary endpoint. An unauthenticated page, or a signed-in client with no enabled locale packs, uses English. The browser prefers a pack marked `default: true`, then sorts by the locale string; `default` is only a preference among packs already enabled, not a switch that enables an extension. There is no per-user language choice or saved locale.
+
+The loader's canonical-tag and data validation rules may evolve; write canonical BCP 47 tags and do not rely on undocumented size or entry limits.
+
 ### Names
 
 Installing an extension with a name already installed replaces it, and a tool with the name of another replaces it in every session. So Pi Pocket refuses a drop-in that would take a name it keeps for itself, or one another module already has, and says so in Menu → Extensions:

@@ -1,5 +1,6 @@
 // Find in session: messages, commands, and files, through the whole history.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { jumpToEntry } from "../chat.js";
 import { actions, closeSheet, isRow, store } from "../store.js";
 import { html, Marked, plainText, Sheet, Spinner, writtenText } from "../ui.js";
@@ -53,16 +54,16 @@ function speaker(entry) {
     }
 
     if (entry.kind !== "user") {
-        return "Context";
+        return t("Context");
     }
 
     const userId = view.authors?.[entry.id];
 
     if (userId === me?.id) {
-        return "You";
+        return t("You");
     }
 
-    return users.find((user) => user.id === userId)?.name ?? entry.from ?? "You";
+    return users.find((user) => user.id === userId)?.name ?? entry.from ?? t("You");
 }
 
 /**
@@ -182,12 +183,12 @@ export function FindSheet({ initial }) {
         }
     };
 
-    return html`<${Sheet} title="Find in session" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Find in session")} onClose=${closeSheet}>
         <input
             class="find-input"
             ref=${box}
             type="search"
-            placeholder="Words in a message, a command, a file…"
+            placeholder=${t("Words in a message, a command, a file…")}
             value=${query}
             onInput=${(event) => {
                 setQuery(event.currentTarget.value);
@@ -199,20 +200,20 @@ export function FindSheet({ initial }) {
             needle !== "" &&
             results.length === 0 &&
             earlier.done &&
-            html`<p class="muted">Nothing here says “${query.trim()}”.</p>`
+            html`<p class="muted">${t("Nothing here says “{{query}}”.", { query: query.trim() })}</p>`
         }
         ${
             !earlier.done &&
-            html`<p class="muted small"><${Spinner} /> Searching earlier history too…</p>`
+            html`<p class="muted small"><${Spinner} /> ${t("Searching earlier history too…")}</p>`
         }
         ${
             earlier.done &&
             !earlier.all &&
             html`<p class="muted small">
-                The oldest history was not searched: only the newest ${earlier.entries.length} earlier entries.
+                ${t("The oldest history was not searched: only the newest {{count}} earlier entries.", { count: earlier.entries.length })}
             </p>`
         }
-        ${results.length === 100 && html`<p class="muted small">The newest 100 are listed.</p>`}
+        ${results.length === 100 && html`<p class="muted small">${t("The newest 100 are listed.")}</p>`}
         <div class="find-results">
             ${results.map(
                 (result) => html`<button

@@ -1,5 +1,6 @@
 // Phone notifications: this device subscribes to the server's pushes, and each person picks what they hear about.
 import { useEffect, useState } from "preact/hooks";
+import { t } from "./i18n.js";
 import { api, attempt, closeSheet, notify, sessionUnread } from "./store.js";
 import { html, Loader, Sheet, Switch } from "./ui.js";
 
@@ -80,15 +81,21 @@ function sameKey(subscription, publicKey) {
 /** Why this device cannot get notifications, or null when it can. */
 function blocker() {
     if (!isSecureContext) {
-        return "Notifications need a secure (https) address. Open Pi Pocket through the Cloudflare Tunnel, or through tailscale serve, on this device.";
+        return t(
+            "Notifications need a secure (https) address. Open Pi Pocket through the Cloudflare Tunnel, or through tailscale serve, on this device.",
+        );
     }
 
     if (!supported) {
-        return "This browser cannot receive notifications. On iPhone and iPad, add Pi Pocket to the home screen first, then open it from there.";
+        return t(
+            "This browser cannot receive notifications. On iPhone and iPad, add Pi Pocket to the home screen first, then open it from there.",
+        );
     }
 
     if (Notification.permission === "denied") {
-        return "Notifications are blocked for this site. Allow them in the browser's site settings, then come back.";
+        return t(
+            "Notifications are blocked for this site. Allow them in the browser's site settings, then come back.",
+        );
     }
 
     return null;
@@ -150,7 +157,7 @@ export function NotificationsSheet() {
 
                 setSubscription(current);
                 setInfo({ ...info, devices: result.devices });
-                notify("info", "Notifications are on for this device.");
+                notify("info", t("Notifications are on for this device."));
             } finally {
                 setBusy(false);
             }
@@ -178,46 +185,55 @@ export function NotificationsSheet() {
     const test = () =>
         attempt(async () => {
             await api("push/test", {});
-            notify("info", "Test sent. It shows as a system notification.");
+            notify("info", t("Test sent. It shows as a system notification."));
         });
 
     const on = Boolean(subscription);
+    const devices =
+        info?.devices > 0
+            ? t(
+                  info.devices === 1
+                      ? "{{count}} device of yours gets them."
+                      : "{{count}} devices of yours get them.",
+                  { count: info.devices },
+              )
+            : "";
 
-    return html`<${Sheet} title="Notifications" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Notifications")} onClose=${closeSheet}>
         <p class="muted small">
-            Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.
+            ${t("Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.")}
         </p>
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${
             !info || subscription === undefined
-                ? html`<${Loader} label="Checking this device" />`
+                ? html`<${Loader} label=${t("Checking this device")} />`
                 : html`<div class="extension">
                     <div class="extension-main">
-                        <div class="extension-title">This device</div>
+                        <div class="extension-title">${t("This device")}</div>
                         <div class="muted small">
-                            ${on ? "Notifications are on." : "Notifications are off."} ${info.devices > 0 ? `${info.devices} device${info.devices === 1 ? "" : "s"} of yours ${info.devices === 1 ? "gets" : "get"} them.` : ""}
+                            ${t(on ? "Notifications are on." : "Notifications are off.")} ${devices}
                         </div>
                     </div>
                     <div class="extension-actions">
                         <${Switch}
                             on=${on}
                             disabled=${busy || (!on && problem !== null)}
-                            label="Notifications on this device"
+                            label=${t("Notifications on this device")}
                             onChange=${on ? disable : enable}
                         />
                     </div>
                 </div>
-                <div class="group-title">Notify me about</div>
+                <div class="group-title">${t("Notify me about")}</div>
                 ${KINDS.map(
                     ([key, title, hint]) => html`<div class="extension">
                         <div class="extension-main">
-                            <div>${title}</div>
-                            <div class="muted small">${hint}</div>
+                            <div>${t(title)}</div>
+                            <div class="muted small">${t(hint)}</div>
                         </div>
                         <div class="extension-actions">
                             <${Switch}
                                 on=${info.prefs[key]}
-                                label=${title}
+                                label=${t(title)}
                                 onChange=${() => setPref(key, !info.prefs[key])}
                             />
                         </div>
@@ -226,7 +242,7 @@ export function NotificationsSheet() {
                 ${
                     on &&
                     html`<button class="button wide" onClick=${test}>
-                        Send a test notification
+                        ${t("Send a test notification")}
                     </button>`
                 }`
         }

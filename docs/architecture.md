@@ -40,6 +40,8 @@ The harness, models, and settings exist only once `#open` has set them up, after
 
 Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose functions call into the app lazily. The HTTP layer parses a request, checks it, calls a part, and writes the answer; it holds no state of its own beyond invites and the event streams' pollers.
 
+A `PocketExtension` may include optional `uiLocales`: locale metadata plus plain `strings` and `templates` dictionaries. `ExtensionLoader` validates these data, rejects duplicate locale registrations, and reports packs only from modules currently installed. A failed reload does not replace the previous module or its locale data. Locale dictionaries are not executable browser code.
+
 ## Startup
 
 `PocketApp.#open` runs in this order, and the order matters:
@@ -112,11 +114,15 @@ Each browser tab is a `Client` (`room.ts`), fed by an event stream or by long po
 3. then, when it shows a conversation, the room's full view;
 4. then only what changed.
 
+For an authenticated client, `hello.server.uiLocales` carries the data packs of enabled extensions; the authenticated `/api/me` response carries the same server metadata. There is no public dictionary endpoint. Without an authenticated hello or without an enabled pack, the web app uses English.
+
 ## The web app
 
 Plain ES modules, served as they are, with no build. Editing a file under `web/` reloads every open tab, and a syntax error blanks the screen for everyone.
 
 **Loading order matters.** `store.js` is the root, and a few modules do work when they load (listed in [map.md](map.md#web-web-preact-and-htm-no-build)). `theme.js` must load before anything that reads `prefs()` as it loads. `store.set` calls subscribers in the order they subscribed. When moving code between modules, keep both orders. `back.js` sits under `store.js` and imports nothing of the app's, so anything may use it.
+
+`store.js` installs the available locale data from `hello` before updating shared state. `i18n.js` exports `t()`, but it translates only explicit source strings passed by UI code; it does not scan the DOM or user content. Calls with parameters use the matching template dictionary, and parameter values are interpolated once without recursive translation. The browser chooses `default: true` first and then sorts by locale string; with no pack it stays in English. The choice is not stored and users do not select a per-client language.
 
 **History is the back stack (`back.js`).** Only `back.js` writes history. Each route (`/s/12`) and each layer over it (a sheet, the drawer, the launcher, the Files tile or Browser panel where they cover the screen, a file over the tile's tree) is an entry, and each entry says how many layers it stands for and how many steps back the session list's entry is. The app's state is the truth and history follows it a moment later: opening a layer pushes an entry, closing one with a tap goes back past it, and a new route first goes back past the layers above the current one. Back that the person makes closes the layers above the entry it lands on; back to another route reaches `store.js` through `onRoute`. Traversals `back.js` makes itself reach no one. So:
 
@@ -128,7 +134,7 @@ Plain ES modules, served as they are, with no build. Editing a file under `web/`
 
 **Contracts with the server.**
 
-- Event names and shapes (`hello`, `view`, `chat`, `peek`, `subagents`, …) and the sheet types the server names (`sheet: "chat"`).
+- Event names and shapes (`hello`, `view`, `chat`, `peek`, `subagents`, …) and the sheet types the server names (`sheet: "chat"`). `hello.server.uiLocales` is authenticated connection metadata for enabled extension packs, not a public dictionary API.
 - The `pocket.*` keys in local and session storage.
 - `ATTACHMENTS_HEADING`, which `ui.js` repeats from `entry-format.ts`.
 

@@ -5,6 +5,7 @@
 // live: once scrolling settles, the tab tells the server which (`POST /api/peeks`), and the rest keep the lines they
 // last had. Their state marks stay current from the session list, which covers every session.
 import { Component } from "preact";
+import { t } from "./i18n.js";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { describeCall } from "./calls.js";
 import { workspaceOrder } from "./sessions.js";
@@ -231,7 +232,7 @@ export function togglePeeks() {
     if (on && !PEEK_WIDE.matches && peekTiles().length === 0) {
         notify(
             "info",
-            "Peek tiles on: sessions show here while they work, wait for you, or finish.",
+            t("Peek tiles on: sessions show here while they work, wait for you, or finish."),
         );
     }
 }
@@ -255,9 +256,9 @@ export function PeeksButton() {
     // counts those waiting, and it stays quiet then too.
     return html`<button
         class=${`icon-button badge-host ${on ? "on" : waiting ? "quiet-narrow" : "quiet"}`}
-        aria-label="Peek tiles"
+        aria-label=${t("Peek tiles")}
         aria-pressed=${on}
-        title=${on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)"}
+        title=${t(on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)")}
         onClick=${togglePeeks}
     >
         <${Icon} name="tiles" />
@@ -472,10 +473,10 @@ function useAwayWaiting(list, key) {
 
 function Status({ status }) {
     if (status === "running") {
-        return html`<span class="peek-run" title="Running">…</span>`;
+        return html`<span class="peek-run" title=${t("Running")}>…</span>`;
     }
 
-    return status === "error" ? html`<span class="err" title="Failed">✕</span>` : null;
+    return status === "error" ? html`<span class="err" title=${t("Failed")}>✕</span>` : null;
 }
 
 function PeekLine({ line }) {
@@ -543,7 +544,7 @@ function PeekApproval({ approval, me, rule, whole }) {
     const ownCall = rule === "others" && me?.role !== "owner" && approval.requestedBy === me?.id;
 
     return html`<span class="peek-actions">
-        <button class="button small" disabled=${busy} onClick=${() => answer(false)}>Deny</button>
+        <button class="button small" disabled=${busy} onClick=${() => answer(false)}>${t("Deny")}</button>
         ${
             whole
                 ? !ownCall &&
@@ -556,7 +557,7 @@ function PeekApproval({ approval, me, rule, whole }) {
                   </button>`
                 : html`<button
                       class="button small primary"
-                      title="See the whole command where it waits"
+                      title=${t("See the whole command where it waits")}
                       onClick=${() => navigate(approval.conversationId)}
                   >
                       Open
@@ -623,7 +624,7 @@ class PeekTile extends Component {
                   : html`<span class="state-idle"></span>`;
 
         return html`<div class=${`peek ${status}`} data-peek=${session.id}>
-            <button class="peek-head" title=${`Open ${title}`} onClick=${open}>
+            <button class="peek-head" title=${t("Open {{title}}", { title })} onClick=${open}>
                 <span class="session-state">${mark}</span>
                 <span class="peek-name">
                     <span class="peek-title">${title}</span>
@@ -667,8 +668,8 @@ class PeekTile extends Component {
                     status === "done" &&
                     html`<button
                         class="icon-button peek-seen"
-                        title="Mark as seen"
-                        aria-label="Mark as seen"
+                        title=${t("Mark as seen")}
+                        aria-label=${t("Mark as seen")}
                         onClick=${() => markSeen(session.id)}
                     >
                         <${Icon} name="check" size=${14} />
@@ -761,7 +762,7 @@ function PeekColumn({ tiles, leaving = false }) {
 
     return html`<aside
         class=${`peeks window ${leaving ? "leaving" : ""}`}
-        aria-label="Peeks"
+        aria-label=${t("Peeks")}
         inert=${leaving}
     >
         <div class="peeks-list" ref=${list}>
@@ -770,8 +771,8 @@ function PeekColumn({ tiles, leaving = false }) {
                 props.length === 0 &&
                 html`<div class="peeks-empty">
                     <${Icon} name="tiles" size=${28} />
-                    <p>Other sessions show here while they work, wait for you, or finish.</p>
-                    <p class="muted small">Pinned sessions stay here. Alt+P hides this.</p>
+                    <p>${t("Other sessions show here while they work, wait for you, or finish.")}</p>
+                    <p class="muted small">${t("Pinned sessions stay here. Alt+P hides this.")}</p>
                 </div>`
             }
         </div>
@@ -786,7 +787,7 @@ export function PeekStrip({ tiles }) {
 
     useOnScreen(list);
 
-    return html`<div class="peek-strip" ref=${list} role="region" aria-label="Peeks">
+    return html`<div class="peek-strip" ref=${list} role="region" aria-label=${t("Peeks")}>
         ${tileProps(tiles, true).map((each) => html`<${PeekTile} ...${each} />`)}
     </div>`;
 }

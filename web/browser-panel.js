@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // The Browser panel: the session's page in the server's browser, the same one Pi uses with its browser tool. Frames
 // come as JPEGs by long polling (which passes any tunnel); taps, drags, scrolls, and keys go back as input events. Wide
 // screens show it as a window beside the conversation; phones show it full screen.
@@ -480,18 +481,18 @@ function TypeBar({ send, onClose, input, shown }) {
         <input
             ref=${input}
             tabindex=${shown ? "0" : "-1"}
-            placeholder="Type into the page…"
+            placeholder=${t("Type into the page…")}
             autocapitalize="off"
             autocomplete="off"
             autocorrect="off"
             spellcheck="false"
             enterkeyhint="send"
         />
-        <button type="submit" class="button small">Send</button>
+        <button type="submit" class="button small">${t("Send")}</button>
         <button
             type="button"
             class="key"
-            title="Enter"
+            title=${t("Enter")}
             onClick=${() => send({ type: "key", key: "Enter" })}
         >
             ⏎
@@ -499,7 +500,7 @@ function TypeBar({ send, onClose, input, shown }) {
         <button
             type="button"
             class="key"
-            title="Backspace"
+            title=${t("Backspace")}
             onClick=${() => send({ type: "key", key: "Backspace" })}
         >
             ⌫
@@ -507,7 +508,7 @@ function TypeBar({ send, onClose, input, shown }) {
         <button
             type="button"
             class="key"
-            title="Tab"
+            title=${t("Tab")}
             onClick=${() => send({ type: "key", key: "Tab" })}
         >
             ⇥
@@ -515,7 +516,7 @@ function TypeBar({ send, onClose, input, shown }) {
         <button
             type="button"
             class="icon-button small"
-            aria-label="Close the keyboard bar"
+            aria-label=${t("Close the keyboard bar")}
             onClick=${onClose}
         >
             <${Icon} name="close" size=${14} />
@@ -563,9 +564,9 @@ function ConsolePane({ conversationId, logs, steer, onClose }) {
     }, [entries]);
     const source = (text) => text?.replace(/^https?:\/\/[^/]+/, "");
 
-    return html`<section class="browser-console" aria-label="Console">
+    return html`<section class="browser-console" aria-label=${t("Console")}>
         <header>
-            <strong>Console</strong>
+            <strong>${t("Console")}</strong>
             <span class="muted small">
                 ${entries ? `${entries.filter((entry) => entry.level !== "nav").length} lines` : ""}
             </span>
@@ -573,20 +574,20 @@ function ConsolePane({ conversationId, logs, steer, onClose }) {
             ${
                 steer &&
                 html`<button class="link" onClick=${() => attempt(() => browserApi("clear", {}))}>
-                    Clear
+                    ${t("Clear")}
                 </button>`
             }
-            <button class="icon-button small" aria-label="Close the console" onClick=${onClose}>
+            <button class="icon-button small" aria-label=${t("Close the console")} onClick=${onClose}>
                 <${Icon} name="close" size=${14} />
             </button>
         </header>
         <div class="browser-console-lines mono" ref=${list}>
             ${
                 entries === null
-                    ? html`<div class="muted small">Loading…</div>`
+                    ? html`<div class="muted small">${t("Loading…")}</div>`
                     : entries.length === 0
                       ? html`<div class="muted small">
-                          Nothing yet. Logs, errors, and failed loads show here.
+                          ${t("Nothing yet. Logs, errors, and failed loads show here.")}
                       </div>`
                       : entries.map((entry) =>
                             entry.level === "nav"
@@ -627,13 +628,13 @@ function StartScreen({ steer }) {
     return html`<div class="browser-start">
         <${Icon} name="globe" size=${28} />
         <p>
-            ${steer ? "Type an address above, such as localhost:5173, or ask Pi to open one." : "Nothing is open yet. Pi, or someone who can steer, opens pages here."}
+            ${steer ? t("Type an address above, such as {{address}}, or ask Pi to open one.", { address: "localhost:5173" }) : t("Nothing is open yet. Pi, or someone who can steer, opens pages here.")}
         </p>
-        ${owner && servers === null && html`<${Spinner} label="Looking for servers" />`}
+        ${owner && servers === null && html`<${Spinner} label=${t("Looking for servers")} />`}
         ${
             servers?.length > 0 &&
             html`<div class="browser-servers">
-                <div class="muted small">Running on this machine</div>
+                <div class="muted small">${t("Running on this machine")}</div>
                 ${servers.slice(0, 8).map(
                     (server) => html`<button
                         key=${server.port}
@@ -693,7 +694,7 @@ function ResizeEdge() {
         class="resize-handle browser-resize"
         role="separator"
         aria-orientation="vertical"
-        title="Drag to resize"
+        title=${t("Drag to resize")}
         onPointerDown=${start}
         onDblClick=${reset}
     ></div>`;
@@ -813,19 +814,19 @@ export function BrowserPanel({ leaving = false }) {
     } else if (!open && why) {
         stage = html`<div class="browser-note">
             <p>${why}</p>
-            ${steer && html`<button class="button small" onClick=${retry}>Try again</button>`}
+            ${steer && html`<button class="button small" onClick=${retry}>${t("Try again")}</button>`}
         </div>`;
     } else if (!open && !steer) {
         stage = html`<div class="browser-note"><${StartScreen} steer=${false} /></div>`;
     } else if (waiting) {
         stage = html`<div class="browser-note">
-            <p>The page closed.</p>
-            <button class="button small" onClick=${retry}>Open it again</button>
+            <p>${t("The page closed.")}</p>
+            <button class="button small" onClick=${retry}>${t("Open it again")}</button>
         </div>`;
     } else if (!open || !frame) {
         stage = html`<div class="browser-note">
-            <${Spinner} label="Starting the browser" />
-            <span class="muted small">Starting the browser…</span>
+            <${Spinner} label=${t("Starting the browser")} />
+            <span class="muted small">${t("Starting the browser…")}</span>
         </div>`;
     } else {
         stage = html`<div class="browser-frame">
@@ -838,7 +839,7 @@ export function BrowserPanel({ leaving = false }) {
                     ${
                         steer &&
                         html`<button class="button small" onClick=${() => run("reload")}>
-                            Reload
+                            ${t("Reload")}
                         </button>`
                     }
                 </div>`
@@ -848,15 +849,15 @@ export function BrowserPanel({ leaving = false }) {
 
     return html`<section
         class=${`browser window ${leaving ? "leaving" : ""}`}
-        aria-label="Browser"
+        aria-label=${t("Browser")}
         inert=${leaving}
     >
         <${ResizeEdge} />
         <header class="browser-bar">
             <button
                 class="icon-button"
-                aria-label="Back"
-                title="Back"
+                aria-label=${t("Back")}
+                title=${t("Back")}
                 disabled=${!steer || !state?.canGoBack}
                 onClick=${() => run("back")}
             >
@@ -864,8 +865,8 @@ export function BrowserPanel({ leaving = false }) {
             </button>
             <button
                 class="icon-button browser-forward"
-                aria-label="Forward"
-                title="Forward"
+                aria-label=${t("Forward")}
+                title=${t("Forward")}
                 disabled=${!steer || !state?.canGoForward}
                 onClick=${() => run("forward")}
             >
@@ -875,8 +876,8 @@ export function BrowserPanel({ leaving = false }) {
                 state?.loading && open
                     ? html`<button
                         class="icon-button"
-                        aria-label="Stop loading"
-                        title="Stop"
+                        aria-label=${t("Stop loading")}
+                        title=${t("Stop")}
                         disabled=${!steer}
                         onClick=${() => run("stop")}
                     >
@@ -884,8 +885,8 @@ export function BrowserPanel({ leaving = false }) {
                     </button>`
                     : html`<button
                         class="icon-button"
-                        aria-label="Reload"
-                        title="Reload"
+                        aria-label=${t("Reload")}
+                        title=${t("Reload")}
                         disabled=${!steer || !open}
                         onClick=${() => run("reload")}
                     >
@@ -928,8 +929,8 @@ export function BrowserPanel({ leaving = false }) {
             </button>
             <button
                 class=${`icon-button badge-host ${showConsole ? "on" : ""}`}
-                aria-label="Console"
-                title="Console"
+                aria-label=${t("Console")}
+                title=${t("Console")}
                 onClick=${() => setShowConsole(!showConsole)}
             >
                 <${Icon} name="terminal" size=${18} />
@@ -944,8 +945,8 @@ export function BrowserPanel({ leaving = false }) {
                 open &&
                 html`<button
                     class=${`icon-button ${typing ? "on" : ""}`}
-                    aria-label="Type into the page"
-                    title="Type into the page"
+                    aria-label=${t("Type into the page")}
+                    title=${t("Type into the page")}
                     onClick=${() => {
                         setTyping(!typing);
 
@@ -962,8 +963,8 @@ export function BrowserPanel({ leaving = false }) {
             }
             <button
                 class="icon-button browser-close"
-                aria-label="Close the browser"
-                title="Close the browser (Alt+B)"
+                aria-label=${t("Close the browser")}
+                title=${t("Close the browser (Alt+B)")}
                 onClick=${() => setBrowserOpen(false)}
             >
                 <${Icon} name="close" size=${18} />
@@ -1019,8 +1020,8 @@ export function BrowserButton() {
     // message box) instead, so the top bar keeps room.
     return html`<button
         class=${`icon-button badge-host ${browserOpen ? "on" : live ? "quiet-phone" : "quiet"}`}
-        aria-label="Browser"
-        title="Browser (Alt+B)"
+        aria-label=${t("Browser")}
+        title=${t("Browser (Alt+B)")}
         onClick=${toggleBrowser}
     >
         <${Icon} name="globe" />
