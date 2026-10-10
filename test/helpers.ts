@@ -61,7 +61,8 @@ export function scriptedModel(route: FauxResponseStep = echo) {
         ],
     });
 
-    faux.setResponses(Array.from({ length: 200 }, () => route));
+    // Plenty: a test file of many subagents (each of whose turns takes one) used 200 up.
+    faux.setResponses(Array.from({ length: 1000 }, () => route));
 
     return faux;
 }

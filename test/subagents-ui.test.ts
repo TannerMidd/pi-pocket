@@ -507,8 +507,8 @@ test(
 );
 
 /** Wait for the layout to settle: a fitted dock is set after a render, and after a size change, a frame later. */
-const frames = () =>
-    page.evaluate(
+const frames = (on = page) =>
+    on.evaluate(
         `await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
     );
 
@@ -532,11 +532,11 @@ type Dock = {
 };
 
 /** The dock and the conversation as they show. */
-const dock = async (on = page) => {
-    await frames();
+const dock = async (on = page): Promise<Dock> => {
+    const measure = async () => {
+        await frames(on);
 
-    return JSON.parse(
-        await on.evaluate(`
+        return on.evaluate(`
             const rect = (element) => element?.getBoundingClientRect();
             const dock = document.querySelector(".dock");
             const scroller = document.querySelector(".scroller");
@@ -573,8 +573,23 @@ const dock = async (on = page) => {
                 count: shown(count) ? count.textContent.trim() : null,
                 lastInView: last !== undefined && last.bottom <= rect(scroller).bottom + 1 && last.bottom > rect(scroller).top,
             });
-        `),
-    ) as Dock;
+        `);
+    };
+
+    // As it settles: the dock fits itself a frame after what changed it, later on a busy machine.
+    let last = await measure();
+
+    for (let tries = 0; tries < 10; tries++) {
+        const now = await measure();
+
+        if (now === last) {
+            break;
+        }
+
+        last = now;
+    }
+
+    return JSON.parse(last) as Dock;
 };
 
 /** A session at `size`, with 15 slow subagents at work and `queued` steers waiting; `before` sets up more. */
