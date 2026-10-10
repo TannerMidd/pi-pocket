@@ -8821,6 +8821,14 @@ textarea.notes {
     padding-top: 2px;
 }
 
+/* A session's finished subagents left off the board, counted: "+12". */
+.board-older {
+    align-self: center;
+    margin-left: 3px;
+    color: var(--muted);
+    font-size: 0.7rem;
+}
+
 .board-cell {
     width: 18px;
     height: 18px;

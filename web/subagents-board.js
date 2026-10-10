@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { folderColor } from "./avatar.js";
 import { useBack } from "./back.js";
-import { useOnScreen } from "./peeks.js";
+import { fromServer, useOnScreen } from "./peeks.js";
 import { api, attempt, canSteer, navigate, store } from "./store.js";
 import { elapsed, nowDoing, ordered, stateOf } from "./subagents.js";
 import { html, Icon, timeAgo } from "./ui.js";
@@ -35,7 +35,8 @@ let told = null;
 /** Numbers each request, so the server drops one that arrives after a newer one. */
 let seq = 0;
 
-store.subscribe((state) => {
+/** Tell the server whether this tab's connection wants every subagent, when that changed. */
+function sync(state) {
     const wanted = state.board && state.streamId ? state.streamId : null;
 
     if (wanted === told) {
@@ -48,19 +49,25 @@ store.subscribe((state) => {
 
     told = wanted;
 
-    // A request lost with the network is asked again on the connection that follows.
+    // A request lost with the network is asked again on the connection that follows; one that failed while the
+    // connection stayed, again in a moment.
     if (wanted !== null) {
-        api("subagents", { connection: wanted, on: true, seq: ++seq }).catch(() => {});
+        api("subagents", { connection: wanted, on: true, seq: ++seq }).catch(() => {
+            if (told === wanted) {
+                told = null;
+                setTimeout(() => sync(store.state), 2000);
+            }
+        });
     }
-});
+}
+
+store.subscribe(sync);
 
 /** Close the board: back to the conversation, or the home screen, it took the place of. */
 export const closeBoard = () => store.set({ board: false, boardAgents: null });
 
-/** "2 need approval · 4 working · 2 done": a session's subagents by state, most urgent first. */
-function summaryOf(list, { short = false } = {}) {
-    const counts = countOf(list);
-
+/** "2 need approval · 4 working · 2 done": a session's subagents by state (`counts`), most urgent first. */
+function summaryOf(counts, { short = false } = {}) {
     if (short) {
         const parts = STATES.filter(
             (state) => counts[state] > 0 && !["stopped", "done"].includes(state),
@@ -70,7 +77,7 @@ function summaryOf(list, { short = false } = {}) {
             ? parts
                   .map((state) => `${counts[state]} ${state === "waiting" ? "approve" : state}`)
                   .join(" · ")
-            : `${list.length} done`;
+            : `${totalOf(counts)} done`;
     }
 
     return STATES.filter((state) => counts[state] > 0)
@@ -78,18 +85,32 @@ function summaryOf(list, { short = false } = {}) {
         .join(" · ");
 }
 
-function countOf(list) {
+const totalOf = (counts) => Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+/**
+ * A session's subagents by state. The board leaves out a session's oldest finished ones (the server's
+ * `BOARD_FINISHED`), which the session list still counts (`known`): never fewer than the squares, as the two lists
+ * can arrive a moment apart.
+ */
+function countOf(list, known) {
     const counts = Object.fromEntries(STATES.map((state) => [state, 0]));
 
     for (const agent of list) {
         counts[boardState(agent)]++;
     }
 
+    for (const state of STATES) {
+        counts[state] = Math.max(counts[state], known?.[state] ?? 0);
+    }
+
     return counts;
 }
 
 /** How long ago something ended, as the board says it: "14m ago", "just now", or the day, a month on. */
-function ago(ms) {
+function ago(server) {
+    // The server's clock, on this device's.
+    const ms = fromServer(server);
+
     if (Date.now() - ms >= 30 * 86_400_000) {
         return `on ${new Date(ms).toLocaleDateString()}`;
     }
@@ -348,6 +369,7 @@ export function SubagentsBoard() {
     const agents = boardAgents ?? [];
     const titles = new Map(sessions.map((session) => [session.id, session.title ?? "New session"]));
     const cwds = new Map(sessions.map((session) => [session.id, session.cwd]));
+    const known = new Map(sessions.map((session) => [session.id, session.subagents]));
     const needle = query.trim().toLowerCase();
     const matches = (agent) =>
         (filter === "all" || boardState(agent) === filter) &&
@@ -370,7 +392,7 @@ export function SubagentsBoard() {
             list: ordered(list).sort(
                 (a, b) => STATES.indexOf(boardState(a)) - STATES.indexOf(boardState(b)),
             ),
-            counts: countOf(list),
+            counts: countOf(list, known.get(id)),
         }))
         .sort(
             (a, b) =>
@@ -380,7 +402,11 @@ export function SubagentsBoard() {
         );
     const grid = rows.map((row) => row.list.map((agent) => agent.conversationId));
     const byId = new Map(agents.map((agent) => [agent.conversationId, agent]));
-    const counts = countOf(agents);
+    // Every state's count, older finished subagents left off the board included.
+    const counts = Object.fromEntries(
+        STATES.map((state) => [state, rows.reduce((sum, row) => sum + row.counts[state], 0)]),
+    );
+    const total = totalOf(counts);
     // What needs you, in the squares' order: waiting for an approval first, then failed.
     const needs = rows
         .flatMap((row) => row.list)
@@ -519,7 +545,7 @@ export function SubagentsBoard() {
     const pick = (id) => setSelected(id);
     const sessionCount = rows.length;
     const legend = [
-        { key: "all", label: "All", count: agents.length },
+        { key: "all", label: "All", count: total },
         ...STATES.filter((state) => counts[state] > 0).map((state) => ({
             key: state,
             label: LABELS[state],
@@ -527,7 +553,9 @@ export function SubagentsBoard() {
         })),
     ];
 
-    const sessionRows = rows.map(({ id, list }) => {
+    const sessionRows = rows.map(({ id, list, counts: own }) => {
+        // Finished long ago and left off the board: counted, not drawn.
+        const older = totalOf(own) - list.length;
         const top = STATES.find((state) => list.some((agent) => boardState(agent) === state));
         const tone = top === "done" || top === "stopped" ? "quiet" : top;
         const title = titles.get(id) ?? `Session ${id}`;
@@ -550,11 +578,11 @@ export function SubagentsBoard() {
                     ${
                         phone &&
                         html`<span class=${`board-summary ${tone}`}>
-                            ${summaryOf(list, { short: true })}
+                            ${summaryOf(own, { short: true })}
                         </span>`
                     }
                 </span>
-                ${!phone && html`<span class=${`board-summary ${tone}`}>${summaryOf(list)}</span>`}
+                ${!phone && html`<span class=${`board-summary ${tone}`}>${summaryOf(own)}</span>`}
             </button>
             <div class="board-cells">
                 ${list.map(
@@ -568,6 +596,15 @@ export function SubagentsBoard() {
                         onHover=${phone ? () => {} : setHovered}
                     />`,
                 )}
+                ${
+                    older > 0 &&
+                    html`<span
+                        class="board-older"
+                        title=${`${older} more, finished earlier: open the session to see them`}
+                    >
+                        +${older}
+                    </span>`
+                }
             </div>
         </div>`;
     });
@@ -590,7 +627,7 @@ export function SubagentsBoard() {
             <div class="board-title">
                 <h2>Subagents</h2>
                 <div class="board-sub">
-                    ${agents.length} in ${sessionCount} session${sessionCount === 1 ? "" : "s"}
+                    ${total} in ${sessionCount} session${sessionCount === 1 ? "" : "s"}
                 </div>
             </div>
             ${!phone && html`<${Search} query=${query} setQuery=${setQuery} />`}

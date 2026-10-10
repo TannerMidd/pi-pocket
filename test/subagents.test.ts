@@ -615,3 +615,105 @@ test("the session list counts each session's subagents by state, and an open boa
         failing = new Set();
     }
 });
+
+test("an open board loses the subagents of a session no longer shared, at once", async () => {
+    const shared = await orchestrate({ spawn: ["kept"], rounds: 0, sleep: 0 });
+
+    // The plan is read when the model answers: the first one's, before the next session's.
+    await until(() => app.subagents().some((each) => each.name === "kept"), "the first subagent");
+    const unshared = await orchestrate({ spawn: ["hidden"], rounds: 0, sleep: 0 });
+    const guest = app.config.addUser("Narrowed", "guest");
+    const tab = fakeTab(undefined, guest.user);
+    const names = () =>
+        ((tab.last("subagents") ?? []) as unknown as { name: string }[])
+            .map((entry) => entry.name)
+            .filter((name) => name === "kept" || name === "hidden")
+            .sort();
+
+    // Both answered, their reports delivered, and the parents idle: nothing more would send the board on its own.
+    try {
+        await until(
+            async () =>
+                app
+                    .subagents()
+                    .filter((each) => ["kept", "hidden"].includes(each.name) && !each.busy)
+                    .length === 2 &&
+                !app.isBusy(shared) &&
+                !app.isBusy(unshared) &&
+                (await delivered(unshared)).hidden === 1,
+            "both subagents done",
+            15_000,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await app.attach(tab.client);
+        app.setBoard(guest.user, tab.client.connection, true);
+        assert.deepEqual(names(), ["hidden", "kept"]);
+        app.setAccess(owner(app), guest.user.id, { sessions: [String(shared)] });
+        // Nothing else changes on the server: the change of access alone sends the board again.
+        await until(
+            () => isDeepStrictEqual(names(), ["kept"]),
+            "the board without the other session",
+            2000,
+        );
+        assert.ok(unshared !== shared);
+    } finally {
+        // One person again, as the tests after expect: with more, messages say who sent them.
+        app.config.removeUser(guest.user.id);
+    }
+});
+
+test("the board keeps a session's newest finished subagents, and every one that needs looking at", async () => {
+    const id = await newSession(app);
+    const old = Date.now() - 86_400_000;
+
+    // Thirty done long ago, and one that failed: as a session that has run many.
+    await app.harness.commit(async (tx) => {
+        const doc = await tx.doc(SubagentsDoc, id);
+
+        doc.agents = {
+            ...Object.fromEntries(
+                Array.from({ length: 30 }, (_, index) => [
+                    `done-${index}`,
+                    {
+                        conversationId: (900_000 + index) as never,
+                        reported: [],
+                        asked: "Look.",
+                        askedAt: old + index * 1000,
+                        answeredAt: old + index * 1000 + 500,
+                        failed: false,
+                    },
+                ]),
+            ),
+            broke: {
+                conversationId: 900_100 as never,
+                reported: [],
+                asked: "Look.",
+                askedAt: old,
+                answeredAt: old + 100,
+                failed: true,
+                error: "Bad request",
+            },
+        };
+    }, context);
+    await until(
+        () =>
+            isDeepStrictEqual(app.sessions().find((each) => each.id === Number(id))?.subagents, {
+                done: 30,
+                failed: 1,
+            }),
+        "the session list counts them all",
+    );
+    const shown = app.subagents().filter((each) => each.id === Number(id));
+    const done = shown.filter((each) => each.name.startsWith("done-")).map((each) => each.name);
+
+    assert.equal(shown.length, 25);
+    assert.ok(
+        shown.some((each) => each.name === "broke"),
+        "the one that failed always shows",
+    );
+    // The newest 24: the last 24 made.
+    assert.deepEqual(
+        done.sort(),
+        Array.from({ length: 24 }, (_, index) => `done-${index + 6}`).sort(),
+    );
+});

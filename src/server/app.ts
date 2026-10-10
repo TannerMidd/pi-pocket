@@ -139,8 +139,31 @@ export function subagentState(entry: SubagentEntry): SubagentState {
     return entry.stopped === true ? "stopped" : entry.failed === true ? "failed" : "done";
 }
 
+/**
+ * On the subagents board, a session's finished subagents (done or stopped) beyond this many, the oldest, are left out:
+ * the session list counts them, and the board says how many more there are. Those that work, wait, failed, or have a
+ * report on its way always show.
+ */
+const BOARD_FINISHED = 24;
+
 /** How long a read of Pi's settings serves skills and trust before it is read again. */
 const SETTINGS_STALE_MS = 30_000;
+
+/** A session's subagents as the board gets them: all but its oldest finished ones past `BOARD_FINISHED`. */
+function forBoard(entries: readonly SubagentEntry[]): SubagentEntry[] {
+    const finished = (entry: SubagentEntry) =>
+        entry.reporting !== true && ["done", "stopped"].includes(subagentState(entry));
+    const done = entries.filter(finished);
+
+    if (done.length <= BOARD_FINISHED) {
+        return [...entries];
+    }
+
+    const when = (entry: SubagentEntry) => entry.answeredAt ?? entry.askedAt ?? 0;
+    const kept = new Set(done.sort((a, b) => when(b) - when(a)).slice(0, BOARD_FINISHED));
+
+    return entries.filter((entry) => !finished(entry) || kept.has(entry));
+}
 
 /** How many of a session's subagents are in each state, without the empty ones; undefined for none at all. */
 function countSubagents(
@@ -1157,8 +1180,8 @@ export class PocketApp {
     }
 
     /**
-     * Every subagent in the sessions this person can see, for the subagents board. Archived sessions are left out,
-     * unless one of their subagents works or waits there.
+     * Every subagent in the sessions this person can see, for the subagents board, but a session's oldest finished ones
+     * past `BOARD_FINISHED`. Archived sessions are left out, unless one of their subagents works or waits there.
      */
     subagents(user?: User): SubagentEntry[] {
         const all: SubagentEntry[] = [];
@@ -1172,7 +1195,7 @@ export class PocketApp {
                 continue;
             }
 
-            all.push(...list);
+            all.push(...forBoard(list));
         }
 
         return all;
@@ -1663,6 +1686,12 @@ export class PocketApp {
 
             client.send("hello", this.#helloFor(client, await this.hello(user)));
             client.send("sessions", this.sessions(user));
+
+            // An open board too: it must not keep subagents of sessions no longer shared.
+            if (client.board === true) {
+                client.boardSent = undefined;
+                this.#sendBoard(client, this.subagents(user));
+            }
         }
     }
 
