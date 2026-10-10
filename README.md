@@ -13,7 +13,7 @@ Runs on your own machine or directly on your phone. No cloud VM.
 
 [Website](https://tannermidd.github.io/pi-pocket/) · [Quick start](#quick-start) · [Features](#features) · [Remote access](#remote-access)
 
-<img src="docs/showcase.png" alt="Pi Pocket in the Tokyo Night theme, on a desktop and a phone. On the desktop, three tiled windows: the session list by day; a conversation where Pi has fixed a sign-in redirect loop, its edits and a passing test run of 48 folded into a timeline, and a teammate, Alex, asks it to push the branch; and Changes, reviewing the diff. On the phone, the same session waits for Lancet Guard's approval before git push." width="100%">
+<img src="docs/showcase-0.12.png" alt="Pi Pocket in the Tokyo Night theme, on a desktop and a phone. On the desktop, three tiled windows: the session list by day; a conversation where Pi has fixed a sign-in redirect loop, its edits and a passing test run of 48 folded into a timeline, and a teammate, Alex, asks it to push the branch; and Changes, reviewing the diff. On the phone, the same session waits for Lancet Guard's approval before git push." width="100%">
 
 </div>
 
