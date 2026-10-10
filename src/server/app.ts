@@ -10,6 +10,7 @@ import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
     getAgentDir,
     ModelRuntime,
@@ -42,7 +43,7 @@ import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
-import { Commands } from "./commands.ts";
+import { Commands, THINKING_LEVELS } from "./commands.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
 import {
     ArtifactBodyDoc,
@@ -1308,6 +1309,8 @@ export class PocketApp {
                 collab: 2,
                 reactions: REACTIONS,
                 approvalRule: this.config.approvalRule,
+                // The model and thinking level new sessions start with, or null for the last one picked.
+                defaultModel: this.config.defaultModel ?? null,
             },
         };
     }
@@ -1970,6 +1973,72 @@ export class PocketApp {
                 ? `${user.name} made approvals need someone other than who asked.`
                 : `${user.name} let anyone who can steer allow risky calls.`,
         );
+    }
+
+    /**
+     * The owner picks the model and thinking level new sessions start with: a signed-in model, its level kept to one it
+     * has. Null leaves it to the last model picked, as before there was a choice.
+     */
+    async setDefaultModel(user: User, choice: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (choice === null) {
+            if (this.config.defaultModel !== undefined) {
+                this.config.defaultModel = undefined;
+                await this.#refreshClients();
+            }
+
+            return;
+        }
+
+        const asked = (typeof choice === "object" ? choice : {}) as {
+            provider?: unknown;
+            modelId?: unknown;
+            thinkingLevel?: unknown;
+        };
+
+        if (
+            typeof asked.provider !== "string" ||
+            typeof asked.modelId !== "string" ||
+            (asked.thinkingLevel !== undefined &&
+                (typeof asked.thinkingLevel !== "string" ||
+                    !THINKING_LEVELS.has(asked.thinkingLevel)))
+        ) {
+            throw new HttpError(
+                400,
+                `defaultModel must be null, or { provider, modelId, thinkingLevel? } with thinkingLevel one of ${[...THINKING_LEVELS].join(", ")}`,
+            );
+        }
+
+        const model = this.models
+            .getAvailableSnapshot()
+            .find((each) => each.provider === asked.provider && each.id === asked.modelId);
+
+        if (model === undefined) {
+            throw new HttpError(
+                400,
+                `Model ${asked.provider}/${asked.modelId} is not available: sign in to its provider first.`,
+            );
+        }
+
+        const thinkingLevel = clampThinkingLevel(
+            model,
+            (asked.thinkingLevel ?? "off") as ModelThinkingLevel,
+        );
+        const before = this.config.defaultModel;
+
+        if (
+            before?.provider === model.provider &&
+            before.modelId === model.id &&
+            before.thinkingLevel === thinkingLevel
+        ) {
+            return;
+        }
+
+        this.config.defaultModel = { provider: model.provider, modelId: model.id, thinkingLevel };
+        await this.#refreshClients();
     }
 
     /** Send every client a fresh hello: the guard's status and the extension names changed. */

@@ -59,6 +59,8 @@ interface PocketConfig {
     /** Invites not yet used: kept here so one that lasts a day or a week outlives a restart. */
     invites?: StoredInvite[];
     lastModel?: ModelChoice;
+    /** The model and thinking level new sessions start with, as the owner chose; absent: the last one picked. */
+    defaultModel?: ModelChoice;
     /** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
     disabledExtensions?: string[];
     /** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
@@ -133,6 +135,20 @@ export class ConfigStore {
 
     set lastModel(choice: ModelChoice | undefined) {
         this.#config.lastModel = choice;
+        this.save();
+    }
+
+    get defaultModel(): ModelChoice | undefined {
+        return this.#config.defaultModel;
+    }
+
+    set defaultModel(choice: ModelChoice | undefined) {
+        if (choice === undefined) {
+            delete this.#config.defaultModel;
+        } else {
+            this.#config.defaultModel = choice;
+        }
+
         this.save();
     }
 

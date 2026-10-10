@@ -21,6 +21,7 @@ import {
 import { isPinned, paletteOf, togglePin } from "../theme.js";
 import { currentTrust, trustAvailable } from "../trust.js";
 import { branchAvailable } from "./branch.js";
+import { defaultLabel, defaultsKept } from "./model.js";
 import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
 
 /**
@@ -271,6 +272,15 @@ export function MenuSheet() {
         <div class="group">
             <div class="group-title">App</div>
             ${item("Appearance", () => openSheet({ type: "appearance" }), paletteOf().name)}
+            ${
+                me?.role === "owner" &&
+                defaultsKept() &&
+                item(
+                    "Default model",
+                    () => openSheet({ type: "model", id: "default", forDefault: true }),
+                    defaultLabel(server?.defaultModel, store.state.models) || "the last one picked",
+                )
+            }
             ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
             ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
             ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}

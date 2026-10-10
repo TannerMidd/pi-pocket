@@ -433,10 +433,22 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "settings" && method === "POST") {
-            const body = await readJson<{ approvalRule?: unknown }>(request);
+            const body = await readJson<{ approvalRule?: unknown; defaultModel?: unknown }>(
+                request,
+            );
+
+            // One at a time: a second that fails must not leave the first changed.
+            if (body.approvalRule !== undefined && body.defaultModel !== undefined) {
+                throw new HttpError(400, "Change one setting at a time.");
+            }
 
             if (body.approvalRule !== undefined) {
                 await app.setApprovalRule(user, body.approvalRule);
+            }
+
+            // Null clears it: new sessions start with the last model picked again.
+            if (body.defaultModel !== undefined) {
+                await app.setDefaultModel(user, body.defaultModel);
             }
 
             return json(response, 200, { ok: true });

@@ -3335,6 +3335,41 @@ button.chip:hover {
     margin: 0.2rem 0 0;
 }
 
+/* What new sessions start with, under the thinking levels: the default, and making this one it. */
+.pop-menu-default {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.3rem 0.8rem;
+    padding-block: 0.55rem;
+    font-size: 0.75rem;
+}
+
+.pop-menu-foot + .pop-menu-default {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.pop-menu-default-text {
+    min-width: 0;
+    color: var(--body);
+    overflow-wrap: anywhere;
+}
+
+.pop-menu-default-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--ok);
+}
+
+.pop-menu-head-sub {
+    margin-left: 0.4rem;
+    font-weight: 400;
+    color: var(--muted);
+}
+
 /* A heading between a menu's groups of rows. */
 .pop-menu-label {
     padding: 0.55rem 0.8rem 0.25rem;

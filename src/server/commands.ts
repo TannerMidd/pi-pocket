@@ -70,7 +70,7 @@ export interface SubmitRequest {
     inlineFiles?: boolean;
 }
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 /** Attached images that also go to the model itself, when it takes images. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
@@ -346,8 +346,8 @@ export class Commands {
     }
 
     /**
-     * The model a new session starts with: `prefer` (with its thinking level) when it is signed in here, or the one last
-     * picked, or Pi's default, or the first there is.
+     * The model a new session starts with: `prefer` (with its thinking level) when it is signed in here, or the owner's
+     * default, or the one last picked, or Pi's default, or the first there is.
      */
     #defaultModel(prefer?: {
         model: { provider: string; modelId: string } | null;
@@ -364,8 +364,11 @@ export class Commands {
                 : available.find((model) => model.provider === provider && model.id === id);
         const last = config.lastModel;
         const preferred = pick(prefer?.model?.provider, prefer?.model?.modelId);
+        const chosen = config.defaultModel;
+        const fallback = pick(chosen?.provider, chosen?.modelId);
         const model =
             preferred ??
+            fallback ??
             pick(last?.provider, last?.modelId) ??
             pick(settings.getDefaultProvider(), settings.getDefaultModel()) ??
             available[0];
@@ -375,6 +378,9 @@ export class Commands {
         }
 
         const level = ((preferred === undefined ? undefined : prefer?.thinkingLevel) ??
+            (preferred === undefined && fallback !== undefined
+                ? chosen?.thinkingLevel
+                : undefined) ??
             last?.thinkingLevel ??
             settings.getDefaultThinkingLevel() ??
             "off") as ModelThinkingLevel;
