@@ -98,12 +98,15 @@ function queuedMode(item) {
     return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queued" : "Note";
 }
 
-/** What a waiting message says; subagents' reports say whose, as their text is long. */
+/** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
+const FROM = /^\[from: [^\]\n]{1,60}\] /;
+
+/** What a waiting message says (its row names who sent it); subagents' reports say whose, as their text is long. */
 function queuedText(item) {
     const names = queuedReports(item);
 
     if (!names) {
-        return item.text ?? "";
+        return (item.text ?? "").replace(FROM, "");
     }
 
     return `from ${names.join(", ")}, on ${names.length === 1 ? "its" : "their"} way to Pi`;
