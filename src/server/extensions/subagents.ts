@@ -40,6 +40,9 @@ function textOf(message: AssistantMessage | undefined): string {
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
+/** Why a report says its subagent went idle: its run ended without taking the message, and none will. */
+const IDLE = "went idle without taking the message; send it again";
+
 /**
  * A subagent's conversation is owned by an anchor: a background task that finishes at once. Background tasks are a
  * boundary, so the parent's Esc and idle waits do not reach the subagent, while `abort({ background: true })` still does.
@@ -89,7 +92,26 @@ function reporterFor(Courier: CourierTask) {
                         ? `subagent:${reporter.id}`
                         : requestFor(requestedBy, `subagent-${reporter.id}`);
                 const submission = await subagent.submit({ ...request, requestId }, context);
+                // Pi Durable leaves a failed run's inbox alone, so a queued follow-up waits for a boundary that never
+                // comes: once the subagent is idle with it still queued, withdraw it, which ends the wait below.
+                const watch = await runtime.watchDoc(LiveDoc, conversationId, context);
+                let withdrawn = false;
+
+                if (watch !== undefined) {
+                    const strand = async (live: NonNullable<typeof watch>["value"]) => {
+                        if (live !== null && live.run === undefined) {
+                            withdrawn = (await submission.abort(context)) === "aborted";
+                        }
+                    };
+
+                    // A listener is never called inline, so the value it started on is this one's to check.
+                    await strand(watch.value);
+                    watch.start(strand);
+                }
+
                 const settled = await submission.wait(context);
+
+                await watch?.stop();
 
                 await runtime.commit(async (tx) => {
                     const next = (report?: string) =>
@@ -98,7 +120,9 @@ function reporterFor(Courier: CourierTask) {
                     const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
 
                     if (settled.status === "unanswered") {
-                        const why = whyUnanswered(settled.reason, settled.detail);
+                        const why = withdrawn
+                            ? IDLE
+                            : whyUnanswered(settled.reason, settled.detail);
 
                         if (agent !== undefined) {
                             agent.answeredAt = Date.now();
