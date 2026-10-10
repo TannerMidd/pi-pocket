@@ -37,6 +37,14 @@ export class Workspace {
     readonly #files = new FileLists();
 
     /**
+     * The looks at what a conversation's folder changed that are under way, per reach (its folder only, or its
+     * repository). Every tab that shows a session asks (the top bar's count), often together as Pi moves on; those that
+     * ask while a look is under way share it, as each reads the whole history for Pi's edits and runs git. One asked
+     * after it ends looks again, so what it says is never older than the question.
+     */
+    readonly #changesUnderWay = new Map<string, Promise<Changes>>();
+
+    /**
      * Where each folder's repository keeps its files, for a minute: views ask on every update. A folder in none is
      * asked about again after a few seconds, so one Pi has just run `git init` in shows its branch soon.
      */
@@ -398,6 +406,7 @@ export class Workspace {
                 ? `deleted ${path}, which was new since the last commit`
                 : `undid the uncommitted changes to ${path}`;
 
+        this.#forgetChanges(id);
         await this.#app.commands.note(id, user, what);
         await this.#app.collab.activity(id, user, what);
     }
@@ -408,11 +417,34 @@ export class Workspace {
         this.#app.requireSteer(user);
 
         // Someone invited to this session only sees the files in its folder, here as in `conversationFile`.
-        return changesIn(
-            this.#app.cwdOf(id),
-            await this.#app.transcripts.allEntries(id, false),
-            user.sessions !== undefined,
-        );
+        const onlyHere = user.sessions !== undefined;
+        const key = `${id}:${onlyHere}`;
+        const underWay = this.#changesUnderWay.get(key);
+
+        if (underWay !== undefined) {
+            return underWay;
+        }
+
+        const pending = (async () =>
+            changesIn(
+                this.#app.cwdOf(id),
+                await this.#app.transcripts.allEntries(id, false),
+                onlyHere,
+            ))().finally(() => {
+            if (this.#changesUnderWay.get(key) === pending) {
+                this.#changesUnderWay.delete(key);
+            }
+        });
+
+        this.#changesUnderWay.set(key, pending);
+
+        return pending;
+    }
+
+    /** Looks under way began before a file was undone: one asked from now on looks again. */
+    #forgetChanges(id: ConversationId): void {
+        this.#changesUnderWay.delete(`${id}:true`);
+        this.#changesUnderWay.delete(`${id}:false`);
     }
 
     /** The diff of one changed file in a session's repository. */

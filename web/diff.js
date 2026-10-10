@@ -804,8 +804,11 @@ export function reloadChanges(id = store.state.conversationId) {
         return known.pending;
     }
 
+    // The conversation's newest entry when it asked: nothing newer, and Pi quiet, what it said still holds.
+    const entry = id === store.state.conversationId ? store.state.view.order?.at(-1) : undefined;
+
     known.pending = actions.changes(id).then(
-        (data) => Object.assign(known, { data, error: null, pending: null, at: Date.now() }),
+        (data) => Object.assign(known, { data, error: null, pending: null, at: Date.now(), entry }),
         (failure) => Object.assign(known, { error: failure.message, pending: null }),
     );
     changesCache.set(id, known);
@@ -816,7 +819,8 @@ export function reloadChanges(id = store.state.conversationId) {
 
 /**
  * What changed in this conversation's folder, `{ changes, error }`, fetched when first wanted and again a moment after
- * the conversation moves on (Pi's edits show up on their own) while `live`.
+ * the conversation moves on (Pi's edits show up on their own) while `live`. A tab out of sight waits until it shows
+ * again; with nothing new since the last answer and Pi quiet, the answer holds (Refresh asks again).
  */
 export function useChanges(live = true) {
     const id = store.state.conversationId;
@@ -829,17 +833,42 @@ export function useChanges(live = true) {
             reloadChanges(id);
         }
     }, [id]);
+    // The first look after it shows (or turns live) always asks: the folder can have changed outside the conversation
+    // (an editor, a terminal, another session), and so can it while the tab was out of sight.
+    const first = useRef(true);
+
     useEffect(() => {
         if (!live) {
+            first.current = true;
+
             return;
         }
 
+        const look = (always) => {
+            const known = changesCache.get(id);
+
+            if (document.hidden || (!always && !busy && known?.data && known.entry === lastEntry)) {
+                return;
+            }
+
+            reloadChanges(id);
+        };
+
+        const shown = () => !document.hidden && look(true);
         // While Pi works, entries come quickly: look less often then, but at least every few seconds.
         const since = Date.now() - (changesCache.get(id)?.at ?? 0);
         const wait = busy ? Math.max(0, Math.min(BUSY_WAIT, BUSY_MAX - since)) : QUIET_WAIT;
-        const timer = setTimeout(() => reloadChanges(id), wait);
+        const timer = setTimeout(() => {
+            look(first.current);
+            first.current = false;
+        }, wait);
 
-        return () => clearTimeout(timer);
+        document.addEventListener("visibilitychange", shown);
+
+        return () => {
+            clearTimeout(timer);
+            document.removeEventListener("visibilitychange", shown);
+        };
     }, [lastEntry, busy, live, id]);
 
     return { changes: known?.data ?? null, error: known?.error ?? null };
