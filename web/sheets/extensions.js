@@ -139,7 +139,7 @@ export function ExtensionsSheet() {
                         ${module.source === "built-in" ? t(module.title) : module.title}
                         ${module.error && html` <span class="warn small">· ${t("failed to load")}</span>`}
                     </div>
-                    ${module.summary && html`<div class="muted small">${t(module.summary)}</div>`}
+                    ${module.summary && html`<div class="muted small">${module.source === "built-in" ? t(module.summary) : module.summary}</div>`}
                     ${
                         note &&
                         html`<div class=${`small ${note.warn ? "warn" : "ok"}`}>${note.text}</div>`
