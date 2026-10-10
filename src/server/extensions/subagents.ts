@@ -96,22 +96,29 @@ function reporterFor(Courier: CourierTask) {
                 // comes: once the subagent is idle with it still queued, withdraw it, which ends the wait below.
                 const watch = await runtime.watchDoc(LiveDoc, conversationId, context);
                 let withdrawn = false;
+                let settled: Awaited<ReturnType<typeof submission.wait>>;
 
-                if (watch !== undefined) {
-                    const strand = async (live: NonNullable<typeof watch>["value"]) => {
-                        if (live !== null && live.run === undefined) {
-                            withdrawn = (await submission.abort(context)) === "aborted";
-                        }
-                    };
+                try {
+                    if (watch !== undefined) {
+                        // Once withdrawn it stays so: a later call finds the submission settled, which changes nothing.
+                        const strand = async (live: NonNullable<typeof watch>["value"]) => {
+                            if (live !== null && live.run === undefined) {
+                                if ((await submission.abort(context)) === "aborted") {
+                                    withdrawn = true;
+                                }
+                            }
+                        };
 
-                    // A listener is never called inline, so the value it started on is this one's to check.
-                    await strand(watch.value);
-                    watch.start(strand);
+                        // A listener is never called inline, so the value it started on is this one's to check.
+                        await strand(watch.value);
+                        watch.start(strand);
+                    }
+
+                    settled = await submission.wait(context);
+                } finally {
+                    // On every way out, so no watch outlives the phase.
+                    await watch?.stop();
                 }
-
-                const settled = await submission.wait(context);
-
-                await watch?.stop();
 
                 await runtime.commit(async (tx) => {
                     const next = (report?: string) =>
