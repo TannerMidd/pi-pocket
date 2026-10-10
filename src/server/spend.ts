@@ -328,13 +328,23 @@ export class Spend {
     summary(user: User): SpendSummary {
         const app = this.#app;
         const owner = user.role === "owner";
+        // Each session's spend, its subagents' with it, in one pass over every conversation.
+        const byRoot = new Map<ConversationId, number>();
+
+        for (const [id, cost] of this.#costs) {
+            const root = app.rootOf(id);
+
+            byRoot.set(root, (byRoot.get(root) ?? 0) + cost);
+        }
+
         const sessions = app.sessions(user).map((session) => {
-            const budget = app.sessionMeta(session.id as unknown as ConversationId)?.budget;
+            const id = session.id as unknown as ConversationId;
+            const budget = app.sessionMeta(id)?.budget;
 
             return {
                 id: session.id,
                 title: session.title ?? "New session",
-                spent: this.sessionSpent(session.id as unknown as ConversationId),
+                spent: byRoot.get(id) ?? 0,
                 ...(budget === undefined ? {} : { budget }),
             };
         });
