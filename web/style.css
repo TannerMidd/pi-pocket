@@ -2216,7 +2216,7 @@ pre.diff .del {
     padding: 8px 12px 0;
 }
 
-/* Two lines to start with, growing as today; one on a short screen, where the conversation needs the room. */
+/* One line to start with, growing with the text (`fitBox`). */
 .composer textarea {
     display: block;
     border: 0;
@@ -2225,16 +2225,9 @@ pre.diff .del {
     color: var(--text);
     resize: none;
     padding: 10px 12px 2px;
-    min-height: calc(3em + 12px);
     max-height: 40vh;
     font-size: 0.9rem;
     line-height: 1.5;
-}
-
-@media (max-height: 640px) {
-    .composer textarea {
-        min-height: 0;
-    }
 }
 
 /* Touch screens keep 16px, below which iOS zooms into the field. */
