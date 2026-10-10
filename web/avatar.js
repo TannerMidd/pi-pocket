@@ -1,4 +1,5 @@
-// People's avatars: their initials in a color of the theme, the same color for the same person everywhere.
+// People's avatars: their initials in a color of the theme, the same color for the same person everywhere; and the
+// colors of folders, which mark their sessions the same way.
 
 import { html } from "./ui.js";
 
@@ -14,15 +15,39 @@ const COLORS = [
     "var(--o-fg-bright)",
 ];
 
-/** A steady color per person, so the same person looks the same on every device. */
-export function personColor(id) {
+/** Folders' colors: the same, without yellow and red, which mark sessions waiting for you and subagents that failed. */
+const FOLDER_COLORS = [
+    "var(--o-blue)",
+    "var(--o-green)",
+    "var(--o-magenta)",
+    "var(--o-cyan)",
+    "var(--o-orange)",
+    "var(--o-fg-bright)",
+];
+
+function hashOf(text) {
     let hash = 0;
 
-    for (const char of String(id)) {
+    for (const char of String(text)) {
         hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
     }
 
-    return COLORS[hash % COLORS.length];
+    return hash;
+}
+
+/** A steady color per person, so the same person looks the same on every device. */
+export function personColor(id) {
+    return COLORS[hashOf(id) % COLORS.length];
+}
+
+/** A steady color per folder, from its last part, for the mark on its sessions' rows. */
+export function folderColor(path) {
+    const name = String(path ?? "")
+        .replace(/\/+$/, "")
+        .split("/")
+        .pop();
+
+    return FOLDER_COLORS[hashOf(name) % FOLDER_COLORS.length];
 }
 
 /** "Tanner - Mac" → "TM", "alex" → "AL". */

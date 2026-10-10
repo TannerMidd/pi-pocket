@@ -22,7 +22,8 @@ const DEFAULTS = {
     text: 14,
     /** The sidebar on wide screens: "open", or "rail" (icons and numbered sessions only). */
     sidebar: "open",
-    sidebarWidth: 300,
+    /** The open sidebar's width, its borders, the rail, and the list's: a 264px list. */
+    sidebarWidth: 324,
     /** How the session list groups: "recent" (by day) or "folder". */
     group: "recent",
     /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). Off until turned on. */
@@ -41,8 +42,35 @@ function readJson(key, fallback) {
 
 const reduceQuery = matchMedia("(prefers-reduced-motion: reduce)");
 
+/** Set once this browser's saved look has the sidebar's width for the rail beside the list. */
+const RAIL_KEY = "pocket.railBeside";
+
+/** What this browser saved. The sidebar's usual width was 300 before the rail went beside the list: now 324. */
+function savedPrefs() {
+    const saved = readJson(KEY, {});
+
+    if (localStorage.getItem(RAIL_KEY) !== null) {
+        return saved;
+    }
+
+    localStorage.setItem(RAIL_KEY, "1");
+
+    if (saved.sidebarWidth !== 300) {
+        return saved;
+    }
+
+    const next = { ...saved, sidebarWidth: DEFAULTS.sidebarWidth };
+
+    localStorage.setItem(KEY, JSON.stringify(next));
+
+    return next;
+}
+
+/** The open sidebar's width as it shows: the rail and its borders, and a list 204–464px wide. */
+const sidebarWidth = (p) => `${Math.min(524, Math.max(264, p.sidebarWidth))}px`;
+
 store.set({
-    appearance: { ...DEFAULTS, ...readJson(KEY, {}) },
+    appearance: { ...DEFAULTS, ...savedPrefs() },
     desktopTheme: readJson(DESKTOP_CACHE, null),
     pinned: readJson(PINNED, []),
 });
@@ -201,7 +229,7 @@ export function apply() {
 
     root.style.setProperty("--wallpaper", wallpaper);
     root.style.setProperty("--text-size", `${p.text}px`);
-    root.style.setProperty("--sidebar-w", `${p.sidebarWidth}px`);
+    root.style.setProperty("--sidebar-w", sidebarWidth(p));
     const attrs = {
         mode: modeOf(palette),
         tiling: p.tiling ? "on" : "off",
@@ -221,7 +249,7 @@ export function apply() {
                 ...cached,
                 "--wallpaper": wallpaper,
                 "--text-size": `${p.text}px`,
-                "--sidebar-w": `${p.sidebarWidth}px`,
+                "--sidebar-w": sidebarWidth(p),
             },
             attrs,
         }),

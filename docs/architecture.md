@@ -71,11 +71,11 @@ Everything here is synchronous. A commit listener may not call the harness's ses
 
 Updates to tabs are coalesced:
 
-| What             | How often, at most |
-| ---------------- | ------------------ |
-| A room's changes | Every 90 ms        |
-| Peek tiles       | Once a second      |
-| The session list | Every 400 ms       |
+| What                                                                       | How often, at most |
+| -------------------------------------------------------------------------- | ------------------ |
+| A room's changes                                                           | Every 90 ms        |
+| Peek tiles                                                                 | Once a second      |
+| The session list, and every subagent to tabs that show the subagents board | Every 400 ms       |
 
 ## Who Pi works for
 
@@ -128,7 +128,7 @@ Plain ES modules, served as they are, with no build. Editing a file under `web/`
 
 **Contracts with the server.**
 
-- Event names and shapes (`hello`, `view`, `chat`, `peek`, …) and the sheet types the server names (`sheet: "chat"`).
+- Event names and shapes (`hello`, `view`, `chat`, `peek`, `subagents`, …) and the sheet types the server names (`sheet: "chat"`).
 - The `pocket.*` keys in local and session storage.
 - `ATTACHMENTS_HEADING`, which `ui.js` repeats from `entry-format.ts`.
 

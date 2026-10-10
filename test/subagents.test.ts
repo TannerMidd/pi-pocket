@@ -1,6 +1,7 @@
 // Subagents' reports: they reach a working parent at its next pause, all those waiting together as one message, each
 // once, without a turn of the parent's per report; a restart, a withdrawn batch, or a stale courier loses none. And
-// what the subagents bar is told about each subagent, and its live peek.
+// what the subagents bar is told about each subagent, and its live peek; and what the session list and the subagents
+// board are told about every session's.
 import {
     type App,
     cleanUp,
@@ -17,6 +18,7 @@ import {
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
@@ -463,4 +465,153 @@ test("an idle parent gets reports that finish a moment apart in one message", as
 
     assert.equal(carrying.length, 1, "in one message, so Pi answers them once");
     slow = {};
+});
+
+test("the session list counts each session's subagents by state, and an open board gets every one", async () => {
+    slow = { busy: 20, asks: 20, halts: 20 };
+    failing = new Set(["broken"]);
+    const id = await orchestrate({
+        spawn: ["busy", "asks", "halts", "broken", "fine"],
+        rounds: 0,
+        sleep: 0,
+    });
+    const other = await newSession(app);
+    const guest = app.config.addUser("Elsewhere", "guest", [String(other)]);
+    const tab = fakeTab(undefined, owner(app));
+    const outsider = fakeTab(undefined, guest.user);
+    const records = async () =>
+        (await app.harness.snapshot(SubagentsDoc, id, context))?.agents ?? {};
+    const counts = () => app.sessions().find((each) => each.id === Number(id))?.subagents;
+
+    type Entry = {
+        id: number;
+        name: string;
+        busy: boolean;
+        waiting?: boolean;
+        approval?: { tool: string; subject: string };
+        failed?: boolean;
+        stopped?: boolean;
+        error?: string;
+    };
+    const board = (of = tab) => (of.last("subagents") ?? []) as unknown as Entry[];
+
+    try {
+        await until(
+            async () => {
+                const agents = await records();
+
+                return (
+                    ["busy", "asks", "halts"].every(
+                        (name) =>
+                            agents[name] !== undefined && app.isBusy(agents[name].conversationId),
+                    ) &&
+                    agents.broken?.answeredAt !== undefined &&
+                    agents.fine?.answeredAt !== undefined
+                );
+            },
+            "three at work, two answered",
+            20_000,
+        );
+        const agents = await records();
+
+        await (await app.harness.conversation(agents.halts!.conversationId, context))!.abort(
+            context,
+        );
+        void app.approvals
+            .request(
+                {
+                    id: "board-ask",
+                    conversationId: agents.asks!.conversationId,
+                    taskId: 1 as never,
+                    callId: "board-call",
+                    tool: "bash",
+                    subject: "git push",
+                    reason: "risky",
+                    createdAt: Date.now(),
+                },
+                context,
+            )
+            .catch(() => {});
+        await until(
+            () =>
+                isDeepStrictEqual(counts(), {
+                    working: 1,
+                    waiting: 1,
+                    stopped: 1,
+                    failed: 1,
+                    done: 1,
+                }),
+            "the counts in the session list",
+            20_000,
+        );
+        assert.equal(
+            app.sessions().find((each) => each.id === Number(other))?.subagents,
+            undefined,
+        );
+
+        await app.attach(tab.client);
+        await app.attach(outsider.client);
+        app.setBoard(owner(app), tab.client.connection, true);
+        app.setBoard(guest.user, outsider.client.connection, true);
+        const mine = board().filter((entry) => entry.id === Number(id));
+        const byName = Object.fromEntries(mine.map((entry) => [entry.name, entry]));
+
+        assert.equal(mine.length, 5);
+        assert.equal(byName.busy?.busy, true);
+        assert.equal(byName.busy?.waiting, undefined);
+        assert.equal(byName.asks?.waiting, true);
+        assert.deepEqual(byName.asks?.approval, { tool: "bash", subject: "git push" });
+        assert.equal(byName.halts?.stopped, true);
+        assert.equal(byName.broken?.failed, true);
+        assert.match(String(byName.broken?.error), /Bad request/);
+        assert.equal(byName.fine?.busy, false);
+        assert.equal(byName.fine?.failed, undefined);
+        // Someone invited to another session sees none of these.
+        assert.deepEqual(board(outsider), []);
+
+        // While the board shows, each change comes with the session list.
+        app.approvals.answer("board-ask", { allow: false, by: "test" });
+        await until(
+            () =>
+                board().some(
+                    (entry) => entry.name === "asks" && entry.id === Number(id) && !entry.waiting,
+                ),
+            "the board told the approval went",
+        );
+
+        // Closed, it gets no more.
+        app.setBoard(owner(app), tab.client.connection, false);
+        const sent = tab.events.filter((each) => each.event === "subagents").length;
+        const lists = tab.events.filter((each) => each.event === "sessions").length;
+
+        await (await app.harness.conversation(agents.busy!.conversationId, context))!.abort(
+            context,
+        );
+        await until(
+            () => tab.events.filter((each) => each.event === "sessions").length > lists,
+            "the next session list",
+        );
+        assert.equal(tab.events.filter((each) => each.event === "subagents").length, sent);
+
+        // Archived, a session's subagents leave the board once none works there.
+        await (await app.harness.conversation(agents.asks!.conversationId, context))!.abort(
+            context,
+        );
+        await until(
+            () => app.subagents().every((entry) => entry.id !== Number(id) || !entry.busy),
+            "nothing at work",
+            20_000,
+        );
+        await app.commands.updateSession(id, owner(app), { archived: true });
+        assert.equal(
+            app.subagents().some((entry) => entry.id === Number(id)),
+            false,
+        );
+    } finally {
+        app.detach(tab.client);
+        app.detach(outsider.client);
+        app.config.removeUser(guest.user.id);
+        slow = {};
+        failing = new Set();
+    }
 });

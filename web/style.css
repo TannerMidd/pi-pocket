@@ -670,13 +670,22 @@ kbd {
     display: none;
 }
 
+/* The sidebar: the rail and the session list beside it, cut off rather than squeezed while it folds and unfolds. */
 .sidebar {
     display: none;
-    width: var(--sidebar-w, 300px);
+    width: var(--sidebar-w, 324px);
     flex: none;
+    flex-direction: row;
     border-right: 1px solid var(--line);
     background: var(--panel);
     transition: width var(--t-in) var(--ease-out);
+}
+
+.sidebar-clip {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    overflow: hidden;
 }
 
 :root.resizing .sidebar {
@@ -711,10 +720,6 @@ kbd {
     display: flex;
 }
 
-.home-list .sessions {
-    flex: 1;
-}
-
 .splash {
     display: none;
 }
@@ -732,8 +737,12 @@ kbd {
     .topbar > .icon-button:first-child {
         display: none;
     }
+    /* Folded: the rail alone, and the sidebar's border. */
     :root[data-rail="on"] .sidebar {
-        width: 64px;
+        width: 57px;
+    }
+    :root[data-tiling="on"][data-rail="on"] .sidebar {
+        width: calc(56px + 2 * var(--border));
     }
 
     :root[data-tiling="on"] .layout {
@@ -2038,708 +2047,40 @@ button.chip:hover {
     cursor: default;
 }
 
-/* ─── Sessions: the sidebar ────────────────────────────────── */
-
-.sessions {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    padding: calc(env(safe-area-inset-top) + 0.6rem) 0.6rem
-        calc(env(safe-area-inset-bottom) + 0.55rem);
-    gap: 0.55rem;
-}
-
-.sessions-head {
-    display: flex;
-    align-items: center;
-    gap: 0.15rem;
-    padding: 0 0 0 0.2rem;
-    min-height: 40px;
-}
-
-.brand {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.3rem;
-    font:
-        1.6rem/1 Georgia,
-        serif;
-    color: var(--brand);
-    margin-right: auto;
-    white-space: nowrap;
-}
-
-.brand span {
-    font: 700 1rem var(--mono);
-    color: var(--text);
-}
-
-.brand small {
-    font: 500 0.62rem var(--mono);
-    color: var(--muted);
-    letter-spacing: 0.08em;
-    text-transform: lowercase;
-}
-
-.new-button {
-    margin-left: 0.25rem;
-}
-
-.search {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 0 0.45rem 0 0.6rem;
-    color: var(--muted);
-    margin-bottom: 0.5rem;
-    transition:
-        border-color var(--t-hover) var(--ease-out),
-        background-color var(--t-hover) var(--ease-out);
-}
-
-.search:hover {
-    border-color: var(--line-strong);
-}
-
-.search:focus-within {
-    border-color: var(--accent);
-    background: var(--bg);
-    color: var(--accent);
-}
-
-.search input {
-    border: 0;
-    background: none;
-    padding: 0.55rem 0;
-    min-width: 0;
-}
-
-.search kbd {
-    cursor: pointer;
-    flex: none;
-}
-
-.sessions .search {
-    margin-bottom: 0;
-}
-
-/* Recent, Folders, Archived: tabs with a bar that slides to the one chosen. */
-.session-tabs {
-    position: relative;
-    display: flex;
-    border-bottom: 1px solid var(--line);
-    flex: none;
-}
-
-.session-tabs button {
-    flex: 1;
-    padding: 0.4rem 0.2rem 0.45rem;
-    font-size: 0.74rem;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-    transition: color var(--t-hover) var(--ease-out);
-}
-
-.session-tabs button:hover {
-    color: var(--body);
-}
-
-.session-tabs button.on {
-    color: var(--text);
-}
-
-.slide-x {
-    position: absolute;
-    left: 0;
-    bottom: -1px;
-    height: 2px;
-    background: var(--active);
-    transition:
-        transform var(--t-in) var(--ease-out),
-        width var(--t-in) var(--ease-out);
-}
-
-.session-items {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    display: flex;
-    flex-direction: column;
-    margin: 0 -0.3rem;
-    padding: 0 0.3rem 0.3rem;
-}
-
-/* The active session's bar, sliding from row to row. */
-.slide-y {
-    position: absolute;
-    left: 0.3rem;
-    top: 0;
-    width: 2px;
-    background: var(--accent);
-    z-index: 2;
-    pointer-events: none;
-    transition:
-        transform var(--t-in) var(--ease-out),
-        height var(--t-in) var(--ease-out),
-        opacity var(--t-fade) var(--ease-almost);
-}
-
-.slide-x.instant,
-.slide-y.instant {
-    transition: none;
-}
-
-.session-group {
-    display: flex;
-    flex-direction: column;
-}
-
-.group-head {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    padding: 0.7rem 0.35rem 0.3rem;
-    font-size: 0.64rem;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--faint);
-    text-align: left;
-    transition: color var(--t-hover) var(--ease-out);
-}
-
-.group-head:hover {
-    color: var(--muted);
-}
-
-.group-head .group-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 70%;
-}
-
-.group-head .group-name b {
-    color: var(--body);
-    font-weight: 700;
-}
-
-/* A hairline from the name to the count, like a section rule in a terminal. */
-.group-head::after {
-    content: "";
-    order: 2;
-    flex: 1;
-    height: 1px;
-    background: var(--line);
-}
-
-.group-head .group-count {
-    order: 3;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0;
-}
-
-.group-head .icon {
-    order: 4;
-    transition: transform var(--t-in) var(--ease-out);
-}
-
-.session-group.closed .group-head .icon {
-    transform: rotate(-90deg);
-}
-
-/* Groups fold smoothly: a one-row grid whose row goes from 1fr to 0fr. */
-.group-body {
-    display: grid;
-    grid-template-rows: 1fr;
-    transition: grid-template-rows var(--t-in) var(--ease-out);
-}
-
-.group-body > div {
-    min-height: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-.session-group.closed .group-body {
-    grid-template-rows: 0fr;
-}
-
-.session-row {
-    position: relative;
-    animation: rise-in 0.38s var(--ease-out) backwards;
-    animation-delay: calc(min(var(--i, 0), 14) * 18ms);
-}
-
-.session {
-    display: grid;
-    grid-template-columns: 12px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 0 0.55rem;
-    width: 100%;
-    text-align: left;
-    padding: 0.5rem 0.6rem 0.5rem 0.55rem;
-    border: 1px solid transparent;
-    border-radius: var(--radius);
-    transition:
-        background-color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
-}
-
-.session:hover {
-    background: var(--hover);
-}
-
-.session:active {
-    background: var(--pressed);
-}
-
-/* omarchy-shell's selected row: a light fill, a quiet border, the accent for text. */
-.session-row.active .session {
-    background: var(--hover);
-    border-color: var(--edge);
-}
-
-.session-row.active .session-title {
-    color: var(--accent);
-}
-
-.session-state {
-    display: grid;
-    place-items: center;
-    width: 12px;
-    height: 12px;
-    align-self: start;
-    margin-top: 0.3rem;
-}
-
-.state-idle {
-    width: 6px;
-    height: 6px;
-    border: 1px solid var(--faint);
-    transition:
-        background-color var(--t-border) var(--ease-out),
-        border-color var(--t-border) var(--ease-out);
-}
-
-.session-row.active .state-idle {
-    background: var(--accent);
-    border-color: var(--accent);
-}
-
-.state-warn {
-    display: grid;
-    place-items: center;
-    width: 12px;
-    height: 12px;
-    background: var(--warn);
-    color: var(--accent-ink);
-    font-size: 0.6rem;
-    font-weight: 800;
-    animation: attention 1.6s var(--ease-in-out) infinite;
-}
-
-@keyframes attention {
-    50% {
-        box-shadow: 0 0 0 3px var(--warn-soft);
-        opacity: 0.75;
-    }
-}
-
-.session-main {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-.session-title {
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 0.9rem;
-    transition: color var(--t-hover) var(--ease-out);
-}
-
-.session-title mark,
-.launcher mark {
-    background: none;
-    color: var(--accent);
-    font-weight: 800;
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
-}
-
-.session-meta {
-    display: flex;
-    gap: 0.6rem;
-    font-size: 0.68rem;
-    color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
-}
-
-.session-meta span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.session-meta span + span::before {
-    content: "·";
-    margin-right: 0.6rem;
-    color: var(--faint);
-}
-
-.session-side {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 0.2rem;
-    font-size: 0.68rem;
-    color: var(--muted);
-    min-width: 2.2rem;
-    transition: opacity var(--t-hover) var(--ease-out);
-}
-
-.session-side .unread-dot {
-    width: 6px;
-    height: 6px;
-}
-
-/* Hold Alt: each of the first nine rows shows the number that jumps to it. */
-.session-num {
-    display: none;
-}
-
-:root[data-alt="on"] .session-num {
-    display: inline-grid;
-    animation: popin 0.2s var(--ease-out);
-}
-
-:root[data-alt="on"] .session-time {
-    display: none;
-}
-
-.session-people {
-    grid-column: 2 / span 2;
-    display: flex;
-    gap: 3px;
-    margin-top: 0.3rem;
-}
-
-/* Archive and pin: on the row's right, shown on hover. */
-.session-actions {
-    position: absolute;
-    top: 50%;
-    right: 0.35rem;
-    margin-top: -13px;
-    display: flex;
-    gap: 4px;
-}
-
-.session-act {
-    width: 26px;
-    height: 26px;
-    display: grid;
-    place-items: center;
-    color: var(--muted);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    opacity: 0;
-    transform: translateX(4px);
-    transition:
-        opacity var(--t-hover) var(--ease-out),
-        transform var(--t-in) var(--ease-out),
-        color var(--t-hover) var(--ease-out);
-}
-
-.session-act:hover {
-    color: var(--accent);
-    border-color: var(--accent-line);
-}
-
-.session-act + .session-act {
-    transition-delay: 25ms;
-}
-
-.session-pin.on {
-    color: var(--brand);
-}
-
-/* Touch screens archive and pin from the session's menu instead: an unseen button would take taps meant for the row. */
-@media (hover: none) {
-    .session-actions {
-        display: none;
-    }
-}
-
-/* The buttons take the time's place, widened so a long title ends before them (two 26px buttons and their gap). */
-@media (hover: hover) {
-    .session-row:hover .session-act,
-    .session-act:focus-visible {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:hover .session-side {
-        opacity: 0;
-        min-width: calc(56px - 0.6rem);
-    }
-    /* Kept apart from the rules above: a browser without :has() drops only these. */
-    .session-actions:has(:focus-visible) .session-act {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:has(.session-act:focus-visible) .session-side {
-        opacity: 0;
-        min-width: calc(56px - 0.6rem);
-    }
-    /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
-    :root.selecting .session-row .session-act {
-        opacity: 0;
-    }
-    :root.selecting .session-row .session-side {
-        opacity: 1;
-        min-width: 2.2rem;
-    }
-}
-
-/* Selected rows (Ctrl/⌘+click or drag, Shift+click): the accent's soft fill and a check where the state mark was. */
-.session-row.selected .session {
-    background: var(--accent-soft);
-    border-color: var(--accent-line);
-}
-
-/* On its way into or out of the archive: dimmed until the server's list moves it. */
-.session-row.moving {
-    opacity: 0.4;
-    pointer-events: none;
-    transition: opacity var(--t-hover) var(--ease-out);
-}
-
-.state-check {
-    display: grid;
-    place-items: center;
-    width: 12px;
-    height: 12px;
-    background: var(--accent);
-    color: var(--accent-ink);
-    animation: popin 0.16s var(--ease-out);
-}
-
-.state-check .icon {
-    stroke-width: 3.5;
-}
-
-:root.selecting,
-:root.selecting * {
-    user-select: none;
-}
-
-/* What to do with the selected sessions: in the tiles' place, so the list keeps its height while a drag is on. */
-.foot-top {
-    display: grid;
-}
-
-.foot-top > * {
-    grid-area: 1 / 1;
-}
-
-.foot-tiles.covered {
-    visibility: hidden;
-}
-
-.select-bar {
-    container-type: inline-size;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    min-width: 0;
-    padding: 0 0.35rem 0 0.6rem;
-    border: 1px solid var(--accent-line);
-    background: var(--accent-soft);
-    border-radius: var(--radius);
-    animation: rise-in var(--t-in) var(--ease-out);
-}
-
-.select-count {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    font-size: 0.78rem;
-    color: var(--muted);
-    white-space: nowrap;
-}
-
-/* A narrow bar (a narrow sidebar, or larger text) shows just the count, so the buttons fit. */
-@container (max-width: 17.5rem) {
-    .select-word {
-        display: none;
-    }
-}
-
-.select-count b {
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
-}
-
-.sessions-empty {
-    padding: 1.2rem 0.6rem;
-    color: var(--muted);
-    font-size: 0.85rem;
-    animation: fade var(--t-fade) var(--ease-almost);
-}
-
-/* A session row's shape while the list loads: a title bar and a shorter detail bar, pulsing one row after another. */
-.session-placeholder {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    padding: 0.75rem 0.65rem;
-}
-
-.session-placeholder span {
-    height: 0.6rem;
-    width: var(--width);
-    background: var(--line);
-    animation: placeholder 1.4s ease-in-out var(--delay) infinite;
-}
-
-.session-placeholder span + span {
-    height: 0.45rem;
-    width: calc(var(--width) * 0.6);
-}
-
-@keyframes placeholder {
-    50% {
-        opacity: 0.35;
-    }
-}
-
-/* The sidebar's foot: tiles for what is beside the sessions, then who is signed in. */
-.sessions-foot {
-    border-top: 1px solid var(--line);
-    padding-top: 0.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    flex: none;
-}
-
-.foot-tiles {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
-}
-
-.foot-tile {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.2rem;
-    padding: 0.45rem 0.2rem 0.35rem;
-    font-size: 0.62rem;
-    letter-spacing: 0.03em;
-    color: var(--muted);
-    border: 1px solid var(--line);
-    background: var(--card);
-    transition:
-        background-color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out),
-        color var(--t-hover) var(--ease-out),
-        transform 90ms var(--ease-out);
-}
-
-.foot-tile:hover {
-    color: var(--text);
-    border-color: var(--edge);
-    background: var(--card-2);
-}
-
-.foot-tile:active {
-    transform: scale(0.96);
-}
-
-.foot-tile .tile-count {
-    position: absolute;
-    top: 3px;
-    right: 4px;
-    font-size: 0.6rem;
-    font-weight: 700;
-    color: var(--accent);
-}
-
-.foot-tile.lit {
-    color: var(--accent);
-    border-color: var(--accent-line);
-}
-
-.me-row {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.35rem 0.4rem;
-    text-align: left;
-    font-size: 0.8rem;
-    color: var(--body);
-    transition: background-color var(--t-hover) var(--ease-out);
-}
-
-.me-row:hover {
-    background: var(--hover);
-}
-
-.me-row .me-name {
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.me-row .me-role {
-    font-size: 0.66rem;
-    color: var(--muted);
-    border: 1px solid var(--line);
-    padding: 0 0.35rem;
-}
-
-/* ─── The rail: the sidebar folded to numbered sessions, like Waybar's workspaces ─── */
+/* ─── The rail: Pi, the tools, and you; folded, the sessions too ─── */
 
 .rail {
+    width: 56px;
+    flex: none;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.3rem;
-    width: 100%;
-    height: 100%;
+    gap: 4px;
     min-height: 0;
-    padding: 0.6rem 0 0.55rem;
-    animation: fade var(--t-in) var(--ease-out);
+    padding: calc(env(safe-area-inset-top) + 10px) 0 calc(env(safe-area-inset-bottom) + 10px);
+    background: var(--o-bg-dark);
+    border-right: 1px solid var(--line);
+    /* A short screen (a phone on its side) scrolls the rail rather than cut off its last buttons. */
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
 }
 
-.rail-brand {
-    font:
-        1.7rem/1 Georgia,
-        serif;
-    color: var(--brand);
+.rail-brand,
+.rail-button {
+    position: relative;
+    flex: none;
     width: 44px;
     height: 44px;
     display: grid;
     place-items: center;
+}
+
+.rail-brand {
+    font:
+        1.6rem/1 Georgia,
+        serif;
+    color: var(--brand);
     transition: transform var(--t-in) var(--ease-out);
 }
 
@@ -2747,6 +2088,86 @@ button.chip:hover {
     transform: rotate(-8deg) scale(1.08);
 }
 
+.rail-button {
+    color: var(--muted);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.rail-button:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+
+.rail-gap {
+    flex: none;
+    height: 6px;
+}
+
+.rail-fill {
+    flex: 1;
+}
+
+/* The sessions, always on while the list shows: a lit tile with the accent's bar at the rail's edge. */
+.rail-button.on {
+    color: var(--text);
+    background: var(--hover);
+}
+
+.rail-button.on::before {
+    content: "";
+    position: absolute;
+    left: -5.5px;
+    top: 9px;
+    bottom: 9px;
+    width: 2px;
+    background: var(--accent);
+}
+
+.rail-new,
+.rail-running,
+.rail-agents.lit {
+    color: var(--accent);
+}
+
+.rail-new .icon {
+    stroke-width: 2.4;
+}
+
+.rail-agents.open {
+    color: var(--text);
+}
+
+/* How many: sessions where Pi works, or subagents that work or wait. */
+.rail-count {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 2px;
+    display: grid;
+    place-items: center;
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    font-size: 0.56rem;
+    font-weight: 700;
+    line-height: 1;
+    animation: popin var(--t-in) var(--ease-out);
+}
+
+/* A subagent failed, or waits for an approval. */
+.rail-trouble {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    width: 6px;
+    height: 6px;
+    background: var(--err);
+}
+
+/* Folded: the sessions as numbered tiles, like Waybar's workspaces, between New and the tools. */
 .rail-items {
     position: relative;
     flex: 1;
@@ -2762,6 +2183,10 @@ button.chip:hover {
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
     scrollbar-width: none;
+}
+
+.rail:has(.rail-items) {
+    overflow-y: hidden;
 }
 
 .rail-items .slide-y {
@@ -2822,11 +2247,721 @@ button.chip:hover {
     height: 5px;
 }
 
-.rail-foot {
+/* ─── Sessions: the list beside the rail ───────────────────────── */
+
+.sessions {
+    flex: 1;
+    /* Narrower, as the sidebar unfolds, it is cut off rather than squeezed. */
+    min-width: 204px;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    padding: calc(env(safe-area-inset-top) + 12px) 10px calc(env(safe-area-inset-bottom) + 8px);
+}
+
+.sessions-head {
+    display: flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: 6px;
+    height: 34px;
+    padding-left: 4px;
+    flex: none;
+}
+
+.sessions-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text);
+}
+
+.sessions-count {
+    margin-right: auto;
+    font-size: 0.72rem;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+}
+
+.new-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 9px 0 7px;
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    font-weight: 700;
+    font-size: 0.76rem;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.new-button:hover {
+    background: color-mix(in oklab, var(--accent-fill) 85%, var(--o-fg-bright));
+}
+
+.new-button .icon {
+    stroke-width: 2.4;
+}
+
+/* A search field: the sheets' (providers, a message's, the pickers') and the session list's. */
+.search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0 0.45rem 0 0.6rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.search:hover {
+    border-color: var(--line-strong);
+}
+
+.search:focus-within {
+    border-color: var(--accent);
+    background: var(--bg);
+    color: var(--accent);
+}
+
+.search input {
+    border: 0;
+    background: none;
+    padding: 0.55rem 0;
+    min-width: 0;
+}
+
+.search kbd {
+    cursor: pointer;
+    flex: none;
+}
+
+.sessions .search {
+    flex: none;
+    margin: 10px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 6px 0 9px;
+    background: var(--card);
+    border: 1px solid transparent;
+    color: var(--muted);
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sessions .search:focus-within {
+    border-color: var(--accent);
+    background: var(--card);
+    color: var(--muted);
+}
+
+.sessions .search.filled {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* The field's frame shows the focus. */
+.sessions .search input:focus-visible,
+.board-search input:focus-visible {
+    outline: none;
+}
+
+.sessions .search input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 0.82rem;
+    color: var(--text);
+}
+
+.sessions .search-keys {
+    font-size: 0.64rem;
+    color: var(--faint);
+    white-space: nowrap;
+    opacity: 1;
+}
+
+.search-clear {
+    position: relative;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.search-clear:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+
+/* Touch screens have no Ctrl K: the launcher's button takes its place. */
+.search-launcher {
+    position: relative;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    display: none;
+    place-items: center;
+    color: var(--muted);
+}
+
+@media (pointer: coarse) {
+    .search-launcher {
+        display: grid;
+    }
+    .search-launcher::before {
+        content: "";
+        position: absolute;
+        inset: -5px -9px;
+    }
+}
+
+/* Recent, Folders, Archived: tabs with a bar that slides to the one chosen. */
+.session-tabs {
+    position: relative;
+    flex: none;
+    margin-top: 10px;
+    display: flex;
+    gap: 16px;
+    padding: 0 4px;
+    border-bottom: 1px solid var(--line);
+}
+
+.session-tabs button {
+    position: relative;
+    padding: 0 0 6px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+.session-tabs button:hover,
+.session-tabs button.on {
+    color: var(--text);
+}
+
+.slide-x {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    height: 2px;
+    background: var(--active);
+    transition:
+        transform var(--t-in) var(--ease-out),
+        width var(--t-in) var(--ease-out);
+}
+
+.session-tabs .slide-x {
+    background: var(--accent);
+}
+
+.session-items {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    margin: 4px -4px 0;
+    padding: 0 4px 4px;
+}
+
+/* A bar that slides from item to item: the folded rail's open session. */
+.slide-y {
+    position: absolute;
+    left: 0.3rem;
+    top: 0;
+    width: 2px;
+    background: var(--accent);
+    z-index: 2;
+    pointer-events: none;
+    transition:
+        transform var(--t-in) var(--ease-out),
+        height var(--t-in) var(--ease-out),
+        opacity var(--t-fade) var(--ease-almost);
+}
+
+.slide-x.instant,
+.slide-y.instant {
+    transition: none;
+}
+
+.session-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.group-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 12px 8px 4px;
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    text-align: left;
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+.group-head:hover {
+    color: var(--muted);
+}
+
+.group-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.group-name b {
+    font-weight: 700;
+}
+
+/* A folder's group: its path quiet, its last part bold, and the path cut short first when it is long. */
+.group-name:has(.last) {
+    display: flex;
+}
+
+.group-name .first,
+.group-name .last {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.group-name .first {
+    flex: 0 1 auto;
+}
+
+.group-name .last {
+    flex: none;
+    max-width: 100%;
+    color: var(--body);
+}
+
+.group-count {
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-head .icon {
+    transition: transform var(--t-in) var(--ease-out);
+}
+
+.session-group.closed .group-head .icon {
+    transform: rotate(-90deg);
+}
+
+/* Groups fold smoothly: a one-row grid whose row goes from 1fr to 0fr. */
+.group-body {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows var(--t-in) var(--ease-out);
+}
+
+.group-body > div {
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.session-group.closed .group-body {
+    grid-template-rows: 0fr;
+}
+
+.session-row {
+    position: relative;
+    animation: rise-in 0.38s var(--ease-out) backwards;
+    animation-delay: calc(min(var(--i, 0), 14) * 18ms);
+}
+
+/* One line: the folder's color, the title, and what goes on there on the right. */
+.session {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 10px;
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    text-align: left;
+    border: 1px solid transparent;
+    user-select: none;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.session:hover {
+    background: var(--hover);
+}
+
+/* The open session: the accent's soft fill and an accent title. */
+.session-row.active .session {
+    background: var(--accent-soft);
+}
+
+.session-row.active .session-title {
+    color: var(--accent);
+}
+
+/* Selected rows (Ctrl/⌘+click or drag, Shift+click): the soft fill, a border, and a check for the folder's mark. */
+.session-row.selected .session {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+}
+
+.session-mark {
+    display: grid;
+    place-items: center;
+    width: 8px;
+    height: 8px;
+}
+
+.folder-mark {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    background: var(--folder, var(--muted));
+}
+
+.state-check {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 11px;
+    height: 11px;
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    animation: popin 0.16s var(--ease-out);
+}
+
+.state-check .icon {
+    stroke-width: 3.5;
+}
+
+.session-title {
+    font-size: 0.84rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+/* New chat messages there, in a session not open. */
+.session.unread .session-title {
+    font-weight: 700;
+}
+
+.session-title mark,
+.launcher mark {
+    background: none;
+    color: var(--accent);
+    font-weight: 800;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
+
+.session-side {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    font-size: 0.66rem;
+    color: var(--faint);
+    transition: opacity var(--t-hover) var(--ease-out);
+}
+
+/* Subagents at work there (or failed ones, in red): ⑂ and how many. */
+.session-fork {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.session-fork.failed {
+    color: var(--err);
+}
+
+.session-fork .icon {
+    stroke-width: 2.2;
+}
+
+.session-side .avatar {
+    font-size: 0.52rem;
+}
+
+.session-side .mini-sweep i {
+    width: 3px;
+    height: 3px;
+}
+
+.session-side .unread-dot {
+    width: 6px;
+    height: 6px;
+}
+
+.session-time {
+    min-width: 22px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A session's state where a peek tile shows it: a square, three cells while Pi works, "!" while a call waits. */
+.session-state {
+    display: grid;
+    place-items: center;
+    width: 12px;
+    height: 12px;
+    align-self: start;
+    margin-top: 0.3rem;
+}
+
+.state-idle {
+    width: 6px;
+    height: 6px;
+    border: 1px solid var(--faint);
+    transition:
+        background-color var(--t-border) var(--ease-out),
+        border-color var(--t-border) var(--ease-out);
+}
+
+.state-warn {
+    display: grid;
+    place-items: center;
+    width: 12px;
+    height: 12px;
+    background: var(--warn);
+    color: var(--accent-ink);
+    font-size: 0.6rem;
+    font-weight: 800;
+    line-height: 1;
+    animation: attention 1.6s var(--ease-in-out) infinite;
+}
+
+@keyframes attention {
+    50% {
+        box-shadow: 0 0 0 3px var(--warn-soft);
+        opacity: 0.75;
+    }
+}
+
+/* Hold Alt: each of the first nine rows shows the number that jumps to it, in the time's place. */
+.session-num {
+    display: none;
+}
+
+:root[data-alt="on"] .session-num {
+    display: inline-grid;
+    animation: popin 0.2s var(--ease-out);
+}
+
+:root[data-alt="on"] .session-time:has(~ .session-num) {
+    display: none;
+}
+
+/* Archive and pin: on the row's right, shown on hover. */
+.session-actions {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    margin-top: -13px;
+    display: flex;
+    gap: 4px;
+}
+
+.session-act {
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    opacity: 0;
+    transform: translateX(4px);
+    transition:
+        opacity var(--t-hover) var(--ease-out),
+        transform var(--t-in) var(--ease-out),
+        color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+.session-act:hover {
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+
+.session-act + .session-act {
+    transition-delay: 25ms;
+}
+
+.session-pin.on {
+    color: var(--brand);
+}
+
+/* Touch screens archive and pin from the session's menu instead: an unseen button would take taps meant for the row. */
+@media (hover: none) {
+    .session-actions {
+        display: none;
+    }
+}
+
+/* The buttons take the right side's place, widened so a long title ends before them (one or two 26px buttons). */
+@media (hover: hover) {
+    .session-row:hover .session-act,
+    .session-act:focus-visible {
+        opacity: 1;
+        transform: none;
+    }
+    .session-row:not(.no-acts):hover .session-side {
+        opacity: 0;
+        min-width: 56px;
+    }
+    .session-row.one-act:hover .session-side {
+        min-width: 26px;
+    }
+    /* Kept apart from the rules above: a browser without :has() drops only these. */
+    .session-actions:has(:focus-visible) .session-act {
+        opacity: 1;
+        transform: none;
+    }
+    .session-row:has(.session-act:focus-visible) .session-side {
+        opacity: 0;
+        min-width: 56px;
+    }
+    /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
+    :root.selecting .session-row .session-act {
+        opacity: 0;
+    }
+    :root.selecting .session-row .session-side {
+        opacity: 1;
+        min-width: 0;
+    }
+}
+
+/* On its way into or out of the archive: dimmed until the server's list moves it. */
+.session-row.moving {
+    opacity: 0.4;
+    pointer-events: none;
+    transition: opacity var(--t-hover) var(--ease-out);
+}
+
+:root.selecting,
+:root.selecting * {
+    user-select: none;
+}
+
+/* What to do with the selected sessions: docked under the list. */
+.select-bar {
+    container-type: inline-size;
+    flex: none;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 4px 4px 4px 9px;
+    border: 1px solid var(--accent-line);
+    background: var(--accent-soft);
+    animation: rise-in var(--t-in) var(--ease-out);
+}
+
+.select-count {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.76rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.select-count b {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+/* A narrow bar (a narrow list, or larger text) shows just the count, so the buttons fit. */
+@container (max-width: 14rem) {
+    .select-word {
+        display: none;
+    }
+}
+
+.select-bar .button {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.76rem;
+}
+
+.select-clear {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    color: var(--body);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.select-clear:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+
+.sessions-empty {
+    padding: 1.2rem 0.6rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    animation: fade var(--t-fade) var(--ease-almost);
+}
+
+/* A session row's shape while the list loads: a title bar, pulsing one row after another. */
+.session-placeholder {
+    display: flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 10px 0 28px;
+}
+
+.session-placeholder span {
+    height: 0.6rem;
+    width: var(--width);
+    background: var(--line);
+    animation: placeholder 1.4s ease-in-out var(--delay) infinite;
+}
+
+@keyframes placeholder {
+    50% {
+        opacity: 0.35;
+    }
 }
 
 /* ─── The home screen on wide screens: a fastfetch for Pi Pocket ─── */
@@ -3035,6 +3170,7 @@ button.chip:hover {
 }
 
 .drawer {
+    display: flex;
     width: min(86vw, 340px);
     height: 100dvh;
     background: var(--panel);
@@ -7725,18 +7861,31 @@ textarea.notes {
         min-height: 38px;
         padding-inline: 0.8rem;
     }
-    .segmented button,
-    .session-tabs button {
+    .segmented button {
         min-height: 42px;
     }
+    /* iOS zooms into a text field under 16px as it takes focus. */
+    .sessions .search input,
+    .board-search input {
+        font-size: 16px;
+    }
+    /* The session list keeps its look; its tabs, folds, and clear button take a taller tap. */
+    .session-tabs button::after,
+    .search-clear::before {
+        content: "";
+        position: absolute;
+        inset: -10px -8px -4px;
+    }
+    .search-clear::before {
+        inset: -5px -9px;
+    }
     .group-head {
-        min-height: 40px;
+        position: relative;
     }
-    .me-row {
-        min-height: 44px;
-    }
-    .sessions-head .button {
-        min-height: 40px;
+    .group-head::after {
+        content: "";
+        position: absolute;
+        inset: -4px 0 -2px;
     }
     .search .icon-button.small {
         width: 40px;
@@ -8332,4 +8481,794 @@ textarea.notes {
 .agent-stop {
     flex: none;
     margin-right: 0.2rem;
+}
+
+/* ─── Subagents board ─────────────────────────────────────────── */
+
+/*
+ * Every subagent in every session, in the conversation's place: a square each, a row per session, the bar of states
+ * that filters by one, what needs you, and the one selected. Phones: one column, and a bar at the bottom.
+ */
+.board {
+    --done-cell: color-mix(in srgb, var(--ok) 40%, var(--bg));
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    animation: fade var(--t-fade) var(--ease-almost);
+}
+
+.board-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: calc(env(safe-area-inset-top) + 0.35rem) 0.4rem 0.35rem 1rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.board-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.board-title h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.board-title h2::before {
+    content: "▪ ";
+    color: var(--accent);
+}
+
+.board-sub {
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.board-search {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 220px;
+    height: 32px;
+    padding: 0 8px;
+    background: var(--card);
+    border: 1px solid transparent;
+    color: var(--muted);
+    transition: border-color var(--t-hover) var(--ease-out);
+}
+
+.board-search.filled,
+.board-search:focus-within {
+    border-color: var(--accent);
+}
+
+.board-search input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 0.8rem;
+    color: var(--text);
+}
+
+.board-search-row {
+    flex: none;
+    padding: 10px 12px 0;
+}
+
+.board-search-row .board-search {
+    width: 100%;
+}
+
+/* A state's mark: its fill and edge, with "!" for what needs you. */
+.board-mark {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    color: var(--accent-ink);
+    font-size: 0.56rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.board-mark.waiting,
+.board-cell.waiting {
+    background: var(--warn);
+    border-color: var(--warn);
+}
+
+.board-mark.failed,
+.board-cell.failed {
+    background: var(--err);
+    border-color: var(--err);
+}
+
+.board-mark.working,
+.board-cell.working {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.board-mark.stopped,
+.board-cell.stopped {
+    background: transparent;
+    border-color: var(--muted);
+}
+
+.board-mark.done,
+.board-cell.done {
+    background: var(--done-cell);
+    border-color: var(--done-cell);
+}
+
+/* How many are in each state, as one bar, and a legend that filters by one. */
+.board-summary-bar {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.board-states {
+    display: flex;
+    gap: 2px;
+    height: 10px;
+}
+
+.board-state {
+    flex-basis: 0;
+    transition: opacity var(--t-fade) var(--ease-almost);
+}
+
+.board-state.waiting {
+    background: var(--warn);
+}
+
+.board-state.failed {
+    background: var(--err);
+}
+
+.board-state.working {
+    background: var(--accent);
+}
+
+.board-state.stopped {
+    background: var(--line-strong);
+}
+
+.board-state.done {
+    background: var(--done-cell);
+}
+
+.board-state.dim {
+    opacity: 0.25;
+}
+
+.board-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+}
+
+.board-filter {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 0 5px;
+    font-size: 0.76rem;
+    color: var(--muted);
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+.board-filter:hover,
+.board-filter.on {
+    color: var(--text);
+}
+
+.board-filter.on::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--accent);
+}
+
+.board-filter .board-mark {
+    width: 9px;
+    height: 9px;
+}
+
+.board-filter-count {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+.board-filter.waiting .board-filter-count {
+    color: var(--warn);
+}
+
+.board-filter.failed .board-filter-count {
+    color: var(--err);
+}
+
+.board-filter.working .board-filter-count {
+    color: var(--accent);
+}
+
+.board-filter.stopped .board-filter-count {
+    color: var(--muted);
+}
+
+.board-filter.done .board-filter-count {
+    color: var(--ok);
+}
+
+.board-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.board-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.board-map {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px 16px 12px;
+}
+
+.board-empty {
+    padding: 1.2rem 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+/* A session: its title and how its subagents are, then a square for each. */
+.board-row {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 14px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    transition: opacity var(--t-fade) var(--ease-almost);
+}
+
+.board-row.dim {
+    opacity: 0.4;
+}
+
+.board-session {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    text-align: left;
+}
+
+.board-session-title {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.board-session-name {
+    min-width: 0;
+    font-size: 0.8rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+.board-session:hover .board-session-name {
+    color: var(--accent);
+}
+
+.board-summary {
+    padding-left: 14px;
+    font-size: 0.66rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.board-summary.waiting {
+    color: var(--warn);
+}
+
+.board-summary.failed {
+    color: var(--err);
+}
+
+.board-summary.working {
+    color: var(--accent);
+}
+
+.board-cells {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 3px;
+    padding-top: 2px;
+}
+
+.board-cell {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    color: var(--accent-ink);
+    font-size: 0.58rem;
+    font-weight: 800;
+    line-height: 1;
+    outline-offset: 1px;
+    transition: opacity var(--t-fade) var(--ease-almost);
+}
+
+.board-cell:hover {
+    outline: 1px solid var(--body);
+}
+
+.board-cell.on {
+    outline: 2px solid var(--text);
+    outline-offset: 1px;
+}
+
+.board-cell.dim {
+    opacity: 0.15;
+}
+
+/* What the square under the mouse does, or the selected one's. */
+.board-status {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 30px;
+    padding: 0 16px;
+    border-top: 1px solid var(--line);
+    background: var(--o-bg-dark);
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.board-status .board-mark {
+    width: 8px;
+    height: 8px;
+}
+
+.board-status-name {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.board-status-when {
+    color: var(--muted);
+}
+
+.board-status-line {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--muted);
+}
+
+.board-status-line.working,
+.board-status-line.stopped,
+.board-status-line.done {
+    color: var(--body);
+}
+
+.board-status-line.waiting {
+    color: var(--warn);
+}
+
+.board-status-line.failed {
+    color: var(--err);
+}
+
+.board-keys {
+    flex: none;
+    margin-left: auto;
+    color: var(--faint);
+}
+
+/* The side: what needs you, then the one selected. */
+.board-side {
+    flex: none;
+    width: 310px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 14px 16px;
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+}
+
+.board-needs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.board-needs .label {
+    margin: 0 0 2px;
+}
+
+.board-needs-count {
+    color: var(--warn);
+}
+
+.board-need {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    align-items: center;
+    gap: 0 8px;
+    padding: 6px 8px;
+    text-align: left;
+    border: 1px solid transparent;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.board-need:hover {
+    background: var(--hover);
+}
+
+.board-need.on {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+}
+
+.board-need-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.board-need-head {
+    font-size: 0.8rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.board-need-head b {
+    font-weight: 600;
+}
+
+.board-need.waiting .board-need-what {
+    color: var(--warn);
+}
+
+.board-need.failed .board-need-what {
+    color: var(--err);
+}
+
+.board-need-session {
+    font-size: 0.66rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.board-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+
+.board-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.board-detail-name {
+    min-width: 0;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.board-detail-state {
+    flex: none;
+    margin-left: auto;
+    font-size: 0.72rem;
+}
+
+.board-detail-state.waiting {
+    color: var(--warn);
+}
+
+.board-detail-state.failed {
+    color: var(--err);
+}
+
+.board-detail-state.working {
+    color: var(--accent);
+}
+
+.board-detail-state.stopped {
+    color: var(--muted);
+}
+
+.board-detail-state.done {
+    color: var(--ok);
+}
+
+.board-facts {
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr);
+    gap: 7px 10px;
+    font-size: 0.78rem;
+}
+
+.board-facts > span:not([class]) {
+    color: var(--muted);
+}
+
+.board-link {
+    min-width: 0;
+    text-align: left;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.board-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.board-when {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.board-asked {
+    color: var(--body);
+    text-wrap: pretty;
+    overflow-wrap: anywhere;
+}
+
+.board-now {
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.board-now.waiting {
+    color: var(--warn);
+}
+
+.board-error {
+    color: var(--err);
+    overflow-wrap: anywhere;
+}
+
+.board-detail .agent-chip {
+    align-self: flex-start;
+}
+
+.board-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.board-actions .button {
+    padding: 0.3rem 0.65rem;
+    font-size: 0.82rem;
+}
+
+.board-stop:hover {
+    border-color: var(--err);
+    color: var(--err);
+}
+
+/* Phones: one column, what needs you first, thumb-sized squares, and the one selected in a bar at the bottom. */
+.board-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 12px 16px;
+}
+
+/* Room under the last row for the bar over it. */
+.board-list.with-bar {
+    padding-bottom: 200px;
+}
+
+.board.phone .board-needs {
+    gap: 2px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.board.phone .board-needs .label {
+    margin-bottom: 4px;
+}
+
+.board.phone .board-need {
+    gap: 0 10px;
+    min-height: 44px;
+    padding: 4px 8px;
+}
+
+.board.phone .board-need-head {
+    font-size: 0.84rem;
+}
+
+.board.phone .board-need-session {
+    font-size: 0.7rem;
+}
+
+.board.phone .board-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0;
+}
+
+.board.phone .board-session {
+    min-height: 24px;
+    justify-content: center;
+}
+
+.board.phone .board-session-title {
+    gap: 8px;
+}
+
+.board.phone .board-session-name {
+    font-size: 0.84rem;
+}
+
+.board.phone .board-summary {
+    flex: none;
+    margin-left: auto;
+    padding-left: 0;
+    font-size: 0.68rem;
+}
+
+.board.phone .board-cells {
+    gap: 4px;
+    padding-top: 0;
+}
+
+.board.phone .board-cell {
+    width: 30px;
+    height: 30px;
+    font-size: 0.72rem;
+}
+
+.board-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 12px calc(env(safe-area-inset-bottom) + 14px);
+    background: var(--bg);
+    border-top: 2px solid transparent;
+    border-image: var(--active) 1;
+    animation: rise-in var(--t-in) var(--ease-out);
+}
+
+.board-bar-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.board-bar .board-detail-name {
+    font-size: 1rem;
+}
+
+.board-bar .board-detail-state {
+    margin-left: 0;
+}
+
+.board-bar-when {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.board-bar-close {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    margin: -6px -6px -6px 0;
+    color: var(--body);
+}
+
+.board-bar-session {
+    font-size: 0.74rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.board-bar-line {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.8rem;
+    color: var(--body);
+    overflow-wrap: anywhere;
+}
+
+.board-bar-line.waiting {
+    color: var(--warn);
+}
+
+.board-bar-line.failed {
+    color: var(--err);
+}
+
+.board-bar-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.board-bar-actions .button {
+    height: 44px;
+    font-size: 0.86rem;
+}
+
+.board-bar-actions .button.primary {
+    flex: 1;
+}
+
+.board-bar-actions .button:not(.primary) {
+    flex: none;
+    width: 96px;
 }

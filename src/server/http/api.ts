@@ -221,6 +221,31 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, { ok: true });
         }
 
+        // Every subagent in the sessions this person can see, as the subagents board shows them.
+        if (first === "subagents" && method === "GET") {
+            return json(response, 200, app.subagents(user));
+        }
+
+        // The subagents board opened or closed in a tab: while open, it gets every subagent (`subagents` events).
+        if (first === "subagents" && method === "POST") {
+            const body = await readJson<{ connection?: unknown; on?: unknown; seq?: unknown }>(
+                request,
+            );
+
+            if (body.seq !== undefined && !Number.isSafeInteger(body.seq)) {
+                throw new HttpError(400, "seq must be a whole number");
+            }
+
+            app.setBoard(
+                user,
+                String(body.connection ?? ""),
+                body.on === true,
+                body.seq as number | undefined,
+            );
+
+            return json(response, 200, { ok: true });
+        }
+
         if (first === "push") {
             return pushRoutes(route, second);
         }

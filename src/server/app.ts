@@ -73,7 +73,7 @@ import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
-import { type Client, Room, ROOM_DOCS } from "./room.ts";
+import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
 import { Schedules } from "./schedules.ts";
 import { Shell } from "./shell.ts";
 import {
@@ -106,6 +106,56 @@ const BROWSER_EXTENSION = "pocket-browser";
 
 /** The most peek tiles a tab gets live at once: the ones on its screen, which a tall screen fits a handful of. */
 export const MAX_PEEKS = 12;
+
+/** A conversation's subagents document, as far as the app reads it. */
+type SubagentsValue = {
+    agents?: Record<string, SubagentRecord>;
+    outbox?: readonly { name: string }[];
+    sending?: { reports: readonly { name: string }[] };
+};
+
+type SubagentsOf = { agents: Record<string, SubagentRecord>; reporting: Set<string> };
+
+/** One subagent on the subagents board: the subagents bar's view, the session it works in, and the call it waits on. */
+export type SubagentEntry = ReturnType<typeof subagentView> & {
+    id: number;
+    waiting?: true;
+    approval?: { tool: string; subject: string };
+};
+
+/** Where a subagent is. Waiting for an approval comes before working: it is working, held up. */
+export type SubagentState = "waiting" | "working" | "failed" | "stopped" | "done";
+
+export function subagentState(entry: SubagentEntry): SubagentState {
+    if (entry.waiting === true) {
+        return "waiting";
+    }
+
+    if (entry.busy) {
+        return "working";
+    }
+
+    return entry.stopped === true ? "stopped" : entry.failed === true ? "failed" : "done";
+}
+
+/** How many of a session's subagents are in each state, without the empty ones; undefined for none at all. */
+function countSubagents(
+    entries: readonly SubagentEntry[],
+): Partial<Record<SubagentState, number>> | undefined {
+    if (entries.length === 0) {
+        return undefined;
+    }
+
+    const counts: Partial<Record<SubagentState, number>> = {};
+
+    for (const entry of entries) {
+        const state = subagentState(entry);
+
+        counts[state] = (counts[state] ?? 0) + 1;
+    }
+
+    return counts;
+}
 
 export interface OpenOptions {
     dataDir: string;
@@ -168,6 +218,8 @@ export class PocketApp {
     readonly #lastChat = new Map<string, { at: number; userId: string }>();
     /** Subagent conversation → the conversation that spawned it. */
     readonly #parents = new Map<ConversationId, ConversationId>();
+    /** Each conversation's subagents, and those with a report on its way to it: for the board and the session list. */
+    readonly #subagents = new Map<ConversationId, SubagentsOf>();
     #sessions: Record<string, SessionMeta> = {};
     #sessionsTimer: NodeJS.Timeout | undefined;
     #unsubscribeCommits: (() => void) | undefined;
@@ -416,10 +468,7 @@ export class PocketApp {
                     unrecorded.set(id, missing);
                 }
 
-                this.#noteSubagents(
-                    id,
-                    (await this.harness.snapshot(SubagentsDoc, id, context))?.agents,
-                );
+                this.#noteSubagents(id, await this.harness.snapshot(SubagentsDoc, id, context));
             }
 
             cursor = page.next;
@@ -531,10 +580,9 @@ export class PocketApp {
                     sessionsChanged = true;
                 }
             } else if (kind === SubagentsDoc.definition.kind) {
-                this.#noteSubagents(
-                    id,
-                    (change.value as { agents?: Record<string, SubagentRecord> } | null)?.agents,
-                );
+                this.#noteSubagents(id, change.value as SubagentsValue | null);
+                // The list counts each session's subagents, and the board lists them.
+                sessionsChanged = true;
             }
 
             void this.#rooms.get(id)?.then(
@@ -1040,9 +1088,126 @@ export class PocketApp {
         return true;
     }
 
-    #noteSubagents(id: ConversationId, agents: Record<string, SubagentRecord> | undefined): void {
-        for (const record of Object.values(agents ?? {})) {
+    #noteSubagents(id: ConversationId, doc: SubagentsValue | null | undefined): void {
+        const agents = doc?.agents ?? {};
+
+        for (const record of Object.values(agents)) {
             this.#parents.set(record.conversationId, id);
+        }
+
+        if (Object.keys(agents).length === 0) {
+            this.#subagents.delete(id);
+        } else {
+            this.#subagents.set(id, { agents: { ...agents }, reporting: reportingOf(doc) });
+        }
+    }
+
+    /**
+     * Every subagent, by the session it works in (its parent's, or the session its parent's chain started from), as the
+     * subagents board shows it: the subagents bar's view, with the session and the call it waits on, if any.
+     */
+    #subagentsBySession(): Map<string, SubagentEntry[]> {
+        const asks = new Map<ConversationId, ApprovalRequest>();
+
+        for (const approval of this.approvals.all()) {
+            if (!asks.has(approval.conversationId)) {
+                asks.set(approval.conversationId, approval);
+            }
+        }
+
+        const sessions = new Map<string, SubagentEntry[]>();
+
+        for (const [parent, { agents, reporting }] of this.#subagents) {
+            const session = String(this.rootOf(parent));
+
+            if (this.#sessions[session] === undefined) {
+                continue;
+            }
+
+            const list = sessions.get(session) ?? [];
+
+            for (const [name, record] of Object.entries(agents)) {
+                const ask = asks.get(record.conversationId);
+
+                list.push({
+                    id: Number(session),
+                    ...subagentView(
+                        name,
+                        record,
+                        this.#busy.has(record.conversationId),
+                        reporting.has(name),
+                    ),
+                    ...(ask === undefined
+                        ? {}
+                        : {
+                              waiting: true,
+                              approval: { tool: ask.tool, subject: ask.subject.slice(0, 200) },
+                          }),
+                });
+            }
+
+            sessions.set(session, list);
+        }
+
+        return sessions;
+    }
+
+    /**
+     * Every subagent in the sessions this person can see, for the subagents board. Archived sessions are left out,
+     * unless one of their subagents works or waits there.
+     */
+    subagents(user?: User): SubagentEntry[] {
+        const all: SubagentEntry[] = [];
+
+        for (const [id, list] of this.#subagentsBySession()) {
+            if (user?.sessions !== undefined && !user.sessions.includes(id)) {
+                continue;
+            }
+
+            if (this.#sessions[id]?.archived === true && !list.some((entry) => entry.busy)) {
+                continue;
+            }
+
+            all.push(...list);
+        }
+
+        return all;
+    }
+
+    /**
+     * A tab opened or closed the subagents board: while open, it gets every subagent with each session list. A request
+     * numbered `seq` below one already taken arrived late, and is dropped.
+     */
+    setBoard(user: User, connection: string, on: boolean, seq?: number): void {
+        for (const client of this.#clients) {
+            if (client.user.id !== user.id || client.connection !== connection) {
+                continue;
+            }
+
+            if (seq !== undefined) {
+                if (seq <= (client.boardSeq ?? -Infinity)) {
+                    continue;
+                }
+
+                client.boardSeq = seq;
+            }
+
+            client.board = on;
+            client.boardSent = undefined;
+
+            if (on) {
+                this.#sendBoard(client, this.subagents(client.user));
+            }
+        }
+    }
+
+    /** Send a tab's board its subagents, unless they are what it last got. */
+    #sendBoard(client: Client, entries: SubagentEntry[]): void {
+        const json = JSON.stringify(entries);
+
+        if (json !== client.boardSent) {
+            client.boardSent = json;
+            client.send("subagents", entries);
         }
     }
 
@@ -1127,6 +1292,7 @@ export class PocketApp {
         this.#sessionsTimer = setTimeout(() => {
             this.#sessionsTimer = undefined;
             const all = this.sessions();
+            let board: SubagentEntry[] | undefined;
 
             for (const client of this.#clients) {
                 const scope = client.user.sessions;
@@ -1137,6 +1303,16 @@ export class PocketApp {
                         ? all
                         : all.filter((session) => scope.includes(String(session.id))),
                 );
+
+                if (client.board === true) {
+                    board ??= this.subagents();
+                    this.#sendBoard(
+                        client,
+                        scope === undefined
+                            ? board
+                            : board.filter((entry) => scope.includes(String(entry.id))),
+                    );
+                }
             }
         }, 400);
     }
@@ -1147,6 +1323,7 @@ export class PocketApp {
             this.approvals.all().map((approval) => String(this.rootOf(approval.conversationId))),
         );
         const people = new Map<string, Map<string, string>>();
+        const subagents = this.#subagentsBySession();
 
         for (const client of this.#clients) {
             if (client.conversationId === undefined) {
@@ -1170,6 +1347,7 @@ export class PocketApp {
                 );
                 const chat = this.#lastChat.get(id);
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
+                const counts = countSubagents(subagents.get(id) ?? []);
 
                 return {
                     id: Number(id),
@@ -1180,6 +1358,7 @@ export class PocketApp {
                     ...(model === undefined ? {} : { model: model.modelId }),
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
+                    ...(counts === undefined ? {} : { subagents: counts }),
                 };
             })
             .sort((a, b) => b.updatedAt - a.updatedAt);

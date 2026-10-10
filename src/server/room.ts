@@ -124,6 +124,12 @@ export interface Client {
     peeks?: Set<ConversationId>;
     /** The number of the last peek list taken, so one that arrives late does not undo a newer one. */
     peekSeq?: number;
+    /** This tab shows the subagents board: it gets every subagent with each session list (`PocketApp.setBoard`). */
+    board?: boolean;
+    /** The number of the last board request taken, so one that arrives late does not undo a newer one. */
+    boardSeq?: number;
+    /** The JSON of the subagents this tab's board last got, so an unchanged list is not sent again. */
+    boardSent?: string;
 }
 
 export type TypingPlace = "chat" | "pi";
@@ -138,7 +144,7 @@ export type Person = {
 };
 
 /** The subagents with a report on its way: waiting in the outbox, or in the batch sent and still queued. */
-function reportingOf(
+export function reportingOf(
     doc:
         | {
               outbox?: readonly { name: string }[];
@@ -150,6 +156,32 @@ function reportingOf(
     return new Set(
         [...(doc?.outbox ?? []), ...(doc?.sending?.reports ?? [])].map((report) => report.name),
     );
+}
+
+/**
+ * One subagent as the web app shows it, in its parent's subagents bar and on the subagents board: what it was asked and
+ * when, whether it works, and how it ended (`stopped` is a `failed` that was stopped).
+ */
+export function subagentView(
+    name: string,
+    record: SubagentRecord,
+    busy: boolean,
+    reporting: boolean,
+) {
+    return {
+        name,
+        conversationId: record.conversationId,
+        busy,
+        ...(record.asked === undefined ? {} : { asked: record.asked }),
+        ...(record.askedAt === undefined ? {} : { askedAt: record.askedAt }),
+        ...(record.answeredAt === undefined ? {} : { answeredAt: record.answeredAt }),
+        ...(record.failed === true ? { failed: true } : {}),
+        ...(record.failed === true && record.error === STOPPED ? { stopped: true } : {}),
+        ...(record.failed === true && record.error !== undefined && record.error !== STOPPED
+            ? { error: record.error }
+            : {}),
+        ...(reporting ? { reporting: true } : {}),
+    };
 }
 
 /** The view of one conversation, shared by every client attached to it. */
@@ -415,20 +447,14 @@ export class Room {
                     createdAt: version.createdAt,
                 })),
             })),
-            subagents: Object.entries(this.subagents).map(([name, record]) => ({
-                name,
-                conversationId: record.conversationId,
-                busy: this.#app.isBusy(record.conversationId),
-                ...(record.asked === undefined ? {} : { asked: record.asked }),
-                ...(record.askedAt === undefined ? {} : { askedAt: record.askedAt }),
-                ...(record.answeredAt === undefined ? {} : { answeredAt: record.answeredAt }),
-                ...(record.failed === true ? { failed: true } : {}),
-                ...(record.failed === true && record.error === STOPPED ? { stopped: true } : {}),
-                ...(record.failed === true && record.error !== undefined && record.error !== STOPPED
-                    ? { error: record.error }
-                    : {}),
-                ...(this.#reporting.has(name) ? { reporting: true } : {}),
-            })),
+            subagents: Object.entries(this.subagents).map(([name, record]) =>
+                subagentView(
+                    name,
+                    record,
+                    this.#app.isBusy(record.conversationId),
+                    this.#reporting.has(name),
+                ),
+            ),
             authors: this.authors,
             reactions: this.reactions,
             pins: this.pins,

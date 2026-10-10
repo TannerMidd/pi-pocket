@@ -83,6 +83,10 @@ export const store = {
         trust: null,
         /** The conversation whose subagents bar shows a row for each subagent (`subagents.js`); null for none. */
         subagentsOpen: null,
+        /** The subagents board shows in the conversation's place (`subagents-board.js`). */
+        board: false,
+        /** Every subagent in every session, while the board shows; null until the server's first list arrives. */
+        boardAgents: null,
         /** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
         filesLoaded: 0,
         /** `!` commands this tab started that have no entry yet: `{ taskId, command, conversationId, at }`. */
@@ -405,6 +409,8 @@ const handlers = {
             moving: stillMoving(state.moving, sessions),
         })),
     models: (models) => store.set({ models }),
+    // Every subagent in every session, while this tab shows the subagents board (`subagents-board.js`).
+    subagents: (agents) => store.state.board && store.set({ boardAgents: agents }),
     view: applyView,
     chat: applyChat,
     presence: (data) =>
@@ -694,6 +700,11 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
 
     if (location.pathname !== path || store.state.conversationId !== conversationId) {
         pushRoute(path, { replace });
+    }
+
+    // The subagents board shows in the conversation's place: going to one, even the one under it, closes it.
+    if (store.state.board) {
+        store.set({ board: false, boardAgents: null });
     }
 
     if (store.state.conversationId === conversationId && source) {

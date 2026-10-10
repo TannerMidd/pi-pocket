@@ -39,7 +39,7 @@ function putAway(id, agents) {
 export const openSubagents = () => store.set({ subagentsOpen: store.state.conversationId });
 
 /** Where a subagent is: working, done, stopped, or failed. */
-const stateOf = (agent) =>
+export const stateOf = (agent) =>
     agent.busy ? "working" : agent.stopped ? "stopped" : agent.failed ? "failed" : "done";
 
 /** The mark a row starts with, for a subagent that is not working. */
@@ -48,7 +48,7 @@ const MARKS = { done: "✓", stopped: "■", failed: "!" };
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /** How long since `ms`: "45s", "3m 05s", "1h 12m". */
-function elapsed(ms) {
+export function elapsed(ms) {
     const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
 
     if (seconds < 60) {
@@ -63,7 +63,7 @@ function elapsed(ms) {
 }
 
 /** What a working subagent does this moment, from its peek: a call waiting for someone, the one it runs, or its words. */
-function nowDoing(agent) {
+export function nowDoing(agent) {
     const peek = store.state.peeks?.[agent.conversationId];
     const waiting = peek?.approvals?.[0];
 
@@ -94,7 +94,7 @@ function nowDoing(agent) {
 const RANK = { working: 0, failed: 1, stopped: 2, done: 3 };
 
 /** By state; working ones newest asked first, the rest newest answer first. */
-function ordered(agents) {
+export function ordered(agents) {
     return [...agents].sort(
         (a, b) =>
             RANK[stateOf(a)] - RANK[stateOf(b)] ||

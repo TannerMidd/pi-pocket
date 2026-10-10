@@ -26,13 +26,14 @@ import {
     peeksWanted,
     togglePeeks,
 } from "./peeks.js";
-import { Drawer, Rail, ResizeHandle, SessionList, workspaceOrder } from "./sessions.js";
+import { Drawer, RailNav, ResizeHandle, SessionList, workspaceOrder } from "./sessions.js";
 // Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
 import "./rich.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
 import { SignIn } from "./signin.js";
 import { openSubagents } from "./subagents.js";
+import { SubagentsBoard } from "./subagents-board.js";
 import {
     actions,
     attempt,
@@ -228,26 +229,34 @@ function App() {
 
     const inConversation = state.conversationId !== null;
     const rail = prefs().sidebar === "rail";
-    const browsing = inConversation && state.browserOpen && browserAvailable() && !state.missing;
-    const filing = filesShown(state);
-    const people = !browsing && !filing && peopleDocked(state);
-    const peeking = peeksWanted(state);
+    // The subagents board takes the conversation's place, and the panels beside it give it their room.
+    const board = state.board;
+    const browsing =
+        inConversation && !board && state.browserOpen && browserAvailable() && !state.missing;
+    const filing = !board && filesShown(state);
+    const people = !board && !browsing && !filing && peopleDocked(state);
+    const peeking = !board && peeksWanted(state);
     const tiles = peeking ? peekTiles(state) : [];
     // The column takes the place beside the conversation when Browser and People leave it free; otherwise a strip,
     // which only shows when there are tiles.
     const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !filing && !people;
 
     return html`<div
-        class=${`layout ${inConversation ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""}`}
+        class=${`layout ${inConversation || board ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""}`}
     >
         <aside class="sidebar window">
-            ${rail ? html`<${Rail} />` : html`<${SessionList} />`}
+            <div class="sidebar-clip">
+                <${RailNav} foldable=${true} folded=${rail} />
+                ${!rail && html`<${SessionList} />`}
+            </div>
             ${!rail && html`<${ResizeHandle} />`}
         </aside>
-        <div class="pane window">
+        <div class=${`pane window ${board ? "boarded" : ""}`}>
             ${
-                inConversation
-                    ? html`<${Topbar} />
+                board
+                    ? html`<${SubagentsBoard} />`
+                    : inConversation
+                      ? html`<${Topbar} />
                     ${
                         peeking &&
                         tiles.length > 0 &&
@@ -260,7 +269,11 @@ function App() {
                         !state.missing &&
                         html`<${Composer} key=${state.conversationId} />`
                     }`
-                    : html`<div class="home-list"><${SessionList} /></div><${Splash} />`
+                      : html`<div class="home-list">
+                          <${RailNav} />
+                          <${SessionList} />
+                      </div>
+                      <${Splash} />`
             }
         </div>
         ${
@@ -362,7 +375,8 @@ addEventListener("keydown", (event) => {
         !event.shiftKey &&
         key === "f" &&
         store.state.view.conversation &&
-        !store.state.launcher
+        !store.state.launcher &&
+        !store.state.board
     ) {
         event.preventDefault();
         openSheet({ type: "find" });
@@ -421,14 +435,20 @@ addEventListener("keydown", (event) => {
             return;
         }
 
-        if (event.code === "KeyB" && store.state.conversationId !== null && browserAvailable()) {
+        // The panels are not beside the subagents board.
+        if (
+            event.code === "KeyB" &&
+            store.state.conversationId !== null &&
+            !store.state.board &&
+            browserAvailable()
+        ) {
             event.preventDefault();
             toggleBrowser();
 
             return;
         }
 
-        if (event.code === "KeyE" && filesAvailable()) {
+        if (event.code === "KeyE" && !store.state.board && filesAvailable()) {
             event.preventDefault();
             toggleFiles();
 
@@ -459,9 +479,10 @@ const ESCAPE_TWICE_MS = 1500;
 
 /** Esc twice stops Pi, as Esc does in other agents' terminals. Twice, since Esc also closes things and leaves fields. */
 function stopOnSecondEscape() {
-    const { view, sheet, launcher } = store.state;
+    const { view, sheet, launcher, board } = store.state;
 
-    if (sheet || launcher || !view.live?.busy || !canSteer()) {
+    // Esc closes these first.
+    if (sheet || launcher || board || !view.live?.busy || !canSteer()) {
         return;
     }
 
