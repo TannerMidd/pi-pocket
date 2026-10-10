@@ -936,6 +936,51 @@ test("on a phone, the controls are thumb-sized", real, async () => {
 });
 
 test(
+    "the message box starts one line tall, on a phone and a desktop, and grows with its text",
+    real,
+    async () => {
+        await fresh();
+        await goTo(first);
+        await slid();
+        // How many lines tall the box is: its height less its padding, in its own line height.
+        const lines = (text: string) =>
+            inPage<number>(`
+            const box = document.querySelector(".composer textarea");
+
+            box.value = ${JSON.stringify(text)};
+            box.dispatchEvent(new Event("input", { bubbles: true }));
+            // The box fits its text once the app has drawn it.
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const style = getComputedStyle(box);
+            const inside = box.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+
+            return JSON.stringify(Math.round(inside / parseFloat(style.lineHeight)));
+        `);
+
+        try {
+            for (const viewport of [
+                VIEWPORTS.mobile,
+                { width: 1440, height: 900, scale: 1, mobile: false },
+            ]) {
+                const at = `${viewport.width}px wide`;
+
+                await page.setViewport(viewport);
+                assert.equal(await lines(""), 1, `empty, one line, ${at}`);
+                assert.equal(await lines("one"), 1, `one line of text, one line, ${at}`);
+                assert.equal(
+                    await lines("one\ntwo\nthree"),
+                    3,
+                    `three lines of text, three, ${at}`,
+                );
+                assert.equal(await lines(""), 1, `emptied, one line again, ${at}`);
+            }
+        } finally {
+            await page.setViewport(VIEWPORTS.mobile);
+        }
+    },
+);
+
+test(
     "on a phone, Files' bar is out of reach under a file, and a diff's header keeps the name readable",
     real,
     async () => {
