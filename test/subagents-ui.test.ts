@@ -214,7 +214,10 @@ test(
         await page.click({ label: "Stop slow" });
         await says(".agents-count", /^1 stopped · 1 done$/, 15_000);
         await says(".agent-row.stopped .agent-name", /^slow$/);
-        assert.equal(app.isBusy(id), false);
+        // The subagent itself: its run ended (the parent had not been working since it started them).
+        const slow = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.slow!;
+
+        assert.equal(app.isBusy(slow.conversationId), false, "the subagent stopped");
         // The stopped one's report goes to Pi first; then the bar can be put away.
         await see(
             `return JSON.stringify(document.querySelector('[aria-label="Put the subagents bar away"]') !== null)`,

@@ -4,7 +4,7 @@
 // as tiles have), for how long, whether its report is on its way, Stop, and a tap to open it.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { describeCall } from "./calls.js";
-import { useOnScreen } from "./peeks.js";
+import { fromServer, useOnScreen } from "./peeks.js";
 import { api, attempt, canSteer, navigate, store } from "./store.js";
 import { html, Icon, Spinner, timeAgo } from "./ui.js";
 
@@ -47,9 +47,9 @@ const MARKS = { done: "✓", stopped: "■", failed: "!" };
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** How long since `ms`: "45s", "3m 05s", "1h 12m". */
+/** How long since `ms`, a time the server took: "45s", "3m 05s", "1h 12m". */
 export function elapsed(ms) {
-    const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    const seconds = Math.max(0, Math.round((Date.now() - fromServer(ms)) / 1000));
 
     if (seconds < 60) {
         return `${seconds}s`;
@@ -87,7 +87,8 @@ export function nowDoing(agent) {
         return last.text;
     }
 
-    return "Thinking…";
+    // Before its peek arrives, nothing is known but that it works.
+    return peek === undefined ? "Working…" : "Thinking…";
 }
 
 /** The order of the states, in the dots and the rows: working, then trouble, then done. */
@@ -109,7 +110,7 @@ function AgentRow({ agent }) {
     const status = stateOf(agent);
     const when = agent.busy
         ? agent.askedAt && elapsed(agent.askedAt)
-        : agent.answeredAt && `${status} ${timeAgo(agent.answeredAt)}`;
+        : agent.answeredAt && `${status} ${timeAgo(fromServer(agent.answeredAt))}`;
 
     return html`<div class=${`agent-row ${status}`} data-peek=${agent.conversationId}>
         <button class="agent-open" onClick=${() => navigate(agent.conversationId)}>
@@ -171,6 +172,9 @@ function Bar({ agents, active, open }) {
         return () => clearInterval(timer);
     }, [working.length]);
 
+    // What the button says, the newest one's work too: the label stands for everything in it.
+    const label = `Subagents: ${summary}${lead && !open ? `. ${lead.name}: ${nowDoing(lead)}` : ""}`;
+
     return html`<div
         class=${`agents-bar ${open ? "open" : ""} ${working.length > 0 ? "busy" : ""}`}
         ref=${box}
@@ -178,7 +182,7 @@ function Bar({ agents, active, open }) {
         <div class="agents-top">
             <button
                 class="agents-summary"
-                aria-label=${`Subagents: ${summary}`}
+                aria-label=${label}
                 aria-expanded=${open}
                 onClick=${() =>
                     store.set({ subagentsOpen: open ? null : store.state.conversationId })}
