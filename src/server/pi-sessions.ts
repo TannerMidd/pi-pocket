@@ -78,7 +78,10 @@ export type PiSession = {
 /** A session file Pi Pocket cannot continue, and why, in words for people. */
 export class PiSessionError extends Error {}
 
-/** The entries from the first to `leafId`, along `parentId`. */
+/**
+ * The entries from the first to `leafId`, along `parentId`. A file whose entries lead back to one already passed is
+ * damaged: Pi's own walk along them, which comes next, would never end.
+ */
 function branchTo(entries: readonly SessionEntry[], leafId: string): SessionEntry[] {
     const byId = new Map(entries.map((entry) => [entry.id, entry]));
     const path: SessionEntry[] = [];
@@ -86,14 +89,38 @@ function branchTo(entries: readonly SessionEntry[], leafId: string): SessionEntr
 
     for (
         let entry = byId.get(leafId);
-        entry !== undefined && !seen.has(entry.id);
+        entry !== undefined;
         entry = entry.parentId === null ? undefined : byId.get(entry.parentId)
     ) {
+        if (seen.has(entry.id)) {
+            throw new PiSessionError(
+                "This Pi session file is damaged: its entries lead in a circle.",
+            );
+        }
+
         seen.add(entry.id);
         path.push(entry);
     }
 
     return path.reverse();
+}
+
+/** The first of `sorted` (ascending) at or after `from`, or undefined. */
+function firstFrom(sorted: readonly number[], from: number): number | undefined {
+    let low = 0;
+    let high = sorted.length;
+
+    while (low < high) {
+        const middle = (low + high) >> 1;
+
+        if (sorted[middle]! < from) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return sorted[low];
 }
 
 /** What an entry of Pi's gives the model, as Pi sends it; Pi's system messages stay behind for Pi Pocket's own. */
@@ -137,8 +164,10 @@ export function readPiSession(text: string): PiSession {
     const path = leaf === undefined ? [] : branchTo(all, leaf.id);
     const projection = buildSessionProjection(all, leaf?.id);
     const entries: PiEntry[] = [];
-    // The entries of Pi's that became messages here.
-    const copied = new Set<string>();
+    // Where each entry is on the branch, and where those that became messages here are (in order): a compaction finds
+    // the first it keeps without a scan, so a file with many compactions reads in time that grows with its length.
+    const at = new Map(path.map((entry, index) => [entry.id, index]));
+    const copied: number[] = [];
     // Tool calls of the last assistant message without a result yet.
     const open = new Map<string, { name: string; timestamp: number }>();
 
@@ -163,12 +192,10 @@ export function readPiSession(text: string): PiSession {
     for (const [index, entry] of path.entries()) {
         if (entry.type === "compaction") {
             const summary = forModel(sessionEntryToContextMessages(entry))[0];
-            const start = path.findIndex((each) => each.id === entry.firstKeptEntryId);
+            const start = at.get(entry.firstKeptEntryId) ?? -1;
             // The first of the kept entries that is a message here, as Pi keeps them up to the compaction.
-            const kept =
-                start === -1 || start > index
-                    ? undefined
-                    : path.slice(start, index).find((each) => copied.has(each.id));
+            const first = start === -1 || start > index ? undefined : firstFrom(copied, start);
+            const kept = first === undefined || first >= index ? undefined : path[first];
 
             if (summary !== undefined) {
                 entries.push({
@@ -191,7 +218,9 @@ export function readPiSession(text: string): PiSession {
         }
 
         for (const message of forModel(sessionEntryToContextMessages(entry))) {
-            copied.add(entry.id);
+            if (copied.at(-1) !== index) {
+                copied.push(index);
+            }
 
             if (message.role === "toolResult") {
                 open.delete(message.toolCallId);

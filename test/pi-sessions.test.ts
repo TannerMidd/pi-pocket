@@ -28,7 +28,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createHandler } from "../src/server/http.ts";
-import { readPiSession } from "../src/server/pi-sessions.ts";
+import { PiSessionError, readPiSession } from "../src/server/pi-sessions.ts";
 import { projectEntry } from "../src/server/projection.ts";
 
 /** The messages of the newest request to the model. */
@@ -419,6 +419,82 @@ test("two compactions, the second keeping messages from before the first: Pi's c
     assert.deepEqual(await pocketContext(id), piContext(path));
     assert.match(JSON.stringify(await pocketContext(id)), /Second summary/);
     assert.doesNotMatch(JSON.stringify(await pocketContext(id)), /First summary/);
+});
+
+test("a file whose entries lead in a circle says it is damaged, at once", () => {
+    const manager = SessionManager.inMemory(work);
+
+    manager.appendMessage({ role: "user", content: "one", timestamp: 1 });
+    manager.appendMessage(fauxAssistantMessage([fauxText("reply one")]));
+    const [header, first, second] = [manager.getHeader(), ...manager.getEntries()];
+    // The first entry's parent made the second, as a damaged or hand-edited file might have it.
+    const circle = [header, { ...first, parentId: second!.id }, second].map((entry) =>
+        JSON.stringify(entry),
+    );
+
+    assert.throws(() => readPiSession(circle.join("\n")), PiSessionError);
+    assert.throws(() => readPiSession(circle.join("\n")), /damaged/);
+});
+
+test("a long session with many compactions reads in time that grows with its length", () => {
+    // Written as Pi writes it, line by line (building it through Pi's session manager takes far longer than reading).
+    const at = "2026-10-09T10:00:00.000Z";
+
+    const file = (count: number) => {
+        const lines = [
+            JSON.stringify({ type: "session", version: 3, id: "many", timestamp: at, cwd: work }),
+            JSON.stringify({
+                type: "message",
+                id: "start",
+                parentId: null,
+                timestamp: at,
+                message: { role: "user", content: "the start", timestamp: 1 },
+            }),
+        ];
+
+        // Compaction after compaction, each keeping from the one before: the slowest kind of file to find what each
+        // keeps in by looking back through the branch, as reading once did.
+        for (let index = 0; index < count; index++) {
+            const before = index === 0 ? "start" : `c${index - 1}`;
+
+            lines.push(
+                JSON.stringify({
+                    type: "compaction",
+                    id: `c${index}`,
+                    parentId: before,
+                    timestamp: at,
+                    summary: `Summary ${index}.`,
+                    firstKeptEntryId: before,
+                    tokensBefore: 1000,
+                }),
+            );
+        }
+
+        return lines.join("\n");
+    };
+
+    // The fastest of three reads: what the machine is doing besides weighs on each alike.
+    const time = (text: string) =>
+        Math.min(
+            ...[0, 1, 2].map(() => {
+                const started = performance.now();
+
+                readPiSession(text);
+
+                return performance.now() - started;
+            }),
+        );
+    const small = file(10_000);
+    const large = file(40_000);
+
+    assert.equal(
+        readPiSession(large).entries.filter((entry) => entry.kind === "compaction").length,
+        40_000,
+    );
+    // Four times the compactions, about four times the time: it was about sixteen, with the server waiting on it.
+    const ratio = time(large) / time(small);
+
+    assert.ok(ratio < 8, `4x the compactions took ${ratio.toFixed(1)}x the time`);
 });
 
 test("a message without content, as old or edited files have, reads; its session is named by what it can", async () => {
