@@ -63,7 +63,7 @@ export function SpendSheet() {
             html`<p>Pi spent <strong>${money(data.total)}</strong> on this server so far.</p>`
         }
         <p class="muted small">
-            Spend goes to whoever asked for the work. Past a limit, Pi takes no new messages there, and a run that crosses it stops.
+            Spend goes to whoever asked for the work. Past a limit, Pi takes no new messages there, a run that crosses it stops, and subagents' reports wait until it is raised.
         </p>
         ${
             data &&

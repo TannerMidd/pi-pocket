@@ -10,7 +10,13 @@ import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import {
+    getAgentDir,
+    ModelRuntime,
+    SettingsManager,
+    type Skill,
+} from "@earendil-works/pi-coding-agent";
 import {
     AgentDoc,
     type AgentState,
@@ -37,7 +43,7 @@ import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
-import { Commands } from "./commands.ts";
+import { Commands, THINKING_LEVELS } from "./commands.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
 import {
     ArtifactBodyDoc,
@@ -61,20 +67,25 @@ import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { modelList, resolveModel } from "./models.ts";
 import { configureHttp } from "./net.ts";
+import { PiSessions } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
-import {
-    loadPromptTemplates,
-    loadSkillCommands,
-    type PromptTemplate,
-    type SkillCommand,
-} from "./prompts.ts";
+import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
-import { type Client, Room, ROOM_DOCS } from "./room.ts";
+import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
 import { Schedules } from "./schedules.ts";
 import { Shell } from "./shell.ts";
+import {
+    loadSessionSkills,
+    projectDistrusted,
+    type ProjectTrust,
+    readProjectTrust,
+    saveProjectTrust,
+    type SkillSources,
+    type TrustChoice,
+} from "./skills.ts";
 import { Spend } from "./spend.ts";
 import { Transcripts } from "./transcripts.ts";
 import { Workspace } from "./workspace.ts";
@@ -98,6 +109,82 @@ const BROWSER_EXTENSION = "pocket-browser";
 /** The most peek tiles a tab gets live at once: the ones on its screen, which a tall screen fits a handful of. */
 export const MAX_PEEKS = 12;
 
+/** A conversation's subagents document, as far as the app reads it. */
+type SubagentsValue = {
+    agents?: Record<string, SubagentRecord>;
+    outbox?: readonly { name: string }[];
+    sending?: { reports: readonly { name: string }[] };
+};
+
+type SubagentsOf = { agents: Record<string, SubagentRecord>; reporting: Set<string> };
+
+/** One subagent on the subagents board: the subagents bar's view, the session it works in, and the call it waits on. */
+export type SubagentEntry = ReturnType<typeof subagentView> & {
+    id: number;
+    waiting?: true;
+    approval?: { tool: string; subject: string };
+};
+
+/** Where a subagent is. Waiting for an approval comes before working: it is working, held up. */
+export type SubagentState = "waiting" | "working" | "failed" | "stopped" | "done";
+
+export function subagentState(entry: SubagentEntry): SubagentState {
+    if (entry.waiting === true) {
+        return "waiting";
+    }
+
+    if (entry.busy) {
+        return "working";
+    }
+
+    return entry.stopped === true ? "stopped" : entry.failed === true ? "failed" : "done";
+}
+
+/**
+ * On the subagents board, a session's finished subagents (done or stopped) beyond this many, the oldest, are left out:
+ * the session list counts them, and the board says how many more there are. Those that work, wait, failed, or have a
+ * report on its way always show.
+ */
+const BOARD_FINISHED = 24;
+
+/** How long a read of Pi's settings serves skills and trust before it is read again. */
+const SETTINGS_STALE_MS = 30_000;
+
+/** A session's subagents as the board gets them: all but its oldest finished ones past `BOARD_FINISHED`. */
+function forBoard(entries: readonly SubagentEntry[]): SubagentEntry[] {
+    const finished = (entry: SubagentEntry) =>
+        entry.reporting !== true && ["done", "stopped"].includes(subagentState(entry));
+    const done = entries.filter(finished);
+
+    if (done.length <= BOARD_FINISHED) {
+        return [...entries];
+    }
+
+    const when = (entry: SubagentEntry) => entry.answeredAt ?? entry.askedAt ?? 0;
+    const kept = new Set(done.sort((a, b) => when(b) - when(a)).slice(0, BOARD_FINISHED));
+
+    return entries.filter((entry) => !finished(entry) || kept.has(entry));
+}
+
+/** How many of a session's subagents are in each state, without the empty ones; undefined for none at all. */
+function countSubagents(
+    entries: readonly SubagentEntry[],
+): Partial<Record<SubagentState, number>> | undefined {
+    if (entries.length === 0) {
+        return undefined;
+    }
+
+    const counts: Partial<Record<SubagentState, number>> = {};
+
+    for (const entry of entries) {
+        const state = subagentState(entry);
+
+        counts[state] = (counts[state] ?? 0) + 1;
+    }
+
+    return counts;
+}
+
 export interface OpenOptions {
     dataDir: string;
     defaultCwd: string;
@@ -109,6 +196,8 @@ export interface OpenOptions {
     now?: () => number;
     /** The browser to run for the Browser panel and tool; null for none. Undefined finds one on this machine. */
     browser?: string | null;
+    /** The home folder, whose `.agents/skills/` every session has. Undefined is Pi's: `$HOME`. Tests use their own. */
+    home?: string;
 }
 
 export class PocketApp {
@@ -126,6 +215,8 @@ export class PocketApp {
     harness!: Harness;
     models!: ModelRuntime;
     settings!: SettingsManager;
+    /** What extension modules get (`PocketHost`): kept for tests that stand in for an older server's. */
+    host!: PocketHost;
     loader!: ExtensionLoader;
     readonly commands = new Commands(this);
     readonly collab = new Collab(this);
@@ -141,6 +232,8 @@ export class PocketApp {
     readonly workspace = new Workspace(this);
     /** The conversation's stored history, as people read it. */
     readonly transcripts = new Transcripts(this);
+    /** Pi's sessions from the terminal, which the owner can continue here. */
+    readonly piSessions = new PiSessions(this);
     /** Each conversation's browser page, which Pi and the people in the conversation share. */
     readonly browsers: Browsers;
     readonly #clients = new Set<Client>();
@@ -155,6 +248,8 @@ export class PocketApp {
     readonly #lastChat = new Map<string, { at: number; userId: string }>();
     /** Subagent conversation → the conversation that spawned it. */
     readonly #parents = new Map<ConversationId, ConversationId>();
+    /** Each conversation's subagents, and those with a report on its way to it: for the board and the session list. */
+    readonly #subagents = new Map<ConversationId, SubagentsOf>();
     #sessions: Record<string, SessionMeta> = {};
     #sessionsTimer: NodeJS.Timeout | undefined;
     #unsubscribeCommits: (() => void) | undefined;
@@ -164,11 +259,13 @@ export class PocketApp {
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
+    readonly #home: string;
     /** The clock durable work runs by. */
     readonly now: () => number;
 
     private constructor(options: OpenOptions) {
         this.#configureModels = options.configureModels;
+        this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
         this.defaultCwd = options.defaultCwd;
@@ -267,13 +364,18 @@ export class PocketApp {
                     return [];
                 }
             },
+            skills: (cwd) => this.skills(cwd),
             resolveModel: (spec) => resolveModel(this.models, spec),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             notice: (level, message) => this.notice(level, message),
+            heldBack: (conversationId) => this.spend.heldBack(conversationId),
+            onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             schedules: this.schedules,
             goals: this.goals,
             browsers: this.browsers,
         };
+
+        this.host = host;
         const dropIn = join(this.dataDir, "extensions");
 
         try {
@@ -400,10 +502,7 @@ export class PocketApp {
                     unrecorded.set(id, missing);
                 }
 
-                this.#noteSubagents(
-                    id,
-                    (await this.harness.snapshot(SubagentsDoc, id, context))?.agents,
-                );
+                this.#noteSubagents(id, await this.harness.snapshot(SubagentsDoc, id, context));
             }
 
             cursor = page.next;
@@ -515,10 +614,9 @@ export class PocketApp {
                     sessionsChanged = true;
                 }
             } else if (kind === SubagentsDoc.definition.kind) {
-                this.#noteSubagents(
-                    id,
-                    (change.value as { agents?: Record<string, SubagentRecord> } | null)?.agents,
-                );
+                this.#noteSubagents(id, change.value as SubagentsValue | null);
+                // The list counts each session's subagents, and the board lists them.
+                sessionsChanged = true;
             }
 
             void this.#rooms.get(id)?.then(
@@ -752,15 +850,20 @@ export class PocketApp {
     }
 
     /**
-     * The sessions a connection shows as peek tiles on its screen now. Each gets short `peek` updates while it stays
-     * there; the rest stop, and their views close as they do when the last tab leaves. Sessions this person may not see
-     * are left out. `connection` is the id its `hello` carried; a list numbered `seq` below one already taken arrived
-     * late, and is dropped.
+     * The sessions a connection shows as peek tiles on its screen now, and the subagents its subagents bar shows. Each
+     * gets short `peek` updates while it stays there; the rest stop, and their views close as they do when the last tab
+     * leaves. Conversations this person may not see are left out. `connection` is the id its `hello` carried. A list
+     * numbered `seq` below one already taken arrived late, and is dropped.
      */
     setPeeks(user: User, connection: string, ids: readonly ConversationId[], seq?: number): void {
+        // Sessions, and the subagents of sessions: the subagents bar shows what each does now.
         const wanted = new Set(
             ids
-                .filter((id) => this.#sessions[String(id)] !== undefined && this.canSee(user, id))
+                .filter(
+                    (id) =>
+                        this.#sessions[String(this.rootOf(id))] !== undefined &&
+                        this.canSee(user, id),
+                )
                 .slice(0, MAX_PEEKS),
         );
 
@@ -1019,9 +1122,126 @@ export class PocketApp {
         return true;
     }
 
-    #noteSubagents(id: ConversationId, agents: Record<string, SubagentRecord> | undefined): void {
-        for (const record of Object.values(agents ?? {})) {
+    #noteSubagents(id: ConversationId, doc: SubagentsValue | null | undefined): void {
+        const agents = doc?.agents ?? {};
+
+        for (const record of Object.values(agents)) {
             this.#parents.set(record.conversationId, id);
+        }
+
+        if (Object.keys(agents).length === 0) {
+            this.#subagents.delete(id);
+        } else {
+            this.#subagents.set(id, { agents: { ...agents }, reporting: reportingOf(doc) });
+        }
+    }
+
+    /**
+     * Every subagent, by the session it works in (its parent's, or the session its parent's chain started from), as the
+     * subagents board shows it: the subagents bar's view, with the session and the call it waits on, if any.
+     */
+    #subagentsBySession(): Map<string, SubagentEntry[]> {
+        const asks = new Map<ConversationId, ApprovalRequest>();
+
+        for (const approval of this.approvals.all()) {
+            if (!asks.has(approval.conversationId)) {
+                asks.set(approval.conversationId, approval);
+            }
+        }
+
+        const sessions = new Map<string, SubagentEntry[]>();
+
+        for (const [parent, { agents, reporting }] of this.#subagents) {
+            const session = String(this.rootOf(parent));
+
+            if (this.#sessions[session] === undefined) {
+                continue;
+            }
+
+            const list = sessions.get(session) ?? [];
+
+            for (const [name, record] of Object.entries(agents)) {
+                const ask = asks.get(record.conversationId);
+
+                list.push({
+                    id: Number(session),
+                    ...subagentView(
+                        name,
+                        record,
+                        this.#busy.has(record.conversationId),
+                        reporting.has(name),
+                    ),
+                    ...(ask === undefined
+                        ? {}
+                        : {
+                              waiting: true,
+                              approval: { tool: ask.tool, subject: ask.subject.slice(0, 200) },
+                          }),
+                });
+            }
+
+            sessions.set(session, list);
+        }
+
+        return sessions;
+    }
+
+    /**
+     * Every subagent in the sessions this person can see, for the subagents board, but a session's oldest finished ones
+     * past `BOARD_FINISHED`. Archived sessions are left out, unless one of their subagents works or waits there.
+     */
+    subagents(user?: User): SubagentEntry[] {
+        const all: SubagentEntry[] = [];
+
+        for (const [id, list] of this.#subagentsBySession()) {
+            if (user?.sessions !== undefined && !user.sessions.includes(id)) {
+                continue;
+            }
+
+            if (this.#sessions[id]?.archived === true && !list.some((entry) => entry.busy)) {
+                continue;
+            }
+
+            all.push(...forBoard(list));
+        }
+
+        return all;
+    }
+
+    /**
+     * A tab opened or closed the subagents board: while open, it gets every subagent with each session list. A request
+     * numbered `seq` below one already taken arrived late, and is dropped.
+     */
+    setBoard(user: User, connection: string, on: boolean, seq?: number): void {
+        for (const client of this.#clients) {
+            if (client.user.id !== user.id || client.connection !== connection) {
+                continue;
+            }
+
+            if (seq !== undefined) {
+                if (seq <= (client.boardSeq ?? -Infinity)) {
+                    continue;
+                }
+
+                client.boardSeq = seq;
+            }
+
+            client.board = on;
+            client.boardSent = undefined;
+
+            if (on) {
+                this.#sendBoard(client, this.subagents(client.user));
+            }
+        }
+    }
+
+    /** Send a tab's board its subagents, unless they are what it last got. */
+    #sendBoard(client: Client, entries: SubagentEntry[]): void {
+        const json = JSON.stringify(entries);
+
+        if (json !== client.boardSent) {
+            client.boardSent = json;
+            client.send("subagents", entries);
         }
     }
 
@@ -1089,6 +1309,8 @@ export class PocketApp {
                 collab: 2,
                 reactions: REACTIONS,
                 approvalRule: this.config.approvalRule,
+                // The model and thinking level new sessions start with, or null for the last one picked.
+                defaultModel: this.config.defaultModel ?? null,
             },
         };
     }
@@ -1106,6 +1328,7 @@ export class PocketApp {
         this.#sessionsTimer = setTimeout(() => {
             this.#sessionsTimer = undefined;
             const all = this.sessions();
+            let board: SubagentEntry[] | undefined;
 
             for (const client of this.#clients) {
                 const scope = client.user.sessions;
@@ -1116,6 +1339,16 @@ export class PocketApp {
                         ? all
                         : all.filter((session) => scope.includes(String(session.id))),
                 );
+
+                if (client.board === true) {
+                    board ??= this.subagents();
+                    this.#sendBoard(
+                        client,
+                        scope === undefined
+                            ? board
+                            : board.filter((entry) => scope.includes(String(entry.id))),
+                    );
+                }
             }
         }, 400);
     }
@@ -1126,6 +1359,7 @@ export class PocketApp {
             this.approvals.all().map((approval) => String(this.rootOf(approval.conversationId))),
         );
         const people = new Map<string, Map<string, string>>();
+        const subagents = this.#subagentsBySession();
 
         for (const client of this.#clients) {
             if (client.conversationId === undefined) {
@@ -1149,16 +1383,20 @@ export class PocketApp {
                 );
                 const chat = this.#lastChat.get(id);
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
+                const counts = countSubagents(subagents.get(id) ?? []);
+                // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
+                const { fromPi: _fromPi, ...shown } = meta;
 
                 return {
                     id: Number(id),
-                    ...meta,
+                    ...shown,
                     busy,
                     waiting: waiting.has(id),
                     ...(endedAt === undefined ? {} : { endedAt }),
                     ...(model === undefined ? {} : { model: model.modelId }),
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
+                    ...(counts === undefined ? {} : { subagents: counts }),
                 };
             })
             .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1457,6 +1695,12 @@ export class PocketApp {
 
             client.send("hello", this.#helloFor(client, await this.hello(user)));
             client.send("sessions", this.sessions(user));
+
+            // An open board too: it must not keep subagents of sessions no longer shared.
+            if (client.board === true) {
+                client.boardSent = undefined;
+                this.#sendBoard(client, this.subagents(user));
+            }
         }
     }
 
@@ -1496,17 +1740,85 @@ export class PocketApp {
         return this.#agents.get(id)?.cwd ?? this.#sessions[String(id)]?.cwd ?? this.defaultCwd;
     }
 
-    /** Pi's skills in a conversation's folder, to run as `/skill:name`. */
-    skillCommands(id: ConversationId): SkillCommand[] {
-        let paths: string[] = [];
+    /** When Pi's settings were last read: Pi's CLI, or a person, can change them while Pi Pocket runs. */
+    #settingsReadAt = Date.now();
 
-        try {
-            paths = this.settings.getSkillPaths();
-        } catch {
-            // Unreadable settings: the default folders still count.
+    /**
+     * What says where Pi's skills are, besides a session's folder: Pi's folder and settings, and the home folder. Pi's
+     * settings are read again when the copy is older than `SETTINGS_STALE_MS`, in the background: a change (such as
+     * `defaultProjectTrust`) counts from the request after.
+     */
+    #skillSources(): SkillSources {
+        if (Date.now() - this.#settingsReadAt >= SETTINGS_STALE_MS) {
+            this.#settingsReadAt = Date.now();
+            this.settings.reload().catch(() => {
+                // Unreadable now: the last good settings stay.
+            });
         }
 
-        return loadSkillCommands(this.cwdOf(id), getAgentDir(), paths);
+        let settingsPaths: string[] = [];
+        let defaultProjectTrust: SkillSources["defaultProjectTrust"] = "ask";
+
+        try {
+            settingsPaths = this.settings.getSkillPaths();
+            defaultProjectTrust = this.settings.getDefaultProjectTrust();
+        } catch {
+            // Unreadable settings: the default folders still count, and no project is trusted unasked.
+        }
+
+        return { agentDir: getAgentDir(), home: this.#home, settingsPaths, defaultProjectTrust };
+    }
+
+    /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
+    skills(cwd: string): Skill[] {
+        return loadSessionSkills(cwd, this.#skillSources());
+    }
+
+    /**
+     * Whether Pi trusts the project a conversation works in, and the project skills that wait for it. The owner's: the
+     * skills may be in folders above the session's, which someone invited to it cannot see.
+     */
+    projectTrust(id: ConversationId, user: User): ProjectTrust {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner decides which projects Pi trusts.");
+        }
+
+        return readProjectTrust(this.cwdOf(id), this.#skillSources());
+    }
+
+    /** The owner's answer to "trust this project?", saved where Pi's CLI keeps its own, as its `/trust` does. */
+    setProjectTrust(id: ConversationId, user: User, choice: TrustChoice): ProjectTrust {
+        // Before anything is saved: only the owner may read it, or answer.
+        const now = this.projectTrust(id, user);
+
+        if (now.unreadable) {
+            throw new HttpError(
+                409,
+                "Pi's trust store (~/.pi/agent/trust.json) cannot be read, so no answer can be saved. Mend or delete it first.",
+            );
+        }
+
+        if (choice === "trust-parent" && now.parent === undefined) {
+            throw new HttpError(400, "This folder has no folder above it.");
+        }
+
+        saveProjectTrust(this.cwdOf(id), getAgentDir(), choice);
+
+        return this.projectTrust(id, user);
+    }
+
+    /** Pi's skills in a conversation's folder, to run as `/skill:name`. */
+    skillCommands(id: ConversationId): SkillCommand[] {
+        try {
+            return this.skills(this.cwdOf(id)).map((skill) => ({
+                name: skill.name,
+                description: skill.description,
+                path: skill.filePath,
+                baseDir: skill.baseDir,
+            }));
+        } catch {
+            return [];
+        }
     }
 
     /** Pi's prompt templates, as a conversation in its folder offers them. */
@@ -1519,7 +1831,12 @@ export class PocketApp {
             // Unreadable settings: the default folders still count.
         }
 
-        return loadPromptTemplates(this.cwdOf(id), getAgentDir(), paths);
+        const cwd = this.cwdOf(id);
+
+        // A project told "Don't trust" offers none of its own, as its .pi/skills.
+        return loadPromptTemplates(cwd, getAgentDir(), paths, {
+            project: !projectDistrusted(cwd, this.#skillSources()),
+        });
     }
 
     // ─── Extensions ─────────────────────────────────────────────────────────
@@ -1656,6 +1973,72 @@ export class PocketApp {
                 ? `${user.name} made approvals need someone other than who asked.`
                 : `${user.name} let anyone who can steer allow risky calls.`,
         );
+    }
+
+    /**
+     * The owner picks the model and thinking level new sessions start with: a signed-in model, its level kept to one it
+     * has. Null leaves it to the last model picked, as before there was a choice.
+     */
+    async setDefaultModel(user: User, choice: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (choice === null) {
+            if (this.config.defaultModel !== undefined) {
+                this.config.defaultModel = undefined;
+                await this.#refreshClients();
+            }
+
+            return;
+        }
+
+        const asked = (typeof choice === "object" ? choice : {}) as {
+            provider?: unknown;
+            modelId?: unknown;
+            thinkingLevel?: unknown;
+        };
+
+        if (
+            typeof asked.provider !== "string" ||
+            typeof asked.modelId !== "string" ||
+            (asked.thinkingLevel !== undefined &&
+                (typeof asked.thinkingLevel !== "string" ||
+                    !THINKING_LEVELS.has(asked.thinkingLevel)))
+        ) {
+            throw new HttpError(
+                400,
+                `defaultModel must be null, or { provider, modelId, thinkingLevel? } with thinkingLevel one of ${[...THINKING_LEVELS].join(", ")}`,
+            );
+        }
+
+        const model = this.models
+            .getAvailableSnapshot()
+            .find((each) => each.provider === asked.provider && each.id === asked.modelId);
+
+        if (model === undefined) {
+            throw new HttpError(
+                400,
+                `Model ${asked.provider}/${asked.modelId} is not available: sign in to its provider first.`,
+            );
+        }
+
+        const thinkingLevel = clampThinkingLevel(
+            model,
+            (asked.thinkingLevel ?? "off") as ModelThinkingLevel,
+        );
+        const before = this.config.defaultModel;
+
+        if (
+            before?.provider === model.provider &&
+            before.modelId === model.id &&
+            before.thinkingLevel === thinkingLevel
+        ) {
+            return;
+        }
+
+        this.config.defaultModel = { provider: model.provider, modelId: model.id, thinkingLevel };
+        await this.#refreshClients();
     }
 
     /** Send every client a fresh hello: the guard's status and the extension names changed. */

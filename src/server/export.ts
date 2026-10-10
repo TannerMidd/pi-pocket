@@ -172,6 +172,8 @@ export function transcriptMarkdown(input: ExportInput): string {
             );
         } else if (entry.kind === "note") {
             sections.push(`_${entry.name} ${entry.text}._`);
+        } else if (entry.kind === "fromPi") {
+            sections.push(`---\n\n_Continued from Pi in the terminal (${entry.file})._`);
         } else if (entry.kind === "shell") {
             const fence = entry.output.includes("```") ? "````" : "```";
 

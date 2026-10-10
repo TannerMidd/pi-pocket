@@ -28,6 +28,8 @@ export type SessionMeta = {
     budget?: number;
     /** The git worktree the session works in, when it has one of its own. */
     worktree?: Worktree;
+    /** The session of Pi's in the terminal this one continues, and how many messages its file had then. */
+    fromPi?: { session: string; count: number };
 };
 
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */
@@ -101,7 +103,17 @@ export type SubagentRecord = {
     conversationId: ConversationId;
     /** Answers already reported to the parent: several messages can end in one answer, reported once. */
     reported: EntryId[];
+    /** What the parent asked it last, the start of it, and when. */
+    asked?: string;
+    askedAt?: number;
+    /** When it last answered, or failed to (`failed`), what the parent asked; and why it failed, or that it was stopped. */
+    answeredAt?: number;
+    failed?: boolean;
+    error?: string;
 };
+
+/** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
+export type PendingReport = { name: string; text: string };
 
 /** Values codemode scripts keep with `store(key, value)`, read back with `load(key)` in later scripts. */
 export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>({
@@ -117,6 +129,29 @@ export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>
 export const SubagentsDoc = defineDoc<{
     agents: Record<string, SubagentRecord>;
     reporters: Record<string, TaskId>;
+    /** Reports not yet sent to the parent. */
+    outbox?: PendingReport[];
+    /** The task sending them, while there is one. */
+    courier?: TaskId;
+    /**
+     * The batch taken from the outbox, kept until it has left the parent's queue, with the request id it goes with: a
+     * courier that stops before then leaves it to the next, which sends it again under that id, so it goes once.
+     */
+    sending?: {
+        request: string;
+        reports: PendingReport[];
+        /** A person took it out of the parent's queue (the queue's ×, or Stop): it is gone, not sent again. */
+        discarded?: true;
+    };
+    /** How many batches went so far, for their request ids. */
+    batches?: number;
+    /**
+     * Why the reports wait, while a spend limit holds them back: the parent would start a turn for them that its
+     * session, or whoever pays there, may not pay for. They go when the limit is raised.
+     */
+    held?: string;
+    /** An earlier build's names of the batch in the queue: no longer written, and cleared where found. */
+    delivering?: string[];
 }>({
     kind: "pocket.subagents",
     version: 1,
@@ -227,6 +262,9 @@ export const DecisionsDoc = defineDoc<{ calls: Record<string, Decision> }>({
 
 /** The text a subagent report starts with; the UI renders these as report cards. */
 export const REPORT_PREFIX = "[subagent ";
+
+/** Why a subagent that was stopped did not answer, in its report and its record. */
+export const STOPPED = "stopped before it answered";
 
 /** Plan mode: while on, Pi reads and proposes, and anything that would change something is blocked. */
 export const PlanDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({

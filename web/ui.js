@@ -181,9 +181,8 @@ function richKind(name, source) {
 }
 
 /**
- * A code block as the app draws it: its language and a copy button above it (or the button alone, over it), its code
- * colored, and a long one folded. A block that shows something besides its code is marked with its kind for
- * `markdownParts`.
+ * A code block as the app draws it: a bar with its language (or "text") and a copy button above it, its code colored,
+ * and a long one folded. A block that shows something besides its code is marked with its kind for `markdownParts`.
  */
 function codeBlock(pre, fold) {
     const source = pre.textContent ?? "";
@@ -211,18 +210,14 @@ function codeBlock(pre, fold) {
         wrap.dataset.lang = name;
     }
 
-    if (name) {
-        const head = document.createElement("div");
-        const label = document.createElement("span");
+    const head = document.createElement("div");
+    const label = document.createElement("span");
 
-        head.className = "code-head";
-        label.className = "code-lang";
-        label.textContent = name;
-        head.append(label, copy);
-        wrap.append(head, pre);
-    } else {
-        wrap.append(copy, pre);
-    }
+    head.className = "code-head";
+    label.className = "code-lang";
+    label.textContent = name || "text";
+    head.append(label, copy);
+    wrap.append(head, pre);
 
     const lines = source.split("\n").length;
 
@@ -777,7 +772,7 @@ export function Marked({ text, hits }) {
     return parts;
 }
 
-export function Icon({ name, size = 20, class: className = "" }) {
+export function Icon({ name, size = 20, class: className = "", stroke = 2 }) {
     return html`<svg
         class=${`icon ${className}`}
         width=${size}
@@ -785,7 +780,7 @@ export function Icon({ name, size = 20, class: className = "" }) {
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"
+        stroke-width=${stroke}
         stroke-linecap="round"
         stroke-linejoin="round"
         aria-hidden="true"
@@ -795,11 +790,14 @@ export function Icon({ name, size = 20, class: className = "" }) {
 }
 
 /**
- * The app's loaders, after Omarchy's: a quadrant block that steps around a square like a terminal spinner, a flat bar
- * that eases toward 70% the way Omarchy's boot screen does while it waits, and a sweep of square cells for "thinking".
+ * The app's loaders, after Omarchy's: a quadrant block that steps around a square like a terminal spinner, and a flat
+ * bar that eases toward 70% the way Omarchy's boot screen does while it waits.
  */
-export function Spinner({ label = "Working" }) {
-    return html`<span class="spinner" role="img" aria-label=${label}></span>`;
+export function Spinner({ label = "Working", hidden = false }) {
+    // Hidden from screen readers beside words that say the same.
+    return hidden
+        ? html`<span class="spinner" aria-hidden="true"></span>`
+        : html`<span class="spinner" role="img" aria-label=${label}></span>`;
 }
 
 /** A spinner with a short line about what is loading, for sheets and panels. */
@@ -817,20 +815,6 @@ export function Boot({ caption = "starting", detail = "", inline = false }) {
         <div class="boot-bar" aria-hidden="true"><span></span></div>
         <div class="boot-caption">${caption}</div>
         ${detail && html`<div class="boot-detail">${detail}</div>`}
-    </div>`;
-}
-
-/** Pi is working on an answer: a block sweeping across square cells. */
-export function Thinking() {
-    return html`<div class="thinking" role="status" aria-label="Pi is thinking">
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
     </div>`;
 }
 
@@ -1022,9 +1006,10 @@ export function Sheet({ title, onClose, children, wide = false, actions = null }
 }
 
 /**
- * Where a menu opens from the control `selector` names: above it and aligned with it, within what shows of the page (a
- * phone's keyboard can cover it), and as tall as its rows need up to a menu's height. Null, for the middle of the
- * screen, when the control is gone or scrolled away, or has too little room above it.
+ * Where a menu opens from the control `selector` names: above it and aligned with it, or below it for a control near the
+ * top of the screen, within what shows of the page (a phone's keyboard can cover it), and as tall as its rows need up to
+ * a menu's height. Null, for the middle of the screen, when the control is gone or scrolled away, or has too little
+ * room on either side.
  */
 export function popAnchor(selector) {
     const rect = document.querySelector(selector)?.getBoundingClientRect();
@@ -1035,27 +1020,32 @@ export function popAnchor(selector) {
 
     const top = visualViewport?.offsetTop ?? 0;
     const bottom = top + (visualViewport?.height ?? innerHeight);
-    const at = Math.min(rect.top, bottom - 8);
-    const room = at - top - 14;
 
-    if (rect.bottom < top || room < 220) {
+    // Scrolled away above. One under a phone's keyboard opens from the keyboard's top edge.
+    if (rect.bottom < top) {
         return null;
     }
 
     const width = Math.min(420, innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left, innerWidth - width - 8));
+    const at = Math.min(rect.top, bottom - 8);
+    const above = at - top - 14;
 
-    return {
-        left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
-        bottom: innerHeight - at + 6,
-        width,
-        height: Math.min(540, room),
-    };
+    if (above >= 220) {
+        return { left, bottom: innerHeight - at + 6, width, height: Math.min(540, above) };
+    }
+
+    const below = bottom - rect.bottom - 14;
+
+    return below >= 220 && rect.bottom <= bottom
+        ? { left, top: rect.bottom + 6, width, height: Math.min(540, below), down: true }
+        : null;
 }
 
 /** A `popAnchor` as a menu's style: nothing for the middle of the screen. */
 export const anchorStyle = (anchor) =>
     anchor
-        ? `left:${anchor.left}px;bottom:${anchor.bottom}px;width:${anchor.width}px;max-height:${anchor.height}px`
+        ? `left:${anchor.left}px;${anchor.down ? `top:${anchor.top}px` : `bottom:${anchor.bottom}px`};width:${anchor.width}px;max-height:${anchor.height}px`
         : "";
 
 /** The short name of a model for chips: "Claude Opus 5.5" stays, long ids lose their date suffix. */

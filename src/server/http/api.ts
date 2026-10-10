@@ -221,6 +221,31 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, { ok: true });
         }
 
+        // Every subagent in the sessions this person can see, as the subagents board shows them.
+        if (first === "subagents" && method === "GET") {
+            return json(response, 200, app.subagents(user));
+        }
+
+        // The subagents board opened or closed in a tab: while open, it gets every subagent (`subagents` events).
+        if (first === "subagents" && method === "POST") {
+            const body = await readJson<{ connection?: unknown; on?: unknown; seq?: unknown }>(
+                request,
+            );
+
+            if (body.seq !== undefined && !Number.isSafeInteger(body.seq)) {
+                throw new HttpError(400, "seq must be a whole number");
+            }
+
+            app.setBoard(
+                user,
+                String(body.connection ?? ""),
+                body.on === true,
+                body.seq as number | undefined,
+            );
+
+            return json(response, 200, { ok: true });
+        }
+
         if (first === "push") {
             return pushRoutes(route, second);
         }
@@ -282,6 +307,33 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
         if (first === "sessions" && second === undefined && method === "GET") {
             return json(response, 200, app.sessions(user));
+        }
+
+        // Pi's sessions from the terminal, which the owner can continue here.
+        if (first === "pi-sessions" && second === undefined && method === "GET") {
+            return json(
+                response,
+                200,
+                await app.piSessions.list(user, url.searchParams.get("q") ?? ""),
+            );
+        }
+
+        if (first === "pi-sessions" && second === "preview" && method === "GET") {
+            return json(
+                response,
+                200,
+                await app.piSessions.preview(user, url.searchParams.get("path") ?? ""),
+            );
+        }
+
+        if (first === "pi-sessions" && second === "continue" && method === "POST") {
+            const body = await readJson<{ path?: unknown }>(request);
+
+            if (typeof body.path !== "string") {
+                throw new HttpError(400, "path is required");
+            }
+
+            return json(response, 200, await app.commands.continuePiSession(user, body.path));
         }
 
         if (first === "sessions" && second === undefined && method === "POST") {
@@ -381,10 +433,22 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "settings" && method === "POST") {
-            const body = await readJson<{ approvalRule?: unknown }>(request);
+            const body = await readJson<{ approvalRule?: unknown; defaultModel?: unknown }>(
+                request,
+            );
+
+            // One at a time: a second that fails must not leave the first changed.
+            if (body.approvalRule !== undefined && body.defaultModel !== undefined) {
+                throw new HttpError(400, "Change one setting at a time.");
+            }
 
             if (body.approvalRule !== undefined) {
                 await app.setApprovalRule(user, body.approvalRule);
+            }
+
+            // Null clears it: new sessions start with the last model picked again.
+            if (body.defaultModel !== undefined) {
+                await app.setDefaultModel(user, body.defaultModel);
             }
 
             return json(response, 200, { ok: true });

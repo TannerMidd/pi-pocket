@@ -69,6 +69,17 @@ async function describeTask(
         case "pocket.subagent-reporter":
             return { label: "waiting for a subagent's answer" };
 
+        case "pocket.subagent-courier": {
+            const held = (await app.harness.snapshot(SubagentsDoc, id, context))?.held;
+
+            return {
+                label:
+                    held === undefined
+                        ? "taking subagents' reports to Pi at its next pause"
+                        : `holding subagents' reports: ${held}`,
+            };
+        }
+
         case "pocket.schedule": {
             const schedule = Object.values(
                 (await app.harness.snapshot(ScheduleDoc, id, context))?.items ?? {},

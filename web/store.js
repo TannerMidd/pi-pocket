@@ -47,6 +47,7 @@ const emptyView = () => ({
     schedules: [],
     goal: null,
     branch: null,
+    subagentsHeld: null,
 });
 
 export const store = {
@@ -79,6 +80,14 @@ export const store = {
         composerInsert: null,
         /** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
         templates: null,
+        /** Whether Pi trusts a conversation's project, for its own skills (`trust.js`): `{ conversationId, cwd, info }`. */
+        trust: null,
+        /** The conversation whose subagents bar shows a row for each subagent (`subagents.js`); null for none. */
+        subagentsOpen: null,
+        /** The subagents board shows in the conversation's place (`subagents-board.js`). */
+        board: false,
+        /** Every subagent in every session, while the board shows; null until the server's first list arrives. */
+        boardAgents: null,
         /** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
         filesLoaded: 0,
         /** `!` commands this tab started that have no entry yet: `{ taskId, command, conversationId, at }`. */
@@ -361,6 +370,9 @@ function applyView(data) {
                 schedules: data.schedules ?? base.schedules,
                 // No goal is null, which the server sends too: only a missing field keeps the last value.
                 goal: data.goal === undefined ? base.goal : data.goal,
+                // Why subagents' reports wait (a spend limit), or null when none do: the subagents bar says it.
+                subagentsHeld:
+                    data.subagentsHeld === undefined ? base.subagentsHeld : data.subagentsHeld,
                 // What the folder has checked out: `{ branch }` or `{ detached }`, and null outside a repository.
                 branch: data.branch === undefined ? base.branch : data.branch,
             },
@@ -401,6 +413,8 @@ const handlers = {
             moving: stillMoving(state.moving, sessions),
         })),
     models: (models) => store.set({ models }),
+    // Every subagent in every session, while this tab shows the subagents board (`subagents-board.js`).
+    subagents: (agents) => store.state.board && store.set({ boardAgents: agents }),
     view: applyView,
     chat: applyChat,
     presence: (data) =>
@@ -692,6 +706,11 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
         pushRoute(path, { replace });
     }
 
+    // The subagents board shows in the conversation's place: going to one, even the one under it, closes it.
+    if (store.state.board) {
+        store.set({ board: false, boardAgents: null });
+    }
+
     if (store.state.conversationId === conversationId && source) {
         if (sheet) {
             openSheet(sheet);
@@ -796,6 +815,8 @@ export const actions = {
     setAccess: (userId, patch) => api(`users/${encodeURIComponent(userId)}`, patch),
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
     configure: (change) => api(`c/${current()}/configure`, change),
+    /** The owner's model and thinking level for new sessions, `{ provider, modelId, thinkingLevel }`; null clears it. */
+    setDefaultModel: (choice) => api("settings", { defaultModel: choice }),
     compact: (instructions) => api(`c/${current()}/compact`, { instructions }),
     reset: (note) => api(`c/${current()}/reset`, { note }),
     setInstructions: (text) => api(`c/${current()}/instructions`, { text }),
@@ -807,6 +828,14 @@ export const actions = {
     setPlan: (on) => api(`c/${current()}/plan`, { on }),
     approvePlan: () => api(`c/${current()}/plan`, { approve: true }),
     prompts: () => api(`c/${current()}/prompts`),
+    trust: () => api(`c/${current()}/trust`),
+    /** `trust`, `trust-parent`, or `distrust`, as Pi's `/trust` offers them. */
+    setTrust: (choice) => api(`c/${current()}/trust`, { choice }),
+    /** Pi's sessions from the terminal on this machine; one of them to look at; and one continued as a new session. */
+    piSessions: (query = "") =>
+        api(query === "" ? "pi-sessions" : `pi-sessions?q=${encodeURIComponent(query)}`),
+    piSession: (path) => api(`pi-sessions/preview?path=${encodeURIComponent(path)}`),
+    continuePiSession: (path) => api("pi-sessions/continue", { path }),
     /** `when` says when, then what Pi gets: `in 2h check the deploy`. Clock times are this device's. */
     schedule: (when) =>
         api(`c/${current()}/schedules`, {
@@ -829,7 +858,7 @@ export const actions = {
 
 /** Entries that show as transcript rows. Tool results show inside their call's card instead. */
 export const isRow = (entry) =>
-    ["user", "assistant", "compaction", "reset", "shell", "note"].includes(entry.kind);
+    ["user", "assistant", "compaction", "reset", "shell", "note", "fromPi"].includes(entry.kind);
 
 /**
  * Show the transcript from this entry down when it is above the rows shown now, as for a jump to a pinned or quoted

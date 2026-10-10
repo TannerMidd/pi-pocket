@@ -38,6 +38,9 @@ const hidden = () => document.visibilityState === "hidden";
 let clockOffset = 0;
 const serverNow = () => Date.now() + clockOffset;
 
+/** A time the server took (its clock), on this device's clock: a phone set a few minutes off still counts right. */
+export const fromServer = (ms) => ms - clockOffset;
+
 function readSeen() {
     const seen = {};
 
@@ -248,9 +251,10 @@ export function PeeksButton() {
             (session) => session.waiting && !session.archived && session.id !== conversationId,
         );
 
-    // Quiet on phones while off: the top bar's way back to the sessions counts those waiting there.
+    // Quiet while off, unless another session waits for you; where the top bar leads back to the sessions, its way back
+    // counts those waiting, and it stays quiet then too.
     return html`<button
-        class=${`icon-button badge-host ${on ? "on" : "quiet"}`}
+        class=${`icon-button badge-host ${on ? "on" : waiting ? "quiet-narrow" : "quiet"}`}
         aria-label="Peek tiles"
         aria-pressed=${on}
         title=${on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)"}
@@ -345,8 +349,11 @@ document.addEventListener("visibilitychange", () => {
     seeOpen(store.state);
 });
 
-/** Watch a scrolling list's tiles for being on screen, and tell the server once they settle. */
-function useOnScreen(list) {
+/**
+ * Watch a scrolling list's tiles (its `[data-peek]` elements) for being on screen, and tell the server once they
+ * settle. The subagents bar watches its rows this way too.
+ */
+export function useOnScreen(list) {
     const observer = useRef(null);
     const watched = useRef(new Set());
 

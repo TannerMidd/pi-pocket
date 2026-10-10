@@ -17,7 +17,7 @@ const entry = (kind: string, message: unknown, id = 1) =>
 test("user entries keep text, count images, and lift the speaker prefix", () => {
     const plain = projectEntry(entry("pi.user", { role: "user", content: "hi", timestamp: 1 }));
 
-    assert.deepEqual(plain, { id: 1, kind: "user", text: "hi", images: 0 });
+    assert.deepEqual(plain, { id: 1, kind: "user", text: "hi", images: 0, at: 1 });
     const shared = projectEntry(
         entry("pi.user", {
             role: "user",
@@ -35,7 +35,30 @@ test("user entries keep text, count images, and lift the speaker prefix", () => 
         text: "look at this",
         images: 1,
         from: "Alex",
+        at: 1,
     });
+});
+
+test("messages carry when they were made, when they say", () => {
+    const at = 1_760_000_000_000;
+    const reply = projectEntry(
+        entry("pi.assistant", { role: "assistant", content: [], timestamp: at }),
+    );
+    const result = projectEntry(
+        entry("pi.tool-result", {
+            role: "toolResult",
+            toolCallId: "c1",
+            toolName: "read",
+            content: [],
+            isError: false,
+            timestamp: at + 5,
+        }),
+    );
+    const undated = projectEntry(entry("pi.user", { role: "user", content: "hi" }));
+
+    assert.equal(reply?.kind === "assistant" && reply.at, at);
+    assert.equal(result?.kind === "toolResult" && result.at, at + 5);
+    assert.ok(undated !== undefined && !("at" in undated));
 });
 
 test("tool results count their images and leave the data out", () => {

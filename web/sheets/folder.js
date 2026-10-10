@@ -1,8 +1,9 @@
 // The working folder of a new session or of this one: browse, make a new folder, recent folders, and a worktree of its
 // own.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { actions, api, attempt, closeSheet, navigate, notify, store } from "../store.js";
-import { html, Icon, Sheet, shortPath } from "../ui.js";
+import { actions, api, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
+import { html, Icon, item, Sheet, shortPath } from "../ui.js";
+import { piSessionsAvailable } from "./pi-sessions.js";
 
 /** A folder's path with a name added: `/a` and `b` make `/a/b`, `/` and `b` make `/b`. */
 const joined = (folder, name) => `${folder.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
@@ -168,6 +169,15 @@ export function CwdSheet({ mode }) {
         <button class="button primary wide" ref=${useButton} onClick=${() => use(path)}>
             ${missing === path ? "Create and use" : "Use"} ${shortPath(path, home)}
         </button>
+        ${
+            mode === "new" &&
+            piSessionsAvailable() &&
+            item(
+                "Continue a Pi session",
+                () => openSheet({ type: "pi-sessions" }),
+                "from Pi in the terminal",
+            )
+        }
         ${
             browse &&
             listing &&

@@ -249,6 +249,12 @@ test("peek tiles are off until turned on: nothing shows and nothing is sent", re
 });
 
 test("the top bar's switch turns them on, and Alt+P off and on again", real, async () => {
+    // Off, the switch shows on a wide screen while another session waits.
+    assert.notEqual(
+        await inPage<string>(`return JSON.stringify(getComputedStyle(${SWITCH}).display)`),
+        "none",
+        "the switch in sight",
+    );
     await page.evaluate(`${SWITCH}.click()`);
     assert.equal(await pressed(), "true");
     await until(
@@ -798,13 +804,29 @@ test(
     "with People open, and on a phone, the tiles are a strip under the top bar",
     real,
     async () => {
-        await page.evaluate(`document.querySelector(".people-button").click()`);
+        // Nobody else is here: the chat opens from the menu's tile, and the top bar's button closes it.
+        await page.evaluate(`document.querySelector('.topbar [aria-label="Menu"]').click()`);
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(!!document.querySelector('.place[data-place="chat"]'))`,
+                )) === true,
+            "the menu",
+        );
+        await page.evaluate(`document.querySelector('.place[data-place="chat"]').click()`);
         await until(
             async () =>
                 (await inPage<boolean>(
                     `return JSON.stringify(!!document.querySelector(".peek-strip") && !document.querySelector(".peeks"))`,
                 )) === true,
             "the strip in place of the column",
+        );
+        assert.notEqual(
+            await inPage<string>(
+                `return JSON.stringify(getComputedStyle(document.querySelector(".people-button")).display)`,
+            ),
+            "none",
+            "the button to close it, in sight while it is open",
         );
         await page.evaluate(`document.querySelector(".people-button").click()`);
         await until(
@@ -861,7 +883,8 @@ test(
             "no tiles",
         );
         await until(async () => (await serverPeeks())?.length === 0, "nothing live");
-        await page.evaluate(`${SWITCH}.click()`);
+        // Off, the switch may be out of the top bar (nothing waits): Alt+P, as the menu's tile, turns them on.
+        await altP();
         await sameAsScreen("the tiles back, and live");
     },
 );

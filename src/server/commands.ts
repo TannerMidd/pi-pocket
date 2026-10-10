@@ -39,6 +39,7 @@ import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY } from "./entr
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
+import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
 import { expandPromptTemplate, expandSkillCommand } from "./prompts.ts";
 import { clientKey, ownRequest } from "./requests.ts";
@@ -69,7 +70,7 @@ export interface SubmitRequest {
     inlineFiles?: boolean;
 }
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 /** Attached images that also go to the model itself, when it takes images. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
@@ -198,6 +199,59 @@ export class Commands {
     }
 
     /**
+     * Continue one of Pi's sessions from the terminal here: a new session with its history, in its folder, with its model
+     * when that one is signed in here (`pi-sessions.ts`). The owner's, as Pi's own files are.
+     */
+    async continuePiSession(user: User, path: string): Promise<{ id: ConversationId }> {
+        const app = this.#app;
+        const session = await app.piSessions.read(user, path);
+        let cwd: string;
+
+        try {
+            cwd = app.workspace.checkDirectory(session.cwd);
+        } catch {
+            throw new HttpError(
+                400,
+                `The folder this Pi session worked in is not there anymore: ${session.cwd}`,
+            );
+        }
+
+        const start = this.#defaultModel(session);
+        const title = session.title.slice(0, MAX_TITLE);
+        const now = Date.now();
+        const conversation = await app.harness.createConversation(
+            {
+                ownership: { kind: "ownerless" },
+                agent: {
+                    cwd,
+                    ...(start.model === undefined ? {} : { model: start.model }),
+                    ...(start.thinkingLevel === undefined
+                        ? {}
+                        : { thinkingLevel: start.thinkingLevel }),
+                },
+                init: async (tx, id) => {
+                    (await tx.doc(SessionsDoc)).items[String(id)] = {
+                        cwd,
+                        title,
+                        createdAt: now,
+                        updatedAt: now,
+                        createdBy: user.id,
+                        fromPi: { session: session.id, count: session.count },
+                    };
+                    await writePiSession(tx, id, session, {
+                        session: session.id,
+                        title: session.title,
+                        file: path,
+                    });
+                },
+            },
+            context,
+        );
+
+        return { id: conversation.id };
+    }
+
+    /**
      * Run `create` with the folder a new session works in: `cwd` itself, or, when `isolated`, the matching folder in a
      * new git worktree made from it, named after `label`. A worktree whose session `create` did not make is discarded.
      */
@@ -291,8 +345,17 @@ export class Commands {
         );
     }
 
-    /** The model a new session starts with: the one last chosen here, else Pi's default, else any available one. */
-    #defaultModel(): { model?: ModelRef; thinkingLevel?: ModelThinkingLevel } {
+    /**
+     * The model a new session starts with: `prefer` (with its thinking level) when it is signed in here, or the owner's
+     * default, or the one last picked, or Pi's default, or the first there is.
+     */
+    #defaultModel(prefer?: {
+        model: { provider: string; modelId: string } | null;
+        thinkingLevel: string;
+    }): {
+        model?: ModelRef;
+        thinkingLevel?: ModelThinkingLevel;
+    } {
         const { models, config, settings } = this.#app;
         const available = models.getAvailableSnapshot();
         const pick = (provider: string | undefined, id: string | undefined) =>
@@ -300,7 +363,12 @@ export class Commands {
                 ? undefined
                 : available.find((model) => model.provider === provider && model.id === id);
         const last = config.lastModel;
+        const preferred = pick(prefer?.model?.provider, prefer?.model?.modelId);
+        const chosen = config.defaultModel;
+        const fallback = pick(chosen?.provider, chosen?.modelId);
         const model =
+            preferred ??
+            fallback ??
             pick(last?.provider, last?.modelId) ??
             pick(settings.getDefaultProvider(), settings.getDefaultModel()) ??
             available[0];
@@ -309,7 +377,11 @@ export class Commands {
             return {};
         }
 
-        const level = (last?.thinkingLevel ??
+        const level = ((preferred === undefined ? undefined : prefer?.thinkingLevel) ??
+            (preferred === undefined && fallback !== undefined
+                ? chosen?.thinkingLevel
+                : undefined) ??
+            last?.thinkingLevel ??
             settings.getDefaultThinkingLevel() ??
             "off") as ModelThinkingLevel;
 
@@ -621,6 +693,8 @@ export class Commands {
         const conversation = await app.conversation(id);
         const busy = app.isBusy(id);
 
+        // Stop withdraws what waits in the queue, subagents' reports too: a person meant them gone.
+        await this.#discardReports(id);
         void conversation
             .abort(context)
             .catch((error: unknown) => app.notice("error", `Abort failed: ${describe(error)}`, id));
@@ -628,6 +702,32 @@ export class Commands {
         if (busy) {
             await app.collab.activity(id, user, "stopped the run");
         }
+    }
+
+    /**
+     * Mark the batch of subagents' reports in `id`'s queue (or, given `submissionId`, only if that is it) as a person's
+     * to withdraw: the courier then lets it go instead of sending it again, as it does with one a spend limit's stop
+     * withdrew.
+     */
+    async #discardReports(id: ConversationId, submissionId?: number): Promise<void> {
+        await this.#app.harness.commit(async (tx) => {
+            const state = await tx.doc(SubagentsDoc, id);
+            const sending = state.sending;
+
+            if (sending === undefined || sending.discarded === true) {
+                return;
+            }
+
+            if (submissionId !== undefined) {
+                const record = await tx.submissionByRequest(id, sending.request);
+
+                if (record === undefined || Number(record.id) !== submissionId) {
+                    return;
+                }
+            }
+
+            state.sending = { ...sending, discarded: true };
+        }, context);
     }
 
     /** Take back a queued message. Anyone may take back their own; someone else's needs the right to drive. */
@@ -642,6 +742,7 @@ export class Commands {
             await app.requireDriver(id, user);
         }
 
+        await this.#discardReports(id, submissionId);
         const result = await app.harness.abortSubmission(
             submissionId as unknown as SubmissionId,
             context,
@@ -685,6 +786,15 @@ export class Commands {
         }
 
         optionalText(request.cwd, "cwd");
+
+        // Someone invited to one session sees files in its folder only: moving it would move what they see.
+        if (request.cwd !== undefined && user.sessions !== undefined) {
+            throw new HttpError(
+                403,
+                "You were invited to one session and cannot move it to another folder.",
+            );
+        }
+
         const conversation = await app.conversation(id);
         const current = await app.agentState(id);
         const ref = request.model ?? current?.model;

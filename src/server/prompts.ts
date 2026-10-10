@@ -12,7 +12,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { CONFIG_DIR_NAME, loadSkills, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { expandHome } from "./paths.ts";
 
 export type PromptTemplate = {
@@ -87,15 +87,19 @@ function templatesIn(directory: string): PromptTemplate[] {
     });
 }
 
-/** The templates a session in `cwd` offers, first of each name only. `paths` are Pi's configured extra ones. */
+/**
+ * The templates a session in `cwd` offers, first of each name only. `paths` are Pi's configured extra ones. `project`
+ * false leaves out the project's own `.pi/prompts`, for a project Pi was told not to trust.
+ */
 export function loadPromptTemplates(
     cwd: string,
     agentDir: string,
     paths: readonly string[],
+    { project = true }: { project?: boolean } = {},
 ): PromptTemplate[] {
     const found = [
         ...templatesIn(join(agentDir, "prompts")),
-        ...templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")),
+        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")) : []),
     ];
 
     for (const raw of paths) {
@@ -218,33 +222,8 @@ export function expandPromptTemplate(
         : fillTemplate(template.content, parseArguments(match[2] ?? ""));
 }
 
-/** A skill Pi has in a session's folder, to run as `/skill:name`. */
+/** A skill Pi has in a session's folder (`skills.ts` finds them), to run as `/skill:name`. */
 export type SkillCommand = { name: string; description: string; path: string; baseDir: string };
-
-/** The skills a session in `cwd` has, as Pi loads them. `paths` are Pi's configured extra ones. */
-export function loadSkillCommands(
-    cwd: string,
-    agentDir: string,
-    paths: readonly string[],
-): SkillCommand[] {
-    try {
-        const { skills } = loadSkills({
-            cwd,
-            agentDir,
-            skillPaths: [...paths],
-            includeDefaults: true,
-        });
-
-        return skills.map((skill) => ({
-            name: skill.name,
-            description: skill.description,
-            path: skill.filePath,
-            baseDir: skill.baseDir,
-        }));
-    } catch {
-        return [];
-    }
-}
 
 /** `/skill:name request` with the skill's instructions, as Pi sends it; undefined when the text is not one. */
 export function expandSkillCommand(

@@ -19,13 +19,15 @@ import {
     store,
 } from "../store.js";
 import { isPinned, paletteOf, togglePin } from "../theme.js";
+import { currentTrust, trustAvailable } from "../trust.js";
 import { branchAvailable } from "./branch.js";
+import { defaultLabel, defaultsKept } from "./model.js";
 import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
 
 /**
  * The session's places as big tiles at the top of the menu: Files, Changes, the browser, artifacts, the chat, find,
- * the branch, and peek tiles. On a phone the top bar keeps only the buttons with something to say; these are always
- * here, a thumb's width each.
+ * the branch, and peek tiles. The top bar keeps only the buttons with something to say; these are always here, a
+ * thumb's width each.
  */
 function Places() {
     const { view, browser, browserOpen, server } = store.state;
@@ -130,6 +132,26 @@ export function PlacesSheet() {
     <//>`;
 }
 
+/** The project's trust in a word, once the server said. */
+function trustHint() {
+    const info = currentTrust();
+
+    if (!info) {
+        return "";
+    }
+
+    if (info.ask) {
+        return "not decided";
+    }
+
+    // No decision, and nothing waiting for one: there is nothing to say.
+    if (info.saved === null && info.defaultProjectTrust === "ask") {
+        return "";
+    }
+
+    return info.trusted ? "trusted" : "not trusted";
+}
+
 export function MenuSheet() {
     const { view, me, server } = store.state;
     const conversation = view.conversation;
@@ -205,6 +227,7 @@ export function MenuSheet() {
                 store.state.browser?.open && displayUrl(store.state.browser.url),
             )
         }
+        ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
         ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
         ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
         ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
@@ -249,6 +272,15 @@ export function MenuSheet() {
         <div class="group">
             <div class="group-title">App</div>
             ${item("Appearance", () => openSheet({ type: "appearance" }), paletteOf().name)}
+            ${
+                me?.role === "owner" &&
+                defaultsKept() &&
+                item(
+                    "Default model",
+                    () => openSheet({ type: "model", id: "default", forDefault: true }),
+                    defaultLabel(server?.defaultModel, store.state.models) || "the last one picked",
+                )
+            }
             ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
             ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
             ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}

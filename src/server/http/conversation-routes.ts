@@ -208,6 +208,25 @@ export async function conversationRoutes(
         return json(response, 200, { ok: true });
     }
 
+    // Whether Pi trusts the session's project, which its own skills wait for; only the owner answers.
+    if (third === "trust" && method === "GET") {
+        return json(response, 200, app.projectTrust(id, user));
+    }
+
+    if (third === "trust" && method === "POST") {
+        const body = await readJson<{ choice?: unknown }>(request);
+
+        if (
+            body.choice !== "trust" &&
+            body.choice !== "trust-parent" &&
+            body.choice !== "distrust"
+        ) {
+            throw new HttpError(400, "choice must be trust, trust-parent, or distrust");
+        }
+
+        return json(response, 200, app.setProjectTrust(id, user, body.choice));
+    }
+
     if (third === "fork" && method === "POST") {
         return json(response, 200, await app.commands.fork(id, user, await readJson(request)));
     }

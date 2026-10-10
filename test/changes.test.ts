@@ -214,6 +214,15 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
     assert.ok(before);
     writeFileSync(join(repo, "notes/todo.md"), "- two, and longer\n");
     assert.notEqual(await versionOf("notes/todo.md"), before);
+
+    // Tabs asking together (each shows the top bar's count) share one look; one asked after it looks again.
+    const [one, two] = await Promise.all([
+        app.workspace.changes(id, owner(app)),
+        app.workspace.changes(id, owner(app)),
+    ]);
+
+    assert.equal(one, two);
+    assert.notEqual(await app.workspace.changes(id, owner(app)), one);
 });
 
 test("diffs read the same whatever a person's git config says", async () => {

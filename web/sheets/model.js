@@ -1,4 +1,5 @@
-// The model picker: a menu under the model chip, searchable once there are many models.
+// The model picker: a menu over the model chip, searchable once there are many models; and the same menu for the model
+// and thinking level new sessions start with.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, openSheet, store } from "../store.js";
 import { anchorStyle, formatTokens, html, Icon, popAnchor } from "../ui.js";
@@ -11,28 +12,63 @@ const coarsePointer = matchMedia("(pointer: coarse)").matches;
 /** Where the picker opens: above the message box's model chip (`popAnchor`). */
 const modelAnchor = () => popAnchor(".model-chip");
 
+/** Whether the server keeps a default model: one started before it did sends none, and would ignore one. */
+export const defaultsKept = () => store.state.server?.defaultModel !== undefined;
+
+/** A model chosen as the default (`server.defaultModel`) and its thinking level, in a few words: "Opus 4.5 · high". */
+export function defaultLabel(chosen, models) {
+    if (!chosen) {
+        return "";
+    }
+
+    const model = models.find(
+        (each) => each.provider === chosen.provider && each.id === chosen.modelId,
+    );
+
+    // Not signed in any more, or gone from its provider: new sessions start with the last model picked instead.
+    if (!model) {
+        return `${chosen.modelId} (not available: the last model picked)`;
+    }
+
+    return `${model.name}${model.reasoning ? ` · ${chosen.thinkingLevel ?? "off"}` : ""}`;
+}
+
 /**
  * The model picker: a menu that opens up from the message box's model chip, with the current model first and checked,
- * and how hard Pi thinks below. Arrows and Enter pick; a search box shows when there are many models, or when
- * `/model son` opened it already searching.
+ * and how hard Pi thinks below, then what new sessions start with. Arrows and Enter pick; a search box shows when there
+ * are many models, or when `/model son` opened it already searching. Opened for the default (`forDefault`, from the
+ * menu), it picks the model and thinking level new sessions start with instead, and stays open for both.
  */
 export function ModelPicker() {
-    const { models, view } = store.state;
+    const { models, view, server, me } = store.state;
     // While the picker animates out, the store has no sheet any more.
     const [query, setQuery] = useState(store.state.sheet?.query ?? "");
+    const [forDefault] = useState(() => store.state.sheet?.forDefault === true);
     // Decided once: a search box that went away when emptied would take the caret with it.
     const [searchable] = useState(() => models.length > MODEL_SEARCH_AT || query !== "");
     const [picked, setPicked] = useState(0);
-    const [anchor, setAnchor] = useState(modelAnchor);
+    const [anchor, setAnchor] = useState(() => (forDefault ? null : modelAnchor()));
     const box = useRef(null);
     const search = useRef(null);
     const list = useRef(null);
     // Arrows scroll the list to the model they reach; the mouse does not, or the list would run away under it.
     const keyed = useRef(false);
     const agent = view.agent;
-    const current = agent?.model;
+    const owner = me?.role === "owner";
+    const chosen = server?.defaultModel ?? null;
+    const isDefault = (model) =>
+        chosen?.provider === model?.provider && chosen?.modelId === (model?.id ?? model?.modelId);
+    const defaultModel = models.find(isDefault);
+    // The model and thinking level this picker sets: the session's, or the default's.
+    const current = forDefault ? chosen : agent?.model;
     const isCurrent = (model) =>
         current?.provider === model.provider && current?.modelId === model.id;
+    const levels = (forDefault ? defaultModel?.levels : agent?.levels) ?? ["off"];
+    // Before there is a default, the first one picked thinks as hard as this session does.
+    const level = forDefault
+        ? (chosen?.thinkingLevel ?? agent?.thinkingLevel ?? "off")
+        : agent?.thinkingLevel;
+    const reasoning = forDefault ? defaultModel?.reasoning : agent?.reasoning;
     const needle = query.trim().toLowerCase();
     const shown = models
         .filter(
@@ -43,10 +79,23 @@ export function ModelPicker() {
         .sort((a, b) => Number(isCurrent(b)) - Number(isCurrent(a)));
     // The list can change while the picker is open.
     const active = Math.max(0, Math.min(picked, shown.length - 1));
-    const levels = agent?.levels ?? ["off"];
+    // The session's model and level are the default already.
+    const sessionIsDefault =
+        !forDefault &&
+        isDefault(agent?.model) &&
+        (chosen?.thinkingLevel ?? "off") === (agent?.thinkingLevel ?? "off");
+    const setDefault = (model, thinkingLevel) =>
+        attempt(() =>
+            actions.setDefaultModel({
+                provider: model.provider,
+                modelId: model.id ?? model.modelId,
+                thinkingLevel,
+            }),
+        );
 
     useEffect(() => {
-        const place = () => setAnchor(modelAnchor());
+        // The default's picker has no chip to open from: it stays in the middle.
+        const place = () => setAnchor(forDefault ? null : modelAnchor());
         const onKey = (event) => event.key === "Escape" && closeSheet();
 
         addEventListener("resize", place);
@@ -72,7 +121,12 @@ export function ModelPicker() {
         list.current?.querySelector(".pop-menu-row.on")?.scrollIntoView({ block: "nearest" });
     }, [active]);
 
-    const pick = (model) =>
+    const pick = (model) => {
+        // The default's picker stays open, for its thinking level.
+        if (forDefault) {
+            return isCurrent(model) ? undefined : setDefault(model, level);
+        }
+
         attempt(async () => {
             if (!isCurrent(model)) {
                 await actions.configure({ model: { provider: model.provider, modelId: model.id } });
@@ -80,6 +134,12 @@ export function ModelPicker() {
 
             closeSheet();
         });
+    };
+
+    const think = (each) =>
+        forDefault
+            ? setDefault(defaultModel, each)
+            : attempt(() => actions.configure({ thinkingLevel: each }));
 
     // Arrows and Enter move through the models from the search box or the picker itself, not from its other buttons.
     const onKeyDown = (event) => {
@@ -108,16 +168,19 @@ export function ModelPicker() {
         onClick=${(event) => event.target === event.currentTarget && closeSheet()}
     >
         <section
-            class=${`pop-menu ${anchor ? "" : "free"}`}
+            class=${`pop-menu ${anchor ? (anchor.down ? "down" : "") : "free"}`}
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"
-            aria-label="Model"
+            aria-label=${forDefault ? "Default model" : "Model"}
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
             <header class="pop-menu-head">
-                <span>Model</span>
+                <span>
+                    ${forDefault ? "Default model" : "Model"}
+                    ${forDefault && html`<span class="pop-menu-head-sub">for new sessions</span>`}
+                </span>
                 <button class="pop-menu-link" onClick=${() => openSheet({ type: "providers" })}>
                     <${Icon} name="key" size=${13} /> Providers
                 </button>
@@ -161,30 +224,72 @@ export function ModelPicker() {
                     >
                         <span class="pop-menu-row-text">
                             <span class="pop-menu-row-name">${model.name}</span>
-                            <span class="pop-menu-row-sub">${model.provider}</span>
+                            <span class="pop-menu-row-sub">
+                                ${model.provider}${!forDefault && isDefault(model) ? " · default" : ""}
+                            </span>
                         </span>
                         ${isCurrent(model) && html`<${Icon} name="check" size=${14} />`}
                     </button>`,
                 )}
             </div>
             ${
-                agent?.reasoning &&
+                reasoning &&
                 html`<div class="pop-menu-foot">
                     <div class="label">Thinking</div>
                     <div class="segmented model-levels" role="radiogroup" aria-label="Thinking">
                         ${levels.map(
-                            (level) =>
+                            (each) =>
                                 html`<button
                                     role="radio"
-                                    aria-checked=${agent.thinkingLevel === level}
-                                    class=${agent.thinkingLevel === level ? "on" : ""}
-                                    onClick=${() => attempt(() => actions.configure({ thinkingLevel: level }))}
+                                    aria-checked=${level === each}
+                                    class=${level === each ? "on" : ""}
+                                    onClick=${() => think(each)}
                                 >
-                                    ${level}
+                                    ${each}
                                 </button>`,
                         )}
                     </div>
                 </div>`
+            }
+            ${
+                !defaultsKept()
+                    ? null
+                    : forDefault
+                      ? html`<div class="pop-menu-foot pop-menu-default">
+                          ${
+                              chosen
+                                  ? html`<button
+                                        class="pop-menu-link"
+                                        onClick=${() => attempt(() => actions.setDefaultModel(null))}
+                                    >
+                                        Start with the last model picked instead
+                                    </button>`
+                                  : html`<span class="muted">
+                                        None chosen: new sessions start with the last model picked.
+                                    </span>`
+                          }
+                      </div>`
+                      : html`<div class="pop-menu-foot pop-menu-default">
+                          <span class="pop-menu-default-text">
+                              <span class="muted">New sessions:</span>
+                              ${" "}${chosen ? defaultLabel(chosen, models) : "the last model picked"}
+                          </span>
+                          ${
+                              owner &&
+                              models.some((model) => isCurrent(model)) &&
+                              (sessionIsDefault
+                                  ? html`<span class="pop-menu-default-mark">
+                                        <${Icon} name="check" size=${13} /> Default
+                                    </span>`
+                                  : html`<button
+                                        class="pop-menu-link"
+                                        title="New sessions start with this model and thinking level"
+                                        onClick=${() => setDefault(agent.model, agent.thinkingLevel ?? "off")}
+                                    >
+                                        Make default
+                                    </button>`)
+                          }
+                      </div>`
             }
         </section>
     </div>`;

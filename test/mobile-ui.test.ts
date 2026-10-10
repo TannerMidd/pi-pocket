@@ -102,6 +102,13 @@ const tap = async (selector: string) => {
 
 const row = (id: ConversationId) => `.home-list .session-row[data-id="${id}"] .session`;
 
+/** Open the Files tile from the menu's tiles, where the top bar keeps it while it is closed. */
+async function openFiles(): Promise<void> {
+    await tap('.topbar [aria-label="Menu"]');
+    await reach({ sheet: "menu" }, "the menu");
+    await tap('.place[data-place="files"]');
+}
+
 /** The session list, freshly loaded at phone size with no panel open: each test starts from here. */
 async function fresh(): Promise<void> {
     await page.setViewport(VIEWPORTS.mobile);
@@ -145,7 +152,7 @@ before(async () => {
     mkdirSync(join(work, "src"), { recursive: true });
     writeFileSync(join(work, "README.md"), "# Hello\n\nA file to read.\n");
     writeFileSync(join(work, "src", "main.ts"), "export const answer = 42;\n");
-    // A repository with a change, for Changes and the branch in the status line.
+    // A repository with a change, for Changes and the branch in the top bar.
     const git = (...args: string[]) =>
         execFileSync("git", ["-C", work, "-c", "user.name=T", "-c", "user.email=t@t.t", ...args]);
 
@@ -225,7 +232,7 @@ test("back closes the open file, then the Files tile, then leaves the session", 
     await fresh();
     await tap(row(first));
     await reach({ path: `/s/${first}` }, "the session");
-    await tap('.topbar [aria-label="Files"]');
+    await openFiles();
     await reach({ files: true, layers: 1 }, "the Files tile");
     await tap('.ft-row[data-path$="/README.md"]');
     await reach({ file: "README.md", layers: 2 }, "the file, over the tree");
@@ -241,7 +248,7 @@ test("back closes the open file, then the Files tile, then leaves the session", 
 test("a reload keeps the steps back: the file, then the tile", real, async () => {
     await fresh();
     await tap(row(first));
-    await tap('.topbar [aria-label="Files"]');
+    await openFiles();
     await tap('.ft-row[data-path$="/README.md"]');
     await reach({ file: "README.md", layers: 2 }, "the file");
     await page.reload({ wait: true });
@@ -382,6 +389,14 @@ test("on a phone the top bar keeps only the buttons with something to say", real
     await fresh();
     await tap(row(first));
     await reach({ path: `/s/${first}` }, "the session");
+    // The folder's change shows once it is read.
+    await until(
+        async () =>
+            (await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".changes-button") !== null)`,
+            )) === true,
+        "the changes",
+    );
     const shown = await inPage<string[]>(`
         return JSON.stringify(
             [...document.querySelectorAll(".topbar button")]
@@ -391,10 +406,56 @@ test("on a phone the top bar keeps only the buttons with something to say", real
     `);
 
     assert.ok(shown.includes("Back to sessions"), `the way back: ${shown}`);
-    assert.ok(shown.includes("Files"), `Files: ${shown}`);
+    assert.ok(
+        shown.some((label) => label?.startsWith("Changes: 1 file")),
+        `what changed: ${shown}`,
+    );
     assert.ok(shown.includes("Menu"), `the menu: ${shown}`);
+    assert.ok(!shown.includes("Files"), `Files, in the menu while closed: ${shown}`);
     assert.ok(!shown.includes("Artifacts"), `no artifacts yet: ${shown}`);
+    assert.match(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector(".topbar .title-sub").textContent)`,
+        ),
+        /work.*⎇ main/,
+        "the folder and the branch under the title",
+    );
 });
+
+test(
+    "the branch in the top bar opens the branch picker in one tap, the title the menu",
+    real,
+    async () => {
+        await fresh();
+        await tap(row(first));
+        await reach({ path: `/s/${first}` }, "the session");
+        await slid();
+        await page.click({ selector: ".topbar button.title-branch" });
+        await reach({ sheet: "branch", layers: 1 }, "the branch picker");
+        // Past its slide in.
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        const placed = await inPage<{ down: boolean; gap: number }>(`
+            const menu = document.querySelector(".pop-menu");
+            const branch = document.querySelector(".topbar button.title-branch");
+
+            return JSON.stringify({
+                down: menu.classList.contains("down"),
+                gap: menu.getBoundingClientRect().top - branch.getBoundingClientRect().bottom,
+            });
+        `);
+
+        assert.ok(placed.down, "a menu down from the branch");
+        assert.ok(Math.abs(placed.gap - 6) < 2, `just under it: ${placed.gap}px`);
+        await back();
+        await reach({ sheet: null, layers: 0 }, "closed");
+        // Past the moment a tap right after a layer closes is held back.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        await page.click({ selector: ".topbar .title-main" });
+        await reach({ sheet: "menu", layers: 1 }, "the menu, from the title");
+        await back();
+        await reach({ sheet: null, layers: 0 }, "closed again");
+    },
+);
 
 test("a session opened straight away gets the list under it at the first tap", real, async () => {
     await fresh();
@@ -419,7 +480,7 @@ test("a file opened from Changes goes back to Changes", real, async () => {
     await fresh();
     await page.evaluate(`(await import("/files-panel.js")).setFilesOpen(false)`);
     await tap(row(first));
-    await tap('.topbar [aria-label="Files"]');
+    await openFiles();
     await reach({ files: true, layers: 1 }, "the Files tile");
     // A path tapped in the Changes tab, as a line number there opens the file.
     await page.evaluate(`
@@ -471,7 +532,7 @@ test("panels docked beside the conversation are not steps back", real, async () 
     await page.setViewport({ width: 1440, height: 900, scale: 1, mobile: false });
     await tap(`.sidebar .session-row[data-id="${first}"] .session`);
     await reach({ path: `/s/${first}` }, "the session");
-    await tap('.topbar [aria-label="Files"]');
+    await openFiles();
     await reach({ files: true }, "the Files tile, docked");
     await tap('.ft-row[data-path$="/README.md"]');
     await reach({ file: "README.md" }, "the file");
@@ -488,7 +549,7 @@ test(
         await page.setViewport({ width: 1000, height: 800, scale: 1, mobile: false });
         await tap(`.sidebar .session-row[data-id="${first}"] .session`);
         await reach({ path: `/s/${first}` }, "the session");
-        await tap('.topbar [aria-label="Files"]');
+        await openFiles();
         await reach({ files: true, layers: 1 }, "the tile, covering the conversation");
         assert.equal(
             await inPage<string>(
@@ -649,12 +710,12 @@ test("a tap right after something moved on its own is not held back", real, asyn
     await tap(row(first));
     await reach({ path: `/s/${first}`, layers: 0 }, "the session");
     await new Promise((resolve) => setTimeout(resolve, 400));
-    // Another session opens with no tap (as a reply's link or the server opens one), and the person taps Files at once.
+    // Another session opens with no tap (as a reply's link or the server opens one), and the person taps the menu at once.
     await goTo(second);
-    await page.click({ selector: '.topbar [aria-label="Files"]' });
-    await reach({ path: `/s/${second}`, files: true, layers: 1 }, "Files, from the tap");
+    await page.click({ selector: '.topbar [aria-label="Menu"]' });
+    await reach({ path: `/s/${second}`, sheet: "menu", layers: 1 }, "the menu, from the tap");
     await back();
-    await reach({ files: false, layers: 0 }, "closed");
+    await reach({ sheet: null, layers: 0 }, "closed");
 });
 
 test("on a phone, nothing that slides in makes the page wider than the screen", real, async () => {
@@ -701,7 +762,7 @@ test("on a phone, nothing that slides in makes the page wider than the screen", 
     await settle();
     assert.equal(await widest(), 390, "a swipe's lean");
     await reach({ path: `/s/${first}`, layers: 0 }, "still the session");
-    await tap('.topbar [aria-label="Files"]');
+    await openFiles();
     await reach({ files: true }, "Files");
     await settle();
     assert.equal(await widest(), 390, "Files sliding in");
@@ -792,17 +853,30 @@ test("on a phone, the controls are thumb-sized", real, async () => {
             )) === true,
         "the reply",
     );
-    // Measured where it rests, past the conversation's slide in.
+    // Measured where it rests, past the conversation's slide in, with something to send (an empty box's Send takes no
+    // taps: they go to the text).
     await slid();
+    const draft = (text: string) =>
+        page.evaluate(`
+            const box = document.querySelector(".composer textarea");
+
+            box.value = ${JSON.stringify(text)};
+            box.dispatchEvent(new Event("input", { bubbles: true }));
+        `);
+
+    await draft("x");
 
     for (const selector of [
         ".topbar-back",
-        '.topbar [aria-label="Files"]',
+        ".topbar button.title-branch",
+        ".changes-button",
+        '.topbar [aria-label="Menu"]',
         ".composer-row .places-button",
+        ".composer-row .attach-button",
         ".composer-row .model-chip",
+        ".composer-row .send-button",
         ".code-head .copy",
         ".answer-actions > button",
-        ".status-line .branch",
     ]) {
         const area = await hitArea(selector);
 
@@ -840,6 +914,7 @@ test("on a phone, the controls are thumb-sized", real, async () => {
     }
 
     await page.evaluate(`document.activeElement?.blur()`);
+    await draft("");
 
     // A reaction keeps its chip's look; the tap it takes reaches past it, unseen.
     await tap(".answer-actions .reaction.add");
@@ -866,7 +941,7 @@ test(
     async () => {
         await fresh();
         await tap(row(first));
-        await tap('.topbar [aria-label="Files"]');
+        await openFiles();
         await reach({ files: true }, "Files");
         await tap('.ft-row[data-path$="/README.md"]');
         await reach({ file: "README.md" }, "the file");
@@ -968,6 +1043,67 @@ test("the way to the bottom goes to the bottom, and scrolling works after it", r
     await back();
     await reach({ path: "/" }, "the list");
 });
+
+test(
+    "while a finger is on the conversation, a change under it does not move it; after, it stays at the bottom",
+    real,
+    async () => {
+        const gap = () =>
+            inPage<number>(`
+            const scroller = document.querySelector(".pane > .scroller");
+
+            return JSON.stringify(Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight));
+        `);
+        const finger = (type: "touchstart" | "touchend") =>
+            page.evaluate(`
+            const scroller = document.querySelector(".pane > .scroller");
+            const touch = new Touch({ identifier: 1, target: scroller, clientX: 200, clientY: 300 });
+
+            scroller.dispatchEvent(
+                new TouchEvent("${type}", {
+                    bubbles: true,
+                    touches: ${type === "touchstart" ? "[touch]" : "[]"},
+                    changedTouches: [touch],
+                }),
+            );
+        `);
+        // The message box grows, as with a long draft: the conversation above it gets shorter.
+        const box = (px: number) =>
+            page.evaluate(
+                `document.querySelector(".composer textarea").style.minHeight = "${px}px"`,
+            );
+
+        await fresh();
+        await goTo(long);
+        await slid();
+        await until(async () => (await gap()) < 2, "the bottom");
+        // A few frames for the resize to be seen, as it is before the next paint: the conversation stays put.
+        const frames = () =>
+            page.evaluate(
+                `await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150))))`,
+            );
+
+        await finger("touchstart");
+        await box(160);
+        await frames();
+        assert.ok((await gap()) > 40, "left where the finger holds it");
+        await finger("touchend");
+        await page.evaluate(`
+        const scroller = document.querySelector(".pane > .scroller");
+
+        scroller.scrollTop = scroller.scrollHeight;
+    `);
+        await until(async () => (await gap()) < 2, "the bottom again");
+        // Past any glide: a change keeps it at the bottom, as before.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await box(260);
+        await frames();
+        assert.ok((await gap()) < 2, "kept at the bottom");
+        await box(0);
+        await back();
+        await reach({ path: "/" }, "the list");
+    },
+);
 
 test(
     "on a phone, an invite lasts as long as chosen, and the one it replaces ends",

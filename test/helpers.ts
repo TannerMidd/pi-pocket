@@ -21,6 +21,9 @@ mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 /** The folder test sessions work in. */
 export const work = join(root, "work");
 mkdirSync(work);
+/** The home folder the app finds `~/.agents/skills` in, for the same isolation. */
+export const home = join(root, "home");
+mkdirSync(home);
 
 const { PocketApp } = await import("../src/server/app.ts");
 
@@ -58,7 +61,8 @@ export function scriptedModel(route: FauxResponseStep = echo) {
         ],
     });
 
-    faux.setResponses(Array.from({ length: 200 }, () => route));
+    // Plenty: a test file of many subagents (each of whose turns takes one) used 200 up.
+    faux.setResponses(Array.from({ length: 1000 }, () => route));
 
     return faux;
 }
@@ -75,6 +79,7 @@ export function openApp(
         supervised: false,
         log: () => {},
         configureModels: (models) => models.registerNativeProvider(model.provider),
+        home,
         ...(now === undefined ? {} : { now }),
     });
 }

@@ -4,6 +4,7 @@ import {
     type App,
     cleanUp,
     fakeTab,
+    home,
     lastText,
     newSession,
     openApp,
@@ -810,6 +811,7 @@ test("the browser tool says so when this machine has no browser", async () => {
         log: () => {},
         configureModels: (models) => models.registerNativeProvider(model.provider),
         browser: null,
+        home,
     });
 
     try {

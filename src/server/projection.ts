@@ -6,7 +6,9 @@ import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-dura
 import {
     ATTACHMENTS_HEADING,
     FILE_BLOCK,
+    FROM_PI_ENTRY,
     FROM_PREFIX,
+    type FromPiData,
     NOTE_ENTRY,
     SHELL_ENTRY,
     type ShellData,
@@ -23,8 +25,17 @@ export type ClientBlock =
           clipped?: Record<string, number>;
       };
 
+/** `at`: when the message was made, by the server's clock (milliseconds), where the message says. */
 export type ClientEntry =
-    | { id: number; kind: "user"; text: string; images: number; from?: string; files?: string[] }
+    | {
+          id: number;
+          kind: "user";
+          text: string;
+          images: number;
+          from?: string;
+          files?: string[];
+          at?: number;
+      }
     | {
           id: number;
           kind: "assistant";
@@ -33,6 +44,7 @@ export type ClientEntry =
           error?: string;
           model?: string;
           provider?: string;
+          at?: number;
       }
     | {
           id: number;
@@ -41,6 +53,7 @@ export type ClientEntry =
           name: string;
           text: string;
           isError: boolean;
+          at?: number;
           details?: unknown;
           clipped?: number;
           /** Image parts in the result; browsers load them from `/api/c/:id/image/:entry/:index`. */
@@ -50,6 +63,7 @@ export type ClientEntry =
     | { id: number; kind: "reset"; text?: string }
     | ({ id: number; kind: "shell"; truncated?: number } & ShellData)
     | { id: number; kind: "note"; text: string; name: string }
+    | { id: number; kind: "fromPi"; title: string; file: string }
     | { id: number; kind: "other"; entryKind: string };
 
 export type ClientToolSlot = {
@@ -241,6 +255,13 @@ function projectDetails(details: unknown, full: boolean): unknown {
     return undefined;
 }
 
+/** When a message was made, as `{ at }`, or nothing when it does not say. */
+function madeAt(message: Record<string, unknown> | undefined): { at?: number } {
+    const at = message?.timestamp;
+
+    return typeof at === "number" && Number.isFinite(at) && at > 0 ? { at } : {};
+}
+
 /** One entry for the browser, or undefined for bookkeeping entries the UI does not show. */
 export function projectEntry(entry: EntryRecord, full = false): ClientEntry | undefined {
     const message = entry.model?.[0] as Record<string, unknown> | undefined;
@@ -268,7 +289,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
             const prefixed = FROM_PREFIX.exec(text);
 
             return prefixed === null
-                ? { id, kind: "user", text, images, ...named }
+                ? { id, kind: "user", text, images, ...named, ...madeAt(message) }
                 : {
                       id,
                       kind: "user",
@@ -276,6 +297,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                       images,
                       from: prefixed[1]!,
                       ...named,
+                      ...madeAt(message),
                   };
         }
 
@@ -294,6 +316,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                 ...(error === undefined ? {} : { error }),
                 ...(typeof message?.model === "string" ? { model: message.model } : {}),
                 ...(typeof message?.provider === "string" ? { provider: message.provider } : {}),
+                ...madeAt(message),
             };
         }
 
@@ -314,6 +337,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                 ...(details === undefined ? {} : { details }),
                 ...(clipped === undefined ? {} : { clipped }),
                 ...(images === 0 ? {} : { images }),
+                ...madeAt(message),
             };
         }
 
@@ -328,6 +352,20 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
 
         case "pi.system":
             return undefined;
+
+        case FROM_PI_ENTRY: {
+            const data = entry.data as Partial<FromPiData> | undefined;
+
+            // The file's name only: its folder is in the owner's home, which others need not see.
+            return {
+                id,
+                kind: "fromPi",
+                title: String(data?.title ?? ""),
+                file: String(data?.file ?? "")
+                    .split("/")
+                    .pop()!,
+            };
+        }
 
         case NOTE_ENTRY: {
             const data = entry.data as { text?: unknown; name?: unknown } | undefined;
@@ -642,6 +680,9 @@ export function peekLines(
                 break;
             case "reset":
                 lines.push({ kind: "event", text: "Context cleared" });
+                break;
+            case "fromPi":
+                lines.push({ kind: "event", text: "Continued from Pi in the terminal" });
                 break;
             default:
                 break;
