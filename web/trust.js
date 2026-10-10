@@ -147,9 +147,13 @@ function Choice({ label, detail, current, onClick }) {
     </button>`;
 }
 
-/** Whether Pi was told not to trust the project: a saved "no", or its setting for undecided projects. */
+/**
+ * Whether Pi was told not to trust the project: a saved "no", or its setting for undecided projects. A trust store that
+ * cannot be read decides nothing (as on the server, `skills.ts`), so the project's .pi/skills load.
+ */
 const distrusted = (info) =>
     !info.trusted &&
+    !info.unreadable &&
     (info.saved?.trusted === false ||
         (info.saved === null && info.defaultProjectTrust === "never"));
 

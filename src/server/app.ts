@@ -78,6 +78,7 @@ import { Schedules } from "./schedules.ts";
 import { Shell } from "./shell.ts";
 import {
     loadSessionSkills,
+    projectDistrusted,
     type ProjectTrust,
     readProjectTrust,
     saveProjectTrust,
@@ -137,6 +138,9 @@ export function subagentState(entry: SubagentEntry): SubagentState {
 
     return entry.stopped === true ? "stopped" : entry.failed === true ? "failed" : "done";
 }
+
+/** How long a read of Pi's settings serves skills and trust before it is read again. */
+const SETTINGS_STALE_MS = 30_000;
 
 /** How many of a session's subagents are in each state, without the empty ones; undefined for none at all. */
 function countSubagents(
@@ -1698,8 +1702,22 @@ export class PocketApp {
         return this.#agents.get(id)?.cwd ?? this.#sessions[String(id)]?.cwd ?? this.defaultCwd;
     }
 
-    /** What says where Pi's skills are, besides a session's folder: Pi's folder and settings, and the home folder. */
+    /** When Pi's settings were last read: Pi's CLI, or a person, can change them while Pi Pocket runs. */
+    #settingsReadAt = Date.now();
+
+    /**
+     * What says where Pi's skills are, besides a session's folder: Pi's folder and settings, and the home folder. Pi's
+     * settings are read again when the copy is older than `SETTINGS_STALE_MS`, in the background: a change (such as
+     * `defaultProjectTrust`) counts from the request after.
+     */
     #skillSources(): SkillSources {
+        if (Date.now() - this.#settingsReadAt >= SETTINGS_STALE_MS) {
+            this.#settingsReadAt = Date.now();
+            this.settings.reload().catch(() => {
+                // Unreadable now: the last good settings stay.
+            });
+        }
+
         let settingsPaths: string[] = [];
         let defaultProjectTrust: SkillSources["defaultProjectTrust"] = "ask";
 
@@ -1775,7 +1793,12 @@ export class PocketApp {
             // Unreadable settings: the default folders still count.
         }
 
-        return loadPromptTemplates(this.cwdOf(id), getAgentDir(), paths);
+        const cwd = this.cwdOf(id);
+
+        // A project told "Don't trust" offers none of its own, as its .pi/skills.
+        return loadPromptTemplates(cwd, getAgentDir(), paths, {
+            project: !projectDistrusted(cwd, this.#skillSources()),
+        });
     }
 
     // ─── Extensions ─────────────────────────────────────────────────────────

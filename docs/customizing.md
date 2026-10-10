@@ -29,7 +29,7 @@ A project's `.agents/skills/` load only in a project Pi trusts. When a session's
 
 ## Prompt templates: saved messages with blanks
 
-A Markdown file in `~/.pi/agent/prompts/` (or a project's `.pi/prompts/`) becomes a slash command named after it: `review.md` is `/review`. `$1`, `$2`, … take the words after the command, `$@` all of them. See Pi's `prompt-templates.md`.
+A Markdown file in `~/.pi/agent/prompts/` (or a project's `.pi/prompts/`, unless Pi was told not to trust the project) becomes a slash command named after it: `review.md` is `/review`. `$1`, `$2`, … take the words after the command, `$@` all of them. See Pi's `prompt-templates.md`.
 
 Use a template for a message people send often; use a skill for steps Pi should know how to take.
 

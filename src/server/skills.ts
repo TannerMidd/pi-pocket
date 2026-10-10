@@ -149,6 +149,20 @@ function decides(saved: Saved | null | undefined, sources: SkillSources): Decisi
           : "undecided";
 }
 
+/**
+ * Whether Pi was told not to trust the project a session in `cwd` works in (a saved "no", or `defaultProjectTrust`
+ * "never"), for what of its own `.pi` folder trust gates: its `.pi/prompts` stay out then, as its `.pi/skills` do. The
+ * trust store is read only for a project with `.pi/prompts`.
+ */
+export function projectDistrusted(cwd: string, sources: SkillSources): boolean {
+    const folder = resolve(cwd);
+
+    return (
+        existsSync(join(folder, CONFIG_DIR_NAME, "prompts")) &&
+        decides(savedDecision(folder, sources.agentDir), sources) === "distrusted"
+    );
+}
+
 /** Where a session in `cwd` loads skills from, in order: folders, and the paths in Pi's settings as written. */
 export function skillPlaces(cwd: string, sources: SkillSources): string[] {
     const folder = resolve(cwd);
@@ -208,8 +222,9 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
         folders,
         skills,
         ownSkills,
-        // Never about a store that cannot be read: the answer could not be saved.
-        ask: folders.length > 0 && saved === null && sources.defaultProjectTrust === "ask",
+        // Only about skills that would load (an empty .agents/skills, or one of files that are not skills, has none),
+        // and never about a store that cannot be read: the answer could not be saved.
+        ask: skills.length > 0 && saved === null && sources.defaultProjectTrust === "ask",
         ...(saved === undefined ? { unreadable: true as const } : {}),
     };
 }

@@ -87,15 +87,19 @@ function templatesIn(directory: string): PromptTemplate[] {
     });
 }
 
-/** The templates a session in `cwd` offers, first of each name only. `paths` are Pi's configured extra ones. */
+/**
+ * The templates a session in `cwd` offers, first of each name only. `paths` are Pi's configured extra ones. `project`
+ * false leaves out the project's own `.pi/prompts`, for a project Pi was told not to trust.
+ */
 export function loadPromptTemplates(
     cwd: string,
     agentDir: string,
     paths: readonly string[],
+    { project = true }: { project?: boolean } = {},
 ): PromptTemplate[] {
     const found = [
         ...templatesIn(join(agentDir, "prompts")),
-        ...templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")),
+        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")) : []),
     ];
 
     for (const raw of paths) {

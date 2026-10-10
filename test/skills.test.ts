@@ -335,6 +335,11 @@ test("an undecided project with skills of its own asks; one without, or with a d
     // Nothing of its own to load: nothing to ask about.
     assert.equal(readProjectTrust(extra, sources).ask, false);
     assert.deepEqual(readProjectTrust(extra, sources).folders, []);
+    // Nor with a .agents/skills that holds no skill: the bar would name none.
+    mkdirSync(join(extra, ".agents", "skills", "not-a-skill"), { recursive: true });
+    writeFileSync(join(extra, ".agents", "skills", "not-a-skill", "notes.txt"), "Just notes.");
+    assert.equal(readProjectTrust(extra, sources).skills.length, 0);
+    assert.equal(readProjectTrust(extra, sources).ask, false);
     // Nor when the trust store cannot be read: the answer could not be saved.
     writeFileSync(join(agentDir, "trust.json"), "{ not json");
     assert.deepEqual(
@@ -563,4 +568,21 @@ test("a project with only .pi/skills says what Don't trust does to them", async 
     assert.ok(app.skillCommands(id).some((each) => each.name === "lint-only"));
     app.setProjectTrust(id, owner(app), "distrust");
     assert.ok(!app.skillCommands(id).some((each) => each.name === "lint-only"));
+});
+
+test("a project told Don't trust offers none of its own .pi/prompts, as it loads none of its .pi/skills", async () => {
+    const on = await started();
+    const folder = realpathSync(mkdtempSync(join(root, "prompts-trust-")));
+
+    mkdirSync(join(folder, ".git"));
+    mkdirSync(join(folder, ".pi", "prompts"), { recursive: true });
+    writeFileSync(join(folder, ".pi", "prompts", "release-notes.md"), "Write the release notes.\n");
+    const id = await newSession(on, folder);
+    const offered = () => on.promptTemplates(id).map((each) => each.name);
+
+    assert.ok(offered().includes("release-notes"), "undecided: offered, as before");
+    on.setProjectTrust(id, owner(on), "distrust");
+    assert.ok(!offered().includes("release-notes"), "Don't trust: not offered");
+    on.setProjectTrust(id, owner(on), "trust");
+    assert.ok(offered().includes("release-notes"), "trusted: offered");
 });

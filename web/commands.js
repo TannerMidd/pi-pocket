@@ -22,28 +22,27 @@ const goalsAvailable = () =>
 /** How long a list of prompt templates is used before it is fetched again: someone may be writing one. */
 const TEMPLATES_FOR_MS = 30_000;
 
-/** Fetch Pi's prompt templates for this conversation, unless a fresh list is here. Call when someone types a command. */
+/**
+ * Fetch Pi's prompt templates for this conversation, unless a fresh list is here. Call when someone types a command. A
+ * list is for a folder too: the session moved (`/cwd`, a worktree) has another project's templates and skills.
+ */
 export function loadTemplates() {
     const id = store.state.conversationId;
+    const cwd = store.state.view.agent?.cwd;
     const cached = store.state.templates;
+    const same = cached?.conversationId === id && cached?.cwd === cwd;
 
-    if (
-        id === null ||
-        (cached?.conversationId === id && Date.now() - cached.at < TEMPLATES_FOR_MS)
-    ) {
+    if (id === null || (same && Date.now() - cached.at < TEMPLATES_FOR_MS)) {
         return;
     }
 
     store.set({
-        templates: {
-            conversationId: id,
-            at: Date.now(),
-            list: cached?.conversationId === id ? cached.list : [],
-        },
+        templates: { conversationId: id, cwd, at: Date.now(), list: same ? cached.list : [] },
     });
     actions.prompts().then(
         (list) =>
             store.state.templates?.conversationId === id &&
+            store.state.templates?.cwd === cwd &&
             store.set({ templates: { ...store.state.templates, list } }),
         () => {},
     );
@@ -53,7 +52,10 @@ export function loadTemplates() {
 function templates() {
     const cached = store.state.templates;
 
-    if (cached?.conversationId !== store.state.conversationId) {
+    if (
+        cached?.conversationId !== store.state.conversationId ||
+        cached.cwd !== store.state.view.agent?.cwd
+    ) {
         return [];
     }
 
