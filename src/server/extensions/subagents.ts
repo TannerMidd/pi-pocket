@@ -23,10 +23,12 @@ import {
     LiveDoc,
     section,
     type SubmissionId,
+    type SubmissionRecord,
     type TaskRuntime,
     type Tx,
 } from "@earendil-works/pi-durable";
-import { REPORT_PREFIX, STOPPED, SubagentsDoc } from "../docs.ts";
+import { type PendingReport, REPORT_PREFIX, STOPPED, SubagentsDoc } from "../docs.ts";
+import { describe } from "../errors.ts";
 import type { PocketHost } from "../host.ts";
 import { requestFor } from "../requests.ts";
 
@@ -274,7 +276,7 @@ type CourierState =
     | { phase: "send"; batch?: number; text?: string };
 
 /** What the courier asks Pi Pocket about spend limits. */
-type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged">;
+type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged" | "notice">;
 
 type CourierTask = ReturnType<typeof courierFor>;
 
@@ -283,6 +285,36 @@ type CourierTask = ReturnType<typeof courierFor>;
  * and this catches the rest (someone else, with spend left, now pays there).
  */
 const HOLD_MS = 30_000;
+
+/** How long a courier that met something unexpected waits before it tries again. */
+const RETRY_MS = 5_000;
+
+/**
+ * What became of the batch a courier took (`state.sending`), from its submission, settled in `state`: kept while it is
+ * still to send or waits in the parent's queue; gone once Pi has it. Taken out of the queue before Pi had it, it is
+ * gone if a person did that (the queue's ×, or Stop, which mark it `discarded`), and otherwise (a spend limit's stop, a
+ * new context) its reports wait again, first.
+ */
+function settleBatch(
+    state: { outbox?: PendingReport[]; sending?: { reports: PendingReport[]; discarded?: true } },
+    record: SubmissionRecord | undefined,
+): void {
+    const sending = state.sending;
+
+    if (sending === undefined || record === undefined || record.status === "queued") {
+        return;
+    }
+
+    if (
+        record.status === "unanswered" &&
+        record.entry === undefined &&
+        sending.discarded !== true
+    ) {
+        state.outbox = [...sending.reports, ...(state.outbox ?? [])];
+    }
+
+    delete state.sending;
+}
 
 /** How long a courier waits, for a parent that is idle, for more reports to go with the first. */
 const GATHER_MS = 2_000;
@@ -315,6 +347,54 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
  * the reports wait (saying why, in `held`) rather than start a turn nobody may pay for, and go once the limit is raised.
  */
 function courierFor(limits: Limits) {
+    // A server older than this module has neither: extension modules reload into the running server, while the
+    // server's own part waits for a restart. Then nothing is held back, as before limits held reports.
+    const { heldBack, onLimitsChanged } = limits as Partial<Limits>;
+    const heldFor = (id: ConversationId) =>
+        typeof heldBack === "function" ? heldBack(id) : undefined;
+
+    const whenLimitsChange = (listener: () => void) =>
+        typeof onLimitsChanged === "function" ? onLimitsChanged(listener) : () => {};
+
+    // Couriers that said so already: a courier that keeps meeting a problem says it once.
+    const told = new Set<string>();
+
+    /**
+     * Run a phase; if it meets something unexpected, say so once, wait, and start over from "gather" rather than end with the
+     * reports left waiting (the next courier starts only with the next report). A fixed module reloads into the running
+     * server, and the courier carries on with it.
+     */
+    const orRetry = async (
+        courier: { id: string | number },
+        runtime: TaskRuntime<null, CourierState, null, object>,
+        context: Context,
+        phase: () => Promise<void>,
+    ) => {
+        const signals = [runtime.signal, context.abortSignal].filter(
+            (signal): signal is AbortSignal => signal !== undefined,
+        );
+
+        try {
+            await phase();
+        } catch (error) {
+            if (signals.some((signal) => signal.aborted)) {
+                throw error;
+            }
+
+            if (!told.has(String(courier.id))) {
+                told.add(String(courier.id));
+                limits.notice?.("warning", `Subagents' reports wait: ${describe(error)}`);
+            }
+
+            await pause(RETRY_MS, AbortSignal.any(signals));
+            // From "gather", not the phase that failed: committing the same step again is no progress, which faults.
+            await runtime.commit(
+                () => ({ status: "running", checkpoint: { phase: "gather" } }),
+                context,
+            );
+        }
+    };
+
     return defineTask<null, CourierState, null>({
         name: "pocket.subagent-courier",
         version: 1,
@@ -341,56 +421,74 @@ function courierFor(limits: Limits) {
                 );
             },
             next: (courier, runtime, context) =>
-                runtime.commit(async (tx) => {
-                    const state = await tx.doc(SubagentsDoc, runtime.conversationId);
+                orRetry(courier, runtime, context, async () => {
+                    await runtime.commit(async (tx) => {
+                        const state = await tx.doc(SubagentsDoc, runtime.conversationId);
+                        // Reads first: a commit reads the tables only before it writes one.
+                        const record =
+                            state.sending === undefined
+                                ? undefined
+                                : await tx.submissionByRequest(
+                                      runtime.conversationId,
+                                      state.sending.request,
+                                  );
 
-                    delete state.delivering;
+                        delete state.delivering;
 
-                    if (state.sending === undefined && (state.outbox ?? []).length === 0) {
-                        delete state.courier;
-                        delete state.held;
-
-                        return {
-                            status: "terminal",
-                            outcome: { status: "completed", result: null },
-                        };
-                    }
-
-                    // Past a spend limit, the parent may start no turn for them: they wait, and say why.
-                    const held = limits.heldBack(runtime.conversationId);
-
-                    if (held !== undefined) {
-                        if (state.held !== held) {
-                            state.held = held;
+                        // A batch an earlier courier sent that still waits in Pi's queue: see it leave first. It is
+                        // Pi's already, whatever the limits say now.
+                        if (record?.status === "queued") {
+                            return { status: "running", checkpoint: { phase: "send" } };
                         }
 
-                        return { status: "running", checkpoint: { phase: "hold" } };
-                    }
+                        settleBatch(state, record);
 
-                    delete state.held;
+                        if (state.sending === undefined && (state.outbox ?? []).length === 0) {
+                            delete state.courier;
+                            delete state.held;
 
-                    // A batch an earlier courier took and did not see leave the queue goes first, under its own id.
-                    if (state.sending === undefined) {
-                        const reports = state.outbox ?? [];
-                        const batch = (state.batches ?? 0) + 1;
+                            return {
+                                status: "terminal",
+                                outcome: { status: "completed", result: null },
+                            };
+                        }
 
-                        state.batches = batch;
-                        state.outbox = [];
-                        state.sending = {
-                            request: `subagent-reports:${courier.id}:${batch}`,
-                            reports,
-                        };
-                    }
+                        // Past a spend limit, the parent may start no turn for them: they wait, and say why.
+                        const held = heldFor(runtime.conversationId);
 
-                    return { status: "running", checkpoint: { phase: "send" } };
-                }, context),
+                        if (held !== undefined) {
+                            if (state.held !== held) {
+                                state.held = held;
+                            }
+
+                            return { status: "running", checkpoint: { phase: "hold" } };
+                        }
+
+                        delete state.held;
+
+                        // A batch taken and not sent yet goes first, under its own id.
+                        if (state.sending === undefined) {
+                            const reports = state.outbox ?? [];
+                            const batch = (state.batches ?? 0) + 1;
+
+                            state.batches = batch;
+                            state.outbox = [];
+                            state.sending = {
+                                request: `subagent-reports:${courier.id}:${batch}`,
+                                reports,
+                            };
+                        }
+
+                        return { status: "running", checkpoint: { phase: "send" } };
+                    }, context);
+                }),
             // Until a limit changes (the owner raised it) or a while passes, then look again.
             hold: async (_courier, runtime, context) => {
                 const signals = [runtime.signal, context.abortSignal].filter(
                     (signal): signal is AbortSignal => signal !== undefined,
                 );
                 const changed = new AbortController();
-                const stop = limits.onLimitsChanged(() => changed.abort());
+                const stop = whenLimitsChange(() => changed.abort());
 
                 try {
                     await pause(HOLD_MS, AbortSignal.any([...signals, changed.signal]));
@@ -408,63 +506,57 @@ function courierFor(limits: Limits) {
                     context,
                 );
             },
-            send: async (courier, runtime, context) => {
-                const checkpoint = courier.state.checkpoint as Extract<
-                    CourierState,
-                    { phase: "send" }
-                >;
-                const parentId = runtime.conversationId;
-                const sending =
-                    checkpoint.text === undefined
-                        ? (await runtime.snapshot(SubagentsDoc, parentId, context))?.sending
-                        : {
-                              request: `subagent-reports:${courier.id}:${checkpoint.batch}`,
-                              reports: [{ name: "", text: checkpoint.text }],
-                          };
+            send: (courier, runtime, context) =>
+                orRetry(courier, runtime, context, async () => {
+                    const checkpoint = courier.state.checkpoint as Extract<
+                        CourierState,
+                        { phase: "send" }
+                    >;
+                    const parentId = runtime.conversationId;
+                    const sending =
+                        checkpoint.text === undefined
+                            ? (await runtime.snapshot(SubagentsDoc, parentId, context))?.sending
+                            : {
+                                  request: `subagent-reports:${courier.id}:${checkpoint.batch}`,
+                                  reports: [{ name: "", text: checkpoint.text }],
+                              };
 
-                if (sending !== undefined) {
-                    const parent = (await runtime.conversation(parentId, context))!;
-                    const submission = await parent.submit(
-                        {
-                            type: "input",
-                            content: sending.reports.map((report) => report.text).join("\n\n"),
-                            whenBusy: "steer",
-                            requestId: sending.request,
-                        },
-                        context,
-                    );
+                    if (sending !== undefined) {
+                        const parent = (await runtime.conversation(parentId, context))!;
+                        // Under its own id: a batch sent before is not sent again, and its submission is what it was.
+                        const submission = await parent.submit(
+                            {
+                                type: "input",
+                                content: sending.reports.map((report) => report.text).join("\n\n"),
+                                whenBusy: "steer",
+                                requestId: sending.request,
+                            },
+                            context,
+                        );
 
-                    await leftQueue(runtime, parentId, submission.id, context);
-                }
-
-                await runtime.commit(async (tx) => {
-                    const state = await tx.doc(SubagentsDoc, parentId);
-                    // Reads first: a commit reads the tables only before it writes one.
-                    const record =
-                        sending === undefined
-                            ? undefined
-                            : await tx.submissionByRequest(parentId, sending.request);
-
-                    if (state.sending !== undefined && state.sending.request === sending?.request) {
-                        // Taken out of the queue before Pi had it while a spend limit is reached: the limit's stop
-                        // withdrew it, with all that waited there. Its reports wait again, first. (Once a limit holds
-                        // reports back, none are sent; a batch can be in the queue then only if it went before.)
-                        if (
-                            record?.status === "unanswered" &&
-                            record.entry === undefined &&
-                            limits.heldBack(parentId) !== undefined
-                        ) {
-                            state.outbox = [...state.sending.reports, ...(state.outbox ?? [])];
-                        }
-
-                        delete state.sending;
+                        await leftQueue(runtime, parentId, submission.id, context);
                     }
 
-                    delete state.delivering;
+                    await runtime.commit(async (tx) => {
+                        const state = await tx.doc(SubagentsDoc, parentId);
+                        // Reads first: a commit reads the tables only before it writes one.
+                        const record =
+                            sending === undefined
+                                ? undefined
+                                : await tx.submissionByRequest(parentId, sending.request);
 
-                    return { status: "running", checkpoint: { phase: "next" } };
-                }, context);
-            },
+                        if (
+                            state.sending !== undefined &&
+                            state.sending.request === sending?.request
+                        ) {
+                            settleBatch(state, record);
+                        }
+
+                        delete state.delivering;
+
+                        return { status: "running", checkpoint: { phase: "next" } };
+                    }, context);
+                }),
         },
         // Stopped with its conversation: what waits, and the batch it took, stay for the next courier.
         abort: (_courier, runtime, context) =>

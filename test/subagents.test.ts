@@ -882,6 +882,178 @@ test("reports a spend limit holds back still wait after a restart, and go once i
     }
 });
 
+test("in a server older than the subagents module (one reloaded into it), reports still go, unheld", async () => {
+    const host = app.host as Partial<typeof app.host>;
+    const { heldBack, onLimitsChanged } = host;
+
+    // As a server started before the module's change has it: the module reloads, the server's own part waits.
+    delete host.heldBack;
+    delete host.onLimitsChanged;
+    await app.loader.reload("subagents.ts");
+
+    try {
+        const id = await orchestrate({ spawn: ["older"], rounds: 0, sleep: 0 });
+
+        await until(
+            async () => (await delivered(id)).older === 1 && !app.isBusy(id),
+            "the report",
+            15_000,
+        );
+    } finally {
+        host.heldBack = heldBack;
+        host.onLimitsChanged = onLimitsChanged;
+        await app.loader.reload("subagents.ts");
+    }
+});
+
+test("a courier that meets something unexpected says so once, waits, and goes on: the report is not stranded", async () => {
+    const tab = fakeTab(undefined, owner(app));
+    const heldBack = app.spend.heldBack.bind(app.spend);
+    let failures = 0;
+
+    await app.attach(tab.client);
+
+    app.spend.heldBack = (...args) => {
+        if (failures < 2) {
+            failures++;
+
+            throw new Error("the spend count is not ready");
+        }
+
+        return heldBack(...args);
+    };
+
+    try {
+        const id = await orchestrate({ spawn: ["unlucky"], rounds: 0, sleep: 0 });
+
+        await until(
+            async () => (await delivered(id)).unlucky === 1 && !app.isBusy(id),
+            "the report, after the courier tried again",
+            20_000,
+        );
+        assert.equal(failures, 2);
+        assert.equal(
+            tab.events.filter(
+                (each) =>
+                    each.event === "notice" &&
+                    String(each.data.message).includes("the spend count is not ready"),
+            ).length,
+            1,
+            "said once",
+        );
+    } finally {
+        app.spend.heldBack = heldBack;
+    }
+});
+
+test("reports taken out of the queue by something other than a person go again, and reach Pi once", async () => {
+    const id = await orchestrate({ spawn: ["again-a", "again-b"], rounds: 1, sleep: 8 });
+
+    await until(
+        async () => (await queued(id)) === 1,
+        "the reports in the busy parent's queue",
+        15_000,
+    );
+    // Not Stop: the run ends as Pi Durable ends it, which withdraws what waits. The courier sends them again; as
+    // anything queued while a run ends, they go to Pi with the next message.
+    await (await app.harness.conversation(id, context))!.abort(context);
+    await until(
+        async () => !app.isBusy(id) && (await queued(id)) === 1 && (await held(id)).waiting === 2,
+        "sent again, waiting",
+        15_000,
+    );
+    await app.commands.submit(id, owner(app), { text: "and then?", requestId: `next-${id}` });
+    await until(
+        async () => {
+            const got = await delivered(id);
+
+            return got["again-a"] === 1 && got["again-b"] === 1 && !app.isBusy(id);
+        },
+        "both reports, once",
+        15_000,
+    );
+    assert.deepEqual(await delivered(id), { "again-a": 1, "again-b": 1 });
+});
+
+test("a person's Stop takes the reports in the queue with it, as it takes every message waiting there", async () => {
+    const id = await orchestrate({ spawn: ["dropped"], rounds: 1, sleep: 8 });
+
+    await until(
+        async () => (await queued(id)) === 1,
+        "the report in the busy parent's queue",
+        15_000,
+    );
+    await app.commands.abort(id, owner(app));
+    await until(() => !app.isBusy(id), "stopped");
+    await until(
+        async () => (await app.harness.snapshot(SubagentsDoc, id, context))?.courier === undefined,
+        "the courier done",
+        15_000,
+    );
+    assert.deepEqual(await delivered(id), {});
+    assert.deepEqual(await held(id), { why: undefined, waiting: 0 });
+});
+
+test("a batch an earlier courier sent, and that was taken out of the queue before Pi had it, goes once the limit is raised", async () => {
+    slow = { late: 2 };
+    const id = await orchestrate({ spawn: ["late"], rounds: 1, sleep: 8 });
+
+    try {
+        // An earlier courier's batch, sent and then taken out of the queue, and the courier gone: as a fault leaves it.
+        await until(() => app.isBusy(id), "the parent at work");
+        const parent = (await app.harness.conversation(id, context))!;
+        const ghost = await parent.submit(
+            {
+                type: "input",
+                content: "[subagent ghost answered, no reply needed] ghost result",
+                whenBusy: "steer",
+                requestId: "subagent-reports:gone:1",
+            },
+            context,
+        );
+
+        await app.harness.abortSubmission(ghost.id, context, id);
+        await app.harness.commit(async (tx) => {
+            const state = await tx.doc(SubagentsDoc, id);
+
+            state.courier = 999_999 as never;
+            state.sending = {
+                request: "subagent-reports:gone:1",
+                reports: [
+                    {
+                        name: "ghost",
+                        text: "[subagent ghost answered, no reply needed] ghost result",
+                    },
+                ],
+            };
+        }, context);
+        // Past a limit now (which stops the parent and the subagent): the next report starts a courier, which holds.
+        await app.spend.setSessionBudget(owner(app), id, 1);
+        await recordCost(app, id, 2);
+        await until(async () => (await held(id)).why !== undefined, "held back", 15_000);
+        assert.equal(
+            (await held(id)).waiting,
+            2,
+            "the earlier batch waits again, with the new report",
+        );
+        assert.deepEqual(await delivered(id), {});
+
+        await app.spend.setSessionBudget(owner(app), id, null);
+        await until(
+            async () => {
+                const got = await delivered(id);
+
+                return got.ghost === 1 && got.late === 1 && !app.isBusy(id);
+            },
+            "both, after the raise",
+            15_000,
+        );
+        assert.deepEqual(await delivered(id), { ghost: 1, late: 1 });
+    } finally {
+        slow = {};
+    }
+});
+
 test("past a person's spend limit, reports their work led to wait, saying whose limit, and go once it is raised", async () => {
     const payer = app.config.addUser("Paying", "guest");
 

@@ -687,6 +687,8 @@ export class Commands {
         const conversation = await app.conversation(id);
         const busy = app.isBusy(id);
 
+        // Stop withdraws what waits in the queue, subagents' reports too: a person meant them gone.
+        await this.#discardReports(id);
         void conversation
             .abort(context)
             .catch((error: unknown) => app.notice("error", `Abort failed: ${describe(error)}`, id));
@@ -694,6 +696,32 @@ export class Commands {
         if (busy) {
             await app.collab.activity(id, user, "stopped the run");
         }
+    }
+
+    /**
+     * Mark the batch of subagents' reports in `id`'s queue (or, given `submissionId`, only if that is it) as a person's
+     * to withdraw: the courier then lets it go instead of sending it again, as it does with one a spend limit's stop
+     * withdrew.
+     */
+    async #discardReports(id: ConversationId, submissionId?: number): Promise<void> {
+        await this.#app.harness.commit(async (tx) => {
+            const state = await tx.doc(SubagentsDoc, id);
+            const sending = state.sending;
+
+            if (sending === undefined || sending.discarded === true) {
+                return;
+            }
+
+            if (submissionId !== undefined) {
+                const record = await tx.submissionByRequest(id, sending.request);
+
+                if (record === undefined || Number(record.id) !== submissionId) {
+                    return;
+                }
+            }
+
+            state.sending = { ...sending, discarded: true };
+        }, context);
     }
 
     /** Take back a queued message. Anyone may take back their own; someone else's needs the right to drive. */
@@ -708,6 +736,7 @@ export class Commands {
             await app.requireDriver(id, user);
         }
 
+        await this.#discardReports(id, submissionId);
         const result = await app.harness.abortSubmission(
             submissionId as unknown as SubmissionId,
             context,

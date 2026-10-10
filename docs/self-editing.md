@@ -13,6 +13,8 @@ Before you start, read [map.md](map.md) for where the code you need is, and the 
 | Any other file in `src/server/`      | Nothing, until the server restarts.                                                                                                                  |
 | `docs/`, `test/`                     | Nothing runs it, except `npm test`.                                                                                                                  |
 
+So a change to an extension module and to other server code goes live in halves: the module at once, against the server as it was started. A module that calls something the rest of the change adds (a new member of the host, a new function in `src/server/`) breaks until the restart. Have it check that the new part is there, and do as before when it is not (`docs/extensions.md`, the host).
+
 ## After every save
 
 - **`web/*.js`:** `node --check web/<file>.js` at once, before anything else. If the app went blank, this says why. Check the change in a browser (below): there are tests for some of the web app (`test/mobile-ui.test.ts`, `test/peeks-ui.test.ts`), not all of it.

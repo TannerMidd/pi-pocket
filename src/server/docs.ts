@@ -137,7 +137,12 @@ export const SubagentsDoc = defineDoc<{
      * The batch taken from the outbox, kept until it has left the parent's queue, with the request id it goes with: a
      * courier that stops before then leaves it to the next, which sends it again under that id, so it goes once.
      */
-    sending?: { request: string; reports: PendingReport[] };
+    sending?: {
+        request: string;
+        reports: PendingReport[];
+        /** A person took it out of the parent's queue (the queue's ×, or Stop): it is gone, not sent again. */
+        discarded?: true;
+    };
     /** How many batches went so far, for their request ids. */
     batches?: number;
     /**
