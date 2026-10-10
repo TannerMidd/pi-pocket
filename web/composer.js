@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // The message box: send, steer or queue while busy, attach files, mention files with @, run commands with !, recall
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -63,7 +64,7 @@ function savePastes(id, pastes) {
             localStorage.setItem(pasteKey(id), JSON.stringify(pastes));
         }
     } catch {
-        notify("warning", "This browser has no room to keep the paste after a reload.");
+        notify("warning", t("This browser has no room to keep the paste after a reload."));
     }
 }
 
@@ -92,10 +93,10 @@ function queuedMode(item) {
     const names = queuedReports(item);
 
     if (names) {
-        return names.length === 1 ? "Report" : "Reports";
+        return t(names.length === 1 ? "Report" : "Reports");
     }
 
-    return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queue" : "Note";
+    return t(item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queue" : "Note");
 }
 
 /** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
@@ -138,17 +139,17 @@ function DriverBar() {
             <span class="driver-label">🚗 You're driving</span>
             ${turns.asks.map(
                 (id) => html`<span class="driver-ask">
-                    ${name(id)} asks to drive <button class="link small" onClick=${() => run("handover", id)}>Hand over</button>
+                    ${name(id)} asks to drive <button class="link small" onClick=${() => run("handover", id)}>${t("Hand over")}</button>
                 </span>`,
             )}
             <span class="grow"></span>
             ${
                 others.length > 0 &&
                 html`<button class="link small" onClick=${() => setHanding(!handing)}>
-                    Hand over…
+                    ${t("Hand over…")}
                 </button>`
             }
-            <button class="link small" onClick=${() => run("release")}>Let go</button>
+            <button class="link small" onClick=${() => run("release")}>${t("Let go")}</button>
             ${
                 handing &&
                 html`<div class="driver-pick">
@@ -183,7 +184,7 @@ function DriverBar() {
         ${
             canTake &&
             html`<button class="button small primary" onClick=${() => run("claim")}>
-                Take the wheel
+                ${t("Take the wheel")}
             </button>`
         }
     </div>`;
@@ -202,20 +203,20 @@ function PlanBar({ blocked }) {
 
     return html`<div class="plan-bar">
         <span class="grow">
-            <strong>Plan mode.</strong> ${subagent ? "This subagent follows its session: it reads, and changes nothing." : "Pi reads and proposes; nothing changes until you approve."}
+            <strong>${t("Plan mode.")}</strong> ${subagent ? "This subagent follows its session: it reads, and changes nothing." : "Pi reads and proposes; nothing changes until you approve."}
         </span>
         ${
             !blocked &&
             !subagent &&
             html`<button class="link small" onClick=${() => attempt(() => actions.setPlan(false))}>
-                Turn off
+                ${t("Turn off")}
             </button>
             <button
                 class="button small primary"
                 disabled=${view.live.busy}
                 onClick=${() => attempt(actions.approvePlan)}
             >
-                Approve plan
+                ${t("Approve plan")}
             </button>`
         }
     </div>`;
@@ -486,7 +487,7 @@ export function Composer() {
         const command = full.replace(/^!!?/, "").trim();
 
         if (command === "") {
-            return notify("info", "Say which command to run, such as !git status.");
+            return notify("info", t("Say which command to run, such as !git status."));
         }
 
         setSending(true);
@@ -772,7 +773,7 @@ export function Composer() {
                         ),
                     ),
                 (error) => {
-                    notify("error", `Upload failed: ${error.message}`);
+                    notify("error", `${t("Upload failed: ")}${error.message}`);
 
                     if (preview) {
                         URL.revokeObjectURL(preview);
@@ -820,9 +821,9 @@ export function Composer() {
 
     const placeholder = busy
         ? steer
-            ? "Steer the current run…"
-            : "Queue a message for after this run…"
-        : "Ask Pi anything…";
+            ? t("Steer the current run…")
+            : t("Queue a message for after this run…")
+        : t("Ask Pi anything…");
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
@@ -842,10 +843,10 @@ export function Composer() {
             </div>
             <div class="view-only">
                 <span>
-                    <strong>View only.</strong> You can read along, react, and chat with the people here.
+                    <strong>${t("View only.")}</strong> ${t("You can read along, react, and chat with the people here.")}
                 </span>
                 <button class="button small" onClick=${() => openSheet({ type: "chat" })}>
-                    <${Icon} name="chat" size=${15} /> Chat
+                    <${Icon} name="chat" size=${15} /> ${t("Chat")}
                 </button>
             </div>
             <${StatusLine} />
@@ -884,8 +885,8 @@ export function Composer() {
                                 (!blocked || item.by === me?.id) &&
                                 html`<button
                                     class="icon-button small queued-remove"
-                                    aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
-                                    title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
+                                    aria-label=${t(queuedReports(item) ? "Discard these reports" : "Withdraw")}
+                                    title=${t(queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw")}
                                     onClick=${() => attempt(() => actions.withdraw(item.id))}
                                 >
                                     <${Icon} name="close" size=${13} />
@@ -906,7 +907,7 @@ export function Composer() {
                 ? html`${
                       busy &&
                       html`<div class="composer-row stop-only">
-                          <span class="muted small grow">Pi is working…</span>
+                          <span class="muted small grow">${t("Pi is working…")}</span>
                           <${StopButton} />
                       </div>`
                   }`
@@ -915,11 +916,11 @@ export function Composer() {
                       html`<div
                           class="commands history-options"
                           role="listbox"
-                          aria-label="Sent before"
+                          aria-label=${t("Sent before")}
                           ref=${list}
                       >
                           <div class="file-note">
-                              Sent before${text.trim() ? ` with “${text.trim()}”` : ""} · Enter puts it in the box · Esc closes
+                              ${t("Sent before")}${text.trim() ? ` with “${text.trim()}”` : ""} · Enter puts it in the box · Esc closes
                           </div>
                           ${recalled.map(
                               (each) => html`<button
@@ -985,7 +986,7 @@ export function Composer() {
                     html`<div
                         class="commands file-options"
                         role="listbox"
-                        aria-label="Files"
+                        aria-label=${t("Files")}
                         ref=${list}
                     >
                         ${matches.map(
@@ -1011,7 +1012,7 @@ export function Composer() {
                                 </span>
                             </button>`,
                         )}
-                        ${matches.length === 0 && html`<div class="file-note">Finding files…</div>`}
+                        ${matches.length === 0 && html`<div class="file-note">${t("Finding files…")}</div>`}
                         ${
                             found.truncated &&
                             html`<div class="file-note">
@@ -1096,7 +1097,7 @@ export function Composer() {
                                     ${file.state === "uploading" ? html`<${Spinner} />` : file.preview ? "" : "📎"} ${file.name} <span class="muted">${formatBytes(file.size)}</span>
                                     <button
                                         class="icon-button small"
-                                        aria-label=${`Remove ${file.name}`}
+                                        aria-label=${t("Remove {{name}}", { name: file.name })}
                                         onClick=${() => {
                                             forget([file]);
                                             setFiles((current) =>
@@ -1130,8 +1131,8 @@ export function Composer() {
                         <${PlacesButton} />
                         <button
                             class="icon-button attach-button"
-                            aria-label="Attach files"
-                            title="Attach files"
+                            aria-label=${t("Attach files")}
+                            title=${t("Attach files")}
                             onClick=${() => picker.current?.click()}
                         >
                             <${Icon} name="clip" size=${17} />
@@ -1161,10 +1162,10 @@ export function Composer() {
                             view.conversation?.kind !== "subagent" &&
                             html`<button
                                 class=${`chip toggle plan-chip ${view.plan?.on ? "on" : ""}`}
-                                title="Plan mode: Pi reads and proposes, and changes nothing until you approve"
+                                title=${t("Plan mode: Pi reads and proposes, and changes nothing until you approve")}
                                 onClick=${() => attempt(() => actions.setPlan(!view.plan?.on))}
                             >
-                                Plan
+                                ${t("Plan")}
                             </button>`
                         }
                         ${
@@ -1172,7 +1173,7 @@ export function Composer() {
                             html`<div
                                 class="mode-switch"
                                 role="radiogroup"
-                                aria-label="Send as"
+                                aria-label=${t("Send as")}
                                 onKeyDown=${(event) => {
                                     // Arrows move between the two, as in any group of radio buttons.
                                     if (/^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
@@ -1195,10 +1196,10 @@ export function Composer() {
                                         aria-checked=${steer === value ? "true" : "false"}
                                         tabindex=${steer === value ? "0" : "-1"}
                                         class=${steer === value ? "on" : ""}
-                                        title=${tip}
+                                        title=${t(tip)}
                                         onClick=${() => setSteer(value)}
                                     >
-                                        ${label}
+                                        ${t(label)}
                                     </button>`,
                                 )}
                             </div>`
@@ -1207,8 +1208,8 @@ export function Composer() {
                         ${busy && html`<${StopButton} />`}
                         <button
                             class=${`send-button ${canSend ? "ready" : ""}`}
-                            aria-label="Send"
-                            title=${coarse ? "Send" : "Send (Enter)"}
+                            aria-label=${t("Send")}
+                            title=${t(coarse ? "Send" : "Send (Enter)")}
                             disabled=${!canSend}
                             onClick=${send}
                         >
@@ -1250,8 +1251,8 @@ const shortModel = (agent) =>
 function StopButton() {
     return html`<button
         class="stop-button"
-        aria-label="Stop"
-        title="Stop (Esc twice)"
+        aria-label=${t("Stop")}
+        title=${t("Stop (Esc twice)")}
         onClick=${() => attempt(actions.abort)}
     >
         <span class="stop-square" aria-hidden="true"></span>
@@ -1270,8 +1271,8 @@ function PlacesButton() {
 
     return html`<button
         class="icon-button places-button badge-host"
-        aria-label="Places: Files, Changes, Browser, and more"
-        title="Places (or swipe up here)"
+        aria-label=${t("Places: Files, Changes, Browser, and more")}
+        title=${t("Places (or swipe up here)")}
         onClick=${() => openSheet({ type: "places" })}
     >
         <${Icon} name="grid" />

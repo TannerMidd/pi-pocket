@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 // The menu: what can be done in this session and in the app.
 import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
 import { chatUnread } from "../chat.js";
@@ -43,19 +44,19 @@ function Places() {
         filesAvailable() && {
             id: "files",
             icon: "folder",
-            label: "Files",
+            label: t("Files"),
             run: () => setFilesOpen(true, "files"),
         },
         filesAvailable() && {
             id: "changes",
             icon: "diff",
-            label: "Changes",
+            label: t("Changes"),
             run: () => setFilesOpen(true, "changes"),
         },
         browserAvailable() && {
             id: "browser",
             icon: "globe",
-            label: "Browser",
+            label: t("Browser"),
             on: browserOpen,
             dot: live,
             run: () => {
@@ -66,29 +67,29 @@ function Places() {
         {
             id: "artifacts",
             icon: "artifact",
-            label: "Artifacts",
+            label: t("Artifacts"),
             count: view.artifacts.length,
             run: () => openSheet({ type: "artifacts" }),
         },
         collab() && {
             id: "chat",
             icon: "chat",
-            label: "Chat",
+            label: t("Chat"),
             count: unread,
             counted: "unread",
             run: () => openSheet({ type: "chat" }),
         },
-        { id: "find", icon: "search", label: "Find", run: () => openSheet({ type: "find" }) },
+        { id: "find", icon: "search", label: t("Find"), run: () => openSheet({ type: "find" }) },
         branchAvailable() && {
             id: "branch",
             icon: "fork",
-            label: "Branch",
+            label: t("Branch"),
             run: () => openSheet({ type: "branch" }),
         },
         server?.peeks === true && {
             id: "peeks",
             icon: "tiles",
-            label: "Peeks",
+            label: t("Peeks"),
             on: peeksOn(),
             run: () => {
                 togglePeeks();
@@ -97,14 +98,14 @@ function Places() {
         },
     ].filter(Boolean);
 
-    return html`<nav class="places" aria-label="Places">
+    return html`<nav class="places" aria-label=${t("Places")}>
         ${places.map(
             (place) => html`<button
                 key=${place.id}
                 type="button"
                 class=${`place ${place.on ? "on" : ""}`}
                 data-place=${place.id}
-                aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.dot ? `${place.label}, a page open` : place.label}
+                aria-label=${place.count > 0 ? t("{{label}}, {{count}} {{kind}}", { label: place.label, count: place.count, kind: t(place.counted ?? "") }).trim() : place.dot ? t("{{label}}, a page open", { label: place.label }) : place.label}
                 aria-pressed=${place.on === undefined ? undefined : place.on ? "true" : "false"}
                 onClick=${place.run}
             >
@@ -126,9 +127,9 @@ function Places() {
 export function PlacesSheet() {
     const conversation = store.state.view.conversation;
 
-    return html`<${Sheet} title=${conversation?.title ?? "Open"} onClose=${closeSheet}>
+    return html`<${Sheet} title=${conversation?.title ?? t("Open")} onClose=${closeSheet}>
         <${Places} />
-        ${item("Session menu", () => openSheet({ type: "menu" }), "rename, context, settings")}
+        ${item(t("Session menu"), () => openSheet({ type: "menu" }), t("rename, context, settings"))}
     <//>`;
 }
 
@@ -168,7 +169,7 @@ export function MenuSheet() {
         !store.state.presence.some((person) => person.id === turns.driver);
     const instructions = view.agent?.instructions;
 
-    return html`<${Sheet} title=${conversation?.title ?? "Menu"} onClose=${closeSheet}>
+    return html`<${Sheet} title=${conversation?.title ?? t("Menu")} onClose=${closeSheet}>
         <${Places} />
         ${
             conversation &&
@@ -176,31 +177,33 @@ export function MenuSheet() {
             steer &&
             (!turns?.on || canStopTurns) &&
             item(
-                turns?.on ? "Turn off take turns" : "Take turns",
+                turns?.on ? t("Turn off take turns") : t("Take turns"),
                 () =>
                     attempt(async () => {
                         await actions.turns(turns?.on ? "off" : "on");
                         closeSheet();
                     }),
-                turns?.on ? "anyone here can send to Pi again" : "one person drives Pi at a time",
+                turns?.on
+                    ? t("anyone here can send to Pi again")
+                    : t("one person drives Pi at a time"),
             )
         }
-        ${session && steer && item("Rename", () => openSheet({ type: "rename" }))}
+        ${session && steer && item(t("Rename"), () => openSheet({ type: "rename" }))}
         ${
             session &&
             item(
-                isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
+                isPinned(conversation.id) ? t("Unpin from the top") : t("Pin to the top"),
                 () => {
                     togglePin(conversation.id);
                     closeSheet();
                 },
-                "this browser",
+                t("this browser"),
             )
         }
         ${
             conversation?.worktree && steer
                 ? item(
-                      "Worktree",
+                      t("Worktree"),
                       () => openSheet({ type: "worktree" }),
                       conversation.worktree.branch,
                   )
@@ -209,7 +212,7 @@ export function MenuSheet() {
                   driving &&
                   !scoped() &&
                   item(
-                      "Working directory",
+                      t("Working directory"),
                       () => openSheet({ type: "cwd", mode: "change" }),
                       shortPath(view.agent?.cwd, server?.home),
                   )
@@ -219,7 +222,7 @@ export function MenuSheet() {
             browserAvailable() &&
             store.state.browserOpen &&
             item(
-                "Close the browser",
+                t("Close the browser"),
                 () => {
                     setBrowserOpen(false);
                     closeSheet();
@@ -227,31 +230,50 @@ export function MenuSheet() {
                 store.state.browser?.open && displayUrl(store.state.browser.url),
             )
         }
-        ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
-        ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
-        ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
-        ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
-        ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), view.schedules.length === 0 ? "none" : `${view.schedules.length} coming`)}
+        ${conversation && trustAvailable() && item(t("Project trust"), () => openSheet({ type: "trust" }), trustHint())}
+        ${
+            session &&
+            steer &&
+            driving &&
+            item(
+                t("Instructions for Pi"),
+                () => openSheet({ type: "instructions" }),
+                instructions ? t("on") : t("none"),
+            )
+        }
+        ${conversation && steer && driving && item(t("Compact context"), () => openSheet({ type: "compact" }), t("summarize older messages"))}
+        ${conversation && steer && driving && item(t("New context"), () => openSheet({ type: "reset" }), t("Pi starts fresh; history stays"))}
+        ${
+            schedulesAvailable() &&
+            item(
+                t("Scheduled messages"),
+                () => openSheet({ type: "schedules" }),
+                view.schedules.length === 0
+                    ? t("none")
+                    : t("{{count}} coming", { count: view.schedules.length }),
+            )
+        }
+
         ${
             conversation &&
-            item("Copy link", () =>
+            item(t("Copy link"), () =>
                 copyText(location.href).then(
-                    () => notify("info", "Link copied. Other signed-in devices can open it."),
-                    () => notify("error", "Could not copy."),
+                    () => notify("info", t("Link copied. Other signed-in devices can open it.")),
+                    () => notify("error", t("Could not copy.")),
                 ),
             )
         }
         ${
             conversation &&
             html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download>
-                <span>Export as Markdown</span>
-                <span class="muted small">the whole history</span>
+                <span>${t("Export as Markdown")}</span>
+                <span class="muted small">${t("the whole history")}</span>
             </a>`
         }
         ${
             session &&
             steer &&
-            item(conversation.archived ? "Unarchive" : "Archive", () => {
+            item(conversation.archived ? t("Unarchive") : t("Archive"), () => {
                 closeSheet();
                 setArchived([conversation.id], !conversation.archived);
             })
@@ -259,50 +281,55 @@ export function MenuSheet() {
         ${
             view.subagents.length > 0 &&
             html`<div class="group">
-                <div class="group-title">Subagents</div>
+                <div class="group-title">${t("Subagents")}</div>
                 ${view.subagents.map((agent) =>
                     item(
                         html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
                         () => navigate(agent.conversationId),
-                        agent.busy ? "working" : "idle",
+                        t(agent.busy ? "working" : "idle"),
                     ),
                 )}
             </div>`
         }
         <div class="group">
-            <div class="group-title">App</div>
-            ${item("Appearance", () => openSheet({ type: "appearance" }), paletteOf().name)}
+            <div class="group-title">${t("App")}</div>
+            ${item(t("Appearance"), () => openSheet({ type: "appearance" }), paletteOf().name)}
             ${
                 me?.role === "owner" &&
                 defaultsKept() &&
                 item(
-                    "Default model",
+                    t("Default model"),
                     () => openSheet({ type: "model", id: "default", forDefault: true }),
-                    defaultLabel(server?.defaultModel, store.state.models) || "the last one picked",
+                    defaultLabel(server?.defaultModel, store.state.models) ||
+                        t("the last one picked"),
                 )
             }
-            ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
-            ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
-            ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
-            ${item("Running now", () => openSheet({ type: "running" }), "everything Pi is doing")}
-            ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
-            ${item("Providers", () => openSheet({ type: "providers" }))}
-            ${item("Extensions", () => openSheet({ type: "extensions" }), store.state.guard?.enabled ? "Lancet Guard on" : store.state.guard?.available ? "Lancet Guard off" : "")}
+            ${item(t("Your name"), () => openSheet({ type: "name" }), me?.name)}
+            ${collab() ? item(t("People"), () => openSheet({ type: "people" }), me?.role === "viewer" ? t("you can view") : "") : item(t("Sign in another device"), () => openSheet({ type: "invite" }))}
+            ${collab() && item(t("Notifications"), () => openSheet({ type: "notifications" }), t("Pi finished, approvals, chat"))}
+            ${item(t("Running now"), () => openSheet({ type: "running" }), t("everything Pi is doing"))}
+            ${item(t("Spend"), () => openSheet({ type: "spend" }), me?.role === "owner" ? t("by person and session, limits") : t("yours"))}
+            ${item(t("Providers"), () => openSheet({ type: "providers" }))}
+            ${item(t("Extensions"), () => openSheet({ type: "extensions" }), store.state.guard?.enabled ? t("Lancet Guard on") : store.state.guard?.available ? t("Lancet Guard off") : "")}
+
             ${
                 me?.role === "owner" &&
                 server?.supervised &&
                 item(
-                    "Restart server",
+                    t("Restart server"),
                     () =>
                         attempt(async () => {
                             await api("restart", {});
                             closeSheet();
-                            notify("info", "Restarting. Running work continues after the restart.");
+                            notify(
+                                "info",
+                                t("Restarting. Running work continues after the restart."),
+                            );
                         }),
-                    "running work resumes",
+                    t("running work resumes"),
                 )
             }
-            ${item("Sign out", () =>
+            ${item(t("Sign out"), () =>
                 attempt(async () => {
                     await api("logout", {});
                     location.href = "/";

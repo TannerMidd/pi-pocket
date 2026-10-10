@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -77,12 +78,12 @@ function ChangesButton() {
     const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     const lines = added > 0 || removed > 0;
     const count = files.length + (changes.more ?? 0);
-    const counted = `${count} ${count === 1 ? "file" : "files"}`;
+    const counted = t(count === 1 ? "{{count}} file" : "{{count}} files", { count });
 
     return html`<button
         class="changes-button"
-        title="Uncommitted changes in this session's folder"
-        aria-label=${`Changes: ${counted}${lines ? `, ${added} lines added and ${removed} removed` : ""}`}
+        title=${t("Uncommitted changes in this session's folder")}
+        aria-label=${lines ? t("Changes: {{counted}}, {{added}} lines added and {{removed}} removed", { counted, added, removed }) : t("Changes: {{counted}}", { counted })}
         onClick=${() => setFilesOpen(true, "changes")}
     >
         ${added > 0 && html`<span class="added">+${added}</span>`}
@@ -104,7 +105,7 @@ function Topbar() {
     const title =
         conversation?.title ??
         store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ??
-        "Loading…";
+        t("Loading…");
     const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
     // Other sessions waiting for an approval, counted on the way back to them.
     const waiting = store.state.sessions.filter(
@@ -115,8 +116,12 @@ function Topbar() {
     return html`<header class="topbar">
         <button
             class="icon-button badge-host topbar-back"
-            aria-label=${waiting > 0 ? `Back to sessions, ${waiting} waiting for you` : "Back to sessions"}
-            title="Sessions"
+            aria-label=${
+                waiting > 0
+                    ? t("Back to sessions, {{count}} waiting for you", { count: waiting })
+                    : t("Back to sessions")
+            }
+            title=${t("Sessions")}
             onClick=${toSessions}
         >
             <${Icon} name="back" size=${22} />
@@ -125,8 +130,8 @@ function Topbar() {
         <div class="title">
             <button
                 class="title-open"
-                aria-label=${`${title}${folder ? `, in ${folder}` : ""}: session menu`}
-                title=${cwd ? `${shortPath(cwd, server?.home)}\nSession menu` : "Session menu"}
+                aria-label=${folder ? t("{{title}}, in {{folder}}: session menu", { title, folder }) : t("{{title}}: session menu", { title })}
+                title=${cwd ? `${shortPath(cwd, server?.home)}\n${t("Session menu")}` : t("Session menu")}
                 disabled=${!conversation}
                 onClick=${() => openSheet({ type: "menu" })}
             ></button>
@@ -143,7 +148,7 @@ function Topbar() {
                 ${
                     conversation?.kind === "subagent"
                         ? html`<span class="title-folder">
-                              subagent of ${conversation.parent?.title ?? "?"}
+                              ${t("subagent of {{title}}", { title: conversation.parent?.title ?? "?" })}
                           </span>`
                         : html`${
                               folder &&
@@ -155,13 +160,13 @@ function Topbar() {
                               (branchAvailable()
                                   ? html`<button
                                         class="title-branch"
-                                        aria-label=${view.branch?.detached ? `No branch, at ${branch}: switch to one` : `Branch ${branch}: switch or make a branch`}
-                                        title=${view.branch?.detached ? "No branch: switch to one" : "Switch or make a branch"}
+                                        aria-label=${view.branch?.detached ? t("No branch, at {{branch}}: switch to one", { branch }) : t("Branch {{branch}}: switch or make a branch", { branch })}
+                                        title=${view.branch?.detached ? t("No branch: switch to one") : t("Switch or make a branch")}
                                         onClick=${() => openSheet({ type: "branch" })}
                                     >
                                         ⎇ ${branch}
                                     </button>`
-                                  : html`<span class="title-branch" title="The git branch">
+                                  : html`<span class="title-branch" title=${t("The git branch")}>
                                         ⎇ ${branch}
                                     </span>`)
                           }`
@@ -172,8 +177,8 @@ function Topbar() {
             busySubagents > 0 &&
             html`<button
                 class="icon-button"
-                aria-label=${`Subagents: ${busySubagents} working`}
-                title="Subagents working"
+                aria-label=${t("Subagents: {{count}} working", { count: busySubagents })}
+                title=${t("Subagents working")}
                 onClick=${openSubagents}
             >
                 <span class="pulse"></span>
@@ -185,7 +190,7 @@ function Topbar() {
         <${BrowserButton} />
         <button
             class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
-            aria-label="Artifacts"
+            aria-label=${t("Artifacts")}
             onClick=${() => openSheet({ type: "artifacts" })}
         >
             <${Icon} name="artifact" />
@@ -195,8 +200,8 @@ function Topbar() {
         <${PeopleButton} />
         <button
             class="icon-button"
-            aria-label="Menu"
-            title="More"
+            aria-label=${t("Menu")}
+            title=${t("More")}
             onClick=${() => openSheet({ type: "menu" })}
         >
             <${Icon} name="more" />
@@ -579,7 +584,7 @@ function stopOnSecondEscape() {
     }
 
     escapedAt = Date.now();
-    notify("info", "Press Esc again to stop Pi.");
+    notify("info", t("Press Esc again to stop Pi."));
 }
 
 const altUp = () => delete document.documentElement.dataset.alt;
@@ -600,7 +605,7 @@ startSwipes((where) => {
 
     // The subagents board in the conversation's place (or the home screen's): right goes back, as its × does.
     if (where === "board") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return { right: { path: iconPath("back"), label: t("Back"), run: goBack } };
     }
 
     if (conversationId === null || !view.conversation || missing) {
@@ -608,7 +613,7 @@ startSwipes((where) => {
     }
 
     if (where === "files") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return { right: { path: iconPath("back"), label: t("Back"), run: goBack } };
     }
 
     // Back to the list, or to the session before when that is where back goes.
@@ -617,11 +622,11 @@ startSwipes((where) => {
     return {
         right: {
             path: iconPath("back"),
-            label: toList ? "Sessions" : "Back",
+            label: toList ? t("Sessions") : t("Back"),
             run: () => (canGoBack() ? goBack() : toSessions()),
         },
         left: filesAvailable()
-            ? { path: iconPath("folder"), label: "Files", run: () => setFilesOpen(true) }
+            ? { path: iconPath("folder"), label: t("Files"), run: () => setFilesOpen(true) }
             : null,
         up: () => openSheet({ type: "places" }),
     };
@@ -661,7 +666,7 @@ if (shared !== null) {
         (share) =>
             share
                 ? store.set({ sheet: { type: "share", share } })
-                : notify("error", "What was shared did not arrive. Share it again."),
-        () => notify("error", "What was shared could not be read. Share it again."),
+                : notify("error", t("What was shared did not arrive. Share it again.")),
+        () => notify("error", t("What was shared could not be read. Share it again.")),
     );
 }

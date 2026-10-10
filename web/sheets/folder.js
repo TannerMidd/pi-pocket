@@ -1,6 +1,7 @@
 // The working folder of a new session or of this one: browse, make a new folder, recent folders, and a worktree of its
 // own.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { actions, api, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
 import { html, Icon, item, Sheet, shortPath } from "../ui.js";
 import { piSessionsAvailable } from "./pi-sessions.js";
@@ -34,8 +35,8 @@ function NewFolder({ folder, onMake, onCancel }) {
             class="mono"
             ref=${input}
             value=${name}
-            placeholder=${`New folder in ${folder}`}
-            aria-label="The new folder's name"
+            placeholder=${t("New folder in {{folder}}", { folder })}
+            aria-label=${t("The new folder's name")}
             autocapitalize="off"
             autocomplete="off"
             spellcheck="false"
@@ -131,7 +132,7 @@ export function CwdSheet({ mode }) {
         });
 
     return html`<${Sheet}
-        title=${mode === "change" ? "Working directory" : "New session"}
+        title=${t(mode === "change" ? "Working directory" : "New session")}
         onClose=${closeSheet}
     >
         <div class="row">
@@ -148,26 +149,26 @@ export function CwdSheet({ mode }) {
                 class="button"
                 onClick=${() => (browse ? setBrowse(false) : (setBrowse(true), load(path)))}
             >
-                ${browse ? "Hide" : "Browse"}
+                ${t(browse ? "Hide" : "Browse")}
             </button>
         </div>
         ${
             missing !== null &&
             html`<div class="folder-missing">
-                <span><span class="mono">${shortPath(missing, home)}</span> isn't there yet.</span>
+                <span>${t("{{path}} isn't there yet.", { path: shortPath(missing, home) })}</span>
                 <button class="button small" onClick=${() => make(missing)}>
-                    <${Icon} name="plus" size=${14} /> Create it
+                    <${Icon} name="plus" size=${14} /> ${t("Create it")}
                 </button>
             </div>`
         }
         ${
             mode === "new" &&
             html`<label class="check">
-                <input type="checkbox" checked=${worktree} onChange=${(event) => setWorktree(event.currentTarget.checked)} /> In a git worktree of its own: a branch, apart from this folder
+                <input type="checkbox" checked=${worktree} onChange=${(event) => setWorktree(event.currentTarget.checked)} /> ${t("In a git worktree of its own: a branch, apart from this folder")}
             </label>`
         }
         <button class="button primary wide" ref=${useButton} onClick=${() => use(path)}>
-            ${missing === path ? "Create and use" : "Use"} ${shortPath(path, home)}
+            ${t(missing === path ? "Create and use" : "Use")} ${shortPath(path, home)}
         </button>
         ${
             mode === "new" &&
@@ -191,12 +192,12 @@ export function CwdSheet({ mode }) {
                                 setHidden(event.currentTarget.checked);
                                 load(path, event.currentTarget.checked);
                             }}
-                        /> Show hidden
+                        /> ${t("Show hidden")}
                     </label>
                     ${
                         !naming &&
                         html`<button class="button small" onClick=${() => setNaming(true)}>
-                            <${Icon} name="plus" size=${14} /> New folder
+                            <${Icon} name="plus" size=${14} /> ${t("New folder")}
                         </button>`
                     }
                 </div>
@@ -220,13 +221,13 @@ export function CwdSheet({ mode }) {
                         <${Icon} name="chevron" size=${14} />
                     </button>`,
                 )}
-                ${listing.dirs.length === 0 && html`<div class="muted pad">No folders here.</div>`}
+                ${listing.dirs.length === 0 && html`<div class="muted pad">${t("No folders here.")}</div>`}
             </div>`
         }
         ${
             listing?.recent?.length > 0 &&
             html`<div class="group">
-                <div class="group-title">Recent</div>
+                <div class="group-title">${t("Recent")}</div>
                 ${listing.recent.map(
                     (dir) =>
                         html`<button class="list-item" onClick=${() => use(dir)}>

@@ -1,6 +1,7 @@
 // The file viewer: a file's text, an image, or a folder's entries. `FileView` draws it in the Files tile and in the
 // file sheet alike.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { browserAvailable, openInBrowser } from "../browser.js";
 import { mentionText } from "../files.js";
 import { highlightLines, langOf } from "../highlight.js";
@@ -104,7 +105,7 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
             <span class="muted small mono file-path" title=${file?.path ?? path}>
                 ${shown}
                 ${file?.size !== undefined ? ` · ${formatBytes(file.size)}` : ""}
-                ${file?.kind === "text" ? ` · ${lines.length} ${lines.length === 1 ? "line" : "lines"}` : ""}
+                ${file?.kind === "text" ? ` · ${t("{{count}} lines", { count: lines.length })}` : ""}
             </span>
             <${FileActions}
                 file=${file}
@@ -117,23 +118,23 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
             />
         </div>
         ${error && html`<p class="muted">${error}</p>`}
-        ${!file && !error && html`<${Loader} label="Opening" />`}
+        ${!file && !error && html`<${Loader} label=${t("Opening")} />`}
         ${
             file?.kind === "image" &&
             html`<img class="file-image" src=${fileUrl(file.path)} alt=${name} />`
         }
         ${
             file?.kind === "binary" &&
-            html`<p class="muted">A binary file: nothing to show as text.</p>`
+            html`<p class="muted">${t("A binary file: nothing to show as text.")}</p>`
         }
         ${
             file?.kind === "other" &&
-            html`<p class="muted">Not a regular file (a pipe or a device, say): nothing to show.</p>`
+            html`<p class="muted">${t("Not a regular file (a pipe or a device, say): nothing to show.")}</p>`
         }
         ${
             file?.kind === "folder" &&
             html`<div class="group">
-                ${file.entries.length === 0 && html`<p class="muted">An empty folder.</p>`}
+                ${file.entries.length === 0 && html`<p class="muted">${t("An empty folder.")}</p>`}
                 ${file.entries.map((entry) =>
                     item(
                         html`<span class="file-entry">
@@ -146,7 +147,7 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
                 ${
                     file.truncated &&
                     html`<p class="muted small">
-                        Only the first ${file.entries.length} are listed.
+                        ${t("Only the first {{count}} are listed.", { count: file.entries.length })}
                     </p>`
                 }
             </div>`
@@ -162,12 +163,12 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
                     : html`<${HtmlPreview} source=${file.text} title=${name} />`
             }
             <p class="muted small file-note">
-                The files it links to (styles, scripts, images) do not load here.
+                ${t("The files it links to (styles, scripts, images) do not load here.")}
                 ${
                     store.state.me?.role === "owner" &&
                     browserAvailable() &&
                     html` <button class="link small" onClick=${() => openInBrowser(file.path)}>
-                        Open it in the browser
+                        ${t("Open it in the browser")}
                     </button>`
                 }
             </p>`
@@ -180,7 +181,7 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
                 !all &&
                 lines.length > FILE_LINES &&
                 html`<button class="link" onClick=${() => setAll(true)}>
-                    Show all ${lines.length} lines
+                    ${t("Show all {{count}} lines", { count: lines.length })}
                 </button>`
             }`
         }
@@ -188,7 +189,7 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
             file?.kind === "text" &&
             file.truncated &&
             html`<p class="muted small">
-                Only the first ${formatBytes(file.text.length)} are shown.
+                ${t("Only the first {{size}} are shown.", { size: formatBytes(file.text.length) })}
             </p>`
         }
     </div>`;
@@ -217,7 +218,7 @@ function FileLines({ lines, colored, all, line }) {
 
 /**
  * The viewer's buttons: Preview or Source for Markdown and pages, Run for a previewed page (`running` is null where it
- * does not apply), Copy, and @ Mention.
+ * does not apply), Copy, and @ ${t("Mention")}.
  */
 function FileActions({ file, shown, previewable, preview, onPreview, running, onRun }) {
     return html`${
@@ -225,26 +226,26 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         running !== null &&
         html`<button
             class=${`button small ${running ? "on" : ""}`}
-            title=${running ? "Stop its scripts" : "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app"}
+            title=${t(running ? "Stop its scripts" : "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app")}
             onClick=${() => onRun(!running)}
         >
-            ${running ? "■ Stop" : "▶ Run"}
+            ${running ? `■ ${t("Stop")}` : `▶ ${t("Run")}`}
         </button>`
     }
     ${
         file?.kind === "text" &&
         previewable &&
         html`<button class="button small" onClick=${() => onPreview(!preview)}>
-            ${preview ? "Source" : "Preview"}
+            ${t(preview ? "Source" : "Preview")}
         </button>`
     }
     ${
         file?.kind === "text" &&
         html`<button
             class="icon-button"
-            title="Copy"
-            aria-label="Copy"
-            onClick=${() => copyText(file.text).then(() => notify("info", "Copied."))}
+            title=${t("Copy")}
+            aria-label=${t("Copy")}
+            onClick=${() => copyText(file.text).then(() => notify("info", t("Copied.")))}
         >
             ⧉
         </button>`
@@ -254,10 +255,10 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         canSteer() &&
         html`<button
             class="button small"
-            title="Mention it in the message box"
+            title=${t("Mention it in the message box")}
             onClick=${() => insertIntoComposer(`${mentionText(shown)} `, [], { inline: true })}
         >
-            @ Mention
+            @ ${t("Mention")}
         </button>`
     }`;
 }

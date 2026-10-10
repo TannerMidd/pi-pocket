@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // People working together beside Pi: who is here, who is typing, and a side panel Pi does not see, with the chat,
 // pinned messages, and shared notes.
 
@@ -22,7 +23,17 @@ import {
     store,
     typing,
 } from "./store.js";
-import { copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
+import {
+    copyText,
+    formatLocaleDate,
+    formatLocaleTime,
+    html,
+    Icon,
+    Loader,
+    Sheet,
+    Spinner,
+    timeAgo,
+} from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
 
@@ -57,7 +68,7 @@ export function PeopleButton() {
     const label =
         others.length === 0
             ? "Chat"
-            : `Chat with ${others.map((person) => person.name).join(", ")}`;
+            : t("Chat with {{names}}", { names: others.map((person) => person.name).join(", ") });
 
     // Quiet with no one else here and nothing unread, unless the panel is open: the menu has the chat.
     return html`<button
@@ -119,11 +130,11 @@ export function TypingLine({ where }) {
 
 function clock(at) {
     const date = new Date(at);
-    const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const time = formatLocaleTime(at, { hour: "numeric", minute: "2-digit" });
 
     return date.toDateString() === new Date().toDateString()
         ? time
-        : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+        : `${formatLocaleDate(at, { month: "short", day: "numeric" })} ${time}`;
 }
 
 /** Close the sheet and scroll the transcript to a message, briefly highlighted. The docked People panel stays. */
@@ -139,7 +150,7 @@ export function jumpToEntry(entryId) {
         if (!found) {
             notify(
                 "info",
-                "That message is in earlier history: use “Show earlier messages” at the top.",
+                t("That message is in earlier history: use “Show earlier messages” at the top."),
             );
 
             return;
@@ -209,15 +220,29 @@ class ChatLine extends Component {
     shouldComponentUpdate(next) {
         const now = this.props;
 
-        return !["message", "grouped", "open", "pinned", "users", "me", "steer"].every(
-            (key) => now[key] === next[key],
-        );
+        return ![
+            "message",
+            "grouped",
+            "open",
+            "pinned",
+            "users",
+            "me",
+            "steer",
+            "localeRevision",
+        ].every((key) => now[key] === next[key]);
     }
 
     render({ message, grouped, open, pinned, users, me, steer, onSelect }) {
         if (message.kind === "event") {
+            const modelChange = "switched the model to ";
+            const text = message.text.startsWith(modelChange)
+                ? t("switched the model to {{model}}", {
+                      model: message.text.slice(modelChange.length),
+                  })
+                : message.text;
+
             return html`<div class="chat-event">
-                <span style=${`color:${personColor(message.userId)}`}>${message.userId === me?.id ? "You" : senderName(message, users)}</span> ${message.text} · ${clock(message.at)}
+                <span style=${`color:${personColor(message.userId)}`}>${message.userId === me?.id ? t("You") : senderName(message, users)}</span> ${text} · ${clock(message.at)}
             </div>`;
         }
 
@@ -231,7 +256,7 @@ class ChatLine extends Component {
             ${
                 !grouped &&
                 html`<div class="chat-meta">
-                    <span class="chat-name">${mine ? "You" : senderName(message, users)}</span>
+                    <span class="chat-name">${mine ? t("You") : senderName(message, users)}</span>
                     <span class="muted">${clock(message.at)}</span>
                     ${pinned && html`<span class="muted">📌</span>`}
                 </div>`
@@ -259,24 +284,24 @@ class ChatLine extends Component {
                             class="link small"
                             onClick=${() => insertIntoComposer(`> ${senderName(message, users)}: ${message.text.replace(/\n/g, "\n> ")}\n\n`)}
                         >
-                            Send to Pi
+                            ${t("Send to Pi")}
                         </button>`
                     }
                     <button
                         class="link small"
                         onClick=${() => attempt(() => actions.pin({ chatId: message.id }))}
                     >
-                        ${pinned ? "Unpin" : "Pin"}
+                        ${t(pinned ? "Unpin" : "Pin")}
                     </button>
                     <button
                         class="link small"
                         onClick=${() =>
                             copyText(message.text).then(
-                                () => notify("info", "Copied."),
-                                () => notify("error", "Could not copy."),
+                                () => notify("info", t("Copied.")),
+                                () => notify("error", t("Could not copy.")),
                             )}
                     >
-                        Copy
+                        ${t("Copy")}
                     </button>
                 </div>`
             }
@@ -399,14 +424,14 @@ function ChatTab({ highlight, focus }) {
             (person) =>
                 html`<span class=${`chip ${person.away ? "away" : ""}`} key=${person.id}>
                     <${Avatar} person=${person} size=${18} /> ${person.name}
-                    ${person.id === me?.id ? " (you)" : person.away ? " · away" : ""}
+                    ${person.id === me?.id ? ` (${t("you")})` : person.away ? ` · ${t("away")}` : ""}
                 </span>`,
         )}
     </div>
     <div class="chat-log" ref=${log}>
         ${
             chat.length === 0 &&
-            html`<div class="muted">No messages yet. Pi does not see this chat.</div>`
+            html`<div class="muted">${t("No messages yet. Pi does not see this chat.")}</div>`
         }
         ${chat.map((message, index) => {
             const previous = chat[index - 1];
@@ -426,6 +451,7 @@ function ChatTab({ highlight, focus }) {
                 users=${users}
                 me=${me}
                 steer=${canSteer()}
+                localeRevision=${store.state.uiLocaleRevision}
                 onSelect=${setSelected}
             />`;
         })}
@@ -434,10 +460,10 @@ function ChatTab({ highlight, focus }) {
     ${
         chatQuote &&
         html`<div class="quote-draft">
-            <span class="muted small">Discussing</span> <span class="quote-text">${chatQuote.text}</span>
+            <span class="muted small">${t("Discussing")}</span> <span class="quote-text">${chatQuote.text}</span>
             <button
                 class="icon-button small"
-                aria-label="Stop quoting"
+                aria-label=${t("Stop quoting")}
                 onClick=${() => store.set({ chatQuote: null })}
             >
                 <${Icon} name="close" size=${12} />
@@ -468,7 +494,7 @@ function ChatTab({ highlight, focus }) {
             rows="1"
             maxlength="4000"
             value=${text}
-            placeholder=${collab() ? "Message the people here… @ to mention" : "Message the people here…"}
+            placeholder=${t(collab() ? "Message the people here… @ to mention" : "Message the people here…")}
             onInput=${(event) => update(event.currentTarget.value, event.currentTarget.selectionStart)}
             onKeyDown=${(event) => {
                 if (
@@ -497,7 +523,7 @@ function ChatTab({ highlight, focus }) {
         ></textarea>
         <button
             class="round send"
-            aria-label="Send"
+            aria-label=${t("Send")}
             disabled=${text.trim() === "" || sending}
             onClick=${send}
         >
@@ -513,7 +539,7 @@ function PinsTab({ onShowChat }) {
 
     if (pins.length === 0) {
         return html`<p class="muted">
-            Nothing pinned yet. Pin a reply of Pi's or a chat message to keep it at hand for everyone here.
+            ${t("Nothing pinned yet. Pin a reply of Pi's or a chat message to keep it at hand for everyone here.")}
         </p>`;
     }
 
@@ -539,8 +565,8 @@ function PinsTab({ onShowChat }) {
                 </button>
                 <button
                     class="icon-button small"
-                    title="Unpin"
-                    aria-label="Unpin"
+                    title=${t("Unpin")}
+                    aria-label=${t("Unpin")}
                     onClick=${() => attempt(() => actions.pin(pin.entryId !== undefined ? { entryId: pin.entryId } : { chatId: pin.chatId }))}
                 >
                     <${Icon} name="close" size=${12} />
@@ -557,7 +583,7 @@ function NotesTab() {
     const [saving, setSaving] = useState(false);
 
     if (notes === null) {
-        return html`<${Loader} label="Loading notes" />`;
+        return html`<${Loader} label=${t("Loading notes")} />`;
     }
 
     const editing = draft !== null;
@@ -577,12 +603,12 @@ function NotesTab() {
     };
 
     return html`<p class="muted small">
-        One page of notes for everyone here: the plan, decisions, who does what. Pi does not see it unless you send it.
+        ${t("One page of notes for everyone here: the plan, decisions, who does what. Pi does not see it unless you send it.")}
     </p>
     ${
         changedMeanwhile &&
         html`<div class="error-box small">
-            ${by ?? "Someone"} saved the notes while you were editing.
+            ${t("{{name}} saved the notes while you were editing.", { name: by ?? t("Someone") })}
             <button
                 class="link small"
                 onClick=${() => {
@@ -590,15 +616,15 @@ function NotesTab() {
                     setBase(notes.rev);
                 }}
             >
-                Use theirs
-            </button> · <button class="link small" onClick=${() => save(notes.rev)}>Keep mine</button>
+                ${t("Use theirs")}
+            </button> · <button class="link small" onClick=${() => save(notes.rev)}>${t("Keep mine")}</button>
         </div>`
     }
     <textarea
         class="notes"
         rows="10"
         value=${editing ? draft : notes.text}
-        placeholder="Write the plan here…"
+        placeholder=${t("Write the plan here…")}
         onInput=${(event) => {
             if (!editing) {
                 setBase(notes.rev);
@@ -609,8 +635,8 @@ function NotesTab() {
     ></textarea>
     <div class="row">
         <span class="muted small grow">
-            ${by ? `Saved by ${by} ${timeAgo(notes.at)}` : "Not saved yet"}
-            ${editing ? " · unsaved changes" : ""}
+            ${by ? t("Saved by {{name}} {{when}}", { name: by, when: timeAgo(notes.at) }) : t("Not saved yet")}
+            ${editing ? ` · ${t("unsaved changes")}` : ""}
         </span>
         ${
             canSteer() &&
@@ -625,14 +651,14 @@ function NotesTab() {
         }
         ${
             editing &&
-            html`<button class="button small ghost" onClick=${() => setDraft(null)}>Cancel</button>`
+            html`<button class="button small ghost" onClick=${() => setDraft(null)}>${t("Cancel")}</button>`
         }
         <button
             class="button small primary"
             disabled=${!editing || saving || changedMeanwhile}
             onClick=${() => save()}
         >
-            ${saving ? "Saving…" : "Save"}
+            ${t(saving ? "Saving…" : "Save")}
         </button>
     </div>`;
 }
@@ -646,13 +672,13 @@ function PeopleTabs({ ask, focus }) {
     const tabs = collab()
         ? html`<div class="segmented tabs">
             <button class=${tab === "chat" ? "on" : ""} onClick=${() => setTab("chat")}>
-                Chat
+                ${t("Chat")}
             </button>
             <button class=${tab === "pins" ? "on" : ""} onClick=${() => setTab("pins")}>
-                Pinned${pins > 0 ? ` ${pins}` : ""}
+                ${t("Pinned")}${pins > 0 ? ` ${pins}` : ""}
             </button>
             <button class=${tab === "notes" ? "on" : ""} onClick=${() => setTab("notes")}>
-                Notes
+                ${t("Notes")}
             </button>
         </div>`
         : null;
@@ -678,7 +704,7 @@ export function ChatSheet() {
     // While the sheet animates out, the store has no sheet any more.
     const sheet = store.state.sheet ?? {};
 
-    return html`<${Sheet} title="People" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("People")} onClose=${closeSheet}>
         <${PeopleTabs} ask=${sheet} focus=${true} />
     <//>`;
 }
@@ -714,16 +740,16 @@ export function PeoplePanel({ leaving = false }) {
 
     return html`<section
         class=${`people window ${leaving ? "leaving" : ""}`}
-        aria-label="People"
+        aria-label=${t("People")}
         inert=${leaving}
         onKeyDown=${keepEscape}
     >
         <header class="sheet-head">
-            <h2>People</h2>
+            <h2>${t("People")}</h2>
             <button
                 class="icon-button"
-                aria-label="Close the People panel"
-                title="Close"
+                aria-label=${t("Close the People panel")}
+                title=${t("Close")}
                 onClick=${closePeople}
             >
                 <${Icon} name="close" />

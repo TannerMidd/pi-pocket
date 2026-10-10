@@ -3,6 +3,7 @@
 // it loads (`setRichBlock`), so ui.js does not import it.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { t } from "./i18n.js";
 import { DiffBlock } from "./diff.js";
 import { highlight, langOf } from "./highlight.js";
 import { RunFrame, useFitHeight } from "./run-frame.js";
@@ -148,12 +149,12 @@ function SvgImage({ source }) {
     const [broken, setBroken] = useState(false);
 
     if (broken) {
-        return html`<p class="muted small rich-note">This SVG could not be drawn.</p>`;
+        return html`<p class="muted small rich-note">${t("This SVG could not be drawn.")}</p>`;
     }
 
     return html`<img
         class="rich-svg"
-        alt="SVG image"
+        alt=${t("SVG image")}
         src=${`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`}
         onError=${() => setBroken(true)}
     />`;
@@ -179,8 +180,8 @@ function RichBlock({ kind, lang, source, streaming }) {
 
     const copy = () =>
         copyText(source).then(
-            () => notify("info", "Copied."),
-            () => notify("error", "Could not copy."),
+            () => notify("info", t("Copied.")),
+            () => notify("error", t("Could not copy.")),
         );
 
     let body;
@@ -213,7 +214,7 @@ function RichBlock({ kind, lang, source, streaming }) {
                         class=${view === "shown" ? "on" : ""}
                         onClick=${() => setView("shown")}
                     >
-                        ${VIEW_NAMES[kind]}
+                        ${t(VIEW_NAMES[kind])}
                     </button>
                     <button
                         type="button"
@@ -233,13 +234,13 @@ function RichBlock({ kind, lang, source, streaming }) {
                 html`<button
                     type="button"
                     class=${`rich-run ${running ? "on" : ""}`}
-                    title=${running ? "Stop its scripts" : "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app"}
+                    title=${t(running ? "Stop its scripts" : "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app")}
                     onClick=${() => setRunning(!running)}
                 >
                     ${running ? "■ Stop" : "▶ Run"}
                 </button>`
             }
-            <button type="button" class="copy" onClick=${copy}>Copy</button>
+            <button type="button" class="copy" onClick=${copy}>${t("Copy")}</button>
         </div>
         ${body}
     </div>`;

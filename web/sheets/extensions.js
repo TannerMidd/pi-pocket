@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 // Extensions: the modules the owner can turn on and off, Lancet Guard, and who may allow risky calls.
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, store } from "../store.js";
@@ -12,20 +13,26 @@ function guardNote(module, guard) {
     if (!guard.enabled) {
         return {
             warn: true,
-            text: "Off in Pi's own settings (~/.pi/lancet-guard.json), so it does not run here either.",
+            text: t("Off in Pi's own settings ({{path}}), so it does not run here either.", {
+                path: "~/.pi/lancet-guard.json",
+            }),
         };
     }
 
     if (!module.enabled) {
         return {
             warn: true,
-            text: "Off in Pi Pocket: bash, write, and edit calls run unchecked here. Pi itself still uses it.",
+            text: t(
+                "Off in Pi Pocket: bash, write, and edit calls run unchecked here. Pi itself still uses it.",
+            ),
         };
     }
 
     return {
         warn: false,
-        text: "Checks bash, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        text: t(
+            "Checks bash, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        ),
     };
 }
 
@@ -37,15 +44,15 @@ function ApprovalRule({ owner }) {
 
     return html`<div class="setting">
         <div class="grow">
-            <div class="small">Approvals need someone else</div>
+            <div class="small">${t("Approvals need someone else")}</div>
             <div class="muted small">
-                A guest cannot allow a call that their own message led to. You always can.
+                ${t("A guest cannot allow a call that their own message led to. You always can.")}
             </div>
         </div>
         <${Switch}
             on=${others}
             disabled=${!owner}
-            label=${`Approvals need someone else: ${others ? "on" : "off"}`}
+            label=${t("Approvals need someone else: {{state}}", { state: t(others ? "on" : "off") })}
             onChange=${change}
         />
     </div>`;
@@ -66,7 +73,9 @@ export function ExtensionsSheet() {
             (error) =>
                 setProblem(
                     error.status === 404
-                        ? "Restart the server (menu → Restart server) to manage extensions from here."
+                        ? t(
+                              "Restart the server (menu → Restart server) to manage extensions from here.",
+                          )
                         : error.message,
                 ),
         );
@@ -90,7 +99,9 @@ export function ExtensionsSheet() {
             module.file === "guard.ts" &&
             module.enabled &&
             !confirm(
-                "Turn off Lancet Guard in Pi Pocket?\n\nbash, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.",
+                t(
+                    "Turn off Lancet Guard in Pi Pocket?\n\nbash, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.",
+                ),
             )
         ) {
             return;
@@ -100,7 +111,10 @@ export function ExtensionsSheet() {
             module.source === "drop-in" &&
             !module.enabled &&
             !confirm(
-                `Turn on ${module.title}?\n\nA drop-in extension runs inside the server with your rights, in every session.`,
+                t(
+                    "Turn on {{title}}?\n\nA drop-in extension runs inside the server with your rights, in every session.",
+                    { title: module.title },
+                ),
             )
         ) {
             return;
@@ -109,12 +123,12 @@ export function ExtensionsSheet() {
         change(module, "", { enabled: !module.enabled });
     };
 
-    return html`<${Sheet} title="Extensions" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Extensions")} onClose=${closeSheet}>
         <p class="muted small">
-            Extensions give Pi its tools and checks in Pi Pocket. A change applies to every session right away and stays after restarts.${owner ? "" : " Only the owner can change them."}
+            ${t("Extensions give Pi its tools and checks in Pi Pocket. A change applies to every session right away and stays after restarts.")}${owner ? "" : ` ${t("Only the owner can change extensions.")} `}
         </p>
         ${problem && html`<div class="error-box">${problem}</div>`}
-        ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
+        ${!data && !problem && html`<${Loader} label=${t("Loading extensions")} />`}
         ${data?.modules.map((module) => {
             const tools = module.extensions.flatMap((extension) => extension.tools);
             const note = module.file === "guard.ts" ? guardNote(module, data.guard) : null;
@@ -122,10 +136,10 @@ export function ExtensionsSheet() {
             return html`<div class=${`extension ${module.enabled ? "" : "off"}`}>
                 <div class="extension-main">
                     <div class="extension-title">
-                        ${module.title}
-                        ${module.error && html` <span class="warn small">· failed to load</span>`}
+                        ${module.source === "built-in" ? t(module.title) : module.title}
+                        ${module.error && html` <span class="warn small">· ${t("failed to load")}</span>`}
                     </div>
-                    ${module.summary && html`<div class="muted small">${module.summary}</div>`}
+                    ${module.summary && html`<div class="muted small">${module.source === "built-in" ? t(module.summary) : module.summary}</div>`}
                     ${
                         note &&
                         html`<div class=${`small ${note.warn ? "warn" : "ok"}`}>${note.text}</div>`
@@ -138,15 +152,15 @@ export function ExtensionsSheet() {
                     ${module.error && html`<div class="error-box small">${module.error}</div>`}
                     <div class="muted small mono">
                         ${module.source === "drop-in" ? `drop-in${module.path ? ` · ${shortPath(module.path, store.state.server?.home)}` : ""}` : module.file}
-                        ${tools.length > 0 ? ` · tools: ${tools.join(", ")}` : ""}
-                        ${module.required ? " · required" : ""}
+                        ${tools.length > 0 ? ` · ${t("tools: {{tools}}", { tools: tools.join(", ") })}` : ""}
+                        ${module.required ? ` · ${t("required")}` : ""}
                     </div>
                 </div>
                 <div class="extension-actions">
                     <${Switch}
                         on=${module.enabled}
                         disabled=${!owner || module.required || busy !== null}
-                        label=${`${module.title}: ${module.enabled ? "on" : "off"}`}
+                        label=${t("{{title}}: {{state}}", { title: module.title, state: t(module.enabled ? "on" : "off") })}
                         onChange=${() => toggle(module)}
                     />
                     ${
@@ -157,7 +171,7 @@ export function ExtensionsSheet() {
                             disabled=${busy !== null}
                             onClick=${() => change(module, "/reload", {})}
                         >
-                            Reload
+                            ${t("Reload")}
                         </button>`
                     }
                 </div>
@@ -166,7 +180,7 @@ export function ExtensionsSheet() {
         ${
             data?.dropIns &&
             html`<p class="muted small">
-                Add your own: put a <span class="mono">.ts</span> extension module in <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. Drop-ins stay off until the owner turns them on, and run inside the server with the owner's rights.
+                ${t("Add your own:")} ${t("Put a .ts extension module in")} <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. ${t("Drop-ins stay off until the owner turns them on, and run inside the server with the owner's rights.")}
             </p>`
         }
     <//>`;

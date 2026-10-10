@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 // People with access to this server, and invites for more.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Avatar } from "../avatar.js";
@@ -126,13 +127,13 @@ export function InviteSheet({ session = null }) {
     // under a cleared box (which the server's answer says too).
     const invite =
         made && made.asked === asked && (made.grant?.role === "owner") === asOwner ? made : null;
-    const where = only && here ? `only “${here.title}”` : "every session";
+    const where = only && here ? t("only “{{title}}”", { title: here.title }) : t("every session");
     // As long as the invite shown lasts (a server that does not say: 15 minutes), or, while one is made, as chosen.
-    const lasting = LASTS.find(
-        ([each]) => each === (invite ? (invite.minutes ?? 15) : minutes),
-    )?.[2];
+    const lasting = t(
+        LASTS.find(([each]) => each === (invite ? (invite.minutes ?? 15) : minutes))?.[2] ?? "",
+    );
 
-    return html`<${Sheet} title="Invite someone" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Invite someone")} onClose=${closeSheet}>
         ${
             me?.role === "owner" &&
             html`<label class="check">
@@ -141,39 +142,39 @@ export function InviteSheet({ session = null }) {
                     checked=${asOwner}
                     onChange=${(event) => setAsOwner(event.currentTarget.checked)}
                 />
-                Sign in as me (owner)
+                ${t("Sign in as me (owner)")}
             </label>`
         }
         ${
             collab() &&
             !asOwner &&
             html`<div class="field">
-                <div class="label">They can</div>
+                <div class="label">${t("They can")}</div>
                 <div class="segmented">
                     <button class=${role === "guest" ? "on" : ""} onClick=${() => setRole("guest")}>
-                        Steer
+                        ${t("Steer")}
                     </button>
                     <button
                         class=${role === "viewer" ? "on" : ""}
                         onClick=${() => setRole("viewer")}
                     >
-                        View only
+                        ${t("View only")}
                     </button>
                 </div>
                 <div class="muted small">
-                    ${ROLE_TEXT[role]}.${role === "guest" && only ? " Seeing one session in the app does not limit what Pi can reach on the machine." : ""}
+                    ${t(ROLE_TEXT[role])}.${role === "guest" && only ? ` ${t("Seeing one session in the app does not limit what Pi can reach on the machine.")}` : ""}
                 </div>
             </div>
             ${
                 here &&
                 html`<div class="field">
-                    <div class="label">In</div>
+                    <div class="label">${t("In")}</div>
                     <div class="segmented">
                         <button class=${!only ? "on" : ""} onClick=${() => setOnly(false)}>
-                            Every session
+                            ${t("Every session")}
                         </button>
                         <button class=${only ? "on" : ""} onClick=${() => setOnly(true)}>
-                            Only this session
+                            ${t("Only this session")}
                         </button>
                     </div>
                 </div>`
@@ -182,7 +183,7 @@ export function InviteSheet({ session = null }) {
         ${
             !asOwner &&
             html`<div class="field">
-                <div class="label">Expires after</div>
+                <div class="label">${t("Expires after")}</div>
                 <div class="segmented">
                     ${LASTS.map(
                         ([each, label]) => html`<button
@@ -190,7 +191,7 @@ export function InviteSheet({ session = null }) {
                             aria-pressed=${minutes === each}
                             onClick=${() => setMinutes(each)}
                         >
-                            ${label}
+                            ${t(label)}
                         </button>`,
                     )}
                 </div>
@@ -199,13 +200,18 @@ export function InviteSheet({ session = null }) {
         <p class="muted small">
             ${
                 asOwner
-                    ? "Scan this on your other device, or send it the link. That device signs in as you, the owner. It works once and expires in 15 minutes."
-                    : `Scan this on the other device, or send it the link. It works once and expires ${lasting}. Whoever joins sees ${where}.`
+                    ? t(
+                          "Scan this on your other device, or send it the link. That device signs in as you, the owner. It works once and expires in 15 minutes.",
+                      )
+                    : t(
+                          "Scan this on the other device, or send it the link. It works once and expires {{lasting}}. Whoever joins sees {{where}}.",
+                          { lasting, where },
+                      )
             }
         </p>
         ${
             invite?.access?.url &&
-            html`<p class="muted small">Other devices connect through ${invite.access.label}.</p>`
+            html`<p class="muted small">${t("Other devices connect through {{label}}.", { label: invite.access.label })}</p>`
         }
         ${
             invite
@@ -213,22 +219,22 @@ export function InviteSheet({ session = null }) {
                     ${
                         invite.local &&
                         html`<div class="error-box">
-                            This link only works on this device. To let other devices in, press <span class="mono">a</span> in the Pi Pocket terminal (or start it with <span class="mono">--access</span>) and pick Local network, Cloudflare Tunnel, or Tailscale. Then make a new invite.
+                            ${t("This link only works on this device. To let other devices in, press {{key}} in the Pi Pocket terminal (or start it with {{flag}}) and pick {{choices}}. Then make a new invite.", { key: "a", flag: "--access", choices: t("Local network, Cloudflare Tunnel, or Tailscale") })}
                         </div>`
                     }
                     <div class="qr" dangerouslySetInnerHTML=${{ __html: invite.svg }}></div>
                     <div class="invite-code">
                         <div class="invite-code-head">
-                            <span>Invite code</span>
+                            <span>${t("Invite code")}</span>
                             <button
                                 class="link small"
                                 onClick=${() =>
                                     copyText(invite.code).then(
-                                        () => notify("info", "Code copied."),
-                                        () => notify("error", "Could not copy."),
+                                        () => notify("info", t("Code copied.")),
+                                        () => notify("error", t("Could not copy.")),
                                     )}
                             >
-                                Copy
+                                ${t("Copy")}
                             </button>
                         </div>
                         <div
@@ -239,7 +245,7 @@ export function InviteSheet({ session = null }) {
                             <span>${invite.code.slice(5)}</span>
                         </div>
                         <div class="muted small">
-                            Or enter it on the other device's sign-in screen.
+                            ${t("Or enter it on the other device's sign-in screen.")}
                         </div>
                     </div>
                     <div class="row">
@@ -253,11 +259,11 @@ export function InviteSheet({ session = null }) {
                             class="button"
                             onClick=${() =>
                                 copyText(invite.url).then(
-                                    () => notify("info", "Link copied."),
-                                    () => notify("error", "Could not copy."),
+                                    () => notify("info", t("Link copied.")),
+                                    () => notify("error", t("Could not copy.")),
                                 )}
                         >
-                            Copy
+                            ${t("Copy")}
                         </button>
                     </div>
                     ${
@@ -270,24 +276,29 @@ export function InviteSheet({ session = null }) {
                     }
                 </div>`
                 : failed
-                  ? html`<p class="muted small">No invite yet. Tap New invite to try again.</p>`
-                  : html`<${Loader} label="Making an invite" />`
+                  ? html`<p class="muted small">${t("No invite yet. Tap New invite to try again.")}</p>`
+                  : html`<${Loader} label=${t("Making an invite")} />`
         }
-        <button class="button wide" onClick=${create}>New invite</button>
+        <button class="button wide" onClick=${create}>${t("New invite")}</button>
         ${!collab() && html`<${PeopleList} />`}
     <//>`;
 }
 
 function lastSeen(person) {
     if (person.online) {
-        return "here now";
+        return t("here now");
     }
 
     if (!person.lastSeen) {
-        return "not seen yet";
+        return t("not seen yet");
     }
 
-    return `seen ${timeAgo(person.lastSeen)}${timeAgo(person.lastSeen) === "now" ? "" : " ago"}`;
+    return t("seen {{time}}", {
+        time:
+            timeAgo(person.lastSeen) === "now"
+                ? t("now")
+                : t("{{time}} ago", { time: timeAgo(person.lastSeen) }),
+    });
 }
 
 /** Everyone with access: who is online, when the others were last here, and (for the owner) what each may do. */
@@ -304,7 +315,7 @@ function PeopleList() {
         attempt(async () => store.set({ users: await actions.setAccess(person.id, patch) }));
 
     return html`<div class="group">
-        <div class="group-title">People</div>
+        <div class="group-title">${t("People")}</div>
         ${ordered.map(
             (person) => html`<div class="person-row" key=${person.id}>
                 <span class=${`online-dot ${person.online ? "on" : ""}`}></span>
@@ -312,11 +323,11 @@ function PeopleList() {
                 <div class="person-main">
                     <div>
                         ${person.name}
-                        ${person.id === me?.id ? html` <span class="muted small">(you)</span>` : ""}
+                        ${person.id === me?.id ? html` <span class="muted small">(${t("you")})</span>` : ""}
                     </div>
                     <div class="muted small">
-                        ${person.role === "owner" ? "owner" : person.role === "viewer" ? "view only" : "can steer"}
-                        ${person.sessions ? ` · only ${person.sessions.map(sessionTitle).join(", ")}` : ""} · ${lastSeen(person)}
+                        ${t(person.role === "owner" ? "owner" : person.role === "viewer" ? "view only" : "can steer")}
+                        ${person.sessions ? ` · ${t("only {{sessions}}", { sessions: person.sessions.map(sessionTitle).join(", ") })}` : ""} · ${lastSeen(person)}
                     </div>
                 </div>
                 ${
@@ -327,10 +338,10 @@ function PeopleList() {
                             collab() &&
                             html`<button
                                 class="button small"
-                                title="Change what they can do"
+                                title=${t("Change what they can do")}
                                 onClick=${() => change(person, { role: person.role === "viewer" ? "guest" : "viewer" })}
                             >
-                                ${person.role === "viewer" ? "Let steer" : "View only"}
+                                ${t(person.role === "viewer" ? "Let steer" : "View only")}
                             </button>`
                         }
                         ${
@@ -338,16 +349,20 @@ function PeopleList() {
                             person.sessions &&
                             html`<button
                                 class="button small"
-                                title="Let them see every session"
+                                title=${t("Let them see every session")}
                                 onClick=${() => change(person, { sessions: null })}
                             >
-                                All sessions
+                                ${t("All sessions")}
                             </button>`
                         }
                         <button
                             class="button small ghost"
                             onClick=${() =>
-                                confirm(`Remove ${person.name}? Their devices are signed out.`) &&
+                                confirm(
+                                    t("Remove {{name}}? Their devices are signed out.", {
+                                        name: person.name,
+                                    }),
+                                ) &&
                                 attempt(async () => {
                                     await api(`users/${person.id}/remove`, {});
                                     store.set({
@@ -357,7 +372,7 @@ function PeopleList() {
                                     });
                                 })}
                         >
-                            Remove
+                            ${t("Remove")}
                         </button>
                     </div>`
                 }
@@ -369,16 +384,16 @@ function PeopleList() {
 export function PeopleSheet() {
     const canInvite = canSteer() && !scoped();
 
-    return html`<${Sheet} title="People" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("People")} onClose=${closeSheet}>
         ${
             canInvite &&
             html`<button class="button primary wide" onClick=${() => openSheet({ type: "invite" })}>
-                <${Icon} name="plus" size=${16} /> Invite someone
+                <${Icon} name="plus" size=${16} /> ${t("Invite someone")}
             </button>`
         }
         <${PeopleList} />
         <button class="button wide" onClick=${() => openSheet({ type: "notifications" })}>
-            Notifications on this device…
+            ${t("Notifications on this device")}…
         </button>
     <//>`;
 }

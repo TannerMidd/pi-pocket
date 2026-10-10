@@ -25,7 +25,7 @@ A drop-in extension survives updates to Pi Pocket and can be turned off from the
 ## The documents
 
 - [customizing.md](customizing.md): changing how Pi works without code.
-- [extensions.md](extensions.md): writing extensions (tools, prompt sections, hooks), with working examples in [examples/](examples/).
+- [extensions.md](extensions.md): writing extensions (tools, prompt sections, hooks, and UI locale packs), with working examples in [examples/](examples/).
 - [self-editing.md](self-editing.md): changing Pi Pocket's code while it runs, checking the change, and getting a broken one back.
 - [map.md](map.md): where each part of the code is, and how to add the common things.
 - [architecture.md](architecture.md): how the parts depend on each other, and the orderings they rely on.

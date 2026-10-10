@@ -389,6 +389,7 @@ export class PocketApp {
             host,
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
+            () => this.#refreshClients(),
         );
         await this.loader.loadAll();
 
@@ -1299,6 +1300,8 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                // Data-only UI translation packs from currently enabled extension modules.
+                uiLocales: this.loader.uiLocales(),
                 // Tells the web app this server has people chat and typing indicators.
                 chat: true,
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).

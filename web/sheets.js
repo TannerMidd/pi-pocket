@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // The open sheet: which component shows it. The sheets themselves are in web/sheets/, and a few beside their features
 // (chat.js, notify.js, share.js).
 import { ChatSheet } from "./chat.js";
@@ -158,8 +159,8 @@ function sheetBody(sheet) {
             break;
         case "rename":
             body = html`<${TextSheet}
-                title="Rename"
-                label="Session title"
+                title=${t("Rename")}
+                label=${t("Session title")}
                 initial=${view.conversation?.title ?? ""}
                 submit=${(value) => actions.updateSession(view.conversation.id, { title: value })}
             />`;
@@ -207,40 +208,40 @@ function sheetBody(sheet) {
             break;
         case "reset":
             body = html`<${TextSheet}
-                title="New context"
-                hint="Pi starts fresh: it no longer sees the messages so far, though everyone here still does."
-                label="Handoff note (optional)"
+                title=${t("New context")}
+                hint=${t("Pi starts fresh: it no longer sees the messages so far, though everyone here still does.")}
+                label=${t("Handoff note (optional)")}
                 placeholder="e.g. We fixed the login bug; next is the signup form."
                 multiline=${true}
-                button="Start a new context"
+                button=${t("Start a new context")}
                 submit=${(value) => actions.reset(value)}
             />`;
             break;
         case "instructions":
             body = html`<${TextSheet}
-                title="Instructions for Pi"
-                hint="Pi gets these with every message in this session, after its own instructions. Everyone here can see them. Leave empty for none."
-                label="Instructions"
+                title=${t("Instructions for Pi")}
+                hint=${t("Pi gets these with every message in this session, after its own instructions. Everyone here can see them. Leave empty for none.")}
+                label=${t("Instructions")}
                 initial=${view.agent?.instructions ?? ""}
-                placeholder="e.g. Use pnpm, not npm. Ask before adding dependencies."
+                placeholder=${t("e.g. Use pnpm, not npm. Ask before adding dependencies.")}
                 multiline=${true}
                 submit=${(value) => actions.setInstructions(value)}
             />`;
             break;
         case "compact":
             body = html`<${TextSheet}
-                title="Compact context"
-                label="What should the summary keep? (optional)"
-                placeholder="e.g. the failing test names"
+                title=${t("Compact context")}
+                label=${t("What should the summary keep? (optional)")}
+                placeholder=${t("e.g. the failing test names")}
                 multiline=${true}
-                button="Compact"
+                button=${t("Compact")}
                 submit=${(value) => actions.compact(value)}
             />`;
             break;
         case "name":
             body = html`<${TextSheet}
-                title="Your name"
-                label="Shown on your messages to others"
+                title=${t("Your name")}
+                label=${t("Shown on your messages to others")}
                 initial=${me?.name ?? ""}
                 submit=${async (value) => {
                     await api("me", { name: value });

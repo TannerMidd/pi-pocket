@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // Shared bits: htm binding, markdown, formatting, icons, the bottom sheet, and small controls (switches, menu rows).
 
 import DOMPurify from "dompurify";
@@ -547,7 +548,7 @@ document.addEventListener("click", (event) => {
             button.textContent = "Copied";
             setTimeout(() => (button.textContent = "Copy"), 1200);
         },
-        () => notify("error", "Could not copy."),
+        () => notify("error", t("Could not copy.")),
     );
 });
 
@@ -616,10 +617,24 @@ export function formatBytes(bytes) {
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const currentUiLocale = () => store.state.uiLocale || "en";
+
+export function formatLocaleDate(ms, options) {
+    return new Date(ms).toLocaleDateString(currentUiLocale(), options);
+}
+
+export function formatLocaleTime(ms, options) {
+    return new Date(ms).toLocaleTimeString(currentUiLocale(), options);
+}
+
+export function formatLocaleDateTime(ms) {
+    return new Date(ms).toLocaleString(currentUiLocale());
+}
+
 /** A time ahead, on this device's clock: "14:30" today, "Mon 09:00" this week, "Oct 20 09:00" later. */
 export function formatWhen(ms) {
     const at = new Date(ms);
-    const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const time = formatLocaleTime(ms, { hour: "numeric", minute: "2-digit" });
 
     if (at.toDateString() === new Date().toDateString()) {
         return time;
@@ -627,8 +642,8 @@ export function formatWhen(ms) {
 
     const day =
         ms - Date.now() < 6 * 86_400_000
-            ? at.toLocaleDateString([], { weekday: "short" })
-            : at.toLocaleDateString([], { month: "short", day: "numeric" });
+            ? formatLocaleDate(ms, { weekday: "short" })
+            : formatLocaleDate(ms, { month: "short", day: "numeric" });
 
     return `${day} ${time}`;
 }
@@ -652,7 +667,7 @@ export function timeAgo(ms) {
         return `${Math.round(seconds / 86400)}d`;
     }
 
-    return new Date(ms).toLocaleDateString();
+    return formatLocaleDate(ms);
 }
 
 /** Markdown as plain text, for one-line previews such as a quote: no emphasis, code ticks, or markers. */
@@ -793,7 +808,7 @@ export function Icon({ name, size = 20, class: className = "", stroke = 2 }) {
  * The app's loaders, after Omarchy's: a quadrant block that steps around a square like a terminal spinner, and a flat
  * bar that eases toward 70% the way Omarchy's boot screen does while it waits.
  */
-export function Spinner({ label = "Working", hidden = false }) {
+export function Spinner({ label = t("Working"), hidden = false }) {
     // Hidden from screen readers beside words that say the same.
     return hidden
         ? html`<span class="spinner" aria-hidden="true"></span>`
@@ -801,7 +816,7 @@ export function Spinner({ label = "Working", hidden = false }) {
 }
 
 /** A spinner with a short line about what is loading, for sheets and panels. */
-export function Loader({ label = "Loading" }) {
+export function Loader({ label = t("Loading") }) {
     return html`<div class="loader" role="status">
         <${Spinner} label=${label} />
         <span>${label}…</span>
@@ -996,7 +1011,7 @@ export function Sheet({ title, onClose, children, wide = false, actions = null }
                 <div class="grip"></div>
                 <h2>${title}</h2>
                 ${actions}
-                <button class="icon-button" onClick=${onClose} aria-label="Close">
+                <button class="icon-button" onClick=${onClose} aria-label=${t("Close")}>
                     <${Icon} name="close" />
                 </button>
             </header>
@@ -1051,7 +1066,7 @@ export const anchorStyle = (anchor) =>
 /** The short name of a model for chips: "Claude Opus 5.5" stays, long ids lose their date suffix. */
 export function modelLabel(agent) {
     if (!agent?.model) {
-        return "No model";
+        return t("No model");
     }
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");

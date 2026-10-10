@@ -65,11 +65,30 @@ const route: FauxResponseStep = (request) => {
 
 const model = scriptedModel(route);
 
+/** A drop-in that registers a data-only UI translation pack. */
+const uiLocale = (translation: string) => `/** Registers a test UI locale. */
+import { defineExtension } from "@earendil-works/pi-durable";
+
+export default () => ({
+    ...defineExtension({ name: "test-ui-locale" }),
+    uiLocales: [
+        {
+            locale: "zh-CN",
+            label: "简体中文",
+            default: true,
+            strings: { Extensions: ${JSON.stringify(translation)} },
+            templates: { "Back, {{count}} waiting": "返回，{{count}} 项待处理" },
+        },
+    ],
+});
+`;
+
 let app: App;
 
 before(async () => {
     mkdirSync(dropIns, { recursive: true });
     writeFileSync(join(dropIns, "shout.ts"), shout("!"));
+    writeFileSync(join(dropIns, "ui-locale.ts"), uiLocale("扩展"));
     // The name of a built-in module: never loaded in its place.
     writeFileSync(
         join(dropIns, "plan.ts"),
@@ -92,7 +111,7 @@ test("drop-ins are listed after the built-in modules, off until the owner turns 
     assert.equal(listed?.path, join(dropIns, "shout.ts"));
     assert.equal(listed?.summary, "Shout offers a tool that shouts!.");
     assert.equal(listed?.enabled, false);
-    assert.equal(app.loader.list().at(-1)?.file, "shout.ts");
+    assert.equal(app.loader.list().at(-1)?.file, "ui-locale.ts");
     assert.deepEqual(
         module("plan.ts").map((each) => each.source),
         ["built-in"],
@@ -150,6 +169,82 @@ test("a drop-in that is on gives Pi its tools and hooks, reloads when edited, an
         );
         assert.equal(app.loader.extensionNames().includes("shout"), false);
         assert.deepEqual(module("shout.ts"), []);
+    } finally {
+        app.detach(tab.client);
+    }
+});
+
+test("enabled drop-ins publish data-only UI locales and edits or removal update every client's hello", async () => {
+    await app.setExtensionEnabled(owner(app), "ui-locale.ts", true);
+
+    const hello = await app.hello(owner(app));
+
+    assert.deepEqual(
+        hello.server.uiLocales.map(({ locale, label }) => ({ locale, label })),
+        [{ locale: "zh-CN", label: "简体中文" }],
+    );
+    assert.equal(hello.server.uiLocales[0]?.strings.Extensions, "扩展");
+
+    writeFileSync(
+        join(dropIns, "locale-conflict.ts"),
+        uiLocale("冲突").replace('name: "test-ui-locale"', 'name: "conflicting-locale"'),
+    );
+    await assert.rejects(
+        app.setExtensionEnabled(owner(app), "locale-conflict.ts", true),
+        /already registers the zh-CN UI locale/,
+    );
+    await app.setExtensionEnabled(owner(app), "locale-conflict.ts", false);
+
+    const tab = fakeTab(undefined, owner(app));
+
+    await app.attach(tab.client);
+
+    try {
+        writeFileSync(join(dropIns, "ui-locale.ts"), uiLocale("界面扩展"));
+        await until(
+            () =>
+                tab.events.some(
+                    (event) =>
+                        event.event === "hello" &&
+                        (event.data.server as { uiLocales: { strings: Record<string, string> }[] })
+                            .uiLocales[0]?.strings.Extensions === "界面扩展",
+                ),
+            "edited locale data to reach connected clients",
+        );
+
+        rmSync(join(dropIns, "ui-locale.ts"));
+        await until(
+            () =>
+                tab.events.some(
+                    (event) =>
+                        event.event === "notice" &&
+                        String(event.data.message).includes(
+                            "Removed the drop-in extension ui-locale.ts.",
+                        ),
+                ),
+            "the locale pack to be uninstalled",
+        );
+        assert.deepEqual(app.loader.uiLocales(), []);
+        const latestHello = [...tab.events]
+            .reverse()
+            .find((event) => event.event === "hello")?.data;
+
+        assert.equal(
+            (latestHello?.server as { uiLocales: unknown[] }).uiLocales.length,
+            0,
+            "removing the module tells connected clients to use English",
+        );
+
+        writeFileSync(
+            join(dropIns, "invalid-locale.ts"),
+            `import { defineExtension } from "@earendil-works/pi-durable";\nexport default () => ({ ...defineExtension({ name: "invalid-locale" }), uiLocales: [{ locale: "zh-CN", label: "bad", strings: { Extensions: 7 } }] });`,
+        );
+        await assert.rejects(
+            app.setExtensionEnabled(owner(app), "invalid-locale.ts", true),
+            /values must be plain strings/,
+        );
+        assert.deepEqual(app.loader.uiLocales(), [], "invalid data never reaches clients");
+        await app.setExtensionEnabled(owner(app), "invalid-locale.ts", false);
     } finally {
         app.detach(tab.client);
     }
@@ -227,4 +322,18 @@ test("the built-in tool names a drop-in may not take are every tool the built-in
 
     assert.ok(installed.length >= 9, "the built-ins are on");
     assert.deepEqual([...installed].sort(), [...BUILT_IN_TOOLS].sort());
+});
+
+test("locale enable and disable choices survive app restarts", async () => {
+    writeFileSync(join(dropIns, "ui-locale.ts"), uiLocale("扩展"));
+    await app.setExtensionEnabled(owner(app), "ui-locale.ts", false);
+    assert.deepEqual(app.loader.uiLocales(), []);
+    await app.setExtensionEnabled(owner(app), "ui-locale.ts", true);
+    await app.close();
+    app = await openApp(model, dataDir);
+    assert.equal((await app.hello(owner(app))).server.uiLocales[0]?.strings.Extensions, "扩展");
+    await app.setExtensionEnabled(owner(app), "ui-locale.ts", false);
+    await app.close();
+    app = await openApp(model, dataDir);
+    assert.deepEqual((await app.hello(owner(app))).server.uiLocales, []);
 });

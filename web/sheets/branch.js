@@ -1,6 +1,7 @@
 // The branch picker: the git branch this session's folder has checked out, and the others to switch to or make, in a
 // menu down from the branch in the top bar.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { actions, attempt, canSteer, closeSheet, notify, scoped, store } from "../store.js";
 import { anchorStyle, html, Icon, popAnchor, shortPath, timeAgo } from "../ui.js";
 
@@ -23,19 +24,19 @@ function whyNot() {
     const { view, me } = store.state;
 
     if (!canSteer()) {
-        return "Viewers can see the branch, not switch it.";
+        return t("Viewers can see the branch, not switch it.");
     }
 
     if (scoped()) {
-        return "You were invited to one session: switching the branch changes the whole folder.";
+        return t("You were invited to one session: switching the branch changes the whole folder.");
     }
 
     if (view.turns?.on && view.turns.driver !== me?.id) {
-        return "Take turns is on: the driver switches branches.";
+        return t("Take turns is on: the driver switches branches.");
     }
 
     if (view.live?.busy) {
-        return "Pi is working: switch once it is done, or stop it.";
+        return t("Pi is working: switch once it is done, or stop it.");
     }
 
     return null;
@@ -48,12 +49,12 @@ function Track({ upstream }) {
     }
 
     if (upstream.gone) {
-        return html`<span class="branch-track warn" title=${`${upstream.name} is gone`}>gone</span>`;
+        return html`<span class="branch-track warn" title=${t("{{name}} is gone", { name: upstream.name })}>{t("gone")}</span>`;
     }
 
     return (
         (upstream.ahead > 0 || upstream.behind > 0) &&
-        html`<span class="branch-track" title=${`Against ${upstream.name}`}>
+        html`<span class="branch-track" title=${t("Against {{name}}", { name: upstream.name })}>
             ${upstream.ahead > 0 ? `↑${upstream.ahead}` : ""}${upstream.ahead > 0 && upstream.behind > 0 ? " " : ""}${upstream.behind > 0 ? `↓${upstream.behind}` : ""}
         </span>`
     );
@@ -166,7 +167,10 @@ export function BranchPicker() {
         if (row.kind === "local" && row.branch.worktree) {
             notify(
                 "info",
-                `${row.branch.name} is checked out in ${shortPath(row.branch.worktree, server?.home)}: git switches to it only there.`,
+                t("{{branch}} is checked out in {{path}}: git switches to it only there.", {
+                    branch: row.branch.name,
+                    path: shortPath(row.branch.worktree, server?.home),
+                }),
             );
 
             return;
@@ -189,7 +193,7 @@ export function BranchPicker() {
         attempt(async () => {
             const { branch } = await actions.switchBranch(target);
 
-            notify("info", `On ${branch} now.`);
+            notify("info", t("On {{branch}} now.", { branch }));
             closeSheet();
         }).then(() => setSwitching(false));
     };
@@ -198,16 +202,18 @@ export function BranchPicker() {
         if (each.kind === "make") {
             return html`<${Icon} name="plus" size=${14} />
                 <span class="pop-menu-row-text">
-                    <span class="pop-menu-row-name">Make the branch <span class="mono">${each.name}</span></span>
-                    <span class="pop-menu-row-sub">from ${headLabel(view.branch) || "here"}${branches.changed > 0 ? ", with your uncommitted changes" : ""}</span>
+                    <span class="pop-menu-row-name">${t("Make the branch")} <span class="mono">${each.name}</span></span>
+                    <span class="pop-menu-row-sub">${t("from {{head}}{{changes}}", { head: headLabel(view.branch) || t("here"), changes: branches.changed > 0 ? t(", with your uncommitted changes") : "" })}</span>
                 </span>`;
         }
 
         const { branch } = each;
         const sub =
             each.kind === "local" && branch.worktree
-                ? `in another worktree: ${shortPath(branch.worktree, server?.home)}`
-                : [branch.subject, branch.at ? timeAgo(branch.at) : "no commits yet"]
+                ? t("in another worktree: {{path}}", {
+                      path: shortPath(branch.worktree, server?.home),
+                  })
+                : [branch.subject, branch.at ? timeAgo(branch.at) : t("no commits yet")]
                       .filter(Boolean)
                       .join(" · ");
 
@@ -262,13 +268,13 @@ export function BranchPicker() {
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"
-            aria-label="Branch"
+            aria-label=${t("Branch")}
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
             <header class="pop-menu-head">
-                <span>Branch</span>
-                <span class="branch-head mono" title=${view.branch?.detached ? "No branch: a commit" : "Checked out"}>
+                <span>${t("Branch")}</span>
+                <span class="branch-head mono" title=${t(view.branch?.detached ? "No branch: a commit" : "Checked out")}>
                     <${Icon} name="fork" size=${12} /> ${headLabel(view.branch) || "none"}
                 </span>
             </header>
@@ -276,7 +282,7 @@ export function BranchPicker() {
                 <${Icon} name="search" size=${15} />
                 <input
                     ref=${search}
-                    placeholder="Switch to or make a branch"
+                    placeholder=${t("Switch to or make a branch")}
                     value=${query}
                     autocapitalize="off"
                     autocomplete="off"
@@ -287,18 +293,18 @@ export function BranchPicker() {
                     }}
                 />
             </label>
-            <div class="pop-menu-list" ref=${list} role="listbox" aria-label="Branches">
+            <div class="pop-menu-list" ref=${list} role="listbox" aria-label=${t("Branches")}>
                 ${error && html`<p class="muted pop-menu-note">${error}</p>`}
-                ${!branches && !error && html`<p class="muted pop-menu-note">Asking git…</p>`}
+                ${!branches && !error && html`<p class="muted pop-menu-note">${t("Asking git…")}</p>`}
                 ${
                     branches &&
                     rows.length === 0 &&
-                    html`<p class="muted pop-menu-note">No branch matches “${query.trim()}”.</p>`
+                    html`<p class="muted pop-menu-note">${t("No branch matches “{{query}}”.", { query: query.trim() })}</p>`
                 }
                 ${rows.flatMap((each, index) => [
                     each.kind === "remote" &&
                         rows[index - 1]?.kind !== "remote" &&
-                        html`<div class="pop-menu-label" key="remote">Remote</div>`,
+                        html`<div class="pop-menu-label" key="remote">${t("Remote")}</div>`,
                     row(each, index, rowBody(each)),
                 ])}
             </div>
@@ -307,17 +313,11 @@ export function BranchPicker() {
                 (blocked || branches.changed > 0 || branches.more > 0) &&
                 html`<div class="pop-menu-foot small">
                     ${blocked && html`<p class="warn">${blocked}</p>`}
-                    ${
-                        !blocked &&
-                        branches.changed > 0 &&
-                        html`<p class="muted">
-                            ${branches.changed} ${branches.changed === 1 ? "file has" : "files have"} uncommitted changes: they come along, unless the other branch changes them too.
-                        </p>`
-                    }
+                    ${!blocked && branches.changed > 0 && html`<p class="muted">${t("{{count}} file(s) have uncommitted changes: they come along, unless the other branch changes them too.", { count: branches.changed })}</p>`}
                     ${
                         branches.more > 0 &&
                         html`<p class="muted">
-                            ${`${branches.more.toLocaleString()} older branches are not listed.`}
+                            ${t("{{count}} older branches are not listed.", { count: branches.more.toLocaleString() })}
                         </p>`
                     }
                 </div>`
