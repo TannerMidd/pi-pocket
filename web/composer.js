@@ -24,10 +24,10 @@ import {
     typing,
     uid,
 } from "./store.js";
-import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { useDock } from "./dock.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
+import { prefs } from "./theme.js";
 import { formatBytes, formatTokens, html, Icon, Marked, modelLabel, Spinner } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
@@ -95,7 +95,7 @@ function queuedMode(item) {
         return names.length === 1 ? "Report" : "Reports";
     }
 
-    return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queued" : "Note";
+    return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queue" : "Note";
 }
 
 /** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
@@ -266,6 +266,11 @@ export function Composer() {
     const [searching, setSearching] = useState(false);
     const [inlineFiles, setInlineFiles] = useState(() => localStorage.getItem(INLINE_KEY) === "1");
     const box = useRef(null);
+    // The box as it comes and goes (taking the wheel shows it, with the draft in it): fitted to its text at once.
+    const [setBox] = useState(() => (element) => {
+        box.current = element;
+        fitBox(element);
+    });
     // What is above the message box, and how it shares the room with the conversation (`dock.js`).
     const dock = useRef(null);
     const picker = useRef(null);
@@ -322,16 +327,15 @@ export function Composer() {
             element.setSelectionRange(element.value.length, element.value.length);
         });
     }, [insert?.n]);
+    // Again when the text size changes (Appearance), which changes the lines' height.
     useEffect(() => {
-        const element = box.current;
+        const fit = () => fitBox(box.current);
 
-        if (!element) {
-            return;
-        }
+        fit();
+        addEventListener("resize", fit);
 
-        element.style.height = "auto";
-        element.style.height = `${Math.min(element.scrollHeight, innerHeight * 0.4)}px`;
-    }, [text]);
+        return () => removeEventListener("resize", fit);
+    }, [text, prefs().text]);
 
     const update = (value, at = value.length) => {
         setText(value);
@@ -817,10 +821,8 @@ export function Composer() {
     const placeholder = busy
         ? steer
             ? "Steer the current run…"
-            : "Queue a follow-up…"
-        : coarse
-          ? "Message Pi…"
-          : "Message Pi… (/ commands · @ files · ! shell)";
+            : "Queue a message for after this run…"
+        : "Ask Pi anything…";
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
@@ -881,12 +883,12 @@ export function Composer() {
                                 canSteer() &&
                                 (!blocked || item.by === me?.id) &&
                                 html`<button
-                                    class="icon-button small"
+                                    class="icon-button small queued-remove"
                                     aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
                                     title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
                                     onClick=${() => attempt(() => actions.withdraw(item.id))}
                                 >
-                                    <${Icon} name="close" size=${14} />
+                                    <${Icon} name="close" size=${13} />
                                 </button>`
                             }
                         </div>`,
@@ -905,13 +907,7 @@ export function Composer() {
                       busy &&
                       html`<div class="composer-row stop-only">
                           <span class="muted small grow">Pi is working…</span>
-                          <button
-                              class="round stop"
-                              aria-label="Stop"
-                              onClick=${() => attempt(actions.abort)}
-                          >
-                              <${Icon} name="stop" size=${16} />
-                          </button>
+                          <${StopButton} />
                       </div>`
                   }`
                 : html`${
@@ -1068,12 +1064,14 @@ export function Composer() {
                     </div>`
                 }
                 <div
-                    class="composer"
+                    class=${`composer ${busy ? "busy" : ""}`}
                     onClick=${(event) => {
-                        // The box is one target: a tap on its padding or between its buttons goes to the text.
+                        // The box is one target: a tap on its edge, around the files sent along, between its buttons,
+                        // or on Send with nothing to send (a disabled button takes no taps), goes to the text.
                         if (
                             event.target === event.currentTarget ||
-                            event.target.classList.contains("composer-row")
+                            event.target.classList.contains("composer-row") ||
+                            event.target.classList.contains("files")
                         ) {
                             box.current?.focus();
                         }
@@ -1113,7 +1111,7 @@ export function Composer() {
                         </div>`
                     }
                     <textarea
-                        ref=${box}
+                        ref=${setBox}
                         rows="1"
                         value=${text}
                         placeholder=${placeholder}
@@ -1131,11 +1129,12 @@ export function Composer() {
                     <div class="composer-row">
                         <${PlacesButton} />
                         <button
-                            class="icon-button"
+                            class="icon-button attach-button"
                             aria-label="Attach files"
+                            title="Attach files"
                             onClick=${() => picker.current?.click()}
                         >
-                            <${Icon} name="clip" />
+                            <${Icon} name="clip" size=${17} />
                         </button>
                         <input
                             ref=${picker}
@@ -1148,17 +1147,20 @@ export function Composer() {
                             }}
                         />
                         <button
-                            class=${`chip model-chip ${agent?.available === false ? "warn" : ""}`}
+                            class=${`model-chip ${agent?.available === false ? "warn" : ""}`}
+                            aria-label=${`Model: ${modelLabel(agent)}${level ? `, thinking ${level}` : ""}`}
+                            title=${`Model and thinking: ${modelLabel(agent)}${level ? `, ${level}` : ""}`}
                             onClick=${() => openSheet({ type: "model" })}
                         >
-                            <span class="glyph">✦</span> ${modelLabel(agent)}
-                            ${level && html`<span class="muted"> ${level}</span>`}
+                            <${Icon} name="sparkle" size=${12} class="model-spark" />
+                            <span class="model-name">${shortModel(agent)}</span>
+                            ${level && html`<span class="model-level">${level}</span>`}
                         </button>
                         ${
                             planAvailable() &&
                             view.conversation?.kind !== "subagent" &&
                             html`<button
-                                class=${`chip toggle ${view.plan?.on ? "on" : ""}`}
+                                class=${`chip toggle plan-chip ${view.plan?.on ? "on" : ""}`}
                                 title="Plan mode: Pi reads and proposes, and changes nothing until you approve"
                                 onClick=${() => attempt(() => actions.setPlan(!view.plan?.on))}
                             >
@@ -1167,45 +1169,93 @@ export function Composer() {
                         }
                         ${
                             busy &&
-                            html`<button
-                                class=${`chip toggle ${steer ? "on" : ""}`}
-                                onClick=${() => setSteer(!steer)}
-                                title="Steer joins the running work; off queues a follow-up"
+                            html`<div
+                                class="mode-switch"
+                                role="radiogroup"
+                                aria-label="Send as"
+                                onKeyDown=${(event) => {
+                                    // Arrows move between the two, as in any group of radio buttons.
+                                    if (/^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
+                                        const group = event.currentTarget;
+
+                                        event.preventDefault();
+                                        setSteer(!steer);
+                                        requestAnimationFrame(() =>
+                                            group.querySelector('[aria-checked="true"]')?.focus(),
+                                        );
+                                    }
+                                }}
                             >
-                                Steer
-                            </button>`
+                                ${[
+                                    [true, "Steer", "Pi reads it now, between steps"],
+                                    [false, "Queue", "Pi reads it when this run ends"],
+                                ].map(
+                                    ([value, label, tip]) => html`<button
+                                        role="radio"
+                                        aria-checked=${steer === value ? "true" : "false"}
+                                        tabindex=${steer === value ? "0" : "-1"}
+                                        class=${steer === value ? "on" : ""}
+                                        title=${tip}
+                                        onClick=${() => setSteer(value)}
+                                    >
+                                        ${label}
+                                    </button>`,
+                                )}
+                            </div>`
                         }
                         <span class="grow"></span>
-                        ${
-                            busy &&
-                            html`<button
-                                class="round stop"
-                                aria-label="Stop"
-                                onClick=${() => attempt(actions.abort)}
-                            >
-                                <${Icon} name="stop" size=${16} />
-                            </button>`
-                        }
-                        ${
-                            (!busy || text.trim() !== "" || files.length > 0) &&
-                            html`<button
-                                class="round send"
-                                aria-label="Send"
-                                disabled=${!canSend}
-                                onClick=${send}
-                            >
-                                ${
-                                    sending
-                                        ? html`<${Spinner} />`
-                                        : html`<${Icon} name="send" size=${18} />`
-                                }
-                            </button>`
-                        }
+                        ${busy && html`<${StopButton} />`}
+                        <button
+                            class=${`send-button ${canSend ? "ready" : ""}`}
+                            aria-label="Send"
+                            title=${coarse ? "Send" : "Send (Enter)"}
+                            disabled=${!canSend}
+                            onClick=${send}
+                        >
+                            ${
+                                sending
+                                    ? html`<${Spinner} />`
+                                    : html`<${Icon} name="send" size=${16} stroke=${2.4} />`
+                            }
+                        </button>
                     </div>
                 </div>`
         }
         <${StatusLine} />
     </footer>`;
+}
+
+/**
+ * The message box grows with what is written, to 40% of the screen; its least height (two lines, or one on a short
+ * screen) is the stylesheet's, and changes with the screen.
+ */
+function fitBox(element) {
+    if (!element) {
+        return;
+    }
+
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, innerHeight * 0.4)}px`;
+}
+
+/** A model's short name for the message box: "opus 4.5" for "Claude Opus 4.5". */
+const shortModel = (agent) =>
+    modelLabel(agent)
+        // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
+        .replace(/^[^:]{1,24}:\s*/, "")
+        .replace(/^(?:anthropic\s+)?claude\s+/i, "")
+        .toLowerCase();
+
+/** Stop the run: a square in the failure color. */
+function StopButton() {
+    return html`<button
+        class="stop-button"
+        aria-label="Stop"
+        title="Stop (Esc twice)"
+        onClick=${() => attempt(actions.abort)}
+    >
+        <span class="stop-square" aria-hidden="true"></span>
+    </button>`;
 }
 
 /**
@@ -1229,6 +1279,7 @@ function PlacesButton() {
     </button>`;
 }
 
+/** Under the message box: who is here, how full the context is, the cache, the spend, and Lancet Guard. */
 function StatusLine() {
     const { view, connection, guard } = store.state;
     const stats = view.stats ?? {};
@@ -1243,38 +1294,37 @@ function StatusLine() {
         );
     }
 
-    // The git branch, first as in an editor's status bar: a tap switches it.
-    if (view.branch) {
-        const label = html`<${Icon} name="fork" size=${11} />
-            <span>${headLabel(view.branch)}</span>`;
-
-        parts.push(
-            branchAvailable()
-                ? html`<button
-                      class="branch"
-                      title=${view.branch.detached ? "No branch: switch to one" : "Switch or make a branch"}
-                      onClick=${() => openSheet({ type: "branch" })}
-                  >
-                      ${label}
-                  </button>`
-                : html`<span class="branch" title="The git branch">${label}</span>`,
-        );
-    }
+    // People, not tabs: one person with a phone and a laptop open is one here (presence has a row per person).
+    const here = store.state.presence.length || view.viewers?.length || 1;
 
     parts.push(
-        html`<span title=${(view.viewers ?? []).join(", ")}>
-            ${view.clients} client${view.clients === 1 ? "" : "s"}
+        html`<span
+            title=${`${(view.viewers ?? []).join(", ")}${view.clients > here ? ` · ${view.clients} tabs` : ""}`}
+        >
+            ${here} here
         </span>`,
     );
 
-    if (stats.cacheRate !== undefined) {
-        parts.push(html`<span>cache ${Math.round(stats.cacheRate * 100)}%</span>`);
+    if (window) {
+        const used = stats.contextTokens ?? 0;
+        const percent = Math.min(100, Math.round((used / window) * 100));
+
+        parts.push(
+            html`<span
+                class="context"
+                title=${`${formatTokens(used)} of ${formatTokens(window)} tokens in context`}
+            >
+                context
+                <span class="meter" aria-hidden="true">
+                    <span style=${`width:${percent}%`}></span>
+                </span>
+                ${percent}%
+            </span>`,
+        );
     }
 
-    if (window) {
-        const percent = stats.contextTokens ? Math.round((stats.contextTokens / window) * 100) : 0;
-
-        parts.push(html`<span>${percent}%/${formatTokens(window)}</span>`);
+    if (stats.cacheRate !== undefined) {
+        parts.push(html`<span>cache ${Math.round(stats.cacheRate * 100)}%</span>`);
     }
 
     // The session's spend, its subagents' included, and its limit when it has one.
@@ -1289,41 +1339,20 @@ function StatusLine() {
     );
 
     // On but not loaded: the guard blocks bash, write, and edit until it loads or is turned off.
-    if (guard?.enabled && guard.available === false) {
+    const failed = guard?.enabled && guard.available === false;
+
+    if (guard?.enabled || guard?.available) {
         parts.push(
             html`<button
-                class="guard off"
+                class=${`guard ${guard.enabled && !failed ? "" : "off"}`}
                 title=${guard.detail}
                 onClick=${() => openSheet({ type: "extensions" })}
             >
-                <${Icon} name="shield" size=${11} /> guard failed
-            </button>`,
-        );
-    } else if (guard?.enabled) {
-        parts.push(
-            html`<button
-                class="guard"
-                title=${guard.detail}
-                onClick=${() => openSheet({ type: "extensions" })}
-            >
-                <${Icon} name="shield" size=${11} /> guard
-            </button>`,
-        );
-    } else if (guard?.available) {
-        parts.push(
-            html`<button
-                class="guard off"
-                title=${guard.detail}
-                onClick=${() => openSheet({ type: "extensions" })}
-            >
-                <${Icon} name="shield" size=${11} /> guard off
+                <${Icon} name="shield" size=${11} />
+                ${failed ? "guard failed" : guard.enabled ? "guard on" : "guard off"}
             </button>`,
         );
     }
 
-    return html`<div class="status-line">
-        ${parts.flatMap((part, index) =>
-            index === 0 ? [part] : [html`<span class="dot">·</span>`, part],
-        )}
-    </div>`;
+    return html`<div class="status-line">${parts}</div>`;
 }

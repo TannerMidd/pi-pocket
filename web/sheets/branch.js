@@ -1,5 +1,5 @@
 // The branch picker: the git branch this session's folder has checked out, and the others to switch to or make, in a
-// menu up from the branch in the bar under the message box.
+// menu down from the branch in the top bar.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, canSteer, closeSheet, notify, scoped, store } from "../store.js";
 import { anchorStyle, html, Icon, popAnchor, shortPath, timeAgo } from "../ui.js";
@@ -9,8 +9,8 @@ const coarsePointer = matchMedia("(pointer: coarse)").matches;
 /** The picker is for people who can steer, in a session whose folder is in a git repository. */
 export const branchAvailable = () => canSteer() && Boolean(store.state.view.branch);
 
-/** Where the picker opens: above the branch in the bar under the message box (`popAnchor`). */
-const branchAnchor = () => popAnchor(".status-line .branch");
+/** Where the picker opens: under the branch in the top bar (`popAnchor`), or above the message box without it. */
+const branchAnchor = () => popAnchor(".topbar button.title-branch") ?? popAnchor(".composer");
 
 /** What a folder has checked out, in a few characters: its branch, or the commit it is at. */
 export const headLabel = (head) => head?.branch ?? head?.detached ?? "";
@@ -60,7 +60,7 @@ function Track({ upstream }) {
 }
 
 /**
- * The branch picker: a menu up from the branch, with the folder's branches (the current one first and checked, then
+ * The branch picker: a menu down from the branch, with the folder's branches (the current one first and checked, then
  * the newest), the remote branches it has no local branch for, and, for a name typed that is not a branch yet, a new
  * branch made from what is checked out. Arrows and Enter pick, as in the model picker; `/branch fix` opens it already
  * searching.
@@ -258,7 +258,7 @@ export function BranchPicker() {
         onClick=${(event) => event.target === event.currentTarget && closeSheet()}
     >
         <section
-            class=${`pop-menu ${anchor ? "" : "free"}`}
+            class=${`pop-menu ${anchor ? (anchor.down ? "down" : "") : "free"}`}
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"

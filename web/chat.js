@@ -50,6 +50,8 @@ export function PeopleButton() {
     }
 
     const others = presence.filter((person) => person.id !== me?.id);
+    // The one shown: someone looking now, if anyone is.
+    const shown = others.find((person) => !person.away) ?? others[0];
     const unread = chatUnread();
     const docked = peopleDocked();
     const label =
@@ -57,9 +59,9 @@ export function PeopleButton() {
             ? "Chat"
             : `Chat with ${others.map((person) => person.name).join(", ")}`;
 
-    // Quiet on phones with no one else here and nothing unread: the menu has the chat.
+    // Quiet with no one else here and nothing unread, unless the panel is open: the menu has the chat.
     return html`<button
-        class=${`people-button badge-host ${docked ? "on" : ""} ${others.length === 0 && unread === 0 ? "quiet" : ""}`}
+        class=${`people-button badge-host ${docked ? "on" : ""} ${others.length === 0 && unread === 0 && !docked ? "quiet" : ""}`}
         aria-label=${label}
         aria-pressed=${docked}
         title=${label}
@@ -68,18 +70,14 @@ export function PeopleButton() {
         ${
             others.length === 0
                 ? html`<${Icon} name="chat" />`
-                : html`<span class="avatars">
-                    ${others
-                        .slice(0, 3)
-                        .map(
-                            (person) =>
-                                html`<${Avatar} key=${person.id} person=${person} size=${22} />`,
-                        )}
-                    ${
-                        others.length > 3 &&
-                        html`<span class="avatar more">+${others.length - 3}</span>`
-                    }
-                </span>`
+                : html`<span class="people-here">
+                      <${Avatar} person=${shown} size=${24} />
+                      <span
+                          class=${`online-mark ${shown.away ? "away" : ""}`}
+                          aria-hidden="true"
+                      ></span>
+                  </span>
+                  ${others.length > 1 && html`<span class="people-more">+${others.length - 1}</span>`}`
         }
         ${unread > 0 && html`<span class="badge">${unread}</span>`}
     </button>`;
@@ -133,10 +131,12 @@ export function jumpToEntry(entryId) {
     closeSheet();
     // A message above the rows the transcript shows: show from it down. The render runs before the next frame.
     revealEntry(entryId);
+    // An answer of only tool calls is a mark in a group of Pi's calls: the group opens (transcript.js).
+    document.dispatchEvent(new CustomEvent("pocket:reveal", { detail: entryId }));
     requestAnimationFrame(() => {
-        const element = document.getElementById(`entry-${entryId}`);
+        const found = document.getElementById(`entry-${entryId}`);
 
-        if (!element) {
+        if (!found) {
             notify(
                 "info",
                 "That message is in earlier history: use “Show earlier messages” at the top.",
@@ -144,6 +144,11 @@ export function jumpToEntry(entryId) {
 
             return;
         }
+
+        // The mark has no size: its group's line is what shows.
+        const element = found.classList.contains("entry-anchor")
+            ? (found.closest(".activity")?.querySelector(".activity-head") ?? found)
+            : found;
 
         element.scrollIntoView({ block: "center", behavior: "smooth" });
         element.classList.remove("flash");

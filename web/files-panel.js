@@ -1,6 +1,7 @@
 // The Files tile: the session's folder as a tree beside a file viewer, and Changes, a review of its uncommitted
 // changes. It docks beside the conversation where the Browser and People panels do (one of them at a time), and
-// covers the screen on phones. Alt+E, the top bar's folder button, the launcher, or /files show and hide it.
+// covers the screen on phones. Alt+E, the menu's Files tile, the launcher, or /files show it (and the top bar's folder
+// button while it is open, or Alt+E, hides it); the top bar's count of changes opens it on Changes.
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useBack } from "./back.js";
@@ -714,7 +715,7 @@ export function FilesPanel({ leaving = false }) {
     </section>`;
 }
 
-/** The top bar's button: shows and hides the tile, with a count of changed files. */
+/** The top bar's button while the tile is open: hides it. Closed, the tile opens from the menu's tiles and Alt+E. */
 export function FilesButton() {
     const { filesOpen } = store.state;
 
@@ -722,8 +723,9 @@ export function FilesButton() {
         return null;
     }
 
+    // Quiet while closed: the menu's tiles, Alt+E, and a swipe left on a phone open it.
     return html`<button
-        class=${`icon-button ${filesOpen ? "on" : ""}`}
+        class=${`icon-button ${filesOpen ? "on" : "quiet"}`}
         aria-label="Files"
         title="Files and changes (Alt+E)"
         onClick=${() => toggleFiles()}

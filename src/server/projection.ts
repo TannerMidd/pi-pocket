@@ -25,8 +25,17 @@ export type ClientBlock =
           clipped?: Record<string, number>;
       };
 
+/** `at`: when the message was made, by the server's clock (milliseconds), where the message says. */
 export type ClientEntry =
-    | { id: number; kind: "user"; text: string; images: number; from?: string; files?: string[] }
+    | {
+          id: number;
+          kind: "user";
+          text: string;
+          images: number;
+          from?: string;
+          files?: string[];
+          at?: number;
+      }
     | {
           id: number;
           kind: "assistant";
@@ -35,6 +44,7 @@ export type ClientEntry =
           error?: string;
           model?: string;
           provider?: string;
+          at?: number;
       }
     | {
           id: number;
@@ -43,6 +53,7 @@ export type ClientEntry =
           name: string;
           text: string;
           isError: boolean;
+          at?: number;
           details?: unknown;
           clipped?: number;
           /** Image parts in the result; browsers load them from `/api/c/:id/image/:entry/:index`. */
@@ -244,6 +255,13 @@ function projectDetails(details: unknown, full: boolean): unknown {
     return undefined;
 }
 
+/** When a message was made, as `{ at }`, or nothing when it does not say. */
+function madeAt(message: Record<string, unknown> | undefined): { at?: number } {
+    const at = message?.timestamp;
+
+    return typeof at === "number" && Number.isFinite(at) && at > 0 ? { at } : {};
+}
+
 /** One entry for the browser, or undefined for bookkeeping entries the UI does not show. */
 export function projectEntry(entry: EntryRecord, full = false): ClientEntry | undefined {
     const message = entry.model?.[0] as Record<string, unknown> | undefined;
@@ -271,7 +289,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
             const prefixed = FROM_PREFIX.exec(text);
 
             return prefixed === null
-                ? { id, kind: "user", text, images, ...named }
+                ? { id, kind: "user", text, images, ...named, ...madeAt(message) }
                 : {
                       id,
                       kind: "user",
@@ -279,6 +297,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                       images,
                       from: prefixed[1]!,
                       ...named,
+                      ...madeAt(message),
                   };
         }
 
@@ -297,6 +316,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                 ...(error === undefined ? {} : { error }),
                 ...(typeof message?.model === "string" ? { model: message.model } : {}),
                 ...(typeof message?.provider === "string" ? { provider: message.provider } : {}),
+                ...madeAt(message),
             };
         }
 
@@ -317,6 +337,7 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
                 ...(details === undefined ? {} : { details }),
                 ...(clipped === undefined ? {} : { clipped }),
                 ...(images === 0 ? {} : { images }),
+                ...madeAt(message),
             };
         }
 

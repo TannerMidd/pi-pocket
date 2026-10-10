@@ -11,12 +11,12 @@
  *
  *   Fonts, tokens, and the reset   the palette's variables, light themes, scrollbars, base elements
  *   Motion                         Hyprland's curves, reduced motion, the theme reveal
- *   Loaders                        the boot screen, the spinner, the thinking bar
+ *   Loaders                        the boot screen, the spinner
  *   Layout                         windows on a desktop, the sidebar's edge
  *   Top bar
- *   Transcript                     messages, arrivals, chevrons
- *   Tool cards
- *   Composer                       slash commands, file mentions, the message box, the bar under it
+ *   Transcript                     messages, Pi's replies, code blocks, answer actions, arrivals, chevrons
+ *   Tool cards                     what Pi did: activity groups and their timelines, approvals, the live line
+ *   Composer                       the queue, slash commands, file mentions, the message box, the bar under it
  *   Extensions                     extension cards, and the switch every sheet uses
  *   Sessions                       the sidebar: tabs, groups, rows, selection, its foot
  *   The rail, The home screen
@@ -380,10 +380,6 @@ kbd {
     transform: translate(calc(100% + 2px), 0);
 }
 
-:root[data-motion="reduced"] .thinking span:nth-child(-n + 3) {
-    background: var(--lit);
-}
-
 :root[data-motion="reduced"] .boot-bar span {
     width: 70%;
 }
@@ -540,65 +536,6 @@ kbd {
     padding: 0.6rem 0.1rem;
     font-size: 0.85rem;
     color: var(--muted);
-}
-
-/* Pi is thinking: a block sweeping across square cells, accent to spark. */
-.thinking {
-    display: flex;
-    gap: 3px;
-    padding: 0.45rem 0;
-    animation: fade var(--t-fade) var(--ease-almost);
-}
-
-.thinking span {
-    width: 7px;
-    height: 7px;
-    background: var(--line);
-    animation: sweep 1.3s infinite;
-}
-
-.thinking span:nth-child(1) {
-    --lit: var(--accent);
-    animation-delay: 0s;
-}
-.thinking span:nth-child(2) {
-    --lit: color-mix(in oklab, var(--accent) 86%, var(--spark));
-    animation-delay: 0.08s;
-}
-.thinking span:nth-child(3) {
-    --lit: color-mix(in oklab, var(--accent) 71%, var(--spark));
-    animation-delay: 0.16s;
-}
-.thinking span:nth-child(4) {
-    --lit: color-mix(in oklab, var(--accent) 57%, var(--spark));
-    animation-delay: 0.24s;
-}
-.thinking span:nth-child(5) {
-    --lit: color-mix(in oklab, var(--accent) 43%, var(--spark));
-    animation-delay: 0.32s;
-}
-.thinking span:nth-child(6) {
-    --lit: color-mix(in oklab, var(--accent) 29%, var(--spark));
-    animation-delay: 0.4s;
-}
-.thinking span:nth-child(7) {
-    --lit: color-mix(in oklab, var(--accent) 14%, var(--spark));
-    animation-delay: 0.48s;
-}
-.thinking span:nth-child(8) {
-    --lit: var(--spark);
-    animation-delay: 0.56s;
-}
-
-@keyframes sweep {
-    0%,
-    12% {
-        background: var(--lit);
-    }
-    36%,
-    100% {
-        background: var(--line);
-    }
 }
 
 /*
@@ -813,39 +750,59 @@ kbd {
 
 /* ─── Top bar ──────────────────────────────────────────────── */
 
+/* The session's title over its folder and branch, what changed, who is here, and the menu. */
 .topbar {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 0.25rem;
-    padding: calc(env(safe-area-inset-top) + 0.35rem) 0.4rem 0.35rem;
+    gap: 6px;
+    min-height: 52px;
+    padding: calc(env(safe-area-inset-top) + 4px) 8px 4px 16px;
     border-bottom: 1px solid var(--line);
     background: var(--bg);
 }
 
 /*
- * Below the sidebar's width the top bar leads back to the session list, each button a thumb wide. On phones it keeps
- * only the buttons with something to say (a page open, artifacts made, people here, peek tiles on): the menu's tiles
- * open the rest.
+ * The top bar keeps only the buttons with something to say (a page open, artifacts made, people here, peek tiles on,
+ * Files open): the menu's tiles open the rest.
+ */
+.topbar .quiet {
+    display: none;
+}
+
+/*
+ * On a phone a few more go to the places by the message box, which show the same (artifacts made, a page open): the
+ * top bar's buttons are a thumb wide each and must leave room for the title and the menu.
  */
 @media (max-width: 699px) {
-    .topbar .quiet {
+    .topbar .quiet-phone {
         display: none;
     }
 }
 
+/* Below the sidebar's width the top bar leads back to the session list, each button a thumb wide. */
 @media (max-width: 959px) {
     .topbar {
         gap: 0;
-        padding-left: 0.15rem;
+        padding-left: 4px;
     }
-    .topbar > .icon-button,
-    .topbar > .people-button {
+    /* Its way back says what the button would. */
+    .topbar .quiet-narrow {
+        display: none;
+    }
+    .topbar > .icon-button {
         width: 44px;
         min-width: 44px;
         height: 44px;
     }
+    /* As wide as who is here: an avatar, and how many more. */
+    .topbar > .people-button {
+        min-width: 44px;
+        height: 44px;
+    }
+    /* Over the title's button, whose box reaches a little under it. */
     .topbar-back {
+        z-index: 1;
         color: var(--text);
     }
     .topbar-back .badge {
@@ -854,40 +811,163 @@ kbd {
     }
 }
 
+/* The title and its line under it open the menu, all but the branch, which opens the branch picker. */
 .title {
+    position: relative;
     flex: 1;
     min-width: 0;
-    text-align: left;
-    padding: 0.15rem 0.35rem;
+    display: flex;
+    flex-direction: column;
+    padding: 2px 6px;
+    margin-left: -6px;
     transition: background-color var(--t-hover) var(--ease-out);
 }
 
-.title:hover {
+.title:has(> .title-open:hover) {
     background: var(--hover);
 }
 
+/* Over the whole title, under the branch. */
+.title-open {
+    position: absolute;
+    inset: 0;
+}
+
+.title-open:focus-visible {
+    outline-offset: -1px;
+}
+
 .title-main {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
     font-weight: 700;
+    font-size: 0.95rem;
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.title-main > span {
+/* The folder's color and last part, then the branch. */
+.title-sub {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    font-size: 0.72rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.title-sub > span {
+    flex: none;
+}
+
+.title-sub > .title-folder {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.title-sub {
-    font-size: 0.72rem;
-    color: var(--muted);
+.title-sub > .title-branch {
+    flex: 0 1 auto;
+    min-width: 2ch;
+    padding: 0 4px;
+    margin: 0 -4px;
+    font: inherit;
+    color: inherit;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+/* Over the title's button, which takes the taps around it. */
+.title-sub > button.title-branch {
+    position: relative;
+    z-index: 1;
+}
+
+.title-sub > button.title-branch:hover {
+    color: var(--accent);
+    background: var(--hover);
+}
+
+/*
+ * A thumb's height on a touch screen, with its look kept: the room around it takes the tap. The top bar is a little
+ * taller there, and the line under the title too, so that room stays in the top bar; it reaches the bottom of the
+ * title's line above the branch (its descenders), and the rest of the title opens the menu.
+ */
+@media (pointer: coarse) {
+    .topbar {
+        min-height: 56px;
+    }
+    .title {
+        padding-block: 0;
+    }
+    .title-sub {
+        min-height: 24px;
+    }
+    .title-sub > button.title-branch {
+        padding-block: 10px;
+        margin-block: -10px;
+    }
+}
+
+.title-sub > .folder-mark {
+    width: 7px;
+    height: 7px;
+    background: var(--folder, var(--accent));
+}
+
+.title-sub .faint {
+    color: var(--faint);
+}
+
+/* What changed in the session's folder: lines added and removed, and how many files. */
+.changes-button {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    font-size: 0.76rem;
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.changes-button:hover {
+    border-color: var(--line-strong);
+    background: var(--hover);
+}
+
+.changes-button .added {
+    color: var(--ok);
+}
+
+.changes-button .removed {
+    color: var(--err);
+}
+
+.changes-button .changes-files {
+    color: var(--muted);
+}
+
+@media (max-width: 959px) {
+    .changes-button {
+        margin-right: 4px;
+    }
+}
+
+/* A narrow phone: the counts of lines alone. */
+@media (max-width: 380px) {
+    .changes-button .changes-files {
+        display: none;
+    }
 }
 
 .icon-button {
@@ -958,19 +1038,30 @@ kbd {
     position: relative;
 }
 
+/* A column of turns: a person's message, what Pi did, Pi's reply, an approval, the live line. */
 .transcript {
-    max-width: 780px;
+    max-width: 744px;
     margin: 0 auto;
-    padding: 0.9rem 0.85rem 1.4rem;
+    padding: 28px 20px 32px;
     display: flex;
     flex-direction: column;
-    gap: 0.7rem;
+    gap: 14px;
     animation: rise-in 0.36s var(--ease-out);
 }
 
+/* Turns stand apart: 22px before each message or report (the gap's 14px and 8px more), 14px between the parts of one. */
+.transcript > :is(.user-row, .report, .report-group):not(:first-child) {
+    margin-top: 8px;
+}
+
+@media (max-width: 699px) {
+    .transcript {
+        padding: 20px 16px;
+    }
+}
+
 /* What arrives while the session is open slides up into place: a message sent, or Pi starting to answer. */
-.enter,
-.assistant.live {
+.enter {
     animation: rise-in 0.42s var(--ease-out) backwards;
 }
 
@@ -998,43 +1089,59 @@ kbd {
     align-items: center;
 }
 
-.user-row {
-    display: flex;
-    justify-content: flex-end;
-}
-
-.bubble {
-    background: var(--card-2);
-    border: 1px solid var(--line);
-    border-right: 2px solid var(--accent);
-    border-radius: var(--radius);
-    padding: 0.55rem 0.8rem;
+/* A person's message: a filled row with a prompt mark, who and when over what they wrote. Scoped to its row: the
+ * launcher's input has a `.prompt` of its own. */
+.user-row > .prompt {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 4px 10px;
+    padding: 10px 14px 12px;
+    background: var(--card);
     color: var(--text);
-    max-width: min(88%, 620px);
-    transition:
-        border-color var(--t-hover) var(--ease-out),
-        background-color var(--t-hover) var(--ease-out);
+    transition: background-color var(--t-hover) var(--ease-out);
 }
 
-.bubble.tappable {
+.user-row > .prompt.tappable {
     cursor: pointer;
 }
 
-.bubble.tappable:hover {
-    border-color: var(--line-strong);
-    border-right-color: var(--accent);
-    background: var(--raised);
+.user-row > .prompt.tappable:hover {
+    background: var(--card-2);
 }
 
-.author {
-    font-size: 0.68rem;
-    color: var(--accent);
-    margin-bottom: 0.1rem;
+.prompt-mark {
+    grid-row: span 2;
+    font-weight: 700;
+    line-height: 1.55;
+}
+
+.user-row > .prompt:not(:has(> .prompt-head)) > .prompt-mark {
+    grid-row: auto;
+}
+
+.prompt-head,
+.prompt-body {
+    grid-column: 2;
+    min-width: 0;
+}
+
+.prompt-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    font-size: 0.74rem;
+    color: var(--muted);
+}
+
+.prompt-author {
+    font-weight: 600;
+    color: var(--text);
 }
 
 .user-text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    text-wrap: pretty;
 }
 
 .attachments,
@@ -1045,11 +1152,37 @@ kbd {
     margin-top: 0.35rem;
 }
 
-.assistant {
+/* Pi's words: plain prose, a little apart. */
+.reply {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 10px;
     min-width: 0;
+    color: var(--body);
+    line-height: 1.65;
+}
+
+.reply > .md {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.reply > .md > *,
+.reply > .md > .md-part > * {
+    margin: 0;
+}
+
+.reply > .md :is(h1, h2, h3, h4) {
+    margin-top: 6px;
+}
+
+.reply > .md li + li {
+    margin-top: 4px;
+}
+
+.reply > .md p {
+    text-wrap: pretty;
 }
 
 .md {
@@ -1072,7 +1205,7 @@ kbd {
 
 .md ul,
 .md ol {
-    padding-left: 1.3rem;
+    padding-left: 1.4rem;
 }
 
 .md h1,
@@ -1089,27 +1222,11 @@ kbd {
     background: var(--card-2);
     color: var(--text);
     border-radius: var(--radius);
-    padding: 0.05rem 0.3rem;
+    padding: 1px 5px;
 }
 
 .md strong {
     color: var(--text);
-}
-
-.md pre {
-    margin: 0;
-    padding: 0.7rem 0.8rem;
-    overflow-x: auto;
-    background: var(--code-bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-}
-
-.md pre code {
-    background: none;
-    padding: 0;
-    font-size: 0.82rem;
-    color: var(--body);
 }
 
 /* A reply's own tables; a diff it shows draws its table itself. */
@@ -1135,36 +1252,69 @@ kbd {
     color: var(--muted);
 }
 
+/* A code block: a bar with its file or language and Copy, then the code. */
 .code {
     position: relative;
     margin: 0.5rem 0;
+    border: 1px solid var(--line);
+    background: var(--code-bg);
 }
 
-.code .copy {
-    position: absolute;
-    top: 0.35rem;
-    right: 0.35rem;
-    font-size: 0.7rem;
-    padding: 0.15rem 0.45rem;
-    border-radius: var(--radius);
-    background: var(--raised);
-    border: 1px solid var(--line-strong);
+.code-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 6px 0 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.74rem;
+    color: var(--muted);
+}
+
+.code-lang {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: lowercase;
+}
+
+.code-head .copy {
+    flex: none;
+    height: 22px;
+    margin-left: auto;
+    padding: 0 8px;
+    font-size: 0.72rem;
     color: var(--body);
-    opacity: 0.55;
     transition:
-        opacity var(--t-hover) var(--ease-out),
         color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
+        background-color var(--t-hover) var(--ease-out);
 }
 
-.code:hover .copy,
-.code .copy:focus-visible {
-    opacity: 1;
-}
-
-.code .copy:hover {
+.code-head .copy:hover {
     color: var(--accent);
-    border-color: var(--accent-line);
+    background: var(--hover);
+}
+
+.md pre {
+    margin: 0;
+    padding: 10px 12px;
+    overflow-x: auto;
+    background: var(--code-bg);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    line-height: 1.55;
+}
+
+.code pre {
+    background: none;
+}
+
+.md pre code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+    color: var(--body);
 }
 
 .md.streaming > :last-child:not(.md-part)::after {
@@ -1180,23 +1330,6 @@ kbd {
     }
 }
 
-.thought-head {
-    color: var(--muted);
-    font-size: 0.85rem;
-    display: inline-flex;
-    gap: 0.3rem;
-    align-items: center;
-    transition: color var(--t-hover) var(--ease-out);
-}
-
-.thought-head:hover {
-    color: var(--body);
-}
-
-.thought-head .icon:first-child {
-    color: var(--spark);
-}
-
 /* Chevrons turn instead of swapping: closed points right, open points down. */
 .chev {
     transition: transform var(--t-in) var(--ease-out);
@@ -1205,18 +1338,6 @@ kbd {
 .open > button > .chev,
 .chev.open {
     transform: rotate(90deg);
-}
-
-.thought-body {
-    white-space: pre-wrap;
-    color: var(--muted);
-    font-size: 0.85rem;
-    border-left: 2px solid var(--line);
-    padding: 0.2rem 0 0.2rem 0.7rem;
-    margin-top: 0.3rem;
-    max-height: 50vh;
-    overflow: auto;
-    animation: unroll var(--t-in) var(--ease-out);
 }
 
 /* A panel opening below its header: revealed from the top down. */
@@ -1230,145 +1351,379 @@ kbd {
     }
 }
 
-/* ─── Tool cards ───────────────────────────────────────────── */
-
-.tool {
-    position: relative;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--line-strong);
-    border-radius: var(--radius);
-    overflow: hidden;
-    transition:
-        border-color var(--t-border) var(--ease-out),
-        background-color var(--t-hover) var(--ease-out);
+/* Under Pi's answers: reactions, then React, Discuss, Pin, Copy, and More. */
+.answer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-height: 28px;
+    line-height: 1.6;
 }
 
-.tool:hover {
+.reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    font-size: 0.74rem;
+    color: var(--body);
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.reaction:hover {
     border-color: var(--line-strong);
 }
 
-/* A call at work: its left edge takes the accent. The spinner in its header is the one thing that moves. */
-.tool.running,
-.tool.pending {
-    border-left-color: var(--accent);
+.reaction.mine {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
 }
 
-/* Just finished: the card flashes its success color once. */
-.tool.settled {
-    animation: settle 0.9s var(--ease-out);
+.answer-actions > button.answer-tool,
+.reaction.add {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    font-size: 0.74rem;
+    color: var(--muted);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out),
+        opacity var(--t-fade) var(--ease-out);
 }
 
-@keyframes settle {
-    from {
-        background-color: color-mix(in srgb, var(--ok) 14%, var(--card));
+.answer-actions > button.answer-tool:hover,
+.reaction.add:hover {
+    color: var(--text);
+    background: var(--hover);
+}
+
+/* With a mouse they show while the reply is hovered; touch screens always show them. */
+@media (hover: hover) and (pointer: fine) {
+    .reply .answer-actions > .answer-tool {
+        opacity: 0;
+        transition: opacity var(--t-fade) var(--ease-out);
+    }
+    .reply:hover .answer-actions > .answer-tool,
+    .answer-actions:focus-within > .answer-tool,
+    .answer-actions.picking > .answer-tool {
+        opacity: 1;
     }
 }
 
-.tool.done {
-    border-left-color: var(--ok);
+.reaction-host {
+    position: relative;
+    display: inline-flex;
 }
 
-.tool.error {
-    border-color: var(--err-line);
-    border-left-color: var(--err);
+.reaction-picker {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    z-index: 5;
+    display: flex;
+    gap: 0.1rem;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    padding: 0.2rem;
 }
 
-.tool.approval {
-    border-color: var(--warn-line);
-    border-left-color: var(--warn);
+.reaction-picker button {
+    font-size: 1.1rem;
+    padding: 0.15rem 0.3rem;
 }
 
-.tool-head {
+.reaction-picker button:hover {
+    background: var(--card);
+}
+
+/* ─── Tool cards ───────────────────────────────────────────── */
+
+/* What Pi did between its words: one line ("Read 2 files, ran 1 command · 18s") that opens into a timeline. */
+.activity {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.entry-anchor {
+    display: block;
+    height: 0;
+}
+
+/* One between rows takes no room: the gap before it is taken back. */
+.entry-mark {
+    margin-top: -14px;
+}
+
+.activity-head {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    padding: 0.5rem 0.65rem;
+    gap: 8px;
+    min-height: 30px;
+    padding: 2px 8px 2px 2px;
     text-align: left;
-    min-height: 40px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
 }
 
-.tool-icon {
-    font-family: var(--mono);
-    font-size: 0.78rem;
-    color: var(--accent);
-    width: 1.3rem;
-    text-align: center;
-    flex: none;
-}
-
-.tool-label {
-    font-weight: 700;
-    font-size: 0.82rem;
+.activity-head:hover {
     color: var(--text);
-    flex: none;
+    background: var(--hover);
 }
 
-.tool-subject {
+.activity-summary {
     flex: 1;
     min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--muted);
-    font-size: 0.82rem;
 }
 
-.tool-status {
+.activity-time {
     flex: none;
-    font-size: 0.8rem;
-    color: var(--ok);
-    display: inline-grid;
-    place-items: center;
-    width: 1.1rem;
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
 }
 
-.tool.error .tool-status {
-    color: var(--err);
-    font-weight: 700;
+.activity-time.live {
+    color: var(--accent);
 }
 
-.tool.approval .tool-status {
-    color: var(--warn);
+/* The timeline: a line per call, each with its node on a thin rule. */
+.timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 4px 0 0 8px;
+    border-left: 1px solid var(--line);
+    animation: unroll var(--t-in) var(--ease-out);
 }
 
-.tool-chevron {
-    color: var(--muted);
+.step {
+    position: relative;
+    min-width: 0;
+    padding-left: 14px;
 }
 
-.tool-head {
+.step-node {
+    position: absolute;
+    left: -3px;
+    top: 13px;
+    width: 5px;
+    height: 5px;
+    background: color-mix(in srgb, var(--ok) 40%, var(--bg));
+    transition: background-color var(--t-border) var(--ease-out);
+}
+
+.step[data-status="running"] > .step-node {
+    background: var(--accent);
+}
+
+.step[data-status="approval"] > .step-node {
+    background: var(--warn);
+}
+
+.step[data-status="error"] > .step-node {
+    background: var(--err);
+}
+
+.step:is([data-status="denied"], [data-status="stopped"]) > .step-node {
+    background: var(--line-strong);
+}
+
+.step-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.step-head {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 3px 8px;
+    text-align: left;
     transition: background-color var(--t-hover) var(--ease-out);
 }
 
-.tool-head:hover {
+.step-head:hover {
     background: var(--hover);
 }
 
-.tool-head:hover .tool-chevron {
-    color: var(--text);
+/* Just finished: the line flashes its success color once. */
+.step.settled > .step-line > .step-head {
+    animation: settle 0.9s var(--ease-out);
 }
 
-.tool-body {
-    border-top: 1px solid var(--line);
-    padding: 0.5rem 0.65rem 0.65rem;
+@keyframes settle {
+    from {
+        background-color: color-mix(in srgb, var(--ok) 14%, transparent);
+    }
+}
+
+.step-glyph {
+    flex: none;
+    width: 14px;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.step-glyph.thought {
+    color: var(--spark);
+}
+
+/* Light themes' magenta can be faint as text on their ground: toward the foreground, as code's colors are. */
+:root[data-mode="light"] .step-glyph.thought {
+    color: color-mix(in oklab, var(--spark) 60%, var(--o-fg));
+}
+
+.step-glyph.agent {
+    color: var(--accent);
+}
+
+.step-label {
+    flex: none;
+    max-width: 45%;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.step-subject {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.step-meta {
+    flex: none;
+    max-width: 40%;
+    font-size: 0.74rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+}
+
+.step-meta.ok {
+    color: var(--ok);
+}
+
+.step-meta.warn {
+    color: var(--warn);
+}
+
+.step-meta.err {
+    color: var(--err);
+}
+
+/* A subagent's line goes to it. */
+.step-open {
+    flex: none;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 0.74rem;
+    color: var(--accent);
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.step-open:hover {
+    background: var(--hover);
+}
+
+/* Who allowed or denied a call Lancet Guard asked about. */
+.step-decision {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px 6px 30px;
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+/* Under a line, past its glyph: what the call made, and once tapped, its input and output. */
+.step-extras,
+.step-body {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 6px;
+    min-width: 0;
+    margin: 2px 8px 8px 30px;
+}
+
+.step-extras + .step-body {
+    margin-top: 0;
+}
+
+.step-body {
     animation: unroll var(--t-in) var(--ease-out);
+}
+
+.step-extras > .thumbs {
+    margin-top: 0;
+}
+
+.step-extras > .artifact-preview {
+    max-width: min(100%, 420px);
+}
+
+.step-extras > .artifact-preview img {
+    max-height: 240px;
+}
+
+.thought-body {
+    max-height: 50vh;
+    overflow: auto;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    background: var(--code-bg);
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--muted);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .tool-note {
     white-space: pre-wrap;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: var(--muted);
+}
+
+.step-body .dv-block {
+    font-size: 0.76rem;
+    line-height: 1.6;
 }
 
 pre.output,
 pre.cmd,
 pre.diff {
     margin: 0;
-    font: 0.78rem/1.45 var(--mono);
+    font: 0.76rem/1.5 var(--mono);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     max-height: 45vh;
@@ -1376,7 +1731,7 @@ pre.diff {
     background: var(--code-bg);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 0.5rem 0.6rem;
+    padding: 8px 10px;
     color: var(--body);
 }
 
@@ -1396,23 +1751,22 @@ pre.diff .del {
     color: var(--err);
 }
 
+/* An artifact a call made, or the browser it used: a way there. */
 .artifact-link {
-    display: block;
-    width: 100%;
+    align-self: flex-start;
+    max-width: 100%;
+    min-height: 30px;
+    padding: 0 8px;
+    margin-left: -8px;
     text-align: left;
+    font-size: 0.76rem;
     color: var(--accent);
-    font-size: 0.84rem;
-    padding: 0.45rem 0.7rem;
-    border-top: 1px solid var(--line);
-    background: var(--accent-soft);
-    transition:
-        background-color var(--t-hover) var(--ease-out),
-        padding var(--t-in) var(--ease-out);
+    overflow-wrap: anywhere;
+    transition: background-color var(--t-hover) var(--ease-out);
 }
 
 .artifact-link:hover {
-    background: color-mix(in srgb, var(--o-accent) 22%, transparent);
-    padding-left: 0.95rem;
+    background: var(--hover);
 }
 
 .report {
@@ -1455,43 +1809,93 @@ pre.diff .del {
     overflow-wrap: anywhere;
 }
 
+/* Lancet Guard asks before a call: at the end of the turn, until someone answers. */
 .approval {
-    border: 2px solid var(--warn);
-    background: var(--warn-soft);
-    border-radius: var(--radius);
-    padding: 0.7rem 0.8rem;
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
-    animation:
-        popin var(--t-in) var(--ease-out),
-        asking 2.2s var(--ease-in-out) var(--t-in) infinite;
-}
-
-/* Waiting for someone: the border breathes. */
-@keyframes asking {
-    50% {
-        border-color: var(--warn-line);
-    }
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--warn-line);
+    border-left: 2px solid var(--warn);
+    background: var(--warn-soft);
+    animation: popin var(--t-in) var(--ease-out);
 }
 
 .approval-head {
-    font-weight: 600;
     display: flex;
-    gap: 0.4rem;
     align-items: center;
+    gap: 8px;
+    font-size: 0.86rem;
+    font-weight: 600;
     color: var(--warn);
 }
 
 .approval-reason {
-    font-size: 0.85rem;
-    color: var(--muted);
+    font-size: 0.8rem;
+    color: var(--body);
+}
+
+.approval pre.cmd {
+    font-size: 0.8rem;
 }
 
 .approval-actions {
     display: flex;
-    gap: 0.5rem;
     justify-content: flex-end;
+    gap: 8px;
+}
+
+.approval-actions .button {
+    height: 32px;
+    padding: 0 14px;
+    font-size: 0.84rem;
+}
+
+.approval-actions .button.deny:hover {
+    border-color: var(--err);
+    color: var(--err);
+}
+
+/* The live turn's last line: what Pi does now, for how long, and how to stop it. */
+.live-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 2px 2px 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    animation: fade var(--t-fade) var(--ease-almost);
+}
+
+.live-state {
+    flex: none;
+    color: var(--body);
+}
+
+.live-line.waiting .live-state {
+    color: var(--warn);
+}
+
+.live-wait {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    background: var(--warn);
+}
+
+.live-why {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.live-esc {
+    flex: none;
+    margin-left: auto;
+    color: var(--faint);
 }
 
 .error-box {
@@ -1523,8 +1927,12 @@ pre.diff .del {
 .history {
     display: flex;
     flex-direction: column;
-    gap: 0.7rem;
+    gap: 14px;
     opacity: 0.75;
+}
+
+.history > :is(.user-row, .report, .report-group):not(:first-child) {
+    margin-top: 8px;
 }
 
 .pulse {
@@ -1575,10 +1983,16 @@ pre.diff .del {
 /* ─── Composer ─────────────────────────────────────────────── */
 
 .composer-wrap {
-    padding: 0.35rem 0.6rem calc(env(safe-area-inset-bottom) + 0.25rem);
-    max-width: 800px;
+    padding: 6px 20px calc(env(safe-area-inset-bottom) + 10px);
+    max-width: 784px;
     width: 100%;
     margin: 0 auto;
+}
+
+@media (max-width: 699px) {
+    .composer-wrap {
+        padding-inline: 12px;
+    }
 }
 
 /*
@@ -1641,23 +2055,23 @@ pre.diff .del {
 .inbox {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
-    margin-bottom: 0.35rem;
+    gap: 6px;
+    margin-bottom: 6px;
     max-height: min(28vh, 12rem);
     overflow-y: auto;
     overscroll-behavior: contain;
 }
 
+/* A message waiting for Pi: Steer or Queue, what it says, and a way to take it back. */
 .queued {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 8px;
+    min-height: 32px;
+    padding: 0 4px 0 10px;
     background: var(--card);
-    border: 1px solid var(--line);
     border-left: 2px solid var(--accent);
-    border-radius: var(--radius);
-    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
 }
 
 .queued-mode {
@@ -1669,9 +2083,16 @@ pre.diff .del {
 .queued-text {
     flex: 1;
     min-width: 0;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.queued .queued-remove {
+    width: 26px;
+    height: 26px;
+    color: var(--muted);
 }
 
 /* Slash commands: suggestions while typing a name, then a hint for the one that will run. */
@@ -1777,53 +2198,125 @@ pre.diff .del {
     text-overflow: ellipsis;
 }
 
-/* The message box is a small window: its border lights up, the way Hyprland's does, when it takes focus. */
+/* The message box: a quiet card whose border takes the accent while it has the focus. */
 .composer {
     position: relative;
     background: var(--card);
-    border: 2px solid var(--line);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 0.4rem 0.4rem 0.35rem;
-    transition: background-color var(--t-border) var(--ease-out);
-}
-
-.composer::after {
-    content: "";
-    position: absolute;
-    inset: -2px;
-    border: 2px solid transparent;
-    border-image: var(--active) 1;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--t-border) var(--ease-out);
+    transition: border-color var(--t-border) var(--ease-out);
 }
 
 .composer:focus-within {
-    background: var(--bg);
-}
-
-.composer:focus-within::after {
-    opacity: 1;
+    border-color: var(--accent);
 }
 
 .composer .files {
-    margin: 0 0.3rem 0.35rem;
+    margin: 0;
+    padding: 8px 12px 0;
 }
 
+/* Two lines to start with, growing as today; one on a short screen, where the conversation needs the room. */
 .composer textarea {
+    display: block;
     border: 0;
+    outline: none;
     background: none;
     color: var(--text);
     resize: none;
-    padding: 0.35rem 0.5rem;
+    padding: 10px 12px 2px;
+    min-height: calc(3em + 12px);
     max-height: 40vh;
-    line-height: 1.45;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+@media (max-height: 640px) {
+    .composer textarea {
+        min-height: 0;
+    }
+}
+
+/* Touch screens keep 16px, below which iOS zooms into the field. */
+@media (pointer: coarse) {
+    .composer textarea {
+        font-size: 16px;
+    }
+    /* The status line's own room below it is enough. */
+    .composer-wrap {
+        padding-bottom: calc(env(safe-area-inset-bottom) + 2px);
+    }
 }
 
 .composer-row {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 4px;
+    padding: 4px 6px 6px;
+}
+
+.composer-row .attach-button {
+    width: 32px;
+    height: 32px;
+    color: var(--muted);
+}
+
+/* The model and its thinking level: opens the model menu. */
+.model-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 28px;
+    padding: 0 9px;
+    font-size: 0.76rem;
+    color: var(--body);
+    white-space: nowrap;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.model-chip:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+
+.model-chip .model-spark {
+    color: var(--accent);
+}
+
+.model-chip .model-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.model-chip .model-level {
+    color: var(--muted);
+}
+
+.model-chip.warn {
+    color: var(--warn);
+}
+
+/* Below about 360px the model's short name alone; on a phone, while Steer and Queue take room, too. */
+@media (max-width: 359px) {
+    .model-chip .model-level {
+        display: none;
+    }
+}
+
+@media (max-width: 439px) {
+    .composer.busy .model-chip .model-level {
+        display: none;
+    }
+}
+
+@media (max-width: 379px) {
+    .composer.busy .model-chip .model-spark {
+        display: none;
+    }
 }
 
 .chip {
@@ -1850,20 +2343,115 @@ button.chip:hover {
     color: var(--text);
 }
 
-.model-chip .glyph {
-    color: var(--accent);
-}
-
-.model-chip.warn {
-    border-color: var(--warn);
-}
-
 .chip.toggle.on {
     color: var(--accent);
     border-color: var(--accent-line);
     background: var(--accent-soft);
 }
 
+.composer-row .plan-chip {
+    flex: none;
+    height: 26px;
+    padding: 0 9px;
+    font-size: 0.74rem;
+    background: none;
+    color: var(--muted);
+}
+
+.composer-row .plan-chip.on {
+    color: var(--accent);
+}
+
+/* While Pi works: whether a message steers the run or waits for its end. */
+.mode-switch {
+    flex: none;
+    display: flex;
+    height: 26px;
+    border: 1px solid var(--line);
+}
+
+.mode-switch button {
+    padding: 0 9px;
+    font-size: 0.74rem;
+    color: var(--muted);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.mode-switch button:hover {
+    color: var(--text);
+}
+
+.mode-switch button.on {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.stop-button,
+.send-button {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out),
+        transform 90ms var(--ease-out);
+}
+
+.stop-button:active,
+.send-button:active:not(:disabled) {
+    transform: scale(0.92);
+}
+
+.stop-button {
+    background: var(--card-2);
+    border: 1px solid var(--line-strong);
+}
+
+.stop-button:hover {
+    border-color: var(--err);
+}
+
+.stop-square {
+    width: 12px;
+    height: 12px;
+    background: var(--err);
+}
+
+/* Send: the accent with something to send, quiet without; then a tap on it goes to the text (composer.js). */
+.send-button {
+    background: var(--card-2);
+    color: var(--faint);
+    cursor: default;
+}
+
+.send-button:disabled {
+    pointer-events: none;
+}
+
+.send-button.ready {
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    cursor: pointer;
+}
+
+.send-button.ready:hover {
+    background: color-mix(in oklab, var(--accent-fill) 85%, var(--o-fg-bright));
+}
+
+.send-button.ready .icon {
+    transition: transform var(--t-in) var(--ease-out);
+}
+
+.send-button.ready:hover .icon {
+    transform: translateY(-2px);
+}
+
+/* Square buttons elsewhere: the chat's send. */
 .round {
     width: 36px;
     height: 36px;
@@ -1905,63 +2493,46 @@ button.chip:hover {
     cursor: default;
 }
 
-.round.stop {
-    background: var(--err);
-    color: var(--accent-ink);
-}
-
-.round.stop:hover {
-    background: color-mix(in oklab, var(--err) 85%, var(--o-fg-bright));
-}
-
-/* Under the message box, Waybar-like: small modules side by side. */
+/* Under the message box: who is here, the context, the cache, the spend, and Lancet Guard. */
 .status-line {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     justify-content: center;
-    gap: 0.3rem;
-    font: 0.7rem var(--mono);
+    gap: 4px 12px;
+    padding-top: 6px;
+    font: 0.72rem var(--mono);
     color: var(--muted);
-    padding: 0.35rem 0 0.1rem;
     font-variant-numeric: tabular-nums;
 }
 
-.status-line .dot {
-    opacity: 0.6;
-    color: var(--faint);
+.status-line .context {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-line .meter {
+    display: inline-flex;
+    width: 36px;
+    height: 4px;
+    background: var(--line);
+}
+
+.status-line .meter > span {
+    background: var(--accent);
 }
 
 .status-line .guard {
     display: inline-flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: 4px;
     color: var(--ok);
     font: inherit;
 }
 
 .status-line .guard.off {
     color: var(--warn);
-}
-
-/* The git branch: a tap opens the branch picker. A long name gives way to the rest of the bar. */
-.status-line .branch {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    max-width: 24ch;
-    font: inherit;
-    color: var(--muted);
-    transition: color var(--t-hover) var(--ease-out);
-}
-
-.status-line .branch > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.status-line button.branch:hover {
-    color: var(--accent);
 }
 
 /* ─── Extensions ───────────────────────────────────────────── */
@@ -3236,6 +3807,29 @@ button.chip:hover {
     }
 }
 
+/* A menu down from a control near the top (the branch in the top bar): it comes and goes from above. */
+.pop-menu.down {
+    animation-name: pop-menu-down;
+}
+
+.leaving .pop-menu.down {
+    animation: pop-menu-up var(--t-out) linear forwards;
+}
+
+@keyframes pop-menu-down {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+}
+
+@keyframes pop-menu-up {
+    to {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+}
+
 .pop-menu-head {
     display: flex;
     align-items: center;
@@ -3888,12 +4482,8 @@ button.chip:hover {
     margin-top: 0.4rem;
 }
 
-.bubble > .thumbs:first-child {
+.prompt-body > .thumbs:first-child {
     margin-top: 0;
-}
-
-.author + .thumbs {
-    margin-top: 0.2rem;
 }
 
 .thumb {
@@ -3920,12 +4510,6 @@ button.chip:hover {
     height: auto;
     max-height: 320px;
     object-fit: contain;
-}
-
-.tool > .thumbs {
-    padding: 0.45rem 0.7rem;
-    margin: 0;
-    border-top: 1px solid var(--line);
 }
 
 .md img {
@@ -3960,7 +4544,7 @@ button.chip:hover {
     display: block;
     width: 100%;
     padding: 0.5rem;
-    border-top: 1px solid var(--line);
+    border: 1px solid var(--line);
     background: #fff;
     cursor: zoom-in;
 }
@@ -4181,29 +4765,48 @@ body.plain-page {
 
 /* ─── People: who is here, typing, and the side chat ───────── */
 
+/* Who else is here, in the top bar: an avatar with an online mark, and how many more. */
 .people-button {
     height: 40px;
     min-width: 40px;
-    padding: 0 0.3rem;
+    padding: 0 8px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     position: relative;
     flex: none;
     color: var(--body);
+    transition: background-color var(--t-hover) var(--ease-out);
 }
 
 .people-button:hover {
-    background: var(--card);
+    background: var(--hover);
     color: var(--text);
 }
 
-.avatars {
-    display: inline-flex;
+.people-here {
+    position: relative;
+    display: inline-grid;
 }
 
-.avatars .avatar + .avatar {
-    margin-left: -6px;
+.online-mark {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 6px;
+    height: 6px;
+    background: var(--ok);
+    border: 1px solid var(--bg);
+}
+
+.online-mark.away {
+    background: var(--faint);
+}
+
+.people-more {
+    font-size: 0.72rem;
+    color: var(--muted);
 }
 
 .avatar {
@@ -4217,12 +4820,6 @@ body.plain-page {
     font-weight: 700;
     line-height: 1;
     letter-spacing: 0;
-}
-
-.avatar.more {
-    --who: var(--muted);
-    width: 22px;
-    height: 22px;
 }
 
 .avatar.typing {
@@ -4532,82 +5129,6 @@ textarea.notes {
     line-height: 1.5;
 }
 
-.answer-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem 0.7rem;
-    margin-top: 0.35rem;
-}
-
-.reaction {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    border: 1px solid var(--line);
-    background: var(--card);
-    padding: 0.05rem 0.45rem;
-    font-size: 0.8rem;
-    line-height: 1.5;
-}
-
-.reaction.mine {
-    border-color: var(--accent-line);
-    background: var(--accent-soft);
-}
-
-.reaction span {
-    font-size: 0.72rem;
-    color: var(--muted);
-}
-
-.reaction.add {
-    color: var(--muted);
-    font-size: 0.72rem;
-}
-
-.reaction-host {
-    position: relative;
-    display: inline-flex;
-}
-
-.reaction-picker {
-    position: absolute;
-    bottom: calc(100% + 4px);
-    left: 0;
-    z-index: 5;
-    display: flex;
-    gap: 0.1rem;
-    background: var(--panel);
-    border: 1px solid var(--line-strong);
-    padding: 0.2rem;
-}
-
-.reaction-picker button {
-    font-size: 1.1rem;
-    padding: 0.15rem 0.3rem;
-}
-
-.reaction-picker button:hover {
-    background: var(--card);
-}
-
-.decision {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.72rem;
-    padding: 0.1rem 0.6rem 0.3rem;
-}
-
-.decision.allowed {
-    color: var(--ok);
-}
-
-.decision.denied {
-    color: var(--err);
-}
-
 /* Bars above the message box: who drives (take turns), plan mode, a goal, and project trust. The left edge says which:
    the accent for plan mode and a goal, the warning color for a question (who drives, whether to trust). */
 .driver-bar,
@@ -4699,7 +5220,7 @@ textarea.notes {
 }
 
 .composer-row.stop-only {
-    padding: 0.2rem 0;
+    padding: 4px 6px;
 }
 
 .unread-dot {
@@ -7432,30 +7953,7 @@ textarea.notes {
     animation: blink 1s steps(2) infinite;
 }
 
-/* A code block's bar: its language, what it can show, and Copy. */
-.code-head {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    min-height: 1.9rem;
-    padding: 0.15rem 0.3rem 0.15rem 0.7rem;
-    background: var(--card-2);
-    border: 1px solid var(--line);
-    border-bottom: 0;
-    font: 0.72rem var(--mono);
-    color: var(--muted);
-}
-
-.code-lang {
-    text-transform: lowercase;
-}
-
-.code-head .copy {
-    position: static;
-    margin-left: auto;
-    opacity: 0.8;
-}
-
+/* A code block that shows more than code: its bar also has what it can show, and Run. */
 .rich-tabs {
     display: inline-flex;
     margin-left: 0.4rem;
@@ -7505,6 +8003,11 @@ textarea.notes {
     background: #fff;
 }
 
+/* Inside a code block's frame, its own border is the frame's. */
+.code > :is(.html-preview, .run-frame, .rich-svg, .rich-note) {
+    border: 0;
+}
+
 .rich-svg {
     display: block;
     max-width: 100%;
@@ -7536,8 +8039,7 @@ textarea.notes {
     display: block;
     width: 100%;
     padding: 0.3rem;
-    border: 1px solid var(--line);
-    border-top: 0;
+    border-top: 1px solid var(--line);
     background: var(--card);
     color: var(--accent);
     font: 0.74rem var(--mono);
@@ -7661,7 +8163,7 @@ textarea.notes {
     display: none !important;
 }
 
-/* Phones: the places, beside the message box where a thumb reaches (composer.js). Elsewhere the top bar has them. */
+/* Phones: the places, beside the message box where a thumb reaches (composer.js). Elsewhere the menu has them. */
 .composer-row .places-button {
     display: none;
 }
@@ -7669,21 +8171,21 @@ textarea.notes {
 @media (max-width: 699px) {
     .composer-row .places-button {
         display: inline-grid;
-        width: 40px;
-        height: 40px;
-        margin-left: -0.25rem;
+        width: 36px;
+        height: 36px;
+        color: var(--muted);
     }
     .composer-row .places-button .browser-dot {
-        top: 7px;
-        right: 7px;
+        top: 6px;
+        right: 6px;
     }
-    /* Room for it: the model's name gives way first, and the thinking level shows on the model picker. */
+    /* Room for it: the model's name gives way first. */
     .composer-row .model-chip {
-        min-width: 0;
-        overflow: hidden;
-        white-space: nowrap;
+        flex: 0 1 auto;
+        padding-inline: 6px;
     }
-    .composer-row .model-chip .muted {
+    /* While Pi works, Steer and Queue take the plan chip's place (`/plan` still turns plan mode on or off). */
+    .composer.busy .plan-chip {
         display: none;
     }
 }
@@ -7962,8 +8464,42 @@ textarea.notes {
     .search .icon-button.small::before {
         content: none;
     }
-    .composer-row .chip {
+    .composer-row .chip,
+    .composer-row .model-chip,
+    .composer-row .mode-switch {
         min-height: 36px;
+    }
+    .composer-row .attach-button,
+    .composer-row .stop-button,
+    .composer-row .send-button {
+        width: 36px;
+        height: 36px;
+    }
+    /* Kept small to fit one line on a phone; a layer past each takes a tap about 40px wide and tall. */
+    .composer-row :is(.places-button, .attach-button, .stop-button, .send-button) {
+        position: relative;
+    }
+    .composer-row :is(.places-button, .attach-button, .stop-button, .send-button)::before {
+        content: "";
+        position: absolute;
+        inset: -4px -2px;
+    }
+    /* Steer and Queue too, taller only: side by side, their layers must not take each other's taps. */
+    .mode-switch button {
+        position: relative;
+    }
+    .mode-switch button::before {
+        content: "";
+        position: absolute;
+        inset: -4px 0;
+    }
+    /* A group's line and a call's line, a little taller for a thumb. */
+    .activity-head,
+    .step-head {
+        min-height: 36px;
+    }
+    .step-node {
+        top: 16px;
     }
     .browser-servers .chip,
     .dr-tools .chip {
@@ -7996,14 +8532,22 @@ textarea.notes {
     .check {
         min-height: 40px;
     }
-    /* Boxed ones (Copy, tabs, Run, a reaction) keep their box; an invisible layer past it takes the tap. */
+    /* Boxed ones (Copy, tabs, Run, a reaction, the top bar's changes) keep their box; an invisible layer past it
+     * takes the tap. */
     .code-head .copy,
     .rich-tabs button,
     .rich-run,
-    .answer-actions .reaction {
+    .answer-actions .reaction,
+    .changes-button {
         position: relative;
         /* Above what follows (a preview's frame), so the layer past the box takes the tap there too. */
         z-index: 1;
+    }
+    /* Taller only: its neighbours touch it, and must keep their own edges. */
+    .changes-button::after {
+        content: "";
+        position: absolute;
+        inset: -8px 0;
     }
     /* Over them, as they scroll by: the way to the bottom keeps its taps. */
     .jump {
@@ -8017,15 +8561,18 @@ textarea.notes {
         position: absolute;
         inset: -12px -2px;
     }
-    /* The status line's branch sits low: room below it, so its hit area stays on the screen, and above the message
+    /* The status line's guard sits low: room below it, so its hit area stays on the screen, and above the message
      * box's bottom edge, which its hit area reaches into. */
     .status-line {
         position: relative;
         z-index: 1;
         padding-bottom: 0.6rem;
     }
+    .answer-actions > button.answer-tool {
+        height: auto;
+    }
     .answer-actions > button:not(.reaction),
-    .status-line .branch,
+    .status-line .guard,
     .link.small,
     .running-head .link,
     .dr-branch {

@@ -1,11 +1,13 @@
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { folderColor } from "./avatar.js";
 import { canGoBack, goBack, goHome, replaceAddress, startHistory, useBack } from "./back.js";
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer } from "./composer.js";
+import { useChanges } from "./diff.js";
 import {
     FilesButton,
     FilesPanel,
@@ -31,6 +33,7 @@ import { Drawer, RailNav, ResizeHandle, SessionList, workspaceOrder } from "./se
 import "./rich.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
+import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { SignIn } from "./signin.js";
 import { openSubagents } from "./subagents.js";
 import { SubagentsBoard } from "./subagents-board.js";
@@ -59,16 +62,49 @@ import { APPLE, Boot, html, Icon, iconPath, shortPath, usePresence } from "./ui.
  */
 const toSessions = () => goHome(() => navigate(null, { replace: true }));
 
+/** What changed in the session's folder: lines added and removed, and how many files. It opens Changes. */
+function ChangesButton() {
+    const { changes } = useChanges();
+    // Outside a repository Pi's edits are all there is to review (in one, they are what was committed since).
+    const files = [...(changes?.files ?? []), ...(changes?.repo ? [] : (changes?.piOnly ?? []))];
+
+    if (files.length === 0) {
+        return null;
+    }
+
+    // Git counts the lines of changed files, not of new or binary ones: each side shows when it has some.
+    const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0);
+    const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
+    const lines = added > 0 || removed > 0;
+    const count = files.length + (changes.more ?? 0);
+    const counted = `${count} ${count === 1 ? "file" : "files"}`;
+
+    return html`<button
+        class="changes-button"
+        title="Uncommitted changes in this session's folder"
+        aria-label=${`Changes: ${counted}${lines ? `, ${added} lines added and ${removed} removed` : ""}`}
+        onClick=${() => setFilesOpen(true, "changes")}
+    >
+        ${added > 0 && html`<span class="added">+${added}</span>`}
+        ${removed > 0 && html`<span class="removed">−${removed}</span>`}
+        <span class=${lines ? "changes-files" : ""}>${counted}</span>
+    </button>`;
+}
+
 function Topbar() {
-    const { view, server } = store.state;
+    const { view, server, conversationId } = store.state;
     const conversation = view.conversation;
     const artifacts = view.artifacts?.length ?? 0;
-    const subtitle =
-        conversation?.kind === "subagent"
-            ? `subagent of ${conversation.parent?.title ?? "?"}`
-            : conversation?.worktree
-              ? `⎇ ${view.branch?.branch ?? conversation.worktree.branch}`
-              : shortPath(view.agent?.cwd ?? conversation?.cwd, server?.home);
+    const cwd = view.agent?.cwd ?? conversation?.cwd;
+    const folder = String(cwd ?? "")
+        .replace(/\/+$/, "")
+        .split("/")
+        .pop();
+    const branch = headLabel(view.branch) || conversation?.worktree?.branch;
+    const title =
+        conversation?.title ??
+        store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ??
+        "Loading…";
     const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
     // Other sessions waiting for an approval, counted on the way back to them.
     const waiting = store.state.sessions.filter(
@@ -86,34 +122,83 @@ function Topbar() {
             <${Icon} name="back" size=${22} />
             ${waiting > 0 && html`<span class="badge warn">${waiting}</span>`}
         </button>
-        <button class="title" onClick=${() => conversation && openSheet({ type: "menu" })}>
-            <div class="title-main">
-                <span>
-                    ${conversation?.title ?? store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ?? "Loading…"}
-                </span>
-            </div>
-            <div class="title-sub mono">${subtitle}</div>
-        </button>
+        <div class="title">
+            <button
+                class="title-open"
+                aria-label=${`${title}${folder ? `, in ${folder}` : ""}: session menu`}
+                title=${cwd ? `${shortPath(cwd, server?.home)}\nSession menu` : "Session menu"}
+                disabled=${!conversation}
+                onClick=${() => openSheet({ type: "menu" })}
+            ></button>
+            <span class="title-main" aria-hidden="true">${title}</span>
+            <span class="title-sub">
+                ${
+                    folder &&
+                    html`<span
+                        class="folder-mark"
+                        style=${`--folder:${folderColor(cwd)}`}
+                        aria-hidden="true"
+                    ></span>`
+                }
+                ${
+                    conversation?.kind === "subagent"
+                        ? html`<span class="title-folder">
+                              subagent of ${conversation.parent?.title ?? "?"}
+                          </span>`
+                        : html`${
+                              folder &&
+                              html`<span class="title-folder" aria-hidden="true">${folder}</span>`
+                          }
+                          ${branch && html`<span class="faint" aria-hidden="true">·</span>`}
+                          ${
+                              branch &&
+                              (branchAvailable()
+                                  ? html`<button
+                                        class="title-branch"
+                                        aria-label=${view.branch?.detached ? `No branch, at ${branch}: switch to one` : `Branch ${branch}: switch or make a branch`}
+                                        title=${view.branch?.detached ? "No branch: switch to one" : "Switch or make a branch"}
+                                        onClick=${() => openSheet({ type: "branch" })}
+                                    >
+                                        ⎇ ${branch}
+                                    </button>`
+                                  : html`<span class="title-branch" title="The git branch">
+                                        ⎇ ${branch}
+                                    </span>`)
+                          }`
+                }
+            </span>
+        </div>
         ${
             busySubagents > 0 &&
-            html`<button class="icon-button" title="Subagents working" onClick=${openSubagents}>
+            html`<button
+                class="icon-button"
+                aria-label=${`Subagents: ${busySubagents} working`}
+                title="Subagents working"
+                onClick=${openSubagents}
+            >
                 <span class="pulse"></span>
                 <span class="count">${busySubagents}</span>
             </button>`
         }
         <${PeeksButton} />
-        <${PeopleButton} />
         <${FilesButton} />
         <${BrowserButton} />
         <button
-            class=${`icon-button badge-host ${artifacts > 0 ? "" : "quiet"}`}
+            class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
             aria-label="Artifacts"
             onClick=${() => openSheet({ type: "artifacts" })}
         >
             <${Icon} name="artifact" />
             ${artifacts > 0 && html`<span class="badge">${artifacts}</span>`}
         </button>
-        <button class="icon-button" aria-label="Menu" onClick=${() => openSheet({ type: "menu" })}>
+        ${filesAvailable() && html`<${ChangesButton} key=${conversationId} />`}
+        <${PeopleButton} />
+        <button
+            class="icon-button"
+            aria-label="Menu"
+            title="More"
+            onClick=${() => openSheet({ type: "menu" })}
+        >
             <${Icon} name="more" />
         </button>
     </header>`;

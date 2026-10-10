@@ -722,7 +722,7 @@ function FileHead({ file, tools, viewed, onViewed, open, onToggle, note }) {
     </header>`;
 }
 
-/** Diff text from a tool card or a reply: each file it holds, with a header unless `bare` (the card names the file). */
+/** Diff text from a tool call or a reply: each file it holds, with a header unless `bare` (the call names the file). */
 export function DiffBlock({ text, path = "", bare = false }) {
     const parsed = useMemo(() => parseDiff(text, path), [text, path]);
     const files = parsed.files.filter((file) => file.hunks.length > 0 || file.binary);

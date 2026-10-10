@@ -435,7 +435,7 @@ test(
         );
         // Once Pi has it, it shows as the person's message, not as a report card.
         await see(
-            `return JSON.stringify([...document.querySelectorAll(".bubble")].some((bubble) => bubble.textContent.includes("this is my own message")))`,
+            `return JSON.stringify([...document.querySelectorAll(".prompt")].some((prompt) => prompt.textContent.includes("this is my own message")))`,
             "the look-alike as a message",
             20_000,
         );

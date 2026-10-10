@@ -1,10 +1,12 @@
-// The conversation: messages, thinking, tool cards, artifacts, subagents, approvals, and the live run.
+// The conversation, as a column of turns: a person's message, then what Pi did (its thinking and tool calls folded
+// into one line that opens into a timeline), then Pi's reply, any approval, and the live line while Pi works.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { personColor } from "./avatar.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall } from "./calls.js";
 import { DiffBlock } from "./diff.js";
+import { fromServer } from "./peeks.js";
 import { Highlighted } from "./rich.js";
 import {
     actions,
@@ -14,13 +16,31 @@ import {
     discuss,
     isRow,
     navigate,
+    notify,
     openSheet,
     store,
     TRANSCRIPT_ROWS,
 } from "./store.js";
+import { stateOf } from "./subagents.js";
+import {
+    diffCounts,
+    itemsOf,
+    lineCount,
+    matchCount,
+    plural,
+    rowsBefore,
+    says,
+    short,
+    shortError,
+    STOPPED,
+    summarize,
+    testOutcome,
+    withoutNotes,
+} from "./turns.js";
 import {
     ATTACHMENTS_HEADING,
     Boot,
+    copyText,
     entryImageUrl,
     fileUrl,
     html,
@@ -30,7 +50,6 @@ import {
     plainText,
     replyText,
     Spinner,
-    Thinking,
     Thumb,
 } from "./ui.js";
 
@@ -164,6 +183,35 @@ function Report({ report, view, fresh }) {
     </div>`;
 }
 
+/** A span of time: "18s", "2m 04s", "1h 02m". */
+function span(ms) {
+    const seconds = Math.max(0, Math.round(ms / 1000));
+
+    if (seconds < 60) {
+        return `${seconds}s`;
+    }
+
+    if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+    }
+
+    return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
+}
+
+/** When a message was sent, from the server's time: "10:42" today, "Oct 3 10:42" before. */
+function clock(at) {
+    const date = new Date(fromServer(at));
+    const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+    return date.toDateString() === new Date().toDateString()
+        ? time
+        : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+/**
+ * A person's message: a filled row with a prompt mark, the accent's for your own and the author's color for someone
+ * else's, then who sent it and when, and what they wrote.
+ */
 function UserEntry({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 
@@ -203,6 +251,7 @@ function UserEntry({ entry, view, users }) {
         </div>`;
     }
 
+    const authorId = view.authors?.[entry.id];
     const author =
         authorName(entry.id, view, users) ??
         entry.from ??
@@ -216,73 +265,91 @@ function UserEntry({ entry, view, users }) {
     const skill = SKILL.exec(body);
     const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
     const others = files.filter((file) => !pictures.includes(file));
+    const name = author ?? (scheduled ? "Pi" : undefined);
+    // Your own messages take the accent; someone else's, their color; one from someone the app does not know (a name
+    // the message carries, the main agent, Pi's own schedule), a quiet one.
+    const mark =
+        authorId === store.state.me?.id || (authorId === undefined && name === undefined)
+            ? "var(--accent)"
+            : authorId === undefined
+              ? "var(--muted)"
+              : personColor(authorId);
 
     return html`<div class=${`user-row ${fresh ? "enter" : ""}`} id=${`entry-${entry.id}`}>
         <div
-            class="bubble tappable"
+            class="prompt tappable"
             title="Edit, send again, or copy"
             onClick=${(event) => openMessage(event, entry.id)}
         >
+            <span class="prompt-mark" style=${`color:${mark}`} aria-hidden="true">›</span>
             ${
-                (author || scheduled) &&
-                html`<div
-                    class="author"
-                    style=${view.authors?.[entry.id] ? `color:${personColor(view.authors[entry.id])}` : ""}
-                >
-                    ${author ?? "Pi"}
-                    ${scheduled && html`<span class="muted"> · scheduled</span>`}
-                </div>`
+                (name || entry.at || scheduled) &&
+                html`<span class="prompt-head">
+                    ${
+                        name &&
+                        html`<b
+                            class="prompt-author"
+                            style=${authorId ? `color:${personColor(authorId)}` : ""}
+                        >
+                            ${name}
+                        </b>`
+                    }
+                    ${entry.at && html`<span>${clock(entry.at)}</span>`}
+                    ${scheduled && html`<span>· scheduled</span>`}
+                </span>`
             }
-            ${
-                skill &&
-                html`<button
-                    class="chip skill-chip"
-                    title=${skill[2]}
-                    onClick=${() => openFile(skill[2])}
-                >
-                    ⚡ ${skill[1]}
-                </button>`
-            }
-            ${
-                (skill ? skill[3] : body) &&
-                html`<div class="user-text">
-                    <${MentionedText} text=${skill ? skill[3] : body} />
-                </div>`
-            }
-            ${
-                entry.files?.length > 0 &&
-                html`<div class="attachments">
-                    ${entry.files.map(
-                        (path) =>
-                            html`<button
-                                class="chip"
-                                title=${`Sent with the message: ${path}`}
-                                onClick=${() => openFile(path)}
-                            >
-                                📄 ${path.split("/").pop()}
-                            </button>`,
-                    )}
-                </div>`
-            }
-            ${
-                pictures.length > 0 &&
-                html`<div class="thumbs">
-                    ${pictures.map(
-                        (file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`,
-                    )}
-                </div>`
-            }
-            ${
-                others.length > 0 &&
-                html`<div class="attachments">
-                    ${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}
-                </div>`
-            }
-            ${
-                entry.images > 0 &&
-                !attachments &&
-                html`<${EntryImages} entryId=${entry.id} count=${entry.images} label="Image" />`
-            }
+            <div class="prompt-body">
+                ${
+                    skill &&
+                    html`<button
+                        class="chip skill-chip"
+                        title=${skill[2]}
+                        onClick=${() => openFile(skill[2])}
+                    >
+                        ⚡ ${skill[1]}
+                    </button>`
+                }
+                ${
+                    (skill ? skill[3] : body) &&
+                    html`<div class="user-text">
+                        <${MentionedText} text=${skill ? skill[3] : body} />
+                    </div>`
+                }
+                ${
+                    entry.files?.length > 0 &&
+                    html`<div class="attachments">
+                        ${entry.files.map(
+                            (path) =>
+                                html`<button
+                                    class="chip"
+                                    title=${`Sent with the message: ${path}`}
+                                    onClick=${() => openFile(path)}
+                                >
+                                    📄 ${path.split("/").pop()}
+                                </button>`,
+                        )}
+                    </div>`
+                }
+                ${
+                    pictures.length > 0 &&
+                    html`<div class="thumbs">
+                        ${pictures.map(
+                            (file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`,
+                        )}
+                    </div>`
+                }
+                ${
+                    others.length > 0 &&
+                    html`<div class="attachments">
+                        ${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}
+                    </div>`
+                }
+                ${
+                    entry.images > 0 &&
+                    !attachments &&
+                    html`<${EntryImages} entryId=${entry.id} count=${entry.images} label="Image" />`
+                }
+            </div>
         </div>
     </div>`;
 }
@@ -302,30 +369,233 @@ function Collapsible({ text, limit = 600 }) {
     </div>`;
 }
 
-function Thought({ block, streaming }) {
+// ─── What Pi did: its thinking and tool calls, a line each on a timeline ───────────────
+
+/** The mark a call's line starts with; the rest take theirs from `describeCall`. */
+const GLYPHS = { read: "→", edit: "✎", write: "+", bash: "$", grep: "⌕", find: "⌕", subagent: "⑂" };
+
+/** A call's line: its label (the tool, or a subagent's name) and what it acts on. */
+function stepWords(call) {
+    const args = call.args ?? {};
+
+    switch (call.name) {
+        case "grep":
+        case "find":
+            return {
+                label: call.name,
+                subject: [args.pattern, args.path].filter(Boolean).join("  "),
+            };
+        case "subagent":
+            return {
+                label: args.name ?? "subagent",
+                subject: args.message ? short(args.message) : (args.action ?? ""),
+            };
+        case "browser":
+            return {
+                label: "browser",
+                subject: `${args.action ?? ""} ${describeCall(call).subject}`.trim(),
+            };
+        default:
+            return { label: call.name, subject: describeCall(call).subject };
+    }
+}
+
+/**
+ * What a call came to, on the right of its line: `{ text, tone }`, or null while it runs or when there is nothing to
+ * say.
+ */
+function outcome({ call, result, details, status }) {
+    if (status === "approval") {
+        return { text: "needs approval", tone: "warn" };
+    }
+
+    if (status === "denied" || status === "stopped") {
+        return {
+            text: /was interrupted/.test(result?.text ?? "") ? "cut off by a restart" : status,
+            tone: "",
+        };
+    }
+
+    if (status === "error") {
+        return { text: shortError(result?.text ?? ""), tone: "err" };
+    }
+
+    // A call whose result is not stored yet has nothing to count.
+    if (status !== "done" || !result) {
+        return null;
+    }
+
+    const text = result.text ?? "";
+    const args = call.args ?? {};
+
+    switch (call.name) {
+        case "edit": {
+            const counts = diffCounts(details?.diff);
+
+            return counts && { text: `+${counts.added} −${counts.removed}`, tone: "ok" };
+        }
+
+        case "write":
+            return typeof args.content === "string" && !call.clipped?.content
+                ? { text: `+${lineCount(args.content)}`, tone: "ok" }
+                : null;
+
+        case "read": {
+            // Without the notes a long file's read ends with: "[120 more lines in file. Use offset=…]".
+            const read = withoutNotes(text).replace(
+                /\n*\[[^\]\n]*(?:more lines|offset=)[^\]\n]*\]\s*$/,
+                "",
+            );
+
+            return result.images > 0
+                ? { text: "image", tone: "" }
+                : !result.clipped && { text: plural(lineCount(read), "line"), tone: "" };
+        }
+
+        // A long result reaches the browser cut short (its start and end): its lines cannot be counted.
+        case "grep":
+            return /^No matches/.test(text)
+                ? { text: "no matches", tone: "" }
+                : {
+                      text: result.clipped
+                          ? "many matches"
+                          : plural(matchCount(withoutNotes(text)), "match").replace(
+                                "matchs",
+                                "matches",
+                            ),
+                      tone: "",
+                  };
+        case "find":
+        case "ls":
+            return /^(?:No files|\(empty directory\))/.test(text)
+                ? { text: "none", tone: "" }
+                : {
+                      text: result.clipped
+                          ? "many"
+                          : plural(
+                                lineCount(withoutNotes(text)),
+                                call.name === "ls" ? "entry" : "file",
+                            ).replace("entrys", "entries"),
+                      tone: "",
+                  };
+
+        case "bash": {
+            const tests = testOutcome(text, args.command);
+
+            if (tests) {
+                return { text: tests, tone: "ok" };
+            }
+
+            const lines = lineCount(withoutNotes(text).trim());
+
+            return {
+                text: result.clipped
+                    ? "long output"
+                    : lines === 0
+                      ? "no output"
+                      : plural(lines, "line"),
+                tone: "",
+            };
+        }
+
+        case "artifact":
+            return details?.version !== undefined
+                ? { text: `v${details.version}`, tone: "" }
+                : null;
+        case "codemode":
+            return Array.isArray(details?.calls)
+                ? { text: plural(details.calls.length, "call"), tone: "" }
+                : null;
+
+        case "subagent": {
+            const agent = store.state.view.subagents?.find((each) => each.name === args.name);
+
+            if (
+                !agent ||
+                (args.action !== undefined && args.action !== "spawn" && args.action !== "send")
+            ) {
+                return null;
+            }
+
+            const state = stateOf(agent);
+            const took =
+                state !== "working" && agent.askedAt && agent.answeredAt
+                    ? ` ${span(agent.answeredAt - agent.askedAt)}`
+                    : "";
+
+            return { text: `${state}${took}`, tone: state === "failed" ? "err" : "" };
+        }
+
+        default:
+            return null;
+    }
+}
+
+/**
+ * Where a call is: waiting for approval, denied, running, done, failed, or stopped before it finished. A call with
+ * nothing to say for it yet runs while it is being written, or while Pi works on the answer that asked for it
+ * (`canRun`); any other never will.
+ */
+function callStatus({ result, slot, approval, decision, streaming, canRun, busy }) {
+    if (approval) {
+        return "approval";
+    }
+
+    if (decision?.allow === false) {
+        return "denied";
+    }
+
+    if (result) {
+        // Stopped with the run, or cut off by a restart: the harness says so in its own words.
+        if (result.isError && STOPPED.test(result.text ?? "")) {
+            return "stopped";
+        }
+
+        return result.isError ? "error" : "done";
+    }
+
+    if (slot) {
+        return slot.status === "done" ? "done" : "running";
+    }
+
+    return streaming || (busy && canRun) ? "running" : "stopped";
+}
+
+/** A thought, on the timeline: open it to read it. */
+function ThoughtStep({ block, streaming }) {
     const [open, setOpen] = useState(false);
 
-    return html`<div class=${`thought ${open ? "open" : ""}`}>
-        <button class="thought-head" onClick=${() => setOpen(!open)}>
-            <${Icon} name="sparkle" size=${14} /> ${streaming ? "Thinking…" : block.redacted ? "Thought (redacted)" : "Thought"}
-            <${Icon} name="chevron" size=${14} class=${`chev ${open ? "open" : ""}`} />
-        </button>
-        ${open && html`<div class="thought-body">${block.text}</div>`}
+    return html`<div
+        class=${`step ${open ? "open" : ""}`}
+        data-status=${streaming ? "running" : "done"}
+    >
+        <span class="step-node" aria-hidden="true"></span>
+        <div class="step-line">
+            <button class="step-head" aria-expanded=${open} onClick=${() => setOpen(!open)}>
+                <span class="step-glyph thought" aria-hidden="true">✦</span>
+                <span class="step-label">
+                    ${streaming ? "Thinking" : block.redacted ? "Thought (redacted)" : "Thought"}
+                </span>
+                <span class="step-subject"></span>
+                ${streaming && html`<${Spinner} label="Thinking" />`}
+            </button>
+        </div>
+        ${
+            open &&
+            html`<div class="step-body">
+                <div class="thought-body">${block.text}</div>
+            </div>`
+        }
     </div>`;
 }
 
-function ToolCard({ call, result, slot, approval, entryId }) {
+/** One tool call on the timeline: what it did and how it went, and tapped, its input and output. */
+function ToolStep({ call, result, slot, approval, entryId, streaming, canRun, busy }) {
     const [open, setOpen] = useState(false);
     const [full, setFull] = useState(null);
     const view = store.state.view;
-    const meta = describeCall(full?.call ?? call);
-    const status = approval
-        ? "approval"
-        : result
-          ? result.isError
-              ? "error"
-              : "done"
-          : (slot?.status ?? "pending");
+    const decision = view.decisions?.[call.id];
+    const status = callStatus({ result, slot, approval, decision, streaming, canRun, busy });
     // A call that finishes while on screen flashes once.
     const [settled, setSettled] = useState(false);
     const was = useRef(status);
@@ -335,7 +605,7 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 
         was.current = status;
 
-        if (status !== "done" || (before !== "running" && before !== "pending")) {
+        if (status !== "done" || before !== "running") {
             return;
         }
 
@@ -344,16 +614,23 @@ function ToolCard({ call, result, slot, approval, entryId }) {
 
         return () => clearTimeout(timer);
     }, [status]);
-    const details = result?.details ?? slot?.details;
+    const details = full?.result?.details ?? result?.details ?? slot?.details;
     const args = (full?.call ?? call).args ?? {};
     const resultText = full?.result?.text ?? result?.text;
+    // A long edit's diff reaches the browser cut short, as its start and end (`projection.ts`), with no other sign.
+    const diffClipped =
+        typeof details?.diff === "string" &&
+        /\n\n… \d+ characters not shown …\n\n/.test(details.diff);
     const loadFull = () =>
         attempt(async () => {
             const assistant = await actions.fullEntry(entryId);
             const fullCall = assistant.blocks?.find(
                 (block) => block.type === "toolCall" && block.id === call.id,
             );
-            const fullResult = result?.clipped ? await actions.fullEntry(result.id) : null;
+            const fullResult =
+                (result?.clipped || diffClipped) && result
+                    ? await actions.fullEntry(result.id)
+                    : null;
 
             setFull({ call: fullCall ?? call, result: fullResult });
         });
@@ -361,7 +638,7 @@ function ToolCard({ call, result, slot, approval, entryId }) {
     let body = null;
 
     if (open) {
-        const clipped = (call.clipped && !full) || (result?.clipped && !full);
+        const clipped = (call.clipped || result?.clipped || diffClipped) && !full;
         const parts = [];
 
         if (
@@ -485,7 +762,7 @@ function ToolCard({ call, result, slot, approval, entryId }) {
             parts.push(html`<button class="link" onClick=${loadFull}>Load everything</button>`);
         }
 
-        body = html`<div class="tool-body">${parts}</div>`;
+        body = html`<div class="step-body">${parts}</div>`;
     }
 
     const artifact = call.name === "artifact" && details?.id ? details : null;
@@ -500,78 +777,327 @@ function ToolCard({ call, result, slot, approval, entryId }) {
             ? (details?.conversationId ??
               view.subagents.find((agent) => agent.name === args.name)?.conversationId)
             : undefined;
-    const decision = view.decisions?.[call.id];
+    const glyph = GLYPHS[call.name] ?? describeCall(call).icon;
+    const { label, subject } = stepWords(call);
+    // Counted from everything once it is loaded: a long write's lines, a long edit's whole diff.
+    const said = outcome({
+        call: full?.call ?? call,
+        result: full?.result ?? result,
+        details,
+        status,
+    });
+    const watch = call.name === "browser" && browserAvailable() && !store.state.browserOpen;
+    // What a call made shows under its line, as on today's cards: what it returned as images, an artifact, the browser.
+    const extras = result?.images > 0 || artifact || watch;
 
-    return html`<div class=${`tool ${status} ${settled ? "settled" : ""}`}>
-        <button class="tool-head" onClick=${() => setOpen(!open)}>
-            <span class="tool-icon">${meta.icon}</span>
-            ${meta.label && html`<span class="tool-label">${meta.label}</span>`}
-            <span class=${`tool-subject ${meta.mono ? "mono" : ""}`}>${meta.subject}</span>
-            <span class="tool-status">
-                ${
-                    status === "running" || status === "pending"
-                        ? html`<${Spinner} />`
-                        : status === "approval"
-                          ? html`<${Icon} name="shield" size=${15} />`
-                          : status === "error"
-                            ? "!"
-                            : "✓"
-                }
-            </span>
-            <${Icon} name="chevron" size=${14} class=${`tool-chevron chev ${open ? "open" : ""}`} />
-        </button>
+    return html`<div
+        class=${`step ${open ? "open" : ""} ${settled ? "settled" : ""}`}
+        data-status=${status}
+    >
+        <span class="step-node" aria-hidden="true"></span>
+        <div class="step-line">
+            <button class="step-head" aria-expanded=${open} onClick=${() => setOpen(!open)}>
+                <span
+                    class=${`step-glyph ${call.name === "subagent" ? "agent" : ""}`}
+                    aria-hidden="true"
+                >
+                    ${glyph}
+                </span>
+                <span class="step-label">${label}</span>
+                <span class="step-subject">${subject}</span>
+                ${status === "running" && html`<${Spinner} />`}
+                ${said && html`<span class=${`step-meta ${said.tone}`}>${said.text}</span>`}
+            </button>
+            ${
+                child !== undefined &&
+                html`<button
+                    class="step-open"
+                    title=${`Open ${args.name ?? "the subagent"}`}
+                    onClick=${() => navigate(child)}
+                >
+                    Open →
+                </button>`
+            }
+        </div>
         ${
             decision &&
-            html`<div
-                class=${`decision ${decision.allow ? "allowed" : "denied"}`}
-                title=${new Date(decision.at).toLocaleString()}
-            >
+            html`<div class="step-decision" title=${new Date(decision.at).toLocaleString()}>
                 <${Icon} name="shield" size=${12} /> ${decision.allow ? "Allowed" : "Denied"} by ${decision.by}
             </div>`
         }
         ${
-            result?.images > 0 &&
-            html`<${EntryImages}
-                entryId=${result.id}
-                count=${result.images}
-                label=${`${call.name} image`}
-            />`
-        }
-        ${
-            artifactType === "svg" &&
-            html`<button
-                class="artifact-preview"
-                type="button"
-                onClick=${() => openSheet({ type: "image", src: artifactSrc, alt: artifact.title })}
-            >
-                <img src=${artifactSrc} alt=${artifact.title} loading="lazy" decoding="async" />
-            </button>`
-        }
-        ${
-            artifact &&
-            html`<button
-                class="artifact-link"
-                onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: artifact.version })}
-            >
-                Open ${artifact.title} · version ${artifact.version}
-            </button>`
-        }
-        ${
-            child !== undefined &&
-            html`<button class="artifact-link" onClick=${() => navigate(child)}>
-                Open ${args.name ?? "subagent"} →
-            </button>`
-        }
-        ${
-            call.name === "browser" &&
-            browserAvailable() &&
-            !store.state.browserOpen &&
-            html`<button class="artifact-link" onClick=${() => setBrowserOpen(true)}>
-                Watch in the browser${details?.address ? ` · ${details.address}` : ""} →
-            </button>`
+            extras &&
+            html`<div class="step-extras">
+                ${
+                    result?.images > 0 &&
+                    html`<${EntryImages}
+                        entryId=${result.id}
+                        count=${result.images}
+                        label=${`${call.name} image`}
+                    />`
+                }
+                ${
+                    artifactType === "svg" &&
+                    html`<button
+                        class="artifact-preview"
+                        type="button"
+                        onClick=${() => openSheet({ type: "image", src: artifactSrc, alt: artifact.title })}
+                    >
+                        <img
+                            src=${artifactSrc}
+                            alt=${artifact.title}
+                            loading="lazy"
+                            decoding="async"
+                        />
+                    </button>`
+                }
+                ${
+                    artifact &&
+                    html`<button
+                        class="artifact-link"
+                        onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: artifact.version })}
+                    >
+                        Open ${artifact.title} · version ${artifact.version} →
+                    </button>`
+                }
+                ${
+                    watch &&
+                    html`<button class="artifact-link" onClick=${() => setBrowserOpen(true)}>
+                        Watch in the browser${details?.address ? ` · ${details.address}` : ""} →
+                    </button>`
+                }
+            </div>`
         }
         ${body}
     </div>`;
+}
+
+/** Groups opened or closed by hand, per conversation and group, for as long as the page is open. */
+const openedGroups = new Map();
+/**
+ * The answer a jump asked to see last (`jumpToEntry` in chat.js says so with a `pocket:reveal` event), and when: a group
+ * that shows only after the jump moved the rows shown opens when it first draws. Groups already shown hear the event.
+ */
+let revealing = { entryId: null, at: 0 };
+
+document.addEventListener("pocket:reveal", (event) => {
+    revealing = { entryId: event.detail, at: Date.now() };
+});
+/** When this page first saw a group that began before any of its entries was stored: the start of its clock. */
+const groupSeen = new Map();
+/** Where a group's clock stood when it last ticked: the end of a group whose stored times do not say. */
+const groupTicked = new Map();
+
+/** Keep `value` in one of the maps above, the oldest going once there are many. */
+function keep(map, key, value) {
+    map.delete(key);
+    map.set(key, value);
+
+    if (map.size > 500) {
+        map.delete(map.keys().next().value);
+    }
+}
+
+/**
+ * How long a group took, from when its first answer began to its last result; ticking while it is live, without
+ * drawing the group again. A group whose stored times do not say how long (a thought, then words) keeps what its clock
+ * showed, or shows nothing.
+ */
+function GroupTime({ id, start, end, live }) {
+    const [, tick] = useState(0);
+
+    useEffect(() => {
+        if (!live) {
+            return;
+        }
+
+        const timer = setInterval(() => tick((n) => n + 1), 1000);
+
+        return () => clearInterval(timer);
+    }, [live]);
+
+    if (start === undefined) {
+        return null;
+    }
+
+    let until = end;
+
+    if (live) {
+        until = Date.now();
+        keep(groupTicked, id, until);
+    } else if (!(until > start)) {
+        until = groupTicked.get(id);
+    }
+
+    if (until === undefined || !Number.isFinite(until) || until < start) {
+        return null;
+    }
+
+    return html`<span class=${`activity-time ${live ? "live" : ""}`}>${span(until - start)}</span>`;
+}
+
+/**
+ * Pi's thinking and tool calls between two of its words, as one line: what they did, and how long they took. It opens
+ * into a timeline, a line per call, each drawn again only when what it shows changes. Open while it is live or in the
+ * newest turn, closed before, unless opened or closed by hand.
+ */
+function ActivityGroup({ item, live, newest, busy, results, slots, approvals, conversationId }) {
+    const id = `${conversationId}:${item.key}`;
+    const [, redraw] = useState(0);
+    const [fresh] = useState(() => settledFor !== null && settledFor === conversationId);
+
+    if (
+        revealing.entryId !== null &&
+        Date.now() - revealing.at < 2000 &&
+        item.anchors.includes(revealing.entryId)
+    ) {
+        keep(openedGroups, id, true);
+    }
+
+    const chosen = openedGroups.get(id);
+    const open = chosen ?? (live || newest);
+    const all = item.before.length === 0 ? item.steps : [...item.before, ...item.steps];
+    const first = all[0];
+    let start = first.entry?.at === undefined ? undefined : fromServer(first.entry.at);
+
+    if (start === undefined && first.entry === undefined) {
+        if (!groupSeen.has(id)) {
+            keep(groupSeen, id, Date.now());
+        }
+
+        start = groupSeen.get(id);
+    }
+
+    // The last result, or the last answer when the group ends with a thought.
+    const times = all
+        .flatMap((step) => [
+            step.entry?.at,
+            step.block.type === "toolCall" ? results.get(step.block.id)?.at : undefined,
+        ])
+        .filter((at) => at !== undefined);
+    const end = times.length === 0 ? undefined : fromServer(Math.max(...times));
+    const thinking =
+        live && item.steps.at(-1).streaming && item.steps.at(-1).block.type === "thinking";
+    // The steps' names, as the timeline draws them (below).
+    const keys = new Set();
+    // Begun in rows not shown, it goes on from their last call: a thought keeps its name when they show.
+    const earlier = item.before.findLast((step) => step.block.type === "toolCall");
+    let lastCall = earlier ? `c:${earlier.block.id || "#"}` : "start";
+    let thoughts = 0;
+    // A jump to one of its answers (Find, a pin, Changes) opens it: `jumpToEntry` says which.
+    const anchors = item.anchors.join();
+
+    useEffect(() => {
+        if (anchors === "") {
+            return;
+        }
+
+        const reveal = (event) => {
+            if (item.anchors.includes(event.detail)) {
+                keep(openedGroups, id, true);
+                redraw((n) => n + 1);
+            }
+        };
+
+        document.addEventListener("pocket:reveal", reveal);
+
+        return () => document.removeEventListener("pocket:reveal", reveal);
+    }, [anchors, id]);
+
+    return html`<div class=${`activity ${open ? "open" : ""} ${fresh ? "enter" : ""}`}>
+        ${item.anchors.map(
+            (entryId) => html`<span class="entry-anchor" id=${`entry-${entryId}`}></span>`,
+        )}
+        <button
+            class="activity-head"
+            aria-expanded=${open}
+            onClick=${() => {
+                keep(openedGroups, id, !open);
+                redraw((n) => n + 1);
+            }}
+        >
+            <${Icon} name="chevron" size=${14} class="chev" />
+            <span class="activity-summary">${summarize(all, thinking)}</span>
+            <${GroupTime} id=${id} start=${start} end=${end} live=${live} />
+        </button>
+        ${
+            open &&
+            html`<div class="timeline">
+                ${item.steps.map(({ block, entry, streaming, canRun }, index) => {
+                    // A call is named by its id, the same streamed and stored; a thought by the call before it. Not by
+                    // place: earlier steps join the front when earlier messages show.
+                    if (block.type === "thinking") {
+                        return html`<${Memo} key=${`t:${lastCall}:${thoughts++}`} deps=${[block, streaming]}>
+                            <${ThoughtStep} block=${block} streaming=${streaming} />
+                        <//>`;
+                    }
+
+                    const slot = slots.get(block.id);
+                    const approval =
+                        slot?.taskId === undefined
+                            ? undefined
+                            : approvals.find((each) => each.taskId === slot.taskId);
+                    let key = `c:${block.id || `#${index}`}`;
+
+                    // A provider can use an id twice, or none.
+                    if (keys.has(key)) {
+                        key = `${key}#${index}`;
+                    }
+
+                    keys.add(key);
+                    lastCall = key;
+                    thoughts = 0;
+
+                    return html`<${Memo}
+                        key=${key}
+                        deps=${[
+                            block,
+                            entry,
+                            canRun,
+                            busy,
+                            conversationId,
+                            ...callDeps(block, results, slots, approvals),
+                        ]}
+                    >
+                        <${ToolStep}
+                            call=${block}
+                            result=${results.get(block.id)}
+                            slot=${slot}
+                            approval=${approval}
+                            entryId=${entry?.id}
+                            streaming=${entry === undefined}
+                            canRun=${canRun}
+                            busy=${busy}
+                        />
+                    <//>`;
+                })}
+            </div>`
+        }
+    </div>`;
+}
+
+/** Whether a step is still at work: a thought being written, or a call that has not finished. */
+function stepLive(step, results, slots, approvals, busy) {
+    if (step.block.type === "thinking") {
+        return step.streaming;
+    }
+
+    const slot = slots.get(step.block.id);
+    const approval =
+        slot?.taskId === undefined
+            ? undefined
+            : approvals.find((each) => each.taskId === slot.taskId);
+    const status = callStatus({
+        result: results.get(step.block.id),
+        slot,
+        approval,
+        decision: store.state.view.decisions?.[step.block.id],
+        streaming: step.entry === undefined,
+        canRun: step.canRun,
+        busy,
+    });
+
+    return status === "running" || status === "approval";
 }
 
 function ApprovalCard({ approval }) {
@@ -605,7 +1131,7 @@ function ApprovalCard({ approval }) {
                       </div>`
                   }
                 <div class="approval-actions">
-                    <button class="button" disabled=${busy} onClick=${() => answer(false)}>
+                    <button class="button deny" disabled=${busy} onClick=${() => answer(false)}>
                         Deny
                     </button>
                     ${
@@ -623,45 +1149,7 @@ function ApprovalCard({ approval }) {
     </div>`;
 }
 
-function AssistantBlocks({ blocks, entryId, results, slots, approvals, streaming }) {
-    return blocks.map((block, index) => {
-        if (block.type === "text") {
-            // The block still growing changes on every update: caching each version would only push out finished ones.
-            const growing = streaming && index === blocks.length - 1;
-
-            return html`<${Markdown}
-                text=${block.text}
-                class=${growing ? "streaming" : ""}
-                cache=${!growing}
-            />`;
-        }
-
-        if (block.type === "thinking") {
-            return html`<${Thought}
-                block=${block}
-                streaming=${streaming && index === blocks.length - 1}
-            />`;
-        }
-
-        if (block.type === "toolCall") {
-            const slot = slots.get(block.id);
-            const approval =
-                slot?.taskId === undefined
-                    ? undefined
-                    : approvals.find((each) => each.taskId === slot.taskId);
-
-            return html`<${ToolCard}
-                call=${block}
-                result=${results.get(block.id)}
-                slot=${slot}
-                approval=${approval}
-                entryId=${entryId}
-            />`;
-        }
-
-        return null;
-    });
-}
+// ─── Pi's words ───────────────────────────────────────────────────────────────────────
 
 /** Under Pi's answers: reactions, and ways to talk about the answer with the people here. */
 function AnswerActions({ entry }) {
@@ -682,7 +1170,7 @@ function AnswerActions({ entry }) {
         attempt(() => actions.react(entry.id, emoji));
     };
 
-    return html`<div class="answer-actions">
+    return html`<div class=${`answer-actions ${picking ? "picking" : ""}`}>
         ${Object.entries(reactions).map(
             ([emoji, ids]) =>
                 html`<button
@@ -693,7 +1181,7 @@ function AnswerActions({ entry }) {
                     ${emoji} <span>${ids.length}</span>
                 </button>`,
         )}
-        <span class="reaction-host">
+        <span class="reaction-host answer-tool">
             <button
                 class="reaction add"
                 aria-label="React"
@@ -712,20 +1200,30 @@ function AnswerActions({ entry }) {
             }
         </span>
         <button
-            class="link small"
+            class="answer-tool"
             onClick=${() => discuss(entry.id, plainText(text).replace(/\s+/g, " ").slice(0, 280))}
         >
             Discuss
         </button>
         <button
-            class="link small"
+            class="answer-tool"
             onClick=${() => attempt(() => actions.pin({ entryId: entry.id }))}
         >
             ${pinned ? "📌 Pinned" : "Pin"}
         </button>
         <button
-            class="link small"
-            title="Fork, retry, or copy"
+            class="answer-tool"
+            onClick=${() =>
+                copyText(text).then(
+                    () => notify("info", "Copied."),
+                    () => notify("error", "Could not copy."),
+                )}
+        >
+            Copy
+        </button>
+        <button
+            class="answer-tool"
+            title="Fork, retry"
             onClick=${() => openSheet({ type: "message", entryId: entry.id })}
         >
             More
@@ -733,27 +1231,38 @@ function AnswerActions({ entry }) {
     </div>`;
 }
 
-function AssistantEntry({ entry, results, slots, approvals }) {
+/** How one of Pi's answers ended, under its last words: a failed request, a stop, or the answer's actions. */
+function AnswerEnd({ entry }) {
     // A final answer (not a step between tool calls) with something to say gets reactions and the discuss row.
-    const answer =
-        collab() &&
-        entry.stopReason !== "toolUse" &&
-        entry.blocks.some((block) => block.type === "text");
+    const answer = collab() && entry.stopReason !== "toolUse" && entry.blocks.some(says);
 
-    return html`<div class="assistant" id=${`entry-${entry.id}`}>
-        <${AssistantBlocks}
-            blocks=${entry.blocks}
-            entryId=${entry.id}
-            results=${results}
-            slots=${slots}
-            approvals=${approvals}
-        />
-        ${
-            entry.stopReason === "error" &&
-            html`<div class="error-box">${entry.error ?? "The model request failed."}</div>`
-        }
-        ${entry.stopReason === "aborted" && html`<div class="muted small">Stopped.</div>`}
-        ${answer && html`<${AnswerActions} entry=${entry} />`}
+    return html`${
+        entry.stopReason === "error" &&
+        html`<div class="error-box">${entry.error ?? "The model request failed."}</div>`
+    }
+    ${entry.stopReason === "aborted" && html`<div class="muted small">Stopped.</div>`}
+    ${answer && html`<${AnswerActions} entry=${entry} />`}`;
+}
+
+/** A run of Pi's words: plain prose, and how the answer ended when they are its last. */
+function Reply({ item, conversationId }) {
+    const [fresh] = useState(() => settledFor !== null && settledFor === conversationId);
+    const { entry, blocks } = item;
+
+    return html`<div
+        class=${`reply ${fresh ? "enter" : ""}`}
+        id=${item.anchor ? `entry-${entry.id}` : undefined}
+    >
+        ${blocks.map(({ block, growing }, index) => {
+            // The block still growing changes on every update: caching each version would only push out finished ones.
+            return html`<${Markdown}
+                key=${index}
+                text=${block.text}
+                class=${growing ? "streaming" : ""}
+                cache=${!growing}
+            />`;
+        })}
+        ${item.end && html`<${AnswerEnd} entry=${entry} />`}
     </div>`;
 }
 
@@ -783,7 +1292,7 @@ function Divider({ entry }) {
     </div>`;
 }
 
-function History({ firstId, results, keepPlace }) {
+function History({ firstId, results, keepPlace, conversationId }) {
     const history = store.state.history;
 
     if (history === null) {
@@ -804,16 +1313,15 @@ function History({ firstId, results, keepPlace }) {
     }
 
     return html`<div class="history">
-        ${history.filter(isRow).map(
-            (entry) => html`<${Row}
-                key=${entry.id}
-                entry=${entry}
-                results=${results}
-                slots=${NO_SLOTS}
-                approvals=${NO_APPROVALS}
-                deps=${rowDeps(entry, results, NO_SLOTS, NO_APPROVALS)}
-            />`,
-        )}
+        <${Items}
+            items=${itemsOf(history.filter(isRow), null, { prefix: "h", talk: collab() })}
+            results=${results}
+            slots=${NO_SLOTS}
+            approvals=${NO_APPROVALS}
+            busy=${false}
+            past=${true}
+            conversationId=${conversationId}
+        />
     </div>`;
 }
 
@@ -949,7 +1457,7 @@ function PendingShells({ conversationId, rows }) {
     );
 }
 
-function EntryView({ entry, results, slots, approvals }) {
+function EntryView({ entry }) {
     const { view, users } = store.state;
 
     if (entry.kind === "shell") {
@@ -964,15 +1472,6 @@ function EntryView({ entry, results, slots, approvals }) {
         return html`<${UserEntry} entry=${entry} view=${view} users=${users} />`;
     }
 
-    if (entry.kind === "assistant") {
-        return html`<${AssistantEntry}
-            entry=${entry}
-            results=${results}
-            slots=${slots}
-            approvals=${approvals}
-        />`;
-    }
-
     if (entry.kind === "compaction" || entry.kind === "reset" || entry.kind === "fromPi") {
         return html`<${Divider} entry=${entry} />`;
     }
@@ -984,15 +1483,21 @@ const NO_SLOTS = new Map();
 
 const NO_APPROVALS = [];
 
+/** The subagents as their rows and lines show them: who, where, and how they stand. */
 const agentsKey = (view) =>
-    (view.subagents ?? []).map((agent) => `${agent.name}:${agent.conversationId}`).join();
+    (view.subagents ?? [])
+        .map(
+            (agent) =>
+                `${agent.name}:${agent.conversationId}:${stateOf(agent)}:${agent.askedAt ?? ""}:${agent.answeredAt ?? ""}`,
+        )
+        .join();
 
 /**
  * Everything a row shows besides its entry, as values that compare with Object.is. Each update from the server builds
  * new objects for the whole view, so this picks out the parts one row uses: a row whose parts did not change skips
  * rendering, and a long thread stays cheap while Pi streams into its newest message.
  */
-function rowDeps(entry, results, slots, approvals) {
+function rowDeps(entry) {
     const { view, users, me, server } = store.state;
     const deps = [entry, users, me, server, view.conversation?.id, view.conversation?.kind];
 
@@ -1002,51 +1507,64 @@ function rowDeps(entry, results, slots, approvals) {
         if (entry.text.startsWith("[subagent ")) {
             deps.push(agentsKey(view));
         }
-    } else if (entry.kind === "assistant") {
-        const reactions = view.reactions?.[entry.id];
-
-        deps.push(
-            reactions === undefined ? "" : JSON.stringify(reactions),
-            (view.pins ?? []).some((pin) => pin.entryId === entry.id),
-        );
-
-        for (const block of entry.blocks) {
-            if (block.type !== "toolCall") {
-                continue;
-            }
-
-            const slot = slots.get(block.id);
-            const decision = view.decisions?.[block.id];
-
-            deps.push(
-                results.get(block.id),
-                slot === undefined ? "" : JSON.stringify(slot),
-                decision === undefined ? "" : JSON.stringify(decision),
-            );
-
-            if (slot?.taskId !== undefined) {
-                deps.push(approvals.find((each) => each.taskId === slot.taskId)?.id);
-            }
-
-            if (block.name === "artifact") {
-                deps.push((view.artifacts ?? []).map((each) => `${each.id}:${each.type}`).join());
-            }
-
-            if (block.name === "subagent") {
-                deps.push(agentsKey(view));
-            }
-
-            if (block.name === "browser") {
-                deps.push(store.state.browserOpen);
-            }
-        }
     }
 
     return deps;
 }
 
-/** One transcript row, rendered again only when its `deps` change (see `rowDeps`). Its cards keep their open state. */
-class Row extends Component {
+/** What a tool call's line shows besides the call: its result, its live slot, who decided on it, what it made. */
+function callDeps(block, results, slots, approvals) {
+    const { view } = store.state;
+    const slot = slots.get(block.id);
+    const decision = view.decisions?.[block.id];
+    const deps = [
+        results.get(block.id),
+        slot === undefined ? "" : JSON.stringify(slot),
+        decision === undefined ? "" : JSON.stringify(decision),
+    ];
+
+    if (slot?.taskId !== undefined) {
+        deps.push(approvals.find((each) => each.taskId === slot.taskId)?.id);
+    }
+
+    if (block.name === "artifact") {
+        deps.push((view.artifacts ?? []).map((each) => `${each.id}:${each.type}`).join());
+    }
+
+    if (block.name === "subagent") {
+        deps.push(agentsKey(view));
+    }
+
+    // Whether the browser is there to watch (`browserAvailable`), and open already.
+    if (block.name === "browser") {
+        deps.push(store.state.browserOpen, store.state.server);
+    }
+
+    return deps;
+}
+
+/** What a run of Pi's words shows besides its text: the answer's reactions and pin, and who is looking. */
+function replyDeps(item) {
+    const { view, users, me, server } = store.state;
+    const { entry } = item;
+    const reactions = view.reactions?.[entry.id];
+
+    return [
+        entry,
+        item.blocks.length,
+        item.end,
+        item.anchor,
+        users,
+        me,
+        server,
+        view.conversation?.id,
+        reactions === undefined ? "" : JSON.stringify(reactions),
+        (view.pins ?? []).some((pin) => pin.entryId === entry.id),
+    ];
+}
+
+/** One item of the transcript, rendered again only when its `deps` change. Its cards keep their open state. */
+class Memo extends Component {
     shouldComponentUpdate(next) {
         const before = this.props.deps;
         const after = next.deps;
@@ -1057,14 +1575,232 @@ class Row extends Component {
         );
     }
 
-    render({ entry, results, slots, approvals }) {
-        return html`<${EntryView}
-            entry=${entry}
-            results=${results}
-            slots=${slots}
-            approvals=${approvals}
-        />`;
+    render({ children }) {
+        return children;
     }
+}
+
+/** The answer being written, as an entry: the same object for as long as its blocks stay the same. */
+const partials = new WeakMap();
+
+function partialEntry(blocks) {
+    if (blocks.length === 0) {
+        return null;
+    }
+
+    if (!partials.has(blocks)) {
+        partials.set(blocks, { kind: "assistant", blocks });
+    }
+
+    return partials.get(blocks);
+}
+
+/**
+ * The transcript's items, each rendered again only when what it shows changed. A group is live while one of its calls
+ * works or waits, or while it is the last thing in a run; groups after the last person's message are the newest turn.
+ */
+function Items({ items, results, slots, approvals, busy, past = false, conversationId }) {
+    let lastMessage = -1;
+
+    items.forEach((item, index) => {
+        if (item.type === "row" && item.entry.kind === "user") {
+            lastMessage = index;
+        }
+    });
+
+    return items.map((item, index) => {
+        if (item.type === "row") {
+            return html`<${Memo} key=${item.key} deps=${rowDeps(item.entry)}>
+                <${EntryView} entry=${item.entry} />
+            <//>`;
+        }
+
+        // An answer with nothing to show (blank words): only where a jump to it lands.
+        if (item.type === "mark") {
+            return html`<span
+                key=${item.key}
+                class="entry-anchor entry-mark"
+                id=${`entry-${item.entry.id}`}
+            ></span>`;
+        }
+
+        if (item.type === "reply") {
+            return html`<${Memo} key=${item.key} deps=${replyDeps(item)}>
+                <${Reply} item=${item} conversationId=${conversationId} />
+            <//>`;
+        }
+
+        const live =
+            !past &&
+            (item.steps.some((step) => stepLive(step, results, slots, approvals, busy)) ||
+                (busy && index === items.length - 1));
+        const newest = !past && index > lastMessage;
+        const deps = [
+            item.steps.length,
+            item.before.length,
+            item.before[0]?.block,
+            item.before.at(-1)?.block,
+            item.anchors.join(),
+            live,
+            newest,
+            busy,
+            conversationId,
+        ];
+
+        // The calls before the rows shown count in the group's line: their results, for its time.
+        for (const step of item.before) {
+            if (step.block.type === "toolCall") {
+                deps.push(results.get(step.block.id));
+            }
+        }
+
+        for (const step of item.steps) {
+            deps.push(step.block, step.entry, step.streaming, step.canRun);
+
+            if (step.block.type === "toolCall") {
+                deps.push(...callDeps(step.block, results, slots, approvals));
+            }
+        }
+
+        return html`<${Memo} key=${item.key} deps=${deps}>
+            <${ActivityGroup}
+                item=${item}
+                live=${live}
+                newest=${newest}
+                busy=${busy}
+                results=${results}
+                slots=${slots}
+                approvals=${approvals}
+                conversationId=${conversationId}
+            />
+        <//>`;
+    });
+}
+
+/** When the runs this tab saw started, per conversation: the newest message then, and the time. */
+const runsSeen = new Map();
+
+/**
+ * When the running work started: when the newest message was sent, if this run is its answer; otherwise when this tab
+ * first saw it run (a retry, or a run this tab opened in the middle of). A steer joins the run on the clock; a message
+ * queued for after a run starts the clock again, once that run gave its answer.
+ */
+function runStart(conversationId, entries, busy) {
+    if (!busy) {
+        runsSeen.delete(conversationId);
+
+        return undefined;
+    }
+
+    const at = entries.findLastIndex((entry) => entry.kind === "user");
+    const newest = entries[at];
+    const finished = (from, to) =>
+        entries
+            .slice(from, to)
+            .some((entry) => entry.kind === "assistant" && entry.stopReason !== "toolUse");
+
+    const begin = () => {
+        // Pi answered it already (stopped, failed, or done): this run is not that message's.
+        const sent =
+            newest?.at === undefined || finished(at + 1)
+                ? undefined
+                : Math.min(Date.now(), fromServer(newest.at));
+
+        return { message: newest?.id, at: sent ?? Date.now() };
+    };
+
+    let seen = runsSeen.get(conversationId);
+
+    if (seen === undefined) {
+        seen = begin();
+    } else if (seen.message !== newest?.id) {
+        const before = entries.findIndex((entry) => entry.id === seen.message);
+
+        seen = finished(before + 1, at) ? begin() : { ...seen, message: newest?.id };
+    }
+
+    keep(runsSeen, conversationId, seen);
+
+    return seen.at;
+}
+
+/** Whether this person can answer one of the approvals waiting: one who can steer, and for a call not of their own asking where that needs someone else. */
+function canAnswer(approvals) {
+    const { me, server } = store.state;
+
+    return (
+        canSteer() &&
+        approvals.some(
+            (approval) =>
+                !(
+                    server?.approvalRule === "others" &&
+                    me?.role !== "owner" &&
+                    approval.requestedBy === me?.id
+                ),
+        )
+    );
+}
+
+/**
+ * The end of the live turn, in one line: what Pi does (thinks, works, waits for an approval, retries a failed request,
+ * compacts its context), for how long, and how to stop it. Screen readers hear what it does when that changes, not the
+ * seconds counting.
+ */
+function LiveLine({ live, approvals, start }) {
+    const [, tick] = useState(0);
+
+    useEffect(() => {
+        const timer = setInterval(() => tick((n) => n + 1), 1000);
+
+        return () => clearInterval(timer);
+    }, []);
+
+    const partial = live.generation?.message?.blocks ?? [];
+    const retry = live.generation?.retry;
+    const working = (live.tools ?? []).some((slot) => slot.status !== "done");
+    const waiting = approvals.length > 0;
+    const seconds = retry ? Math.ceil((fromServer(retry.at) - Date.now()) / 1000) : 0;
+    let state;
+
+    if (waiting) {
+        state = canAnswer(approvals) ? "Waiting for your approval" : "Waiting for approval";
+    } else if (retry) {
+        state = "Retrying";
+    } else if ((live.compactions ?? []).length > 0) {
+        state = "Compacting context";
+    } else if (working || (partial.length > 0 && partial.at(-1).type !== "thinking")) {
+        state = "Working";
+    } else {
+        state = "Thinking";
+    }
+
+    return html`<div class=${`live-line ${waiting ? "waiting" : ""}`}>
+        ${
+            waiting
+                ? html`<span class="live-wait" aria-hidden="true"></span>`
+                : html`<${Spinner} hidden=${true} />`
+        }
+        <span class="live-state" role="status">
+            ${state}${retry && !waiting && seconds > 0 && html`<span aria-hidden="true"> in ${seconds}s</span>`}
+        </span>
+        ${start !== undefined && html`<span aria-hidden="true">${span(Date.now() - start)}</span>`}
+        ${
+            retry &&
+            !waiting &&
+            html`<span
+                class="live-why"
+                title=${`Attempt ${live.generation.attempt + 1}, after: ${retry.error}`}
+            >
+                ${retry.error}
+            </span>`
+        }
+        ${
+            live.busy &&
+            canSteer() &&
+            !COARSE.matches &&
+            html`<span class="live-esc" title="Press Esc twice">Esc stops</span>`
+        }
+    </div>`;
 }
 
 /**
@@ -1293,12 +2029,11 @@ export function Transcript() {
     const slots = new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot]));
     const approvals = view.approvals ?? [];
     const first = entries[0];
-    const partial = view.live.generation?.message?.blocks ?? [];
-    const runningTools = (view.live.tools ?? []).some((slot) => slot.status !== "done");
-    const thinking = view.live.busy && partial.length === 0 && !runningTools;
-    const retry = view.live.generation?.retry;
-    const compactions = view.live.compactions ?? [];
+    const partial = partialEntry(view.live.generation?.message?.blocks ?? []);
+    const busy = view.live.busy;
+    const compacting = (view.live.compactions ?? []).length > 0;
     const conversation = view.conversation;
+    const started = runStart(conversation.id, entries, busy);
     // Only a session this person can see is in their list.
     const { sessions, sessionsLoaded } = store.state;
     const source =
@@ -1334,6 +2069,7 @@ export function Transcript() {
                           firstId=${first.id}
                           results=${results}
                           keepPlace=${keepPlace}
+                          conversationId=${conversation.id}
                       />`
             }
             ${
@@ -1346,44 +2082,25 @@ export function Transcript() {
                     </p>
                 </div>`
             }
-            ${rows.slice(start).map(
-                (entry) => html`<${Row}
-                    key=${entry.id}
-                    entry=${entry}
-                    results=${results}
-                    slots=${slots}
-                    approvals=${approvals}
-                    deps=${rowDeps(entry, results, slots, approvals)}
-                />`,
-            )}
+            <${Items}
+                items=${itemsOf(rows.slice(start), partial, {
+                    from: rowsBefore(rows, start, collab()),
+                    talk: collab(),
+                })}
+                results=${results}
+                slots=${slots}
+                approvals=${approvals}
+                busy=${busy}
+                conversationId=${conversation.id}
+            />
             <${PendingShells} conversationId=${conversation.id} rows=${rows} />
-            ${
-                partial.length > 0 &&
-                html`<div class="assistant live">
-                    <${AssistantBlocks}
-                        blocks=${partial}
-                        results=${results}
-                        slots=${slots}
-                        approvals=${approvals}
-                        streaming=${true}
-                    />
-                </div>`
-            }
             ${approvals.map(
                 (approval) => html`<${ApprovalCard} key=${approval.id} approval=${approval} />`,
             )}
             ${
-                retry &&
-                html`<div class="muted small">
-                    Retrying (attempt ${view.live.generation.attempt + 1}) after: ${retry.error}
-                </div>`
+                (busy || compacting) &&
+                html`<${LiveLine} live=${view.live} approvals=${approvals} start=${started} />`
             }
-            ${compactions.map(
-                (compaction) => html`<div class="muted small">
-                    <${Spinner} /> Compacting context (${compaction.reason})…
-                </div>`,
-            )}
-            ${thinking && html`<${Thinking} />`}
         </div>
         ${
             showJump &&

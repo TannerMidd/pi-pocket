@@ -251,9 +251,10 @@ export function PeeksButton() {
             (session) => session.waiting && !session.archived && session.id !== conversationId,
         );
 
-    // Quiet on phones while off: the top bar's way back to the sessions counts those waiting there.
+    // Quiet while off, unless another session waits for you; where the top bar leads back to the sessions, its way back
+    // counts those waiting, and it stays quiet then too.
     return html`<button
-        class=${`icon-button badge-host ${on ? "on" : "quiet"}`}
+        class=${`icon-button badge-host ${on ? "on" : waiting ? "quiet-narrow" : "quiet"}`}
         aria-label="Peek tiles"
         aria-pressed=${on}
         title=${on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)"}

@@ -26,8 +26,8 @@ import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
 
 /**
  * The session's places as big tiles at the top of the menu: Files, Changes, the browser, artifacts, the chat, find,
- * the branch, and peek tiles. On a phone the top bar keeps only the buttons with something to say; these are always
- * here, a thumb's width each.
+ * the branch, and peek tiles. The top bar keeps only the buttons with something to say; these are always here, a
+ * thumb's width each.
  */
 function Places() {
     const { view, browser, browserOpen, server } = store.state;
