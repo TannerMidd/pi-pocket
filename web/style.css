@@ -839,10 +839,6 @@ kbd {
         gap: 0;
         padding-left: 0.15rem;
     }
-    /* The list is the whole screen here, not a sidebar to fold. */
-    .sidebar-fold {
-        display: none !important;
-    }
     .topbar > .icon-button,
     .topbar > .people-button {
         width: 44px;
@@ -2428,7 +2424,7 @@ button.chip:hover {
     .search-launcher::before {
         content: "";
         position: absolute;
-        inset: -5px -9px;
+        inset: -9px;
     }
 }
 
@@ -7876,8 +7872,25 @@ textarea.notes {
         position: absolute;
         inset: -10px -8px -4px;
     }
+    /* 40px square, as 0.11 made the search's buttons. */
     .search-clear::before {
-        inset: -5px -9px;
+        inset: -9px;
+    }
+    /* New and the board's filters keep their look and take a thumb-tall tap. */
+    .new-button,
+    .board-filter {
+        position: relative;
+    }
+    .new-button::before,
+    .board-filter::before {
+        content: "";
+        position: absolute;
+    }
+    .new-button::before {
+        inset: -6px -3px;
+    }
+    .board-filter::before {
+        inset: -10px -4px;
     }
     .group-head {
         position: relative;
