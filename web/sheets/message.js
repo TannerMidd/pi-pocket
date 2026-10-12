@@ -1,5 +1,6 @@
 // What a message's menu does: copy, fork from here, and send again (with this model or another).
 import { useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import {
     actions,
     attempt,
@@ -50,7 +51,7 @@ const openBranch = (run) => {
         const created = await run();
 
         navigate(created.id);
-        notify("info", "Opened the new session. The original is unchanged.");
+        notify("info", t("Opened the new session. The original is unchanged."));
     }).finally(() => {
         branching = false;
     });
@@ -71,15 +72,15 @@ function SendAgain({ prompt, worktree }) {
     );
 
     return html`<div class="group">
-        <div class="group-title">Send again in a new session</div>
-        ${item(`With ${modelLabel(view.agent)}`, () => openBranch(() => actions.resend(prompt.id, { worktree })), "same model")}
+        <div class="group-title">${t("Send again in a new session")}</div>
+        ${item(t("With {{model}}", { model: modelLabel(view.agent) }), () => openBranch(() => actions.resend(prompt.id, { worktree })), t("same model"))}
         ${
             choosing
                 ? html`<label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
                         autofocus
-                        placeholder="Search models"
+                        placeholder=${t("Search models")}
                         value=${query}
                         onInput=${(event) => setQuery(event.currentTarget.value)}
                     />
@@ -97,7 +98,7 @@ function SendAgain({ prompt, worktree }) {
                         html`<span class="mono">${model.provider}</span>`,
                     ),
                 )}`
-                : item("With another model…", () => setChoosing(true))
+                : item(t("With another model…"), () => setChoosing(true))
         }
     </div>`;
 }
@@ -111,8 +112,8 @@ export function MessageSheet({ entryId }) {
     const [worktree, setWorktree] = useState(false);
 
     if (entry?.kind !== "user" && entry?.kind !== "assistant") {
-        return html`<${Sheet} title="Message" onClose=${closeSheet}>
-            <p class="muted">This message is not here anymore.</p>
+        return html`<${Sheet} title=${t("Message")} onClose=${closeSheet}>
+            <p class="muted">${t("This message is not here anymore.")}</p>
         <//>`;
     }
 
@@ -124,14 +125,14 @@ export function MessageSheet({ entryId }) {
     const prompt = toPi ? entry : promptBefore(entryId);
     const copy = () =>
         copyText(text).then(
-            () => notify("info", "Copied."),
-            () => notify("error", "Could not copy."),
+            () => notify("info", t("Copied.")),
+            () => notify("error", t("Could not copy.")),
         );
 
     if (draft !== null) {
-        return html`<${Sheet} title="Edit and send again" onClose=${closeSheet}>
+        return html`<${Sheet} title=${t("Edit and send again")} onClose=${closeSheet}>
             <p class="muted small">
-                Pi gets the edited message in a new session that forks just before the original. The original stays as it is.
+                ${t("Pi gets the edited message in a new session that forks just before the original. The original stays as it is.")}
             </p>
             <textarea
                 rows="6"
@@ -140,37 +141,37 @@ export function MessageSheet({ entryId }) {
                 onInput=${(event) => setDraft(event.currentTarget.value)}
             ></textarea>
             <div class="row">
-                <button class="button" onClick=${() => setDraft(null)}>Back</button>
+                <button class="button" onClick=${() => setDraft(null)}>${t("Back")}</button>
                 <button
                     class="button primary grow"
                     onClick=${() => openBranch(() => actions.resend(entry.id, { text: draft, worktree }))}
                 >
-                    Send in a new session
+                    ${t("Send in a new session")}
                 </button>
             </div>
         <//>`;
     }
 
-    return html`<${Sheet} title=${toPi ? "Message" : "Reply"} onClose=${closeSheet}>
+    return html`<${Sheet} title=${t(toPi ? "Message" : "Reply")} onClose=${closeSheet}>
         ${
             canBranch &&
             view.conversation.inRepository &&
             html`<label class="check">
-                <input type="checkbox" checked=${worktree} onChange=${(event) => setWorktree(event.currentTarget.checked)} /> New sessions get a git worktree of their own
+                <input type="checkbox" checked=${worktree} onChange=${(event) => setWorktree(event.currentTarget.checked)} /> ${t("New sessions get a git worktree of their own")}
             </label>`
         }
-        ${canBranch && !toPi && item("Fork from here", () => openBranch(() => actions.fork(entry.id, { worktree })), "everything up to this reply")}
-        ${canBranch && toPi && item("Edit and send again…", () => setDraft(text))}
+        ${canBranch && !toPi && item(t("Fork from here"), () => openBranch(() => actions.fork(entry.id, { worktree })), t("everything up to this reply"))}
+        ${canBranch && toPi && item(t("Edit and send again…"), () => setDraft(text))}
         ${canBranch && prompt && html`<${SendAgain} prompt=${prompt} worktree=${worktree} />`}
         ${
             memoryAvailable() &&
             canSteer() &&
             item(
-                "Remember…",
+                t("Remember…"),
                 () => openSheet({ type: "memory", draft: lessonFrom(text) }),
-                "keep it as a lesson for Pi",
+                t("keep it as a lesson for Pi"),
             )
         }
-        ${item("Copy text", copy)}
+        ${item(t("Copy text"), copy)}
     <//>`;
 }

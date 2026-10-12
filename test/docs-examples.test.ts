@@ -94,6 +94,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
         [
             ["clock.ts", false],
             ["no-force-push.ts", false],
+            ["zh-cn-ui.ts", false],
         ],
     );
     assert.ok(listed.every((module) => module.summary.length > 20));

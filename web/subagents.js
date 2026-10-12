@@ -3,6 +3,7 @@
 // are done, and what the newest one does. Unfolded, a row each: what it was asked, what it does this moment (its peek,
 // as tiles have), for how long, whether its report is on its way, Stop, and a tap to open it.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { t } from "./i18n.js";
 import { describeCall } from "./calls.js";
 import { fromServer, useOnScreen } from "./peeks.js";
 import { api, attempt, canSteer, navigate, openSheet, store } from "./store.js";
@@ -71,7 +72,8 @@ export function openSubagent(id) {
 /** The mark a row starts with, for a subagent that is not working. */
 const MARKS = { done: "✓", stopped: "■", failed: "!" };
 
-const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+const subagentCount = (count) =>
+    t(count === 1 ? "{{count}} subagent" : "{{count}} subagents", { count });
 
 /** How long since `ms`, a time the server took: "45s", "3m 05s", "1h 12m". */
 export function elapsed(ms) {
@@ -94,7 +96,10 @@ export function nowDoing(agent) {
     const waiting = peek?.approvals?.[0];
 
     if (waiting) {
-        return `Waiting for approval: ${waiting.tool} ${waiting.subject}`.trim();
+        return t("Waiting for approval: {{tool}} {{subject}}", {
+            tool: waiting.tool,
+            subject: waiting.subject,
+        }).trim();
     }
 
     const last = (peek?.lines ?? []).at(-1);
@@ -114,7 +119,7 @@ export function nowDoing(agent) {
     }
 
     // Before its peek arrives, nothing is known but that it works.
-    return peek === undefined ? "Working…" : "Thinking…";
+    return t(peek === undefined ? "Working…" : "Thinking…");
 }
 
 /** The order of the states, in the dots and the rows: working, then trouble, then done. */
@@ -138,7 +143,7 @@ function AgentRow({ agent }) {
     const dealt = status === "failed" && agent.dealt ? " · dismissed" : "";
     const when = agent.busy
         ? agent.askedAt && elapsed(agent.askedAt)
-        : agent.answeredAt && `${status} ${timeAgo(fromServer(agent.answeredAt))}${dealt}`;
+        : agent.answeredAt && `${t(status)} ${timeAgo(fromServer(agent.answeredAt))}${dealt}`;
 
     return html`<div class=${`agent-row ${status}`} data-peek=${agent.conversationId}>
         <button class="agent-open" onClick=${() => openSubagent(agent.conversationId)}>
@@ -149,7 +154,7 @@ function AgentRow({ agent }) {
                 <span class="agent-head">
                     <span class="agent-name">${agent.name}</span>
                     ${when && html`<span class="agent-when">${when}</span>`}
-                    ${agent.reporting && html`<span class="agent-chip">report on its way to Pi</span>`}
+                    ${agent.reporting && html`<span class="agent-chip">${t("report on its way to Pi")}</span>`}
                 </span>
                 ${agent.busy && html`<span class="agent-now">${nowDoing(agent)}</span>`}
                 ${status === "failed" && agent.error && html`<span class="agent-error">${agent.error}</span>`}
@@ -161,8 +166,8 @@ function AgentRow({ agent }) {
             canSteer() &&
             html`<button
                 class="icon-button agent-stop"
-                aria-label=${`Stop ${agent.name}`}
-                title="Stop"
+                aria-label=${t("Stop {{name}}", { name: agent.name })}
+                title=${t("Stop")}
                 onClick=${stop}
             >
                 <${Icon} name="stop" size=${13} />
@@ -178,13 +183,13 @@ function Held({ why }) {
     const owner = store.state.me?.role === "owner";
 
     return html`<div class="agents-held" role="status">
-        <span>Reports wait: ${why}.</span>
+        <span>${t("Reports wait: {{reason}}.", { reason: why })}</span>
         ${
             owner
                 ? html`<button class="link" onClick=${() => openSheet({ type: "spend" })}>
-                      Raise it
+                      ${t("Raise it")}
                   </button>`
-                : html`<span>They go once the owner raises it.</span>`
+                : html`<span>${t("They go once the owner raises it.")}</span>`
         }
     </div>`;
 }
@@ -201,8 +206,8 @@ function Bar({ agents, active, open, held }) {
     // "3 subagents working" when one kind says it all; "2 working · 1 done · 1 failed", short for a phone, when not.
     const summary =
         kinds.length === 1
-            ? `${plural(agents.length, "subagent")} ${kinds[0]}`
-            : kinds.map((status) => `${count(status)} ${status}`).join(" · ");
+            ? `${subagentCount(agents.length)} ${t(kinds[0])}`
+            : kinds.map((status) => `${count(status)} ${t(status)}`).join(" · ");
     const shown = ordered(agents);
 
     // The rows' and the folded line's peeks: what each working subagent does now.
@@ -219,7 +224,9 @@ function Bar({ agents, active, open, held }) {
     }, [working.length]);
 
     // What the button says, the newest one's work too: the label stands for everything in it.
-    const label = `Subagents: ${summary}${lead && !open ? `. ${lead.name}: ${nowDoing(lead)}` : ""}`;
+    const label =
+        t("Subagents: {{summary}}", { summary }) +
+        (lead && !open ? `. ${lead.name}: ${nowDoing(lead)}` : "");
 
     return html`<div
         class=${`agents-bar ${open ? "open" : ""} ${working.length > 0 ? "busy" : ""}`}
@@ -255,8 +262,8 @@ function Bar({ agents, active, open, held }) {
                 !active &&
                 html`<button
                     class="icon-button"
-                    aria-label="Put the subagents bar away"
-                    title="Put away"
+                    aria-label=${t("Put the subagents bar away")}
+                    title=${t("Put away")}
                     onClick=${() => {
                         putAway(store.state.conversationId, agents);
                         store.set({ subagentsOpen: null });

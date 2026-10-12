@@ -1,5 +1,6 @@
 // Spend: what each session and person cost, and their limits.
 import { useEffect, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { api, attempt, closeSheet, store } from "../store.js";
 import { html, Loader, Sheet } from "../ui.js";
 
@@ -11,7 +12,7 @@ function SpendLimit({ budget, editable, save }) {
 
     if (draft === null) {
         return html`<span class="muted small">
-            ${budget === undefined ? "no limit" : `limit ${money(budget)}`}
+            ${budget === undefined ? t("no limit") : t("limit {{amount}}", { amount: money(budget) })}
         </span>
         ${
             editable &&
@@ -19,7 +20,7 @@ function SpendLimit({ budget, editable, save }) {
                 class="link small"
                 onClick=${() => setDraft(budget === undefined ? "" : String(budget))}
             >
-                Change
+                ${t("Change")}
             </button>`
         }`;
     }
@@ -37,11 +38,11 @@ function SpendLimit({ budget, editable, save }) {
             disabled=${!(Number(draft) > 0)}
             onClick=${() => done(Number(draft))}
         >
-            Set
+            ${t("Set")}
         </button>
         ${
             budget !== undefined &&
-            html`<button class="button small ghost" onClick=${() => done(null)}>No limit</button>`
+            html`<button class="button small ghost" onClick=${() => done(null)}>${t("No limit")}</button>`
         }
     </span>`;
 }
@@ -56,19 +57,20 @@ export function SpendSheet() {
     }, []);
     const save = (target) => async (budget) => setData(await api("spend", { ...target, budget }));
 
-    return html`<${Sheet} title="Spend" onClose=${closeSheet}>
-        ${data === null && html`<${Loader} label="Adding it up" />`}
+    return html`<${Sheet} title=${t("Spend")} onClose=${closeSheet}>
+        ${data === null && html`<${Loader} label=${t("Adding it up")} />`}
         ${
             data?.total !== undefined &&
-            html`<p>Pi spent <strong>${money(data.total)}</strong> on this server so far.</p>`
+            html`<p>${t("Pi spent {{amount}} on this server so far.", { amount: money(data.total) })}</p>`
         }
         <p class="muted small">
-            Spend goes to whoever asked for the work. Past a limit, Pi takes no new messages there, a run that crosses it stops, and subagents' reports wait until it is raised.
+            ${t("Spend goes to whoever asked for the work. Past a limit, Pi takes no new messages there, a run that crosses it stops, and subagents' reports wait until it is raised.")}
+
         </p>
         ${
             data &&
             html`<div class="group">
-                <div class="group-title">People</div>
+                <div class="group-title">${t("People")}</div>
                 ${data.people.map(
                     (person) => html`<div class="spend-row" key=${person.id}>
                         <span class="grow">${person.name}</span>
@@ -82,7 +84,7 @@ export function SpendSheet() {
                 )}
             </div>
             <div class="group">
-                <div class="group-title">Sessions</div>
+                <div class="group-title">${t("Sessions")}</div>
                 ${data.sessions.map(
                     (session) => html`<div class="spend-row" key=${session.id}>
                         <span class="grow">${session.title}</span>

@@ -1,4 +1,5 @@
 // A tool call in one line, as transcripts and peek tiles show it.
+import { t } from "./i18n.js";
 
 const short = (text, max = 90) => {
     const flat = String(text ?? "")
@@ -16,19 +17,24 @@ export function describeCall(call) {
         case "read": {
             const range = args.offset ? `:${args.offset}${args.limit ? `+${args.limit}` : ""}` : "";
 
-            return { icon: "▤", label: "Read", subject: `${args.path ?? ""}${range}`, mono: true };
+            return {
+                icon: "▤",
+                label: t("Read"),
+                subject: `${args.path ?? ""}${range}`,
+                mono: true,
+            };
         }
 
         case "write":
-            return { icon: "✎", label: "Write", subject: args.path ?? "", mono: true };
+            return { icon: "✎", label: t("Write"), subject: args.path ?? "", mono: true };
         case "edit":
-            return { icon: "✎", label: "Edit", subject: args.path ?? "", mono: true };
+            return { icon: "✎", label: t("Edit"), subject: args.path ?? "", mono: true };
         case "bash":
             return { icon: ">_", label: "", subject: short(args.command, 140), mono: true };
         case "artifact":
             return {
                 icon: "✦",
-                label: "Artifact",
+                label: t("Artifact"),
                 subject: args.title ?? args.id ?? "",
                 mono: false,
             };
@@ -40,7 +46,12 @@ export function describeCall(call) {
                 .map((each) => each.trim())
                 .find((each) => each !== "" && !each.startsWith("//"));
 
-            return { icon: "{}", label: "Codemode", subject: short(line ?? "", 140), mono: true };
+            return {
+                icon: "{}",
+                label: t("Codemode"),
+                subject: short(line ?? "", 140),
+                mono: true,
+            };
         }
 
         case "browser": {

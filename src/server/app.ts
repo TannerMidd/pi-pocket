@@ -411,7 +411,8 @@ export class PocketApp {
             subagentModels: () => this.config.subagentModels,
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
-            notice: (level, message, conversationId) => this.notice(level, message, conversationId),
+            notice: (level, message, conversationId, ui) =>
+                this.notice(level, message, conversationId, ui),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             schedules: this.schedules,
@@ -439,6 +440,7 @@ export class PocketApp {
             host,
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
+            () => this.#refreshClients(),
         );
         await this.loader.loadAll();
 
@@ -792,6 +794,7 @@ export class PocketApp {
         level: "info" | "warning" | "error",
         message: string,
         conversationId?: ConversationId,
+        ui?: { key: string; params?: Record<string, string | number> },
     ): void {
         this.#log(`[${level}] ${message}`);
 
@@ -806,7 +809,7 @@ export class PocketApp {
                       this.canSee(client.user, conversationId);
 
             if (reaches) {
-                client.send("notice", { level, message });
+                client.send("notice", { level, message, ...(ui === undefined ? {} : { ui }) });
             }
         }
     }
@@ -1523,6 +1526,8 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                // Data-only UI translation packs from currently enabled extension modules.
+                uiLocales: this.loader.uiLocales(),
                 // Tells the web app this server has people chat and typing indicators.
                 chat: true,
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
@@ -2182,6 +2187,13 @@ export class PocketApp {
         this.notice(
             enabled ? "info" : "warning",
             `${user.name} turned ${module.title} ${enabled ? "on" : "off"}.`,
+            undefined,
+            {
+                key: enabled
+                    ? "{{name}} turned {{extension}} on."
+                    : "{{name}} turned {{extension}} off.",
+                params: { name: user.name, extension: module.title },
+            },
         );
     }
 
@@ -2226,6 +2238,14 @@ export class PocketApp {
             rule === "others"
                 ? `${user.name} made approvals need someone other than who asked.`
                 : `${user.name} let anyone who can steer allow risky calls.`,
+            undefined,
+            {
+                key:
+                    rule === "others"
+                        ? "{{name}} made approvals need someone other than who asked."
+                        : "{{name}} let anyone who can steer allow risky calls.",
+                params: { name: user.name },
+            },
         );
     }
 

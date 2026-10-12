@@ -1,5 +1,6 @@
 // Pi's sessions from the terminal, which the owner can continue here: the list, by folder, and one of them before it
 // continues, as a short conversation.
+import { t } from "../i18n.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
 import { html, Icon, Loader, Sheet, shortPath, timeAgo } from "../ui.js";
@@ -7,7 +8,7 @@ import { html, Icon, Loader, Sheet, shortPath, timeAgo } from "../ui.js";
 /** Only the owner: Pi's sessions are the owner's files. */
 export const piSessionsAvailable = () => store.state.me?.role === "owner";
 
-const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+const messages = (count) => t(count === 1 ? "{{count}} message" : "{{count}} messages", { count });
 
 /** A folder's last part, and the folder it is in: `pi-pocket`, `~/code`. */
 function folderParts(cwd, home) {
@@ -40,13 +41,13 @@ function SessionRow({ session }) {
         <span class="pi-session-text">
             <span class="pi-session-title">${session.title}</span>
             <span class="pi-session-meta">
-                ${plural(session.messages, "message")} · ${timeAgo(session.modified)}
+                ${messages(session.messages)} · ${timeAgo(session.modified)}
             </span>
         </span>
         ${
             pocket &&
             html`<span class=${`pi-tag ${pocket.behind ? "behind" : ""}`}>
-                ${pocket.behind ? "Pi went on" : "in Pocket"}
+                ${t(pocket.behind ? "Pi went on" : "in Pocket")}
             </span>`
         }
         <${Icon} name="chevron" size=${14} />
@@ -103,21 +104,21 @@ export function PiSessionsSheet() {
         }
     }, [any]);
 
-    return html`<${Sheet} title="Continue a Pi session" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Continue a Pi session")} onClose=${closeSheet}>
         <p class="muted small">
-            Sessions of Pi in the terminal on this computer. One continues here as a new session; its file stays as it is.
+            ${t("Sessions of Pi in the terminal on this computer. One continues here as a new session; its file stays as it is.")}
         </p>
         ${problem && html`<div class="error-box small">${problem}</div>`}
-        ${sessions === null && problem === null && html`<${Loader} label="Finding Pi's sessions" />`}
-        ${any === false && html`<p class="muted">Pi has no sessions on this computer yet.</p>`}
+        ${sessions === null && problem === null && html`<${Loader} label=${t("Finding Pi's sessions")} />`}
+        ${any === false && html`<p class="muted">${t("Pi has no sessions on this computer yet.")}</p>`}
         ${
             any === true &&
             html`<input
                 class="find-input"
                 type="search"
                 ref=${box}
-                placeholder="Search sessions"
-                aria-label="Search Pi's sessions: titles, folders, and messages"
+                placeholder=${t("Search sessions")}
+                aria-label=${t("Search Pi's sessions: titles, folders, and messages")}
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
             />`
@@ -145,7 +146,7 @@ export function PiSessionsSheet() {
                 any === true &&
                 needle !== "" &&
                 sessions?.length === 0 &&
-                html`<p class="muted">No session matches “${needle}”.</p>`
+                html`<p class="muted">${t("No session matches “{{query}}”.", { query: needle })}</p>`
             }
         </div>
     <//>`;
@@ -184,7 +185,9 @@ export function PiSessionSheet({ path }) {
                 open(id);
                 notify(
                     "info",
-                    "Continued from Pi. Pi has the conversation as Pi left it; nothing it did runs again.",
+                    t(
+                        "Continued from Pi. Pi has the conversation as Pi left it; nothing it did runs again.",
+                    ),
                 );
             } finally {
                 going.current = false;
@@ -194,57 +197,57 @@ export function PiSessionSheet({ path }) {
     };
 
     if (info === null) {
-        return html`<${Sheet} title="Pi session" onClose=${closeSheet}>
+        return html`<${Sheet} title=${t("Pi session")} onClose=${closeSheet}>
             ${
                 problem === null
-                    ? html`<${Loader} label="Reading the session" />`
+                    ? html`<${Loader} label=${t("Reading the session")} />`
                     : html`<div class="error-box small">${problem}</div>`
             }
         <//>`;
     }
 
-    return html`<${Sheet} title="Pi session" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Pi session")} onClose=${closeSheet}>
         <h3 class="pi-title">${info.title}</h3>
         <dl class="pi-facts">
             <div>
-                <dt>Folder</dt>
+                <dt>${t("Folder")}</dt>
                 <dd class="mono">${shortPath(info.cwd, home)}</dd>
             </div>
             <div>
-                <dt>Model</dt>
+                <dt>${t("Model")}</dt>
                 <dd class="mono">
-                    ${info.model ?? "—"}${info.model && !info.modelHere ? html`<span class="muted"> · not signed in here</span>` : ""}
+                    ${info.model ?? "—"}${info.model && !info.modelHere ? html`<span class="muted"> · ${t("not signed in here")}</span>` : ""}
                 </dd>
             </div>
             <div>
-                <dt>Messages</dt>
+                <dt>${t("Messages")}</dt>
                 <dd>${info.messages}</dd>
             </div>
         </dl>
         ${
             !info.cwdExists &&
             html`<div class="error-box small">
-                The folder it worked in is not there anymore, so it cannot continue here.
+                ${t("The folder it worked in is not there anymore, so it cannot continue here.")}
             </div>`
         }
         ${
             info.model &&
             !info.modelHere &&
-            html`<p class="muted small">It continues with Pi Pocket's usual model.</p>`
+            html`<p class="muted small">${t("It continues with Pi Pocket's usual model.")}</p>`
         }
         ${
             info.pocket &&
             html`<div class="pi-note">
                 <span>
-                    ${info.pocket.behind ? "Continued here before Pi went on in the terminal." : "Already continued here."}
+                    ${t(info.pocket.behind ? "Continued here before Pi went on in the terminal." : "Already continued here.")}
                 </span>
-                <button class="link" onClick=${() => open(info.pocket.id)}>Open it</button>
+                <button class="link" onClick=${() => open(info.pocket.id)}>${t("Open it")}</button>
             </div>`
         }
         ${
             info.last.length > 0 &&
-            html`<div class="pi-convo" aria-label="Its last messages">
-                <div class="label">Its last messages</div>
+            html`<div class="pi-convo" aria-label=${t("Its last messages")}>
+                <div class="label">${t("Its last messages")}</div>
                 ${info.last.map((line) =>
                     line.role === "user"
                         ? html`<div class="pi-ask"><div>${line.text}</div></div>`
@@ -254,10 +257,10 @@ export function PiSessionSheet({ path }) {
         }
         <div class="pi-continue">
             <button class="button primary wide" disabled=${busy || !info.cwdExists} onClick=${go}>
-                ${info.pocket ? "Continue it here again" : "Continue in Pocket"}
+                ${t(info.pocket ? "Continue it here again" : "Continue in Pocket")}
             </button>
             <p class="muted small">
-                Pi gets the conversation as Pi left it, with Pi Pocket's instructions and tools. Nothing Pi did runs again, and the session's file stays as it is.
+                ${t("Pi gets the conversation as Pi left it, with Pi Pocket's instructions and tools. Nothing Pi did runs again, and the session's file stays as it is.")}
             </p>
         </div>
     <//>`;

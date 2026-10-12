@@ -1,5 +1,6 @@
 // Memory: the lessons Pi keeps across sessions, for this session's project and for everywhere.
 import { useEffect, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { api, attempt, closeSheet, navigate, notify, store } from "../store.js";
 import { html, Sheet, timeAgo } from "../ui.js";
 
@@ -103,9 +104,9 @@ export function memoryHint(data) {
         ? data.lessons.filter((lesson) => lesson.pending || lesson.proposal).length
         : 0;
     const parts = [
-        data.project ? `${here} here` : null,
-        `${everywhere} everywhere`,
-        waiting > 0 ? `${waiting} to approve` : null,
+        data.project ? t("{{count}} here", { count: here }) : null,
+        t("{{count}} everywhere", { count: everywhere }),
+        waiting > 0 ? t("{{count}} to approve", { count: waiting }) : null,
     ];
 
     return parts.filter(Boolean).join(" · ");
@@ -133,7 +134,7 @@ function approval(lesson) {
 /** Who saved a lesson, and where it came from, in a line. */
 function Source({ lesson }) {
     const { me } = store.state;
-    const who = lesson.byPi ? "Pi" : lesson.by === me?.id ? "you" : lesson.byName;
+    const who = lesson.byPi ? "Pi" : lesson.by === me?.id ? t("you") : lesson.byName;
 
     const open = (event) => {
         event.preventDefault();
@@ -143,19 +144,19 @@ function Source({ lesson }) {
 
     return html`<div class="muted small lesson-source">
         <span>${who}</span>
-        ${lesson.byPi && lesson.by !== me?.id && html`<span> for ${lesson.byName}</span>`}
+        ${lesson.byPi && lesson.by !== me?.id && html`<span> ${t("for {{name}}", { name: lesson.byName })}</span>`}
         ${
             lesson.from &&
             html` · <a href=${`/s/${lesson.from.id}`} onClick=${open}>${lesson.from.title}</a>`
         }
         <span> · ${timeAgo(lesson.updatedAt ?? lesson.createdAt)}</span>
-        ${(lesson.pending || lesson.proposal) && html`<span> · for ${reach(lesson)}</span>`}
+        ${(lesson.pending || lesson.proposal) && html`<span> · ${t("for {{scope}}", { scope: reach(lesson) })}</span>`}
     </div>`;
 }
 
 /** Where a lesson applies, said where it waits: everywhere's reach every session and PiP. */
 const reach = (lesson) =>
-    lesson.scope === "everywhere" ? "everywhere: every session, and PiP" : "this project";
+    t(lesson.scope === "everywhere" ? "everywhere: every session, and PiP" : "this project");
 
 /** One lesson: its text, where it came from, and what this person may do with it. */
 function Lesson({ lesson, data }) {
@@ -191,13 +192,13 @@ function Lesson({ lesson, data }) {
                 onInput=${(event) => setDraft(event.currentTarget.value)}
             ></textarea>
             <div class="row lesson-actions">
-                <button class="button small ghost" onClick=${() => setDraft(null)}>Cancel</button>
+                <button class="button small ghost" onClick=${() => setDraft(null)}>${t("Cancel")}</button>
                 <button
                     class="button small primary"
                     disabled=${draft.trim() === ""}
                     onClick=${() => act("", { text: draft })}
                 >
-                    Save
+                    ${t("Save")}
                 </button>
             </div>
         </div>`;
@@ -209,7 +210,7 @@ function Lesson({ lesson, data }) {
             lesson.proposal &&
             html`<div class="lesson-proposal">
                 <span class="muted small">
-                    ${lesson.proposal.byPi ? "Pi" : lesson.proposal.mine ? "You" : lesson.proposal.byName} ${lesson.proposal.forget ? "proposes forgetting it." : "proposes:"}
+                    ${t(lesson.proposal.forget ? "{{name}} proposes forgetting it." : "{{name}} proposes:", { name: lesson.proposal.byPi ? "Pi" : lesson.proposal.mine ? t("You") : lesson.proposal.byName })}
                 </span>
                 ${lesson.proposal.text && html`<div class="lesson-text">${lesson.proposal.text}</div>`}
             </div>`
@@ -232,7 +233,7 @@ function Lesson({ lesson, data }) {
                                 act(
                                     "/approve",
                                     approval(lesson),
-                                    "Approved: Pi goes by it from its next message.",
+                                    t("Approved: Pi goes by it from its next message."),
                                 )}
                         >
                             Approve
@@ -241,7 +242,7 @@ function Lesson({ lesson, data }) {
                     ${
                         (approving || withdrawing) &&
                         html`<button class="button small ghost" onClick=${() => act("/discard")}>
-                            ${approving ? "Discard" : "Withdraw"}
+                            ${t(approving ? "Discard" : "Withdraw")}
                         </button>`
                     }
                     ${
@@ -250,7 +251,7 @@ function Lesson({ lesson, data }) {
                             class="button small ghost"
                             onClick=${() => setDraft(lesson.text)}
                         >
-                            Edit
+                            ${t("Edit")}
                         </button>`
                     }
                     ${
@@ -288,7 +289,7 @@ export function MemorySheet({ draft: initial = "" }) {
 
     if (!data) {
         return html`<${Sheet} title="Memory" onClose=${closeSheet}>
-            <p class="muted">Loading…</p>
+            <p class="muted">${t("Loading…")}</p>
         <//>`;
     }
 
@@ -312,22 +313,22 @@ export function MemorySheet({ draft: initial = "" }) {
             notify(
                 "info",
                 lesson.pending
-                    ? "Saved. Pi uses it once the owner approves it."
-                    : "Saved. Pi gets it from its next message.",
+                    ? t("Saved. Pi uses it once the owner approves it.")
+                    : t("Saved. Pi gets it from its next message."),
             );
         }).finally(() => setBusy(false));
     };
 
     return html`<${Sheet} title="Memory" onClose=${closeSheet}>
         <p class="muted small">
-            Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences. ${project ? html`Those for <b>${project.name}</b> go to every session in it, worktrees too; the rest go everywhere.` : "PiP keeps lessons for everywhere."} Pi proposes them as it learns, and the owner approves; yours count at once.
+            ${t("Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences.")} ${project ? t("Those for {{project}} go to every session in it, worktrees too; the rest go everywhere.", { project: project.name }) : t("PiP keeps lessons for everywhere.")} ${t("Pi proposes them as it learns, and the owner approves; yours count at once.")}
         </p>
         ${
             data.canWrite &&
             html`<div class="lesson-add">
                 <textarea
                     rows="2"
-                    placeholder="e.g. Run the tests with npm test; the browser tests need Chromium."
+                    placeholder=${t("e.g. Run the tests with npm test; the browser tests need Chromium.")}
                     maxlength=${data.limits.text}
                     value=${text}
                     onInput=${(event) => setText(event.currentTarget.value)}
@@ -341,7 +342,7 @@ export function MemorySheet({ draft: initial = "" }) {
                 <div class="row">
                     ${
                         project &&
-                        html`<div class="segmented grow" role="radiogroup" aria-label="For">
+                        html`<div class="segmented grow" role="radiogroup" aria-label=${t("For")}>
                             <button
                                 role="radio"
                                 aria-checked=${chosen === "project" ? "true" : "false"}
@@ -372,22 +373,22 @@ export function MemorySheet({ draft: initial = "" }) {
         }
         ${
             waiting.length > 0 &&
-            html`<${Group} title=${`To approve · ${waiting.length}`} lessons=${waiting} data=${data} />`
+            html`<${Group} title=${t("To approve · {{count}}", { count: waiting.length })} lessons=${waiting} data=${data} />`
         }
         ${
             project &&
             html`<${Group}
-                title=${`This project: ${project.name}`}
+                title=${`${t("This project")}: ${project.name}`}
                 lessons=${shown.filter((lesson) => lesson.scope === "project")}
                 data=${data}
-                empty="Nothing yet."
+                empty=${t("Nothing yet.")}
             />`
         }
         <${Group}
-            title="Everywhere"
+            title=${t("Everywhere")}
             lessons=${shown.filter((lesson) => lesson.scope === "everywhere")}
             data=${data}
-            empty="Nothing yet."
+            empty=${t("Nothing yet.")}
         />
     <//>`;
 }
@@ -430,15 +431,15 @@ export function LessonCall({ lessonId, conversationId }) {
     }
 
     const what = lesson.pending
-        ? "A new lesson"
+        ? t("A new lesson")
         : lesson.proposal.forget
-          ? "Forgetting this lesson"
-          : "New text for this lesson";
+          ? t("Forgetting this lesson")
+          : t("New text for this lesson");
     const text = lesson.pending || lesson.proposal.forget ? lesson.text : lesson.proposal.text;
 
     return html`<div class="lesson-call waiting">
         <div class="grow">
-            <div>${what}, for ${reach(lesson)}, waits for ${data.owner ? "you" : "the owner"}:</div>
+            <div>${t("{{what}}, for {{scope}}, waits for {{who}}:", { what, scope: reach(lesson), who: t(data.owner ? "you" : "the owner") })}</div>
             <div class="lesson-text">${text}</div>
         </div>
         ${
@@ -449,14 +450,14 @@ export function LessonCall({ lessonId, conversationId }) {
                         act(
                             "/approve",
                             approval(lesson),
-                            "Approved: Pi goes by it from its next message.",
+                            t("Approved: Pi goes by it from its next message."),
                         )}
                 >
                     Approve
                 </button>
                 <button
                     class="button small ghost"
-                    onClick=${() => act("/discard", {}, "Discarded.")}
+                    onClick=${() => act("/discard", {}, t("Discarded."))}
                 >
                     Discard
                 </button>`

@@ -1,6 +1,7 @@
 // Model providers: signing in and out, the models subagents may use besides their session's own, and the dialog a
 // sign-in uses to ask for a code or a key.
 import { useEffect, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 
@@ -152,7 +153,9 @@ export function ProvidersSheet() {
         attempt(() => api(`providers/${encodeURIComponent(provider.id)}/login`, { type }));
     const logout = (provider) =>
         confirm(
-            `Log out of ${provider.name}? Pi uses the same sign-in, so it is signed out too.`,
+            t("Log out of {{provider}}? Pi uses the same sign-in, so it is signed out too.", {
+                provider: provider.name,
+            }),
         ) &&
         attempt(async () => {
             await api(`providers/${encodeURIComponent(provider.id)}/logout`, {});
@@ -171,9 +174,9 @@ export function ProvidersSheet() {
                 a.name.localeCompare(b.name),
         );
 
-    return html`<${Sheet} title="Providers" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Providers")} onClose=${closeSheet}>
         <p class="muted small">
-            Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
+            ${t("Pi Pocket shares Pi's sign-ins")} (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : t("Only the owner can change them.")}
         </p>
         ${
             owner &&
@@ -184,12 +187,12 @@ export function ProvidersSheet() {
         <label class="search">
             <${Icon} name="search" size=${16} />
             <input
-                placeholder="Search providers"
+                placeholder=${t("Search providers")}
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
             />
         </label>
-        ${providers === null && html`<${Loader} label="Loading providers" />`}
+        ${providers === null && html`<${Loader} label=${t("Loading providers")} />`}
         ${list.map(
             (provider) => html`<div class="provider">
                 <div>
@@ -202,7 +205,7 @@ export function ProvidersSheet() {
                         }
                     </div>
                     <div class="muted small">
-                        ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
+                        ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `${t("signed in")}${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : t("not configured")} · ${t("{{count}} models", { count: provider.models })}
                     </div>
                     ${
                         provider.needsSignIn &&
@@ -218,7 +221,7 @@ export function ProvidersSheet() {
                                 class="button small"
                                 onClick=${() => login(provider, "oauth")}
                             >
-                                ${provider.oauth}
+                                ${provider.oauth === "Sign in with ChatGPT" ? t("Sign in with ChatGPT") : provider.oauth}
                             </button>`
                         }
                         ${
@@ -227,7 +230,7 @@ export function ProvidersSheet() {
                                 class="button small"
                                 onClick=${() => login(provider, "api_key")}
                             >
-                                API key
+                                ${t("API key")}
                             </button>`
                         }
                         ${
@@ -237,7 +240,7 @@ export function ProvidersSheet() {
                                 class="button small ghost"
                                 onClick=${() => logout(provider)}
                             >
-                                Log out
+                                ${t("Log out")}
                             </button>`
                         }
                     </div>`
@@ -278,12 +281,12 @@ export function AuthDialog() {
 
     const prompt = auth.prompt;
 
-    return html`<${Sheet} title=${`Sign in: ${auth.providerName}`} onClose=${close}>
+    return html`<${Sheet} title=${t("Sign in: {{provider}}", { provider: auth.providerName })} onClose=${close}>
         ${auth.events.map((event) => {
             if (event.type === "auth_url") {
                 return html`<div class="auth-event">
                     <a class="button primary wide" href=${event.url} target="_blank" rel="noopener">
-                        Open the sign-in page
+                        ${t("Open the sign-in page")}
                     </a>
                     ${event.instructions && html`<p class="muted small">${event.instructions}</p>`}
                 </div>`;
@@ -292,7 +295,7 @@ export function AuthDialog() {
             if (event.type === "device_code") {
                 return html`<div class="auth-event">
                     <p>
-                        Enter this code at <a href=${event.verificationUri} target="_blank" rel="noopener">${event.verificationUri}</a>
+                        ${t("Enter this code at")} <a href=${event.verificationUri} target="_blank" rel="noopener">${event.verificationUri}</a>
                     </p>
                     <div class="code-big">${event.userCode}</div>
                 </div>`;
@@ -335,12 +338,12 @@ export function AuthDialog() {
                             onKeyDown=${(event) => event.key === "Enter" && answer({ value })}
                         />
                         <button class="button primary" onClick=${() => answer({ value })}>
-                            Continue
+                            ${t("Continue")}
                         </button>
                     </div>
                 </div>`)
         }
-        ${!prompt && !auth.done && html`<${Loader} label="Waiting for the provider" />`}
+        ${!prompt && !auth.done && html`<${Loader} label=${t("Waiting for the provider")} />`}
         ${auth.done && !auth.done.ok && html`<div class="error-box">${auth.done.error}</div>`}
     <//>`;
 }

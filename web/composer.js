@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // The message box: send, steer or queue while busy, attach files, mention files with @, run commands with !, recall
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -102,7 +103,7 @@ function savePastes(id, pastes) {
             localStorage.setItem(pasteKey(id), JSON.stringify(pastes));
         }
     } catch {
-        notify("warning", "This browser has no room to keep the paste after a reload.");
+        notify("warning", t("This browser has no room to keep the paste after a reload."));
     }
 }
 
@@ -131,10 +132,10 @@ function queuedMode(item) {
     const names = queuedReports(item);
 
     if (names) {
-        return names.length === 1 ? "Report" : "Reports";
+        return t(names.length === 1 ? "Report" : "Reports");
     }
 
-    return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queue" : "Note";
+    return t(item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queue" : "Note");
 }
 
 /** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
@@ -161,7 +162,7 @@ function DriverBar() {
         return null;
     }
 
-    const name = (id) => users.find((user) => user.id === id)?.name ?? "someone";
+    const name = (id) => users.find((user) => user.id === id)?.name ?? t("someone");
     const driving = turns.driver === me?.id;
     const driverHere =
         turns.driver !== undefined && presence.some((person) => person.id === turns.driver);
@@ -174,20 +175,20 @@ function DriverBar() {
         );
 
         return html`<div class="driver-bar mine">
-            <span class="driver-label">🚗 You're driving</span>
+            <span class="driver-label">🚗 ${t("You're driving")}</span>
             ${turns.asks.map(
                 (id) => html`<span class="driver-ask">
-                    ${name(id)} asks to drive <button class="link small" onClick=${() => run("handover", id)}>Hand over</button>
+                    ${t("{{name}} asks to drive", { name: name(id) })} <button class="link small" onClick=${() => run("handover", id)}>${t("Hand over")}</button>
                 </span>`,
             )}
             <span class="grow"></span>
             ${
                 others.length > 0 &&
                 html`<button class="link small" onClick=${() => setHanding(!handing)}>
-                    Hand over…
+                    ${t("Hand over…")}
                 </button>`
             }
-            <button class="link small" onClick=${() => run("release")}>Let go</button>
+            <button class="link small" onClick=${() => run("release")}>${t("Let go")}</button>
             ${
                 handing &&
                 html`<div class="driver-pick">
@@ -209,20 +210,20 @@ function DriverBar() {
 
     return html`<div class="driver-bar">
         <span class="driver-label">
-            ${turns.driver === undefined ? "🚗 No one is driving" : `🚗 ${name(turns.driver)} is driving${driverHere ? "" : " (away)"}`}
+            🚗 ${turns.driver === undefined ? t("No one is driving") : t(driverHere ? "{{name}} is driving" : "{{name}} is driving (away)", { name: name(turns.driver) })}
         </span>
         <span class="grow"></span>
         ${
             turns.driver !== undefined &&
             driverHere &&
             html`<button class="button small" disabled=${asked} onClick=${() => run("ask")}>
-                ${asked ? "Asked ✓" : "Ask to drive"}
+                ${t(asked ? "Asked ✓" : "Ask to drive")}
             </button>`
         }
         ${
             canTake &&
             html`<button class="button small primary" onClick=${() => run("claim")}>
-                Take the wheel
+                ${t("Take the wheel")}
             </button>`
         }
     </div>`;
@@ -241,20 +242,20 @@ function PlanBar({ blocked }) {
 
     return html`<div class="plan-bar">
         <span class="grow">
-            <strong>Plan mode.</strong> ${subagent ? "This subagent follows its session: it reads, and changes nothing." : "Pi reads and proposes; nothing changes until you approve."}
+            <strong>${t("Plan mode.")}</strong> ${t(subagent ? "This subagent follows its session: it reads, and changes nothing." : "Pi reads and proposes; nothing changes until you approve.")}
         </span>
         ${
             !blocked &&
             !subagent &&
             html`<button class="link small" onClick=${() => attempt(() => actions.setPlan(false))}>
-                Turn off
+                ${t("Turn off")}
             </button>
             <button
                 class="button small primary"
                 disabled=${view.live.busy}
                 onClick=${() => attempt(actions.approvePlan)}
             >
-                Approve plan
+                ${t("Approve plan")}
             </button>`
         }
     </div>`;
@@ -271,17 +272,17 @@ function GoalBar() {
     const command = html`<span class="mono">${goal.command}</span>`;
     const text =
         goal.status === "met"
-            ? html`<strong>Done:</strong> ${command} passes (check ${goal.tries} of ${goal.max}).`
+            ? html`<strong>${t("Done:")}</strong> ${command} ${t("passes (check {{tries}} of {{max}}).", { tries: goal.tries, max: goal.max })}`
             : goal.status === "gave-up"
-              ? html`<strong>Stopped:</strong> ${command} still fails after ${goal.max} checks.`
-              : html`<strong>Until</strong> ${command} passes${goal.tries > 0 ? ` · check ${goal.tries} of ${goal.max} failed` : ""}.`;
+              ? html`<strong>${t("Stopped:")}</strong> ${command} ${t("still fails after {{max}} checks.", { max: goal.max })}`
+              : html`<strong>${t("Until")}</strong> ${command} ${t("passes")}${goal.tries > 0 ? ` · ${t("check {{tries}} of {{max}} failed", { tries: goal.tries, max: goal.max })}` : ""}.`;
 
     return html`<div class=${`goal-bar ${goal.status}`}>
         <span class="grow">${text}</span>
         ${
             canSteer() &&
             html`<button class="link small" onClick=${() => attempt(actions.clearGoal)}>
-                ${goal.status === "working" ? "Drop" : "Dismiss"}
+                ${t(goal.status === "working" ? "Drop" : "Dismiss")}
             </button>`
         }
     </div>`;
@@ -297,15 +298,17 @@ const WATCH_CHECKS = {
 function watchEnded(watch) {
     switch (watch.status) {
         case "merged":
-            return "was merged.";
+            return t("was merged.");
         case "closed":
-            return "was closed.";
+            return t("was closed.");
         case "gave-up":
-            return `had more to tell than ${watch.max} messages: watch stopped.`;
+            return t("had more to tell than {{max}} messages: watch stopped.", { max: watch.max });
         case "expired":
-            return "had nothing new for two weeks: watch stopped.";
+            return t("had nothing new for two weeks: watch stopped.");
         default:
-            return `could not be watched: ${watch.note ?? "something went wrong"}.`;
+            return t("could not be watched: {{error}}.", {
+                error: watch.note ?? t("something went wrong"),
+            });
     }
 }
 
@@ -321,7 +324,7 @@ function WatchBar() {
     const checks = WATCH_CHECKS[watch.checks];
     const text =
         watch.status === "watching"
-            ? html`<strong>Watching</strong> ${pr}${checks ? ` · ${checks}` : ""}${watch.sent > 0 ? ` · ${watch.sent} of ${watch.max} sent` : ""}${watch.unchecked ? " · owner's comments only" : ""}${watch.errors > 0 ? " · last look failed" : watch.note ? " · waiting" : ""}`
+            ? html`<strong>${t("Watching")}</strong> ${pr}${checks ? ` · ${t(checks)}` : ""}${watch.sent > 0 ? ` · ${t("{{sent}} of {{max}} sent", { sent: watch.sent, max: watch.max })}` : ""}${watch.unchecked ? ` · ${t("owner's comments only")}` : ""}${watch.errors > 0 ? ` · ${t("last look failed")}` : watch.note ? ` · ${t("waiting")}` : ""}`
             : html`${pr} ${watchEnded(watch)}`;
 
     return html`<div
@@ -329,7 +332,9 @@ function WatchBar() {
         title=${[
             watch.title,
             watch.unchecked &&
-                "Only the repository owner's comments count: gh cannot push there, so GitHub does not say who else can write.",
+                t(
+                    "Only the repository owner's comments count: gh cannot push there, so GitHub does not say who else can write.",
+                ),
             watch.note,
         ]
             .filter(Boolean)
@@ -608,7 +613,7 @@ export function Composer() {
         const command = full.replace(/^!!?/, "").trim();
 
         if (command === "") {
-            return notify("info", "Say which command to run, such as !git status.");
+            return notify("info", t("Say which command to run, such as !git status."));
         }
 
         setSending(true);
@@ -896,7 +901,7 @@ export function Composer() {
                         ),
                     ),
                 (error) => {
-                    notify("error", `Upload failed: ${error.message}`);
+                    notify("error", `${t("Upload failed: ")}${error.message}`);
 
                     if (preview) {
                         URL.revokeObjectURL(preview);
@@ -943,20 +948,20 @@ export function Composer() {
     };
 
     const placeholder = dictation.listening
-        ? "Listening…"
+        ? t("Listening…")
         : busy
           ? steer
-              ? "Steer the current run…"
-              : "Queue a message for after this run…"
-          : "Ask Pi anything…";
+              ? t("Steer the current run…")
+              : t("Queue a message for after this run…")
+          : t("Ask Pi anything…");
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
         item.by === undefined
             ? ""
             : item.by === me?.id
-              ? " · you"
-              : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`;
+              ? ` · ${t("you")}`
+              : ` · ${users.find((user) => user.id === item.by)?.name ?? t("someone")}`;
 
     useDock(dock);
     // View only now, or someone else took the wheel: the box goes, and dictation with it.
@@ -977,10 +982,10 @@ export function Composer() {
             <${ParentSessionButton} />
             <div class="view-only">
                 <span>
-                    <strong>View only.</strong> You can read along, react, and chat with the people here.
+                    <strong>${t("View only.")}</strong> ${t("You can read along, react, and chat with the people here.")}
                 </span>
                 <button class="button small" onClick=${() => openSheet({ type: "chat" })}>
-                    <${Icon} name="chat" size=${15} /> Chat
+                    <${Icon} name="chat" size=${15} /> ${t("Chat")}
                 </button>
             </div>
             <${StatusLine} />
@@ -1001,7 +1006,7 @@ export function Composer() {
                 // How many wait: shown when the queue does not show them all (`dock.js`).
                 inbox.length > 0 &&
                 html`<div class="inbox-count">
-                    ${inbox.length} ${inbox.length === 1 ? "message" : "messages"} waiting for Pi
+                    ${t(inbox.length === 1 ? "{{count}} message waiting for Pi" : "{{count}} messages waiting for Pi", { count: inbox.length })}
                 </div>`
             }
             ${
@@ -1019,8 +1024,8 @@ export function Composer() {
                                 (!blocked || item.by === me?.id) &&
                                 html`<button
                                     class="icon-button small queued-remove"
-                                    aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
-                                    title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
+                                    aria-label=${t(queuedReports(item) ? "Discard these reports" : "Withdraw")}
+                                    title=${t(queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw")}
                                     onClick=${() => attempt(() => actions.withdraw(item.id))}
                                 >
                                     <${Icon} name="close" size=${13} />
@@ -1043,7 +1048,7 @@ export function Composer() {
                 ? html`${
                       busy &&
                       html`<div class="composer-row stop-only">
-                          <span class="muted small grow">Pi is working…</span>
+                          <span class="muted small grow">${t("Pi is working…")}</span>
                           <${StopButton} />
                       </div>`
                   }`
@@ -1052,11 +1057,11 @@ export function Composer() {
                       html`<div
                           class="commands history-options"
                           role="listbox"
-                          aria-label="Sent before"
+                          aria-label=${t("Sent before")}
                           ref=${list}
                       >
                           <div class="file-note">
-                              Sent before${text.trim() ? ` with “${text.trim()}”` : ""} · Enter puts it in the box · Esc closes
+                              ${t("Sent before")}${text.trim() ? t(" with “{{query}}”", { query: text.trim() }) : ""} · ${t("Enter puts it in the box · Esc closes")}
                           </div>
                           ${recalled.map(
                               (each) => html`<button
@@ -1077,7 +1082,7 @@ export function Composer() {
                           ${
                               recalled.length === 0 &&
                               html`<div class="file-note">
-                                  Nothing sent from this browser matches.
+                                  ${t("Nothing sent from this browser matches.")}
                               </div>`
                           }
                       </div>`
@@ -1085,14 +1090,14 @@ export function Composer() {
                 ${
                     shell &&
                     html`<div class="command-hint">
-                        <span class="command-name">${shell.context ? "!" : "!!"}</span> <span class="muted">· runs in this session's folder · ${shell.context ? "Pi sees the output (!! to keep it from Pi)" : "only the people here see the output"}</span>
+                        <span class="command-name">${shell.context ? "!" : "!!"}</span> <span class="muted">· ${t("runs in this session's folder")} · ${t(shell.context ? "Pi sees the output (!! to keep it from Pi)" : "only the people here see the output")}</span>
                     </div>`
                 }
                 ${
                     pasted &&
                     !shell &&
                     html`<div class="command-hint muted">
-                        Pasted text goes out in full where its placeholder is.
+                        ${t("Pasted text goes out in full where its placeholder is.")}
                     </div>`
                 }
                 ${
@@ -1122,7 +1127,7 @@ export function Composer() {
                     html`<div
                         class="commands file-options"
                         role="listbox"
-                        aria-label="Files"
+                        aria-label=${t("Files")}
                         ref=${list}
                     >
                         ${matches.map(
@@ -1148,11 +1153,11 @@ export function Composer() {
                                 </span>
                             </button>`,
                         )}
-                        ${matches.length === 0 && html`<div class="file-note">Finding files…</div>`}
+                        ${matches.length === 0 && html`<div class="file-note">${t("Finding files…")}</div>`}
                         ${
                             found.truncated &&
                             html`<div class="file-note">
-                                A large folder: only the files nearest its top are listed.
+                                ${t("A large folder: only the files nearest its top are listed.")}
                             </div>`
                         }
                     </div>`
@@ -1171,9 +1176,9 @@ export function Composer() {
                                 <span class="command-name">/${command.name}</span>
                                 ${
                                     command.args &&
-                                    html`<span class="command-args">${command.args}</span>`
+                                    html`<span class="command-args">${command.template ? command.args : t(command.args)}</span>`
                                 }
-                                <span class="command-description">${command.description}</span>
+                                <span class="command-description">${command.template ? command.description : t(command.description)}</span>
                             </button>`,
                         )}
                     </div>`
@@ -1185,8 +1190,8 @@ export function Composer() {
                         <span class="command-name">/${parsed.command.name}</span>
                         ${
                             parsed.command.args &&
-                            html` <span class="command-args">${parsed.command.args}</span>`
-                        } <span class="muted">· ${parsed.command.description} · not sent to Pi</span>
+                            html` <span class="command-args">${parsed.command.template ? parsed.command.args : t(parsed.command.args)}</span>`
+                        } <span class="muted">· ${parsed.command.template ? parsed.command.description : t(parsed.command.description)} · ${t("not sent to Pi")}</span>
                     </div>`
                 }
                 ${
@@ -1233,7 +1238,7 @@ export function Composer() {
                                     ${file.state === "uploading" ? html`<${Spinner} />` : file.preview ? "" : "📎"} ${file.name} <span class="muted">${formatBytes(file.size)}</span>
                                     <button
                                         class="icon-button small"
-                                        aria-label=${`Remove ${file.name}`}
+                                        aria-label=${t("Remove {{name}}", { name: file.name })}
                                         onClick=${() => {
                                             forget([file]);
                                             setFiles((current) =>
@@ -1267,8 +1272,8 @@ export function Composer() {
                         <${PlacesButton} />
                         <button
                             class="icon-button attach-button"
-                            aria-label="Attach files"
-                            title="Attach files"
+                            aria-label=${t("Attach files")}
+                            title=${t("Attach files")}
                             onClick=${() => picker.current?.click()}
                         >
                             <${Icon} name="clip" size=${17} />
@@ -1285,23 +1290,23 @@ export function Composer() {
                         />
                         <button
                             class=${`model-chip ${agent?.available === false ? "warn" : ""}`}
-                            aria-label=${`Model: ${modelLabel(agent)}${level ? `, thinking ${level}` : ""}`}
-                            title=${`Model and thinking: ${modelLabel(agent)}${level ? `, ${level}` : ""}`}
+                            aria-label=${level ? t("Model: {{model}}, thinking {{level}}", { model: modelLabel(agent), level: t(level) }) : t("Model: {{model}}", { model: modelLabel(agent) })}
+                            title=${t("Model and thinking: {{model}}{{level}}", { model: modelLabel(agent), level: level ? `, ${t(level)}` : "" })}
                             onClick=${() => openSheet({ type: "model" })}
                         >
                             <${Icon} name="sparkle" size=${12} class="model-spark" />
                             <span class="model-name">${shortModel(agent)}</span>
-                            ${level && html`<span class="model-level">${level}</span>`}
+                            ${level && html`<span class="model-level">${t(level)}</span>`}
                         </button>
                         ${
                             planAvailable() &&
                             view.conversation?.kind !== "subagent" &&
                             html`<button
                                 class=${`chip toggle plan-chip ${view.plan?.on ? "on" : ""}`}
-                                title="Plan mode: Pi reads and proposes, and changes nothing until you approve"
+                                title=${t("Plan mode: Pi reads and proposes, and changes nothing until you approve")}
                                 onClick=${() => attempt(() => actions.setPlan(!view.plan?.on))}
                             >
-                                Plan
+                                ${t("Plan")}
                             </button>`
                         }
                         ${
@@ -1309,7 +1314,7 @@ export function Composer() {
                             html`<div
                                 class="mode-switch"
                                 role="radiogroup"
-                                aria-label="Send as"
+                                aria-label=${t("Send as")}
                                 onKeyDown=${(event) => {
                                     // Arrows move between the two, as in any group of radio buttons.
                                     if (/^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
@@ -1332,10 +1337,10 @@ export function Composer() {
                                         aria-checked=${steer === value ? "true" : "false"}
                                         tabindex=${steer === value ? "0" : "-1"}
                                         class=${steer === value ? "on" : ""}
-                                        title=${tip}
+                                        title=${t(tip)}
                                         onClick=${() => setSteer(value)}
                                     >
-                                        ${label}
+                                        ${t(label)}
                                     </button>`,
                                 )}
                             </div>`
@@ -1345,8 +1350,8 @@ export function Composer() {
                         <${MicButton} dictation=${dictation} class="composer-mic" />
                         <button
                             class=${`send-button ${canSend ? "ready" : ""}`}
-                            aria-label="Send"
-                            title=${coarse ? "Send" : "Send (Enter)"}
+                            aria-label=${t("Send")}
+                            title=${t(coarse ? "Send" : "Send (Enter)")}
                             disabled=${!canSend}
                             onClick=${send}
                         >
@@ -1388,8 +1393,8 @@ const shortModel = (agent) =>
 function StopButton() {
     return html`<button
         class="stop-button"
-        aria-label="Stop"
-        title="Stop (Esc twice)"
+        aria-label=${t("Stop")}
+        title=${t("Stop (Esc twice)")}
         onClick=${() => attempt(actions.abort)}
     >
         <span class="stop-square" aria-hidden="true"></span>
@@ -1408,8 +1413,8 @@ function PlacesButton() {
 
     return html`<button
         class="icon-button places-button badge-host"
-        aria-label="Places: Files, Changes, Browser, and more"
-        title="Places (or swipe up here)"
+        aria-label=${t("Places: Files, Changes, Browser, and more")}
+        title=${t("Places (or swipe up here)")}
         onClick=${() => openSheet({ type: "places" })}
     >
         <${Icon} name="grid" />
@@ -1514,15 +1519,16 @@ function SpeedPart({ stats }) {
     }
 
     const title = [
-        rate !== undefined && `${rate.toFixed(1)} tokens a second`,
-        wait !== undefined && `its first token after ${(wait / 1000).toFixed(2)}s`,
+        rate !== undefined && t("{{rate}} tokens a second", { rate: rate.toFixed(1) }),
+        wait !== undefined &&
+            t("its first token after {{seconds}}s", { seconds: (wait / 1000).toFixed(2) }),
     ]
         .filter(Boolean)
         .join(", ");
 
     return html`<span
         class=${`speed ${rate === undefined ? "wait-only" : ""}`}
-        title=${`How fast the last answer came: ${title}`}
+        title=${t("How fast the last answer came: {{detail}}", { detail: title })}
     >
         ${
             rate !== undefined &&
@@ -1535,7 +1541,7 @@ function SpeedPart({ stats }) {
         ${
             wait !== undefined &&
             html`<span class="wait">
-                <span class="word">first token${" "}</span>
+                <span class="word">${t("first token")}${" "}</span>
                 ${seconds(wait)}
             </span>`
         }
@@ -1556,7 +1562,7 @@ function StatusLine() {
     if (connection !== "open") {
         parts.push(
             html`<span class="warn">
-                ${connection === "connecting" ? "connecting…" : "reconnecting…"}
+                ${t(connection === "connecting" ? "connecting…" : "reconnecting…")}
             </span>`,
         );
     }
@@ -1567,9 +1573,9 @@ function StatusLine() {
     parts.push(
         html`<span
             class=${`here ${here === 1 ? "alone" : ""}`}
-            title=${`${(view.viewers ?? []).join(", ")}${view.clients > here ? ` · ${view.clients} tabs` : ""}`}
+            title=${`${(view.viewers ?? []).join(", ")}${view.clients > here ? ` · ${t("{{count}} tabs", { count: view.clients })}` : ""}`}
         >
-            ${here} here
+            ${t("{{count}} here", { count: here })}
         </span>`,
     );
 
@@ -1582,11 +1588,14 @@ function StatusLine() {
         const percent = Math.min(100, Math.round((used / window) * 100));
         // Compacted since the last answer: what is left, estimated until the next answer measures it.
         const about = stats.contextEstimated ? "~" : "";
-        const title = `${about}${formatTokens(used)} of ${formatTokens(window)} tokens in context`;
+        const title = t("{{used}} of {{total}} tokens in context", {
+            used: `${about}${formatTokens(used)}`,
+            total: formatTokens(window),
+        });
 
         parts.push(
             html`<span class="context" title=${title}>
-                <span class="word">context</span>
+                <span class="word">${t("context")}</span>
                 <span class=${`meter ${contextLevel(percent)}`} aria-hidden="true">
                     <span style=${`width:${percent}%`}></span>
                 </span>
@@ -1596,7 +1605,9 @@ function StatusLine() {
     }
 
     if (stats.cacheRate !== undefined) {
-        parts.push(html`<span class="cache">cache ${Math.round(stats.cacheRate * 100)}%</span>`);
+        parts.push(
+            html`<span class="cache">${t("cache {{percent}}%", { percent: Math.round(stats.cacheRate * 100) })}</span>`,
+        );
     }
 
     // The session's spend, its subagents' included, and its limit when it has one.
@@ -1619,12 +1630,16 @@ function StatusLine() {
         parts.push(
             html`<button
                 class=${`guard ${guard.enabled && !failed ? "" : "off"}`}
-                aria-label=${`Lancet Guard ${state}`}
+                aria-label=${
+                    failed
+                        ? `Lancet Guard ${t("failed")}`
+                        : t(guard?.enabled ? "Lancet Guard on" : "Lancet Guard off")
+                }
                 title=${guard.detail}
                 onClick=${() => openSheet({ type: "extensions" })}
             >
                 <${Icon} name="shield" size=${11} />
-                <span><span class="word">guard${" "}</span>${state}</span>
+                <span><span class="word">${t("guard")}${" "}</span>${t(state)}</span>
             </button>`,
         );
     }

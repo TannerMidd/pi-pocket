@@ -1,5 +1,7 @@
+import { t } from "../i18n.js";
 // The model picker: a menu over the model chip, searchable once there are many models; and the same menu for the model
 // and thinking level new sessions start with.
+
 import { useEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, openSheet, store } from "../store.js";
 import { anchorStyle, formatTokens, html, Icon, popAnchor } from "../ui.js";
@@ -173,17 +175,19 @@ export function ModelPicker() {
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"
-            aria-label=${forDefault ? "Default model" : "Model"}
+            aria-label=${forDefault ? t("Default model") : t("Model")}
+
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
             <header class="pop-menu-head">
                 <span>
-                    ${forDefault ? "Default model" : "Model"}
-                    ${forDefault && html`<span class="pop-menu-head-sub">for new sessions</span>`}
+                    ${forDefault ? t("Default model") : t("Model")}
+                    ${forDefault && html`<span class="pop-menu-head-sub">${t("for new sessions")}</span>`}
                 </span>
+
                 <button class="pop-menu-link" onClick=${() => openSheet({ type: "providers" })}>
-                    <${Icon} name="key" size=${13} /> Providers
+                    <${Icon} name="key" size=${13} /> ${t("Providers")}
                 </button>
             </header>
             ${
@@ -192,7 +196,7 @@ export function ModelPicker() {
                     <${Icon} name="search" size=${15} />
                     <input
                         ref=${search}
-                        placeholder="Search models"
+                        placeholder=${t("Search models")}
                         value=${query}
                         onInput=${(event) => {
                             setQuery(event.currentTarget.value);
@@ -201,17 +205,17 @@ export function ModelPicker() {
                     />
                 </label>`
             }
-            <div class="pop-menu-list" ref=${list} role="listbox" aria-label="Models">
+            <div class="pop-menu-list" ref=${list} role="listbox" aria-label=${t("Models")}>
                 ${
                     models.length === 0 &&
                     html`<p class="muted pop-menu-note">
-                        No models are available. Add a provider first.
+                        ${t("No models are available. Add a provider first.")}
                     </p>`
                 }
                 ${
                     models.length > 0 &&
                     shown.length === 0 &&
-                    html`<p class="muted pop-menu-note">No model matches “${query.trim()}”.</p>`
+                    html`<p class="muted pop-menu-note">${t("No model matches “{{query}}”.", { query: query.trim() })}</p>`
                 }
                 ${shown.map(
                     (model, index) => html`<button
@@ -219,7 +223,7 @@ export function ModelPicker() {
                         class=${`pop-menu-row ${index === active ? "on" : ""}`}
                         role="option"
                         aria-selected=${isCurrent(model)}
-                        title=${`${model.provider}/${model.id} · ${formatTokens(model.contextWindow)} context${model.images ? " · images" : ""}`}
+                        title=${`${model.provider}/${model.id} · ${t("{{tokens}} context", { tokens: formatTokens(model.contextWindow) })}${model.images ? ` · ${t("images")}` : ""}`}
                         onMouseMove=${() => index !== active && setPicked(index)}
                         onClick=${() => pick(model)}
                     >
@@ -236,8 +240,8 @@ export function ModelPicker() {
             ${
                 reasoning &&
                 html`<div class="pop-menu-foot">
-                    <div class="label">Thinking</div>
-                    <div class="segmented model-levels" role="radiogroup" aria-label="Thinking">
+                    <div class="label">${t("Thinking")}</div>
+                    <div class="segmented model-levels" role="radiogroup" aria-label=${t("Thinking")}>
                         ${levels.map(
                             (each) =>
                                 html`<button
@@ -246,7 +250,7 @@ export function ModelPicker() {
                                     class=${level === each ? "on" : ""}
                                     onClick=${() => think(each)}
                                 >
-                                    ${each}
+                                    ${t(each)}
                                 </button>`,
                         )}
                     </div>

@@ -1,5 +1,6 @@
 // The wide home screen, shown beside the session list when no session is open.
 
+import { t } from "./i18n.js";
 import { workspaceOrder } from "./sessions.js";
 import { canSteer, navigate, openSheet, scoped, store } from "./store.js";
 import { paletteOf, prefs } from "./theme.js";
@@ -24,14 +25,20 @@ export function Splash() {
     const busy = sessions.filter((session) => session.busy).length;
     const recent = workspaceOrder().slice(0, 5);
     const rows = [
-        ["theme", `${palette.name}${p.theme === "desktop" && palette.desktop ? " (desktop)" : ""}`],
+        [
+            "theme",
+            `${palette.name}${p.theme === "desktop" && palette.desktop ? ` (${t("desktop")})` : ""}`,
+        ],
         [
             "layout",
-            `${p.tiling ? "tiled windows" : "flat"}, sidebar ${p.sidebar === "rail" ? "folded" : "open"}`,
+            t("{{layout}}, sidebar {{sidebar}}", {
+                layout: t(p.tiling ? "tiled windows" : "flat"),
+                sidebar: t(p.sidebar === "rail" ? "folded" : "open"),
+            }),
         ],
         [
             "sessions",
-            `${sessions.filter((session) => !session.archived).length}${busy > 0 ? `, ${busy} running` : ""}`,
+            `${sessions.filter((session) => !session.archived).length}${busy > 0 ? `, ${t("{{count}} running", { count: busy })}` : ""}`,
         ],
         ["models", String(models.length)],
         ["folder", shortPath(server?.defaultCwd, server?.home) || "~"],
@@ -39,11 +46,11 @@ export function Splash() {
             "guard",
             guard?.enabled
                 ? guard.available === false
-                    ? "failed to load"
-                    : "Lancet Guard on"
-                : "off",
+                    ? t("failed to load")
+                    : t("Lancet Guard on")
+                : t("off"),
         ],
-        ["you", `${me?.name ?? "?"} (${me?.role ?? "?"})`],
+        ["you", `${me?.name ?? "?"} (${me?.role ? t(me.role) : "?"})`],
     ];
     const colors = [
         "--o-red",
@@ -68,7 +75,7 @@ export function Splash() {
                 <div class="fetch-rule" style=${`--i:${line++}`}>${"─".repeat(30)}</div>
                 ${rows.map(
                     ([key, value]) => html`<dl class="fetch-row" style=${`--i:${line++}`}>
-                        <dt>${key}</dt>
+                        <dt>${t(key)}</dt>
                         <dd>${value}</dd>
                     </dl>`,
                 )}
@@ -84,28 +91,28 @@ export function Splash() {
                     class="button primary"
                     onClick=${() => openSheet({ type: "cwd", mode: "new" })}
                 >
-                    <${Icon} name="plus" size=${16} /> New session <${Keys} keys="Alt N" />
+                    <${Icon} name="plus" size=${16} /> ${t("New session")} <${Keys} keys="Alt N" />
                 </button>`
             }
             <button class="button" onClick=${() => store.set({ launcher: true })}>
-                <${Icon} name="command" size=${16} /> Launcher <${Keys} keys="Mod K" />
+                <${Icon} name="command" size=${16} /> ${t("Launcher")} <${Keys} keys="Mod K" />
             </button>
             <button class="button" onClick=${() => openSheet({ type: "appearance" })}>
-                <${Icon} name="palette" size=${16} /> Appearance
+                <${Icon} name="palette" size=${16} /> ${t("Appearance")}
             </button>
         </div>
         ${
             recent.length > 0 &&
             html`<div class="splash-recent">
-                <div class="group-title">Jump back in</div>
+                <div class="group-title">${t("Jump back in")}</div>
                 ${recent.map(
                     (
                         session,
                         index,
                     ) => html`<button class="list-item" onClick=${() => navigate(session.id)}>
-                        <span><kbd>${index + 1}</kbd>${session.title ?? "New session"}</span>
+                        <span><kbd>${index + 1}</kbd>${session.title ?? t("New session")}</span>
                         <span class="muted small mono">
-                            ${session.busy ? "working · " : ""}
+                            ${session.busy ? `${t("working")} · ` : ""}
                             ${timeAgo(session.updatedAt)}
                         </span>
                     </button>`,

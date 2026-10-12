@@ -724,7 +724,10 @@ export class Commands {
             try {
                 parts.push(await modelImage(file.path, file.mime));
             } catch (error) {
-                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
+                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id, {
+                    key: "Could not attach {{name}}: {{error}}",
+                    params: { name: file.name, error: describe(error) },
+                });
             }
         }
 
@@ -940,7 +943,10 @@ export class Commands {
                     text: `${FILE_BLOCK}${file}">\n${content}${cut}\n</file>`,
                 });
             } catch (error) {
-                app.notice("warning", `Could not send ${mention.written}: ${describe(error)}`, id);
+                app.notice("warning", `Could not send ${mention.written}: ${describe(error)}`, id, {
+                    key: "Could not send {{path}}: {{error}}",
+                    params: { path: mention.written, error: describe(error) },
+                });
             }
         }
 
@@ -1932,7 +1938,9 @@ export class Commands {
         const taskId = await conversation.compact(instructions, context);
         const done = pip ? "PiP's context compacted." : "Compacted.";
 
-        app.notice("info", pip ? "Compacting PiP's context…" : "Compacting…", id);
+        app.notice("info", pip ? "Compacting PiP's context…" : "Compacting…", id, {
+            key: pip ? "Compacting PiP's context…" : "Compacting…",
+        });
         await app.collab.activity(id, user, "started compacting the context", false);
         void app.harness.waitForTask(taskId, context).then(
             (receipt) => {
@@ -1944,7 +1952,10 @@ export class Commands {
                     const failed = pip ? app.pipCompaction.failure(Number(taskId)) : undefined;
 
                     if (failed !== undefined) {
-                        app.notice("error", `PiP's context was not compacted: ${failed}`, id);
+                        app.notice("error", `PiP's context was not compacted: ${failed}`, id, {
+                            key: "PiP's context was not compacted: {{error}}",
+                            params: { error: failed },
+                        });
                     } else {
                         app.notice(
                             "info",
@@ -1952,10 +1963,16 @@ export class Commands {
                                 ? "Nothing to compact: the context fits in the recent window."
                                 : done,
                             id,
+                            {
+                                key:
+                                    entryId === undefined && submissionId === undefined
+                                        ? "Nothing to compact: the context fits in the recent window."
+                                        : done,
+                            },
                         );
                     }
                 } else if (outcome.status === "aborted") {
-                    app.notice("info", "Compaction aborted.", id);
+                    app.notice("info", "Compaction aborted.", id, { key: "Compaction aborted." });
                 } else {
                     const why = "error" in outcome ? outcome.error?.message : undefined;
 

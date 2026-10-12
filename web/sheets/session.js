@@ -1,4 +1,5 @@
 // A session's actions from its row in the session list, for touch screens, which cannot hover to show them.
+import { t } from "../i18n.js";
 import { selectFromList, setArchived } from "../sessions.js";
 import { canSteer, closeSheet, isUnread, setUnread, store } from "../store.js";
 import { isPinned, togglePin } from "../theme.js";
@@ -17,34 +18,34 @@ export function SessionSheet({ id }) {
         run();
     };
 
-    return html`<${Sheet} title=${session.title ?? "New session"} onClose=${closeSheet}>
+    return html`<${Sheet} title=${session.title ?? t("New session")} onClose=${closeSheet}>
         ${
             !session.archived &&
             item(
-                isPinned(id) ? "Unpin from the top" : "Pin to the top",
+                t(isPinned(id) ? "Unpin from the top" : "Pin to the top"),
                 then(() => togglePin(id)),
-                "this browser",
+                t("this browser"),
             )
         }
         ${
             !session.archived &&
             item(
-                isUnread(id) ? "Mark read" : "Mark unread",
+                t(isUnread(id) ? "Mark read" : "Mark unread"),
                 then(() => setUnread(id, !isUnread(id))),
-                "this browser",
+                t("this browser"),
             )
         }
         ${
             steer &&
             item(
-                session.archived ? "Unarchive" : "Archive",
+                t(session.archived ? "Unarchive" : "Archive"),
                 then(() => setArchived([id], !session.archived)),
             )
         }
         ${item(
-            "Select",
+            t("Select"),
             then(() => selectFromList(id)),
-            "then tap others to add them",
+            t("then tap others to add them"),
         )}
     <//>`;
 }
