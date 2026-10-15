@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useBack } from "./back.js";
 import { useDragToClose } from "./gestures.js";
-import { api, attempt, isRow, navigate, notify, store, uid } from "./store.js";
+import { api, attempt, isRow, navigate, notify, openSheet, store, uid } from "./store.js";
 import { itemsOf, says, summarize } from "./turns.js";
 import {
     contextLevel,
@@ -180,6 +180,16 @@ export function closePip() {
     markSeen();
     store.set({ pipOpen: false });
     tellServer(false);
+}
+
+/** Open PiP's own model picker, never the session behind its panel. */
+export async function openPipModel() {
+    openPip();
+    const pip = await opening;
+
+    if (pip) {
+        openSheet({ type: "model", id: "pip", forPip: true });
+    }
 }
 
 export const togglePip = () => (store.state.pipOpen ? closePip() : openPip());
@@ -615,6 +625,15 @@ function PipPanel({ leaving, scrim }) {
                 <${Icon} name="pip" size=${18} />
             </span>
             <h2>PiP</h2>
+            <button
+                class="icon-button"
+                aria-label="PiP model"
+                title=${`Change PiP model: ${view.agent?.modelName ?? view.agent?.model?.modelId ?? "none"}`}
+                disabled=${!ready || busy}
+                onClick=${openPipModel}
+            >
+                <${Icon} name="settings" size=${18} />
+            </button>
             <span class="pip-status" aria-live="polite">${status}</span>
             ${
                 ready &&

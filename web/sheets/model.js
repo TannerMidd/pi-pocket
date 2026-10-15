@@ -1,7 +1,7 @@
 // The model picker: a menu over the model chip, searchable once there are many models; and the same menu for the model
 // and thinking level new sessions start with.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { actions, attempt, closeSheet, openSheet, store } from "../store.js";
+import { actions, api, attempt, closeSheet, openSheet, store } from "../store.js";
 import { anchorStyle, formatTokens, html, Icon, popAnchor } from "../ui.js";
 
 /** Models past this many get a search box in the picker. */
@@ -45,16 +45,21 @@ export function ModelPicker() {
     // While the picker animates out, the store has no sheet any more.
     const [query, setQuery] = useState(store.state.sheet?.query ?? "");
     const [forDefault] = useState(() => store.state.sheet?.forDefault === true);
+    const [forPip] = useState(() => store.state.sheet?.forPip === true);
+    const [target] = useState(() => (forPip ? store.state.pip?.id : null));
+    const centered = forDefault || forPip;
+    const configure = (change) =>
+        forPip ? api(`c/${target}/configure`, change) : actions.configure(change);
     // Decided once: a search box that went away when emptied would take the caret with it.
     const [searchable] = useState(() => models.length > MODEL_SEARCH_AT || query !== "");
     const [picked, setPicked] = useState(0);
-    const [anchor, setAnchor] = useState(() => (forDefault ? null : modelAnchor()));
+    const [anchor, setAnchor] = useState(() => (centered ? null : modelAnchor()));
     const box = useRef(null);
     const search = useRef(null);
     const list = useRef(null);
     // Arrows scroll the list to the model they reach; the mouse does not, or the list would run away under it.
     const keyed = useRef(false);
-    const agent = view.agent;
+    const agent = forPip ? store.state.pipView.agent : view.agent;
     const owner = me?.role === "owner";
     const chosen = server?.defaultModel ?? null;
     const isDefault = (model) =>
@@ -96,7 +101,7 @@ export function ModelPicker() {
 
     useEffect(() => {
         // The default's picker has no chip to open from: it stays in the middle.
-        const place = () => setAnchor(forDefault ? null : modelAnchor());
+        const place = () => setAnchor(centered ? null : modelAnchor());
         const onKey = (event) => event.key === "Escape" && closeSheet();
 
         addEventListener("resize", place);
@@ -130,7 +135,7 @@ export function ModelPicker() {
 
         attempt(async () => {
             if (!isCurrent(model)) {
-                await actions.configure({ model: { provider: model.provider, modelId: model.id } });
+                await configure({ model: { provider: model.provider, modelId: model.id } });
             }
 
             closeSheet();
@@ -140,7 +145,7 @@ export function ModelPicker() {
     const think = (each) =>
         forDefault
             ? setDefault(defaultModel, each)
-            : attempt(() => actions.configure({ thinkingLevel: each }));
+            : attempt(() => configure({ thinkingLevel: each }));
 
     // Arrows and Enter move through the models from the search box or the picker itself, not from its other buttons.
     const onKeyDown = (event) => {
@@ -173,13 +178,13 @@ export function ModelPicker() {
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"
-            aria-label=${forDefault ? "Default model" : "Model"}
+            aria-label=${forDefault ? "Default model" : forPip ? "PiP model" : "Model"}
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
             <header class="pop-menu-head">
                 <span>
-                    ${forDefault ? "Default model" : "Model"}
+                    ${forDefault ? "Default model" : forPip ? "PiP model" : "Model"}
                     ${forDefault && html`<span class="pop-menu-head-sub">for new sessions</span>`}
                 </span>
                 <button class="pop-menu-link" onClick=${() => openSheet({ type: "providers" })}>
@@ -253,7 +258,7 @@ export function ModelPicker() {
                 </div>`
             }
             ${
-                !defaultsKept()
+                forPip || !defaultsKept()
                     ? null
                     : forDefault
                       ? html`<div class="pop-menu-foot pop-menu-default">

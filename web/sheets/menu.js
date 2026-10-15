@@ -4,7 +4,7 @@ import { chatUnread } from "../chat.js";
 import { schedulesAvailable, triggersOn, watchAvailable, watchPr } from "../commands.js";
 import { filesAvailable, setFilesOpen } from "../files-panel.js";
 import { peeksOn, togglePeeks } from "../peeks.js";
-import { openPip, pipAvailable, pipUnread } from "../pip.js";
+import { openPip, openPipModel, pipAvailable, pipUnread } from "../pip.js";
 import { setArchived } from "../sessions.js";
 import { openSubagent } from "../subagents.js";
 import {
@@ -167,7 +167,7 @@ function trustHint() {
     return info.trusted ? "trusted" : "not trusted";
 }
 
-export function MenuSheet() {
+export function MenuSheet({ settingsOnly = false }) {
     const { view, me, server } = store.state;
     const conversation = view.conversation;
     const steer = canSteer();
@@ -184,8 +184,10 @@ export function MenuSheet() {
     const instructions = view.agent?.instructions;
     const memory = useMemory();
 
-    return html`<${Sheet} title=${conversation?.title ?? "Menu"} onClose=${closeSheet}>
-        <${Places} />
+    return html`<${Sheet} title=${settingsOnly ? "Settings" : (conversation?.title ?? "Menu")} onClose=${closeSheet}>
+        ${
+            !settingsOnly &&
+            html`<${Places} />
         ${
             conversation &&
             collab() &&
@@ -311,8 +313,20 @@ export function MenuSheet() {
                 )}
             </div>`
         }
+        `
+        }
         <div class="group">
             <div class="group-title">App</div>
+            ${
+                pipAvailable() &&
+                item(
+                    "PiP model",
+                    openPipModel,
+                    store.state.pipView.agent?.modelName ??
+                        store.state.pipView.agent?.model?.modelId ??
+                        "Open PiP to see its model",
+                )
+            }
             ${item("Appearance", () => openSheet({ type: "appearance" }), paletteOf().name)}
             ${
                 me?.role === "owner" &&

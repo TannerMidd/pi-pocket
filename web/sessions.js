@@ -1229,6 +1229,14 @@ export function RailNav({ foldable = false, folded = false }) {
             <${Icon} name="palette" size=${18} />
         </button>
         <button
+            class="rail-button"
+            title="Settings"
+            aria-label="Settings"
+            onClick=${() => openSheet({ type: "settings" })}
+        >
+            <${Icon} name="settings" size=${18} />
+        </button>
+        <button
             class="rail-button rail-me"
             title=${`${me?.name ?? ""} · ${role}`}
             aria-label="Your name"
