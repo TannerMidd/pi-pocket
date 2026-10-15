@@ -150,6 +150,9 @@ function sheetBody(sheet) {
         case "notifications":
             body = html`<${NotificationsSheet} />`;
             break;
+        case "settings":
+            body = html`<${MenuSheet} settingsOnly=${true} />`;
+            break;
         case "menu":
             body = html`<${MenuSheet} />`;
             break;

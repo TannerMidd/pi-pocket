@@ -795,6 +795,7 @@ export function shortPath(path, home) {
 }
 
 const ICONS = {
+    settings: "M4 7h16M4 17h16M8 4v6M16 14v6",
     menu: "M3 6h18M3 12h18M3 18h18",
     // PiP: a small orb with a glint.
     pip: "M12 20a8 8 0 100-16 8 8 0 000 16zM8.5 11a3.5 3.5 0 013.5-3.5",
