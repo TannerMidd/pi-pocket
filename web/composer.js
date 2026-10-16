@@ -744,6 +744,27 @@ export function Composer() {
             !event.metaKey &&
             !event.altKey &&
             !event.shiftKey &&
+            !event.isComposing &&
+            event.key.toLowerCase() === "w"
+        ) {
+            event.preventDefault();
+            const element = event.currentTarget;
+            const { value, selectionStart, selectionEnd } = element;
+            const start =
+                selectionStart === selectionEnd
+                    ? value.slice(0, selectionStart).replace(/\S+\s*$|\s+$/, "").length
+                    : selectionStart;
+
+            recall(value.slice(0, start) + value.slice(selectionEnd), start);
+
+            return;
+        }
+
+        if (
+            event.ctrlKey &&
+            !event.metaKey &&
+            !event.altKey &&
+            !event.shiftKey &&
             event.key.toLowerCase() === "r"
         ) {
             event.preventDefault();

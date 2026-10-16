@@ -26,6 +26,7 @@ const SHORTCUTS = [
     ["!", "In the message box: run a command (!! keeps it from Pi)"],
     ["↑", "In an empty message box: what you sent before"],
     ["Ctrl R", "In the message box: search what you sent before"],
+    ["Ctrl W", "In the message box: delete the previous word or selected text"],
     ["Mod F", "Find in this session"],
     ["Esc Esc", "Stop Pi while it works"],
     ["?", "This list"],
