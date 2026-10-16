@@ -73,7 +73,13 @@ A refused first message leaves a linked chat whose local address the tool report
 Session lists project links per person: a hidden origin becomes only `linkedOrigin: true`, never its
 id or title. Later live broadcasts use the same per-person projection for scoped viewers; filtering
 a previously built global list is not sufficient. `web/linked-chats.js` renders the current visible origin and outgoing links above the
-transcript, including links to archived chats. Linked chats keep independent plan mode, budgets,
+transcript, including links to archived chats. The shared session list uses `web/session-tree.js` to
+nest visible linked chats under their origins with branch lines. It only groups rows already passing
+search/archive filters; hidden or absent origins are never synthesized. Pinned children remain roots,
+and Folders keeps chats with different working folders separate. Recent buckets and orders each
+family by its newest visible activity. Indentation is capped at three visual columns for narrow lists;
+logical depth and per-chat navigation/actions remain independent. Stored links stay grouped even when
+Agent Teams is disabled. Linked chats keep independent plan mode, budgets,
 settings and lifecycles. They initially share a working folder; no worktree is created or owned by
 the link. Legacy nested subagents and their automatic batched reports remain unchanged.
 

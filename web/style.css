@@ -3335,8 +3335,46 @@ button.chip:hover {
 
 .session-row {
     position: relative;
+    padding-inline-start: calc(var(--linked-depth, 0) * 14px);
     animation: rise-in 0.38s var(--ease-out) backwards;
     animation-delay: calc(min(var(--i, 0), 14) * 18ms);
+}
+
+/* Linked-chat branches are decorative; each row keeps its own button and actions. */
+.session-branches {
+    position: absolute;
+    inset: 0 auto 0 10px;
+    display: flex;
+    pointer-events: none;
+    color: var(--muted);
+}
+
+.session-branches > span {
+    position: relative;
+    width: 14px;
+}
+
+.session-branches > .continues::before,
+.session-branches > .elbow::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: -1px;
+    bottom: -1px;
+    border-left: 1px solid currentColor;
+}
+
+.session-branches > .elbow:not(.continues)::before {
+    bottom: 50%;
+}
+
+.session-branches > .elbow::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 10px;
+    border-top: 1px solid currentColor;
 }
 
 /* One line: the folder's color, the title, and what goes on there on the right. */

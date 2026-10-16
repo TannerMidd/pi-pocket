@@ -74,7 +74,8 @@ atomic ownerless creation and call receipts, visible-family discovery, and idemp
 `Commands.submit`. `SessionMeta.linkedFrom` is a navigation link, not subagent ownership; session lists
 omit hidden origin ids. `web/linked-chats.js`, rendered by `transcript.js`, draws both directions of
 the links. Server and real-browser checks are in `test/linked-chats.test.ts` and
-`test/linked-chats-ui.test.ts`.
+`test/linked-chats-ui.test.ts`. `web/session-tree.js` groups visible linked chats beneath their origins
+in the shared session list; `sessions.js` and `style.css` draw the branch lines.
 
 ### A conversation's folder and history
 

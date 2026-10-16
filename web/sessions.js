@@ -5,6 +5,7 @@ import { Avatar, folderColor, initials } from "./avatar.js";
 import { useBack } from "./back.js";
 import { useDragToClose } from "./gestures.js";
 import { PipRailButton } from "./pip.js";
+import { sessionForest } from "./session-tree.js";
 import {
     actions,
     canSteer,
@@ -247,6 +248,7 @@ export function selectFromList(id) {
  */
 function SessionRow({
     session,
+    branches,
     index,
     number,
     needle,
@@ -282,8 +284,19 @@ function SessionRow({
     return html`<div
         class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${["no-acts", "one-act", "", "three-acts"][acts]}`}
         data-id=${session.id}
-        style=${`--i:${index}`}
+        data-linked-depth=${branches.length}
+        style=${`--i:${index};--linked-depth:${Math.min(branches.length, 3)}`}
     >
+        ${
+            branches.length > 0 &&
+            html`<span class="session-branches" aria-hidden="true">
+                ${branches.slice(-3).map(
+                    (continues, index, visible) => html`<span
+                        class=${`${continues ? "continues" : ""} ${index === visible.length - 1 ? "elbow" : ""}`}
+                    ></span>`,
+                )}
+            </span>`
+        }
         <button
             class=${`session ${unread ? "unread" : ""}`}
             onPointerDown=${(event) => onSelect(event, session.id)}
@@ -517,12 +530,18 @@ export function SessionList({ compact = false }) {
                     .toLowerCase()
                     .includes(needle)),
     );
-    const groups = groupsOf(shown, { tab, needle, home: server?.home, pinned });
+    const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
+    const groups = groupsOf(forest.roots, { tab, needle, home: server?.home, pinned }).map(
+        (group) => ({
+            ...group,
+            rows: group.rows.flatMap((root) => forest.rows.get(root.id)),
+        }),
+    );
 
     visible.current = groups.flatMap((group) =>
         closed.has(group.key) && group.key !== "flat"
             ? []
-            : group.rows.map((session) => session.id),
+            : group.rows.map(({ session }) => session.id),
     );
     const chosen = shown.filter((session) => selected.has(session.id)).map((session) => session.id);
     // Taps select while the bar shows: not for rows selected and then hidden (archived, or searched away).
@@ -994,10 +1013,11 @@ export function SessionList({ compact = false }) {
                     <div class="group-body" inert=${isClosed}>
                         <div>
                             ${group.rows.map(
-                                (session) =>
+                                ({ session, branches }) =>
                                     html`<${SessionRow}
                                         key=${session.id}
                                         session=${session}
+                                        branches=${branches}
                                         index=${index++}
                                         number=${numbers.get(session.id)}
                                         needle=${needle}
