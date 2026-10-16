@@ -17,6 +17,7 @@ import {
 } from "./files-panel.js";
 import { startEdgeBack, startSwipes } from "./gestures.js";
 import { Splash } from "./home.js";
+import { SparkButton, SparkPanel } from "./spark-panel.js";
 import { Launcher } from "./launcher.js";
 import { registerWorker, updateBadge } from "./notify.js";
 import {
@@ -187,6 +188,7 @@ function Topbar() {
         <${PeeksButton} />
         <${FilesButton} />
         <${BrowserButton} />
+        <${SparkButton} />
         <button
             class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
             aria-label="Artifacts"
@@ -322,7 +324,8 @@ function App() {
     const board = state.board;
     const browsing =
         inConversation && !board && state.browserOpen && browserAvailable() && !state.missing;
-    const filing = !board && filesShown(state);
+    const sparking = inConversation && !board && state.sparkOpen && !state.missing && !browsing;
+    const filing = !board && !sparking && filesShown(state);
     const people = !board && !browsing && !filing && peopleDocked(state);
     const peeking = !board && peeksWanted(state);
     const tiles = peeking ? peekTiles(state) : [];
@@ -331,7 +334,7 @@ function App() {
     const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !filing && !people;
 
     return html`<div
-        class=${`layout ${inConversation || board ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""}`}
+        class=${`layout ${inConversation || board ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""} ${sparking ? "sparked" : ""}`}
     >
         <aside class="sidebar window">
             <div class="sidebar-clip">
@@ -379,6 +382,7 @@ function App() {
             panel=${BrowserPanel}
         />
         <${PanelHost} key=${`files:${state.conversationId}`} shown=${filing} panel=${FilesPanel} />
+        <${PanelHost} key=${`spark:${state.conversationId}`} shown=${sparking} panel=${SparkPanel} />
         ${inConversation && html`<${PeopleHost} shown=${people} replaced=${browsing || filing} />`}
         <${Drawer} />
         <${PipHost} />

@@ -25,6 +25,7 @@ export function setFilesOpen(open, tab) {
     if (open) {
         sessionStorage.setItem(OPEN_KEY, "1");
         sessionStorage.removeItem("pocket.browser");
+        sessionStorage.removeItem("pocket.spark");
         closePeople();
     } else {
         sessionStorage.removeItem(OPEN_KEY);
@@ -45,6 +46,7 @@ export function setFilesOpen(open, tab) {
         ...(open
             ? {
                   browserOpen: false,
+                  sparkOpen: false,
                   sheet: null,
                   filesAsk: { tab: tab ?? store.state.filesTab, at: Date.now() },
               }

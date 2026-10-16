@@ -1,5 +1,6 @@
 // The menu: what can be done in this session and in the app.
 import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
+import { setSparkOpen } from "../spark-panel.js";
 import { chatUnread } from "../chat.js";
 import { schedulesAvailable, triggersOn, watchAvailable, watchPr } from "../commands.js";
 import { filesAvailable, setFilesOpen } from "../files-panel.js";
@@ -64,6 +65,16 @@ function Places() {
             dot: live,
             run: () => {
                 setBrowserOpen(true);
+                closeSheet();
+            },
+        },
+        {
+            id: "spark",
+            icon: "gauge",
+            label: "Spark",
+            on: store.state.sparkOpen,
+            run: () => {
+                setSparkOpen(true);
                 closeSheet();
             },
         },

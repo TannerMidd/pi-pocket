@@ -807,6 +807,8 @@ const ICONS = {
     plus: "M12 5v14M5 12h14",
     artifact: "M4 5h16v14H4zM4 9h16M8 5v4",
     folder: "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z",
+    // The Spark dashboard's gauge: an arc, a needle, a hub, a baseline.
+    gauge: "M4.5 15.5a8 8 0 1 1 15 0M12 14l4.2-4.8M12 14.5h.01M3.5 19h17",
     file: "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5",
     diff: "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5M9 11.5h6M12 8.5v6M9 17.5h6",
     back: "M15 18l-6-6 6-6",

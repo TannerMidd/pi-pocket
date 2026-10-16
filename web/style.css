@@ -2642,6 +2642,16 @@ button.chip:hover {
     color: var(--warn);
 }
 
+/* The Spark cluster's chip: quiet like the rest of the line, dimmed when the dashboard is out of reach, and shortened
+   to its watts when the line is narrow (the `spark` step of the status line's shortening). */
+.status-line .spark.offline {
+    opacity: 0.6;
+}
+
+.status-line[data-short~="spark"] .spark .rest {
+    display: none;
+}
+
 /* How fast the last answer came, once Appearance turns it on: its two halves spaced like the line's items. */
 .status-line .speed {
     display: inline-flex;
@@ -9491,6 +9501,219 @@ textarea.notes {
     gap: 0.15rem;
 }
 
+.usage-hit {
+    color: var(--ok);
+    font-weight: 600;
+}
+
+.prompt-view {
+    max-height: 16rem;
+    overflow: auto;
+    background: var(--code-bg);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    padding: 0.6rem 0.7rem;
+}
+
+.skill-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.skill-row {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.skill-row:last-child {
+    border-bottom: 0;
+}
+
+.skill-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+}
+
+.skill-name {
+    font-family: var(--mono);
+    font-weight: 600;
+    color: var(--ok);
+    font-size: 0.82rem;
+    flex: none;
+}
+
+.skill-glyph {
+    color: var(--ok);
+    margin-right: 0.35rem;
+    font-size: 0.7rem;
+}
+
+.skill-path {
+    font-size: 0.68rem;
+    color: var(--faint);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.skill-desc {
+    font-size: 0.74rem;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Usage as symbol rows instead of a squeezed table. */
+.usage-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.usage-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.5rem 0.6rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--tint, var(--spark));
+    border-radius: var(--radius);
+}
+
+.usage-model {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.78rem;
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-dot {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--spark);
+}
+
+.usage-figures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 1rem;
+    font-size: 0.74rem;
+    color: var(--body);
+}
+
+.usage-figures b {
+    font-weight: 600;
+    margin-right: 0.25rem;
+}
+
+.fig-up {
+    color: var(--o-cyan, var(--accent));
+}
+.fig-down {
+    color: var(--o-orange, var(--brand));
+}
+.fig-cache {
+    color: var(--ok);
+}
+.fig-write {
+    color: var(--muted);
+}
+
+.usage-cost {
+    margin-left: auto;
+    color: var(--warn);
+    font-weight: 600;
+}
+
+.usage-totals {
+    display: flex;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: var(--mono);
+}
+
+/* The gauge and the context composition bar. */
+.context-row {
+    display: flex;
+    gap: 1.2rem;
+    align-items: center;
+}
+
+@media (max-width: 640px) {
+    .context-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+.gauge-block {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.gauge {
+    width: 150px;
+    height: auto;
+}
+
+.gauge-value {
+    font-family: var(--mono);
+    font-size: 1.3rem;
+    font-weight: 700;
+    fill: var(--text);
+}
+
+.gauge-unit {
+    font-family: var(--mono);
+    font-size: 0.5rem;
+    letter-spacing: 0.08em;
+    fill: var(--muted);
+}
+
+.gauge-scale {
+    font-family: var(--mono);
+    font-size: 0.42rem;
+    fill: var(--faint);
+}
+
+.gauge-caption {
+    font-size: 0.68rem;
+    color: var(--muted);
+}
+
+.gauge-caption b {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.ctx-block {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
 .agent-head {
     display: flex;
     align-items: baseline;
@@ -10773,4 +10996,375 @@ textarea.notes {
     overflow-wrap: anywhere;
     user-select: all;
     color: var(--accent);
+}
+
+/* ─── The Spark panel: the DGX cluster's telemetry, docked like the Browser panel ─── */
+
+.spark-panel {
+    --sp-acc: var(--accent);
+    --sp-warn: var(--warn);
+    --sp-err: var(--err);
+    --sp-ok: var(--ok);
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    animation: popin var(--t-in) var(--ease-out);
+}
+
+.spark-bar-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: calc(env(safe-area-inset-top) + 0.35rem) 0.75rem 0.35rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+}
+
+.spark-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font: 600 0.8rem var(--mono);
+}
+
+.spark-clock {
+    margin-left: auto;
+    font: 0.72rem var(--mono);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.spark-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.spark-notice {
+    padding: 2.5rem 1rem;
+    color: var(--muted);
+    font-size: 0.86rem;
+}
+
+.spark-inner {
+    padding: 0.75rem 1rem 1.25rem;
+    max-width: 760px;
+}
+
+.spark-bank-h {
+    margin: 1.1rem 0 0.4rem;
+    font: 600 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    color: var(--text);
+}
+
+.spark-bank-h:first-child {
+    margin-top: 0.4rem;
+}
+
+.spark-bank-h .spark-note {
+    letter-spacing: 0;
+    font-weight: 400;
+}
+
+.spark-tile {
+    padding: 0.7rem 0 0.9rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.spark-tile:last-child {
+    border-bottom: 0;
+}
+
+.spark-lbl {
+    font: 500 0.64rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.45rem;
+}
+
+.spark-note {
+    color: var(--faint);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.spark-big {
+    font: 300 2.1rem var(--mono);
+    line-height: 1.1;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.spark-big.warn,
+.spark-val.warn,
+.spark-n.warn {
+    color: var(--sp-warn);
+}
+
+.spark-big.hot,
+.spark-val.hot,
+.spark-n.hot {
+    color: var(--sp-err);
+}
+
+.spark-unit {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-left: 0.35rem;
+    letter-spacing: 0;
+}
+
+.spark-state {
+    font: 500 0.6rem var(--mono);
+    letter-spacing: 0.14em;
+    color: var(--ok);
+    margin: 0.1rem 0 0.5rem;
+}
+
+.spark-state.warn {
+    color: var(--sp-warn);
+}
+
+.spark-state.hot {
+    color: var(--sp-err);
+}
+
+.spark-bar {
+    position: relative;
+    height: 10px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--card);
+}
+
+.spark-fill {
+    height: 100%;
+    background: var(--sp-acc);
+    opacity: 0.9;
+}
+
+.spark-bar.warn .spark-fill {
+    background: var(--sp-warn);
+}
+
+.spark-bar.hot .spark-fill {
+    background: var(--sp-err);
+}
+
+.spark-zones {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.spark-ticks {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 3px;
+    font: 0.58rem var(--mono);
+    color: var(--faint);
+}
+
+.spark-kv {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 1.1rem;
+    margin-top: 0.45rem;
+    font: 0.68rem var(--mono);
+    color: var(--muted);
+}
+
+.spark-kv b {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.spark-kv .acc {
+    color: var(--sp-acc);
+}
+
+.spark-kv .err {
+    color: var(--sp-err);
+}
+
+.spark-dim {
+    margin-top: 0.4rem;
+    font: 0.62rem var(--mono);
+    color: var(--faint);
+}
+
+.spark-val {
+    font: 300 1.5rem var(--mono);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 0.35rem;
+}
+
+.spark-val small {
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.spark-val.cool {
+    color: var(--sp-ok);
+    font-size: 1.3rem;
+}
+
+.spark-segs {
+    display: flex;
+    gap: 2px;
+    height: 10px;
+    margin-bottom: 0.55rem;
+}
+
+.spark-segs span {
+    flex: 1;
+    background: var(--card-2);
+    border-radius: 1px;
+}
+
+.spark-segs span.on {
+    background: var(--sp-acc);
+}
+
+.spark-trio {
+    display: flex;
+    gap: 1.1rem;
+    margin: 0.55rem 0;
+}
+
+.spark-trio > div {
+    flex: 1;
+    min-width: 0;
+}
+
+.spark-n {
+    font: 500 0.9rem var(--mono);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.spark-n.ok {
+    color: var(--sp-ok);
+}
+
+.spark-t {
+    font: 0.6rem var(--mono);
+    color: var(--muted);
+    margin: 0.1rem 0 0.25rem;
+}
+
+.spark-mb {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--card-2);
+    overflow: hidden;
+}
+
+.spark-mb > div {
+    height: 100%;
+    background: var(--sp-acc);
+}
+
+.spark-model {
+    font: 500 0.8rem var(--mono);
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.spark-model.down {
+    color: var(--faint);
+}
+
+.spark-chartbox {
+    margin-top: 0.5rem;
+}
+
+.spark-chart {
+    display: block;
+    width: 100%;
+}
+
+.spark-ar {
+    fill: var(--sp-acc);
+    opacity: 0.12;
+}
+
+.spark-ln {
+    fill: none;
+    stroke: var(--sp-acc);
+    stroke-width: 1.4;
+}
+
+.spark-dt {
+    fill: var(--sp-acc);
+}
+
+.spark-lt {
+    margin-top: 1.2rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--line);
+}
+
+.spark-lt-hero {
+    font: 300 1.7rem var(--mono);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.spark-lt-hero .spark-unit {
+    display: block;
+    margin: 0 0 0.5rem;
+}
+
+.spark-lt-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem 1rem;
+    margin: 0.7rem 0;
+}
+
+.spark-lt-cell .spark-n {
+    font-size: 1rem;
+}
+
+.spark-foot {
+    margin-top: 1rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--line);
+    font: 0.62rem var(--mono);
+    color: var(--faint);
+}
+
+@media (min-width: 1100px) {
+    .layout.sparked .spark-panel {
+        position: relative;
+        inset: auto;
+        z-index: auto;
+        flex: 0 0 var(--spark-w, 46%);
+        max-width: calc(100% - 440px);
+        height: 100dvh;
+        border-left: 1px solid var(--line);
+        animation-delay: 90ms;
+    }
+
+    :root[data-tiling="on"] .layout.sparked .spark-panel {
+        height: auto;
+    }
+}
+
+@media (max-width: 1099px) {
+    :root .layout > .spark.window {
+        animation: push-in 0.36s var(--ease-out);
+    }
+
+    :root .layout > .spark.window.leaving {
+        animation: push-out 0.24s var(--ease-in-out) forwards;
+    }
 }
