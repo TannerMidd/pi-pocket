@@ -1108,6 +1108,19 @@ kbd {
     align-items: center;
 }
 
+.linked-chats {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.linked-chats .breadcrumb {
+    min-height: 40px;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
 /* The explicit parent route stays beside the message box on every layout, even when the dock scrolls. */
 .parent-session {
     display: flex;

@@ -168,6 +168,7 @@ const ONE = {
     script: "a script",
     artifact: "an artifact",
     session: "a session",
+    chat: "a chat",
     message: "a message",
     reminder: "a reminder",
     call: "a call",
@@ -178,6 +179,14 @@ const ONE = {
 
 /** Calls whose verb depends on what they were asked to do: listing or cancelling schedules, denying a call. */
 function byAction(name, args) {
+    if (name === "agent_chat") {
+        return args.action === "start"
+            ? { verb: "started", noun: "chat" }
+            : args.action === "send"
+              ? { verb: "messaged", noun: "chat", by: "chat" }
+              : { verb: "checked linked chats" };
+    }
+
     const scheduling = name === "schedule" || name === "session_schedule";
 
     if (scheduling && args.action === "list") {

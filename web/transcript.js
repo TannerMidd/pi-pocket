@@ -6,6 +6,7 @@ import { personColor } from "./avatar.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall } from "./calls.js";
 import { DiffBlock } from "./diff.js";
+import { LinkedChats } from "./linked-chats.js";
 import { fromServer } from "./peeks.js";
 import { Highlighted } from "./rich.js";
 import {
@@ -300,7 +301,13 @@ function UserEntry({ entry, view, users }) {
     const via = authorId === undefined ? VIA.exec(written) : null;
     const sent = via ? written.slice(via[0].length) : written;
     const scheduled = sent.startsWith(SCHEDULED);
-    const body = scheduled ? sent.slice(SCHEDULED.length) : sent;
+    const peer = via && /^linked peer (chat-[a-f0-9-]{36})$/.exec(via[1]);
+    // Keep routing instructions in the model's transcript, not in the person's reading of a peer message.
+    const peerText =
+        peer && sent.startsWith(`Message from linked peer ${peer[1]}.`)
+            ? /\n<linked-chat-message>\n([\s\S]*)\n<\/linked-chat-message>$/.exec(sent)?.[1]
+            : undefined;
+    const body = peerText ?? (scheduled ? sent.slice(SCHEDULED.length) : sent);
     const files = attachments ? parseAttachments(attachments) : [];
     // `/skill:name request`: the skill by name, and the request.
     const skill = SKILL.exec(body);
@@ -2124,6 +2131,7 @@ export function Transcript() {
 
     return html`<main class="scroller" ref=${scroller} onScroll=${onScroll}>
         <div class="transcript">
+            <${LinkedChats} />
             ${
                 conversation.forkedFrom &&
                 sessionsLoaded &&

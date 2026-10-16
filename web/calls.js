@@ -69,6 +69,16 @@ export function describeCall(call) {
             };
         }
 
+        case "agent_chat":
+            return {
+                icon: "⧉",
+                label: `Linked chat ${args.action ?? ""}`,
+                subject: [args.title ?? args.chat, args.message && short(args.message, 60)]
+                    .filter(Boolean)
+                    .join(" · "),
+                mono: false,
+            };
+
         case "subagent":
             return {
                 icon: "⧉",

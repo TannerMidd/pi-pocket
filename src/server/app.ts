@@ -45,6 +45,7 @@ import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
+import { LinkedChats } from "./linked-chats.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
 import {
     ArtifactBodyDoc,
@@ -243,6 +244,7 @@ export class PocketApp {
     host!: PocketHost;
     loader!: ExtensionLoader;
     readonly commands = new Commands(this);
+    readonly linkedChats = new LinkedChats(this);
     readonly collab = new Collab(this);
     readonly alerts = new Alerts(this);
     readonly providers = new Providers(this);
@@ -414,6 +416,7 @@ export class PocketApp {
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
+            linkedChats: this.linkedChats,
             schedules: this.schedules,
             goals: this.goals,
             browsers: this.browsers,
@@ -1567,9 +1570,8 @@ export class PocketApp {
 
                 client.send(
                     "sessions",
-                    scope === undefined
-                        ? all
-                        : all.filter((session) => scope.includes(String(session.id))),
+                    // Scoped lists need their own metadata projection, not just a filter over the global list.
+                    scope === undefined ? all : this.sessions(client.user),
                 );
                 this.#sendPip(client);
 
@@ -1623,11 +1625,27 @@ export class PocketApp {
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
                 const counts = countSubagents(subagents.get(id) ?? []);
                 // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
-                const { fromPi: _fromPi, ...shown } = meta;
+                const { fromPi: _fromPi, linkedFrom, ...shown } = meta;
+                // Linking does not share the origin: do not leak its id to someone who only sees the new chat.
+                const origin =
+                    linkedFrom === undefined ? undefined : this.#sessions[String(linkedFrom.id)];
+                const visibleOrigin =
+                    origin !== undefined &&
+                    origin.pip === undefined &&
+                    (user === undefined ||
+                        this.canSee(user, linkedFrom!.id as unknown as ConversationId));
+
+                const linkage: { linkedFrom?: SessionMeta["linkedFrom"]; linkedOrigin?: true } =
+                    linkedFrom === undefined
+                        ? {}
+                        : visibleOrigin
+                          ? { linkedFrom }
+                          : { linkedOrigin: true };
 
                 return {
                     id: Number(id),
                     ...shown,
+                    ...linkage,
                     busy,
                     waiting: waiting.has(id),
                     ...(endedAt === undefined ? {} : { endedAt }),

@@ -61,6 +61,19 @@ const shape = (items: Items) =>
             : item.key,
     );
 
+test("linked peer chat calls are named separately from nested subagents", () => {
+    for (const [action, expected] of [
+        ["start", "Started a chat"],
+        ["send", "Messaged a chat"],
+        ["list", "Checked linked chats"],
+    ]) {
+        assert.equal(
+            turns.summarize([{ block: call("peer", "agent_chat", { action, chat: 12 }) }]),
+            expected,
+        );
+    }
+});
+
 test("Pi's calls across answers fold into one group, and words end it", () => {
     const rows = [
         user(1),

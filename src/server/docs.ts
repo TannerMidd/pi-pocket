@@ -24,6 +24,8 @@ export type SessionMeta = {
     archived?: boolean;
     /** The session this one was forked from, and the last entry it inherited; no entry: forked before the first message. */
     forkedFrom?: { id: number; entryId?: number };
+    /** The normal chat that started this one; a link, never an ownership or access relationship. */
+    linkedFrom?: { id: number };
     /** The most Pi may spend here, in dollars, subagents included. */
     budget?: number;
     /** The git worktree the session works in, when it has one of its own. */
@@ -43,6 +45,30 @@ export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
     version: 1,
     scope: "session",
     initial: () => ({ items: {} }),
+});
+
+/** Local opaque peer addresses, never raw chat ids in a shared tool transcript. A fork makes its own addresses. */
+export const LinkedChatPeersDoc = defineDoc<{ peers: Record<string, number> }>({
+    kind: "pocket.linked-chat-peers",
+    version: 1,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ peers: {} }),
+});
+
+/** A peer-chat tool call's target and requester, committed with creation and retained for safe replay. */
+export const LinkedChatCallDoc = defineDocFamily<
+    { conversationId?: number; by?: string },
+    Record<string, never>
+>({
+    kind: "pocket.linked-chat-call",
+    version: 1,
+    family: true,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({}),
 });
 
 /**
