@@ -1,12 +1,14 @@
 /** Normal chats started by another chat: lasting links, independent agents, and idempotent peer messages. */
 import { createHash, randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { AgentDoc, type AgentState, type ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { LinkedChatCallDoc, LinkedChatPeersDoc, PlanDoc, SessionsDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { defang } from "./fence.ts";
+import { isThinkingLevel, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -35,6 +37,8 @@ function independentAgent(agent: AgentState): AgentState {
 }
 
 export class LinkedChats {
+    /** Hot-loaded extensions must not send route options to an older service that silently ignores them. */
+    readonly modelSelection = true;
     readonly #app: PocketApp;
 
     constructor(app: PocketApp) {
@@ -169,7 +173,7 @@ export class LinkedChats {
     /** Creation and its receipt are atomic: a replay never leaves an extra sidebar chat behind. */
     async start(
         source: ConversationId,
-        request: { title: string; message: string },
+        request: { title: string; message: string; model?: string; thinking?: string },
         key: string,
     ): Promise<ConversationId> {
         const app = this.#app;
@@ -197,6 +201,45 @@ export class LinkedChats {
         }
 
         await this.#maySend(source, user);
+        // Old recorded calls may have no route options, but new peers must never inherit a route silently.
+        const spec = typeof request.model === "string" ? request.model.trim() : "";
+        const thinking = request.thinking;
+
+        if (!spec || spec.indexOf("/") <= 0) {
+            throw new HttpError(
+                400,
+                "Starting a linked chat needs an explicit model as provider/modelId.",
+            );
+        }
+
+        if (!isThinkingLevel(thinking)) {
+            throw new HttpError(
+                400,
+                `Starting a linked chat needs thinking: ${THINKING_LEVELS.join(", ")}.`,
+            );
+        }
+
+        const model = resolveModel(app.models, spec, app.signInNeeded);
+        const supported = getSupportedThinkingLevels(
+            app.models.getModel(model.provider, model.modelId)!,
+        );
+
+        if (!supported.includes(thinking)) {
+            throw new HttpError(
+                400,
+                `Model ${spec} does not support thinking ${thinking}. Supported levels: ${supported.join(", ")}. Do not substitute another route.`,
+            );
+        }
+
+        const problem = await app.providers.problem(model, true);
+
+        if (problem !== undefined) {
+            throw new HttpError(
+                400,
+                `Model ${spec} is not available: ${problem}. Stop and report this; do not substitute another route.`,
+            );
+        }
+
         const agent = independentAgent((await app.agentState(source)) ?? {});
         const cwd = agent.cwd ?? app.cwdOf(source);
         const now = Date.now();
@@ -211,7 +254,11 @@ export class LinkedChats {
             const sessions = await tx.doc(SessionsDoc);
             const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
 
-            Object.assign(await tx.doc(AgentDoc, child.id), agent, { cwd });
+            Object.assign(await tx.doc(AgentDoc, child.id), agent, {
+                cwd,
+                model,
+                thinkingLevel: thinking,
+            });
             sessions.items[String(child.id)] = {
                 cwd,
                 title,

@@ -50,8 +50,15 @@ chats or their links. Nested agents exclude both delegation extensions, includin
 `agent_chat`
 starts a normal sidebar chat, lists its visible linked family, and sends peer messages in either
 direction. `SessionMeta.linkedFrom` records origin only: it never enters `SubagentsDoc`, `parentOf`,
-`rootOf`, access inheritance, or cancellation. Configuration is copied once (not history or terminal
-state), with conversation-specific terminal tool registrations removed when present. Models and thinking levels are not changed by peer sends.
+`rootOf`, access inheritance, or cancellation. Folder, instructions and tool selections are copied once
+(not history or terminal state), with conversation-specific terminal tool registrations removed when
+present. Startup requires explicit model and thinking choices, resolved against available signed-in
+models and exact supported levels before any creation or receipt. There is no source-model fallback,
+source thinking cap or nested-subagent model allowlist: these are normal independent chats. A
+created-call replay returns its recorded target before new route validation, preserving older receipts
+without route options. Models and thinking levels are not changed by peer sends. The `modelSelection`
+bridge capability keeps hot-loaded modules from sending new route options to an older service that
+would silently ignore them; a restart is required instead.
 
 `pocket.linked-chat-peers` keeps local opaque UUID addresses for tools and incoming message headers,
 so shared tool history never automatically records another chat's numeric id. Peer discovery withholds

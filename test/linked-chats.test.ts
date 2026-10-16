@@ -16,27 +16,35 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { AgentDoc, type ConversationId } from "@earendil-works/pi-durable";
-import { PlanDoc, SubagentsDoc, TurnsDoc } from "../src/server/docs.ts";
+import { AgentDoc, type ConversationId, type ModelRef } from "@earendil-works/pi-durable";
+import { LinkedChatCallDoc, PlanDoc, SubagentsDoc, TurnsDoc } from "../src/server/docs.ts";
 import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
 import createAgentTeams from "../src/server/extensions/agent-teams.ts";
 import { createHandler } from "../src/server/http.ts";
 
-const route: Parameters<typeof scriptedModel>[0] = (request) => {
+const peerRuns: { model: string; thinking?: string }[] = [];
+let startupPrompt = "";
+
+const route: Parameters<typeof scriptedModel>[0] = (request, options, _state, model) => {
     const { role, text: said } = lastText(request as never);
     const text = said.replace(/^\[from: [^\]]+\] /, "");
 
     if (text === "start linked test" || text === "start in shared source") {
+        startupPrompt = JSON.stringify(request.messages);
+
         return fauxAssistantMessage(
             [
                 fauxToolCall("agent_chat", {
                     action: "start",
                     title: "Peer investigation",
                     message: "do peer task and report back",
+                    model: "faux/faux-2",
+                    thinking: "xhigh",
                 }),
             ],
             { stopReason: "toolUse" },
@@ -44,6 +52,7 @@ const route: Parameters<typeof scriptedModel>[0] = (request) => {
     }
 
     if (role === "user" && text.includes("<linked-chat-message>\ndo peer task")) {
+        peerRuns.push({ model: model.id, thinking: options?.reasoning });
         const origin = /Message from linked peer (chat-[a-f0-9-]+)/.exec(text)?.[1];
 
         return fauxAssistantMessage(
@@ -101,11 +110,25 @@ const route: Parameters<typeof scriptedModel>[0] = (request) => {
     return fauxAssistantMessage([fauxText(`echo: ${text}`)]);
 };
 
+function teamModel() {
+    const fixture = scriptedModel(route);
+
+    Object.assign(
+        fixture.models.find((model) => model.id === "faux-2")!,
+        {
+            reasoning: true,
+            thinkingLevelMap: { xhigh: "xhigh" },
+        },
+    );
+
+    return fixture;
+}
+
 let app: App;
 const data = join(root, "linked-data");
 
 before(async () => {
-    app = await openApp(scriptedModel(route), data);
+    app = await openApp(teamModel(), data);
 });
 after(async () => {
     await app?.close();
@@ -125,7 +148,11 @@ async function start(
     key: string = crypto.randomUUID(),
     title = "Independent peer",
 ) {
-    return app.linkedChats.start(id, { title, message: "a task" }, key);
+    return app.linkedChats.start(
+        id,
+        { title, message: "a task", model: "faux/faux-1", thinking: "off" },
+        key,
+    );
 }
 
 async function delivered(id: ConversationId, requestId: string) {
@@ -140,8 +167,11 @@ async function delivered(id: ConversationId, requestId: string) {
     return submission;
 }
 
-test("the real agent_chat tool starts an ordinary sidebar chat and the peer can send back", async () => {
+test("the real tool starts a different model at xhigh from an off source, and the peer sends back", async () => {
     const id = await source();
+    const original = await app.agentState(id);
+
+    assert.deepEqual(app.config.subagentModels, []);
 
     await say(app, id, "start linked test");
     const peer = app.sessions(owner(app)).find((chat) => chat.linkedFrom?.id === Number(id));
@@ -154,6 +184,16 @@ test("the real agent_chat tool starts an ordinary sidebar chat and the peer can 
             (await modelTexts(app, id)).some((text) => text.includes("peer findings ready")),
         "peer report reaches source",
     );
+    assert.deepEqual((await app.agentState(target))?.model, {
+        provider: "faux",
+        modelId: "faux-2",
+    });
+    assert.equal((await app.agentState(target))?.thinkingLevel, "xhigh");
+    assert.deepEqual(peerRuns.at(-1), { model: "faux-2", thinking: "xhigh" });
+    assert.match(startupPrompt, /Use agent_chat for task-owner delegation/);
+    assert.match(startupPrompt, /explicit model \(provider\/modelId\) and thinking level/);
+    assert.match(startupPrompt, /governing instructions specifically require a CLI launcher/);
+    assert.deepEqual(await app.agentState(id), original);
     assert.equal(app.rootOf(target), target);
     assert.equal(app.parentOf(target), undefined);
     assert.equal(
@@ -202,12 +242,35 @@ test("agent settings are copied once, not inherited thereafter; plan, budget and
 test("start/send replay reuse chat and submission across restart, including creation before initial delivery", async () => {
     const id = await source();
     const key = "stable-start-key";
-    const target = await start(id, key);
+    const target = await app.linkedChats.start(
+        id,
+        { title: "Routed peer", message: "task", model: "faux/faux-2", thinking: "xhigh" },
+        key,
+    );
     const count = app.sessions().length;
 
     await app.close();
-    app = await openApp(scriptedModel(route), data);
+    app = await openApp(teamModel(), data);
     assert.equal(await start(id, key), target);
+    assert.equal(
+        await app.linkedChats.start(id, { title: "Old call", message: "task" }, key),
+        target,
+        "pre-upgrade calls without route options reuse an existing receipt",
+    );
+    assert.equal(
+        await app.linkedChats.start(
+            id,
+            { title: "Changed call", message: "task", model: "unavailable/model", thinking: "bad" },
+            key,
+        ),
+        target,
+        "a receipt is authoritative even when the supplied route is no longer available",
+    );
+    assert.deepEqual((await app.agentState(target))?.model, {
+        provider: "faux",
+        modelId: "faux-2",
+    });
+    assert.equal((await app.agentState(target))?.thinkingLevel, "xhigh");
     assert.equal(app.sessions().length, count);
     const sent = await app.linkedChats.send(
         id,
@@ -507,7 +570,7 @@ test("shared tool history uses opaque addresses and withholds private peer metad
     const handle = peer.handle;
 
     await app.close();
-    app = await openApp(scriptedModel(route), data);
+    app = await openApp(teamModel(), data);
     assert.equal(await app.linkedChats.address(id, Number(target)), handle);
 });
 
@@ -533,7 +596,7 @@ test("Agent Teams and Subagents are independent plugins, including across restar
             "disabling the plugin keeps its ordinary chat and links",
         );
         await app.close();
-        app = await openApp(scriptedModel(route), data);
+        app = await openApp(teamModel(), data);
         assert.equal(
             app.loader.list().find((module) => module.file === "agent-teams.ts")?.enabled,
             false,
@@ -564,6 +627,75 @@ test("Agent Teams hot-loads safely when the running host still needs a restart",
     assert.equal(extension.name, "pocket-agent-teams");
     assert.deepEqual(extension.tools ?? [], []);
     assert.deepEqual(extension.sections ?? [], []);
+});
+
+test("startup route validation refuses missing, unavailable or unsupported choices without side effects", async () => {
+    const id = await source();
+    const count = app.sessions().length;
+    const cases: [Record<string, string>, RegExp][] = [
+        [{ thinking: "off" }, /model/],
+        [{ model: "faux/faux-2" }, /thinking/],
+        [{ model: " ", thinking: "off" }, /model/],
+        [{ model: "faux-2", thinking: "off" }, /provider\/modelId/],
+        [{ model: "faux/unknown", thinking: "off" }, /not available/],
+        [{ model: "unavailable/model", thinking: "off" }, /not available/],
+        [{ model: "faux/faux-2", thinking: "bad" }, /thinking/],
+        [{ model: "faux/faux-1", thinking: "xhigh" }, /does not support/],
+        [{ model: "faux/faux-2", thinking: "max" }, /does not support/],
+    ];
+
+    for (const [options, expected] of cases) {
+        const key = crypto.randomUUID();
+        const token = createHash("sha256").update(`${id}:${key}`).digest("hex");
+
+        await assert.rejects(
+            app.linkedChats.start(id, { title: "Refused peer", message: "task", ...options }, key),
+            expected,
+        );
+        assert.equal(app.sessions().length, count);
+        assert.equal(await app.harness.snapshot(LinkedChatCallDoc, id, token, context), undefined);
+    }
+});
+
+test("a fresh provider sign-in refusal creates no peer, receipt or fallback", async (t) => {
+    const id = await source();
+    const count = app.sessions().length;
+    const key = "refused-sign-in";
+    const token = createHash("sha256").update(`${id}:${key}`).digest("hex");
+    const check = t.mock.method(
+        app.providers,
+        "problem",
+        async (ref: ModelRef, fresh?: boolean) => {
+            assert.deepEqual(ref, { provider: "faux", modelId: "faux-2" });
+            assert.equal(fresh, true);
+
+            return "the provider sign-in expired";
+        },
+    );
+
+    await assert.rejects(
+        app.linkedChats.start(
+            id,
+            { title: "Refused peer", message: "task", model: "faux/faux-2", thinking: "xhigh" },
+            key,
+        ),
+        /sign-in expired/,
+    );
+    assert.equal(check.mock.callCount(), 1);
+    assert.equal(app.sessions().length, count);
+    assert.equal(await app.harness.snapshot(LinkedChatCallDoc, id, token, context), undefined);
+});
+
+test("an older bridge cannot silently ignore the requested startup route during hot reload", () => {
+    const notices: string[] = [];
+    const extension = createAgentTeams({
+        ...app.host,
+        linkedChats: { ...app.host.linkedChats!, modelSelection: undefined },
+        notice: (_level, message) => notices.push(message),
+    });
+
+    assert.deepEqual(extension.tools ?? [], []);
+    assert.ok(notices.some((message) => /restart/i.test(message)));
 });
 
 test("per-conversation terminal extension registrations are not copied into an independent chat", async () => {

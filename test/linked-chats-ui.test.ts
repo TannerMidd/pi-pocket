@@ -59,7 +59,12 @@ before(async () => {
     await app.commands.updateSession(origin, owner(app), { title: "Main task" });
     target = await app.linkedChats.start(
         origin,
-        { title: "Authentication investigation", message: "task" },
+        {
+            title: "Authentication investigation",
+            message: "task",
+            model: "faux/faux-2",
+            thinking: "off",
+        },
         "browser-start",
     );
     await app.linkedChats.send(
@@ -117,6 +122,10 @@ test(
             await see(
                 `return JSON.stringify((await import('/store.js')).store.state.conversationId === ${Number(target)} && (await import('/store.js')).store.state.view.conversation?.id === ${Number(target)})`,
                 "normal target chat",
+            );
+            await see(
+                `return JSON.stringify((await import('/store.js')).store.state.view.agent?.model?.modelId === 'faux-2' && document.querySelector('.model-chip .model-name')?.textContent.includes('faux-2'))`,
+                "the peer's selected model, not the source model",
             );
             await see(
                 `return JSON.stringify(document.querySelector('.linked-chats')?.textContent.includes('Started from: Main task') === true)`,
