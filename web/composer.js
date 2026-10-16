@@ -27,6 +27,7 @@ import {
 } from "./store.js";
 import { useDock } from "./dock.js";
 import { SubagentsBar } from "./subagents.js";
+import { SparkPart, useSpark } from "./spark-panel.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
 import { MicButton, useDictation } from "./voice.js";
@@ -1422,7 +1423,7 @@ function PlacesButton() {
  * gaps, no "1 here" while you are alone, the guard's and the context's labels, then the cache, then the wait for the
  * first token.
  */
-const SHORTER = ["words", "here", "guard", "context", "cache", "wait"];
+const SHORTER = ["words", "here", "spark", "guard", "context", "cache", "wait"];
 /** What each status line was last fitted for: the text size and its text. Its width is the observer's to watch. */
 const fitted = new WeakMap();
 
@@ -1546,6 +1547,7 @@ function SpeedPart({ stats }) {
  *  cache, the spend, and Lancet Guard. On one row: a narrow one takes shorter forms (`SHORTER`). */
 function StatusLine() {
     const { view, connection, guard } = store.state;
+    const spark = useSpark();
     const stats = view.stats ?? {};
     const window = view.agent?.contextWindow;
     const line = useRef(null);
@@ -1598,6 +1600,12 @@ function StatusLine() {
     if (stats.cacheRate !== undefined) {
         parts.push(html`<span class="cache">cache ${Math.round(stats.cacheRate * 100)}%</span>`);
     }
+
+    // The Spark cluster's chip, before the spend so money stays at the line's end. Its poll lives here, so a fresh
+    // reading re-renders the line and its fit hears the new width.
+    parts.push(
+        html`<${SparkPart} spark=${spark.data === null && spark.error === undefined ? undefined : (spark.data ?? null)} />`,
+    );
 
     // The session's spend, its subagents' included, and its limit when it has one.
     const spend = view.conversation?.spend;

@@ -373,11 +373,12 @@ test(
             // The words that go still name their figures for a screen reader, and the guard, down to its shield,
             // still takes a thumb.
             if (width === 390) {
-                assert.equal(
+                assert.match(
                     await inPage<string>(
                         `return JSON.stringify(document.querySelector(".status-line").innerText.replace(/\\s+/g, " ").trim())`,
                     ),
-                    "87 tok/s first token 1.2s context 77% cache 83% $12.34 on",
+                    // The Spark chip's watts are live data, so the line is matched, not compared.
+                    /87 tok\/s first token 1\.2s context 77% cache 83% \d+W \$12\.34 on/,
                 );
                 const guard = await inPage<{ w: number; h: number; label: string }>(`
                     const guard = document.querySelector(".status-line .guard");
@@ -431,7 +432,8 @@ test(
         assert.equal(wide.short, "", `wide, the line is whole: ${JSON.stringify(wide)}`);
         assert.match(
             await lineShown(),
-            /^1 here 87 tokens\/s first token 1\.2s context 77% cache 83% \$12\.34 guard on$/,
+            // The Spark chip's full form sits between the cache and the spend; its watts are live.
+            /^1 here 87 tokens\/s first token 1\.2s context 77% cache 83% \d+W · \d+° · \d+% \$12\.34 guard on$/,
         );
 
         // Narrowed and widened again on the same page, without a reload: it shortens, then is whole again.
@@ -452,8 +454,17 @@ test(
         await everything();
         const before = await oneRow("one row with the speed off");
 
-        // Without the speed, an iPhone's width shows the line whole, as it was before the setting.
-        assert.equal(before.short, "", `nothing shortened: ${JSON.stringify(before)}`);
+        // Without the speed, an iPhone's width shows the line whole but for the Spark chip's temperature and
+        // utilization, which yield before any part of the line disappears.
+        assert.equal(
+            before.short,
+            "words here spark",
+            `only the usual shortening: ${JSON.stringify(before)}`,
+        );
+        assert.ok(
+            before.shown.includes("spark"),
+            `the spark chip still shows: ${JSON.stringify(before)}`,
+        );
 
         await flipSwitch();
         await page.evaluate(`(await import("/store.js")).closeSheet()`);
@@ -465,7 +476,10 @@ test(
         await page.evaluate(`(await import("/store.js")).closeSheet()`);
         await settle();
         await until(async () => (await speedShown()) === null, "the speed gone");
-        await until(async () => (await line()).short === "", "whole again");
+        await until(
+            async () => (await line()).short === "words here spark",
+            "whole again but the spark's short form",
+        );
     },
 );
 

@@ -23,6 +23,7 @@ import type { User } from "../config.ts";
 import { HttpError } from "../errors.ts";
 import { desktopTheme, wallpaperFile } from "../omarchy.ts";
 import { runningNow } from "../running.ts";
+import { sparkStatus } from "../spark.ts";
 import { serveImage } from "./assets.ts";
 import { browserRoutes } from "./browser-routes.ts";
 import { conversationRoutes } from "./conversation-routes.ts";
@@ -219,6 +220,18 @@ export function createApi(options: HttpOptions, auth: Auth) {
             );
 
             return json(response, 200, { ok: true });
+        }
+
+        // The DGX Spark cluster's status, proxied from the dashboard on the primary node: one cached fetch serves
+        // every window, and the browser's own policy keeps it from fetching the Spark directly.
+        if (first === "spark" && second === undefined && method === "GET") {
+            try {
+                return json(response, 200, await sparkStatus());
+            } catch (error) {
+                return json(response, 502, {
+                    error: `Spark dashboard unreachable: ${String(error)}`,
+                });
+            }
         }
 
         // Every subagent in the sessions this person can see, as the subagents board shows them.
@@ -440,6 +453,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
             return conversationRoutes(route, id, parts);
         }
+
 
         if (first === "approvals" && second !== undefined && method === "POST") {
             const body = await readJson<{ allow?: boolean }>(request);
