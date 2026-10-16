@@ -34,6 +34,19 @@ const route: Parameters<typeof scriptedModel>[0] = (request, options, _state, mo
     const { role, text: said } = lastText(request as never);
     const text = said.replace(/^\[from: [^\]]+\] /, "");
 
+    if (text === "start inherited linked test") {
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("agent_chat", {
+                    action: "start",
+                    title: "Inherited peer",
+                    message: "inherited task",
+                }),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
     if (text === "start linked test" || text === "start in shared source") {
         startupPrompt = JSON.stringify(request.messages);
 
@@ -191,7 +204,7 @@ test("the real tool starts a different model at xhigh from an off source, and th
     assert.equal((await app.agentState(target))?.thinkingLevel, "xhigh");
     assert.deepEqual(peerRuns.at(-1), { model: "faux-2", thinking: "xhigh" });
     assert.match(startupPrompt, /Use agent_chat for task-owner delegation/);
-    assert.match(startupPrompt, /explicit model \(provider\/modelId\) and thinking level/);
+    assert.match(startupPrompt, /inherit your model and thinking level when omitted/);
     assert.match(startupPrompt, /governing instructions specifically require a CLI launcher/);
     assert.deepEqual(await app.agentState(id), original);
     assert.equal(app.rootOf(target), target);
@@ -629,18 +642,104 @@ test("Agent Teams hot-loads safely when the running host still needs a restart",
     assert.deepEqual(extension.sections ?? [], []);
 });
 
-test("startup route validation refuses missing, unavailable or unsupported choices without side effects", async () => {
+test("the real tool inherits omitted model and thinking settings", async () => {
+    const id = await source();
+    const original = await app.agentState(id);
+
+    await say(app, id, "start inherited linked test");
+    const peer = app.sessions(owner(app)).find((chat) => chat.linkedFrom?.id === Number(id));
+
+    assert.ok(peer);
+    const agent = await app.agentState(peer.id as unknown as ConversationId);
+
+    assert.deepEqual(agent?.model, original?.model);
+    assert.equal(agent?.thinkingLevel, original?.thinkingLevel ?? "off");
+});
+
+test("model and thinking overrides are independent, copied once, and explicit levels are exact", async () => {
+    const id = await source();
+
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(AgentDoc, id), {
+            model: { provider: "faux", modelId: "faux-2" },
+            thinkingLevel: "xhigh",
+        });
+    }, context);
+
+    for (const [options, expectedModel, expectedThinking] of [
+        [{}, "faux-2", "xhigh"],
+        [{ model: "faux/faux-1" }, "faux-1", "off"],
+        [{ thinking: "low" }, "faux-2", "low"],
+        [{ model: "faux/faux-1", thinking: "off" }, "faux-1", "off"],
+    ] as const) {
+        const peer = await app.linkedChats.start(
+            id,
+            {
+                title: "Optional overrides",
+                message: "task",
+                ...options,
+            },
+            crypto.randomUUID(),
+        );
+        const agent = await app.agentState(peer);
+
+        assert.deepEqual(agent?.model, { provider: "faux", modelId: expectedModel });
+        assert.equal(agent?.thinkingLevel, expectedThinking);
+
+        await app.harness.commit(async (tx) => {
+            (await tx.doc(AgentDoc, id)).thinkingLevel = "off";
+        }, context);
+        assert.equal((await app.agentState(peer))?.thinkingLevel, expectedThinking);
+        await app.harness.commit(async (tx) => {
+            (await tx.doc(AgentDoc, id)).thinkingLevel = "xhigh";
+        }, context);
+    }
+
+    await app.harness.commit(async (tx) => {
+        delete (await tx.doc(AgentDoc, id)).model;
+    }, context);
+    const count = app.sessions().length;
+
+    await assert.rejects(
+        app.linkedChats.start(
+            id,
+            {
+                title: "No source model",
+                message: "task",
+            },
+            crypto.randomUUID(),
+        ),
+        /source model/,
+    );
+    assert.equal(app.sessions().length, count);
+    const overridden = await app.linkedChats.start(
+        id,
+        {
+            title: "Override missing source model",
+            message: "task",
+            model: "faux/faux-1",
+        },
+        crypto.randomUUID(),
+    );
+
+    assert.deepEqual((await app.agentState(overridden))?.model, {
+        provider: "faux",
+        modelId: "faux-1",
+    });
+    assert.equal((await app.agentState(overridden))?.thinkingLevel, "off");
+});
+
+test("startup route validation refuses invalid, unavailable or unsupported overrides without side effects", async () => {
     const id = await source();
     const count = app.sessions().length;
     const cases: [Record<string, string>, RegExp][] = [
-        [{ thinking: "off" }, /model/],
-        [{ model: "faux/faux-2" }, /thinking/],
         [{ model: " ", thinking: "off" }, /model/],
         [{ model: "faux-2", thinking: "off" }, /provider\/modelId/],
         [{ model: "faux/unknown", thinking: "off" }, /not available/],
         [{ model: "unavailable/model", thinking: "off" }, /not available/],
-        [{ model: "faux/faux-2", thinking: "bad" }, /thinking/],
+        [{ model: "faux/faux-2", thinking: "bad" }, /thinking/i],
         [{ model: "faux/faux-1", thinking: "xhigh" }, /does not support/],
+        [{ thinking: "xhigh" }, /does not support/],
         [{ model: "faux/faux-2", thinking: "max" }, /does not support/],
     ];
 

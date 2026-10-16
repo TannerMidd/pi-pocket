@@ -121,7 +121,7 @@ What the default export receives. Extensions reach the app only through it; it s
 | `onLimitsChanged(listener)`      | Call `listener` when the owner changes a spend limit; returns how to stop                                                     |
 | `approvals`, `guard`             | Calls waiting for a person to allow them; Lancet Guard                                                                        |
 | `schedules`, `goals`, `browsers` | Scheduled messages, Done when, and the built-in browser, as their extensions use them                                         |
-| `linkedChats`                    | Normal linked chats: explicit model/thinking at start, list and send; check `modelSelection` before using route options       |
+| `linkedChats`                    | Normal linked chats: inherited model/thinking with optional startup overrides, list and send; check `modelSelection`          |
 | `memory`                         | Lessons Pi keeps across sessions: their projects, the ones in force, saving and changing them                                 |
 | `watches`                        | Sessions' PR watches: starting, stopping, and reading one, and the task that looks                                            |
 | `repoWatches`                    | Repository watches' task, which the triggers extension installs                                                               |

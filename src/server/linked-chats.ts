@@ -8,7 +8,7 @@ import type { User } from "./config.ts";
 import { LinkedChatCallDoc, LinkedChatPeersDoc, PlanDoc, SessionsDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { defang } from "./fence.ts";
-import { isThinkingLevel, resolveModel, THINKING_LEVELS } from "./models.ts";
+import { isThinkingLevel, levelAtMost, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -201,28 +201,33 @@ export class LinkedChats {
         }
 
         await this.#maySend(source, user);
-        // Old recorded calls may have no route options, but new peers must never inherit a route silently.
-        const spec = typeof request.model === "string" ? request.model.trim() : "";
-        const thinking = request.thinking;
+        // Copy omitted settings once; an explicit override must never silently select another model.
+        const agent = independentAgent((await app.agentState(source)) ?? {});
+        const spec =
+            request.model === undefined
+                ? agent.model && `${agent.model.provider}/${agent.model.modelId}`
+                : request.model.trim();
+        const wantedThinking = request.thinking ?? agent.thinkingLevel ?? "off";
 
         if (!spec || spec.indexOf("/") <= 0) {
             throw new HttpError(
                 400,
-                "Starting a linked chat needs an explicit model as provider/modelId.",
+                "Starting a linked chat needs a source model or a model override as provider/modelId.",
             );
         }
 
-        if (!isThinkingLevel(thinking)) {
-            throw new HttpError(
-                400,
-                `Starting a linked chat needs thinking: ${THINKING_LEVELS.join(", ")}.`,
-            );
+        if (!isThinkingLevel(wantedThinking)) {
+            throw new HttpError(400, `Thinking must be one of: ${THINKING_LEVELS.join(", ")}.`);
         }
 
+        let thinking = wantedThinking;
         const model = resolveModel(app.models, spec, app.signInNeeded);
-        const supported = getSupportedThinkingLevels(
-            app.models.getModel(model.provider, model.modelId)!,
-        );
+        const selected = app.models.getModel(model.provider, model.modelId)!;
+        const supported = getSupportedThinkingLevels(selected);
+
+        if (request.model !== undefined && request.thinking === undefined) {
+            thinking = levelAtMost(selected, thinking) ?? supported[0]!;
+        }
 
         if (!supported.includes(thinking)) {
             throw new HttpError(
@@ -240,7 +245,6 @@ export class LinkedChats {
             );
         }
 
-        const agent = independentAgent((await app.agentState(source)) ?? {});
         const cwd = agent.cwd ?? app.cwdOf(source);
         const now = Date.now();
 
