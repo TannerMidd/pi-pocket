@@ -114,7 +114,7 @@ async function shown(id: ConversationId, actions: string[]): Promise<void> {
         );
     }, "actions shown, metadata hidden");
     const now = await appearance(id);
-    const reserved = actions.length === 1 ? 26 : 56;
+    const reserved = actions.length === 1 ? 26 : actions.length === 3 ? 86 : 56;
 
     assert.deepEqual(now.actions, actions);
     assert.deepEqual(
@@ -283,7 +283,7 @@ test(
             false,
             "keyboard focus alone, not hover",
         );
-        await shown(active, ["Archive", "Pin"]);
+        await shown(active, ["Archive", "Pin", "Mark unread"]);
         const outline = await appearance(active);
 
         assert.equal(outline.outlineStyle, "solid");
@@ -294,16 +294,19 @@ test(
         );
         await page.press("Tab");
         assert.ok(await focused(`${row(active)} [aria-label="Archive"]`));
-        await shown(active, ["Archive", "Pin"]);
+        await shown(active, ["Archive", "Pin", "Mark unread"]);
         await page.press("Tab");
         assert.ok(await focused(`${row(active)} [aria-label="Pin"]`));
-        await shown(active, ["Archive", "Pin"]);
+        await shown(active, ["Archive", "Pin", "Mark unread"]);
+        await page.press("Tab");
+        assert.ok(await focused(`${row(active)} [aria-label="Mark unread"]`));
+        await shown(active, ["Archive", "Pin", "Mark unread"]);
         await page.press("Tab");
         await hidden(active);
 
         // Hover still reveals the same controls, and leaving still restores metadata.
         await page.hover({ selector: `${row(active)} > .session` });
-        await shown(active, ["Archive", "Pin"]);
+        await shown(active, ["Archive", "Pin", "Mark unread"]);
         await page.hover({ x: 1, y: 1 });
         await hidden(active);
     },
@@ -311,6 +314,14 @@ test(
 
 test("a click opens a session without leaving its row's actions shown", real, async () => {
     await fresh();
+    await page.click({ selector: `${row(active)} > .session` });
+    await page.hover({ x: 1, y: 1 });
+    // The session's message box takes the focus once it shows.
+    await until(() => focused(".composer textarea"), "the message box took the focus");
+    await hidden(active);
+    // A click on the open session's row keeps the focus there: still no actions. Past the moment after the click that
+    // opened it, when the next click is held back (`back.js`).
+    await new Promise((resolve) => setTimeout(resolve, 450));
     await page.click({ selector: `${row(active)} > .session` });
     await page.hover({ x: 1, y: 1 });
     assert.ok(await focused(`${row(active)} > .session`), "the click left focus on the row");
@@ -453,7 +464,7 @@ for (const tab of ["Recent", "Folders"] as const) {
 
             for (const id of boundaries) {
                 await tabTo(`${row(id)} > .session`);
-                await shown(id, ["Archive", "Pin"]);
+                await shown(id, ["Archive", "Pin", "Mark unread"]);
                 await until(
                     async () =>
                         await inPage<boolean>(
@@ -536,5 +547,450 @@ test(
         await page.hover({ selector: `${row(active)} > .session` });
         await hidden(active);
         assert.equal((await appearance(active)).display, "none");
+    },
+);
+
+type Touched = {
+    sheet: string | null;
+    items: string[];
+    path: string;
+    layers: number;
+    selected: number[];
+    pinned: number[];
+};
+
+/** What a finger left: the sheet open and what it offers, where the app is, and the rows selected and pinned. */
+const touched = () =>
+    inPage<Touched>(`
+        const { store } = await import("/store.js");
+
+        return JSON.stringify({
+            sheet: store.state.sheet?.type ?? null,
+            items: [...document.querySelectorAll(".sheet-host:not(.leaving) .list-item > span:first-child")]
+                .map((label) => label.textContent.trim()),
+            path: location.pathname,
+            layers: history.state?.pocket?.layers ?? 0,
+            selected: [...document.querySelectorAll(${JSON.stringify(`${list} .session-row.selected`)})]
+                .map((each) => Number(each.dataset.id)),
+            pinned: store.state.pinned,
+        });
+    `);
+
+/** Wait until what a finger left is as `expected` says, in the fields it names. */
+async function settled(expected: Partial<Touched>, what: string): Promise<Touched> {
+    let last: Touched | undefined;
+
+    try {
+        await until(async () => {
+            last = await touched();
+
+            return Object.entries(expected).every(([key, value]) =>
+                Array.isArray(value)
+                    ? JSON.stringify(last![key as keyof Touched]) === JSON.stringify(value)
+                    : last![key as keyof Touched] === value,
+            );
+        }, what);
+    } catch {
+        assert.fail(`${what}: ${JSON.stringify(last)}`);
+    }
+
+    return last!;
+}
+
+/**
+ * A finger on a row: down, held `ms` (moving `dy` on the way), and lifted, with the click a lift makes where it lifts,
+ * on whatever is there by then. Says whether the row showed the press, and its background then and before.
+ */
+const finger = (id: ConversationId, { ms, dy = 0 }: { ms: number; dy?: number }) =>
+    inPage<{ pressed: boolean; before: string; during: string }>(`
+        const button = document.querySelector(${JSON.stringify(`${row(id)} > .session`)});
+        const box = button.getBoundingClientRect();
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        const fire = (type, at = y) =>
+            button.dispatchEvent(
+                new PointerEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    pointerId: 7,
+                    pointerType: "touch",
+                    isPrimary: true,
+                    button: type === "pointermove" ? -1 : 0,
+                    clientX: x,
+                    clientY: at,
+                }),
+            );
+        const wait = (time) => new Promise((resolve) => setTimeout(resolve, time));
+        const before = getComputedStyle(button).backgroundColor;
+
+        fire("pointerdown");
+        await wait(Math.min(250, ${ms} / 2));
+        const pressed = button.closest(".session-row").classList.contains("pressing");
+        const during = getComputedStyle(button).backgroundColor;
+
+        if (${dy} !== 0) {
+            fire("pointermove", y + ${dy});
+        }
+
+        await wait(${ms} - Math.min(250, ${ms} / 2));
+        fire("pointerup", y + ${dy});
+        document
+            .elementFromPoint(x, y + ${dy})
+            .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, clientX: x, clientY: y + ${dy} }));
+
+        return JSON.stringify({ pressed, before, during });
+    `);
+
+/** Tap one of the open sheet's items by its label. */
+async function choose(label: string): Promise<void> {
+    await page.evaluate(`
+        [...document.querySelectorAll(".sheet-host:not(.leaving) .list-item")]
+            .find((each) => each.firstElementChild.textContent.trim() === ${JSON.stringify(label)})
+            .click();
+    `);
+}
+
+test(
+    "touch screens: a finger held on a row opens its actions, a tap still opens it, and a scroll is not a press",
+    real,
+    async () => {
+        await fresh(true);
+
+        // Held: the row shows the press, then its actions open; the lift's click, on the scrim now under it, does not
+        // close them or open the session.
+        const held = await finger(active, { ms: 600 });
+
+        assert.equal(held.pressed, true, "the row shows the press while it is held");
+        assert.notEqual(held.during, held.before, "the press is visible");
+        await settled(
+            {
+                sheet: "session",
+                items: ["Pin to the top", "Mark unread", "Archive", "Select"],
+                path: "/",
+            },
+            "the row's actions, open",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await settled({ sheet: "session", path: "/", layers: 1 }, "still open after the lift");
+        await choose("Pin to the top");
+        await settled({ sheet: null, pinned: [Number(active)] }, "pinned, and the sheet closed");
+        await finger(active, { ms: 600 });
+        await settled(
+            { sheet: "session", items: ["Unpin from the top", "Mark unread", "Archive", "Select"] },
+            "the pinned row offers Unpin",
+        );
+        await choose("Unpin from the top");
+        await settled({ sheet: null, pinned: [] }, "unpinned");
+
+        // A finger that moves is scrolling or dragging: no press, no actions.
+        const scrolled = await finger(active, { ms: 600, dy: 30 });
+
+        assert.equal(scrolled.pressed, true, "the press shows until the finger moves");
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await settled({ sheet: null, path: "/" }, "no actions after a scroll");
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".session-row.pressing") !== null)`,
+            ),
+            false,
+            "the press is let go",
+        );
+
+        // An archived row only comes back.
+        await selectTab("Archived");
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(${JSON.stringify(row(archived))}) !== null)`,
+                ),
+            "the archived row",
+        );
+        await finger(archived, { ms: 600 });
+        await settled(
+            { sheet: "session", items: ["Unarchive", "Select"] },
+            "an archived row's actions",
+        );
+        // Past the moment after the lift, when what moves is taken to be under the finger and the next click is held back.
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        await page.press("Escape");
+        await settled({ sheet: null }, "closed");
+        await selectTab("Recent");
+
+        // A quick tap opens the session, as it always has.
+        await finger(active, { ms: 80 });
+        await settled({ sheet: null, path: `/s/${active}` }, "the session, opened by a tap");
+    },
+);
+
+test(
+    "touch screens: Select in a held row's actions starts a selection that taps add to, and back lets go",
+    real,
+    async () => {
+        const [one, two] = folderSessions as [ConversationId, ConversationId];
+
+        await fresh(true);
+        await finger(one, { ms: 600 });
+        await settled({ sheet: "session" }, "the row's actions");
+        await choose("Select");
+        await settled({ sheet: null, selected: [one].map(Number), layers: 1 }, "one selected");
+
+        // Taps select rows now, and let them go, instead of opening them.
+        await finger(two, { ms: 80 });
+        await settled({ selected: [two, one].map(Number), path: "/" }, "a tap adds a row");
+        await finger(two, { ms: 80 });
+        await settled({ selected: [one].map(Number), path: "/" }, "a second tap lets it go");
+        await finger(active, { ms: 80 });
+        await settled({ selected: [one, active].map(Number), path: "/" }, "another row added");
+
+        const bar = await inPage<{ text: string[]; sizes: [number, number][] }>(`
+            const bar = document.querySelector(${JSON.stringify(`${list} .select-bar`)});
+
+            return JSON.stringify({
+                text: [...bar.querySelectorAll(".select-count, button")].map(
+                    (each) => each.getAttribute("aria-label") ?? each.textContent.trim(),
+                ),
+                sizes: [...bar.querySelectorAll("button")].map((button) => {
+                    const box = button.getBoundingClientRect();
+
+                    return [Math.round(box.width), Math.round(box.height)];
+                }),
+            });
+        `);
+
+        assert.deepEqual(bar.text, ["2 selected", "Archive", "Pin", "Clear the selection"]);
+        assert.ok(
+            bar.sizes.every(([width, height]) => width >= 36 && height >= 36),
+            `the bar's buttons take a thumb: ${JSON.stringify(bar.sizes)}`,
+        );
+
+        // Back lets go of the selection, and stays on the list; then a tap opens a session again.
+        await page.evaluate(`history.back()`);
+        await settled({ selected: [], layers: 0, path: "/" }, "back let go of the selection");
+        await finger(two, { ms: 80 });
+        await settled({ path: `/s/${two}` }, "a tap opens a session again");
+    },
+);
+
+test(
+    "touch screens: a held row's actions archive it, and an archived one's bring it back",
+    real,
+    async () => {
+        const two = folderSessions[1]!;
+        const archivedNow = () =>
+            inPage<boolean>(`
+            const { store } = await import("/store.js");
+
+            return JSON.stringify(store.state.sessions.find((each) => each.id === ${Number(two)})?.archived === true);
+        `);
+
+        await fresh(true);
+        await finger(two, { ms: 600 });
+        await settled({ sheet: "session" }, "the row's actions");
+        await choose("Archive");
+        await until(archivedNow, "archived");
+        await settled({ sheet: null, path: "/" }, "the sheet closed, on the list");
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        await selectTab("Archived");
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(${JSON.stringify(row(two))}) !== null)`,
+                ),
+            "the row in Archived",
+        );
+        await finger(two, { ms: 600 });
+        await settled({ sheet: "session", items: ["Unarchive", "Select"] }, "its actions");
+        await choose("Unarchive");
+        await until(async () => !(await archivedNow()), "back from the archive");
+    },
+);
+
+/** A finger dragged left from a row, as the drawer's drag-to-close hears it (touch events, which stay with the row). */
+const dragLeft = (id: ConversationId) =>
+    page.evaluate(`
+        const target = document.querySelector(${JSON.stringify(`${row(id)} > .session`)});
+        const box = target.getBoundingClientRect();
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        const touch = (at) => new Touch({ identifier: 3, target, clientX: at, clientY: y });
+        const fire = (type, at) =>
+            target.dispatchEvent(
+                new TouchEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    touches: type === "touchend" ? [] : [touch(at)],
+                    changedTouches: [touch(at)],
+                }),
+            );
+
+        fire("touchstart", x);
+
+        for (let step = 1; step <= 10; step++) {
+            fire("touchmove", x - step * 20);
+            await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+
+        fire("touchend", x - 200);
+    `);
+
+const drawerOpen = () =>
+    inPage<boolean>(
+        `return JSON.stringify((await import("/store.js")).store.state.drawer === true && document.querySelector(".drawer") !== null)`,
+    );
+
+test(
+    "touch screens: in the drawer, a row's actions open over it, its drag waits, and Select selects there",
+    real,
+    async () => {
+        const [one, two] = folderSessions as [ConversationId, ConversationId];
+
+        await fresh(true);
+        await finger(active, { ms: 80 });
+        await settled({ path: `/s/${active}` }, "a session open");
+        await page.evaluate(`(await import("/store.js")).store.set({ drawer: true })`);
+        list = ".drawer";
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(${JSON.stringify(row(one))}) !== null)`,
+                ),
+            "the drawer's rows",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 450));
+
+        // The open session's row shows the press too, over its own fill.
+        const open = await finger(active, { ms: 600 });
+
+        assert.equal(open.pressed, true);
+        assert.notEqual(open.during, open.before, "the press shows on the open session's row");
+        await settled({ sheet: "session", layers: 2 }, "its actions, over the drawer");
+        await page.press("Escape");
+        await settled({ sheet: null, layers: 1 }, "closed, the drawer still open");
+
+        await finger(one, { ms: 600 });
+        await settled({ sheet: "session", layers: 2 }, "a row's actions, over the drawer");
+        // The finger that opened them slides left: the drawer under them stays.
+        await dragLeft(one);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await drawerOpen(), true, "the drawer stays under the sheet");
+        await choose("Select");
+        await settled(
+            { sheet: null, selected: [Number(one)], layers: 2, path: `/s/${active}` },
+            "selected in the drawer",
+        );
+        assert.equal(await drawerOpen(), true, "the drawer stays for the selection");
+        await finger(two, { ms: 80 });
+        await settled({ selected: [two, one].map(Number), path: `/s/${active}` }, "a tap adds");
+
+        // Back lets go of the selection first, then the drawer drags closed again.
+        await page.evaluate(`history.back()`);
+        await settled({ selected: [], layers: 1 }, "back let go of the selection");
+        assert.equal(await drawerOpen(), true, "the drawer is still open");
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        await dragLeft(one);
+        await until(async () => !(await drawerOpen()), "the drawer, dragged closed");
+    },
+);
+
+/** What this browser marked unread, and which rows show it. */
+const marks = () =>
+    inPage<{ stored: number[]; dots: number[]; bold: number[] }>(`
+        const rows = [...document.querySelectorAll(${JSON.stringify(`${list} .session-row`)})];
+
+        return JSON.stringify({
+            stored: JSON.parse(localStorage.getItem("pocket.unread") ?? "[]"),
+            dots: rows.filter((each) => each.querySelector(".unread-dot")).map((each) => Number(each.dataset.id)),
+            bold: rows
+                .filter((each) => getComputedStyle(each.querySelector(".session-title")).fontWeight === "700")
+                .map((each) => Number(each.dataset.id)),
+        });
+    `);
+
+async function marked(ids: ConversationId[], what: string): Promise<void> {
+    const want = JSON.stringify({
+        stored: ids.map(Number),
+        dots: ids.map(Number),
+        bold: ids.map(Number),
+    });
+    let last = "";
+
+    try {
+        await until(async () => (last = JSON.stringify(await marks())) === want, what);
+    } catch {
+        assert.fail(`${what}: ${last}`);
+    }
+}
+
+test("a session marked unread shows it until it is opened, however it opens", real, async () => {
+    const [one, two] = folderSessions as [ConversationId, ConversationId];
+    const click = (selector: string) =>
+        page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+
+    await fresh();
+    await click(`${row(one)} [aria-label="Mark unread"]`);
+    await marked([one], "marked: stored, a dot, and a bold title");
+    await click(`${row(one)} [aria-label="Mark read"]`);
+    await marked([], "read again from the row");
+
+    // A tap on the row opens it.
+    await click(`${row(one)} [aria-label="Mark unread"]`);
+    await marked([one], "marked again");
+    await click(`${row(one)} > .session`);
+    await until(async () => (await touched()).path === `/s/${one}`, "opened");
+    await marked([], "opening it read it");
+
+    // Back to it.
+    await click(`${row(two)} > .session`);
+    await until(async () => (await touched()).path === `/s/${two}`, "the other one");
+    await click(`${row(one)} [aria-label="Mark unread"]`);
+    await marked([one], "marked from the other session");
+    await page.evaluate("history.back()");
+    await until(async () => (await touched()).path === `/s/${one}`, "back to it");
+    await marked([], "back read it");
+
+    // A link, or a notification, opens it with the page.
+    await click(`${row(two)} [aria-label="Mark unread"]`);
+    await marked([two], "the other one marked");
+    await page.navigate(`${base}/s/${two}`);
+    await until(async () => (await touched()).path === `/s/${two}`, "loaded with it open");
+    await marked([], "a page load read it");
+});
+
+test("touch screens: a finger held on a row marks it unread, and read again", real, async () => {
+    await fresh(true);
+    await finger(active, { ms: 600 });
+    await settled({ sheet: "session" }, "the row's actions");
+    await choose("Mark unread");
+    await settled({ sheet: null, path: "/" }, "closed, still on the list");
+    await marked([active], "marked");
+    await finger(active, { ms: 600 });
+    await settled(
+        { sheet: "session", items: ["Pin to the top", "Mark read", "Archive", "Select"] },
+        "a marked row offers Mark read",
+    );
+    await choose("Mark read");
+    await marked([], "read again");
+});
+
+test(
+    "touch screens: a selected row that is archived leaves the selection, and taps open sessions again",
+    real,
+    async () => {
+        const [one, two] = folderSessions as [ConversationId, ConversationId];
+
+        await fresh(true);
+        await finger(one, { ms: 600 });
+        await settled({ sheet: "session" }, "the row's actions");
+        await choose("Select");
+        await settled({ sheet: null, selected: [Number(one)], layers: 1 }, "one selected");
+        await finger(one, { ms: 600 });
+        await settled({ sheet: "session" }, "its actions again");
+        await choose("Archive");
+        await settled({ sheet: null, selected: [], layers: 0 }, "archived, out of view");
+        await finger(two, { ms: 80 });
+        await settled({ path: `/s/${two}`, selected: [] }, "a tap opens a session");
+        await page.evaluate(
+            `await (await import("/store.js")).actions.updateSession(${Number(one)}, { archived: false })`,
+        );
     },
 );

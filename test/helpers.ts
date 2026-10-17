@@ -123,6 +123,8 @@ export const owner = (app: App) => app.config.users.find((user) => user.role ===
 
 /** A session in `cwd` with the scripted model, no thinking. */
 export async function newSession(app: App, cwd = work): Promise<ConversationId> {
+    // New sessions start with a model someone picked, and none when nobody did: as if the owner picked this one before.
+    app.config.lastModel ??= { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
     const { id } = await app.commands.createSession(owner(app), { cwd });
 
     await app.commands.configure(id, owner(app), {

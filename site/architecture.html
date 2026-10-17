@@ -32,6 +32,7 @@
         <style>
             /* Layout: flight-recorder ledger. Gridded paper, a sticky contents rail on wide screens, sections as instrument panels. */
             :root {
+                /* The light colors keep text at 4.5:1 or more, also on their own tints. */
                 --paper: #eef1f3;
                 --sheet: #f8fafb;
                 --ink: #142029;
@@ -39,13 +40,13 @@
                 --rule: #c9d2d9;
                 --grid: rgba(20, 32, 41, 0.06);
                 --commit: #d97a00;
-                --commit-ink: #9a5200;
-                --entry: #2b6cb0;
-                --task: #2f855a;
-                --doc: #8a4fbf;
-                --sub: #b83280;
-                --crash: #c53030;
-                --people: #0b8a8c;
+                --commit-ink: #874800;
+                --entry: #245c97;
+                --task: #1e6a44;
+                --doc: #7440a6;
+                --sub: #9e2a6d;
+                --crash: #ad2828;
+                --people: #08716f;
                 --wash: color-mix(in srgb, var(--ink) 5%, transparent);
                 --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
                 --body: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1286,7 +1287,7 @@
                         <div class="facts">
                             <span>TypeScript, no build</span><span>Preact + htm</span
                             ><span>SQLite through Pi Durable</span><span>Node.js 22.19+</span
-                            ><span>v0.13.0</span>
+                            ><span>v0.13.2</span>
                         </div>
                         <p class="note" style="margin-top: 18px">
                             Click a layer on the right to see its parts.
@@ -1662,7 +1663,11 @@
                             <div class="rates">
                                 <div class="rate"><b>90 ms</b><span>a room's changes</span></div>
                                 <div class="rate">
-                                    <b>400 ms</b><span>the session list, when it changes</span>
+                                    <b>400 ms</b
+                                    ><span
+                                        >the session list, when it changes, and the subagents
+                                        board</span
+                                    >
                                 </div>
                                 <div class="rate"><b>1 s</b><span>peek tiles</span></div>
                             </div>
@@ -1734,10 +1739,11 @@
                     <p class="note" style="margin-top: 12px">
                         <code>u:&lt;user&gt;:&lt;key&gt;</code> is a message that a person wrote.
                         <code>p:&lt;user&gt;:&lt;key&gt;</code> is a message sent for a person, for
-                        example a scheduled message that Pi set up, or the task of a subagent. A
-                        schedule that a person set up sends a <code>u:</code> message for that
-                        person. If no person is known, Pi Pocket charges the person who started the
-                        session. If that person is not known, it charges the owner.
+                        example a scheduled message that Pi set up, the task of a subagent, or a
+                        message from PiP, a watch, or a webhook. A schedule that a person set up
+                        sends a <code>u:</code> message for that person. If no person is known, Pi
+                        Pocket charges the person who started the session. If that person is not
+                        known, it charges the owner.
                     </p>
                 </section>
 
@@ -1793,10 +1799,11 @@
                             <span class="tag t-crash">replay: "safe"</span>
                             <h3>Run again only if safe</h3>
                             <p>
-                                Artifact calls and schedule calls are replay-safe. Other calls are
-                                not replay-safe. Examples are bash, browser, and codemode calls.
-                                After a crash, the model gets a message that such a call stopped.
-                                Then the model examines the result.
+                                Artifact, schedule, memory, and <code>watch_pr</code> calls are
+                                replay-safe, and so are the calls of PiP. Other calls are not
+                                replay-safe. Examples are bash, browser, codemode, and subagent
+                                calls. After a crash, the model gets a message that such a call
+                                stopped. Then the model examines the result.
                             </p>
                         </div>
                         <div class="panel rule">
@@ -2382,7 +2389,7 @@
                         c: "var(--sub)",
                         main: true,
                         wire: "calls",
-                        text: "The HTTP server parses a request, checks it, calls a part, and writes the answer. Its only state is the list of long-polling tabs. Invites are in config.json. Each request that changes data must have an X-Pocket header.",
+                        text: "The HTTP server parses a request, checks it, calls a part, and writes the answer. Its only state is the list of long-polling tabs. Invites are in config.json. Each request to /api that changes data must have an X-Pocket header. Webhooks post to /hook/…, outside /api, with the secret of their hook.",
                         owns: [
                             "/api routes",
                             "event stream",
@@ -2390,6 +2397,7 @@
                             "sandboxed artifacts",
                             "browser frames",
                             "invites",
+                            "webhooks",
                         ],
                     },
                     app: {
@@ -2412,6 +2420,12 @@
                             "workspace",
                             "transcripts",
                             "providers",
+                            "piSessions",
+                            "pip",
+                            "watches",
+                            "repoWatches",
+                            "hooks",
+                            "memory",
                             "browsers",
                             "rooms",
                         ],
@@ -2462,6 +2476,9 @@
                             "plan",
                             "guard",
                             "codemode",
+                            "memory",
+                            "pip",
+                            "triggers",
                         ],
                     },
                     chromium: {
@@ -2475,13 +2492,22 @@
                         name: "Pi",
                         path: "~/.pi/agent/",
                         c: "var(--sub)",
-                        text: "This folder contains sign-ins, settings, skills, and prompt templates. Pi Pocket and the Pi command line use the same folder. If you install Lancet Guard as a Pi package, it is in this folder too. Its settings file, ~/.pi/lancet-guard.json, turns it on or off. In Pi Pocket, the guard extension must also be on.",
+                        text: "This folder contains sign-ins, settings, skills, prompt templates, and the answers to project trust. Pi Pocket and the Pi command line use the same folder. Pi Pocket only reads the sessions of the Pi command line, to continue one. If you install Lancet Guard as a Pi package, it is in this folder too. Its settings file, ~/.pi/lancet-guard.json, turns it on or off. In Pi Pocket, the guard extension must also be on.",
                         owns: [
                             "provider sign-ins",
                             "skills",
                             "prompt templates",
+                            "project trust",
+                            "Pi sessions (read only)",
                             "specpi-lancet-guard",
                         ],
+                    },
+                    github: {
+                        name: "GitHub",
+                        path: "github.ts",
+                        c: "var(--task)",
+                        text: "Pull request and repository watches ask GitHub through the gh command that is signed in on the server. Webhooks use it to check who can write to a repository, and PiP uses it to clone a repository into repos/. A repository is watched or worked on only if the account of gh can push to it.",
+                        owns: ["PR watches", "repository watches", "write access checks", "clones"],
                     },
                 };
                 const stackMain = $("#stackMain"),
@@ -2551,6 +2577,9 @@
                     ["subagents", "Subagents", "subagents.ts"],
                     ["worktrees", "Worktrees", "worktrees.ts"],
                     ["spend", "Spend limits", "spend.ts"],
+                    ["pip", "PiP", "pip.ts"],
+                    ["triggers", "Watches and webhooks", "watches.ts"],
+                    ["memory", "Memory", "memory.ts"],
                     ["restart", "Work continues after restart", "app.ts"],
                 ];
                 const LINKS = [
@@ -2597,7 +2626,7 @@
                     [
                         "doc",
                         "pdocs",
-                        "Pi Pocket defines 18 pocket.* kinds: 17 with defineDoc, and the artifact bodies with defineDocFamily. Examples are chat, pins, notes, schedules, and spend.",
+                        "Pi Pocket defines 25 pocket.* kinds: 24 with defineDoc, and the artifact bodies with defineDocFamily. Examples are chat, pins, notes, schedules, memory, and spend.",
                     ],
                     [
                         "doc",
@@ -2632,7 +2661,7 @@
                     [
                         "replay",
                         "restart",
-                        "Artifact calls and schedule calls run again after a crash. Other calls, for example bash, browser, and codemode calls, return as interrupted.",
+                        "Artifact, schedule, memory, watch_pr, and PiP calls run again after a crash. Other calls, for example bash, browser, codemode, and subagent calls, return as interrupted.",
                     ],
                     [
                         "hooks",
@@ -2679,6 +2708,56 @@
                         "env",
                         "worktrees",
                         "A session in a worktree has its cwd in the worktree. The harness makes the environment from the current cwd at each use.",
+                    ],
+                    [
+                        "task",
+                        "pip",
+                        "Each follow is a durable task. It reports to PiP when the run of the session ends, also after a restart.",
+                    ],
+                    [
+                        "submit",
+                        "pip",
+                        "A message that PiP sends has a request id made from its tool call. Thus a call that runs again does not send the message two times.",
+                    ],
+                    [
+                        "replay",
+                        "pip",
+                        "The tools of PiP are replay-safe. A call that runs again finds the session, message, or follow that it made.",
+                    ],
+                    [
+                        "section",
+                        "pip",
+                        "The conversation of PiP selects its own extension and prompt section. Other conversations do not select them.",
+                    ],
+                    [
+                        "task",
+                        "triggers",
+                        "A watch is a durable task. It waits, looks at GitHub with gh, and puts what to tell Pi in its checkpoint before it sends the message.",
+                    ],
+                    [
+                        "submit",
+                        "triggers",
+                        "The request id of a message from a watch is its task and its count. Thus a restart sends the message only one time.",
+                    ],
+                    [
+                        "doc",
+                        "triggers",
+                        "Webhooks and repository watches are documents for the whole server. A PR watch is a document of its session.",
+                    ],
+                    [
+                        "doc",
+                        "memory",
+                        "All lessons are in one document for the whole server. Each change also adds a line to the chat, in the same commit.",
+                    ],
+                    [
+                        "section",
+                        "memory",
+                        "Before each request, a prompt section lists the approved lessons for the project of the session and for everywhere.",
+                    ],
+                    [
+                        "replay",
+                        "memory",
+                        "The memory tool is replay-safe. An add that runs again finds the lesson that the same call saved.",
                     ],
                     [
                         "usage",
@@ -2865,7 +2944,7 @@
                         b.classList.toggle("done", j < step);
                     });
                     const s = STEPS[step];
-                    stepCard.innerHTML = `<span class="file">${step + 1} / ${STEPS.length} · ${s.file}</span><h3>${s.name}</h3><p>${s.text}</p><pre>${s.code.replace(/</g, "&lt;")}</pre>`;
+                    stepCard.innerHTML = `<span class="file">${step + 1} / ${STEPS.length} · ${s.file}</span><h3>${s.name}</h3><p>${s.text}</p><pre tabindex="0">${s.code.replace(/</g, "&lt;")}</pre>`;
                     const done = step === STEPS.length - 1;
                     devices.querySelectorAll(".dv-new").forEach((r) => {
                         r.style.opacity = done ? "1" : ".12";
@@ -3026,6 +3105,12 @@
                         log: "Pi set up this schedule when it worked for Ana. Pi Pocket sends the message for Ana. Pi now works for Ana.",
                     },
                     {
+                        b: "Ben's PR watch reports a failed check",
+                        id: "p:ben:watch-…",
+                        who: "ben",
+                        log: "Ben set up this watch. Pi Pocket sends the message for Ben. Pi now works for Ben.",
+                    },
+                    {
                         b: "Pi starts a subagent",
                         id: "p:<current>:subagent-…",
                         sub: true,
@@ -3115,6 +3200,7 @@
                         "in the memo of the call; not asked again",
                     ],
                     ["The last address of the browser", "pocket.browser opens it again"],
+                    ["PiP's follows and the watches", "durable tasks; they continue"],
                 ];
                 const MEM = [
                     [
@@ -3125,6 +3211,7 @@
                     ["Text typed into a browser page", "the page opens again with no text"],
                     ["The end time of each run (peek tiles)", "lost"],
                     ["Provider sign-ins in progress", "must start again"],
+                    ["Sign-ins that a provider refused to renew", "found again when next used"],
                 ];
                 const fillItems = (ul, arr, st) => {
                     ul.innerHTML = arr
@@ -3200,7 +3287,14 @@
                     ["pocket.schedules", "scheduled messages", "empty"],
                     ["pocket.goal", "goal: the check and its attempts", "empty"],
                     ["pocket.shell-requests", "! commands that people started", "empty"],
+                    ["pocket.pr-watch", "the watch of a pull request", "empty"],
+                    ["pocket.pip-follows", "the follows of PiP", "empty"],
+                    ["pocket.pip-asked", "which provider pays, when PiP asked", "empty"],
+                    ["pocket.pip-compaction", "the summaries that PiP wrote", "empty"],
                     ["pocket.spend", "spend per person (one for the server)", "none"],
+                    ["pocket.memory", "lessons (one for the server)", "none"],
+                    ["pocket.hooks", "webhooks (one for the server)", "none"],
+                    ["pocket.repo-watches", "repository watches (one for the server)", "none"],
                 ];
                 const POL = {
                     adds: "adds a session",
@@ -3290,6 +3384,21 @@
                         "codemode.ts",
                         "Scripts that call the other tools in a QuickJS sandbox. Each call goes through the same hooks as a direct call.",
                         ["tool", "section"],
+                    ],
+                    [
+                        "memory.ts",
+                        "Lessons that Pi keeps across sessions. Pi proposes a lesson with the memory tool, and the owner approves it. The section lists the approved lessons for the project of the session.",
+                        ["tool", "section"],
+                    ],
+                    [
+                        "pip.ts",
+                        "The tools and prompt of PiP, and the follow task that reports to PiP when the run of a session ends. Only the conversation of PiP selects this extension.",
+                        ["tool", "task", "section"],
+                    ],
+                    [
+                        "triggers.ts",
+                        "Pull request and repository watches, and the watch_pr tool of Pi. Webhooks work only while this extension is on.",
+                        ["tool", "tasks"],
                     ],
                 ];
                 const TAGC = {

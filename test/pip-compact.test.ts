@@ -249,7 +249,8 @@ test("compacting by hand: PiP's summary is written without what came from outsid
     );
     // Newer messages, which compaction keeps as they are: everything above them is summarized.
     await say(app, id, `Some context for later: ${"the release goes out on Friday, ".repeat(12)}`);
-    // A follow, on its way while PiP compacts: its report comes after.
+    // A follow, on its way while PiP compacts: its report comes after. PiP looks at the session first.
+    await app.pip.read(id, Number(session));
     await say(app, id, `send ${String(session)} a sleepy job`);
     await until(() => app.isBusy(session), "the session at work");
     const follows = Object.keys((await app.harness.snapshot(FollowsDoc, id, context))?.items ?? {});

@@ -105,15 +105,20 @@ let waitingForTap = false;
 /** Someone has tapped or typed on this page (where the browser says; elsewhere, assume so). */
 const touched = () => navigator.userActivation?.hasBeenActive ?? true;
 
-/** Run `then` at the page's first tap or key, before what the tap itself does. */
+/**
+ * Run `then` at the page's first tap or key, before what the tap itself does. A finger's lift counts: a long press (a
+ * session row's) makes no click.
+ */
 function afterFirstTap(then) {
     const once = () => {
         removeEventListener("click", once, true);
+        removeEventListener("pointerup", once, true);
         removeEventListener("keydown", once, true);
         then();
     };
 
     addEventListener("click", once, true);
+    addEventListener("pointerup", once, true);
     addEventListener("keydown", once, true);
 }
 

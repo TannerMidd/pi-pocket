@@ -1,11 +1,13 @@
 /**
- * Session titles. A session is named after its first message at once; when that message is long, a small model of the
- * session's provider writes a short title in its place, unless someone renamed the session first. What it costs counts
- * as the session's spend, like Pi's own requests.
+ * Session titles. A session is named after its first message at once; when that message is long, or is a command (a
+ * skill or prompt template), the session's own model writes a short title in its place, unless someone
+ * renamed the session first. Never another model picked on the side, such as a cheaper one of the same provider: nobody
+ * chose that one, and it may cost what nobody agreed to. A reply that is no title (the model thinking aloud, or cut off)
+ * leaves the first one. What it costs counts as the session's spend, like Pi's own requests.
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Api, Model, Usage } from "@earendil-works/pi-ai";
-import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
+import type { Usage } from "@earendil-works/pi-ai";
+import { type ConversationId, ProviderDoc, UsageDoc } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { SessionsDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
@@ -15,9 +17,20 @@ const context = BACKGROUND_CONTEXT;
 /** First messages this long or longer get a written title; shorter ones are a title already. */
 const LONG_WORDS = 9;
 const MAX_TITLE = 60;
+/**
+ * More words than this is no title but prose, such as a model thinking aloud. The model is asked for 3 to 6 words, but
+ * some languages put spaces between syllables (Vietnamese), and some models are wordy.
+ */
+const MAX_WORDS = 15;
+/**
+ * Reasoning some servers send at the start of the reply's text: a block in tags, or one whose closing tag never came.
+ * Such tags further on are the title's own words ("Use <think> tags in prompts").
+ */
+const REASONING = /^\s*<(think|thinking|reasoning)>[\s\S]*?(<\/\1>|$)/i;
+/** Reasoning whose opening tag the server left out: up to a closing tag that ends its line, as such reasoning's does. */
+const REASONING_END = /^[\s\S]*?<\/(think|thinking|reasoning)>[^\S\n]*(\n|$)/i;
 /** How much of the first message the model reads. */
 const READ_CHARS = 3000;
-const SMALL = /(^|[-_./])(haiku|mini|flash|nano|lite|small)([-_.]|$)/i;
 
 /** What the model is asked, before the first message. */
 export const TITLE_PROMPT =
@@ -30,30 +43,22 @@ export function wantsTitle(text: string): boolean {
     return words >= LONG_WORDS || text.trim().includes("\n");
 }
 
-/** The cheapest small model of the same provider that can be used now, or the session's own. */
-export function titleModel(models: readonly Model<Api>[], current: Model<Api>): Model<Api> {
-    const small = models
-        .filter(
-            (model) =>
-                model.provider === current.provider &&
-                model.input.includes("text") &&
-                SMALL.test(model.id),
-        )
-        .sort((a, b) => a.cost.input + a.cost.output - (b.cost.input + b.cost.output));
-
-    return small[0] ?? current;
-}
-
-/** A model's reply as a title: one line, no quotes or label, not too long. Undefined when nothing is left. */
+/**
+ * A model's reply as a title: its first line, without quotes or a label, and not too long. Undefined when that is
+ * empty, or is a sentence rather than a title, as when a model thinks aloud in its reply. Reasoning at its start, in
+ * `<think>` tags (or `<thinking>`, `<reasoning>`) as some servers send it, is left out.
+ */
 export function cleanTitle(reply: string): string | undefined {
     const line = reply
+        .replace(REASONING, "")
+        .replace(REASONING_END, "")
         .trim()
         .split("\n")[0]!
         .replace(/^(title|session title)\s*:\s*/i, "")
         .replace(/^["'“‘*#\s]+|["'”’*\s.!?:;,]+$/g, "")
         .trim();
 
-    if (line === "") {
+    if (line === "" || line.split(/\s+/).length > MAX_WORDS) {
         return undefined;
     }
 
@@ -75,7 +80,8 @@ function addUsage(total: Usage, usage: Usage): void {
 
 /**
  * Ask for a title for a session whose first message is `text`, and use it if the session still has the title that
- * message gave it (`provisional`). Failures only leave that title in place.
+ * message gave it (`provisional`). Failures, and replies that are no title or were cut off, only leave that title in
+ * place.
  */
 export async function writeTitle(
     app: PocketApp,
@@ -89,16 +95,24 @@ export async function writeTitle(
         }
 
         const agent = await app.agentState(id);
-        const current =
+        const model =
             agent?.model === undefined
                 ? undefined
                 : app.models.getModel(agent.model.provider, agent.model.modelId);
 
-        if (current === undefined) {
+        if (model === undefined) {
             return;
         }
 
-        const model = titleModel(app.models.getAvailableSnapshot(), current);
+        // The conversation's own identity with the provider, as Pi Durable sends with its summaries: some providers
+        // (OpenCode Go) refuse a request without one.
+        // A conversation older than that identity gets one, as Pi Durable gives it before its next request.
+        const sessionId =
+            (await app.harness.snapshot(ProviderDoc, id, context))?.sessionId ??
+            (await app.harness.commit(
+                async (tx) => (await tx.doc(ProviderDoc, id)).sessionId,
+                context,
+            ));
         const reply = await app.models.completeSimple(
             model,
             {
@@ -115,7 +129,7 @@ export async function writeTitle(
                     },
                 ],
             },
-            { maxTokens: 1024 },
+            { maxTokens: 1024, cacheRetention: "none", sessionId },
         );
         const title = cleanTitle(
             reply.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
@@ -135,7 +149,8 @@ export async function writeTitle(
             };
             addUsage(usage.models[key] as Usage, reply.usage);
 
-            if (title === undefined || reply.stopReason === "error") {
+            // Only a reply that ended by itself: one cut off at the token limit is a model that went on, not a title.
+            if (title === undefined || reply.stopReason !== "stop") {
                 return;
             }
 

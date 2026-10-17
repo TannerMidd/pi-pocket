@@ -245,8 +245,20 @@ export function expandSkillCommand(
         return undefined;
     }
 
+    // `unwrapSkill` takes this wrapper off again: change both together.
     const block = `<skill name="${skill.name}" location="${skill.path}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
     const request = (match![2] ?? "").trim();
 
     return request === "" ? block : `${block}\n\n${request}`;
+}
+
+/**
+ * What `expandSkillCommand` wrote, without the wrapper that names the skill's files and folder: what it asks, for a
+ * session's title. Other text comes back as it is.
+ */
+export function unwrapSkill(text: string): string {
+    return text.replace(
+        /^<skill name="[^"]*" location="[^"]*">\nReferences are relative to [^\n]*\n\n([\s\S]*?)\n<\/skill>/,
+        "$1",
+    );
 }

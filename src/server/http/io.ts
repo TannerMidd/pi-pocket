@@ -72,6 +72,10 @@ export async function readBody(request: IncomingMessage, limit: number): Promise
     }
 }
 
+/**
+ * A request's JSON body, which every route takes as an object (an empty body is an empty one). Anything else, such as
+ * null or a list, is refused here: a route reading its fields would fail with a server error.
+ */
 export async function readJson<T>(request: IncomingMessage): Promise<T> {
     const body = await readBody(request, MAX_JSON);
 
@@ -79,11 +83,19 @@ export async function readJson<T>(request: IncomingMessage): Promise<T> {
         return {} as T;
     }
 
+    let value: unknown;
+
     try {
-        return JSON.parse(body.toString("utf8")) as T;
+        value = JSON.parse(body.toString("utf8"));
     } catch {
         throw new HttpError(400, "Invalid JSON");
     }
+
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new HttpError(400, "Send a JSON object.");
+    }
+
+    return value as T;
 }
 
 export function escapeHtml(text: string): string {

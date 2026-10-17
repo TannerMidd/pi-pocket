@@ -30,6 +30,7 @@
             /* Layout: a flight-recorder ledger. Paper with a faint 24px grid, a sticky table of contents,
    and each section ends in a "bench": a working instrument the reader operates. */
             :root {
+                /* The light colors keep text at 4.5:1 or more, also on their own tints. */
                 --paper: #eef1f3;
                 --sheet: #f8fafb;
                 --ink: #142029;
@@ -37,12 +38,12 @@
                 --rule: #c9d2d9;
                 --grid: rgba(20, 32, 41, 0.06);
                 --commit: #d97a00;
-                --commit-ink: #9a5200;
-                --entry: #2b6cb0;
-                --task: #2f855a;
-                --doc: #8a4fbf;
-                --sub: #b83280;
-                --crash: #c53030;
+                --commit-ink: #874800;
+                --entry: #245c97;
+                --task: #1e6a44;
+                --doc: #7440a6;
+                --sub: #9e2a6d;
+                --crash: #ad2828;
                 --on-ink: #f8fafb;
                 --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
                 --body: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -2096,7 +2097,7 @@
                     </p>
                     <div class="bench">
                         <div class="bench-head"><span class="title">Comparison</span></div>
-                        <div class="scrollx">
+                        <div class="scrollx" tabindex="0">
                             <table class="compare">
                                 <thead>
                                     <tr>
@@ -2419,6 +2420,7 @@
                                 ><span><b id="rid-n-run">0</b>deploys started</span>
                             </div>
                             <pre
+                                tabindex="0"
                                 class="code"
                                 style="margin-top: 14px"
                             ><span class="f">root.submit</span>({ type: <span class="s">"input"</span>, content: <span class="s">"Deploy to staging"</span>, <span class="h">requestId: <span class="s">"deploy-7f3a"</span></span> }, ctx)
@@ -2472,7 +2474,7 @@
                                     <div class="pb" id="ib-placed"></div>
                                 </div>
                             </div>
-                            <div class="scrollx" style="margin-top: 14px">
+                            <div class="scrollx" tabindex="0" style="margin-top: 14px">
                                 <table class="compare">
                                     <thead>
                                         <tr>
@@ -2575,6 +2577,7 @@
                         </div>
                         <div class="bench-body" style="padding-top: 0">
                             <pre
+                                tabindex="0"
                                 class="code"
                             ><span class="c">// The "pay" phase creates four Payment tasks that the checkout owns. Then it waits.</span>
 <span class="f">pay</span>: <span class="f">async</span> (task, runtime, ctx) =&gt; {
@@ -2671,6 +2674,7 @@
                         </div>
                         <div class="bench-body" style="padding-top: 0">
                             <pre
+                                tabindex="0"
                                 class="code"
                             ><span class="f">const</span> Todos = <span class="f">defineDoc</span>&lt;{ items: string[] }&gt;({
   kind: <span class="s">"app.todos"</span>, version: 1, scope: <span class="s">"conversation"</span>,
@@ -2848,7 +2852,11 @@
                             </div>
                             <div class="ctx" id="cx-ctx"></div>
                             <div class="narr" id="cx-narr"></div>
-                            <pre class="code" style="margin-top: 14px">settings: { compaction: {
+                            <pre
+                                class="code"
+                                tabindex="0"
+                                style="margin-top: 14px"
+                            >settings: { compaction: {
   enabled: <span class="f">true</span>,
   reserveTokens: <span class="s">16384</span>,     <span class="c">// above window - reserve, the next request waits for a compaction</span>
   keepRecentTokens: <span class="s">20000</span>,  <span class="c">// roughly how much recent context stays verbatim</span>
@@ -3166,7 +3174,7 @@
                         },
                         {
                             n: "Storage",
-                            c: "var(--commit)",
+                            c: "var(--commit-ink)",
                             s: "Memory, SQLite, JSONL",
                             tags: [["commit", "commit(writes)"]],
                             h: "Storage",
@@ -3240,7 +3248,7 @@
                         ],
                         [
                             "commit",
-                            "var(--commit)",
+                            "var(--commit-ink)",
                             "Commit",
                             "An atomic write. One commit can add entries, change documents, and create tasks. Storage keeps all of the commit or none of it.",
                             "conversation.commit(tx => …)",
@@ -4897,7 +4905,7 @@
                                     const snaps = c.q.filter((f) => f.snap).length;
                                     return `<div class="client"><h5><span>${esc(c.name)}</span>${chip(isSlow(c) ? "crash" : "task", isSlow(c) ? "slow" : "live")}</h5>
         <div class="muted">${esc(c.kind)}${c.joinedAt != null ? ` · joined at #${c.joinedAt}` : ""}</div>
-        <div class="q" aria-label="undelivered frames">${qs}</div>
+        <div class="q" aria-hidden="true">${qs}</div>
         <div><span class="seen">#${c.seen}</span> <span class="muted">${c.kind.startsWith("watch") ? `view at · ${c.q.length} frame${c.q.length === 1 ? "" : "s"} in queue${snaps ? ", 1 with the whole view" : ""}` : "live read-only view"}</span></div></div>`;
                                 })
                                 .join("") +

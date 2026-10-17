@@ -11,9 +11,11 @@ import {
     collab,
     navigate,
     notify,
+    isUnread,
     openSheet,
     scoped,
     sessionUnread,
+    setUnread,
     stillMoving,
     store,
 } from "./store.js";
@@ -207,12 +209,35 @@ function Highlight({ text, needle }) {
     ${text.slice(at + needle.length)}`;
 }
 
+/** Failed subagents nobody has dealt with (seen or dismissed), of a session's counts or the rail's totals. */
+const failing = (counts) => (counts.failed ?? 0) - (counts.dealt ?? 0);
+
 /** "2 working · 1 failed subagents": a session's subagents, for the ⑂ mark's tooltip. */
 function subagentsTip(counts) {
-    const kinds = ["working", "waiting", "failed"].filter((kind) => counts[kind] > 0);
-    const total = kinds.reduce((sum, kind) => sum + counts[kind], 0);
+    const shown = { ...counts, failed: failing(counts) };
+    const kinds = ["working", "waiting", "failed"].filter((kind) => shown[kind] > 0);
+    const total = kinds.reduce((sum, kind) => sum + shown[kind], 0);
 
-    return `${kinds.map((kind) => `${counts[kind]} ${kind}`).join(" · ")} subagent${total === 1 ? "" : "s"}`;
+    return `${kinds.map((kind) => `${shown[kind]} ${kind}`).join(" · ")} subagent${total === 1 ? "" : "s"}`;
+}
+
+/**
+ * How long a finger rests on a row before its actions open; how far it may stray meanwhile (as far as a scroll, or the
+ * drawer's drag); and how long before the row shows the press, so a scroll's start does not light it.
+ */
+const PRESS_MS = 450;
+const PRESS_SLOP = 8;
+const PRESS_SHOWS_MS = 100;
+
+/** The list whose row a finger last held: Select in that row's sheet selects there. */
+let pressedIn = null;
+
+/**
+ * Select a session in the list where its row was held, and let taps there select more (or let go), as Ctrl/⌘+click
+ * does with a mouse. From the sheet a long press opens.
+ */
+export function selectFromList(id) {
+    pressedIn?.current?.(id);
 }
 
 /**
@@ -220,10 +245,21 @@ function subagentsTip(counts) {
  * who else is in it, Pi working, a call waiting for you), unread chat, and how long ago. Its folder and model are in
  * its tooltip.
  */
-function SessionRow({ session, index, number, needle, selected, folders, onPick, onSelect }) {
+function SessionRow({
+    session,
+    index,
+    number,
+    needle,
+    selected,
+    pressing,
+    folders,
+    onPick,
+    onSelect,
+}) {
     const { conversationId, server, me } = store.state;
     const pinned = isPinned(session.id);
     const open = session.id === conversationId && !session.archived;
+    const marked = isUnread(session.id);
     const unread = collab() && sessionUnread(session) && !open;
     const moving = store.state.moving[session.id] !== undefined;
     const title = session.title ?? "New session";
@@ -236,15 +272,15 @@ function SessionRow({ session, index, number, needle, selected, folders, onPick,
     const tip = [title, ...(folders ? where.reverse() : where)].join(" · ");
     const counts = session.subagents ?? {};
     const live = (counts.working ?? 0) + (counts.waiting ?? 0);
-    const failed = counts.failed ?? 0;
-    // Subagents at work, or failed ones, but not over a call waiting for you: that says more.
+    const failed = failing(counts);
+    // Subagents at work, or failed ones nobody dealt with, but not over a call waiting for you: that says more.
     const fork = !session.waiting && (live > 0 || failed > 0);
     const person = collab() ? (session.people ?? []).find((each) => each.id !== me?.id) : undefined;
-    // Archive and pin show on hover; an archived session only comes back, and only for people who steer.
-    const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 1);
+    // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
+    const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2);
 
     return html`<div
-        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${moving ? "moving" : ""} ${["no-acts", "one-act", ""][acts]}`}
+        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${["no-acts", "one-act", "", "three-acts"][acts]}`}
         data-id=${session.id}
         style=${`--i:${index}`}
     >
@@ -291,7 +327,13 @@ function SessionRow({ session, index, number, needle, selected, folders, onPick,
                     session.waiting &&
                     html`<span class="state-warn" title="Waiting for approval">!</span>`
                 }
-                ${unread && html`<span class="unread-dot" title="New chat messages"></span>`}
+                ${
+                    (unread || marked) &&
+                    html`<span
+                        class="unread-dot"
+                        title=${marked ? "Marked unread" : "New chat messages"}
+                    ></span>`
+                }
                 <span class="session-time">${timeAgo(session.updatedAt)}</span>
                 ${
                     number !== undefined &&
@@ -321,6 +363,17 @@ function SessionRow({ session, index, number, needle, selected, folders, onPick,
                     onClick=${() => togglePin(session.id)}
                 >
                     <${Icon} name="pin" size=${14} />
+                </button>`
+            }
+            ${
+                !session.archived &&
+                html`<button
+                    class=${`session-act session-unread ${marked ? "on" : ""}`}
+                    title=${marked ? "Mark read" : "Mark unread"}
+                    aria-label=${marked ? "Mark read" : "Mark unread"}
+                    onClick=${() => setUnread(session.id, !marked)}
+                >
+                    <${Icon} name=${marked ? "check" : "unread"} size=${14} />
                 </button>`
             }
         </span>
@@ -382,6 +435,10 @@ export function SessionList({ compact = false }) {
     const [tab, setTabState] = useState(() => (prefs().group === "folder" ? "folders" : "recent"));
     const [closed, setClosed] = useState(readClosed);
     const [selected, setSelectedState] = useState(() => new Set());
+    // Taps select rows instead of opening them: a selection started from a long press's sheet, on a touch screen.
+    const [tapSelects, setTapSelects] = useState(false);
+    // The row a finger holds down, before its actions open.
+    const [pressing, setPressing] = useState(null);
     // The selection as drags and clicks see it between renders; the row a Shift+click extends from; the row a Ctrl/⌘ press
     // already selected, whose click then does nothing; the rows in view, in order.
     const picked = useRef(selected);
@@ -411,7 +468,32 @@ export function SessionList({ compact = false }) {
     const setSelected = (next) => {
         picked.current = next;
         setSelectedState(next);
+
+        if (next.size === 0) {
+            setTapSelects(false);
+        }
     };
+
+    // What Select in a held row's sheet does here; and what lets go of a press under way.
+    const startSelect = useRef(null);
+    const unpress = useRef(null);
+
+    startSelect.current = (id) => {
+        anchor.current = id;
+        setSelected(new Set([...picked.current, id]));
+        setTapSelects(true);
+    };
+
+    useEffect(
+        () => () => {
+            unpress.current?.();
+
+            if (pressedIn === startSelect) {
+                pressedIn = null;
+            }
+        },
+        [],
+    );
 
     const clearSelection = () => {
         anchor.current = null;
@@ -443,6 +525,8 @@ export function SessionList({ compact = false }) {
             : group.rows.map((session) => session.id),
     );
     const chosen = shown.filter((session) => selected.has(session.id)).map((session) => session.id);
+    // Taps select while the bar shows: not for rows selected and then hidden (archived, or searched away).
+    const tapping = tapSelects && chosen.length > 0;
     const numbers = new Map(workspaceOrder().map((session, index) => [session.id, index]));
 
     /** The rows from `from` to `to` as they show, or just `to` when either is out of view. */
@@ -479,7 +563,7 @@ export function SessionList({ compact = false }) {
             return;
         }
 
-        if (event.ctrlKey || event.metaKey) {
+        if (event.ctrlKey || event.metaKey || tapping) {
             const next = new Set(picked.current);
 
             if (next.has(id)) {
@@ -499,13 +583,112 @@ export function SessionList({ compact = false }) {
     };
 
     /**
+     * A finger (or a pen) held on a row opens its actions in a sheet, as hovering shows them to a mouse: touch screens
+     * have no hover. The row shows the press while it is held; moving (a scroll, a drag) lets it go. The click the lift
+     * may then make, on the row or on the scrim that rose under it, does nothing.
+     */
+    const press = (event, id) => {
+        const session = sessions.find((each) => each.id === id);
+
+        // Nothing to offer: an archived session, for someone who cannot bring it back.
+        if (!event.isPrimary || !session || (session.archived && !canSteer())) {
+            return;
+        }
+
+        const { pointerId, clientX: x, clientY: y } = event;
+        let fired = false;
+        let after = 0;
+        const shows = setTimeout(() => setPressing(id), PRESS_SHOWS_MS);
+
+        const open = setTimeout(() => {
+            // Gone meanwhile (someone deleted it): nothing to open.
+            if (!store.state.sessions.some((each) => each.id === id)) {
+                return stop();
+            }
+
+            fired = true;
+            setPressing(null);
+            pressedIn = startSelect;
+            // Over the drawer, which stays: Select goes on there.
+            store.set({ sheet: { type: "session", id } });
+        }, PRESS_MS);
+
+        const move = (each) => {
+            if (
+                each.pointerId === pointerId &&
+                !fired &&
+                Math.hypot(each.clientX - x, each.clientY - y) >= PRESS_SLOP
+            ) {
+                stop();
+            }
+        };
+
+        const lift = (each) => {
+            if (each.pointerId !== pointerId) {
+                return;
+            }
+
+            if (!fired) {
+                return stop();
+            }
+
+            // The lift's click comes at once, if at all; the next press is someone else's tap.
+            removeEventListener("pointerup", lift, true);
+            removeEventListener("pointercancel", lift, true);
+            addEventListener("pointerdown", stop, true);
+            after = setTimeout(stop, 400);
+        };
+
+        // A finger's click only: Enter on the sheet's item is a click too.
+        const eat = (each) => {
+            if (fired && each.detail > 0) {
+                each.preventDefault();
+                each.stopPropagation();
+                stop();
+            }
+        };
+
+        // Android's own long press: no menu, no text selection.
+        const quiet = (each) => each.preventDefault();
+
+        const stop = () => {
+            unpress.current = null;
+            clearTimeout(shows);
+            clearTimeout(open);
+            clearTimeout(after);
+            setPressing((now) => (now === id ? null : now));
+            removeEventListener("pointermove", move, true);
+            removeEventListener("pointerup", lift, true);
+            removeEventListener("pointercancel", lift, true);
+            removeEventListener("pointerdown", stop, true);
+            removeEventListener("click", eat, true);
+            removeEventListener("contextmenu", quiet, true);
+        };
+
+        unpress.current?.();
+        unpress.current = stop;
+        addEventListener("pointermove", move, true);
+        addEventListener("pointerup", lift, true);
+        addEventListener("pointercancel", lift, true);
+        addEventListener("click", eat, true);
+        addEventListener("contextmenu", quiet, true);
+    };
+
+    /**
      * Ctrl/⌘+press on a row selects it (or, if it was selected, unselects it); dragging on does the same to every row
-     * between it and the pointer. Once the pointer moves, the list scrolls along near its top or bottom edge.
+     * between it and the pointer. Once the pointer moves, the list scrolls along near its top or bottom edge. A finger
+     * held on a row opens its actions instead.
      */
     const select = (event, id) => {
         held.current = null;
 
-        if (event.button !== 0 || event.pointerType !== "mouse") {
+        if (event.button !== 0) {
+            return;
+        }
+
+        if (event.pointerType !== "mouse") {
+            press(event, id);
+
             return;
         }
 
@@ -646,6 +829,9 @@ export function SessionList({ compact = false }) {
 
     // Esc lets go of the selection, unless something else takes it: a sheet, the launcher, a text field, or a menu.
     const selecting = selected.size > 0;
+
+    // On a touch screen, so does back.
+    useBack(tapping, clearSelection);
 
     useEffect(() => {
         if (!selecting) {
@@ -816,6 +1002,7 @@ export function SessionList({ compact = false }) {
                                         number=${numbers.get(session.id)}
                                         needle=${needle}
                                         selected=${selected.has(session.id)}
+                                        pressing=${pressing === session.id}
                                         folders=${tab === "folders" && needle === ""}
                                         onPick=${pick}
                                         onSelect=${select}
@@ -863,7 +1050,7 @@ export function SessionList({ compact = false }) {
  * there, as the subagents board shows them.
  */
 export function subagentTotals(sessions = store.state.sessions) {
-    const totals = { working: 0, waiting: 0, failed: 0, stopped: 0, done: 0 };
+    const totals = { working: 0, waiting: 0, failed: 0, stopped: 0, done: 0, dealt: 0 };
 
     for (const session of sessions) {
         const counts = session.subagents;
@@ -905,8 +1092,7 @@ function RailTiles() {
             >
                 ${index < 9 ? index + 1 : initials(session.title ?? "New session")}
                 ${
-                    collab() &&
-                    sessionUnread(session) &&
+                    ((collab() && sessionUnread(session)) || isUnread(session.id)) &&
                     session.id !== conversationId &&
                     html`<span class="unread-dot"></span>`
                 }
@@ -926,6 +1112,7 @@ export function RailNav({ foldable = false, folded = false }) {
     const busy = sessions.filter((session) => session.busy).length;
     const agents = subagentTotals(sessions);
     const live = agents.working + agents.waiting;
+    const failed = failing(agents);
     const keys = `${APPLE ? "⌘" : "Ctrl"} B`;
     const fold = () => setPrefs({ sidebar: folded ? "open" : "rail" });
     const role = me?.role === "owner" ? "owner" : me?.role === "viewer" ? "view only" : "guest";
@@ -992,7 +1179,7 @@ export function RailNav({ foldable = false, folded = false }) {
                 "Subagents",
                 live > 0 && `${live} at work`,
                 agents.waiting > 0 && `${agents.waiting} waiting for approval`,
-                agents.failed > 0 && `${agents.failed} failed`,
+                failed > 0 && `${failed} failed`,
             ]
                 .filter(Boolean)
                 .join(", ")}
@@ -1002,7 +1189,7 @@ export function RailNav({ foldable = false, folded = false }) {
             <${Icon} name="fork" size=${18} />
             ${live > 0 && html`<span class="rail-count">${live}</span>`}
             ${
-                (agents.failed > 0 || agents.waiting > 0) &&
+                (failed > 0 || agents.waiting > 0) &&
                 html`<span class="rail-trouble" aria-hidden="true"></span>`
             }
         </button>
@@ -1113,7 +1300,12 @@ export function Drawer() {
     const close = () => store.set({ drawer: false });
 
     useBack(store.state.drawer === true, close);
-    useDragToClose(ref, { dir: "left", onClose: close, enabled: Boolean(open) && !leaving });
+    // Not under a row's actions, which a long press opens over it: the finger that opened them may still move.
+    useDragToClose(ref, {
+        dir: "left",
+        onClose: close,
+        enabled: Boolean(open) && !leaving && !store.state.sheet,
+    });
 
     if (!open) {
         return null;

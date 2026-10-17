@@ -37,6 +37,8 @@ Use a template for a message people send often; use a skill for steps Pi should 
 
 People sign in to providers from Menu → **Providers**, and pick a model per session from the model chip in the message box. Pi Pocket uses Pi's sign-ins (`~/.pi/agent/auth.json`) and Pi's model list: to add a model or a provider Pi does not know, follow Pi's `models.md` and `custom-provider.md`.
 
+Models are the person's to choose, never Pi's: a subagent runs on its session's model unless the owner allows others under **Models for subagents** at the top of the Providers sheet (none by default), and PiP passes a model only when its person named it. Instructions, skills, or `AGENTS.md` cannot widen that; tell the person where the setting is instead.
+
 ## Other switches people have
 
 These are in the app, not in files. Tell the person where they are rather than changing them some other way.

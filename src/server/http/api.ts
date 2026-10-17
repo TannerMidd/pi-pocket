@@ -514,15 +514,24 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 approvalRule?: unknown;
                 defaultModel?: unknown;
                 pipCompactAt?: unknown;
+                subagentModels?: unknown;
             }>(request);
 
             // One at a time: a second that fails must not leave the first changed.
             if (
-                [body.approvalRule, body.defaultModel, body.pipCompactAt].filter(
-                    (value) => value !== undefined,
-                ).length > 1
+                [
+                    body.approvalRule,
+                    body.defaultModel,
+                    body.pipCompactAt,
+                    body.subagentModels,
+                ].filter((value) => value !== undefined).length > 1
             ) {
                 throw new HttpError(400, "Change one setting at a time.");
+            }
+
+            // The models subagents may run on besides their session's own: the owner's (checked in `app.ts`).
+            if (body.subagentModels !== undefined) {
+                await app.setSubagentModels(user, body.subagentModels);
             }
 
             if (body.pipCompactAt !== undefined) {
@@ -539,6 +548,15 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             return json(response, 200, { ok: true });
+        }
+
+        // One model allowed for subagents, or no longer: the rest stay as they are. The owner's (checked in `app.ts`).
+        if (first === "subagent-models" && second === undefined && method === "POST") {
+            const body = await readJson<{ model?: unknown; allowed?: unknown }>(request);
+
+            return json(response, 200, {
+                subagentModels: await app.allowSubagentModel(user, body.model, body.allowed),
+            });
         }
 
         if (first === "extensions" && second === undefined && method === "GET") {
@@ -575,8 +593,15 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, await app.extensions(user));
         }
 
+        // For the owner, each subscription's sign-in is asked afresh first (three seconds at most; a mark found later
+        // comes with the models): one that can no longer be renewed shows as needing sign-in. Others see what was last
+        // found, so nobody else makes the server ask providers.
         if (first === "providers" && second === undefined && method === "GET") {
-            return json(response, 200, app.providers.list());
+            if (user.role === "owner") {
+                await app.providers.checkAll(3_000);
+            }
+
+            return json(response, 200, app.providers.list(user.role === "owner"));
         }
 
         if (

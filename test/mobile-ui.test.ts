@@ -153,6 +153,10 @@ before(async () => {
     mkdirSync(join(work, "src"), { recursive: true });
     writeFileSync(join(work, "README.md"), "# Hello\n\nA file to read.\n");
     writeFileSync(join(work, "src", "main.ts"), "export const answer = 42;\n");
+    writeFileSync(join(work, "web.env"), "PORT=3000\nHOST=127.0.0.1\n");
+    writeFileSync(join(work, "magpie.service"), "[Service]\nExecStart=/usr/bin/magpie\n");
+    mkdirSync(join(work, "docs"), { recursive: true });
+    writeFileSync(join(work, "docs", "guide.md"), "# Guide\n\n[The code](../src/main.ts:1)\n");
     // A repository with a change, for Changes and the branch in the top bar.
     const git = (...args: string[]) =>
         execFileSync("git", ["-C", work, "-c", "user.name=T", "-c", "user.email=t@t.t", ...args]);
@@ -245,6 +249,169 @@ test("back closes the open file, then the Files tile, then leaves the session", 
     await back();
     await reach({ path: "/" }, "back to the list");
 });
+
+test(
+    "local Markdown file links use the viewer, line numbers, and its back stack",
+    real,
+    async () => {
+        const linked = await newSession(app);
+        const startup = `${join(work, "magpie.service")}:2`;
+
+        await say(
+            app,
+            linked,
+            [
+                "[web.env](web.env)",
+                `[**Startup**](${startup})`,
+                "[Line](README.md:3)",
+                "[Encoded](src%2Fmain.ts)",
+                "[Home](~/notes.md)",
+                "[Relative](./README.md)",
+                "[Website](https://example.com/web.env)",
+                "[Network](//example.com/web.env)",
+                "[Session](/s/12)",
+                "[Image API](/api/c/1/file?path=web.env)",
+                "[Fragment](#web.env)",
+                "[Unsafe](javascript:alert%281%29)",
+                '<a href="https://example.com" data-path="web.env">Forged</a>',
+                "`web.env`",
+                "```\nweb.env\n```",
+            ].join("\n\n"),
+        );
+        await fresh();
+        await goTo(linked);
+        await reach({ path: `/s/${linked}` }, "the reply with file links");
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.reply .md a[data-path="web.env"]') !== null)`,
+                )) === true,
+            "the rendered links",
+        );
+        const links = await inPage<
+            Record<string, { path: string | null; target: string | null; href: string | null }>
+        >(`
+        return JSON.stringify(Object.fromEntries(
+            [...document.querySelectorAll(".reply .md a")].map((link) => [link.textContent, {
+                path: link.getAttribute("data-path"),
+                target: link.getAttribute("target"),
+                href: link.getAttribute("href"),
+            }]),
+        ));
+    `);
+
+        assert.equal(links["web.env"]?.path, "web.env");
+        assert.equal(links.Startup?.path, startup);
+        assert.equal(
+            links.Line?.path,
+            "./README.md:3",
+            "a bare filename with a line survives sanitizing",
+        );
+        assert.equal(links.Encoded?.path, "src/main.ts");
+        assert.equal(links.Home?.path, "~/notes.md");
+        assert.equal(links.Relative?.path, "./README.md");
+        assert.equal(links["web.env"]?.target, null, "local links stay in the app");
+
+        for (const label of [
+            "Website",
+            "Network",
+            "Session",
+            "Image API",
+            "Fragment",
+            "Unsafe",
+            "Forged",
+        ]) {
+            assert.equal(links[label]?.path, null, `${label} stays outside the file viewer`);
+        }
+
+        assert.equal(links.Website?.target, "_blank");
+        assert.equal(links.Unsafe?.href, null, "unsafe schemes are still stripped");
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".reply .md code[data-path]").length)`,
+            ),
+            1,
+            "inline paths still work, code blocks stay code",
+        );
+        await page.evaluate(`document.querySelector('.reply .md a[data-path="web.env"]').focus()`);
+        await page.press("Enter");
+        await reach({ sheet: "file", layers: 1 }, "the file opened by keyboard");
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".file-viewer")?.textContent.includes("PORT=3000") === true)`,
+                )) === true,
+            "the environment file contents",
+        );
+        await back();
+        await reach({ sheet: null, layers: 0, path: `/s/${linked}` }, "back to the reply");
+        await tap(".reply .md a[data-path] strong");
+        await reach({ sheet: "file", layers: 1 }, "the startup configuration");
+        await until(
+            async () =>
+                (
+                    await inPage<string>(
+                        `return JSON.stringify(document.querySelector('.file-line.on[data-line="2"]')?.textContent ?? "")`,
+                    )
+                ).includes("ExecStart=/usr/bin/magpie"),
+            "the startup line",
+        );
+        await back();
+        await reach({ sheet: null, layers: 0 }, "back from the startup configuration");
+        await tap('.reply .md a[data-path="./README.md:3"]');
+        await reach({ sheet: "file", layers: 1 }, "the bare filename with a line");
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.file-line.on[data-line="3"]') !== null)`,
+                )) === true,
+            "line three",
+        );
+        await back();
+        await reach({ sheet: null, layers: 0 }, "back from line three");
+        // Text selected elsewhere neither holds the link back nor lets it leave the app.
+        await page.evaluate(`
+            const range = document.createRange();
+
+            range.selectNodeContents(document.querySelector(".reply .md code[data-path]"));
+            getSelection().removeAllRanges();
+            getSelection().addRange(range);
+        `);
+        await tap('.reply .md a[data-path="web.env"]');
+        await reach(
+            { sheet: "file", layers: 1, path: `/s/${linked}` },
+            "the file, with a selection elsewhere",
+        );
+        await back();
+        await reach({ sheet: null, layers: 0 }, "back from the file");
+        await page.evaluate(`getSelection().removeAllRanges()`);
+        // A link in a Markdown file names a file beside it, not in the session's folder.
+        await page.evaluate(`(await import("/ui.js")).openFile("docs/guide.md")`);
+        await reach({ sheet: "file", layers: 1 }, "the guide");
+        await tap('.file-viewer .md a[data-path$="/src/main.ts:1"]');
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".file-viewer")?.textContent.includes("answer = 42") === true)`,
+                )) === true,
+            "the file the guide links to",
+        );
+        await reach({ sheet: "file", layers: 2 }, "the linked file, a step above the guide");
+        await back();
+        await reach({ sheet: "file", layers: 1 }, "back to the guide");
+        await back();
+        await reach({ sheet: null, layers: 0, path: `/s/${linked}` }, "back from the guide");
+        await page.setViewport({ width: 1440, height: 900, scale: 1, mobile: false });
+        await openFiles();
+        await reach({ files: true }, "the docked Files tile");
+        await tap('.reply .md a[data-path="web.env"]');
+        await reach(
+            { file: "web.env", sheet: null, layers: 0 },
+            "the linked file in the Files tile",
+        );
+        await page.evaluate(`(await import("/files-panel.js")).setFilesOpen(false)`);
+    },
+);
 
 test("a reload keeps the steps back: the file, then the tile", real, async () => {
     await fresh();
@@ -457,6 +624,47 @@ test(
         await reach({ sheet: null, layers: 0 }, "closed again");
     },
 );
+
+// With a mouse: a touch screen's line under the title is a thumb tall whatever it holds.
+test("while a session loads, its title stays where it will be", real, async () => {
+    await fresh();
+    await page.setViewport(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${first}`);
+    await until(
+        async () =>
+            (await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".topbar .title-sub")?.textContent.includes("main") === true)`,
+            )) === true,
+        "the folder and branch under the title",
+    );
+    // Before the server answers, the view is empty, as `navigate` leaves it: no folder or branch under the title yet.
+    const tops = await inPage<{ loaded: number; loading: number; sub: string }>(`
+        const { store } = await import("/store.js");
+        const top = () => document.querySelector(".topbar .title-main").getBoundingClientRect().top;
+        const painted = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        // Past what pops and rises in as the page opens (not what loops for ever).
+        await Promise.all(
+            document
+                .getAnimations()
+                .filter((each) => each.effect?.getComputedTiming().endTime !== Infinity)
+                .map((each) => each.finished.catch(() => {})),
+        );
+        const loaded = top();
+
+        store.set({ view: { ...store.state.view, conversation: null, agent: null, branch: null } });
+        await painted();
+
+        return JSON.stringify({
+            loaded,
+            loading: top(),
+            sub: document.querySelector(".topbar .title-sub").textContent.trim(),
+        });
+    `);
+
+    assert.equal(tops.sub, "", "nothing under the title while it loads");
+    assert.equal(tops.loading, tops.loaded, "the title does not move");
+});
 
 test("a session opened straight away gets the list under it at the first tap", real, async () => {
     await fresh();
@@ -841,6 +1049,81 @@ test(
             `no column crushed to a few letters: ${table.narrowest}px`,
         );
         assert.ok(table.scrolls, "the table scrolls sideways instead");
+    },
+);
+
+// Issue #63: a short update written a line at a time, as Pi's terminal shows it, not run together into one paragraph.
+test(
+    "a reply keeps its single line breaks; a Markdown file's hard-wrapped lines stay one paragraph",
+    real,
+    async () => {
+        const updates = await newSession(app);
+        // Outside the session's repository: a file there would be one more change for the tests after this one.
+        const wrapped = join(root, "wrapped.md");
+
+        await say(
+            app,
+            updates,
+            [
+                "✅ Checks pass.",
+                "📌 [The guide](docs/guide.md) · `src/main.ts`",
+                "👉 Approve it?",
+                "",
+                "A paragraph of its own.",
+            ].join("\n"),
+        );
+        writeFileSync(
+            wrapped,
+            "# Wrapped\n\nA paragraph wrapped\nat a narrow column,\nas files often are.\n\nAnother.\n",
+        );
+        await fresh();
+        await goTo(updates);
+        await reach({ path: `/s/${updates}` }, "the reply");
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".reply .md")?.textContent.includes("of its own") === true)`,
+                )) === true,
+            "the reply, rendered",
+        );
+        const paragraphs = (selector: string) =>
+            inPage<string[]>(`
+                return JSON.stringify(
+                    [...document.querySelectorAll(${JSON.stringify(selector)})].map((p) => p.innerText),
+                );
+            `);
+        const reply = await paragraphs(".reply .md p");
+
+        assert.equal(reply.length, 2, `two paragraphs: ${JSON.stringify(reply)}`);
+        assert.match(
+            reply[0]!,
+            /✅ Checks pass\.\n📌 The guide · src\/main\.ts\n👉 Approve it\?$/,
+            "each line on its own line",
+        );
+        assert.equal(reply[1], "A paragraph of its own.");
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll('.reply .md a[data-path="docs/guide.md"], .reply .md code[data-path="src/main.ts"]').length)`,
+            ),
+            2,
+            "the link and the path on those lines still open files",
+        );
+
+        await page.evaluate(`(await import("/ui.js")).openFile(${JSON.stringify(wrapped)})`);
+        await reach({ sheet: "file", layers: 1 }, "the Markdown file");
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".file-viewer .md p") !== null)`,
+                )) === true,
+            "the file, rendered",
+        );
+        assert.deepEqual(await paragraphs(".file-viewer .md p"), [
+            "A paragraph wrapped at a narrow column, as files often are.",
+            "Another.",
+        ]);
+        await back();
+        await reach({ sheet: null, layers: 0 }, "back to the reply");
     },
 );
 

@@ -25,12 +25,13 @@ export function defaultLabel(chosen, models) {
         (each) => each.provider === chosen.provider && each.id === chosen.modelId,
     );
 
-    // Not signed in any more, or gone from its provider: new sessions start with the last model picked instead.
+    // Not signed in any more, or gone from its provider: new sessions start with it anyway, and say so, rather than
+    // with a model nobody chose for them.
     if (!model) {
-        return `${chosen.modelId} (not available: the last model picked)`;
+        return `${chosen.modelId} (not signed in)`;
     }
 
-    return `${model.name}${model.reasoning ? ` · ${chosen.thinkingLevel ?? "off"}` : ""}`;
+    return `${model.name}${model.reasoning ? ` · ${chosen.thinkingLevel ?? "off"}` : ""}${model.signIn ? " (needs sign-in)" : ""}`;
 }
 
 /**
@@ -225,7 +226,7 @@ export function ModelPicker() {
                         <span class="pop-menu-row-text">
                             <span class="pop-menu-row-name">${model.name}</span>
                             <span class="pop-menu-row-sub">
-                                ${model.provider}${!forDefault && isDefault(model) ? " · default" : ""}
+                                ${model.provider}${!forDefault && isDefault(model) ? " · default" : ""}${model.signIn ? " · needs sign-in" : ""}
                             </span>
                         </span>
                         ${isCurrent(model) && html`<${Icon} name="check" size=${14} />`}

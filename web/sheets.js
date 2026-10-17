@@ -18,6 +18,7 @@ import { AuthDialog, ProvidersSheet } from "./sheets/providers.js";
 import { RunningSheet } from "./sheets/running.js";
 import { HooksSheet } from "./sheets/hooks.js";
 import { SchedulesSheet } from "./sheets/schedules.js";
+import { SessionSheet } from "./sheets/session.js";
 import { ShortcutsSheet } from "./sheets/shortcuts.js";
 import { SpendSheet } from "./sheets/spend.js";
 import { TextSheet } from "./sheets/text.js";
@@ -151,6 +152,11 @@ function sheetBody(sheet) {
             break;
         case "menu":
             body = html`<${MenuSheet} />`;
+            break;
+        case "session":
+            body = store.state.sessions.some((each) => each.id === sheet.id)
+                ? html`<${SessionSheet} id=${sheet.id} />`
+                : null;
             break;
         case "places":
             body = view.conversation ? html`<${PlacesSheet} />` : null;

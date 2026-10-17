@@ -20,6 +20,18 @@ export function uid() {
 export const TRANSCRIPT_ROWS = 60;
 
 const TAB_KEY = "pocket.tab";
+const UNREAD_KEY = "pocket.unread";
+
+/** Sessions this browser has marked unread, like the pinned list beside it (`pocket.unread`). */
+function unreadOf() {
+    try {
+        const ids = JSON.parse(localStorage.getItem(UNREAD_KEY) ?? "[]");
+
+        return Array.isArray(ids) ? ids : [];
+    } catch {
+        return [];
+    }
+}
 
 const TAB = sessionStorage.getItem(TAB_KEY) ?? uid();
 
@@ -63,6 +75,8 @@ export const store = {
         sessionsLoaded: false,
         /** Sessions on their way into the archive (true) or out of it (false), by id, until the list catches up (`sessions.js`). */
         moving: {},
+        /** Sessions marked unread in this browser: an id each, until opened again. */
+        unread: unreadOf(),
         conversationId: routeConversation(),
         view: emptyView(),
         ...peopleFor(routeConversation()),
@@ -117,11 +131,14 @@ export const store = {
         pipView: emptyView(),
     },
     listeners: new Set(),
+    /**
+     * Change the state: by a patch, or by what a function of the state returns. The function runs first, so a change
+     * it makes on the way (a notice, say) is kept, not overwritten by the state as it was before.
+     */
     set(patch) {
-        this.state = {
-            ...this.state,
-            ...(typeof patch === "function" ? patch(this.state) : patch),
-        };
+        const change = typeof patch === "function" ? patch(this.state) : patch;
+
+        this.state = { ...this.state, ...change };
 
         for (const listener of this.listeners) {
             listener(this.state);
@@ -133,6 +150,29 @@ export const store = {
         return () => this.listeners.delete(listener);
     },
 };
+
+// ─── Marked-unread sessions (this browser) ──────────────────────────────────────
+
+export const isUnread = (id) => store.state.unread.includes(id);
+
+/** Mark a session unread, or clear it again, in this browser only. Opening the session clears it (`opened`). */
+export function setUnread(id, unread) {
+    const next = unread
+        ? [...new Set([...store.state.unread, id])]
+        : store.state.unread.filter((each) => each !== id);
+
+    localStorage.setItem(UNREAD_KEY, JSON.stringify(next));
+    store.set({ unread: next });
+}
+
+/** Opening a session is reading it, however it opens (a tap, back, a link, a notification): its mark goes. */
+function opened(id) {
+    if (id !== null && isUnread(id)) {
+        setUnread(id, false);
+    }
+}
+
+opened(store.state.conversationId);
 
 function routeConversation() {
     const match = /^\/s\/(\d+)/.exec(location.pathname);
@@ -679,7 +719,19 @@ function pollEvents(query) {
     return connection;
 }
 
+/** Sign-ins that ended, or whose dialog was closed here: what the server still says about them shows nothing. */
+const endedSignIns = new Set();
+
+/** The dialog of a sign-in (`AuthDialog`), as the server's words about it come. */
 function handleAuth(data) {
+    if (endedSignIns.has(data.flowId)) {
+        return;
+    }
+
+    if (data.step === "done") {
+        endedSignIns.add(data.flowId);
+    }
+
     store.set((state) => {
         const flow =
             state.auth?.flowId === data.flowId
@@ -687,6 +739,8 @@ function handleAuth(data) {
                 : {
                       flowId: data.flowId,
                       providerId: data.providerId,
+                      // Its id when the server sends no name (one not restarted since an update).
+                      providerName: data.providerName ?? data.providerId,
                       events: [],
                       prompt: null,
                       done: null,
@@ -706,7 +760,7 @@ function handleAuth(data) {
 
         if (data.step === "done") {
             if (data.ok) {
-                notify("info", `Signed in to ${data.providerId}.`);
+                notify("info", `Signed in to ${data.providerName ?? data.providerId}.`);
             }
 
             return { auth: data.ok ? null : { ...flow, prompt: null, done: data } };
@@ -714,6 +768,25 @@ function handleAuth(data) {
 
         return {};
     });
+}
+
+/**
+ * A sign-in's question was answered, and the server took the answer. The server's next words may have come first (the
+ * next question, or the end, which closes the dialog or shows why it failed): the dialog waits for the provider only
+ * while it still shows that sign-in asking that question.
+ */
+export function signInAnswered(flowId, promptId) {
+    store.set((state) =>
+        state.auth?.flowId === flowId && state.auth.prompt?.id === promptId
+            ? { auth: { ...state.auth, prompt: null } }
+            : {},
+    );
+}
+
+/** A sign-in's dialog was closed: it stays closed, whatever the server still says about that sign-in. */
+export function closeSignIn(flowId) {
+    endedSignIns.add(flowId);
+    store.set((state) => (state.auth?.flowId === flowId ? { auth: null } : {}));
 }
 
 export function navigate(conversationId, { replace = false, sheet = null } = {}) {
@@ -727,6 +800,9 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
     if (store.state.board) {
         store.set({ board: false, boardAgents: null });
     }
+
+    // Its row tapped again counts too.
+    opened(conversationId);
 
     if (store.state.conversationId === conversationId && source) {
         if (sheet) {
@@ -755,6 +831,7 @@ onRoute(() => {
     const id = routeConversation();
 
     if (id !== store.state.conversationId) {
+        opened(id);
         store.set({
             conversationId: id,
             view: emptyView(),

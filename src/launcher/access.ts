@@ -75,6 +75,56 @@ export function bindHost(mode: AccessMode): string {
     return "127.0.0.1";
 }
 
+// ─── Choosing a mode ────────────────────────────────────────────────────
+
+export interface AccessChoice {
+    /** The mode from `--access` or `--host`, if any. */
+    given: AccessMode | undefined;
+    /** The last choice, from the data folder. */
+    saved: AccessMode | undefined;
+    /** Whether someone is there to choose from the menu: a terminal, and no `-y`. */
+    ask: boolean;
+    /** Show the menu; undefined when it is closed. */
+    menu(current: AccessMode | undefined): Promise<AccessMode | undefined>;
+    /** Get `mode` ready to use, and say what is wrong when it cannot be: false then, else true or the cloudflared to run. */
+    prepare(mode: AccessMode): Promise<boolean | string>;
+}
+
+type AccessResult = { mode: AccessMode; binary?: string } | "closed" | "unready";
+
+/**
+ * The mode to start in. One that is not ready (Tailscale not connected, no cloudflared) goes back to the menu when it
+ * came from there. One from `--access`, `-y`, or the last choice without a terminal ends the start: asking nobody again
+ * would only try the same mode again, forever.
+ */
+export async function chooseAccess(choice: AccessChoice): Promise<AccessResult> {
+    let mode = choice.given;
+
+    for (;;) {
+        const fromMenu = mode === undefined && choice.ask;
+
+        if (mode === undefined) {
+            mode = fromMenu ? await choice.menu(choice.saved) : (choice.saved ?? "local");
+
+            if (mode === undefined) {
+                return "closed";
+            }
+        }
+
+        const ready = await choice.prepare(mode);
+
+        if (ready !== false) {
+            return typeof ready === "string" ? { mode, binary: ready } : { mode };
+        }
+
+        if (!fromMenu) {
+            return "unready";
+        }
+
+        mode = undefined;
+    }
+}
+
 // ─── cloudflared ────────────────────────────────────────────────────────
 
 function findExecutable(name: string, extraDirectories: string[]): string | undefined {

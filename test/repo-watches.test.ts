@@ -649,6 +649,7 @@ test("nothing is watched, nor worked on, in a repository gh cannot push to", asy
         app.watches.start(session, owner(app).id, { pr: "stranger/x#3", byPi: true }),
         /cannot push to stranger\/x/,
     );
+    await app.pip.read(id, Number(session));
     await assert.rejects(
         app.pip.watchPr(id, Number(session), "--web", "k-2"),
         /Name the pull request/,

@@ -137,3 +137,26 @@ test("the settings route sets and clears the default, for the owner only", async
         server.close();
     }
 });
+
+test("a default that is not signed in stays the default: no other model is put in its place", async () => {
+    // A model Pi knows, of a provider nobody signed in to here.
+    const away = app.models.getModels("anthropic")[0]!;
+
+    app.config.lastModel = { provider: "faux", modelId: "other", thinkingLevel: "low" };
+    app.config.defaultModel = { provider: away.provider, modelId: away.id, thinkingLevel: "off" };
+    assert.equal(
+        (await startsWith()).model,
+        away.id,
+        "the owner's default, not the last one picked",
+    );
+    app.config.defaultModel = undefined;
+});
+
+test("with no model anyone chose, a new session starts with none, never the first there is", async () => {
+    app.config.defaultModel = undefined;
+    app.config.lastModel = undefined;
+    assert.equal((await startsWith()).model, undefined);
+    // The last one picked, once there is one.
+    app.config.lastModel = { provider: "faux", modelId: "other", thinkingLevel: "low" };
+    assert.deepEqual(await startsWith(), { model: "other", thinkingLevel: "low" });
+});

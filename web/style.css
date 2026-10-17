@@ -312,6 +312,24 @@ kbd {
     flex: 1;
 }
 
+.meter {
+    display: inline-flex;
+    height: 4px;
+    background: var(--line);
+}
+
+.meter > span {
+    background: var(--accent);
+}
+
+.meter.warn > span {
+    background: var(--warn);
+}
+
+.meter.err > span {
+    background: var(--err);
+}
+
 .warn {
     color: var(--warn);
 }
@@ -846,12 +864,13 @@ kbd {
     text-overflow: ellipsis;
 }
 
-/* The folder's color and last part, then the branch. */
+/* The folder's color and last part, then the branch. Keep its row while loading so the title stays put. */
 .title-sub {
     display: flex;
     align-items: center;
     gap: 7px;
     min-width: 0;
+    min-height: 1lh;
     font-size: 0.72rem;
     color: var(--muted);
     white-space: nowrap;
@@ -1087,6 +1106,38 @@ kbd {
     display: inline-flex;
     gap: 0.25rem;
     align-items: center;
+}
+
+/* The explicit parent route stays beside the message box on every layout, even when the dock scrolls. */
+.parent-session {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--accent);
+    font-size: 0.8rem;
+    text-align: left;
+}
+
+.parent-session:hover {
+    background: var(--hover);
+}
+
+.parent-session > :not(.parent-session-title) {
+    flex-shrink: 0;
+}
+
+.parent-session-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
 }
 
 /* A person's message: a filled row with a prompt mark, who and when over what they wrote. Scoped to its row: the
@@ -2555,7 +2606,8 @@ button.chip:hover {
     cursor: default;
 }
 
-/* Under the message box: who is here, the context, the cache, the spend, and Lancet Guard. */
+/* Under the message box: who is here, how fast the last answer came, the context, the cache, the spend, and Lancet
+ * Guard. */
 .status-line {
     display: flex;
     flex-wrap: wrap;
@@ -2575,14 +2627,7 @@ button.chip:hover {
 }
 
 .status-line .meter {
-    display: inline-flex;
     width: 36px;
-    height: 4px;
-    background: var(--line);
-}
-
-.status-line .meter > span {
-    background: var(--accent);
 }
 
 .status-line .guard {
@@ -2595,6 +2640,56 @@ button.chip:hover {
 
 .status-line .guard.off {
     color: var(--warn);
+}
+
+/* How fast the last answer came, once Appearance turns it on: its two halves spaced like the line's items. */
+.status-line .speed {
+    display: inline-flex;
+    align-items: center;
+    column-gap: inherit;
+}
+
+.status-line .speed .short {
+    display: none;
+}
+
+/* A line too narrow for one row takes shorter forms, one after another, until it fits (`fitStatus`, composer.js). */
+.status-line[data-short~="words"] {
+    column-gap: 8px;
+}
+
+.status-line[data-short~="words"] .speed {
+    column-gap: 1ch;
+}
+
+.status-line[data-short~="words"] .speed .long,
+.status-line[data-short~="here"] .here.alone,
+.status-line[data-short~="guard"] .guard .word,
+.status-line[data-short~="cache"] .cache,
+.status-line[data-short~="wait"] .speed .wait,
+.status-line[data-short~="wait"] .speed.wait-only {
+    display: none;
+}
+
+.status-line[data-short~="words"] .speed .short {
+    display: inline;
+}
+
+/* Words that go from sight but not from a screen reader: "77%" is still the context's, "1.2s" the first token's. */
+.status-line[data-short~="words"] .speed .rate + .wait .word,
+.status-line[data-short~="context"] .context .word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* Narrow, the wait has no words of its own: "42 tok/s · 1.2s". */
+.status-line[data-short~="words"] .speed .rate + .wait::before {
+    content: "·";
+    margin-right: 1ch;
 }
 
 /* ─── Extensions ───────────────────────────────────────────── */
@@ -3242,7 +3337,9 @@ button.chip:hover {
     padding: 0 10px;
     text-align: left;
     border: 1px solid transparent;
+    -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
     transition: background-color var(--t-hover) var(--ease-out);
 }
 
@@ -3269,6 +3366,11 @@ button.chip:hover {
 .session-row.selected .session {
     background: var(--accent-soft);
     border-color: var(--accent-line);
+}
+
+/* A finger held on a row, before its actions open: after the open and selected rows' fills, so it shows on them too. */
+.session-row.pressing .session {
+    background: var(--hover);
 }
 
 .session-mark {
@@ -3311,6 +3413,11 @@ button.chip:hover {
 
 /* New chat messages there, in a session not open. */
 .session.unread .session-title {
+    font-weight: 700;
+}
+
+/* Marked unread (this browser): the title reads bold, like the dot beside the time says. */
+.session-row.marked-unread .session-title {
     font-weight: 700;
 }
 
@@ -3425,7 +3532,7 @@ button.chip:hover {
     display: none;
 }
 
-/* Archive and pin: on the row's right, shown on hover or while the row has focus. */
+/* Archive, pin, and mark unread: on the row's right, shown on hover or while the row has focus. */
 .session-actions {
     position: absolute;
     top: 50%;
@@ -3465,14 +3572,18 @@ button.chip:hover {
     color: var(--brand);
 }
 
-/* Touch screens archive and pin from the session's menu instead: an unseen button would take taps meant for the row. */
+.session-unread.on {
+    color: var(--accent);
+}
+
+/* Touch screens archive, pin, and mark-unread from a long press on the row instead: an unseen button would take taps meant for it. */
 @media (hover: none) {
     .session-actions {
         display: none;
     }
 }
 
-/* The buttons take the right side's place, widened so a long title ends before them (one or two 26px buttons). */
+/* The buttons take the right side's place, widened so a long title ends before them (one to three 26px buttons). */
 @media (hover: hover) {
     .session-row:hover .session-act,
     .session-act:focus-visible {
@@ -3486,6 +3597,10 @@ button.chip:hover {
     .session-row.one-act:hover .session-side {
         min-width: 26px;
     }
+    /* Three live buttons: archive, pin, and mark-unread. */
+    .session-row.three-acts:hover .session-side {
+        min-width: 86px;
+    }
     /* Keyboard focus in the row shows them too, not the focus a click leaves on the open session's row. Kept apart
        from the rules above: a browser without :has() drops only these. */
     .session-row:has(:focus-visible) .session-act {
@@ -3498,6 +3613,9 @@ button.chip:hover {
     }
     .session-row.one-act:has(:focus-visible) .session-side {
         min-width: 26px;
+    }
+    .session-row.three-acts:has(:focus-visible) .session-side {
+        min-width: 86px;
     }
     /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
     :root.selecting .session-row .session-act {
@@ -3577,6 +3695,18 @@ button.chip:hover {
 .select-clear:hover {
     background: var(--hover);
     color: var(--text);
+}
+
+/* A thumb's size on a touch screen, where a long press starts a selection. */
+@media (pointer: coarse) {
+    .select-bar .button {
+        min-height: 36px;
+        padding-inline: 0.8rem;
+    }
+    .select-clear {
+        width: 36px;
+        height: 36px;
+    }
 }
 
 .sessions-empty {
@@ -4434,6 +4564,85 @@ button.chip:hover {
     gap: 0.35rem;
     flex-wrap: wrap;
     justify-content: flex-end;
+}
+
+/* What a provider said when it would not renew a sign-in. */
+.provider-why {
+    overflow-wrap: anywhere;
+}
+
+/* The owner's choice of models for subagents, above the providers. */
+.subagent-models {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.6rem 0 0.8rem;
+    margin-bottom: 0.4rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.subagent-models p {
+    margin: 0;
+}
+
+/* What is allowed, on one line: the list under it stays put while models are checked one after another. */
+.subagent-models-chosen {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.subagent-models .search {
+    margin-bottom: 0;
+}
+
+/* Every model, by provider. A long list scrolls in its own box, so the providers stay near. */
+.subagent-models-list {
+    max-height: min(22rem, 45dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.subagent-models-list > p {
+    padding: 0.6rem;
+}
+
+.subagent-models-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0.35rem 0.6rem;
+    background: var(--card-2);
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+}
+
+.subagent-model {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px;
+    padding: 0.35rem 0.6rem;
+    border-top: 1px solid var(--line);
+    cursor: pointer;
+}
+
+.subagent-model input {
+    width: auto;
+    flex: none;
+}
+
+.subagent-model > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.subagent-model .muted {
+    display: block;
 }
 
 .invite {
@@ -8791,6 +9000,13 @@ textarea.notes {
         padding-inline: 6px;
         margin-inline: -6px;
     }
+    /* Narrow, the guard is its shield and a word: its hit area reaches past them, to the sides too. */
+    .status-line .guard {
+        min-width: 40px;
+        justify-content: center;
+        padding-inline: 8px;
+        margin-inline: -8px;
+    }
     .answer-actions .reaction.add {
         min-width: 40px;
         justify-content: center;
@@ -10199,14 +10415,7 @@ textarea.notes {
 }
 
 .pip-context .meter {
-    display: inline-flex;
     width: 28px;
-    height: 4px;
-    background: var(--line);
-}
-
-.pip-context .meter > span {
-    background: var(--accent);
 }
 
 .pip-mark {

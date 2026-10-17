@@ -1,7 +1,27 @@
 // Artifacts and images, each in a viewer of its own.
 import { useEffect, useState } from "preact/hooks";
 import { closeSheet, openSheet, store } from "../store.js";
+import { modeOf, paletteOf, themeVars } from "../theme.js";
 import { formatBytes, html, Icon, Sheet, timeAgo } from "../ui.js";
+
+/**
+ * The app's theme for a Markdown artifact's page, in its address: in its sandbox, the page cannot see the app's look,
+ * and would otherwise take the browser's light or dark (`src/server/http/artifacts.ts`).
+ */
+function themeQuery() {
+    const palette = paletteOf();
+    const vars = themeVars(palette);
+    const hex = (name) => vars[name].replace(/^#/, "");
+
+    return `?${new URLSearchParams({
+        mode: modeOf(palette),
+        bg: hex("--o-bg"),
+        fg: hex("--o-fg"),
+        text: hex("--o-fg-bright"),
+        accent: hex("--o-accent"),
+        code: hex("--o-bg-dark"),
+    })}`;
+}
 
 export function ArtifactsSheet() {
     const { artifacts } = store.state.view;
@@ -42,7 +62,8 @@ export function ArtifactViewer({ id, version }) {
     const [shown, setShown] = useState(version ?? artifact?.versions.at(-1)?.version);
     const [nonce, setNonce] = useState(0);
     const latest = artifact?.versions.at(-1)?.version;
-    const src = `/a/${view.conversation.id}/${encodeURIComponent(id)}/${shown ?? "latest"}`;
+    const theme = artifact?.type === "markdown" ? themeQuery() : "";
+    const src = `/a/${view.conversation.id}/${encodeURIComponent(id)}/${shown ?? "latest"}${theme}`;
 
     return html`<div class="viewer">
         <header class="viewer-head">

@@ -170,9 +170,20 @@ export function reportingOf(
     );
 }
 
+/** Whether a subagent failed (not stopped), and a person dealt with that failure: the one it has now. */
+function failureDealtWith(record: SubagentRecord): boolean {
+    return (
+        record.failed === true &&
+        record.error !== STOPPED &&
+        record.dealtAt !== undefined &&
+        record.dealtAt === (record.answeredAt ?? 0)
+    );
+}
+
 /**
  * One subagent as the web app shows it, in its parent's subagents bar and on the subagents board: what it was asked and
- * when, whether it works, and how it ended (`stopped` is a `failed` that was stopped).
+ * when, whether it works, and how it ended (`stopped` is a `failed` that was stopped; `dealt`, a failure a person
+ * dealt with, which needs nobody now).
  */
 export function subagentView(
     name: string,
@@ -192,6 +203,7 @@ export function subagentView(
         ...(record.failed === true && record.error !== undefined && record.error !== STOPPED
             ? { error: record.error }
             : {}),
+        ...(failureDealtWith(record) ? { dealt: true } : {}),
         ...(reporting ? { reporting: true } : {}),
     };
 }
@@ -564,7 +576,12 @@ export class Room {
                           ...this.#app.attribution.submitterOf(item.id as unknown as number, this),
                       },
             ),
-            agent: agentInfo(this.#app.models, agentState, this.#app.defaultCwd),
+            agent: agentInfo(
+                this.#app.models,
+                agentState,
+                this.#app.defaultCwd,
+                this.#app.signInNeeded,
+            ),
             stats: projectStats(view.docs["pi.usage"] as UsageState | undefined, view.entries),
             clients: [...new Set([...this.clients].map((each) => each.id))].length,
             viewers: [...new Set([...this.clients].map((each) => each.user.name))],

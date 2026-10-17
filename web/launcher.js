@@ -115,7 +115,7 @@ function actionItems() {
         },
         {
             label: "Appearance",
-            detail: "theme, tiling, motion, text size",
+            detail: "theme, tiling, motion, text size, reply speed",
             icon: "palette",
             run: () => openSheet({ type: "appearance" }),
         },
@@ -131,6 +131,12 @@ function actionItems() {
             icon: "tiles",
             keys: "Alt P",
             run: togglePeeks,
+        },
+        {
+            label: prefs().speed ? "Hide reply speed" : "Show reply speed",
+            detail: "how fast the last answer came, under the message box",
+            icon: "pulse",
+            run: () => setPrefs({ speed: !prefs().speed }),
         },
         conversation &&
             steer && {
@@ -425,7 +431,12 @@ export function Launcher({ leaving }) {
             const sheet = document.querySelector(".sheet-host:not(.leaving) .sheet");
             const back = sheet ?? returnTo.current;
 
-            if (back && back.isConnected && typeof back.focus === "function") {
+            // Only when the focus left with the launcher: another launcher (opened again at once) or what took the
+            // focus since keeps it.
+            const active = document.activeElement;
+            const lost = active === null || active === document.body || active === input.current;
+
+            if (lost && back && back.isConnected && typeof back.focus === "function") {
                 back.focus({ preventScroll: true });
             }
         };

@@ -44,7 +44,13 @@ export function createHandler(options: HttpOptions) {
             }
 
             if (parts[0] === "a") {
-                return await artifact(app, response, parts.slice(1), auth.user(request));
+                return await artifact(
+                    app,
+                    response,
+                    parts.slice(1),
+                    auth.user(request),
+                    url.searchParams,
+                );
             }
 
             if (parts[0] === "vendor" && parts[1] !== undefined && VENDOR[parts[1]] !== undefined) {

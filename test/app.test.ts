@@ -42,6 +42,15 @@ const route: FauxResponseStep = (context, options) => {
         return call("artifact", { id: "Demo Page", title: "Demo", content: "<h1>one</h1>" });
     }
 
+    if (text.includes("write a markdown artifact")) {
+        return call("artifact", {
+            id: "notes",
+            title: "Notes",
+            type: "markdown",
+            content: "# Notes\n\nSome **text**.",
+        });
+    }
+
     if (text.includes("fix the artifact")) {
         return call("artifact", {
             id: "demo-page",
@@ -152,6 +161,79 @@ test("the page that runs a reply's HTML is for people signed in, sandboxed, and 
         assert.ok(
             body.includes("event.origin !== location.origin"),
             "a parent at the app's address",
+        );
+    } finally {
+        server.closeAllConnections();
+        server.close();
+    }
+});
+
+test("a Markdown artifact takes the app's theme from its viewer, and the browser's light or dark without it", async () => {
+    const { createServer } = await import("node:http");
+    const { createHandler } = await import("../src/server/http.ts");
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+    const id = await newSession();
+
+    await say(id, "please write a markdown artifact");
+    await say(id, "please make an artifact");
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+
+    const page = async (artifact: string, query = "") => {
+        const response = await fetch(
+            `http://127.0.0.1:${port}/a/${id}/${artifact}/latest${query}`,
+            {
+                headers: { authorization: `Bearer ${app.config.ownerToken}` },
+            },
+        );
+
+        assert.equal(response.status, 200);
+
+        return response.text();
+    };
+
+    const style = (body: string) => /<style>(.*)<\/style>/s.exec(body)?.[1] ?? "";
+
+    try {
+        const plain = style(await page("notes"));
+
+        assert.match(plain, /@media \(prefers-color-scheme:light\)\{:root\{color-scheme:light;/);
+        assert.match(plain, /color:var\(--fg\);background:var\(--bg\)/, "no colors of its own");
+
+        // The viewer's address, in a light theme: its colors come last, so they win.
+        const light = style(
+            await page(
+                "notes",
+                "?mode=light&bg=eff1f5&fg=4c4f69&text=4c4f69&accent=1e66f5&code=e3e4e8",
+            ),
+        );
+
+        assert.ok(
+            light.endsWith(
+                ":root{color-scheme:light;--bg:#eff1f5;--fg:#4c4f69;--text:#4c4f69;--accent:#1e66f5;--code:#e3e4e8}",
+            ),
+            light,
+        );
+
+        // Only hex colors get in; without a good background and foreground, the page keeps the browser's look.
+        const tricked = await page(
+            "notes",
+            `?mode=light&bg=${encodeURIComponent("fff}body{display:none")}&fg=${encodeURIComponent("</style><script>alert(1)</script>")}`,
+        );
+
+        assert.equal(style(tricked), plain);
+        assert.doesNotMatch(tricked, /display:none|alert\(1\)/);
+        assert.equal(
+            style(await page("notes", "?mode=dark&bg=000&fg=red")),
+            plain,
+            "a named color is not hex",
+        );
+        assert.equal(
+            await page("demo-page", "?mode=light&bg=eff1f5&fg=4c4f69"),
+            "<h1>one</h1>",
+            "an HTML artifact is served as it is",
         );
     } finally {
         server.closeAllConnections();

@@ -1,13 +1,22 @@
 // The subagents board: every subagent in every session, in the conversation's place while it is open. One square per
 // subagent and one row per session, the sessions that need you first; a bar that says how many are in each state and
-// filters by it; what needs you (approvals and failures) in a queue; and the one selected, with Open and Stop. The
-// arrows move between squares and Enter opens one. Phones get one column and a bar at the bottom for the one selected.
+// filters by it; what needs you (approvals, and failures nobody has dealt with) in a queue; and the one selected, with
+// Open, Stop, and Dismiss. The arrows move between squares and Enter opens one. Phones get one column and a bar at the
+// bottom for the one selected.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { folderColor } from "./avatar.js";
 import { useBack } from "./back.js";
 import { fromServer, useOnScreen } from "./peeks.js";
-import { api, attempt, canSteer, navigate, store } from "./store.js";
-import { elapsed, nowDoing, ordered, stateOf } from "./subagents.js";
+import { api, attempt, canSteer, navigate, notify, store } from "./store.js";
+import {
+    dismiss,
+    elapsed,
+    nowDoing,
+    ordered,
+    seeFailure,
+    stateOf,
+    unresolved,
+} from "./subagents.js";
 import { html, Icon, timeAgo } from "./ui.js";
 
 /** The states, most urgent first: the order of the bar, the legend, the squares, and the sessions' summaries. */
@@ -25,6 +34,13 @@ const LABELS = {
 const boardState = (agent) => (agent.waiting ? "waiting" : stateOf(agent));
 
 const live = (state) => state === "working" || state === "waiting";
+
+/** What needs you: an approval it waits for, or a failure nobody has dealt with (seen or dismissed). */
+const needsYou = (agent) => boardState(agent) === "waiting" || unresolved(agent);
+
+/** A subagent's state in words: "Failed · dismissed" for a failure someone dealt with. */
+const labelOf = (agent) =>
+    `${LABELS[boardState(agent)]}${boardState(agent) === "failed" && agent.dealt ? " · dismissed" : ""}`;
 
 /** The board goes to one column below this width, as sheets come up from the bottom. */
 const PHONE = matchMedia("(max-width: 699px)");
@@ -167,17 +183,19 @@ function whenOf(agent) {
 
 /** One subagent's square: its state's color, and "!" when it needs you. */
 function Cell({ agent, state, dim, selected, onPick, onHover }) {
+    const label = `${agent.name}, ${labelOf(agent)}`;
+
     return html`<button
         class=${`board-cell ${state} ${dim ? "dim" : ""} ${selected ? "on" : ""}`}
         data-agent=${agent.conversationId}
-        aria-label=${`${agent.name}, ${LABELS[state]}`}
+        aria-label=${label}
         aria-pressed=${selected}
         title=${agent.name}
         onClick=${() => onPick(agent.conversationId)}
         onMouseEnter=${() => onHover(agent.conversationId)}
         onMouseLeave=${() => onHover(null)}
     >
-        ${(state === "waiting" || state === "failed") && "!"}
+        ${needsYou(agent) && "!"}
     </button>`;
 }
 
@@ -188,7 +206,7 @@ function Mark({ state, glyph = true }) {
     </span>`;
 }
 
-/** The subagents that need you: waiting for an approval first, then failed. */
+/** The subagents that need you: waiting for an approval first, then failed with nobody dealing with it yet. */
 function NeedsYou({ needs, titles, selected, onPick }) {
     return html`<div class="board-needs">
         <div class="label">Needs you <span class="board-needs-count">${needs.length}</span></div>
@@ -217,10 +235,51 @@ function NeedsYou({ needs, titles, selected, onPick }) {
 /** Stop a subagent that works or waits. */
 const stop = (agent) => attempt(() => api(`c/${agent.conversationId}/abort`, {}));
 
-/** Open a subagent's conversation, where an approval it waits for can be answered. */
+/**
+ * Open a subagent's conversation, where an approval it waits for can be answered; a failure it shows is seen there.
+ * Seen before the board closes, while its subagents are known.
+ */
 function open(agent) {
+    seeFailure(agent);
     closeBoard();
     navigate(agent.conversationId);
+}
+
+/**
+ * Dismiss a failure: dealt with, it no longer needs anyone, here and in the session list. Off while it is asked, and
+ * once dismissed until the board shows it; refused because it failed again since, it says so.
+ */
+function Dismiss({ agent }) {
+    // The failure (by its time) it asked to dismiss: a newer one turns it back on.
+    const [asked, setAsked] = useState(null);
+
+    if (!unresolved(agent) || !canSteer()) {
+        return null;
+    }
+
+    const failure = agent.answeredAt ?? 0;
+
+    const run = async () => {
+        setAsked(failure);
+        const answer = await attempt(() => dismiss(agent));
+
+        if (answer?.dismissed !== true) {
+            setAsked(null);
+        }
+
+        if (answer?.newer === true) {
+            notify("info", `Not dismissed: ${agent.name} failed again since.`);
+        }
+    };
+
+    return html`<button
+        class="button board-dismiss"
+        title="It stays here as failed, and no longer needs you"
+        disabled=${asked === failure}
+        onClick=${run}
+    >
+        Dismiss
+    </button>`;
 }
 
 function openSession(id) {
@@ -235,9 +294,9 @@ function Detail({ agent, title }) {
 
     return html`<div class="board-detail" data-peek=${agent.conversationId}>
         <div class="board-detail-head">
-            <${Mark} state=${state} />
+            <${Mark} state=${state} glyph=${needsYou(agent)} />
             <span class="board-detail-name">${agent.name}</span>
-            <span class=${`board-detail-state ${state}`}>${LABELS[state]}</span>
+            <span class=${`board-detail-state ${state}`}>${labelOf(agent)}</span>
         </div>
         <div class="board-facts">
             <span>Session</span>
@@ -270,6 +329,7 @@ function Detail({ agent, title }) {
                 canSteer() &&
                 html`<button class="button board-stop" onClick=${() => stop(agent)}>Stop</button>`
             }
+            <${Dismiss} agent=${agent} />
         </div>
     </div>`;
 }
@@ -305,9 +365,9 @@ function DetailBar({ agent, title, onClose }) {
 
     return html`<div class="board-bar" data-peek=${agent.conversationId}>
         <div class="board-bar-head">
-            <${Mark} state=${state} />
+            <${Mark} state=${state} glyph=${needsYou(agent)} />
             <span class="board-detail-name">${agent.name}</span>
-            <span class=${`board-detail-state ${state}`}>${LABELS[state]}</span>
+            <span class=${`board-detail-state ${state}`}>${labelOf(agent)}</span>
             <span class="board-bar-when">${whenOf(agent)}</span>
             <button class="board-bar-close" aria-label="Close" onClick=${onClose}>
                 <${Icon} name="close" size=${16} />
@@ -324,6 +384,7 @@ function DetailBar({ agent, title, onClose }) {
                 canSteer() &&
                 html`<button class="button" onClick=${() => stop(agent)}>Stop</button>`
             }
+            <${Dismiss} agent=${agent} />
         </div>
     </div>`;
 }
@@ -383,8 +444,8 @@ export function SubagentsBoard() {
                 .toLowerCase()
                 .includes(needle));
 
-    // One row per session: those with a subagent waiting or failed first, then the most at work; in each, the squares
-    // by state, most urgent first, and the newest first within a state.
+    // One row per session: those with a subagent that needs you first, then the most at work; in each, the squares by
+    // state, most urgent first, and the newest first within a state.
     const bySession = new Map();
 
     for (const agent of agents) {
@@ -398,13 +459,10 @@ export function SubagentsBoard() {
                 (a, b) => STATES.indexOf(boardState(a)) - STATES.indexOf(boardState(b)),
             ),
             counts: countOf(list, known.get(id)),
+            // Failures nobody dealt with always show, so the squares say whether one needs you.
+            needs: list.some(needsYou),
         }))
-        .sort(
-            (a, b) =>
-                Number(b.counts.waiting + b.counts.failed > 0) -
-                    Number(a.counts.waiting + a.counts.failed > 0) ||
-                b.counts.working - a.counts.working,
-        );
+        .sort((a, b) => Number(b.needs) - Number(a.needs) || b.counts.working - a.counts.working);
     const grid = rows.map((row) => row.list.map((agent) => agent.conversationId));
     const byId = new Map(agents.map((agent) => [agent.conversationId, agent]));
     // Every state's count, older finished subagents left off the board included.
@@ -412,10 +470,10 @@ export function SubagentsBoard() {
         STATES.map((state) => [state, rows.reduce((sum, row) => sum + row.counts[state], 0)]),
     );
     const total = totalOf(counts);
-    // What needs you, in the squares' order: waiting for an approval first, then failed.
+    // What needs you, in the squares' order: waiting for an approval first, then failed with nobody dealing with it.
     const needs = rows
         .flatMap((row) => row.list)
-        .filter((agent) => ["waiting", "failed"].includes(boardState(agent)))
+        .filter(needsYou)
         .sort((a, b) => STATES.indexOf(boardState(a)) - STATES.indexOf(boardState(b)));
     const chosen = byId.get(selected) ?? null;
     const shown = byId.get(hovered) ?? chosen;
@@ -572,8 +630,13 @@ export function SubagentsBoard() {
     const sessionRows = rows.map(({ id, list, counts: own }) => {
         // Finished long ago and left off the board: counted, not drawn.
         const older = totalOf(own) - list.length;
-        const top = STATES.find((state) => list.some((agent) => boardState(agent) === state));
-        const tone = top === "done" || top === "stopped" ? "quiet" : top;
+        // The most urgent state there, but for failures someone dealt with, which are quiet now.
+        const top = STATES.find((state) =>
+            list.some(
+                (agent) => boardState(agent) === state && !(state === "failed" && agent.dealt),
+            ),
+        );
+        const tone = top === undefined || top === "done" || top === "stopped" ? "quiet" : top;
         const title = titles.get(id) ?? `Session ${id}`;
 
         return html`<div

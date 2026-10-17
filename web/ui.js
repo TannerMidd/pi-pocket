@@ -82,7 +82,8 @@ export function Thumb({ src, alt = "image" }) {
 
 // ─── Markdown ──────────────────────────────────────────────────────────────────
 
-marked.setOptions({ gfm: true, breaks: false });
+// Line breaks are each `Markdown`'s to choose (`breaks`).
+marked.setOptions({ gfm: true });
 
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -248,6 +249,16 @@ function sanitize(html, fold) {
         }
     }
 
+    // Local Markdown links open the same viewer as inline code paths.
+    for (const link of fragment.querySelectorAll("a[href]")) {
+        const path = linkedPath(link.getAttribute("href") ?? "");
+
+        if (path !== null) {
+            link.dataset.path = fromBase(path);
+            link.removeAttribute("target");
+        }
+    }
+
     for (const pre of fragment.querySelectorAll("pre")) {
         codeBlock(pre, fold);
     }
@@ -347,6 +358,11 @@ DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
     // Before the URL check, so file:// and plain paths become app URLs instead of being dropped.
     if (node.nodeName === "IMG" && data.attrName === "src") {
         data.attrValue = imageSource(data.attrValue, rendering);
+    } else if (node.nodeName === "A" && data.attrName === "href") {
+        // `app.ts:42` looks like a URL scheme to the sanitizer; `./app.ts:42` is the same local file.
+        if (/^[a-z][a-z0-9+.-]*:/i.test(data.attrValue) && linkedPath(data.attrValue) !== null) {
+            data.attrValue = `./${data.attrValue}`;
+        }
     }
 });
 
@@ -367,10 +383,17 @@ const MARKDOWN_CACHE = 500;
 /**
  * Markdown as sanitized parts (`partsOf`). Cached, least recently used out first: a transcript renders its rows in
  * order, and evicting the oldest insert would miss on every row once a thread outgrew the cache. Text still changing
- * (`cache` false) is not kept, and its long code blocks are not folded while they grow.
+ * (`cache` false) is not kept, and its long code blocks are not folded while they grow. With `breaks`, a single line
+ * break is a new line rather than a space.
  */
-function markdownParts(text, conversationId = currentConversation(), cache = true) {
-    const key = `${conversationId ?? ""}\u0000${text}`;
+function markdownParts(
+    text,
+    conversationId = currentConversation(),
+    cache = true,
+    base = null,
+    breaks = true,
+) {
+    const key = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
     let out = markdownCache.get(key);
 
     if (out !== undefined) {
@@ -381,8 +404,10 @@ function markdownParts(text, conversationId = currentConversation(), cache = tru
     }
 
     rendering = conversationId ?? null;
-    out = partsOf(sanitize(marked.parse(fencePage(text), { async: false }), cache));
+    linkBase = base;
+    out = partsOf(sanitize(marked.parse(fencePage(text), { async: false, breaks }), cache));
     rendering = null;
+    linkBase = null;
 
     if (cache) {
         if (markdownCache.size >= MARKDOWN_CACHE) {
@@ -404,10 +429,18 @@ export function setRichBlock(component) {
 
 /**
  * Rendered markdown. `cache={false}` for text that is still changing, such as a streaming answer: its pages, images, and
- * diffs show as code until it is whole.
+ * diffs show as code until it is whole. A single line break is a new line, as Pi's terminal shows a reply and GitHub a
+ * comment; `breaks={false}` for a Markdown file, where it is a space, as GitHub shows the file (hard-wrapped prose
+ * stays one paragraph).
  */
-export function Markdown({ text, class: className = "", cache = true }) {
-    const parts = markdownParts(text, undefined, cache);
+export function Markdown({
+    text,
+    class: className = "",
+    cache = true,
+    base = null,
+    breaks = true,
+}) {
+    const parts = markdownParts(text, undefined, cache, base, breaks);
 
     if (parts.length === 1 && parts[0].kind === undefined) {
         return html`<div
@@ -463,6 +496,52 @@ function looksLikePath(text) {
     return match !== null && (match[1] !== "" || FILE_TYPES.has(match[3].toLowerCase()));
 }
 
+/** A local file link, using the same path recognition as inline code. App routes and URL schemes stay links. */
+function linkedPath(href) {
+    let path;
+
+    try {
+        path = decodeURIComponent(href);
+    } catch {
+        return null;
+    }
+
+    const withoutLine = path.replace(/:\d+(?:-\d+)?$/, "");
+
+    if (
+        /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(withoutLine) ||
+        /^\/(?:api|a|s|login|join|share)(?:\/|[?#]|$)/.test(path)
+    ) {
+        return null;
+    }
+
+    return looksLikePath(path) ? path : null;
+}
+
+/** The folder of the Markdown file being rendered (`Markdown`'s `base`): its relative links name its neighbors. */
+let linkBase = null;
+
+/** A linked path as the viewer opens it: relative to the Markdown file it is in, if any, else as written. */
+function fromBase(path) {
+    if (linkBase === null || /^[~/]/.test(path)) {
+        return path;
+    }
+
+    const parts = linkBase.replace(/\/+$/, "").split("/");
+
+    for (const part of path.split("/")) {
+        if (part === "..") {
+            if (parts.length > 1) {
+                parts.pop();
+            }
+        } else if (part !== ".") {
+            parts.push(part);
+        }
+    }
+
+    return parts.join("/");
+}
+
 /**
  * Open a file (or folder) of the session in the viewer: in the Files tile while it is open, otherwise in a sheet.
  * `path:42` opens it at line 42.
@@ -487,14 +566,24 @@ export function openFile(path) {
 
 /** File paths in rendered markdown open in the viewer. */
 document.addEventListener("click", (event) => {
-    const code = event.target.closest?.(".md code[data-path]");
+    const target = event.target.closest?.(".md code[data-path], .md a[data-path]");
 
-    if (!code || getSelection()?.toString()) {
+    if (!target) {
+        return;
+    }
+
+    // A file link stays in the app even when selecting its text keeps it from opening: its href is a path, not a page.
+    event.preventDefault();
+
+    const selection = getSelection();
+
+    // Selecting a link's text does not change the selection elsewhere: only one in it holds the file back.
+    if (selection?.toString() && selection.containsNode(target, true)) {
         return;
     }
 
     event.stopPropagation();
-    openFile(code.dataset.path);
+    openFile(target.dataset.path);
 });
 
 /** Images in rendered markdown open full screen, unless they are links. */
@@ -586,6 +675,19 @@ export async function copyText(text) {
     if (!ok) {
         throw new Error("Could not copy.");
     }
+}
+
+/** How full a context is, as Pi's own TUI colors its footer: `warn` above 70%, `err` above 90%. */
+export function contextLevel(percent) {
+    if (percent > 90) {
+        return "err";
+    }
+
+    if (percent > 70) {
+        return "warn";
+    }
+
+    return "";
 }
 
 export function formatTokens(count) {
@@ -731,6 +833,7 @@ const ICONS = {
     home: "M3 11l9-7 9 7M5 10v10h14V10",
     archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
     unarchive: "M3 4h18v4H3zM5 8v12h14V8M12 18v-6M9 15l3-3 3 3",
+    unread: "M3 6h18v12H3zM3 7l9 5 9-5M20.5 3.5h.01",
     check: "M5 12l5 5L20 7",
     logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
     globe: "M12 21a9 9 0 100-18 9 9 0 000 18zM3.5 9h17M3.5 15h17M12 3a14 14 0 010 18M12 3a14 14 0 000 18",

@@ -6,7 +6,7 @@ import { canGoBack, goBack, goHome, replaceAddress, startHistory, useBack } from
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
-import { Composer } from "./composer.js";
+import { Composer, openingByAlt } from "./composer.js";
 import { useChanges } from "./diff.js";
 import {
     FilesButton,
@@ -431,7 +431,10 @@ function step(by) {
 
     const at = order.findIndex((session) => session.id === store.state.conversationId);
 
-    navigate(order[(at + by + order.length) % order.length].id);
+    const next = order[(at + by + order.length) % order.length].id;
+
+    openingByAlt(next);
+    navigate(next);
 }
 
 addEventListener("keydown", (event) => {
@@ -498,6 +501,7 @@ addEventListener("keydown", (event) => {
             event.preventDefault();
 
             if (session) {
+                openingByAlt(session.id);
                 navigate(session.id);
             }
 

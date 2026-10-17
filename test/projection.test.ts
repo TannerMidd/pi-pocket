@@ -183,6 +183,39 @@ test("stats add cost and cache rate, and read context size from the newest answe
     assert.equal(stats.contextTokens, 100);
 });
 
+test("the speed reads the newest answer, and an older one's context does not come back", () => {
+    const entries = [
+        entry(
+            "pi.assistant",
+            {
+                role: "assistant",
+                content: [],
+                usage: { input: 10, output: 500, cacheRead: 0, cacheWrite: 0 },
+                stopReason: "stop",
+                pocketTiming: { startedAt: 0, firstTokenAt: 1000, endedAt: 3000 },
+            },
+            1,
+        ),
+        entry(
+            "pi.assistant",
+            {
+                role: "assistant",
+                content: [],
+                usage: { input: 20, output: 100, cacheRead: 0, cacheWrite: 0 },
+                stopReason: "stop",
+                pocketTiming: { startedAt: 10, firstTokenAt: 110, endedAt: 610 },
+            },
+            2,
+        ),
+    ];
+    const stats = projectStats(undefined, entries);
+
+    assert.equal(stats.contextTokens, 120);
+    // The newest answer's 100 output tokens over its half-second window.
+    assert.equal(stats.tokensPerSec, 200);
+    assert.equal(stats.ttftMs, 100);
+});
+
 test("artifact ids become kebab-case slugs", () => {
     assert.equal(slugify("Neon Orbital Garden!"), "neon-orbital-garden");
     assert.equal(slugify("  __x__ "), "x");

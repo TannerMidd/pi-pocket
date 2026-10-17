@@ -16,6 +16,7 @@ import {
     ACCESS_LABELS,
     type AccessMode,
     bindHost,
+    chooseAccess,
     CloudflareTunnel,
     cloudflaredSource,
     downloadCloudflared,
@@ -160,6 +161,21 @@ function accessChoices(): { mode: AccessMode; choice: Choice }[] {
                       },
         },
     ];
+}
+
+/** Get `mode` ready to use: false, having said what is wrong, when it cannot be; the cloudflared to run for a tunnel. */
+async function prepareAccess(mode: AccessMode): Promise<boolean | string> {
+    if (mode === "tailscale" && tailscaleAddress() === undefined) {
+        log(yellow("  Tailscale is not connected on this machine. Connect it with: tailscale up"));
+
+        return false;
+    }
+
+    if (mode === "cloudflare") {
+        return (await ensureCloudflared()) ?? false;
+    }
+
+    return true;
 }
 
 async function pickAccess(current: AccessMode | undefined): Promise<AccessMode | undefined> {
@@ -776,36 +792,30 @@ async function main(): Promise<void> {
 
     let binary: string | undefined;
 
-    for (;;) {
-        if (mode === undefined) {
-            mode =
-                interactive && !options.yes
-                    ? await pickAccess(settings.access)
-                    : (settings.access ?? "local");
+    if (mode !== "custom") {
+        const chosen = await chooseAccess({
+            given: mode,
+            saved: settings.access,
+            ask: interactive && !options.yes,
+            menu: pickAccess,
+            prepare: prepareAccess,
+        });
 
-            if (mode === undefined) {
-                restoreTerminal();
-                process.exit(0);
-            }
+        if (chosen === "closed") {
+            restoreTerminal();
+            process.exit(0);
         }
 
-        if (mode === "tailscale" && tailscaleAddress() === undefined) {
-            log(yellow("  Tailscale is not connected on this machine."));
-        } else if (mode === "cloudflare") {
-            binary = await ensureCloudflared();
-
-            if (binary !== undefined) {
-                break;
-            }
-        } else {
-            break;
+        if (chosen === "unready") {
+            fail(
+                interactive && options.yes && options.access === undefined
+                    ? "Fix the problem above, or start without -y to pick another access mode."
+                    : "Fix the problem above, or pick another access mode with --access.",
+            );
         }
 
-        if (!interactive || options.access !== undefined) {
-            fail("Pick another access mode, or fix the problem above.");
-        }
-
-        mode = undefined;
+        mode = chosen.mode;
+        binary = chosen.binary;
     }
 
     state.mode = mode;

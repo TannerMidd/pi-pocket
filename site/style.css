@@ -1,6 +1,7 @@
 /*
  * Pi Pocket's site. Same theme as the app: Tokyo Night colors, Omarchy's square shapes and thin borders,
- * JetBrains Mono throughout, and the cyan-to-green active gradient as the accent.
+ * JetBrains Mono throughout, and the cyan-to-green active gradient as the accent. It follows the system's
+ * light or dark setting; the screenshots of the app stay in Tokyo Night.
  */
 @font-face {
     font-family: "Pocket Mono";
@@ -33,10 +34,48 @@
     --err-soft: rgba(247, 118, 142, 0.1);
     --purple: #bb9af7;
     --code-bg: #0e0e14;
+    --on-accent: #0e0e14;
+    --nav-bg: rgba(19, 20, 28, 0.94);
+    --focus: #33ccff;
     --active: linear-gradient(45deg, #33ccff, #00ff99);
+    /* Text in the gradient: the same colors where they read, darker ones on a light page. */
+    --active-text: var(--active);
     --mono: "Pocket Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --max: 1160px;
     color-scheme: dark;
+}
+
+/* Light: the same layout on paper. Every text color keeps a contrast of 4.5:1 or more on these backgrounds. */
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg: #f5f6fa;
+        --panel: #eceef4;
+        --card: #ffffff;
+        --card-2: #e8ebf2;
+        --raised: #e1e5ef;
+        --line: #d4d9e5;
+        --line-strong: #b4bccf;
+        --text: #1f2335;
+        --body: #3b4261;
+        --muted: #5c6383;
+        --accent: #2a56c6;
+        --accent-soft: rgba(42, 86, 198, 0.1);
+        --brand: #a64f00;
+        --ok: #33701c;
+        --ok-soft: rgba(51, 112, 28, 0.1);
+        --warn: #7d5300;
+        --warn-soft: rgba(196, 140, 40, 0.1);
+        --warn-line: rgba(125, 83, 0, 0.5);
+        --err: #b8204a;
+        --err-soft: rgba(184, 32, 74, 0.07);
+        --purple: #7139c4;
+        --code-bg: #eef0f5;
+        --on-accent: #ffffff;
+        --nav-bg: rgba(245, 246, 250, 0.94);
+        --focus: #0b6bb8;
+        --active-text: linear-gradient(45deg, #0a74b5, #0b7d50);
+        color-scheme: light;
+    }
 }
 
 * {
@@ -68,6 +107,13 @@ a:hover {
     text-underline-offset: 3px;
 }
 
+/* Links inside running text are underlined, so they do not rely on color alone. */
+:is(p, small, .term-foot, figcaption) a:not(.btn) {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
 img,
 svg {
     display: block;
@@ -96,8 +142,22 @@ code {
 }
 
 :focus-visible {
-    outline: 2px solid #33ccff;
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
+}
+
+kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 0.35em;
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+    background: var(--card);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9em;
+    line-height: 1.5;
+    text-align: center;
 }
 
 .wrap {
@@ -172,7 +232,7 @@ code {
     position: sticky;
     top: 0;
     z-index: 10;
-    background: rgba(19, 20, 28, 0.94);
+    background: var(--nav-bg);
     border-bottom: 1px solid var(--line);
 }
 
@@ -296,7 +356,7 @@ code {
 }
 
 .grad {
-    background: var(--active);
+    background: var(--active-text);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -379,8 +439,9 @@ code {
     vertical-align: 2px;
 }
 
-/* ── Device mockup: a faithful, static rendering of the app's chat screen ── */
+/* ── Screenshots of the app ─────────────────────────────── */
 
+/* A phone screenshot in the active gradient's frame. */
 .device {
     position: relative;
     width: 100%;
@@ -390,7 +451,8 @@ code {
     background: var(--active);
 }
 
-.device::before {
+/* A glow behind the hero's phone. The hero clips it; other sections would grow wider with it. */
+.hero .device::before {
     content: "";
     position: absolute;
     inset: -40px;
@@ -398,352 +460,31 @@ code {
     background: radial-gradient(closest-side, rgba(51, 204, 255, 0.16), transparent);
 }
 
-.screen {
-    display: flex;
-    flex-direction: column;
-    height: 640px;
-    background: var(--bg);
-    font-size: 12px;
-    line-height: 1.55;
-    overflow: hidden;
-    text-align: left;
+.device img,
+.shot img {
+    width: 100%;
+    height: auto;
+    background: #13141c;
 }
 
-.ui-top {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
+/* A wide screenshot, with a caption under it. The image links to itself, to see it whole on a phone. */
+.shot {
+    margin: 0 0 40px;
 }
 
-.ui-menu {
-    width: 15px;
-    height: 11px;
-    flex: none;
-    border-top: 1.5px solid var(--muted);
-    border-bottom: 1.5px solid var(--muted);
-    position: relative;
-}
-
-.ui-menu::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 3.25px;
-    border-top: 1.5px solid var(--muted);
-}
-
-.ui-title {
-    flex: 1;
-    min-width: 0;
-    line-height: 1.35;
-}
-
-.ui-title b {
+.shot a {
     display: block;
-    color: var(--text);
-    font-size: 12.5px;
 }
 
-.ui-title span {
+.shot img {
+    border: 1px solid var(--line-strong);
+}
+
+.shot figcaption {
+    max-width: 52em;
+    margin-top: 12px;
+    font-size: 13px;
     color: var(--muted);
-    font-size: 10.5px;
-}
-
-.avatars {
-    display: flex;
-}
-
-.av {
-    display: grid;
-    place-items: center;
-    width: 23px;
-    height: 23px;
-    flex: none;
-    background: var(--card-2);
-    color: var(--who, var(--accent));
-    border: 1px solid var(--who, var(--accent));
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-}
-
-.avatars .av + .av {
-    margin-left: -4px;
-}
-
-.av.away {
-    opacity: 0.45;
-}
-
-.ui-body {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 11px;
-    padding: 14px 12px;
-    overflow: hidden;
-}
-
-.ui-author {
-    align-self: flex-end;
-    margin-bottom: -7px;
-    font-size: 10px;
-    color: var(--muted);
-}
-
-.ui-bubble {
-    align-self: flex-end;
-    max-width: 88%;
-    background: var(--raised);
-    border: 1px solid var(--line);
-    border-right: 2px solid var(--accent);
-    padding: 7px 10px;
-    color: var(--text);
-}
-
-.ui-text code {
-    font-size: 11px;
-}
-
-.ui-tool {
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--ok);
-    background: var(--card);
-}
-
-.ui-tool.running {
-    border-left-color: var(--accent);
-}
-
-.ui-tool-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 9px;
-    min-height: 32px;
-}
-
-.ui-tool-head .ic {
-    width: 16px;
-    flex: none;
-    text-align: center;
-    color: var(--accent);
-    font-size: 11px;
-}
-
-.ui-tool-head .lbl {
-    color: var(--text);
-    font-weight: 600;
-}
-
-.ui-tool-head .subj {
-    flex: 1;
-    min-width: 0;
-    color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.ui-tool-head .ok {
-    color: var(--ok);
-}
-
-.ui-diff {
-    margin: 0;
-    padding: 6px 0;
-    background: var(--code-bg);
-    border-top: 1px solid var(--line);
-    font: 10.5px/1.6 var(--mono);
-    white-space: pre;
-    overflow: hidden;
-    color: var(--muted);
-}
-
-.ui-diff span {
-    display: block;
-    padding: 0 9px;
-}
-
-.ui-diff .del {
-    color: var(--err);
-    background: var(--err-soft);
-}
-
-.ui-diff .add {
-    color: var(--ok);
-    background: var(--ok-soft);
-}
-
-.ui-out {
-    margin: 0;
-    padding: 6px 9px;
-    background: var(--code-bg);
-    border-top: 1px solid var(--line);
-    font: 10.5px/1.6 var(--mono);
-    color: var(--muted);
-    white-space: pre;
-    overflow: hidden;
-}
-
-.ui-out .pass {
-    color: var(--ok);
-}
-
-.spin {
-    width: 11px;
-    height: 11px;
-    flex: none;
-    border: 1.5px solid var(--line-strong);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
-
-.ui-typing {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 10.5px;
-    color: var(--muted);
-    margin-top: auto;
-}
-
-.dots {
-    display: inline-flex;
-    gap: 3px;
-}
-
-.dots i {
-    width: 4px;
-    height: 4px;
-    background: var(--who, var(--muted));
-    animation: blink 1.2s infinite;
-}
-
-.dots i:nth-child(2) {
-    animation-delay: 0.2s;
-}
-
-.dots i:nth-child(3) {
-    animation-delay: 0.4s;
-}
-
-.ui-compose {
-    padding: 8px 10px 8px;
-    border-top: 1px solid var(--line);
-}
-
-.ui-input {
-    padding: 1px;
-    background: var(--active);
-}
-
-.ui-input-inner {
-    background: var(--card);
-    padding: 9px 10px 8px;
-}
-
-.ui-placeholder {
-    color: var(--text);
-}
-
-.caret {
-    display: inline-block;
-    width: 6px;
-    height: 13px;
-    vertical-align: -2px;
-    background: #33ccff;
-    animation: caret 1s steps(1) infinite;
-}
-
-.ui-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 8px;
-}
-
-.chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 23px;
-    padding: 0 8px;
-    border: 1px solid var(--line);
-    background: var(--card-2);
-    color: var(--body);
-    font-size: 10.5px;
-    white-space: nowrap;
-}
-
-.chip .glyph {
-    color: var(--brand);
-}
-
-.chip.on {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
-.ui-round {
-    display: grid;
-    place-items: center;
-    width: 27px;
-    height: 27px;
-    margin-left: auto;
-    border: 1px solid var(--err);
-    color: var(--err);
-}
-
-.ui-round i {
-    width: 8px;
-    height: 8px;
-    background: currentColor;
-}
-
-.ui-status {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 5px;
-    padding-top: 7px;
-    font-size: 9.5px;
-    color: var(--muted);
-}
-
-.ui-status .sep {
-    opacity: 0.6;
-}
-
-.ui-status .guard {
-    color: var(--ok);
-}
-
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@keyframes blink {
-    0%,
-    100% {
-        opacity: 0.25;
-    }
-    40% {
-        opacity: 1;
-    }
-}
-
-@keyframes caret {
-    50% {
-        opacity: 0;
-    }
 }
 
 /* ── Sections ────────────────────────────────────────────── */
@@ -787,6 +528,11 @@ code {
 .split-copy > p {
     margin-top: 16px;
     font-size: 16px;
+}
+
+.split-copy > .note {
+    margin-top: 28px;
+    font-size: 13.5px;
 }
 
 /* Feature grid */
@@ -849,6 +595,30 @@ code {
     padding: 4px 11px;
     font-size: 12px;
     color: var(--body);
+}
+
+/* Smaller features, each with a sentence on what it does. */
+
+.more {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+}
+
+.more li {
+    padding: 16px 20px 18px;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.more b {
+    color: var(--text);
 }
 
 /* Split sections: copy beside an illustration */
@@ -986,101 +756,6 @@ code {
     color: var(--accent);
 }
 
-/* People panel */
-
-.tabs {
-    display: flex;
-    border-bottom: 1px solid var(--line);
-    font-size: 12px;
-}
-
-.tabs span {
-    padding: 9px 16px;
-    color: var(--muted);
-    border-bottom: 2px solid transparent;
-}
-
-.tabs .on {
-    color: var(--text);
-    border-bottom-color: var(--accent);
-}
-
-.chat {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 18px 16px;
-    font-size: 13px;
-}
-
-.msg {
-    display: grid;
-    grid-template-columns: 26px minmax(0, 1fr);
-    gap: 10px;
-}
-
-.msg .av {
-    width: 26px;
-    height: 26px;
-    font-size: 11px;
-}
-
-.msg-name {
-    font-size: 11.5px;
-    color: var(--who);
-    font-weight: 600;
-}
-
-.msg-name time {
-    margin-left: 6px;
-    color: var(--muted);
-    font-weight: 400;
-}
-
-.msg-text {
-    color: var(--text);
-}
-
-.mention {
-    color: var(--accent);
-    background: var(--accent-soft);
-    padding: 0 3px;
-}
-
-.quote {
-    margin-top: 6px;
-    border-left: 2px solid var(--brand);
-    padding: 3px 9px;
-    background: var(--card-2);
-    color: var(--body);
-    font-size: 12px;
-}
-
-.event {
-    text-align: center;
-    font-size: 11.5px;
-    color: var(--muted);
-}
-
-.event b {
-    color: var(--body);
-    font-weight: 500;
-}
-
-.drive {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 11px 16px;
-    border-top: 1px solid var(--line);
-    background: var(--card-2);
-    font-size: 12px;
-}
-
-.drive .grow {
-    flex: 1;
-}
-
 /* Live-edit band */
 
 .flow {
@@ -1147,9 +822,9 @@ code {
     background: var(--active);
 }
 
-.mode code {
+.mode > code {
     font-size: 12px;
-    color: var(--muted);
+    color: var(--body);
 }
 
 .mode h3 {
@@ -1172,7 +847,7 @@ code {
     font-size: 18px;
 }
 
-.map .card code {
+.map .card > code {
     display: inline-block;
     margin-bottom: 16px;
     font-size: 12.5px;
@@ -1185,12 +860,13 @@ code {
     color: var(--muted);
 }
 
-/* Guard approval */
+/* Guard approval, as the app draws it */
 
 .approval {
-    border: 2px solid var(--warn);
+    border: 1px solid var(--warn);
+    border-left-width: 3px;
     background: var(--warn-soft);
-    padding: 18px 20px 20px;
+    padding: 16px 18px 18px;
 }
 
 .approval-head {
@@ -1202,36 +878,34 @@ code {
     font-weight: 700;
 }
 
-.approval-head .verdict {
-    margin-left: auto;
-    border: 1px solid var(--warn-line);
-    padding: 1px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+.approval-head svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+
+.approval-reason {
+    margin-top: 10px;
+    font-size: 13px;
 }
 
 .approval pre {
-    margin: 14px 0 12px;
+    margin: 12px 0 0;
     padding: 10px 12px;
     background: var(--code-bg);
     border: 1px solid var(--line);
-    color: var(--text);
+    color: var(--ok);
     font: 13px/1.6 var(--mono);
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.approval-reason {
-    font-size: 13px;
-}
-
 .approval-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 10px;
-    margin-top: 16px;
+    margin-top: 14px;
 }
 
 .approval-actions .btn {
@@ -1241,21 +915,19 @@ code {
 }
 
 .btn-allow {
-    background: var(--ok);
-    color: var(--accent-ink);
+    background: var(--accent);
+    color: var(--on-accent);
     border: 0;
 }
 
 .btn-deny {
-    color: var(--err);
-    border-color: var(--err);
-    background: transparent;
+    background: var(--card);
 }
 
 .approval-actions small {
-    margin-left: auto;
+    margin-right: auto;
     font-size: 11.5px;
-    color: var(--muted);
+    color: var(--body);
 }
 
 .callout {
@@ -1313,8 +985,11 @@ code {
 }
 
 .steps b {
-    display: block;
     color: var(--text);
+}
+
+.steps b:first-child {
+    display: block;
 }
 
 .term {
@@ -1348,7 +1023,7 @@ code {
 .term-tabs button[aria-selected="true"] {
     color: var(--text);
     background: var(--code-bg);
-    border-bottom-color: #33ccff;
+    border-bottom-color: var(--focus);
 }
 
 .term-tabs .copy {
@@ -1683,8 +1358,9 @@ code {
         order: 0;
     }
 
-    .grid {
-        grid-template-columns: repeat(2, 1fr);
+    .grid,
+    .more {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .access {
@@ -1703,7 +1379,7 @@ code {
 
 /* The section links and the guides need the full width of the page. Narrower screens show only
    the guides and scroll to the sections. */
-@media (max-width: 1199px) {
+@media (max-width: 1239px) {
     .nav-links a:not(.nav-guide),
     .nav-sep {
         display: none;
@@ -1767,6 +1443,7 @@ code {
     }
 
     .grid,
+    .more,
     .access,
     .flow {
         grid-template-columns: minmax(0, 1fr);
@@ -1779,10 +1456,6 @@ code {
 
     .step:last-child {
         border-bottom: 0;
-    }
-
-    .screen {
-        height: 600px;
     }
 
     .timeline li {

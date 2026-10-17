@@ -8,7 +8,8 @@
             name="description"
             content="How Pi Pocket is built: one Node.js process, one SQLite file through Pi Durable, and a web app with no build step. Architecture, request path, durability rules, state, extensions, and security."
         />
-        <meta name="theme-color" content="#13141c" />
+        <meta name="theme-color" content="#13141c" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)" />
         <link rel="canonical" href="https://tannermidd.github.io/pi-pocket/engineering.html" />
         <link rel="icon" href="icon.svg" type="image/svg+xml" />
         <link
@@ -45,6 +46,7 @@
                     <a href="#durability">Durability</a>
                     <a href="#state">State</a>
                     <a href="#extensions">Extensions</a>
+                    <a href="#assistant">PiP</a>
                     <a href="#practices">Practices</a>
                     <span class="nav-sep" aria-hidden="true"></span>
                     <a class="nav-guide" href="durable.html"
@@ -105,8 +107,9 @@
                         <p>
                             Browsers talk to one server over a JSON API and an event stream. The
                             server keeps its state in Pi Durable's storage and rebuilds the rest
-                            from it when it starts. Nothing a browser sees exists only in memory,
-                            except who is here and who is typing.
+                            from it when it starts. Most of what a browser sees is stored. A few
+                            live things are kept only in memory: who is here and typing, calls
+                            waiting for approval, and the built-in browser's pages.
                         </p>
                     </div>
 
@@ -126,7 +129,8 @@
                                 <div class="parts">
                                     <span>/api routes</span><span>event stream</span
                                     ><span>uploads</span><span>sandboxed artifacts</span
-                                    ><span>browser frames</span><span>invites</span>
+                                    ><span>browser frames</span><span>invites</span
+                                    ><span>webhooks</span>
                                 </div>
                             </div>
                             <div class="wire">calls</div>
@@ -134,8 +138,10 @@
                                 <div class="layer-head"><b>PocketApp</b><code>app.ts</code></div>
                                 <div class="parts">
                                     <span>rooms</span><span>commands</span><span>collab</span
-                                    ><span>alerts</span><span>spend</span><span>schedules</span
-                                    ><span>goals</span><span>changes</span><span>worktrees</span>
+                                    ><span>attribution</span><span>alerts</span><span>spend</span
+                                    ><span>schedules</span><span>goals</span><span>shell</span
+                                    ><span>memory</span><span>pip</span><span>watches</span
+                                    ><span>hooks</span><span>providers</span>
                                 </div>
                             </div>
                             <div class="wire">commits · commit listener</div>
@@ -188,8 +194,17 @@
                             <div class="layer">
                                 <div class="layer-head"><b>Pi</b><code>~/.pi/agent/</code></div>
                                 <p>
-                                    Sign-ins, settings, skills, and prompt templates, shared with
-                                    the Pi command line, and Lancet Guard when it is installed.
+                                    Sign-ins, settings, skills, prompt templates, and project trust,
+                                    shared with the Pi command line, and Lancet Guard when it is
+                                    installed. Pi's own sessions are only read, to continue one.
+                                </p>
+                            </div>
+                            <div class="layer">
+                                <div class="layer-head"><b>GitHub</b><code>github.ts</code></div>
+                                <p>
+                                    Pull request and repository watches, webhooks' checks of who can
+                                    write to a repository, and PiP's clones use the
+                                    <code>gh</code> command signed in on the server.
                                 </p>
                             </div>
                         </div>
@@ -349,9 +364,9 @@
                             <h3>Sent once</h3>
                             <p>
                                 Every message to Pi has a request id, which also says whose work it
-                                is. A retried send, a resend, a <code>!</code> command, or a
-                                scheduled message sent again after a restart finds the one already
-                                there.
+                                is. A retried send, a resend, a <code>!</code> command, a scheduled
+                                message, or a watch's message sent again after a restart finds the
+                                one already there.
                             </p>
                         </article>
                         <article class="card">
@@ -368,9 +383,9 @@
                             <h3>Rerun only when harmless</h3>
                             <p>
                                 A tool call cut off by a restart runs again only if running it twice
-                                is harmless. Otherwise the model is told it was interrupted and
-                                checks what happened. A <code>!</code> command someone ran is never
-                                run twice: its entry says it was cut off.
+                                is harmless, as for artifacts, schedules, memory, and PiP's tools.
+                                Otherwise the model is told it was interrupted and checks what
+                                happened. A <code>!</code> command someone ran is never run twice.
                             </p>
                         </article>
                         <article class="card">
@@ -514,6 +529,47 @@
                                     <td>starts empty</td>
                                 </tr>
                                 <tr>
+                                    <td><code>pocket.pr-watch</code></td>
+                                    <td>
+                                        A session's watch of its pull request: how it stands, and
+                                        what Pi was told
+                                    </td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.pip-follows</code></td>
+                                    <td>PiP's follows, by the tool call that made each</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.pip-asked</code></td>
+                                    <td>Which provider pays, when PiP asked its person</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.pip-compaction</code></td>
+                                    <td>PiP's own summaries, so each one's cost counts once</td>
+                                    <td>starts empty</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.memory</code></td>
+                                    <td>
+                                        Lessons Pi keeps across sessions, waiting or approved. One
+                                        for the server.
+                                    </td>
+                                    <td>—</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.hooks</code></td>
+                                    <td>Webhooks. One for the server.</td>
+                                    <td>—</td>
+                                </tr>
+                                <tr>
+                                    <td><code>pocket.repo-watches</code></td>
+                                    <td>Repository watches. One for the server.</td>
+                                    <td>—</td>
+                                </tr>
+                                <tr>
                                     <td><code>pocket.spend</code></td>
                                     <td>
                                         Spend per person, and what was counted. One for the server.
@@ -533,6 +589,13 @@
                         <span class="tag"><b>worktrees/</b> sessions' git worktrees</span>
                         <span class="tag"><b>extensions/</b> the owner's drop-ins</span>
                         <span class="tag"><b>browser/</b> the built-in browser's profile</span>
+                        <span class="tag"><b>repos/</b> clones PiP makes of repositories</span>
+                        <span class="tag"><b>launcher.json</b> the launcher's access choice</span>
+                        <span class="tag"
+                            ><b>bin/</b> <code>cloudflared</code>, when the launcher downloads
+                            it</span
+                        >
+                        <span class="tag"><b>harness.lock</b> one server per data folder</span>
                     </div>
                     <p class="note">
                         All of it is in <code>~/.pi-pocket/</code>, or wherever
@@ -616,6 +679,27 @@
                                 hooks as a direct one.
                             </p>
                         </li>
+                        <li>
+                            <code>memory.ts</code><span class="kinds">tool · section</span>
+                            <p>
+                                Lessons Pi keeps across sessions. Pi proposes them with its tool;
+                                the section lists the approved ones for the session's project.
+                            </p>
+                        </li>
+                        <li>
+                            <code>pip.ts</code><span class="kinds">tools · section · task</span>
+                            <p>
+                                PiP's tools, its prompt, and the follow task that reports when a
+                                session's run ends. Only PiP's own conversation selects it.
+                            </p>
+                        </li>
+                        <li>
+                            <code>triggers.ts</code><span class="kinds">tool · tasks</span>
+                            <p>
+                                Pull request and repository watches, and Pi's
+                                <code>watch_pr</code> tool. Webhooks need it on.
+                            </p>
+                        </li>
                     </ol>
                     <p class="note">
                         The owner's own modules in <code>~/.pi-pocket/extensions/</code> load after
@@ -625,8 +709,82 @@
                 </div>
             </section>
 
+            <!-- PiP and triggers -->
+            <section class="section" id="assistant">
+                <div class="wrap">
+                    <div class="section-head">
+                        <span class="kicker">PiP and triggers</span>
+                        <h2>Work that crosses sessions.</h2>
+                        <p>
+                            PiP, watches, and webhooks act for one person, with that person's checks
+                            and spend limit. Like memory, each keeps what it needs in storage, so it
+                            carries on after a restart.
+                        </p>
+                    </div>
+                    <div class="grid map">
+                        <article class="card">
+                            <code>pip.ts</code>
+                            <h3>PiP's conversation</h3>
+                            <p>
+                                A conversation marked as PiP's and left out of every session list.
+                                It selects its own extensions, without bash, write, or edit. Only
+                                its person can see it, and its tools act through the same commands
+                                as that person.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>pocket.pip-follows</code>
+                            <h3>Follows</h3>
+                            <p>
+                                A follow is a durable task that reports to PiP when a session's run
+                                ends. A message PiP sends has a request id made from its tool call,
+                                so a replayed call neither sends nor follows twice.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>watches.ts</code>
+                            <h3>Watches</h3>
+                            <p>
+                                A watch is a durable task that sleeps until its next look, asks
+                                GitHub through <code>gh</code>, and stores what to tell Pi in its
+                                checkpoint before it sends. The send's request id is the task and
+                                its count, so a restart sends it once.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>hooks.ts</code>
+                            <h3>Webhooks</h3>
+                            <p>
+                                <code>/hook/…</code> is outside <code>/api</code> and its sign-in. A
+                                post gets in only with its hook's secret or, for GitHub, a signature
+                                made with it. What it brings reaches Pi between tags, as data
+                                (<code>fence.ts</code>).
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>memory.ts</code>
+                            <h3>Memory</h3>
+                            <p>
+                                One document for the app. A project is keyed by its git common
+                                folder, so a repository and its worktrees share lessons. A lesson Pi
+                                or a guest saves waits until the owner approves the text they saw.
+                            </p>
+                        </article>
+                        <article class="card">
+                            <code>model-names.ts</code>
+                            <h3>Who chooses models</h3>
+                            <p>
+                                Only people do. Subagents run on their session's model, or one the
+                                owner allowed. PiP passes a model only when its person named it: in
+                                their own messages, or in a watch or webhook they set up.
+                            </p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
             <!-- Security -->
-            <section class="section" id="security">
+            <section class="section alt" id="security">
                 <div class="wrap split">
                     <div class="split-copy">
                         <span class="kicker">Security</span>
@@ -638,13 +796,14 @@
                         <ul class="points">
                             <li>
                                 <b>Sign-in.</b> Random tokens, stored hashed, in an HttpOnly,
-                                SameSite=Lax cookie. Invites are one-time links that expire after 15
-                                minutes.
+                                SameSite=Lax cookie. Invites work once and last 15 minutes, an hour,
+                                a day, or a week; an owner invite always lasts 15 minutes.
                             </li>
                             <li>
-                                <b>Requests.</b> Anything that changes something must carry an
-                                <code>X-Pocket</code> header, which a form on another site cannot
-                                send.
+                                <b>Requests.</b> Anything under <code>/api</code> that changes
+                                something must carry an <code>X-Pocket</code> header, which a form
+                                on another site cannot send. Webhook posts go to
+                                <code>/hook/…</code> and need their hook's secret instead.
                             </li>
                             <li>
                                 <b>Pages.</b> The app loads nothing from other sites: its policy
@@ -660,6 +819,12 @@
                             <li>
                                 <b>Roles.</b> Owner, steer, or view, in every session or only one.
                                 Lancet Guard approvals can require someone other than whoever asked.
+                            </li>
+                            <li>
+                                <b>From outside.</b> Webhooks and watches act as the person who set
+                                them up. GitHub's issues, pull requests, and comments count only
+                                from people who can write to the repository, unless that person
+                                chose <b>From anyone</b>.
                             </li>
                         </ul>
                     </div>
@@ -679,7 +844,7 @@
             </section>
 
             <!-- Practices -->
-            <section class="section alt" id="practices">
+            <section class="section" id="practices">
                 <div class="wrap">
                     <div class="section-head">
                         <span class="kicker">Practices</span>
@@ -714,7 +879,8 @@
                             <p>
                                 Tests run the real server against a scripted model: real SQLite,
                                 real git repositories, and restarts by reopening the same data
-                                folder, with the clock moved forward for schedules.
+                                folder, with the clock moved forward for schedules. Parts of the web
+                                app are tested in a real Chromium.
                             </p>
                         </article>
                         <article class="card">

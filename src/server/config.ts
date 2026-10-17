@@ -69,6 +69,11 @@ interface PocketConfig {
     approvals?: ApprovalRule;
     /** The tokens of context above which PiP compacts itself once idle; 0: only as sessions do. Absent: the default. */
     pipCompactAt?: number;
+    /**
+     * The models (`provider/modelId`) Pi may start subagents on besides their session's own, as the owner allowed them.
+     * Absent or empty: none, and subagents always run on their session's model.
+     */
+    subagentModels?: string[];
 }
 
 /** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
@@ -164,6 +169,24 @@ export class ConfigStore {
             delete this.#config.pipCompactAt;
         } else {
             this.#config.pipCompactAt = tokens;
+        }
+
+        this.save();
+    }
+
+    /** The models Pi may start subagents on besides their session's own (`provider/modelId`); empty: none. */
+    get subagentModels(): readonly string[] {
+        const models = this.#config.subagentModels;
+
+        // Read from a file people may have edited: only strings count.
+        return Array.isArray(models) ? models.filter((each) => typeof each === "string") : [];
+    }
+
+    set subagentModels(models: readonly string[]) {
+        if (models.length === 0) {
+            delete this.#config.subagentModels;
+        } else {
+            this.#config.subagentModels = [...models];
         }
 
         this.save();

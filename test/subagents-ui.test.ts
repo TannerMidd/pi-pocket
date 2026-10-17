@@ -42,6 +42,11 @@ const route: FauxResponseStep = (request) => {
     const { role, text } = lastText(request as never);
     const subagent = /You are the subagent \\"([^\\]+)\\"/.exec(all)?.[1];
 
+    // Their model fails: Pi hears they failed, and the board says they need you.
+    if (subagent?.startsWith("broken")) {
+        return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Bad request" });
+    }
+
     if (subagent?.startsWith("slow") && role !== "toolResult") {
         return fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 30" })], {
             stopReason: "toolUse",
@@ -61,6 +66,15 @@ const route: FauxResponseStep = (request) => {
                     message: `Check part ${index + 1} of the checkout branch and report what fails.`,
                 }),
             ),
+            { stopReason: "toolUse" },
+        );
+    }
+
+    const breaking = /^break (\S+)$/.exec(text);
+
+    if (breaking !== null) {
+        return fauxAssistantMessage(
+            [fauxToolCall("subagent", { action: "spawn", name: breaking[1]!, message: "Look." })],
             { stopReason: "toolUse" },
         );
     }
@@ -242,6 +256,168 @@ test(
             ),
             true,
         );
+    },
+);
+
+test(
+    "a child opened directly returns to its main session above the input on desktop and mobile",
+    real,
+    async () => {
+        const id = await newSession(app);
+        const title = ("Checkout investigation · " + "a long main-session title ".repeat(6))
+            .slice(0, 110)
+            .trim();
+
+        parentSleep = 0;
+        await app.commands.updateSession(id, owner(app), { title });
+        await app.commands.submit(id, owner(app), { text: "one more", requestId: `child-${id}` });
+        await until(async () => {
+            const doc = await app.harness.snapshot(SubagentsDoc, id, context);
+
+            return !!doc?.agents.extra && !app.isBusy(doc.agents.extra.conversationId);
+        }, "the child answered");
+
+        const child = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.extra!
+            .conversationId;
+        const other = await newSession(app);
+        const label = `Back to main session: ${title}`;
+        const long = Array.from({ length: 100 }, (_, index) => `Checkout detail ${index + 1}`).join(
+            "\n",
+        );
+
+        await app.commands.submit(child, owner(app), { text: long, requestId: `long-${child}` });
+        await until(async () => !app.isBusy(child), "the long message answered");
+
+        const measure = async () => {
+            await frames();
+
+            return inPage<{
+                top: number;
+                height: number;
+                visible: boolean;
+                inputVisible: boolean;
+                scrolls: boolean;
+                scrolled: number;
+            }>(
+                `const button = document.querySelector(".parent-session");
+                const scroller = document.querySelector(".scroller");
+                const box = button.getBoundingClientRect();
+                const input = document.querySelector(".composer textarea").getBoundingClientRect();
+
+                return JSON.stringify({
+                    top: box.top,
+                    height: box.height,
+                    visible: box.top >= scroller.getBoundingClientRect().bottom - 1 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth,
+                    inputVisible: input.height > 0 && input.top >= box.bottom && input.bottom <= innerHeight,
+                    scrolls: scroller.scrollHeight > scroller.clientHeight,
+                    scrolled: scroller.scrollTop,
+                });`,
+            );
+        };
+
+        try {
+            for (const viewport of [
+                VIEWPORTS.mobile,
+                { width: 320, height: 400, scale: 1, mobile: true },
+                VIEWPORTS.desktop,
+            ]) {
+                await page.setViewport(viewport);
+                // Previous history points elsewhere: this action must follow the parent relationship.
+                await page.navigate(`${base}/s/${other}`);
+                await see(
+                    `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+                    "the unrelated session",
+                );
+                assert.equal(
+                    await textOf(".parent-session"),
+                    null,
+                    "ordinary sessions have no return button",
+                );
+                await page.navigate(`${base}/s/${child}`);
+                await see(
+                    `return JSON.stringify(document.querySelector(".parent-session")?.getAttribute("aria-label") === ${JSON.stringify(label)})`,
+                    "the return button names the main session",
+                );
+                await says(".scroller", /Checkout detail 100/);
+                assert.equal(await textOf(".title-sub"), `subagent of ${title}`);
+                assert.equal(
+                    await inPage<number>(
+                        `return JSON.stringify(document.querySelectorAll('.topbar [aria-label^="Back to main session"], .transcript .breadcrumb').length)`,
+                    ),
+                    0,
+                    "no duplicate return controls above the conversation",
+                );
+                await settled();
+                await page.scroll(undefined, 100000);
+                await see(
+                    `return JSON.stringify(document.querySelector(".scroller").scrollTop > 0)`,
+                    "the long conversation scrolled",
+                );
+                const before = await measure();
+
+                assert.ok(before.height >= 44, "the button has a large click target");
+                assert.ok(
+                    before.visible && before.inputVisible && before.scrolls,
+                    "both navigation and input fit outside long content",
+                );
+                await page.scroll(undefined, -100000);
+                await see(
+                    `return JSON.stringify(document.querySelector(".scroller").scrollTop < ${before.scrolled})`,
+                    "the conversation scrolled back",
+                );
+                assert.equal(
+                    (await measure()).top,
+                    before.top,
+                    "scrolling does not move the return button",
+                );
+                await settled();
+                await page.click({ selector: ".parent-session" });
+                await see(
+                    `return JSON.stringify(location.pathname === "/s/${id}" && document.querySelector(".title-main")?.textContent === ${JSON.stringify(title)} && document.querySelector(".composer textarea") !== null)`,
+                    "the main session opened",
+                );
+                assert.equal(
+                    await textOf(".parent-session"),
+                    null,
+                    "the main session has no return button",
+                );
+            }
+
+            const { user, token } = app.config.addUser("Return-navigation viewer", "viewer");
+            const viewer = await browsers.open(3);
+
+            try {
+                await viewer.setViewport(VIEWPORTS.mobile);
+                await viewer.navigate(`${base}/login?token=${encodeURIComponent(token)}`);
+                await viewer.navigate(`${base}/s/${child}`);
+                await until(
+                    async () =>
+                        JSON.parse(
+                            await viewer.evaluate(
+                                `return JSON.stringify(document.querySelector(".view-only") !== null && document.querySelector(".parent-session")?.getAttribute("aria-label") === ${JSON.stringify(label)})`,
+                            ),
+                        ),
+                    "the viewer has the same return action",
+                );
+                await settled();
+                await viewer.click({ selector: ".parent-session" });
+                await until(
+                    async () =>
+                        JSON.parse(
+                            await viewer.evaluate(
+                                `return JSON.stringify(location.pathname === "/s/${id}" && document.querySelector(".title-main")?.textContent === ${JSON.stringify(title)} && document.querySelector(".view-only") !== null)`,
+                            ),
+                        ),
+                    "the viewer returned to the main session",
+                );
+            } finally {
+                await browsers.close(3);
+                app.config.removeUser(user.id);
+            }
+        } finally {
+            await app.commands.abort(id, owner(app));
+            await page.setViewport(VIEWPORTS.mobile);
+        }
     },
 );
 
@@ -1143,5 +1319,386 @@ test(
             `return JSON.stringify(document.querySelector(".board") === null)`,
             "back from the board",
         );
+    },
+);
+
+/** A session at `size` whose subagent `name` fails, once Pi has heard so. */
+async function failed(
+    size: { width: number; height: number; scale: number; mobile: boolean },
+    name: string,
+): Promise<{ id: ConversationId; agent: ConversationId }> {
+    const id = await newSession(app);
+
+    await page.setViewport(size);
+    await page.navigate(`${base}/s/${id}`);
+    await see(
+        `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+        "the session",
+    );
+    await app.commands.submit(id, owner(app), { text: `break ${name}`, requestId: `b-${name}` });
+    await until(
+        async () =>
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents[name]?.failed ===
+                true && !app.isBusy(id),
+        `${name} failed, and Pi idle`,
+        15_000,
+    );
+
+    return {
+        id,
+        agent: (await app.harness.snapshot(SubagentsDoc, id, context))!.agents[name]!
+            .conversationId,
+    };
+}
+
+/**
+ * Whether the rail, the session's row, and the board's Needs you say a failure needs you, and how many failures of the
+ * session the session list says nobody has dealt with.
+ */
+const trouble = (id: ConversationId) =>
+    inPage<{ rail: boolean; row: boolean; needs: string[]; failing: number }>(`
+        const counts = (await import("/store.js")).store.state.sessions.find((each) => each.id === ${Number(id)})?.subagents ?? {};
+
+        return JSON.stringify({
+            rail: document.querySelector(".rail-agents .rail-trouble") !== null,
+            row: document.querySelector('.session-row[data-id="${id}"] .session-fork.failed') !== null,
+            needs: [...document.querySelectorAll(".board-need .board-need-main b")].map((each) => each.textContent),
+            failing: (counts.failed ?? 0) - (counts.dealt ?? 0),
+        });
+    `);
+
+test(
+    "the board: a failed subagent needs you until it is dismissed, and stays dismissed after a reload",
+    real,
+    async () => {
+        // Fresh answers: those before have used up most of them.
+        model.setResponses(Array.from({ length: 200 }, () => route));
+        const { id } = await failed(VIEWPORTS.desktop, "broken-desk");
+
+        await see(
+            `return JSON.stringify(document.querySelector('.session-row[data-id="${id}"] .session-fork.failed') !== null && document.querySelector(".rail-agents .rail-trouble") !== null)`,
+            "the session's row and the rail say it failed",
+        );
+        await settled();
+        await page.click({ selector: ".rail-agents" });
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".board-need")].some((each) => each.textContent.includes("broken-desk")))`,
+            "Needs you lists it",
+        );
+        await page.evaluate(
+            `[...document.querySelectorAll(".board-need")].find((each) => each.textContent.includes("broken-desk")).click()`,
+        );
+        await says(".board-detail .board-detail-name", /^broken-desk$/);
+        await settled();
+        await page.click({ selector: ".board-detail .board-dismiss" });
+        await see(
+            `return JSON.stringify(document.querySelector(".board-detail-state")?.textContent.trim() === "Failed · dismissed" && document.querySelector(".board-dismiss") === null)`,
+            "dismissed, and still failed",
+        );
+        assert.deepEqual(
+            await trouble(id),
+            { rail: false, row: false, needs: [], failing: 0 },
+            "nothing says it needs you",
+        );
+
+        // After a reload, still: the session list and the board come from the server.
+        await page.reload();
+        await see(
+            `return JSON.stringify(document.querySelector('.session-row[data-id="${id}"]') !== null)`,
+            "the session list again",
+        );
+        await settled();
+        await page.click({ selector: ".rail-agents" });
+        await see(
+            `return JSON.stringify(document.querySelector(".board-cell.failed") !== null)`,
+            "its square on the board",
+        );
+        assert.deepEqual(await trouble(id), { rail: false, row: false, needs: [], failing: 0 });
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".board-cell.failed").textContent.trim())`,
+            ),
+            "",
+            "its square has no ! now",
+        );
+        await page.press("Escape");
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "the board on a phone: Dismiss in the bar at the bottom; a failure opened from the board is seen",
+    real,
+    async () => {
+        const first = await failed(VIEWPORTS.mobile, "broken-phone");
+        const second = await failed(VIEWPORTS.mobile, "broken-seen");
+
+        await page.evaluate(`(await import("/store.js")).store.set({ board: true })`);
+        await see(
+            `return JSON.stringify(document.querySelector(".board.phone") !== null && document.querySelectorAll(".board-need").length === 2)`,
+            "both in Needs you, at phone size",
+        );
+        await settled();
+        await page.evaluate(
+            `[...document.querySelectorAll(".board-need")].find((each) => each.textContent.includes("broken-phone")).click()`,
+        );
+        await says(".board-bar .board-detail-name", /^broken-phone$/);
+        const size = await inPage<{ w: number; h: number }>(
+            `const r = document.querySelector(".board-bar .board-dismiss").getBoundingClientRect(); return JSON.stringify({ w: r.width, h: r.height })`,
+        );
+
+        assert.ok(size.h >= 36, `Dismiss takes a thumb: ${JSON.stringify(size)}`);
+        await settled();
+        await page.click({ selector: ".board-bar .board-dismiss" });
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".board-need")].map((each) => each.querySelector("b").textContent).join() === "broken-seen")`,
+            "only the other one needs you",
+        );
+
+        // The other, opened from the board: seen there, it needs nobody either.
+        await page.evaluate(
+            `[...document.querySelectorAll(".board-need")].find((each) => each.textContent.includes("broken-seen")).click()`,
+        );
+        await settled();
+        await page.click({ selector: ".board-bar .button.primary" });
+        await see(
+            `return JSON.stringify(location.pathname === "/s/${Number(second.agent)}")`,
+            "the subagent open",
+        );
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, second.id, context))?.agents[
+                    "broken-seen"
+                ]?.dealtAt !== undefined,
+            "its failure seen",
+        );
+        await page.reload();
+        await see(
+            `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+            "the subagent again",
+        );
+        await page.evaluate(`(await import("/store.js")).store.set({ board: true })`);
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".board-cell.failed").length >= 2)`,
+            "their squares",
+        );
+
+        // At phone size the board takes the session list's place: the list's counts say it.
+        for (const { id } of [first, second]) {
+            assert.deepEqual(await trouble(id), { rail: false, row: false, needs: [], failing: 0 });
+        }
+    },
+);
+
+test(
+    "a failure opened from its row in the subagents bar is seen: it needs nobody, on the server and in the app",
+    real,
+    async () => {
+        const { id, agent } = await failed(VIEWPORTS.desktop, "broken-row");
+        const row = `.agent-row.failed[data-peek="${Number(agent)}"] .agent-open`;
+
+        await see(
+            `return JSON.stringify(document.querySelector('.session-row[data-id="${id}"] .session-fork.failed') !== null && document.querySelector(".rail-agents .rail-trouble") !== null)`,
+            "the session's row and the rail say it failed",
+        );
+        await settled();
+        await page.click({ selector: ".agents-bar .agents-summary" });
+        await see(
+            `return JSON.stringify(document.querySelector(${JSON.stringify(row)}) !== null)`,
+            "its row in the bar",
+        );
+        await settled();
+        await page.click({ selector: row });
+        await see(
+            `return JSON.stringify(location.pathname === "/s/${Number(agent)}")`,
+            "the subagent open",
+        );
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, id, context))?.agents["broken-row"]
+                    ?.dealtAt !== undefined,
+            "its failure seen",
+        );
+        await see(
+            `return JSON.stringify(document.querySelector('.session-row[data-id="${id}"] .session-fork.failed') === null && document.querySelector(".rail-agents .rail-trouble") === null)`,
+            "the session's row and the rail clear",
+        );
+        assert.deepEqual(await trouble(id), { rail: false, row: false, needs: [], failing: 0 });
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "a failure opened from the session menu's Subagents list is seen, as from anywhere else",
+    real,
+    async () => {
+        const { id, agent } = await failed(VIEWPORTS.desktop, "broken-menu");
+
+        await see(
+            `return JSON.stringify(document.querySelector('.session-row[data-id="${id}"] .session-fork.failed') !== null)`,
+            "the session's row says it failed",
+        );
+        await page.evaluate(
+            `(await import("/store.js")).openSheet({ type: "menu" }); return "true"`,
+        );
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".sheet .list-item")].some((each) => each.textContent.includes("broken-menu")))`,
+            "the menu lists it",
+        );
+        await settled();
+        await page.evaluate(
+            `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.includes("broken-menu")).click(); return "true"`,
+        );
+        await see(
+            `return JSON.stringify(location.pathname === "/s/${Number(agent)}")`,
+            "the subagent open",
+        );
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, id, context))?.agents["broken-menu"]
+                    ?.dealtAt !== undefined,
+            "its failure seen",
+        );
+        await see(
+            `return JSON.stringify(document.querySelector('.session-row[data-id="${id}"] .session-fork.failed') === null && document.querySelector(".rail-agents .rail-trouble") === null)`,
+            "the session's row and the rail clear",
+        );
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "Dismiss is off while it is asked, and says so when the subagent failed again since",
+    real,
+    async () => {
+        const { id } = await failed(VIEWPORTS.desktop, "broken-late");
+        const button = ".board-detail .board-dismiss";
+        const disabled = () =>
+            inPage<boolean | null>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(button)})?.disabled ?? null)`,
+            );
+
+        // Its requests wait to be let go. Stale, one names a failure older than the server's, as a board that has not
+        // shown the newer one yet does.
+        await page.evaluate(`
+            const fetched = window.fetch;
+
+            window.held = [];
+            window.stale = true;
+            window.fetch = async (input, init) => {
+                if (/\\/dismiss$/.test(String(input))) {
+                    const at = JSON.parse(init.body).at - (window.stale ? 1 : 0);
+
+                    await new Promise((resolve) => window.held.push(resolve));
+
+                    return fetched(input, { ...init, body: JSON.stringify({ at }) });
+                }
+
+                return fetched(input, init);
+            };
+
+            return "true";
+        `);
+        const letGo = () =>
+            page.evaluate(`window.held.splice(0).forEach((resolve) => resolve()); return "true"`);
+
+        await settled();
+        await page.click({ selector: ".rail-agents" });
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".board-need")].some((each) => each.textContent.includes("broken-late")))`,
+            "Needs you lists it",
+        );
+        await page.evaluate(
+            `[...document.querySelectorAll(".board-need")].find((each) => each.textContent.includes("broken-late")).click()`,
+        );
+        await says(".board-detail .board-detail-name", /^broken-late$/);
+        await settled();
+
+        // Refused, as it failed again since: it says so, and Dismiss is on again.
+        await page.click({ selector: button });
+        assert.equal(await disabled(), true, "off while it is asked");
+        await letGo();
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".notice")].some((notice) => notice.textContent.includes("Not dismissed: broken-late failed again since.")))`,
+            "the notice that says so",
+        );
+        assert.equal(await disabled(), false, "on again");
+        assert.equal(
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents["broken-late"]?.dealtAt,
+            undefined,
+        );
+
+        // Dismissed: off until the board shows it.
+        await page.evaluate(`window.stale = false; return "true"`);
+        await page.click({ selector: button });
+        assert.equal(await disabled(), true, "off while it is asked");
+        await letGo();
+        await see(
+            `return JSON.stringify(document.querySelector(".board-detail-state")?.textContent.trim() === "Failed · dismissed" && document.querySelector(${JSON.stringify(button)}) === null)`,
+            "dismissed",
+        );
+        await page.press("Escape");
+        await page.setViewport(VIEWPORTS.mobile);
+    },
+);
+
+test(
+    "the activity line keeps a right-to-left subagent name in its quotes, before the clock",
+    real,
+    async () => {
+        // Its name ends in Hebrew letters, which would take the closing quote and the clock into their run.
+        const name = "broken-שרת";
+        const { id, agent } = await failed(VIEWPORTS.desktop, name);
+        const at = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents[name]!
+            .answeredAt!;
+
+        await app.commands.dismissSubagent(agent, owner(app), at);
+        await page.navigate(`${base}/s/${id}?chat=1`);
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".chat-event")].some((each) => each.textContent.includes("dealt with")))`,
+            "the activity line",
+        );
+
+        // Where each part is on screen, left to right: the name's Hebrew letters, the closing quote, the clock.
+        const where = await inPage<{ hebrew: number; quote: [number, number]; clock: number }>(`
+            const line = [...document.querySelectorAll(".chat-event")].find((each) => each.textContent.includes("dealt with"));
+            const texts = [];
+            const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+
+            while (walk.nextNode()) {
+                texts.push(walk.currentNode);
+            }
+
+            const box = (node, from, to) => {
+                const range = document.createRange();
+
+                range.setStart(node, from);
+                range.setEnd(node, to);
+
+                return [...range.getClientRects()];
+            };
+            const said = texts.find((each) => each.data.includes("שרת"));
+            const letters = box(said, said.data.indexOf("שרת"), said.data.indexOf("שרת") + 3);
+            const quote = box(said, said.data.indexOf("”"), said.data.indexOf("”") + 1)[0];
+            const clock = texts.at(-1);
+            const digits = box(clock, 0, clock.data.length);
+
+            return JSON.stringify({
+                hebrew: Math.max(...letters.map((each) => each.right)),
+                quote: [quote.left, quote.right],
+                clock: Math.min(...digits.map((each) => each.left)),
+            });
+        `);
+
+        assert.ok(
+            where.quote[0] >= where.hebrew - 0.5,
+            `the quote after the name: ${JSON.stringify(where)}`,
+        );
+        assert.ok(
+            where.clock >= where.quote[1] - 0.5,
+            `the clock after the quote: ${JSON.stringify(where)}`,
+        );
+        await page.press("Escape");
+        await page.setViewport(VIEWPORTS.mobile);
     },
 );

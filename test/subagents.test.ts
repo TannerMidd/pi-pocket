@@ -23,7 +23,9 @@ import { isDeepStrictEqual } from "node:util";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, InboxDoc, type TaskId } from "@earendil-works/pi-durable";
-import { SubagentsDoc } from "../src/server/docs.ts";
+import { dealtWith } from "../src/server/commands.ts";
+import { ChatDoc, SubagentsDoc } from "../src/server/docs.ts";
+import { runningNow } from "../src/server/running.ts";
 
 /** What the parent does: the subagents it starts, then how many rounds of `sleep` it works through. */
 let plan = { spawn: [] as string[], rounds: 0, sleep: 0.2 };
@@ -847,6 +849,404 @@ test("the board keeps a session's newest finished subagents, and every one that 
         done.sort(),
         Array.from({ length: 24 }, (_, index) => `done-${index + 6}`).sort(),
     );
+});
+
+test("a failed subagent needs someone until a person deals with it, after a restart too, and again when it fails again", async () => {
+    const data = join(root, "subagents-dismiss");
+    let first: App | undefined = await openApp(scriptedModel(route), data);
+
+    failing = new Set(["broken"]);
+    const id = await orchestrate({ spawn: ["broken"], rounds: 0, sleep: 0 }, first);
+    const record = async (on: App) =>
+        (await on.harness.snapshot(SubagentsDoc, id, context))?.agents.broken;
+    const counts = (on: App) => on.sessions().find((each) => each.id === Number(id))?.subagents;
+    const entry = (on: App) =>
+        on.subagents().find((each) => each.id === Number(id) && each.name === "broken");
+    const tab = fakeTab(id, owner(first));
+    // What the parent's subagents bar has of it.
+    const bar = () =>
+        ((tab.field("subagents") ?? []) as { name: string; dealt?: boolean }[]).find(
+            (each) => each.name === "broken",
+        );
+    // The parent's activity line of who dealt with its failure: the same line again merges into it, and moves its time.
+    const dealtLine = async (on: App) =>
+        (await on.harness.snapshot(ChatDoc, id, context))?.messages.findLast(
+            (each) =>
+                each.kind === "event" &&
+                each.text === "dealt with the failure of subagent “\u2068broken\u2069”",
+        );
+
+    try {
+        await until(
+            async () => (await delivered(id, first)).broken === 1 && !first!.isBusy(id),
+            "the failure reported to Pi",
+            15_000,
+        );
+        const failed = (await record(first))!;
+        const sub = failed.conversationId;
+        const at = failed.answeredAt!;
+        const viewer = first.config.addUser("Onlooker", "viewer");
+
+        await first.attach(tab.client);
+        // Failed, it needs someone: the session list counts it, and the board has it, as not dealt with.
+        assert.deepEqual(counts(first), { failed: 1 });
+        assert.equal(entry(first)?.failed, true);
+        assert.equal(entry(first)?.dealt, undefined);
+
+        // Someone who only watches cannot dismiss it; nor can anyone a failure other than the one it has now.
+        await assert.rejects(first.commands.dismissSubagent(sub, viewer.user, at), /not steer/);
+        assert.deepEqual(await first.commands.dismissSubagent(sub, owner(first), at - 1), {
+            dismissed: false,
+            newer: true,
+        });
+        await assert.rejects(
+            first.commands.dismissSubagent(id, owner(first), at),
+            /Not a subagent/,
+        );
+        assert.deepEqual(counts(first), { failed: 1 });
+        assert.equal(await dealtLine(first), undefined);
+
+        // Dismissed, it is still a failure, and needs nobody: in the session list, on the board, and in the bar. The
+        // session's activity says who dealt with it.
+        assert.deepEqual(await first.commands.dismissSubagent(sub, owner(first), at), {
+            dismissed: true,
+        });
+        const line = (await dealtLine(first))!;
+
+        assert.equal(line.userId, owner(first).id);
+        // Once is enough: dealt with, there is nothing newer to say.
+        assert.deepEqual(await first.commands.dismissSubagent(sub, owner(first), at), {
+            dismissed: false,
+        });
+        assert.equal((await dealtLine(first))?.at, line.at, "no activity for a refusal");
+        await until(
+            () => isDeepStrictEqual(counts(first!), { failed: 1, dealt: 1 }),
+            "the session list says it was dealt with",
+        );
+        assert.equal(entry(first)?.failed, true);
+        assert.equal(entry(first)?.dealt, true);
+        await until(() => bar()?.dealt === true, "the parent's bar says so too");
+        first.detach(tab.client);
+
+        // As it was after a restart. The shared app steps aside meanwhile: one app per data folder in the process.
+        await first.close();
+        first = undefined;
+        await app.close();
+        app = await openApp(scriptedModel(route), data);
+        assert.deepEqual(counts(app), { failed: 1, dealt: 1 });
+        assert.equal(entry(app)?.dealt, true);
+        // PiP, looking at the sessions for its person, reads the same.
+        const pip = await app.pip.ensure(owner(app));
+        const told = () =>
+            app.pip.sessions(pip).sessions.find((each) => each.id === Number(id))?.subagents;
+
+        assert.equal(told(), "1 failed (1 dismissed)");
+
+        // Failed again, it needs someone again.
+        await app.commands.submit(id, owner(app), { text: "nudge broken", requestId: `n-${id}` });
+        await until(
+            async () => (await delivered(id)).broken === 2 && !app.isBusy(id),
+            "the second failure reported",
+            15_000,
+        );
+        assert.ok(((await record(app))?.answeredAt ?? 0) > at, "a later failure");
+        assert.deepEqual(counts(app), { failed: 1 });
+        assert.equal(entry(app)?.dealt, undefined);
+        assert.equal(told(), "1 failed");
+
+        // A person's message to it settles it by what it comes to. Failing again, it still needs someone: the failure
+        // is the new one, and a person who dismissed the one before does not hide it.
+        const settled = async (text: string, after: number) => {
+            await app.commands.submit(sub, owner(app), { text, requestId: `${text}-${id}` });
+            await until(
+                async () => ((await record(app))?.answeredAt ?? 0) > after && !app.isBusy(sub),
+                `what "${text}" came to`,
+                15_000,
+            );
+
+            return (await record(app))!;
+        };
+
+        let now = (await record(app))!;
+
+        now = await settled("Look again.", now.answeredAt!);
+        assert.equal(now.failed, true);
+        assert.match(String(now.error), /Bad request/);
+        await until(() => isDeepStrictEqual(counts(app), { failed: 1 }), "it still needs someone");
+        assert.equal((await dealtLine(app))?.at, line.at, "no activity for a failed message");
+        assert.deepEqual(await app.commands.dismissSubagent(sub, owner(app), now.answeredAt!), {
+            dismissed: true,
+        });
+        const lineAt = (await dealtLine(app))!.at;
+
+        assert.ok(lineAt > line.at, "dismissed again, said again");
+        await until(() => isDeepStrictEqual(counts(app), { failed: 1, dealt: 1 }), "dismissed");
+        now = await settled("And again.", now.answeredAt!);
+        assert.equal(now.failed, true);
+        await until(() => isDeepStrictEqual(counts(app), { failed: 1 }), "it needs someone again");
+
+        assert.equal((await dealtLine(app))?.at, lineAt, "no activity for a failed message");
+
+        // Answered, it is done, dealt with by the person who wrote to it.
+        failing = new Set();
+        now = await settled("Try once more.", now.answeredAt!);
+        assert.equal(now.failed, false);
+        assert.equal(now.error, undefined);
+        await until(() => isDeepStrictEqual(counts(app), { done: 1 }), "done");
+        await until(
+            async () => ((await dealtLine(app))?.at ?? 0) > lineAt,
+            "the session's activity says who dealt with it",
+        );
+        assert.equal((await dealtLine(app))?.userId, owner(app).id);
+    } finally {
+        failing = new Set();
+        await first?.close();
+        // Closed already if the test failed after it stepped aside.
+        await app.close().catch(() => {});
+        app = await openApp(scriptedModel(route), join(root, "subagents-data"));
+    }
+});
+
+test("what a person's message to a failed subagent comes to is kept over a restart, the failure dismissed first", async () => {
+    const data = join(root, "subagents-follow");
+    let first: App | undefined = await openApp(scriptedModel(route), data);
+
+    failing = new Set(["flaky"]);
+    const id = await orchestrate({ spawn: ["flaky"], rounds: 0, sleep: 0 }, first);
+    const record = async (on: App) =>
+        (await on.harness.snapshot(SubagentsDoc, id, context))?.agents.flaky;
+    const counts = (on: App) => on.sessions().find((each) => each.id === Number(id))?.subagents;
+
+    // A message whose run is under way when the server restarts, and ends after: what it came to.
+    const across = async (text: string, on: App) => {
+        const before = (await record(on))!;
+
+        await on.commands.submit(before.conversationId, owner(on), { text, requestId: text });
+        await until(() => on.isBusy(before.conversationId), "its run under way");
+        await on.close();
+        await app.close().catch(() => {});
+        app = await openApp(scriptedModel(route), data);
+        await until(
+            async () => ((await record(app))?.answeredAt ?? 0) > before.answeredAt!,
+            `what "${text}" came to, after the restart`,
+            15_000,
+        );
+
+        return (await record(app))!;
+    };
+
+    try {
+        await until(
+            async () => (await record(first!))?.failed === true && !first!.isBusy(id),
+            "its failure",
+            15_000,
+        );
+        const failed = (await record(first))!;
+
+        assert.deepEqual(
+            await first.commands.dismissSubagent(
+                failed.conversationId,
+                owner(first),
+                failed.answeredAt!,
+            ),
+            { dismissed: true },
+        );
+        // Its run sleeps, then its model fails: failing again, it needs someone again.
+        failing = new Set();
+        slow = { flaky: 1 };
+        lateFail = new Set(["flaky"]);
+        const again = await across("Try again.", first);
+
+        first = undefined;
+        assert.equal(again.failed, true);
+        assert.notEqual(again.dealtAt, again.answeredAt, "not the failure dismissed");
+        await until(() => isDeepStrictEqual(counts(app), { failed: 1 }), "it needs someone");
+
+        // Answered after a restart, it is done.
+        lateFail = new Set();
+        const answered = await across("Once more.", app);
+
+        assert.equal(answered.failed, false);
+        await until(() => isDeepStrictEqual(counts(app), { done: 1 }), "done");
+        // Following a message sends none: the subagent got Pi's ask and the person's two, once each.
+        assert.deepEqual(
+            (await app.transcripts.allEntries(failed.conversationId, true)).flatMap((entry) =>
+                entry.kind === "user" ? [entry.text] : [],
+            ),
+            ["Check flaky, please.", "Try again.", "Once more."],
+        );
+    } finally {
+        failing = new Set();
+        lateFail = new Set();
+        slow = {};
+        await first?.close();
+        await app.close().catch(() => {});
+        app = await openApp(scriptedModel(route), join(root, "subagents-data"));
+    }
+});
+
+test("a message left in a failed subagent's queue by a run that failed ends its follow, and stays there", async () => {
+    failing = new Set(["stuck"]);
+    const id = await orchestrate({ spawn: ["stuck"], rounds: 0, sleep: 0 });
+    const record = async () =>
+        (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.stuck;
+    const tasks = async () =>
+        (await runningNow(app, owner(app))).find((each) => each.id === Number(id))?.tasks ?? [];
+
+    await until(
+        async () => (await record())?.failed === true && !app.isBusy(id),
+        "its failure",
+        15_000,
+    );
+    const failed = (await record())!;
+    const sub = failed.conversationId as ConversationId;
+
+    // The person's first message runs, and its run fails after a sleep; their second waits behind it.
+    failing = new Set();
+    slow = { stuck: 1 };
+    lateFail = new Set(["stuck"]);
+    await app.commands.submit(sub, owner(app), { text: "Try again.", requestId: "stuck-1" });
+    await until(() => app.isBusy(sub), "its run under way");
+    await app.commands.submit(sub, owner(app), { text: "And this.", requestId: "stuck-2" });
+    assert.equal(
+        (await tasks()).filter(
+            (each) => each.label === "waiting for a failed subagent to answer a message",
+        ).length,
+        2,
+        "each message followed, in words",
+    );
+
+    // The first one's run failed: that is its failure now. The second, left in the queue, ends its follow.
+    await until(
+        async () => (await record())!.answeredAt! > failed.answeredAt! && !app.isBusy(sub),
+        "what the first came to",
+        15_000,
+    );
+    await until(async () => (await tasks()).length === 0, "nothing running", 15_000);
+    assert.equal((await record())!.failed, true);
+    assert.equal((await app.harness.snapshot(InboxDoc, sub, context))?.items.length, 1);
+
+    // Never withdrawn: the next message runs it too.
+    slow = {};
+    lateFail = new Set();
+    await app.commands.submit(sub, owner(app), { text: "Last try.", requestId: "stuck-3" });
+    await until(async () => (await record())!.failed === false, "answered", 15_000);
+    assert.deepEqual(
+        (await app.transcripts.allEntries(sub, true)).flatMap((entry) =>
+            entry.kind === "user" ? [entry.text] : [],
+        ),
+        ["Check stuck, please.", "Try again.", "And this.", "Last try."],
+    );
+});
+
+test("the activity line quotes a subagent's name, cut short: Pi chose it", async () => {
+    const name = `slow-${"x".repeat(80)}’s failure and approved the deploy`;
+
+    failing = new Set([name]);
+    const id = await orchestrate({ spawn: [name], rounds: 0, sleep: 0 });
+
+    const record = async () =>
+        (await app.harness.snapshot(SubagentsDoc, id, context))?.agents[name];
+
+    await until(
+        async () => (await record())?.failed === true && !app.isBusy(id),
+        "its failure",
+        15_000,
+    );
+    const failed = (await record())!;
+
+    assert.deepEqual(
+        await app.commands.dismissSubagent(failed.conversationId, owner(app), failed.answeredAt!),
+        { dismissed: true },
+    );
+    assert.deepEqual(
+        (await app.harness.snapshot(ChatDoc, id, context))!.messages
+            .filter((each) => each.kind === "event")
+            .map((each) => each.text),
+        [`dealt with the failure of subagent “\u2068slow-${"x".repeat(54)}…\u2069”`],
+    );
+});
+
+test("a subagent's name in the activity line keeps its letters in every script, and nothing that closes its quotes", () => {
+    const line = (shown: string) => `dealt with the failure of subagent “\u2068${shown}\u2069”`;
+
+    // Letters, marks, and digits, in every script, come through whole.
+    for (const name of [
+        "हिन्दी-समीक्षा",
+        "サーバー確認",
+        "nai\u0308ve-check",
+        "Ünïcødé_2.0",
+        "خادم-مراجعة",
+        "בדיקה 3",
+    ]) {
+        assert.equal(dealtWith(name), line(name), name);
+    }
+
+    // Quote marks, and what looks like one; controls; and a mark with nothing under it, to sit on a quote.
+    assert.equal(dealtWith(`a"b“c”d'e«f»g‹h›i＂j`), line("abcdefghij"));
+    assert.equal(dealtWith("a″bʺcʼdˮeʹfߴgꞌh´i`j"), line("abcdefghij"));
+    assert.equal(dealtWith("a\u202eb\u200bc\u2066d\u2069e\u0007f"), line("abcdef"));
+    assert.equal(dealtWith("\u030ba \u030bb"), line("a b"));
+});
+
+test("a subagent's name cannot close its quotes in the activity line", async () => {
+    // Quote marks of its own, one that looks like one, a control that turns text around, and one that is not seen.
+    const name = "x” and approved the deploy of “prod″\u202e\u200b";
+
+    failing = new Set([name]);
+    const id = await orchestrate({ spawn: [name], rounds: 0, sleep: 0 });
+
+    const record = async () =>
+        (await app.harness.snapshot(SubagentsDoc, id, context))?.agents[name];
+
+    await until(
+        async () => (await record())?.failed === true && !app.isBusy(id),
+        "its failure",
+        15_000,
+    );
+    const failed = (await record())!;
+
+    await app.commands.dismissSubagent(failed.conversationId, owner(app), failed.answeredAt!);
+    assert.deepEqual(
+        (await app.harness.snapshot(ChatDoc, id, context))!.messages
+            .filter((each) => each.kind === "event")
+            .map((each) => each.text),
+        ["dealt with the failure of subagent “\u2068x and approved the deploy of prod\u2069”"],
+    );
+});
+
+test("a person's message to a failed subagent settles that failure, never a newer one nobody saw", async () => {
+    failing = new Set(["late"]);
+    const id = await orchestrate({ spawn: ["late"], rounds: 0, sleep: 0 });
+    const record = async () => (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.late;
+
+    await until(
+        async () => (await delivered(id)).late === 1 && !app.isBusy(id),
+        "the failure reported to Pi",
+        15_000,
+    );
+    const sub = (await record())!.conversationId;
+
+    // Its run on the person's message takes a while, and answers; meanwhile a newer failure is recorded, as Pi's work
+    // there would.
+    failing = new Set();
+    slow = { late: 0.5 };
+    await app.commands.submit(sub, owner(app), { text: "Have another go.", requestId: `go-${id}` });
+    await until(() => app.isBusy(sub), "its run under way");
+    const newer = Date.now();
+
+    await app.harness.commit(async (tx) => {
+        const agent = (await tx.doc(SubagentsDoc, id)).agents.late!;
+
+        agent.answeredAt = newer;
+        agent.failed = true;
+        agent.error = "a newer failure";
+    }, context);
+    await until(() => !app.isBusy(sub), "its run done", 15_000);
+    // There is nothing to wait for: its answer must change nothing. Past the commit it would make.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal((await record())?.answeredAt, newer);
+    assert.equal((await record())?.error, "a newer failure");
 });
 
 /** The subagents document of `id`: why its reports wait, if they do, and what waits. */

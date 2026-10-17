@@ -6,6 +6,7 @@ import { filesAvailable, setFilesOpen } from "../files-panel.js";
 import { peeksOn, togglePeeks } from "../peeks.js";
 import { openPip, pipAvailable, pipUnread } from "../pip.js";
 import { setArchived } from "../sessions.js";
+import { openSubagent } from "../subagents.js";
 import {
     actions,
     api,
@@ -17,6 +18,7 @@ import {
     notify,
     openSheet,
     scoped,
+    setUnread,
     store,
 } from "../store.js";
 import { isPinned, paletteOf, togglePin } from "../theme.js";
@@ -212,6 +214,18 @@ export function MenuSheet() {
             )
         }
         ${
+            session &&
+            item(
+                "Mark unread",
+                () => {
+                    setUnread(conversation.id, true);
+                    closeSheet();
+                    navigate(null);
+                },
+                "this browser; opening it again clears it",
+            )
+        }
+        ${
             conversation?.worktree && steer
                 ? item(
                       "Worktree",
@@ -291,7 +305,7 @@ export function MenuSheet() {
                 ${view.subagents.map((agent) =>
                     item(
                         html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
-                        () => navigate(agent.conversationId),
+                        () => openSubagent(agent.conversationId),
                         agent.busy ? "working" : "idle",
                     ),
                 )}

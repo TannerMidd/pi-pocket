@@ -119,12 +119,29 @@ export interface PocketHost {
     skillPaths(): string[];
     /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
     skills(cwd: string): Skill[];
-    /** `provider/modelId` (or a bare model id) to an available model, or an error naming the choices. */
+    /**
+     * `provider/modelId` (or a bare model id) to a signed-in model whose sign-in has not expired, or an error that says
+     * it is not available. The error names no other models: models are a person's to choose.
+     */
     resolveModel(spec: string): ModelRef;
+    /**
+     * The models Pi may start subagents on besides their session's own, as the owner allowed them (`provider/modelId`).
+     * Empty, the default: none.
+     */
+    subagentModels(): readonly string[];
+    /**
+     * Why Pi may not use a model now, in words for Pi to pass on (not known here, its provider not signed in, or its
+     * sign-in expired), or undefined when it may. `fresh` asks the provider's sign-in again first.
+     */
+    modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
-    /** Report something odd to the log and the connected clients. */
-    notice(level: "info" | "warning" | "error", message: string): void;
+    /** Report something odd to the log and the connected clients: with `conversationId`, to that session's tabs only. */
+    notice(
+        level: "info" | "warning" | "error",
+        message: string,
+        conversationId?: ConversationId,
+    ): void;
     /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
      * spend limit its session or whoever pays there reached. Undefined when it may.
@@ -152,6 +169,7 @@ export interface PocketHost {
         | "archive"
         | "approvals"
         | "deny"
+        | "status"
         | "schedules"
         | "schedule"
         | "countSchedule"

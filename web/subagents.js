@@ -42,6 +42,32 @@ export const openSubagents = () => store.set({ subagentsOpen: store.state.conver
 export const stateOf = (agent) =>
     agent.busy ? "working" : agent.stopped ? "stopped" : agent.failed ? "failed" : "done";
 
+/** A failed subagent nobody has dealt with yet: it needs someone, on the board, the rail, and the session list. */
+export const unresolved = (agent) => stateOf(agent) === "failed" && agent.dealt !== true;
+
+/** Say a subagent's failure was dealt with: the one this browser shows (by its time), so a newer one still shows. */
+export const dismiss = (agent) =>
+    api(`c/${agent.conversationId}/dismiss`, { at: agent.answeredAt ?? 0 });
+
+/** A failure shown to someone who can deal with it, who opens the subagent: seen, it needs nobody now. */
+export function seeFailure(agent) {
+    if (agent && unresolved(agent) && canSteer()) {
+        dismiss(agent).catch(() => {});
+    }
+}
+
+/** Open a subagent's conversation, from this session's subagents or the board; a failure it had is seen there. */
+export function openSubagent(id) {
+    const { boardAgents, view } = store.state;
+
+    seeFailure(
+        [...(view.subagents ?? []), ...(boardAgents ?? [])].find(
+            (agent) => agent.conversationId === id,
+        ),
+    );
+    navigate(id);
+}
+
 /** The mark a row starts with, for a subagent that is not working. */
 const MARKS = { done: "✓", stopped: "■", failed: "!" };
 
@@ -108,12 +134,14 @@ export function ordered(agents) {
 function AgentRow({ agent }) {
     const stop = () => attempt(() => api(`c/${agent.conversationId}/abort`, {}));
     const status = stateOf(agent);
+    // A failure someone dealt with says so, as the board does.
+    const dealt = status === "failed" && agent.dealt ? " · dismissed" : "";
     const when = agent.busy
         ? agent.askedAt && elapsed(agent.askedAt)
-        : agent.answeredAt && `${status} ${timeAgo(fromServer(agent.answeredAt))}`;
+        : agent.answeredAt && `${status} ${timeAgo(fromServer(agent.answeredAt))}${dealt}`;
 
     return html`<div class=${`agent-row ${status}`} data-peek=${agent.conversationId}>
-        <button class="agent-open" onClick=${() => navigate(agent.conversationId)}>
+        <button class="agent-open" onClick=${() => openSubagent(agent.conversationId)}>
             <span class="agent-mark" aria-hidden="true">
                 ${agent.busy ? html`<${Spinner} />` : MARKS[status]}
             </span>

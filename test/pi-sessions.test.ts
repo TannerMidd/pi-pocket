@@ -235,15 +235,23 @@ test("it continues with the session's model and folder, and Pi answers with the 
     assert.match(lastText({ messages: requested } as never).text, /Carry on/);
 });
 
-test("a model not signed in here gives way to the usual one", async () => {
+test("a model not signed in here gives way to the usual one: one a person picked, never the first there is", async () => {
     const manager = SessionManager.inMemory(work);
 
     manager.appendModelChange("elsewhere", "big-model");
     manager.appendMessage({ role: "user", content: "hi", timestamp: 1 });
-    const { id } = await app.commands.continuePiSession(owner(app), save(manager, "elsewhere"));
-    const agent = await (await app.harness.conversation(id, context))!.agent(context);
 
-    assert.equal(agent.model?.provider, "faux");
+    const continued = async (name: string) => {
+        const { id } = await app.commands.continuePiSession(owner(app), save(manager, name));
+
+        return (await (await app.harness.conversation(id, context))!.agent(context)).model;
+    };
+
+    app.config.defaultModel = undefined;
+    app.config.lastModel = undefined;
+    assert.equal(await continued("elsewhere"), undefined, "nobody picked one: none");
+    app.config.lastModel = { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
+    assert.deepEqual(await continued("elsewhere-again"), { provider: "faux", modelId: "faux-1" });
 });
 
 test("a tool call that never finished does not run: it gets a result saying so", async () => {

@@ -68,6 +68,8 @@ async function describeTask(
             return { label: "compacting the context" };
         case "pocket.subagent-reporter":
             return { label: "waiting for a subagent's answer" };
+        case "pocket.follow-failure":
+            return { label: "waiting for a failed subagent to answer a message" };
 
         case "pocket.subagent-courier": {
             const held = (await app.harness.snapshot(SubagentsDoc, id, context))?.held;

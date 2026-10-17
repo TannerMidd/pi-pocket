@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
     clampThinkingLevel,
@@ -15,13 +16,18 @@ import {
     type TextContent,
 } from "@earendil-works/pi-ai";
 import { resizeImage } from "@earendil-works/pi-coding-agent";
-import type {
-    AgentChange,
-    ConversationCreateOptions,
-    ConversationId,
-    EntryId,
-    ModelRef,
-    SubmissionId,
+import {
+    type AgentChange,
+    type ConversationCreateOptions,
+    type ConversationId,
+    defineTask,
+    type EntryId,
+    LiveDoc,
+    type ModelRef,
+    type SettledSubmissionRecord,
+    type SubmissionId,
+    type Task,
+    type TaskRuntime,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
@@ -33,6 +39,8 @@ import {
     PlanDoc,
     type Schedule,
     SessionsDoc,
+    STOPPED,
+    type SubagentRecord,
     SubagentsDoc,
 } from "./docs.ts";
 import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY } from "./entry-format.ts";
@@ -42,9 +50,10 @@ import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
-import { expandPromptTemplate, expandSkillCommand } from "./prompts.ts";
+import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor } from "./requests.ts";
 import { type Resend, resendContent, resendRequest, ResendTask, userContent } from "./resend.ts";
+import { whyUnanswered } from "./subagent-runs.ts";
 import { wantsTitle, writeTitle } from "./titles.ts";
 import { describeMoment, describeRepeat, knownZone } from "./when.ts";
 import {
@@ -88,6 +97,30 @@ const IMAGE_MIME: Record<string, string> = {
 const MAX_TITLE = 120;
 /** A title as stored: one line, so it cannot pass for more lines where it is quoted (PiP's lists, reports). */
 const oneLine = (title: string): string => title.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE);
+/**
+ * What a subagent's name drops where it is quoted, to keep its letters, marks, and digits, in every script ("हिन्दी",
+ * "サーバー"), its spaces, and ". _ -": no mark of its own then closes the quotes. Every quote mark goes, and every other
+ * sign or symbol ("″", "´"); every control, those that turn the text around, hide, or end its isolate too; and the
+ * modifier letters that are quote marks or apostrophes in form ("ʺ", "ʼ", "ˮ", the Greek "ʹ", NKo's "ߴ", the saltillo
+ * "ꞌ").
+ */
+const UNQUOTED = /[^\p{L}\p{M}\p{N}\s._-]|[\u02B0-\u02FF\u0374\u07F4\u07F5\uA78B\uA78C]/gu;
+/** A mark with no letter or digit under it (first, or after a space), which would sit on the quote beside it. */
+const UNBORNE = /(?<![\p{L}\p{M}\p{N}])\p{M}+/gu;
+
+/**
+ * A person's activity line when they dealt with a subagent's failure, in its parent session: Pi named it, so quoted, and
+ * isolated (U+2068 … U+2069), so a name that ends in right-to-left letters keeps the closing quote and what follows (the
+ * line's clock) after it. It cannot end the isolate itself: such controls are among what it drops.
+ */
+export const dealtWith = (name: string): string => {
+    const shown = snippet(name.replace(UNQUOTED, "").replace(UNBORNE, ""), 60);
+
+    return `dealt with the failure of subagent “\u2068${shown}\u2069”`;
+};
+
+/** What dismissing a subagent's failure came to: `newer` when it failed again since the failure seen. */
+type Dismissal = { dismissed: boolean; newer?: true };
 /** The extension that makes plan mode block changes; without it, plan mode would do nothing. */
 const PLAN_EXTENSION = "pocket-plan";
 /** What Pi is told when someone approves its plan. */
@@ -137,11 +170,172 @@ function checkModel(asked: { provider?: unknown; modelId?: unknown } | undefined
     }
 }
 
+/** A person's message to a failed subagent (`subagent`, its conversation), followed to its end; `failure`, its own then. */
+type Followed = { subagent: number; requestId: string; failure: number; by: string };
+
+/**
+ * What a person's run of subagent `id` came to, on its record in its parent's `doc`, kept as its reports keep what Pi's
+ * work came to: answered, it is done and needs nobody; unanswered, it failed again (or was stopped), which is its
+ * failure now, and needs someone even if the one before was dismissed. Not while its record holds a failure newer than
+ * `failure`, the one they wrote to: nobody saw that one. The subagent's name when this cleared its failure.
+ */
+function settle(
+    doc: { agents: Record<string, SubagentRecord> },
+    id: ConversationId,
+    failure: number,
+    result: { status: string; reason?: string; detail?: unknown },
+): string | undefined {
+    const name = Object.keys(doc.agents).find((each) => doc.agents[each]!.conversationId === id);
+    const record = name === undefined ? undefined : doc.agents[name]!;
+
+    if (record === undefined || (record.failed === true && (record.answeredAt ?? 0) !== failure)) {
+        return undefined;
+    }
+
+    const cleared = record.failed === true && result.status !== "unanswered" ? name : undefined;
+
+    record.answeredAt = Date.now();
+    record.failed = result.status === "unanswered";
+
+    if (result.status === "unanswered") {
+        record.error = whyUnanswered(result.reason ?? "", result.detail);
+    } else {
+        delete record.error;
+    }
+
+    return cleared;
+}
+
+/**
+ * What a person's message (`requestId`) to subagent `id` came to; undefined when it is not there, or is left in the
+ * subagent's queue with no run to take it. Pi Durable leaves a failed run's queue alone, so a message sent while a run
+ * went on, which then failed, waits for the next one someone sends, if anyone does: its follow ends then, and the
+ * message stays where it is. Its known request id gives back the message sent, as it is now: nothing is sent again.
+ */
+async function followed(
+    runtime: TaskRuntime<Followed, { phase: "wait" }, null, object>,
+    id: ConversationId,
+    requestId: string,
+    context: Context,
+): Promise<SettledSubmissionRecord | undefined> {
+    // Where it is: gone, left (queued with no run), or sent. One commit reads both, and writes nothing.
+    const where = async () => {
+        let found = "gone" as "gone" | "left" | "sent";
+
+        await runtime.commit(async (tx) => {
+            const record = await tx.submissionByRequest(id, requestId);
+
+            if (record !== undefined) {
+                found =
+                    record.status === "queued" && (await tx.doc(LiveDoc, id)).run === undefined
+                        ? "left"
+                        : "sent";
+            }
+        }, context);
+
+        return found;
+    };
+
+    if ((await where()) !== "sent") {
+        return undefined;
+    }
+
+    const submission = await (
+        await runtime.conversation(id, context)
+    )?.submit({ type: "input", content: "", requestId }, context);
+    const watch = await runtime.watchDoc(LiveDoc, id, context);
+    let leave!: () => void;
+    const left = new Promise<undefined>((resolve) => {
+        leave = () => resolve(undefined);
+    });
+    // The look under way, if any: one the watch started may still be going when it stops.
+    let looking: Promise<void> = Promise.resolve();
+
+    // Each time the subagent has no run, a look at whether this message is left behind. A failed one is reported.
+    const look = (live: { run?: unknown } | null) => {
+        if (live !== null && live.run === undefined) {
+            looking = where().then(
+                (found) => (found === "left" ? leave() : undefined),
+                (error: unknown) => runtime.report(error),
+            );
+        }
+
+        return looking;
+    };
+
+    if (submission === undefined) {
+        await watch?.stop();
+
+        return undefined;
+    }
+
+    try {
+        if (watch !== undefined) {
+            // A listener is never called inline, so the value it started on is this one's to look at.
+            await look(watch.value);
+            watch.start(look);
+        }
+
+        return await Promise.race([submission.wait(context), left]);
+    } finally {
+        // On every way out, so no watch outlives the phase, nor a look its commit.
+        await watch?.stop();
+        await looking;
+    }
+}
+
 export class Commands {
     readonly #app: PocketApp;
+    /**
+     * Follows a person's message to a failed subagent to its end and settles the failure by it (`settle`): a task of the
+     * parent's, beside its work, so a restart before the run ends still settles it, as the subagent's reports do Pi's
+     * work. It finds the message by its request id, and never sends one (`followed`). Answered, the parent's activity
+     * says who dealt with the failure. A message left in the queue by a run that failed ends it, settling nothing.
+     */
+    readonly followTask: Task<Followed, { phase: "wait" }, null, object>;
 
     constructor(app: PocketApp) {
         this.#app = app;
+        this.followTask = defineTask<Followed, { phase: "wait" }, null>({
+            name: "pocket.follow-failure",
+            version: 1,
+            initial: () => ({ phase: "wait" }),
+            phases: {
+                wait: async (task, runtime, context) => {
+                    const { subagent, requestId, failure, by } = task.input;
+                    const id = subagent as unknown as ConversationId;
+                    const settled = await followed(runtime, id, requestId, context);
+                    let cleared: string | undefined;
+
+                    await runtime.commit(async (tx) => {
+                        if (settled !== undefined) {
+                            cleared = settle(
+                                await tx.doc(SubagentsDoc, runtime.conversationId),
+                                id,
+                                failure,
+                                settled,
+                            );
+                        }
+
+                        return {
+                            status: "terminal",
+                            outcome: { status: "completed", result: null },
+                        };
+                    }, context);
+
+                    const user = app.config.userById(by);
+
+                    if (cleared !== undefined && user !== undefined) {
+                        await app.collab.activity(runtime.conversationId, user, dealtWith(cleared));
+                    }
+                },
+            },
+            abort: (_task, runtime, context) =>
+                runtime.commit(
+                    () => ({ status: "terminal", outcome: { status: "aborted" } }),
+                    context,
+                ),
+        });
     }
 
     /** Start a session in a folder; with `worktree`, in a git worktree of its own made from that folder. */
@@ -354,8 +548,11 @@ export class Commands {
     }
 
     /**
-     * The model a new session starts with: `prefer` (with its thinking level) when it is signed in here, or the owner's
-     * default, or the one last picked, or Pi's default, or the first there is.
+     * The model a new session starts with, always one a person chose: `prefer` (with its thinking level) when it is
+     * signed in here, or else the owner's default, even when it is not signed in now: the session then shows that, and
+     * its first message fails in sight, where another model would spend on what nobody chose for it. Without an owner's
+     * default, the one last picked, or Pi's default, when signed in. Never the first model there is: with none of
+     * these, the session starts without a model, and someone picks one.
      */
     #defaultModel(prefer?: {
         model: { provider: string; modelId: string } | null;
@@ -373,25 +570,26 @@ export class Commands {
         const last = config.lastModel;
         const preferred = pick(prefer?.model?.provider, prefer?.model?.modelId);
         const chosen = config.defaultModel;
-        const fallback = pick(chosen?.provider, chosen?.modelId);
-        const model =
-            preferred ??
-            fallback ??
-            pick(last?.provider, last?.modelId) ??
-            pick(settings.getDefaultProvider(), settings.getDefaultModel()) ??
-            available[0];
+        const owners =
+            chosen === undefined ? undefined : models.getModel(chosen.provider, chosen.modelId);
+        const lastPicked = chosen === undefined ? pick(last?.provider, last?.modelId) : undefined;
+        const pis =
+            chosen === undefined && lastPicked === undefined
+                ? pick(settings.getDefaultProvider(), settings.getDefaultModel())
+                : undefined;
+        const model = preferred ?? owners ?? lastPicked ?? pis;
 
         if (model === undefined) {
             return {};
         }
 
-        const level = ((preferred === undefined ? undefined : prefer?.thinkingLevel) ??
-            (preferred === undefined && fallback !== undefined
-                ? chosen?.thinkingLevel
-                : undefined) ??
-            last?.thinkingLevel ??
-            settings.getDefaultThinkingLevel() ??
-            "off") as ModelThinkingLevel;
+        const level = ((preferred !== undefined
+            ? prefer?.thinkingLevel
+            : owners !== undefined
+              ? chosen?.thinkingLevel
+              : lastPicked !== undefined
+                ? last?.thinkingLevel
+                : settings.getDefaultThinkingLevel()) ?? "off") as ModelThinkingLevel;
 
         return {
             model: { provider: model.provider, modelId: model.id },
@@ -535,6 +733,8 @@ export class Commands {
             via === undefined
                 ? ownRequest(user.id, clientKey(request.requestId))
                 : requestFor(user.id, clientKey(request.requestId));
+        // A failed subagent's failure as the person writes to it: what their message comes to settles it.
+        const failure = await this.#failureOf(id);
         const submission = await conversation.submit(
             {
                 type: "input",
@@ -546,10 +746,132 @@ export class Commands {
         );
 
         app.collab.setTyping(id, user, null);
-        await this.#touched(id, typed);
+        await this.#touched(id, typed, text === typed ? undefined : text);
         this.#reportUnanswered(id, submission.wait(context));
 
+        if (failure !== undefined) {
+            await this.#followFailure(id, user, failure, requestId);
+        }
+
         return { submissionId: submission.id, requestId };
+    }
+
+    /** When a subagent (`id`, its conversation) failed, if it is failed now (not stopped); undefined otherwise. */
+    async #failureOf(id: ConversationId): Promise<number | undefined> {
+        const parent = this.#app.parentOf(id);
+
+        if (parent === undefined) {
+            return undefined;
+        }
+
+        const agents = (await this.#app.harness.snapshot(SubagentsDoc, parent, context))?.agents;
+        const record = Object.values(agents ?? {}).find((each) => each.conversationId === id);
+
+        return record?.failed === true && record.error !== STOPPED
+            ? (record.answeredAt ?? 0)
+            : undefined;
+    }
+
+    /**
+     * Follow a person's message (`requestId`) to failed subagent `id` to its end, in a task of its parent's (`followTask`).
+     * The message went: a failure to start following it is logged, not answered.
+     */
+    async #followFailure(
+        id: ConversationId,
+        user: User,
+        failure: number,
+        requestId: string,
+    ): Promise<void> {
+        const app = this.#app;
+        const parent = app.parentOf(id);
+
+        if (parent === undefined) {
+            return;
+        }
+
+        try {
+            await app.harness.commit(async (tx) => {
+                await tx.createTask(
+                    this.followTask,
+                    { subagent: Number(id), requestId, failure, by: user.id },
+                    {
+                        ownership: { kind: "conversation" },
+                        background: true,
+                        conversationId: parent,
+                    },
+                );
+            }, context);
+        } catch (error) {
+            app.log(`not following a message to ${String(id)}: ${describe(error)}`);
+        }
+    }
+
+    /**
+     * A person dealt with a failed subagent (`id`, its conversation): seen or dismissed, it needs nobody now, on the
+     * board, the rail, or the session list, until it fails again. `at` is the failure they saw (its `answeredAt`): a
+     * newer one still needs them, and `newer` says so. Not dismissed either when it has no failure, or someone dealt
+     * with it already.
+     */
+    async dismissSubagent(id: ConversationId, user: User, at: unknown): Promise<Dismissal> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+
+        if (typeof at !== "number" || !Number.isFinite(at)) {
+            throw new HttpError(400, "at must be the time of the failure seen");
+        }
+
+        if (app.parentOf(id) === undefined) {
+            throw new HttpError(404, "Not a subagent");
+        }
+
+        return this.#dismissFailure(id, user, at);
+    }
+
+    /**
+     * Mark a subagent's failure, the one at `at`, dealt with by `user`, as the parent's activity says: as
+     * `dismissSubagent` answers.
+     */
+    async #dismissFailure(id: ConversationId, user: User, at: number): Promise<Dismissal> {
+        const parent = this.#app.parentOf(id);
+        let name: string | undefined;
+
+        if (parent === undefined) {
+            return { dismissed: false };
+        }
+
+        const answer = await this.#app.harness.commit(async (tx): Promise<Dismissal> => {
+            const agents = (await tx.doc(SubagentsDoc, parent)).agents;
+
+            name = Object.keys(agents).find((each) => agents[each]!.conversationId === id);
+            const record = name === undefined ? undefined : agents[name]!;
+            // Its failure is known by when it failed; a failure from before that was recorded has none.
+            const failure = record?.answeredAt ?? 0;
+
+            if (
+                record === undefined ||
+                record.failed !== true ||
+                record.error === STOPPED ||
+                record.dealtAt === failure
+            ) {
+                return { dismissed: false };
+            }
+
+            if (at !== failure) {
+                return { dismissed: false, newer: true };
+            }
+
+            record.dealtAt = failure;
+
+            return { dismissed: true };
+        }, context);
+
+        if (answer.dismissed && name !== undefined) {
+            await this.#app.collab.activity(parent, user, dealtWith(name));
+        }
+
+        return answer;
     }
 
     /**
@@ -634,9 +956,11 @@ export class Commands {
 
     /**
      * A session just got a message: it moves up the list, and its first message names it. A long first message gets a
-     * short title written for it afterwards (`titles.ts`).
+     * short title written for it afterwards (`titles.ts`), and so does a command (`/skill:name`, a prompt template),
+     * whose name says little: written from the command and what it `expanded` to, which says what it asks (a skill's
+     * instructions without the paths of its files, which would pull the title toward a folder's name).
      */
-    async #touched(id: ConversationId, text: string): Promise<void> {
+    async #touched(id: ConversationId, text: string, expanded?: string): Promise<void> {
         if (this.#app.sessionMeta(id) === undefined) {
             return;
         }
@@ -657,8 +981,13 @@ export class Commands {
             }
         }, context);
 
-        if (provisional !== undefined && wantsTitle(text)) {
-            void writeTitle(this.#app, id, text, provisional);
+        if (provisional !== undefined && (expanded !== undefined || wantsTitle(text))) {
+            void writeTitle(
+                this.#app,
+                id,
+                expanded === undefined ? text : `${text}\n\n${unwrapSkill(expanded)}`,
+                provisional,
+            );
         }
     }
 
