@@ -67,7 +67,9 @@ test("`!` runs a command in the session's folder and Pi sees it; `!!` shows it t
     const id = await newSession(app, folder);
 
     writeFileSync(join(folder, "hello.txt"), "hi from the file\n");
-    await app.shell.start(id, owner(app), { command: "cat hello.txt; exit 3" });
+    await app.shell.start(id, owner(app), {
+        command: "printf '\\033[1m'; cat hello.txt; printf '\\033[0m'; exit 3",
+    });
     await until(
         async () => (await entries(id)).some((entry) => entry.kind === "shell"),
         "the first command's entry",
@@ -78,9 +80,12 @@ test("`!` runs a command in the session's folder and Pi sees it; `!!` shows it t
         "the second command's entry",
     );
     const seen = (await modelTexts(app, id)).join("\n");
+    const first = (await entries(id)).find((entry) => entry.kind === "shell");
 
     assert.match(seen, /hi from the file/);
     assert.doesNotMatch(seen, /secret/);
+    assert.doesNotMatch(seen, /u001b/, "Pi sees no terminal escape codes");
+    assert.equal(first?.kind === "shell" && first.output, "hi from the file\n");
 });
 
 test("a `!` command Pi sees makes Pi work for its person, as a message does; one Pi does not see does not", async () => {
