@@ -44,6 +44,14 @@ Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose funct
 
 `FolderFavoritesDoc` (`pocket.folder-favorites`) stores each person's ordered favorite working folders in SQLite. `folder-favorites.ts` reads and changes only the signed-in person's list; explicit star/unstar operations run inside one harness transaction, so concurrent devices do not overwrite unrelated changes. The commit coordinator sends each connected client only its person's list as a `folder-favorites` event. `hello.folderFavorites` supplies the initial list and refreshes it on reconnect. The folder picker shows only what the server committed, so a failed save leaves its list as it was.
 
+## Session tags
+
+Shared tags are an optional `tags` list on `SessionMeta` in the existing version-one `SessionsDoc` (`pocket.sessions`). Absence means no tags: no SQL schema migration, eager backfill or document-version bump is needed. New session entries, imports, linked sessions and forks start untagged; catalogue metadata is not inherited through conversation-document fork settings. Existing field-level metadata writers preserve the optional list.
+
+`POST /api/sessions/tags` calls `Commands.updateSessionTags` with exact IDs and explicit Add/Remove lists. One harness transaction resolves the current person after loading the catalogue, checks steering and visibility on every ordinary session, and validates every projected tag list before mutating any. Missing, hidden, private PiP or over-capacity targets reject the entire batch. Patches merge against the transaction's current state, so unrelated concurrent tag changes survive; opposing edits of the same tag follow commit order. Tagging does not advance `updatedAt` or reorder Recent.
+
+The existing access-filtered sessions projection and events carry tags; there is no global tag catalogue. Browsers derive suggestions only from the sessions they can already see. Account-scoped personal AND filters stay in this browser tab's memory through navigation, reset on page reload, and combine with search and the existing views. A batch editor snapshots selected IDs intersected with actually rendered rows, excluding collapsed groups and hidden selections; Save never widens or silently shrinks that scope. Single-session editors send a diff of their original draft, not a replacement list.
+
 ## Linked sessions
 
 `LinkedSessions` (`linked-sessions.ts`, `app.linkedSessions`, `host.linkedSessions` as `LinkedSessionsApi`) starts a session from another and carries messages between them; Agent Teams (`extensions/agent-teams.ts`, off by default) is its only user. A linked session is an ordinary ownerless session in the source's folder. Its session entry's `linkedFrom` names the session that started it, and nothing else follows from it: it is not in `SubagentsDoc`, `parentOf`, or `rootOf`, so it gives no access, and stopping or archiving one leaves the other as it was.

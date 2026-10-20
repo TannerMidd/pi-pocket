@@ -74,6 +74,8 @@ export const store = {
         guard: null,
         server: null,
         sessions: [],
+        /** Personal tag filters for this account in this tab; shared by the list's responsive mounts, never sent to the server. */
+        sessionTagFilters: { person: null, tags: [] },
         /** This person's favorite folders, in shortcut order, sent by the server to every signed-in device. */
         folderFavorites: [],
         /** False until the server's first session list arrives: an empty list until then means "not here yet". */
@@ -1086,6 +1088,8 @@ export const actions = {
     createSession: (cwd, { worktree = false } = {}) =>
         api("sessions", { cwd, ...(worktree ? { worktree } : {}) }),
     updateSession: (id, patch) => api(`sessions/${id}`, patch),
+    /** Atomically patch shared tags on exactly these sessions; list events carry committed state. */
+    updateSessionTags: (patch) => api("sessions/tags", patch),
     upload: (file) => api(`c/${current()}/upload?name=${encodeURIComponent(file.name)}`, file),
     fullEntry: (entryId) => api(`c/${current()}/entry/${entryId}`),
     history: (before) => api(`c/${current()}/history?before=${before}`),

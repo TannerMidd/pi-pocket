@@ -480,6 +480,16 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, await app.commands.createSession(user, body));
         }
 
+        if (first === "sessions" && second === "tags" && third === undefined && method === "POST") {
+            const body = await readJson<{ ids?: unknown; add?: unknown; remove?: unknown }>(
+                request,
+            );
+
+            await app.commands.updateSessionTags(user, body);
+
+            return json(response, 200, { ok: true });
+        }
+
         if (first === "sessions" && second !== undefined && method === "POST") {
             const body = await readJson<{ title?: string; archived?: boolean }>(request);
 

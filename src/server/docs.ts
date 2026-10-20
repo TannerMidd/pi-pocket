@@ -22,6 +22,8 @@ export type SessionMeta = {
     updatedAt: number;
     createdBy?: string;
     archived?: boolean;
+    /** Shared organization labels; absent on older sessions and equivalent to an empty list. */
+    tags?: string[];
     /** The session this one was forked from, and the last entry it inherited; no entry: forked before the first message. */
     forkedFrom?: { id: number; entryId?: number };
     /** The session that started this one (`linked-sessions.ts`): a link only, which gives no access and owns nothing. */

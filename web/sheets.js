@@ -27,6 +27,7 @@ import { RunningSheet } from "./sheets/running.js";
 import { HooksSheet } from "./sheets/hooks.js";
 import { SchedulesSheet } from "./sheets/schedules.js";
 import { SessionSheet } from "./sheets/session.js";
+import { SessionTagFilter, SessionTagsSheet } from "./sheets/session-tags.js";
 import { ShortcutsSheet } from "./sheets/shortcuts.js";
 import { SpendSheet } from "./sheets/spend.js";
 import { TextSheet } from "./sheets/text.js";
@@ -37,6 +38,19 @@ import { TrustSheet } from "./trust.js";
 import { addLayer, goBack, removeLayer } from "./back.js";
 import { actions, api, signOut, store } from "./store.js";
 import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js";
+
+// A canceled tag draft must not survive reopening while usePresence retains its outgoing animation.
+// Every editor entry point creates a fresh sheet object; keep its instance key stable only for that opening.
+const tagEditorInstances = new WeakMap();
+let nextTagEditorInstance = 0;
+
+function tagEditorKey(sheet) {
+    if (!tagEditorInstances.has(sheet)) {
+        tagEditorInstances.set(sheet, ++nextTagEditorInstance);
+    }
+
+    return `session-tags:${tagEditorInstances.get(sheet)}`;
+}
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
@@ -161,9 +175,12 @@ export function Sheets() {
         return auth;
     }
 
-    const key = isExtensionHub(sheet)
-        ? "extension-hub"
-        : `${sheet.type}:${sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
+    const key =
+        sheet.type === "session-tags"
+            ? tagEditorKey(sheet)
+            : isExtensionHub(sheet)
+              ? "extension-hub"
+              : `${sheet.type}:${sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
 
     return html`<div class=${`sheet-host ${leaving ? "leaving" : ""}`} inert=${leaving}>
         <${SheetBack.Provider} value=${trail.length > 1 ? goBack : null}>
@@ -262,6 +279,21 @@ function sheetBody(sheet) {
             body = store.state.sessions.some((each) => each.id === sheet.id)
                 ? html`<${SessionSheet} id=${sheet.id} />`
                 : null;
+            break;
+        case "session-tags":
+            body = html`<${SessionTagsSheet}
+                ids=${sheet.ids}
+                batch=${sheet.batch ?? false}
+                submit=${actions.updateSessionTags}
+            />`;
+            break;
+        case "session-tag-filter":
+            body = html`<${SessionTagFilter}
+                tags=${sheet.tags}
+                onChange=${sheet.onChange}
+                scope=${sheet.scope}
+                scopeName=${sheet.scopeName}
+            />`;
             break;
         case "places":
             body = view.conversation ? html`<${PlacesSheet} />` : null;

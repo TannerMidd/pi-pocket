@@ -315,6 +315,9 @@ function SessionRow({
     folders,
     onPick,
     onSelect,
+    onActions,
+    onTag,
+    tagSelecting,
 }) {
     const { conversationId, server, me } = store.state;
     const pinned = isPinned(session.id);
@@ -356,10 +359,10 @@ function SessionRow({
     // Finished since this browser last looked: its result is unread, so its title reads bold.
     const unseen = finishedUnseen(session);
     // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
-    const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2);
+    const acts = (canSteer() ? 2 : 0) + (session.archived ? 0 : 2);
 
     return html`<div
-        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${["no-acts", "one-act", "", "three-acts"][acts]}`}
+        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${(session.tags ?? []).length ? "has-tags" : ""} ${canSteer() ? "tags-editable" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
         data-part="session-row"
         data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
@@ -382,6 +385,12 @@ function SessionRow({
             onPointerDown=${(event) => onSelect(event, session.id)}
             onClick=${(event) => onPick(event, session.id)}
             onContextMenu=${(event) => event.ctrlKey && event.preventDefault()}
+            onKeyDown=${(event) => {
+                if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                    event.preventDefault();
+                    onActions(session.id);
+                }
+            }}
             title=${tip}
         >
             <span class="session-mark">
@@ -448,6 +457,24 @@ function SessionRow({
                 }
             </span>
         </button>
+        ${
+            (session.tags ?? []).length > 0 &&
+            html`<div class="session-tags" role="group" aria-label="Session tags">
+            ${session.tags.map(
+                (tag) => html`<button
+                class="chip"
+                key=${tag}
+                aria-label=${
+                    tagSelecting
+                        ? `${selected ? "Deselect" : "Select"} session ${title} via tag ${tag}`
+                        : `Filter by ${tag}`
+                }
+                title=${tagSelecting ? "Select or deselect this session" : `Filter by ${tag}`}
+                onClick=${(event) => onTag(event, tag, session.id)}
+            >${tag}</button>`,
+            )}
+        </div>`
+        }
         <span class="session-actions">
             ${
                 canSteer() &&
@@ -481,6 +508,15 @@ function SessionRow({
                 >
                     <${Icon} name=${marked ? "check" : "unread"} size=${14} />
                 </button>`
+            }
+            ${
+                canSteer() &&
+                html`<button
+                    class="session-act"
+                    title="Edit tags"
+                    aria-label="Edit tags"
+                    onClick=${() => openSheet({ type: "session-tags", ids: [session.id] })}
+                ><${Icon} name="tag" size=${14} /></button>`
             }
         </span>
     </div>`;
@@ -538,6 +574,18 @@ export function SessionList({ compact = false }) {
     const { sessions, sessionsLoaded, server, pinned } = store.state;
     const canStart = canSteer() && !scoped();
     const [query, setQueryState] = useState(() => (compact ? "" : listKept.query));
+    // Home/sidebar/drawer mounts share this tab's account-scoped filters through ordinary navigation.
+    const person = store.state.me?.id;
+    const tagState = store.state.sessionTagFilters;
+    const tagFilters = tagState.person === person ? tagState.tags : [];
+
+    const setTagFilters = (tags) => {
+        // An old sheet's callback must not apply one person's choices after an account switch.
+        if (store.state.me?.id === person) {
+            store.set({ sessionTagFilters: { person, tags: [...tags] } });
+        }
+    };
+
     const [tab, setTabState] = useState(() => (prefs().group === "folder" ? "folders" : "recent"));
     const [closed, setClosed] = useState(readClosed);
     const [selected, setSelectedState] = useState(() => new Set());
@@ -615,14 +663,26 @@ export function SessionList({ compact = false }) {
         }
     };
 
+    const inView = (session) =>
+        Boolean(session.archived) === archived &&
+        (needle === "" ||
+            `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, server?.home)} ${session.model ?? ""}`
+                .toLowerCase()
+                .includes(needle));
     const shown = sessions.filter(
         (session) =>
-            Boolean(session.archived) === archived &&
-            (needle === "" ||
-                `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, server?.home)} ${session.model ?? ""}`
-                    .toLowerCase()
-                    .includes(needle)),
+            inView(session) && tagFilters.every((tag) => (session.tags ?? []).includes(tag)),
     );
+    const filterTags = () =>
+        store.set({
+            sheet: {
+                type: "session-tag-filter",
+                tags: [...tagFilters],
+                onChange: setTagFilters,
+                scope: () => store.state.sessions.filter(inView),
+                scopeName: `${TABS.find(([key]) => key === tab)[1]}${query ? ` · Search: ${query}` : ""}`,
+            },
+        });
     const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
     const groups = groupsOf(forest.roots, { tab, needle, home: server?.home, pinned }).map(
         (group) => ({
@@ -710,6 +770,7 @@ export function SessionList({ compact = false }) {
         }
 
         const { pointerId, clientX: x, clientY: y } = event;
+        const opener = event.currentTarget;
         let fired = false;
         let after = 0;
         const root = document.documentElement;
@@ -724,6 +785,8 @@ export function SessionList({ compact = false }) {
             fired = true;
             setPressing(null);
             pressedIn = startSelect;
+            // A touch hold need not focus its button by default. Native sheet close returns to this exact row.
+            opener.focus({ preventScroll: true });
             // Over the drawer, which stays: Select goes on there.
             store.set({ sheet: { type: "session", id } });
         }, PRESS_MS);
@@ -1068,6 +1131,17 @@ export function SessionList({ compact = false }) {
                             <${Icon} name="command" size=${14} />
                         </button>`
             }
+            <button
+                class=${`search-filters ${tagFilters.length ? "on" : ""}`}
+                aria-label=${`Filters${tagFilters.length ? `, ${tagFilters.length} active tags` : ""}`}
+                onClick=${(event) => {
+                    event.preventDefault();
+                    filterTags();
+                }}
+            >
+                <${Icon} name="filter" size=${14} />
+                Filters${tagFilters.length ? ` · ${tagFilters.length}` : ""}
+            </button>
         </label>
         <div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
             ${TABS.map(
@@ -1082,6 +1156,22 @@ export function SessionList({ compact = false }) {
             )}
             <${Slide} box=${tabBar} axis="x" />
         </div>
+        ${
+            tagFilters.length > 0 &&
+            html`<div class="session-applied-tags" aria-label="Applied tag filters" role="group">
+            <span class="muted small">All tags:</span>
+            ${tagFilters.map(
+                (tag) => html`<button
+                class="chip"
+                key=${tag}
+                aria-label=${`Remove ${tag} filter`}
+                onClick=${() => setTagFilters(tagFilters.filter((each) => each !== tag))}
+            ><span>${tag}</span><${Icon} name="close" size=${12} /></button>`,
+            )}
+            <button class="tag-clear" onClick=${() => setTagFilters([])}>Clear tags</button>
+            <span class="muted small tag-result" role="status" aria-live="polite">${shown.length} matching</span>
+        </div>`
+        }
         <div
             class="session-items"
             ref=${list}
@@ -1092,7 +1182,8 @@ export function SessionList({ compact = false }) {
                 sessionsLoaded &&
                 shown.length === 0 &&
                 html`<div class="sessions-empty">
-                    ${archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}
+                    ${tagFilters.length ? "No sessions match all selected tags in this view." : archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}
+                    ${tagFilters.length > 0 && html`<button class="button" onClick=${() => setTagFilters([])}>Clear tag filters</button>`}
                 </div>`
             }
             ${groups.map((group) => {
@@ -1156,6 +1247,30 @@ export function SessionList({ compact = false }) {
                                         folders=${tab === "folders" && needle === ""}
                                         onPick=${pick}
                                         onSelect=${select}
+                                        tagSelecting=${selected.size > 0}
+                                        onTag=${(event, tag, id) => {
+                                            if (
+                                                selected.size > 0 ||
+                                                event.ctrlKey ||
+                                                event.metaKey ||
+                                                event.shiftKey
+                                            ) {
+                                                pick(
+                                                    {
+                                                        ctrlKey: true,
+                                                        shiftKey: event.shiftKey,
+                                                        detail: 0,
+                                                    },
+                                                    id,
+                                                );
+                                            } else if (!tagFilters.includes(tag)) {
+                                                setTagFilters([...tagFilters, tag]);
+                                            }
+                                        }}
+                                        onActions=${(id) => {
+                                            pressedIn = startSelect;
+                                            store.set({ sheet: { type: "session", id } });
+                                        }}
                                     />`,
                             )}
                         </div>
@@ -1172,7 +1287,19 @@ export function SessionList({ compact = false }) {
                 </span>
                 ${
                     canSteer() &&
-                    html`<button class="button" onClick=${archiveChosen}>
+                    html`<button
+                        class="button"
+                        disabled=${!chosen.some((id) => visible.current.includes(id))}
+                        onClick=${() =>
+                            store.set({
+                                sheet: {
+                                    type: "session-tags",
+                                    ids: chosen.filter((id) => visible.current.includes(id)),
+                                    batch: true,
+                                },
+                            })}
+                    ><${Icon} name="tag" size=${14} /> Edit tags</button>
+                    <button class="button" onClick=${archiveChosen}>
                         ${archived ? "Unarchive" : "Archive"}
                     </button>`
                 }

@@ -192,6 +192,8 @@ The Extensions hub in `sheets/gallery.js` shares one listing between Discover, I
 
 PiP's `pip-window.js` handles pointer resize zones and the account/browser size preference.
 
+Session tagging uses optional catalogue metadata in `docs.ts`, `Commands.updateSessionTags` and `POST /api/sessions/tags` for atomic explicit Add/Remove patches. The existing sessions projection supplies authorized tag vocabulary. `sessions.js` integrates row shortcuts, personal AND filters and visible-selected batch targets with the existing list; its tag sheets in `sheets/session-tags.js` reuse the native sheet trail. `test/session-tags.test.ts` covers validation, atomic limits, permission revocation, scoped HTTP/events, concurrent edits, legacy-definition compatibility and restart persistence. `test/session-tags-ui.test.ts` exercises the real web app at 390px, 320px and desktop widths, including navigation context, single-row scope, collapsed selections, frozen batch targets, immediate editor reopening and resized desktop hit areas.
+
 The menu in `sheets/menu.js` keeps `Sheet`'s focus, Escape, drag-to-close, and the sheet trail's Back behavior. Its `MenuFrame` positions it below the top bar's menu button at ≥700px, and adds arrow navigation and focus return; below that width it stays a bottom sheet. `PlacesSheet` uses the same three-column tiles.
 
 ## How a message travels

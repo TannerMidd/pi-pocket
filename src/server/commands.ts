@@ -103,6 +103,45 @@ const IMAGE_MIME: Record<string, string> = {
     ".webp": "image/webp",
 };
 const MAX_TITLE = 120;
+const MAX_SESSION_TAGS = 10;
+const MAX_TAG_LENGTH = 32;
+
+/** Canonical names for an explicit tag patch; never silently truncate a name or a session's tags. */
+function sessionTagNames(value: unknown): string[] {
+    if (value === undefined) {
+        return [];
+    }
+
+    if (!Array.isArray(value)) {
+        throw new HttpError(400, "Tags must be a list of names.");
+    }
+
+    const names = new Set<string>();
+
+    for (const item of value) {
+        if (typeof item !== "string") {
+            throw new HttpError(400, "Each tag must be a name.");
+        }
+
+        const name = item.trim().toLowerCase();
+
+        if (
+            name.length === 0 ||
+            name.length > MAX_TAG_LENGTH ||
+            /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/u.test(name)
+        ) {
+            throw new HttpError(
+                400,
+                "Use tag names of 1–32 characters, without control characters.",
+            );
+        }
+
+        names.add(name);
+    }
+
+    return [...names].sort();
+}
+
 /** A title as stored: one line, so it cannot pass for more lines where it is quoted (PiP's lists, reports). */
 const oneLine = (title: string): string => title.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE);
 /**
@@ -680,6 +719,79 @@ export class Commands {
                     : "brought the session back from the archive",
             );
         }
+    }
+
+    /**
+     * Patch shared tags on exactly these sessions, all or none. Unmentioned tags survive concurrent edits; tagging
+     * does not change recency. Authorization and limits use the state on the mutation line, not a cached catalogue.
+     */
+    async updateSessionTags(
+        user: User,
+        patch: { ids?: unknown; add?: unknown; remove?: unknown },
+    ): Promise<void> {
+        const app = this.#app;
+
+        app.requireSteer(user);
+
+        if (
+            !Array.isArray(patch.ids) ||
+            patch.ids.length === 0 ||
+            patch.ids.some((id) => typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0)
+        ) {
+            throw new HttpError(400, "Choose the sessions whose tags you want to edit.");
+        }
+
+        const ids = [...new Set<number>(patch.ids)];
+        const add = sessionTagNames(patch.add);
+        const remove = new Set(sessionTagNames(patch.remove));
+
+        if (add.some((name) => remove.has(name))) {
+            throw new HttpError(400, "A tag cannot be added and removed in the same change.");
+        }
+
+        await app.harness.commit(async (tx) => {
+            const catalogue = await tx.doc(SessionsDoc);
+            const currentUser = app.config.userById(user.id);
+
+            if (currentUser === undefined) {
+                throw new HttpError(401, "You are no longer signed in.");
+            }
+
+            app.requireSteer(currentUser);
+
+            const updates = ids.map((value) => {
+                const id = value as unknown as ConversationId;
+                const meta = catalogue.items[String(value)];
+
+                app.requireSee(currentUser, id);
+
+                if (meta === undefined || meta.pip !== undefined) {
+                    throw new HttpError(404, "A selected session is no longer available.");
+                }
+
+                const tags = [
+                    ...new Set([...(meta.tags ?? []).filter((name) => !remove.has(name)), ...add]),
+                ].sort();
+
+                if (tags.length > MAX_SESSION_TAGS) {
+                    throw new HttpError(
+                        409,
+                        "A selected session would have more than 10 tags. Nothing was saved.",
+                    );
+                }
+
+                return { meta, tags };
+            });
+
+            // Validate every target before changing any: a stale, hidden or full target must never cause a partial save.
+            for (const { meta, tags } of updates) {
+                if (tags.length === 0) {
+                    delete meta.tags;
+                } else {
+                    meta.tags = tags;
+                }
+            }
+        }, context);
     }
 
     /**

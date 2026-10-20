@@ -20,6 +20,14 @@ export function SessionSheet({ id }) {
     return html`<${Sheet} title=${session.title ?? "New session"} onClose=${closeSheet}>
         <div class="sheet-list">
         ${
+            steer &&
+            item(
+                "Edit tags",
+                () => store.set({ sheet: { type: "session-tags", ids: [id] } }),
+                "shared session tags",
+            )
+        }
+        ${
             !session.archived &&
             item(
                 isPinned(id) ? "Unpin from the top" : "Pin to the top",
