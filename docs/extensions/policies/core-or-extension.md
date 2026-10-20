@@ -8,7 +8,7 @@ This page tells where a change goes: into Pi Pocket's core, or into an extension
 - An **extension** is a module that Pi Pocket loads through its extension loader. The owner can turn each one off in **Menu → Extensions**, except the system prompt (`prompt.ts`). There are three types:
     - A **built-in extension** is a module in `src/server/extensions/`. It comes with Pi Pocket.
     - A **gallery extension** is a drop-in that its author keeps in their own repository. The gallery lists it ([gallery-review.md](gallery-review.md)).
-    - A **drop-in** is a module in the owner's `~/.pi-pocket/extensions/` folder.
+    - A **drop-in** is a module in the owner's `~/.local/share/pi-pocket/extensions/` folder.
 - An **extension point** is a part of the public API that lets an extension add to Pi Pocket or change it. [api-stability.md](api-stability.md) lists them.
 
 ## The decision
@@ -85,7 +85,7 @@ Ask these questions in this order. The first "yes" gives the answer.
 ### Themes (#90, 0.14.0)
 
 - **Core:** the theme surface, which every theme can change: tokens (CSS variables), the `data-part` names of the parts of the screen, and their documented states. Also the loading and the checks of theme folders.
-- **Not core:** each theme, as a folder in `~/.pi-pocket/themes/`. Duplicate the Pocket theme, change the copy, and choose it in settings.
+- **Not core:** each theme, as a folder in `~/.local/share/pi-pocket/themes/`. Duplicate the Pocket theme, change the copy, and choose it in settings.
 - **Why:** the tokens and the parts must be the same for every theme (C5). The look is a preference (C6). The default theme stays the one that Pi Pocket ships.
 - The theme guide and the theme surface reference tell what a theme can change.
 

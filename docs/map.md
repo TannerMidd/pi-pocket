@@ -6,11 +6,14 @@ Where things are in Pi Pocket, for agents working on it. [index.md](index.md) li
 
 `bin/pi-pocket.js` checks Node, then runs `src/launcher/main.ts`. The launcher reads its options (`options.ts`), asks how devices connect (`access.ts`: this device, LAN, Cloudflare quick tunnel, Tailscale), runs the server (`src/server/main.ts`) as a child, restarts it on exit code 75 or a crash, and keeps the tunnel up. `term.ts` draws its menu, panel, and QR code in the terminal. The server takes the data folder's lock, opens one `PocketApp`, and serves it with `http.ts`.
 
-## Data (`~/.pi-pocket/`, or `PI_POCKET_DIR`)
+## Data (the XDG folders, or `PI_POCKET_*_DIR`)
 
-- `pocket.sqlite`: Pi Durable's storage: conversations, entries, tasks, and Pi Pocket's documents.
-- `config.json`: people, roles, hashed tokens, settings. `push.json`: VAPID keys and push subscriptions.
-- `uploads/<conversation>/`, `worktrees/` (sessions' git worktrees), `extensions/` (the owner's drop-ins), `themes/` (the owner's theme folders, and `.removed/` for removed ones), `browser/profile/` (the built-in browser's profile; each session's cookies live in memory only).
+`dirs.ts` works out the four folders (config, data, state, cache) from `XDG_*_HOME` and moves an older `~/.pi-pocket` into them once; the launcher passes them to the server as `PI_POCKET_*_DIR`.
+
+- `config.json`: people, roles, hashed tokens, settings. `launcher.json`: the launcher's last access choice. Both in the config folder (`~/.config/pi-pocket/`).
+- `pocket.sqlite`: Pi Durable's storage: conversations, entries, tasks, and Pi Pocket's documents. `push.json`: VAPID keys and push subscriptions. `harness.lock`: the process id of the server using the folder, so one runs there at a time.
+- `uploads/<conversation>/`, `worktrees/` (sessions' git worktrees), `extensions/` (the owner's drop-ins), `themes/` (the owner's theme folders, and `.removed/` for removed ones): all in the data folder.
+- `cloudflared.log` in the state folder (`~/.local/state/pi-pocket/`); `bin/cloudflared` and `browser/profile/` (the built-in browser's profile; each session's cookies live in memory only) in the cache folder (`~/.cache/pi-pocket/`).
 
 ## Server: `src/server/`
 

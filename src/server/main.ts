@@ -2,18 +2,18 @@
 /**
  * Pi Pocket server. Run it through `bin/pi-pocket.js`, which restarts it when the app asks to (exit code 75).
  *
- *   node bin/pi-pocket.js [--host 127.0.0.1] [--port 8787] [--cwd DIR] [--data DIR] [--rotate-token]
+ *   node bin/pi-pocket.js [--host 127.0.0.1] [--port 8787] [--cwd DIR] [--rotate-token]
  *
  * Under the launcher (PI_POCKET_LAUNCHER=1 with an IPC channel) the server reports `ready` instead of printing its
  * sign-in links, and takes `access` messages that say how other devices reach it (a tunnel's public URL).
  */
-import { chmodSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { join, resolve } from "node:path";
 // Only types from the app here: its modules load below, after the signal handlers (loading takes a moment).
 import type { AccessInfo, PocketApp } from "./app.ts";
-import { APP_ROOT, dataDir } from "./config.ts";
+import { APP_ROOT } from "./config.ts";
+import { ensureFolders, foldersFromEnv, migrateLegacy } from "./dirs.ts";
 import type { createHandler } from "./http.ts";
 
 const RESTART_CODE = 75;
@@ -29,7 +29,6 @@ function parseArgs(argv: string[]) {
         host: process.env.PI_POCKET_HOST ?? "127.0.0.1",
         port: Number(process.env.PI_POCKET_PORT ?? 8787),
         cwd: process.cwd(),
-        data: dataDir(),
         rotateToken: false,
     };
 
@@ -52,14 +51,10 @@ function parseArgs(argv: string[]) {
             options.port = Number(value());
         } else if (arg === "--cwd") {
             options.cwd = resolve(value());
-        } else if (arg === "--data") {
-            options.data = resolve(value());
         } else if (arg === "--rotate-token") {
             options.rotateToken = true;
         } else if (arg === "--help" || arg === "-h") {
-            console.log(
-                "pi-pocket [--host 127.0.0.1] [--port 8787] [--cwd DIR] [--data DIR] [--rotate-token]",
-            );
+            console.log("pi-pocket [--host 127.0.0.1] [--port 8787] [--cwd DIR] [--rotate-token]");
             process.exit(0);
         } else {
             throw new Error(`Unknown argument: ${arg}`);
@@ -75,11 +70,20 @@ function parseArgs(argv: string[]) {
 
 const options = parseArgs(process.argv.slice(2));
 
-process.env.PI_POCKET_DIR = options.data;
-// The data folder holds the database, sign-in tokens, push keys, and uploads: only this user may open it, also when
-// --data named a folder that already existed.
-mkdirSync(options.data, { recursive: true, mode: 0o700 });
-chmodSync(options.data, 0o700);
+// The folders hold the database, sign-in tokens, push keys, and uploads: only this user may open them, and an older
+// `~/.pi-pocket` moves into them before anything reads them. After the options, so `--help` and a bad argument leave
+// the disk as they found it.
+const dirs = foldersFromEnv();
+
+ensureFolders(dirs);
+migrateLegacy(dirs, (line) => console.log(line));
+
+if (process.env.PI_POCKET_DIR !== undefined) {
+    // The variable that named the one folder, before the four: say so, rather than start on empty folders.
+    console.log(
+        "PI_POCKET_DIR is no longer used. Set PI_POCKET_DATA_DIR (README.md) to keep that folder's data.",
+    );
+}
 
 /** How long stopping may wait for running work to stop. What is still running then resumes in the next process. */
 const STOP_LIMIT_MS = 10_000;
@@ -189,7 +193,7 @@ const [{ PocketApp: App }, { createHandler: makeHandler }, { watchTree }] = awai
     import("./reload.ts"),
 ]);
 const opened = await App.open({
-    dataDir: options.data,
+    dirs,
     defaultCwd: options.cwd,
     supervised: process.env.PI_POCKET_SUPERVISED === "1",
 });
@@ -244,7 +248,10 @@ if (launcher) {
     }
 
     console.log("\nPi Pocket is running.");
-    console.log(`  data:     ${options.data}`);
+    console.log(`  config:   ${dirs.config}`);
+    console.log(`  data:     ${dirs.data}`);
+    console.log(`  state:    ${dirs.state}`);
+    console.log(`  cache:    ${dirs.cache}`);
     console.log(`  sessions: new sessions start in ${options.cwd}`);
     console.log(
         "  Open one of these once per browser to sign in as the owner (keep them private):",

@@ -52,7 +52,11 @@ in
     dataDir = lib.mkOption {
       type = lib.types.path;
       default = "/var/lib/pi-pocket";
-      description = "Directory for the database, settings, uploads, and extensions.";
+      description = ''
+        Directory for the database, settings, uploads, and extensions. The service keeps
+        Pi Pocket's four folders here as well, so an existing deployment's files stay where
+        they are instead of moving into the user's XDG folders.
+      '';
     };
 
     cwd = lib.mkOption {
@@ -234,6 +238,10 @@ in
       '';
       environment = {
         HOME = config.users.users.${cfg.user}.home;
+        PI_POCKET_CONFIG_DIR = cfg.dataDir;
+        PI_POCKET_DATA_DIR = cfg.dataDir;
+        PI_POCKET_STATE_DIR = cfg.dataDir;
+        PI_POCKET_CACHE_DIR = cfg.dataDir;
       }
       // lib.optionalAttrs (cfg.browser != null) { PI_POCKET_BROWSER = cfg.browser; }
       // lib.optionalAttrs (cfg.browserArgs != [ ]) {
@@ -252,8 +260,6 @@ in
             cfg.access
             "--port"
             (toString cfg.port)
-            "--data"
-            cfg.dataDir
             "--cwd"
             cfg.cwd
           ]

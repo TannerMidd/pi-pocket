@@ -1,6 +1,6 @@
 /**
  * No force-pushing: a bash call that force-pushes with git is blocked before it runs, and the system prompt says so.
- * An example drop-in extension with a hook and a prompt section: copy it into `~/.pi-pocket/extensions/`, then turn it
+ * An example drop-in extension with a hook and a prompt section: copy it into `~/.local/share/pi-pocket/extensions/`, then turn it
  * on in Menu → Extensions.
  */
 import { defineExtension, hook, section, ToolTask } from "@earendil-works/pi-durable";

@@ -1153,7 +1153,7 @@ export class Gallery {
             `- browser module: ${d.client === null ? "none" : `for ${d.client}`}; widest access: ${d.access}`,
             "",
             "Read every file, and report:",
-            "1. What it reads and writes: files and folders, sessions and documents. Does it read config.json or anything else in ~/.pi-pocket, Pi's auth.json or ~/.pi/agent, environment variables, or other secrets?",
+            "1. What it reads and writes: files and folders, sessions and documents. Does it read config.json or anything else in Pi Pocket's folders (~/.config/pi-pocket, ~/.local/share/pi-pocket, ~/.local/state/pi-pocket, ~/.cache/pi-pocket), Pi's auth.json or ~/.pi/agent, environment variables, or other secrets?",
             "2. Its network calls: to which addresses, and what it sends.",
             "3. Processes it starts, and code it loads while it runs (eval, new Function, dynamic imports, downloads).",
             "4. What its browser module does in the app's page: its requests, what it stores, what it shows.",

@@ -102,7 +102,7 @@ A module in `src/server/extensions/`. It is part of Pi Pocket.
 
 ### data folder
 
-Pi Pocket's folder for its data: `~/.pi-pocket` by default. Code: `host.dataDir`.
+Pi Pocket's folder for its data: `~/.local/share/pi-pocket` by default (`XDG_DATA_HOME` moves it). Code: `host.dataDir`.
 
 ### drop-in folder
 

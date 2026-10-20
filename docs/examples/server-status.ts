@@ -1,6 +1,6 @@
 /**
  * Server status: a page on the rail with this machine's load, memory, and uptime, which stays live while it shows.
- * An example drop-in extension with a web part: copy it and `server-status.js` into `~/.pi-pocket/extensions/`, then
+ * An example drop-in extension with a web part: copy it and `server-status.js` into `~/.local/share/pi-pocket/extensions/`, then
  * turn it on in Menu → Extensions.
  */
 import { cpus, freemem, hostname, loadavg, totalmem, uptime } from "node:os";

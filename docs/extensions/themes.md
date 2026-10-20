@@ -25,14 +25,14 @@ Besides Appearance: the launcher's **Themes** (Ctrl/⌘+K, then `#`) lists the t
 
 Each save shows at once in every tab that uses the theme. The page does not reload, so nothing you typed is lost.
 
-You can also edit the folder yourself: `~/.pi-pocket/themes/<id>/` (or `themes/` in `PI_POCKET_DIR`). It is the one place in the data folder, with `extensions/`, that you edit by hand. **Remove** moves a theme's folder to `themes/.removed/`, so you can get it back from there. Pi Pocket never deletes what is in `.removed/`, so it grows: delete the folders there you no longer want.
+You can also edit the folder yourself: `~/.local/share/pi-pocket/themes/<id>/` (or `themes/` in `PI_POCKET_DATA_DIR`; `XDG_DATA_HOME` moves it). It is the one place in the data folder, with `extensions/`, that you edit by hand. **Remove** moves a theme's folder to `themes/.removed/`, so you can get it back from there. Pi Pocket never deletes what is in `.removed/`, so it grows: delete the folders there you no longer want.
 
 A copy of Pocket starts with a `theme.css` that lists every token with its value, commented out. Take the comment marks off a token and change its value. Leave the others commented out, so they follow the app's updates.
 
 ## The folder
 
 ```
-~/.pi-pocket/themes/paper/
+~/.local/share/pi-pocket/themes/paper/
     theme.json
     theme.css
     layout.css        (theme.css imports it)

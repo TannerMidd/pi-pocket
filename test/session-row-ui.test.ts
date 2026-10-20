@@ -90,7 +90,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
-        dataDir: mkdtempSync(join(root, "session-row-ui-")),
+        cacheDir: mkdtempSync(join(root, "session-row-ui-")),
         load: async () => undefined,
         save: () => {},
         // A mouse, whatever this machine has: headless Chromium without one says (hover: none), and rows show their

@@ -17,7 +17,7 @@ import {
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
@@ -271,7 +271,7 @@ test("after a restart, an older message settling does not take Pi back from the 
     }
 });
 
-test("only the owner may read Pi's folder and the app's data, but anyone who steers may read uploads", async () => {
+test("only the owner may read Pi's folder and Pi Pocket's own folders, but anyone who steers may read uploads", async () => {
     const id = await newSession(app, folder);
     const { user: guest } = app.config.addUser("Guest", "guest");
 
@@ -280,10 +280,28 @@ test("only the owner may read Pi's folder and the app's data, but anyone who ste
 
         writeFileSync(agentFile, "{}");
         await assert.rejects(app.workspace.viewFile(id, guest, agentFile), /is not there/);
-        await assert.rejects(
-            app.workspace.viewFile(id, guest, join(app.dataDir, "config.json")),
-            /is not there/,
-        );
+
+        // Everything the folders hold is the owner's alone: tokens, the database, push keys, the tunnel log,
+        // the browser's cookies, and what an unfinished migration left in the old folder.
+        const secret = (path: string) => {
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, "{}");
+
+            return path;
+        };
+
+        for (const path of [
+            join(app.configDir, "config.json"),
+            join(app.configDir, "launcher.json"),
+            join(app.dataDir, "pocket.sqlite"),
+            join(app.dataDir, "push.json"),
+            join(app.stateDir, "cloudflared.log"),
+            join(app.cacheDir, "browser", "profile", "Cookies"),
+            join(app.homeFolder, ".pi-pocket", "config.json"),
+        ]) {
+            await assert.rejects(app.workspace.viewFile(id, guest, secret(path)), /is not there/);
+        }
+
         assert.equal((await app.workspace.viewFile(id, owner(app), agentFile)).kind, "text");
         mkdirSync(app.workspace.uploadDirectory(id), { recursive: true });
         writeFileSync(join(app.workspace.uploadDirectory(id), "shared.txt"), "hi");

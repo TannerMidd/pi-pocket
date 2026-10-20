@@ -1,4 +1,4 @@
-import { cleanUp, owner, root, scriptedModel, work } from "./helpers.ts";
+import { cleanUp, foldersFor, owner, root, scriptedModel, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,7 +6,7 @@ import { after, test } from "node:test";
 import { PocketApp } from "../src/server/app.ts";
 
 const app = await PocketApp.open({
-    dataDir: join(root, "scope-data"),
+    dirs: foldersFor(join(root, "scope-data")),
     defaultCwd: work,
     supervised: false,
     log: () => {},

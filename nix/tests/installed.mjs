@@ -26,9 +26,10 @@ test(
         const source = readFileSync(process.env.PI_POCKET_TEST_EXTENSION, "utf8");
         const root = mkdtempSync(join(tmpdir(), "pi-pocket-installed-"));
         const data = join(root, "data");
+        const config = join(root, "config");
         const extensions = join(data, "extensions");
         const file = join(extensions, "extension.ts");
-        const jsonFile = (name) => JSON.parse(readFileSync(join(data, name), "utf8"));
+        const jsonFile = (folder, name) => JSON.parse(readFileSync(join(folder, name), "utf8"));
 
         mkdirSync(extensions, { recursive: true });
         writeFileSync(file, source);
@@ -50,18 +51,7 @@ test(
         function start() {
             child = spawn(
                 join(packageDir, "bin/pi-pocket"),
-                [
-                    "--access",
-                    "local",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    String(port),
-                    "--data",
-                    data,
-                    "--cwd",
-                    root,
-                ],
+                ["--access", "local", "--host", "127.0.0.1", "--port", String(port), "--cwd", root],
                 {
                     cwd: root,
                     detached: true,
@@ -73,6 +63,10 @@ test(
                         TMPDIR: tmpdir(),
                         PI_CODING_AGENT_DIR: join(root, "agent"),
                         PI_POCKET_GUARD: "off",
+                        PI_POCKET_CONFIG_DIR: config,
+                        PI_POCKET_DATA_DIR: data,
+                        PI_POCKET_STATE_DIR: join(root, "state"),
+                        PI_POCKET_CACHE_DIR: join(root, "cache"),
                     },
                 },
             );
@@ -148,7 +142,7 @@ test(
             const response = await fetch(`${base}/api/${path}`, {
                 method: body === undefined ? "GET" : "POST",
                 headers: {
-                    Authorization: `Bearer ${jsonFile("config.json").ownerToken}`,
+                    Authorization: `Bearer ${jsonFile(config, "config.json").ownerToken}`,
                     "X-Pocket": "1",
                     "Content-Type": "application/json",
                 },
@@ -183,12 +177,12 @@ test(
             assert.deepEqual(current.extensions, [
                 { name: `runtime-${version}`, tools: [`probe_${version}`] },
             ]);
-            assert.equal(jsonFile("runtime-probe.json").version, version);
+            assert.equal(jsonFile(data, "runtime-probe.json").version, version);
         }
 
         start();
         await ready();
-        const token = jsonFile("config.json").ownerToken;
+        const token = jsonFile(config, "config.json").ownerToken;
         const session = await api("sessions", {
             title: "Installed runtime session",
         });
@@ -232,12 +226,12 @@ test(
 
         await api("extensions/extension.ts", { enabled: true });
         await loaded("v1");
-        const serverPid = jsonFile("runtime-probe.json").pid;
+        const serverPid = jsonFile(data, "runtime-probe.json").pid;
 
         writeFileSync(file, source.replaceAll("v1", "v2"));
         await loaded("v2");
         assert.equal(
-            jsonFile("runtime-probe.json").pid,
+            jsonFile(data, "runtime-probe.json").pid,
             serverPid,
             "hot reload does not restart the server",
         );
@@ -245,7 +239,7 @@ test(
         // Restart through Pocket's actual supervisor, not by reopening an in-process app.
         await api("restart", {});
         await until(
-            () => jsonFile("runtime-probe.json").pid !== serverPid,
+            () => jsonFile(data, "runtime-probe.json").pid !== serverPid,
             "the supervisor to restart the server",
         );
         await ready();
@@ -257,7 +251,7 @@ test(
         await ready();
         await loaded("v2");
         assert.equal(readFileSync(file, "utf8"), source.replaceAll("v1", "v2"));
-        assert.equal(jsonFile("config.json").ownerToken, token);
+        assert.equal(jsonFile(config, "config.json").ownerToken, token);
         assert.ok(
             (await api("sessions")).some(
                 (each) => each.id === session.id && each.title === "Installed runtime session",

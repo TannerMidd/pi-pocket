@@ -2,13 +2,14 @@
 // this before anything from src/: it points Pi's config at a temporary folder first.
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
 import type { Attachment } from "../src/server/commands.ts";
 import type { User } from "../src/server/config.ts";
+import type { Folders } from "../src/server/dirs.ts";
 import type { Client } from "../src/server/room.ts";
 
 export const context = BACKGROUND_CONTEXT;
@@ -67,6 +68,21 @@ export function scriptedModel(route: FauxResponseStep = echo) {
     return faux;
 }
 
+/**
+ * The four folders an app opened on `data` uses: the data folder as given, and config, state, and cache as its
+ * siblings, the way `~/.local/share/pi-pocket` sits beside its own.
+ */
+export function foldersFor(data: string): Folders {
+    const parent = dirname(data);
+
+    return {
+        config: join(parent, "config"),
+        data,
+        state: join(parent, "state"),
+        cache: join(parent, "cache"),
+    };
+}
+
 /** Open the app on `dataDir` with the scripted model. Opening the same folder again is a restart; `now` moves its clock. */
 export function openApp(
     model: ReturnType<typeof scriptedModel>,
@@ -74,7 +90,7 @@ export function openApp(
     now?: () => number,
 ): Promise<App> {
     return PocketApp.open({
-        dataDir,
+        dirs: foldersFor(dataDir),
         defaultCwd: work,
         supervised: false,
         log: () => {},

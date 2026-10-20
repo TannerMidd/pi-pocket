@@ -2,6 +2,7 @@ import {
     type App,
     cleanUp,
     fakeTab,
+    foldersFor,
     home,
     owner,
     root,
@@ -73,7 +74,7 @@ function expiredSignIn(): void {
 before(async () => {
     expiredSignIn();
     app = await PocketApp.open({
-        dataDir: join(root, "signins-data"),
+        dirs: foldersFor(join(root, "signins-data")),
         defaultCwd: work,
         supervised: false,
         log: () => {},

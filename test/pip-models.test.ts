@@ -1,6 +1,7 @@
 import {
     type App,
     cleanUp,
+    foldersFor,
     home,
     lastText,
     newSession,
@@ -82,7 +83,7 @@ let app: App;
 
 before(async () => {
     app = await PocketApp.open({
-        dataDir: join(root, "pip-models-data"),
+        dirs: foldersFor(join(root, "pip-models-data")),
         defaultCwd: work,
         supervised: false,
         log: () => {},

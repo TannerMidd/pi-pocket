@@ -954,7 +954,7 @@ test("a lock left by a process that is gone, or is not Node, is taken over; a ru
         writeFileSync(lock, `${node.pid}\n`);
         await assert.rejects(
             openHere(),
-            new RegExp(`already running on this data directory \\(pid ${node.pid}\\)`),
+            new RegExp(`already running on this data folder \\(pid ${node.pid}\\)`),
         );
     } finally {
         other.kill();

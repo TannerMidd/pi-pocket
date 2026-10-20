@@ -8,7 +8,7 @@ In this tutorial, you write a drop-in extension. It gives Pi a tool that counts 
 - You must have Pi Pocket 0.14.0 or later.
 - You must be able to write a file on the machine where Pi Pocket runs. You can also ask Pi to write the file for you.
 
-Drop-ins go in the drop-in folder: `~/.pi-pocket/extensions/`, or `extensions/` in `PI_POCKET_DIR`. Menu → **Extensions** shows the path at the bottom of the sheet.
+Drop-ins go in the drop-in folder: `~/.local/share/pi-pocket/extensions/` (`XDG_DATA_HOME` moves it), or `extensions/` in `PI_POCKET_DATA_DIR`. Menu → **Extensions** shows the path at the bottom of the sheet.
 
 ## 1. Write the module
 
