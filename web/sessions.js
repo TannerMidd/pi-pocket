@@ -393,68 +393,70 @@ function SessionRow({
             }}
             title=${tip}
         >
-            <span class="session-mark">
-                ${
-                    selected
-                        ? html`<span class="state-check" role="img" aria-label="Selected">
-                            <${Icon} name="check" size=${9} />
-                        </span>`
-                        : html`<span
-                            class=${`state-mark ${mark.shape}`}
-                            data-part="session-mark"
-                            style=${`--folder:${folderColor(session.cwd)}`}
-                            role=${mark.label ? "img" : undefined}
-                            aria-label=${mark.label || undefined}
-                            aria-hidden=${mark.label ? undefined : "true"}
-                        ></span>`
-                }
-            </span>
-            <span class=${`session-title ${hit ? "with-hit" : ""}`}>
-                ${
-                    hit
-                        ? html`<span class="session-name">${title}</span>
-                            <span class="session-hit">
-                                <${Highlight} text=${hit} needle=${needle} />
+            <span class="session-content">
+                <span class="session-mark">
+                    ${
+                        selected
+                            ? html`<span class="state-check" role="img" aria-label="Selected">
+                                <${Icon} name="check" size=${9} />
                             </span>`
-                        : html`<${Highlight} text=${title} needle=${needle} />`
-                }
-            </span>
-            <span class="session-side">
-                ${
-                    fork &&
-                    html`<span
-                        class=${`session-fork ${live > 0 ? "" : "failed"}`}
-                        title=${subagentsTip(counts)}
-                    >
-                        <${Icon} name="fork" size=${10} />${live > 0 ? live : failed}
-                    </span>`
-                }
-                ${!fork && person && html`<${Avatar} person=${person} size=${18} />`}
-                ${
-                    session.busy &&
-                    !session.waiting &&
-                    !fork &&
-                    html`<span class="session-working" title="Working"></span>`
-                }
-                ${
-                    session.waiting &&
-                    html`<span class="session-needs" title="Waiting for approval">
-                        ${canSteer() ? "needs you" : "waiting"}
-                    </span>`
-                }
-                ${
-                    (unread || marked) &&
-                    html`<span
-                        class="unread-dot"
-                        title=${marked ? "Marked unread" : "New chat messages"}
-                    ></span>`
-                }
-                <span class="session-time">${timeAgo(session.updatedAt)}</span>
-                ${
-                    number !== undefined &&
-                    number < 9 &&
-                    html`<kbd class="session-num">${number + 1}</kbd>`
-                }
+                            : html`<span
+                                class=${`state-mark ${mark.shape}`}
+                                data-part="session-mark"
+                                style=${`--folder:${folderColor(session.cwd)}`}
+                                role=${mark.label ? "img" : undefined}
+                                aria-label=${mark.label || undefined}
+                                aria-hidden=${mark.label ? undefined : "true"}
+                            ></span>`
+                    }
+                </span>
+                <span class=${`session-title ${hit ? "with-hit" : ""}`}>
+                    ${
+                        hit
+                            ? html`<span class="session-name">${title}</span>
+                                <span class="session-hit">
+                                    <${Highlight} text=${hit} needle=${needle} />
+                                </span>`
+                            : html`<${Highlight} text=${title} needle=${needle} />`
+                    }
+                </span>
+                <span class="session-side">
+                    ${
+                        fork &&
+                        html`<span
+                            class=${`session-fork ${live > 0 ? "" : "failed"}`}
+                            title=${subagentsTip(counts)}
+                        >
+                            <${Icon} name="fork" size=${10} />${live > 0 ? live : failed}
+                        </span>`
+                    }
+                    ${!fork && person && html`<${Avatar} person=${person} size=${18} />`}
+                    ${
+                        session.busy &&
+                        !session.waiting &&
+                        !fork &&
+                        html`<span class="session-working" title="Working"></span>`
+                    }
+                    ${
+                        session.waiting &&
+                        html`<span class="session-needs" title="Waiting for approval">
+                            ${canSteer() ? "needs you" : "waiting"}
+                        </span>`
+                    }
+                    ${
+                        (unread || marked) &&
+                        html`<span
+                            class="unread-dot"
+                            title=${marked ? "Marked unread" : "New chat messages"}
+                        ></span>`
+                    }
+                    <span class="session-time">${timeAgo(session.updatedAt)}</span>
+                    ${
+                        number !== undefined &&
+                        number < 9 &&
+                        html`<kbd class="session-num">${number + 1}</kbd>`
+                    }
+                </span>
             </span>
         </button>
         ${
@@ -1298,7 +1300,7 @@ export function SessionList({ compact = false }) {
                                     batch: true,
                                 },
                             })}
-                    ><${Icon} name="tag" size=${14} /> Edit tags</button>
+                    >Edit tags</button>
                     <button class="button" onClick=${archiveChosen}>
                         ${archived ? "Unarchive" : "Archive"}
                     </button>`

@@ -4360,9 +4360,23 @@ pre.diff .del {
 
 .session-row {
     position: relative;
-    padding-inline-start: calc(var(--linked-depth, 0) * 14px);
+    isolation: isolate;
+    padding-inline-start: calc(var(--linked-depth, 0) * var(--linked-step, 14px));
     animation: rise-in 0.38s var(--ease-out) backwards;
     animation-delay: calc(min(var(--i, 0), 14) * 18ms);
+}
+
+/* One continuous item fill, including sibling actions and tags, without joining their click targets. */
+.session-row::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    inset-inline-start: calc(var(--linked-depth, 0) * var(--linked-step, 14px));
+    z-index: -1;
+    border: 1px solid transparent;
+    border-radius: var(--r-row);
+    pointer-events: none;
+    transition: background-color var(--t-hover) var(--ease-out);
 }
 
 /*
@@ -4428,8 +4442,12 @@ pre.diff .del {
     transition: background-color var(--t-hover) var(--ease-out);
 }
 
+.session-content {
+    display: contents;
+}
+
 @media (hover: hover) {
-    .session:hover {
+    .session-row:hover::before {
         background: var(--hover);
     }
 }
@@ -4441,7 +4459,7 @@ pre.diff .del {
 }
 
 /* The open session: the accent's soft fill, and its title in bold. */
-.session-row.active .session {
+.session-row.active::before {
     background: var(--accent-soft);
 }
 
@@ -4450,13 +4468,13 @@ pre.diff .del {
 }
 
 /* Selected rows (Ctrl/⌘+click or drag, Shift+click): the soft fill, a border, and a check for the folder's mark. */
-.session-row.selected .session {
+.session-row.selected::before {
     background: var(--accent-soft);
     border-color: var(--accent-line);
 }
 
 /* A finger held on a row, before its actions open: after the open and selected rows' fills, so it shows on them too. */
-.session-row.pressing .session {
+.session-row.pressing::before {
     background: var(--hover);
 }
 
@@ -4751,7 +4769,7 @@ pre.diff .del {
 
 /* Named tags are siblings of the row-open button, never nested controls or a new action gutter. */
 .session-tags {
-    padding: 0 10px 5px 29px;
+    padding: 4px 10px 6px 29px;
 }
 
 .session-tags .chip {
@@ -4772,6 +4790,7 @@ pre.diff .del {
 
 /* Edit tags, archive, pin, and mark unread: native hover/focus actions on the row's right. */
 .session-actions {
+    pointer-events: none;
     position: absolute;
     top: 50%;
     right: 6px;
@@ -4790,6 +4809,7 @@ pre.diff .del {
     border: 1px solid var(--hair);
     border-radius: var(--r-seg);
     opacity: 0;
+    pointer-events: none;
     transform: translateX(4px);
     transition:
         opacity var(--t-hover) var(--ease-out),
@@ -4829,6 +4849,7 @@ pre.diff .del {
     .session-row:hover .session-act,
     .session-act:focus-visible {
         opacity: 1;
+        pointer-events: auto;
         transform: none;
     }
     .session-row:not(.no-acts):hover .session-side {
@@ -4846,6 +4867,7 @@ pre.diff .del {
        from the rules above: a browser without :has() drops only these. */
     .session-row:has(:focus-visible) .session-act {
         opacity: 1;
+        pointer-events: auto;
         transform: none;
     }
     .session-row:not(.no-acts):has(:focus-visible) .session-side {
@@ -4861,6 +4883,7 @@ pre.diff .del {
     /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
     :root.selecting .session-row .session-act {
         opacity: 0;
+        pointer-events: none;
     }
     :root.selecting .session-row .session-side {
         opacity: 1;
@@ -4868,13 +4891,12 @@ pre.diff .del {
     }
 }
 
-/* Stable, disjoint desktop hit areas without changing native row height or density.
-   Idle metadata occupies the reserved status/action slot, never the narrow title/open area.
-   The original hover/focus rules hide it when the native 26px action strip appears. */
+/* Keep the opening button's bounds stable, so moving to click never puts Archive under its center.
+   Its child line extends across the idle row (including hit testing), and yields only visual space
+   when actions appear. The item fill stays full width without a permanent blank title gutter. */
 @media (hover: hover) {
     .session-row.tags-editable {
         --linked-step: clamp(0px, calc((100cqw - 180px) * 0.28), 14px);
-        padding-inline-start: calc(var(--linked-depth, 0) * var(--linked-step));
     }
     .session-row.tags-editable .session-branches > span {
         width: var(--linked-step);
@@ -4889,27 +4911,48 @@ pre.diff .del {
     }
     .session-row.tags-editable .session {
         width: calc(100% - 66px);
-        grid-template-columns: 8px minmax(0, 1fr);
     }
     .session-row.four-acts .session {
         width: calc(100% - 126px);
     }
-    .session-row.tags-editable .session-side {
+    .session-row.tags-editable .session-content {
+        position: absolute;
+        top: 0;
+        inset-inline-start: calc(var(--linked-depth, 0) * var(--linked-step));
+        right: 0;
+        display: grid;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0 11px;
+        height: inherit;
+        padding: inherit;
+        border: inherit;
+    }
+    .session-row.tags-editable:is(:hover, :has(:focus-visible)) .session-content {
+        right: 66px;
+        grid-template-columns: 8px minmax(0, 1fr);
+    }
+    .session-row.four-acts:is(:hover, :has(:focus-visible)) .session-content {
+        right: 126px;
+    }
+    .session-row.tags-editable:is(:hover, :has(:focus-visible)) .session-side {
         position: absolute;
         top: calc((24px + 12px * var(--space-y)) / 2);
         right: 10px;
         transform: translateY(-50%);
-        max-width: 52px;
-        overflow: hidden;
+        min-width: 0;
         pointer-events: none;
     }
-    .session-row.four-acts .session-side {
-        max-width: 112px;
+    :root.selecting .session-row.tags-editable .session {
+        width: 100%;
     }
-    .session-row.tags-editable .session-side,
-    .session-row.tags-editable:hover .session-side,
-    .session-row.tags-editable:has(:focus-visible) .session-side {
-        min-width: 0;
+    :root.selecting .session-row.tags-editable .session-content {
+        right: 0;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+    }
+    :root.selecting .session-row.tags-editable .session-side {
+        position: static;
+        transform: none;
     }
 }
 

@@ -33,6 +33,7 @@ let empty: ConversationId;
 let first: ConversationId;
 let second: ConversationId;
 let archived: ConversationId;
+let layout: ConversationId;
 let list = ".home-list";
 const row = (id: ConversationId) => `${list} .session-row[data-id="${id}"]`;
 const sheet = ".sheet-host:not(.leaving)";
@@ -153,6 +154,14 @@ before(async () => {
     first = await newSession(app);
     second = await newSession(app);
     archived = await newSession(app);
+    layout = await newSession(app);
+    await app.commands.updateSession(layout, owner(app), {
+        title: "A long session title should use the available space before the timestamp",
+    });
+    await app.commands.updateSessionTags(owner(app), {
+        ids: [Number(layout)],
+        add: ["layout-check-a", "layout-check-b", "layout-check-c"],
+    });
 
     for (const [id, title] of [
         [empty, "Untagged notes"],
@@ -344,6 +353,15 @@ test(
         await sheetType(null);
         // A tag in selection mode selects its session, never adds a filter or opens it.
         await click({ selector: `${row(second)} .session-tags button` });
+        assert.equal(
+            await inPage<number>(`
+                const action = [...document.querySelectorAll(${JSON.stringify(`${list} .select-bar button`)})]
+                    .find(button => button.textContent.trim() === "Edit tags");
+                return JSON.stringify(action.querySelectorAll("svg").length);
+            `),
+            0,
+            "batch Edit tags is text-only like the existing Archive and Pin actions",
+        );
         await clickText("Edit tags", `${list} .select-bar`);
         await sheetType("session-tags");
         await addName("reviewed");
@@ -543,6 +561,7 @@ test(
                         centerHitsOpen: boolean;
                         distinct: boolean;
                         actionsHit: boolean;
+                        idleFillsRow: boolean;
                         height: number;
                         titleWidth: number;
                         ellipsis: boolean;
@@ -556,8 +575,9 @@ test(
                 const hits = each => {const r = box(each); return each.contains(document.elementFromPoint(r.x+r.width/2, r.y+r.height/2));};
                 return JSON.stringify({
                     centerHitsOpen: hits(button),
-                    distinct: acts.length === 4 && acts.every(each => {const r = box(each); return r.left >= open.right || r.right <= open.left || r.top >= open.bottom || r.bottom <= open.top;}),
+                    distinct: acts.length === 4 && acts.every(each => {const r = box(each); return getComputedStyle(each).pointerEvents === 'none' || r.left >= open.right || r.right <= open.left || r.top >= open.bottom || r.bottom <= open.top;}),
                     actionsHit: acts.every(hits),
+                    idleFillsRow: Math.abs(box(row.querySelector('.session-content')).right - box(row).right) < 0.01,
                     height: button.offsetHeight,
                     titleWidth: row.querySelector('.session-title').getBoundingClientRect().width,
                     ellipsis: getComputedStyle(row.querySelector('.session-title')).textOverflow === 'ellipsis',
@@ -573,8 +593,17 @@ test(
                     assert.equal(
                         geometry.distinct,
                         true,
-                        `${width}px actions outside open hit area, hover=${hovered}`,
+                        `${width}px visible actions stay outside open hit area; hidden actions ignore pointers, hover=${hovered}`,
                     );
+
+                    if (!hovered) {
+                        assert.equal(
+                            geometry.idleFillsRow,
+                            true,
+                            `${width}px no idle action gutter`,
+                        );
+                    }
+
                     assert.equal(geometry.height, 36, `${width}px native one-line desktop height`);
                     assert.ok(
                         geometry.titleWidth > 0 && geometry.ellipsis && geometry.fullTooltip,
@@ -604,5 +633,205 @@ test(
         }
 
         await page.evaluate(`document.documentElement.style.setProperty('--sidebar-w', '312px');`);
+    },
+);
+
+test("desktop layout: idle titles reclaim the hidden action strip", real, async () => {
+    await fresh(1280);
+    await page.hover({ selector: `${list} .session-tabs` });
+    const geometry = await inPage<{
+        rowWidth: number;
+        lineWidth: number;
+        lineBelongsToOpen: boolean;
+        titleGap: number;
+        hiddenActionsIgnorePointers: boolean;
+    }>(`
+        const row = document.querySelector(${JSON.stringify(row(layout))});
+        const button = row.querySelector('.session');
+        const title = row.querySelector('.session-title').getBoundingClientRect();
+        const side = row.querySelector('.session-side').getBoundingClientRect();
+        return JSON.stringify({
+            rowWidth: row.getBoundingClientRect().width,
+            lineWidth: row.querySelector('.session-content').getBoundingClientRect().width,
+            lineBelongsToOpen: button.contains(document.elementFromPoint(side.right - 1, side.top + side.height / 2)),
+            titleGap: side.left - title.right,
+            hiddenActionsIgnorePointers: [...row.querySelectorAll('.session-act')]
+                .every(each => getComputedStyle(each).pointerEvents === 'none'),
+        });
+    `);
+
+    assert.equal(geometry.lineWidth, geometry.rowWidth, "idle visible line uses the full row");
+    assert.equal(
+        geometry.lineBelongsToOpen,
+        true,
+        "the extended idle line belongs to the open control",
+    );
+    assert.ok(geometry.titleGap <= 12, "title ends at native spacing before the timestamp");
+    assert.equal(
+        geometry.hiddenActionsIgnorePointers,
+        true,
+        "hidden actions cannot intercept clicks",
+    );
+});
+
+test(
+    "desktop layout: the whole item stays highlighted over its title, actions and tags",
+    real,
+    async () => {
+        await fresh(1280);
+
+        for (const target of [
+            ".session",
+            ".session-act:first-child",
+            ".session-act:last-child",
+            ".session-tags .chip",
+        ]) {
+            await page.hover({ selector: `${row(layout)} ${target}` });
+            await expectPage(
+                `getComputedStyle(document.querySelector(${JSON.stringify(`${row(layout)} .session-act`)})).opacity === '1'`,
+                "native actions revealed",
+            );
+            const paint = await inPage<{
+                fill: boolean;
+                right: string;
+                top: string;
+                bottom: string;
+                buttonClear: boolean;
+            }>(`
+            const row = document.querySelector(${JSON.stringify(row(layout))});
+            const fill = getComputedStyle(row, '::before');
+            return JSON.stringify({
+                fill: fill.content !== 'none' && fill.backgroundColor !== 'rgba(0, 0, 0, 0)',
+                right: fill.right, top: fill.top, bottom: fill.bottom,
+                buttonClear: getComputedStyle(row.querySelector('.session')).backgroundColor === 'rgba(0, 0, 0, 0)',
+            });
+        `);
+
+            assert.equal(paint.fill, true, `${target}: one painted item, not just the open button`);
+            assert.deepEqual(
+                [paint.right, paint.top, paint.bottom],
+                ["0px", "0px", "0px"],
+                "highlight reaches every item edge",
+            );
+            assert.equal(
+                paint.buttonClear,
+                true,
+                "no separate title-only highlight over the item fill",
+            );
+        }
+    },
+);
+
+test(
+    "tag layout: chips have breathing room inside the item at phone and desktop widths",
+    real,
+    async () => {
+        for (const width of [390, 320, 1280]) {
+            await fresh(width);
+            const geometry = await inPage<{
+                topGap: number;
+                bottomGap: number;
+                overflow: boolean;
+                titleHeight: number;
+            }>(`
+            const row = document.querySelector(${JSON.stringify(row(layout))});
+            const title = row.querySelector('.session').getBoundingClientRect();
+            const tags = [...row.querySelectorAll('.session-tags .chip')].map(each => each.getBoundingClientRect());
+            return JSON.stringify({
+                topGap: Math.min(...tags.map(each => each.top)) - title.bottom,
+                bottomGap: row.getBoundingClientRect().bottom - Math.max(...tags.map(each => each.bottom)),
+                overflow: document.documentElement.scrollWidth > innerWidth,
+                titleHeight: title.height,
+            });
+        `);
+
+            assert.ok(geometry.topGap >= 4, `${width}px: at least 4px between title and chips`);
+            assert.ok(
+                geometry.bottomGap >= 6,
+                `${width}px: at least 6px below the final chip line`,
+            );
+            assert.equal(geometry.overflow, false, `${width}px: no horizontal overflow`);
+            assert.equal(
+                geometry.titleHeight,
+                width < 700 ? 40 : 36,
+                `${width}px: native title-row height unchanged`,
+            );
+        }
+    },
+);
+
+test(
+    "desktop layout: a direct idle-row click cannot become an archive click on hover",
+    real,
+    async () => {
+        await fresh(1280);
+        await page.hover({ selector: `${list} .session-tabs` });
+        // Deliberately no row hover first: moving to click must not change the action under this target.
+        await page.click({ selector: `${row(layout)} > .session` });
+        assert.equal(
+            app.sessionMeta(layout)?.archived,
+            undefined,
+            "opening must never archive the row",
+        );
+        await expectPage(
+            `(await import('/store.js')).store.state.view.conversation?.id === ${Number(layout)}`,
+            "direct idle click opens the session",
+        );
+    },
+);
+
+test(
+    "desktop layout: active and selected item fills respect Pocket and Lantern",
+    real,
+    async () => {
+        for (const look of ["pocket", "lantern"]) {
+            await fresh(1280);
+
+            if (look === "lantern") {
+                await page.evaluate(`
+                const { setPrefs } = await import('/theme.js');
+                const loaded = new Promise(resolve => document.addEventListener('pocket:theme', resolve, { once: true }));
+                setPrefs({ look: 'lantern' });
+                await loaded;
+            `);
+            }
+
+            await page.hover({ selector: `${row(layout)} > .session` });
+            await click({ selector: `${row(layout)} > .session` });
+            await expectPage(
+                `(await import('/store.js')).store.state.conversationId === ${Number(layout)}`,
+                "fixture opened",
+            );
+
+            for (const selected of [false, true]) {
+                if (selected) {
+                    await page.evaluate(
+                        `document.querySelector(${JSON.stringify(`${row(layout)} > .session`)}).focus()`,
+                    );
+                    await page.press("Shift+F10");
+                    await sheetType("session");
+                    await clickText("Select");
+                    await sheetType(null);
+                }
+
+                const expected = look === "lantern" ? "--card-2" : "--accent-soft";
+
+                await expectPage(
+                    `(() => {
+                const row = document.querySelector(${JSON.stringify(row(layout))});
+                // Resolve the native palette token in a separate probe, not by overriding app styles.
+                const probe = document.createElement('span');
+                probe.style.backgroundColor = 'var(${expected})';
+                document.body.append(probe);
+                const expected = getComputedStyle(probe).backgroundColor;
+                probe.remove();
+                return getComputedStyle(row, '::before').backgroundColor === expected
+                    && getComputedStyle(row.querySelector('.session')).backgroundColor === 'rgba(0, 0, 0, 0)'
+                    && row.classList.contains(${JSON.stringify(selected ? "selected" : "active")});
+            })()`,
+                    `${look}: whole-item ${selected ? "selection" : "active"} fill`,
+                );
+            }
+        }
     },
 );
