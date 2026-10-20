@@ -383,6 +383,7 @@ function sessionItems() {
                     .filter(Boolean)
                     .join(" · ") || timeAgo(session.updatedAt),
             text: `${session.title ?? "New session"} ${shortPath(session.cwd, server?.home)}`,
+            tags: session.tags ?? [],
             keys: number >= 0 && number < 9 ? `Alt ${number + 1}` : undefined,
             rank: session.archived ? -20 : -number * 0.01,
             run: () => navigate(session.id),
@@ -473,6 +474,74 @@ function resultDetail(item, hits) {
     };
 }
 
+const tagSegments =
+    typeof Intl.Segmenter === "function"
+        ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+        : null;
+
+/** Expand display hits to whole graphemes, then keep context before a late match; scoring stays native. */
+function resultTag(text, hits) {
+    const parts = tagSegments ? Array.from(tagSegments.segment(text)) : [];
+
+    if (!tagSegments) {
+        let index = 0;
+
+        for (const segment of text) {
+            parts.push({ index, segment });
+            index += segment.length;
+        }
+    }
+
+    const marked = parts.flatMap(({ index, segment }) =>
+        hits.some((at) => at >= index && at < index + segment.length)
+            ? Array.from({ length: segment.length }, (_, at) => index + at)
+            : [],
+    );
+    const first = parts.findLastIndex((part) => part.index <= hits[0]);
+
+    if (!tagSegments || parts.length <= 24 || first <= 12) {
+        return { text, hits: marked };
+    }
+
+    const start = parts[first - 12].index;
+
+    return { text: `…${text.slice(start)}`, hits: marked.map((at) => at - start + 1) };
+}
+
+function TagName({ text, hits }) {
+    let first = hits[0] ?? 0;
+    let end = (hits.at(-1) ?? -1) + 1;
+    const separator = /[\s/._…-]/u;
+
+    // Flex may shorten context, but must not split the inline shaping context inside a joining word.
+    while (first > 0 && !separator.test(text[first - 1])) {
+        first--;
+    }
+
+    while (end < text.length && !separator.test(text[end])) {
+        end++;
+    }
+
+    if (tagSegments) {
+        const boundaries = [...tagSegments.segment(text)].map((part) => part.index);
+
+        boundaries.push(text.length);
+        first = boundaries.findLast((at) => at <= first) ?? 0;
+        end = boundaries.find((at) => at >= end) ?? text.length;
+    } else {
+        first = 0;
+        end = text.length;
+    }
+
+    return html`<span class="launcher-tag-name" dir="auto">
+        <span class="launcher-tag-context">${text.slice(0, first)}</span>
+        <span class="launcher-tag-hit">
+            <${Marked} text=${text.slice(first, end)} hits=${hits.map((at) => at - first)} />
+        </span>
+        <span class="launcher-tag-context">${text.slice(end)}</span>
+    </span>`;
+}
+
 const optionId = (item) => `launcher-option-${encodeURIComponent(item.key)}`;
 
 export function Launcher({ leaving, returnTo }) {
@@ -496,21 +565,40 @@ export function Launcher({ leaving, returnTo }) {
         const scored = [];
 
         for (const item of all) {
-            const match = fuzzy(item.text, needle);
+            let match = fuzzy(item.text, needle);
+            let tag = null;
+
+            // Preserve the native combined title/folder search; tags add recall only when that did not match.
+            if (!match && item.kind === "session") {
+                for (const name of item.tags) {
+                    const candidate = fuzzy(name, needle);
+
+                    if (candidate && (!match || candidate.score > match.score)) {
+                        match = candidate;
+                        tag = name;
+                    }
+                }
+            }
 
             if (!match) {
                 continue;
             }
 
             // Themes' scorer text begins with "theme ", not with their displayed label.
-            const hits = fieldHits(match.hits, item.kind === "theme" ? 6 : 0, item.label.length);
+            const hits =
+                tag === null
+                    ? fieldHits(match.hits, item.kind === "theme" ? 6 : 0, item.label.length)
+                    : [];
             const detailHits =
-                item.kind === "theme"
+                item.kind === "theme" || tag !== null
                     ? []
                     : fieldHits(match.hits, item.label.length + 1, (item.detail ?? "").length);
             const detail = resultDetail(item, detailHits);
             const matchNote =
-                match.hits.length > 0 && hits.length === 0 && detailHits.length === 0
+                tag === null &&
+                match.hits.length > 0 &&
+                hits.length === 0 &&
+                detailHits.length === 0
                     ? item.kind === "theme"
                         ? "Theme name or ID match"
                         : "Keyword match"
@@ -521,6 +609,7 @@ export function Launcher({ leaving, returnTo }) {
                 score: match.score + (item.rank ?? 0),
                 hits,
                 fullDetail: item.detail,
+                tag: tag === null ? null : { name: tag, ...resultTag(tag, match.hits) },
                 detail,
                 matchNote,
             });
@@ -943,6 +1032,7 @@ export function Launcher({ leaving, returnTo }) {
                                 const description = [
                                     item.label,
                                     fullDetail,
+                                    item.tag && `Tag: ${item.tag.name}`,
                                     item.status,
                                     item.matchNote,
                                     item.keys?.replace("Mod", APPLE ? "Command" : "Control"),
@@ -1002,16 +1092,28 @@ export function Launcher({ leaving, returnTo }) {
                                             <${Marked} text=${item.label} hits=${item.hits} />
                                         </span>
                                         ${
-                                            (item.detail.text || item.matchNote) &&
+                                            (item.detail.text || item.matchNote || item.tag) &&
                                             html`<span class="detail">
                                                 <span
-                                                    class=${`launcher-path ${item.kind === "session" ? "session-path" : ""}`}
+                                                    class=${`launcher-path ${item.kind === "session" ? "session-path" : ""} ${item.tag ? "launcher-tag-folder-full" : ""}`}
                                                 >
                                                     <${Marked}
                                                         text=${item.detail.text}
                                                         hits=${item.detail.hits}
                                                     />
                                                 </span>
+                                                ${
+                                                    item.tag &&
+                                                    html`
+                                                        <span class="launcher-path session-path launcher-tag-folder-short" aria-hidden="true">
+                                                            …/${fullDetail.slice(fullDetail.lastIndexOf("/") + 1)}
+                                                        </span>
+                                                        <span class="launcher-tag-reason">
+                                                            <span>Tag:</span>
+                                                            <${TagName} text=${item.tag.text} hits=${item.tag.hits} />
+                                                        </span>
+                                                    `
+                                                }
                                                 ${
                                                     item.matchNote &&
                                                     html`<span class="launcher-match-note">

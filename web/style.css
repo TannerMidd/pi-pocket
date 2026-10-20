@@ -8693,6 +8693,56 @@ textarea.notes {
     font-family: var(--mono);
 }
 
+/* Tag-only matches explain themselves beside the folder, without adding a row or competing with status. */
+.launcher-tag-reason {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: calc(100% - 36px);
+    white-space: nowrap;
+}
+
+.launcher-tag-name {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.launcher-tag-context {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.launcher-tag-hit {
+    flex: 0 0 auto;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.launcher-item .detail:has(.launcher-tag-reason) .launcher-path {
+    min-width: 28px;
+}
+
+.launcher-tag-folder-short {
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .launcher-tag-folder-full {
+        display: none;
+    }
+
+    .launcher-tag-folder-short {
+        display: block;
+    }
+}
+
 .launcher-state {
     flex: none;
     max-width: 50%;
