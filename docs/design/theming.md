@@ -28,7 +28,7 @@ The goal, from issue #90, point 3: "A theme should be a folder. Copy the main th
 
 ## The decisions
 
-1. **A theme is a folder:** `~/.pi-pocket/themes/<id>/`. The built-in **Pocket** theme is `web/themes/pocket/`, in the same format.
+1. **A theme is a folder:** `~/.local/share/pi-pocket/themes/<id>/` (`XDG_DATA_HOME` moves it). The built-in **Pocket** theme is `web/themes/pocket/`, in the same format.
 2. **Two choices: Theme and Colors.** The theme sets the look and the layout. Colors is a palette: the 22 Omarchy palettes, Desktop, or a folder's `colors.toml`. A layout must stay when the colors change, because Follow desktop and the launcher's previews change colors often. With one list, a layout would need a copy for each palette.
 3. **A folder holds colors, CSS, or both.** `colors.toml` is Omarchy's format, unchanged, so any Omarchy theme folder dropped in shows under Colors. When you choose a theme that has its own colors, Colors changes to them too. You can change it after.
 4. **Duplicate gives a starter, not a fork.** If Duplicate copied all of `style.css`, you would have a 14,700-line fork that falls behind at each release. So Pocket's folder holds a manifest and a `theme.css` that lists every token, commented out with its default, plus examples for each part.
@@ -46,7 +46,7 @@ The goal, from issue #90, point 3: "A theme should be a folder. Copy the main th
 ## The format by example
 
 ```
-~/.pi-pocket/themes/paper/
+~/.local/share/pi-pocket/themes/paper/
     theme.json
     theme.css
     layout.css        (theme.css imports it)

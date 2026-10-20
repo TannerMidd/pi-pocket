@@ -70,7 +70,7 @@ test(
             createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
         );
         const browsers = new Browsers({
-            dataDir: mkdtempSync(join(root, "extensions-hub-ui-")),
+            cacheDir: mkdtempSync(join(root, "extensions-hub-ui-")),
             load: async () => undefined,
             save: () => {},
         });

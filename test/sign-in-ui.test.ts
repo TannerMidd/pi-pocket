@@ -1,4 +1,13 @@
-import { type App, cleanUp, home, root, scriptedModel, until, work } from "./helpers.ts";
+import {
+    type App,
+    cleanUp,
+    foldersFor,
+    home,
+    root,
+    scriptedModel,
+    until,
+    work,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -171,7 +180,7 @@ before(async () => {
     const faux = scriptedModel();
 
     app = await PocketApp.open({
-        dataDir: join(root, "sign-in-ui-data"),
+        dirs: foldersFor(join(root, "sign-in-ui-data")),
         defaultCwd: work,
         supervised: false,
         log: () => {},
@@ -187,7 +196,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
-        dataDir: mkdtempSync(join(root, "sign-in-ui-browser-")),
+        cacheDir: mkdtempSync(join(root, "sign-in-ui-browser-")),
         load: async () => undefined,
         save: () => {},
     });

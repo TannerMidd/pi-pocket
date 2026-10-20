@@ -3,15 +3,16 @@
  * quick tunnel, or Tailscale), then it runs the server and the tunnel. The server restarts when the app asks (exit code
  * 75) or after a crash; the tunnel stays up across those restarts, so its address does not change.
  *
- *   pi-pocket [--access local|lan|cloudflare|tailscale] [-y] [--port 8787] [--cwd DIR] [--data DIR] [--rotate-token]
+ *   pi-pocket [--access local|lan|cloudflare|tailscale] [-y] [--port 8787] [--cwd DIR] [--rotate-token]
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { ensureFolders, foldersFromEnv, migrateLegacy } from "../server/dirs.ts";
 import {
     ACCESS_LABELS,
     type AccessMode,
@@ -52,8 +53,13 @@ const RESTART_CODE = 75;
 
 const options = parseArgs(process.argv.slice(2));
 
-mkdirSync(options.data, { recursive: true, mode: 0o700 });
-const settingsFile = join(options.data, "launcher.json");
+// The four folders, in the XDG base directories unless PI_POCKET_*_DIR names them: a `~/.pi-pocket` from an older
+// Pi Pocket moves into them once, before anything reads it.
+const dirs = foldersFromEnv();
+
+ensureFolders(dirs);
+
+const settingsFile = join(dirs.config, "launcher.json");
 
 function loadSettings(): { access?: AccessMode } {
     try {
@@ -112,7 +118,7 @@ function accessChoices(): { mode: AccessMode; choice: Choice }[] {
     const port = options.port;
     const lan = lanAddresses()[0];
     const tailnet = tailscaleAddress();
-    const cloudflared = findCloudflared(options.data);
+    const cloudflared = findCloudflared(dirs.cache);
     const source = cloudflaredSource();
 
     return [
@@ -195,7 +201,7 @@ async function pickAccess(current: AccessMode | undefined): Promise<AccessMode |
 
 /** cloudflared's path, downloading it first when the user agrees. */
 async function ensureCloudflared(): Promise<string | undefined> {
-    const found = findCloudflared(options.data);
+    const found = findCloudflared(dirs.cache);
 
     if (found !== undefined) {
         return found;
@@ -221,7 +227,7 @@ async function ensureCloudflared(): Promise<string | undefined> {
 
     log("");
     const yes = await confirm(
-        `Download cloudflared (Cloudflare's official release, about 40 MB) to ${tilde(join(options.data, "bin"))}?`,
+        `Download cloudflared (Cloudflare's official release, about 40 MB) to ${tilde(join(dirs.cache, "bin"))}?`,
         true,
     );
 
@@ -232,7 +238,7 @@ async function ensureCloudflared(): Promise<string | undefined> {
     let last = 0;
 
     try {
-        const file = await downloadCloudflared(options.data, source.url, (done, total) => {
+        const file = await downloadCloudflared(dirs.cache, source.url, (done, total) => {
             if (Date.now() - last < 120 && done !== total) {
                 return;
             }
@@ -381,7 +387,7 @@ async function showPanel(withQr: boolean): Promise<void> {
     }
 
     lines.push(row("Folder", tilde(options.cwd)));
-    lines.push(row("Data", tilde(options.data)));
+    lines.push(row("Data", tilde(dirs.data)));
     lines.push("");
     const login =
         state.loginPath === undefined
@@ -446,8 +452,6 @@ function startServer(first: boolean): void {
         String(options.port),
         "--cwd",
         options.cwd,
-        "--data",
-        options.data,
     ];
 
     if (first && options.rotateToken) {
@@ -455,9 +459,18 @@ function startServer(first: boolean): void {
     }
 
     // Node 22 calls node:sqlite experimental and says so at every start, right above the panel.
+    // The four folders come along as the variables the server reads, so launcher and server always agree.
     const proc = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...args], {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: { ...process.env, PI_POCKET_SUPERVISED: "1", PI_POCKET_LAUNCHER: "1" },
+        env: {
+            ...process.env,
+            PI_POCKET_SUPERVISED: "1",
+            PI_POCKET_LAUNCHER: "1",
+            PI_POCKET_CONFIG_DIR: dirs.config,
+            PI_POCKET_DATA_DIR: dirs.data,
+            PI_POCKET_STATE_DIR: dirs.state,
+            PI_POCKET_CACHE_DIR: dirs.cache,
+        },
     });
 
     child = proc;
@@ -579,7 +592,7 @@ function startTunnel(binary: string): void {
     const current: CloudflareTunnel = new CloudflareTunnel(
         binary,
         options.port,
-        join(options.data, "cloudflared.log"),
+        join(dirs.state, "cloudflared.log"),
         {
             ready(url) {
                 if (tunnel !== current) {
@@ -619,7 +632,7 @@ function startTunnel(binary: string): void {
 
                 log(
                     yellow(
-                        `  The tunnel stopped (code ${code}); trying again in ${delay / 1000} seconds. Log: ${tilde(join(options.data, "cloudflared.log"))}`,
+                        `  The tunnel stopped (code ${code}); trying again in ${delay / 1000} seconds. Log: ${tilde(join(dirs.state, "cloudflared.log"))}`,
                     ),
                 );
                 maybeShowPanel();
@@ -778,6 +791,7 @@ process.on("exit", () => restoreTerminal());
 async function main(): Promise<void> {
     // Until the server runs, Ctrl+C (raw mode turns off the terminal's own) still quits, even mid-download.
     onKeys((key) => key === "ctrl-c" && void quit(130));
+    migrateLegacy(dirs, log);
     const settings = loadSettings();
     let mode: Mode | undefined = options.access;
 

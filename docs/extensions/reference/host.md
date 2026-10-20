@@ -28,7 +28,7 @@ readonly dataDir: string;
 
 Since 0.1.0 · Stable
 
-Pi Pocket's data folder. It is `~/.pi-pocket`, unless `PI_POCKET_DIR` or the `--data` option gives another folder. The drop-in folder is `extensions/` in it.
+Pi Pocket's data folder. It is `~/.local/share/pi-pocket`, unless `XDG_DATA_HOME` or `PI_POCKET_DATA_DIR` gives another folder. The drop-in folder is `extensions/` in it.
 
 ### `agentDir`
 

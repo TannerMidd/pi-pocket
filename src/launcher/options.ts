@@ -1,6 +1,5 @@
 /** The launcher's command line: its options, from arguments and the environment, and its help. */
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { ACCESS_MODES, type AccessMode, isAccessMode } from "./access.ts";
 import { restoreTerminal } from "./term.ts";
 
@@ -17,12 +16,15 @@ Usage: pi-pocket [options]
   -y, --yes           Use the last choice without asking
   -p, --port N        Port (default 8787)
       --cwd DIR       Folder for new sessions (default: the current folder)
-      --data DIR      Data folder (default ~/.pi-pocket)
       --host HOST     Listen on this address instead of choosing an access mode
       --rotate-token  Replace the owner sign-in link, signing out the devices that used it
   -h, --help          Show this help
 
-Environment: PI_POCKET_ACCESS, PI_POCKET_PORT, PI_POCKET_DIR, PI_POCKET_HOST, PI_POCKET_GUARD=off`;
+Environment: PI_POCKET_ACCESS, PI_POCKET_PORT, PI_POCKET_HOST, PI_POCKET_GUARD=off, and the folders:
+  PI_POCKET_CONFIG_DIR  (default XDG_CONFIG_HOME/pi-pocket, ~/.config/pi-pocket)
+  PI_POCKET_DATA_DIR    (default XDG_DATA_HOME/pi-pocket, ~/.local/share/pi-pocket)
+  PI_POCKET_STATE_DIR   (default XDG_STATE_HOME/pi-pocket, ~/.local/state/pi-pocket)
+  PI_POCKET_CACHE_DIR   (default XDG_CACHE_HOME/pi-pocket, ~/.cache/pi-pocket)`;
 
 export interface Options {
     access: AccessMode | undefined;
@@ -30,7 +32,6 @@ export interface Options {
     host: string | undefined;
     port: number;
     cwd: string;
-    data: string;
     rotateToken: boolean;
 }
 
@@ -42,7 +43,6 @@ export function parseArgs(argv: string[]): Options {
         host: process.env.PI_POCKET_HOST || undefined,
         port: Number(process.env.PI_POCKET_PORT ?? 8787),
         cwd: process.cwd(),
-        data: resolve(process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket")),
         rotateToken: false,
     };
 
@@ -75,8 +75,6 @@ export function parseArgs(argv: string[]): Options {
             options.port = Number(value());
         } else if (arg === "--cwd") {
             options.cwd = resolve(value());
-        } else if (arg === "--data") {
-            options.data = resolve(value());
         } else if (arg === "--rotate-token") {
             options.rotateToken = true;
         } else if (arg === "--help" || arg === "-h") {

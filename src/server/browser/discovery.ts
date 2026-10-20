@@ -95,17 +95,17 @@ export function snapOf(
 }
 
 /**
- * Where the browser keeps its profile. A snap may not write to hidden folders in the home folder, as the data folder
- * usually is (`~/.pi-pocket`): its profile goes in the snap's own folder instead, one per data folder.
+ * Where the browser keeps its profile. A snap may not write to hidden folders in the home folder, as the cache folder
+ * usually is (`~/.cache`): its profile goes in the snap's own folder instead, one per cache folder.
  */
-export function profileFolder(executable: string, dataDir: string, snapBin = SNAP_BIN): string {
+export function profileFolder(executable: string, cacheDir: string, snapBin = SNAP_BIN): string {
     const snap = snapOf(executable, snapBin);
 
     if (snap === undefined) {
-        return join(dataDir, "browser", "profile");
+        return join(cacheDir, "browser", "profile");
     }
 
-    const id = createHash("sha256").update(dataDir).digest("hex").slice(0, 12);
+    const id = createHash("sha256").update(cacheDir).digest("hex").slice(0, 12);
 
     return join(homedir(), "snap", snap.name, "common", "pi-pocket", id);
 }

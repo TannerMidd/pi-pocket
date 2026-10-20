@@ -31,28 +31,30 @@ async function freePort(): Promise<number> {
 function server(
     name: string,
     port: number,
-): { proc: ChildProcess; data: string; output: () => string } {
-    const data = join(root, name, "data");
-    const proc = spawn(
-        process.execPath,
-        [MAIN, "--port", String(port), "--data", data, "--cwd", root],
-        {
-            env: {
-                ...process.env,
-                PI_CODING_AGENT_DIR: join(root, name, "agent"),
-                PI_POCKET_GUARD: "off",
-                PI_POCKET_LAUNCHER: "",
-                PI_POCKET_SUPERVISED: "",
-            },
-            stdio: ["ignore", "pipe", "pipe"],
+): { proc: ChildProcess; data: string; state: string; output: () => string } {
+    const folder = (kind: string) => join(root, name, kind);
+    const data = folder("data");
+    const state = folder("state");
+    const proc = spawn(process.execPath, [MAIN, "--port", String(port), "--cwd", root], {
+        env: {
+            ...process.env,
+            PI_CODING_AGENT_DIR: join(root, name, "agent"),
+            PI_POCKET_GUARD: "off",
+            PI_POCKET_LAUNCHER: "",
+            PI_POCKET_SUPERVISED: "",
+            PI_POCKET_CONFIG_DIR: folder("config"),
+            PI_POCKET_DATA_DIR: data,
+            PI_POCKET_STATE_DIR: state,
+            PI_POCKET_CACHE_DIR: folder("cache"),
         },
-    );
+        stdio: ["ignore", "pipe", "pipe"],
+    });
     let text = "";
 
     proc.stdout!.on("data", (chunk) => (text += chunk));
     proc.stderr!.on("data", (chunk) => (text += chunk));
 
-    return { proc, data, output: () => text };
+    return { proc, data, state, output: () => text };
 }
 
 async function exit(

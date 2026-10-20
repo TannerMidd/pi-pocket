@@ -285,8 +285,9 @@ export class Workspace {
 
     /**
      * A file a person may read whole through a session: the viewer, and files sent along with a message. As
-     * `conversationFile`, but Pi's own folder (sign-ins, settings) and this app's data (people, tokens, the database)
-     * are the owner's alone. Uploads, worktrees, and PiP's clones (`repos/`), which sessions use, are not kept back.
+     * `conversationFile`, but Pi's own folder (sign-ins, settings) and this app's own folders (people and tokens, the
+     * database, its lock and tunnel log, the browser's profile) are the owner's alone. Uploads, worktrees, and PiP's
+     * clones (`repos/`), which sessions use, are not kept back.
      */
     readableFile(user: User, id: ConversationId, path: string): string {
         const file = this.conversationFile(user, id, path);
@@ -306,9 +307,17 @@ export class Workspace {
         const target = real(file);
         const inside = (root: string) => target === root || target.startsWith(root + sep);
         const data = real(this.#app.dataDir);
+        // The old folder too: a migration leaves behind what another folder already had, `config.json` included.
+        const appFolders = [
+            this.#app.configDir,
+            this.#app.stateDir,
+            this.#app.cacheDir,
+            join(this.#app.homeFolder, ".pi-pocket"),
+        ].map(real);
 
         if (
             inside(real(getAgentDir())) ||
+            appFolders.some(inside) ||
             (inside(data) &&
                 !inside(join(data, "uploads")) &&
                 !inside(join(data, "worktrees")) &&

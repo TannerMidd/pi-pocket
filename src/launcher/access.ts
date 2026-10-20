@@ -151,9 +151,9 @@ function findExecutable(name: string, extraDirectories: string[]): string | unde
     return undefined;
 }
 
-/** cloudflared from PATH, or the copy the launcher downloaded into the data folder. */
-export function findCloudflared(dataDir: string): string | undefined {
-    return findExecutable("cloudflared", [join(dataDir, "bin")]);
+/** cloudflared from PATH, or the copy the launcher downloaded into the cache folder. */
+export function findCloudflared(cacheDir: string): string | undefined {
+    return findExecutable("cloudflared", [join(cacheDir, "bin")]);
 }
 
 /** Where to get cloudflared on this platform: a release binary the launcher can download, or how to install it. */
@@ -186,13 +186,13 @@ export function cloudflaredSource(): { url: string } | { install: string } {
     };
 }
 
-/** Download Cloudflare's release binary into `<data>/bin/cloudflared` and check that it runs. */
+/** Download Cloudflare's release binary into `<cache>/bin/cloudflared` and check that it runs. */
 export async function downloadCloudflared(
-    dataDir: string,
+    cacheDir: string,
     url: string,
     progress: (done: number, total: number) => void,
 ): Promise<string> {
-    const directory = join(dataDir, "bin");
+    const directory = join(cacheDir, "bin");
 
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const target = join(directory, "cloudflared");

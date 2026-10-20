@@ -133,7 +133,7 @@ test(
     async () => {
         const saved = new Map<number, { url?: string }>();
         const browsers = new Browsers({
-            dataDir: mkdtempSync(join(root, "engine-")),
+            cacheDir: mkdtempSync(join(root, "engine-")),
             load: async (id) => saved.get(id),
             save: (id, value) => saved.set(id, value),
         });
@@ -180,7 +180,7 @@ test(
 
 test("a command sent while a navigation swaps the page waits for it", real, async () => {
     const browsers = new Browsers({
-        dataDir: mkdtempSync(join(root, "swap-")),
+        cacheDir: mkdtempSync(join(root, "swap-")),
         load: async () => undefined,
         save: () => {},
     });

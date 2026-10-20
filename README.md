@@ -59,7 +59,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Codemode.** On by default: Pi writes short scripts that call its tools, and every call still goes through the same checks.
 - **Lancet Guard.** Off by default; turn it on in Menu → Extensions. With the [specpi-lancet-guard](https://github.com/TannerMidd/SpecPi) Pi package installed and on, risky bash, write, and edit calls wait for someone in the session to approve.
 - **Roles, invites, and limits.** Steer or view-only access, to every session or just one, through one-time links and QR codes, with spend limits per person and per session.
-- **Live-editable.** No build step: edit the web app or an extension and it reloads in place. Add your own extensions in `~/.pi-pocket/extensions/`: tools and checks for Pi, and pages, rail buttons, routes, and slash commands for the app.
+- **Live-editable.** No build step: edit the web app or an extension and it reloads in place. Add your own extensions in `~/.local/share/pi-pocket/extensions/` (`XDG_DATA_HOME` moves it): tools and checks for Pi, and pages, rail buttons, routes, and slash commands for the app.
 
 The full tour is in [docs/features.md](docs/features.md).
 
@@ -74,7 +74,7 @@ Choose a mode in the launcher, or pass `--access`:
 | `cloudflare` | Anyone with the link | Free quick tunnel with https, no account needed (Cloudflare offers quick tunnels for testing and development). The address changes each time the launcher starts but stays the same across server restarts. |
 | `tailscale`  | Your tailnet         | Tailscale address only, encrypted by the tailnet                                                                                                                                                            |
 
-Cloudflare mode needs `cloudflared`. On Linux the launcher can download the official release into `~/.pi-pocket/bin`. To use another tunnel (ngrok, `tailscale serve`), choose `local` and point the tunnel at port 8787.
+Cloudflare mode needs `cloudflared`. On Linux the launcher can download the official release into `~/.cache/pi-pocket/bin` (`XDG_CACHE_HOME` moves it). To use another tunnel (ngrok, `tailscale serve`), choose `local` and point the tunnel at port 8787.
 
 > [!WARNING]
 > Anyone with steering rights can make the agent run commands on this machine, as you. That reaches everything you can: your files, Pi Pocket's own settings and sign-in tokens, and its code. A single-session invite limits what someone sees in the app, not what Pi can reach, and Lancet Guard approvals can come from anyone who can steer, including the person who asked. People who can steer every session can also invite others. Invite only people you would trust at your keyboard. View-only users cannot make Pi act.
@@ -106,11 +106,21 @@ The flake builds Pi Pocket (`nix run github:TannerMidd/pi-pocket`) and has a Nix
 | `-y`              |                | Reuse the last access choice                                      |
 | `--port`          | `8787`         | Port to listen on                                                 |
 | `--cwd`           | current folder | Default folder for new sessions                                   |
-| `--data`          | `~/.pi-pocket` | Database, settings, uploads, and push keys                        |
 | `--host`          |                | Listen on a specific address instead of choosing access           |
 | `--rotate-token`  |                | Issue a new owner link and sign out devices that used the old one |
 
-Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_DIR`, `PI_POCKET_HOST`, `PI_POCKET_PORT`, `PI_POCKET_GUARD=off`, `PI_POCKET_BROWSER` (the browser to run, when Chromium or Chrome is not found by itself), and `PI_POCKET_BROWSER_ARGS` (extra flags for it, such as `--no-sandbox` where sandboxes are unavailable). Without a terminal (under systemd, for example), the launcher uses `--access` or the last choice.
+Pi Pocket keeps its files in the [XDG base directories](https://specifications.freedesktop.org/basedir-spec/latest/), a `pi-pocket` folder in each:
+
+| Kind   | Default                    | Holds                                                                                    |
+| ------ | -------------------------- | ---------------------------------------------------------------------------------------- |
+| config | `~/.config/pi-pocket`      | People, roles, tokens, and settings; the launcher's last choice                          |
+| data   | `~/.local/share/pi-pocket` | The database and its lock, push keys, uploads, worktrees, drop-in extensions, and themes |
+| state  | `~/.local/state/pi-pocket` | The Cloudflare tunnel's log                                                              |
+| cache  | `~/.cache/pi-pocket`       | The downloaded cloudflared, and the built-in browser's profile                           |
+
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` move them, and `PI_POCKET_CONFIG_DIR`, `PI_POCKET_DATA_DIR`, `PI_POCKET_STATE_DIR`, and `PI_POCKET_CACHE_DIR` name each one itself: the `--data` option and `PI_POCKET_DIR` that named one folder are gone. A `~/.pi-pocket` from an older Pi Pocket moves into them on the first start, and is left in place if anything else is in it.
+
+Environment variables: `PI_POCKET_ACCESS`, `PI_POCKET_HOST`, `PI_POCKET_PORT`, `PI_POCKET_GUARD=off`, `PI_POCKET_BROWSER` (the browser to run, when Chromium or Chrome is not found by itself), and `PI_POCKET_BROWSER_ARGS` (extra flags for it, such as `--no-sandbox` where sandboxes are unavailable), and the four folder variables above. Without a terminal (under systemd, for example), the launcher uses `--access` or the last choice.
 
 ## Architecture
 
@@ -152,7 +162,7 @@ Pi knows where Pi Pocket's own documentation is: [docs/index.md](docs/index.md) 
 - Pi Durable is experimental, and its API can change between releases. Versions are pinned in `package.json`.
 - Only one server process can use the database at a time.
 - Forks are separate sessions; there is no branch tree to switch between inside one session.
-- Pi's own extensions are not supported: Pi Pocket runs its own extensions on Pi Durable, and drop-ins from `~/.pi-pocket/extensions/`. Pi's prompt templates work as slash commands.
+- Pi's own extensions are not supported: Pi Pocket runs its own extensions on Pi Durable, and drop-ins from `~/.local/share/pi-pocket/extensions/`. Pi's prompt templates work as slash commands.
 - A git worktree keeps a session's files apart; it is not a sandbox. Pi can still reach everything you can.
 - Artifacts run in an opaque-origin sandbox, so `localStorage` and cookies are unavailable inside them.
 - The browser needs Chromium, Chrome, Brave, or Edge on the server. Its pages live in memory: a restart opens each one again at its last address, but not what was typed into it. Each session's cookies are its own and last until the page closes. A browser installed as a snap (Ubuntu's Chromium) is used only when there is no other; it cannot open files outside your home folder. The list of servers running on the machine is Linux-only. Tested on Linux and macOS; not yet on Windows.

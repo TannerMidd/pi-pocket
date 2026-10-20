@@ -25,8 +25,8 @@ export type OpenOptions = {
 };
 
 export interface BrowsersOptions {
-    /** Where the browser's profile goes: `browser/` in it. */
-    dataDir: string;
+    /** Where the browser's profile goes: `browser/profile/` in it. */
+    cacheDir: string;
     /** The browser to run. Undefined finds one; null means there is none (tests). */
     executable?: string | null;
     /** Extra Chromium flags, such as `--no-sandbox` where sandboxes are not available. */
@@ -164,7 +164,7 @@ export class Browsers {
         ];
         const launching = Chromium.launch(
             executable,
-            profileFolder(executable, this.#options.dataDir),
+            profileFolder(executable, this.#options.cacheDir),
             extra,
         );
 

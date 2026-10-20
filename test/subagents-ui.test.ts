@@ -132,7 +132,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
-        dataDir: mkdtempSync(join(root, "subagents-ui-")),
+        cacheDir: mkdtempSync(join(root, "subagents-ui-")),
         load: async () => undefined,
         save: () => {},
     });

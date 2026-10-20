@@ -4,7 +4,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 
 export default () => {
-    const marker = join(process.env.PI_POCKET_DIR!, "runtime-probe.json");
+    const marker = join(process.env.PI_POCKET_DATA_DIR!, "runtime-probe.json");
 
     // both runners poll this marker while the extension loads
     writeFileSync(`${marker}.tmp`, JSON.stringify({ pid: process.pid, version: "v1" }));

@@ -158,7 +158,7 @@
                             <div class="wire">one file</div>
                             <div class="layer store">
                                 <div class="layer-head">
-                                    <b>SQLite</b><code>~/.pi-pocket/pocket.sqlite</code>
+                                    <b>SQLite</b><code>~/.local/share/pi-pocket/pocket.sqlite</code>
                                 </div>
                             </div>
                         </div>
@@ -598,9 +598,11 @@
                         <span class="tag"><b>harness.lock</b> one server per data folder</span>
                     </div>
                     <p class="note">
-                        All of it is in <code>~/.pi-pocket/</code>, or wherever
-                        <code>PI_POCKET_DIR</code> points. The config files are written atomically
-                        with mode 0600.
+                        All of it is in Pi Pocket's XDG folders:
+                        <code>~/.local/share/pi-pocket/</code>, <code>~/.config/pi-pocket/</code>,
+                        <code>~/.local/state/pi-pocket/</code>, and
+                        <code>~/.cache/pi-pocket/</code>, or wherever <code>PI_POCKET_*_DIR</code>
+                        points. The config files are written atomically with mode 0600.
                     </p>
                 </div>
             </section>
@@ -702,8 +704,9 @@
                         </li>
                     </ol>
                     <p class="note">
-                        The owner's own modules in <code>~/.pi-pocket/extensions/</code> load after
-                        these, stay off until turned on, and import the same packages through a
+                        The owner's own modules in
+                        <code>~/.local/share/pi-pocket/extensions/</code> load after these, stay off
+                        until turned on, and import the same packages through a
                         <code>node_modules</code> link.
                     </p>
                 </div>

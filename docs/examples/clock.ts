@@ -1,6 +1,6 @@
 /**
  * A clock tool, and a /clock-zone command that sets the time zone it uses in a session. An example drop-in extension:
- * copy it into `~/.pi-pocket/extensions/`, then turn it on in Menu → Extensions.
+ * copy it into `~/.local/share/pi-pocket/extensions/`, then turn it on in Menu → Extensions.
  */
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineExtension, defineTool } from "@earendil-works/pi-durable";

@@ -40,7 +40,7 @@ This page is the map. Read all of it, then only the pages that your task needs.
 
 ## Drop-in or built-in
 
-**A drop-in** is a file in the drop-in folder, `~/.pi-pocket/extensions/` (the `extensions/` folder in the data folder). Use a drop-in for all that one person or one machine wants.
+**A drop-in** is a file in the drop-in folder, `~/.local/share/pi-pocket/extensions/` (the `extensions/` folder in the data folder; `XDG_DATA_HOME` moves it). Use a drop-in for all that one person or one machine wants.
 
 - It stays when Pi Pocket updates.
 - It starts off. The owner turns it on in Menu → Extensions.

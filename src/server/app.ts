@@ -48,6 +48,7 @@ import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
+import { ensureFolders, type Folders } from "./dirs.ts";
 import {
     ArtifactBodyDoc,
     type ArtifactMeta,
@@ -234,7 +235,7 @@ function countSubagents(
 }
 
 export interface OpenOptions {
-    dataDir: string;
+    dirs: Folders;
     defaultCwd: string;
     supervised: boolean;
     log?: (line: string) => void;
@@ -254,7 +255,17 @@ export class PocketApp {
     pushStore: PushStore | undefined;
     readonly approvals = new Approvals((id) => this.attribution.requesterOf(id));
     readonly guard = new LancetGuard();
+    /**
+     * The data folder: the database and its lock, uploads, worktrees, gallery, themes, and drop-ins. Also
+     * `host.dataDir`.
+     */
     readonly dataDir: string;
+    /** `config.json` and `launcher.json`: people, roles, tokens, settings, and the launcher's last choice. */
+    readonly configDir: string;
+    /** The tunnel's log: the one thing Pi Pocket writes that is only worth keeping while it runs. */
+    readonly stateDir: string;
+    /** What Pi Pocket can download again: cloudflared and the built-in browser's profile. */
+    readonly cacheDir: string;
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
@@ -345,18 +356,27 @@ export class PocketApp {
     /** The clock durable work runs by. */
     readonly now: () => number;
 
+    /** What Pi's own skills and settings are read from, and where an older Pi Pocket's folder may still be. */
+    get homeFolder(): string {
+        return this.#home;
+    }
+
     private constructor(options: OpenOptions) {
         this.#configureModels = options.configureModels;
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
-        this.dataDir = options.dataDir;
+        this.dataDir = options.dirs.data;
+        this.configDir = options.dirs.config;
+        this.stateDir = options.dirs.state;
+        this.cacheDir = options.dirs.cache;
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
-        this.config = new ConfigStore(options.dataDir);
-        this.#lockFile = join(options.dataDir, "harness.lock");
+        this.config = new ConfigStore(options.dirs.config);
+        // In the data folder, not the state folder: the lock holds a database, and says which folder is taken.
+        this.#lockFile = join(options.dirs.data, "harness.lock");
         this.#log = options.log ?? ((line) => console.log(line));
         this.browsers = new Browsers({
-            dataDir: options.dataDir,
+            cacheDir: options.dirs.cache,
             ...(options.browser === undefined ? {} : { executable: options.browser }),
             log: (line) => this.#log(line),
             load: async (id) =>
@@ -390,7 +410,7 @@ export class PocketApp {
         });
         this.themes = new Themes({
             builtIn: join(APP_ROOT, "web", "themes"),
-            dataDir: options.dataDir,
+            dataDir: options.dirs.data,
             notify: (message) => this.ownerNotice("warning", message),
             // Everyone's tabs: a theme anyone may have chosen changed, or one came or went.
             changed: () => {
@@ -472,7 +492,17 @@ export class PocketApp {
         return app;
     }
 
+    /**
+     * The four folders first: the config folder holds `config.json`, the data folder the database and the lock taken
+     * below, and the launcher and the server make them; a caller with its own (as tests do) gets them too.
+     */
     async #open(): Promise<void> {
+        ensureFolders({
+            config: this.configDir,
+            data: this.dataDir,
+            state: this.stateDir,
+            cache: this.cacheDir,
+        });
         takeLock(this.#lockFile);
 
         try {
