@@ -220,7 +220,16 @@ const tooSoon = (event) =>
     event.isTrusted && event.detail > 0 && performance.now() - movedAt < SETTLING_MS;
 
 // Held back from the press too: a field that slid in under the finger does not take the focus (and the keyboard).
-addEventListener("mousedown", (event) => tooSoon(event) && event.preventDefault(), true);
+addEventListener(
+    "mousedown",
+    (event) => {
+        if (tooSoon(event)) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    },
+    true,
+);
 addEventListener(
     "click",
     (event) => {
@@ -313,6 +322,7 @@ const HOME = "/";
 let shown = location.pathname;
 let shownBack = history.state?.pocket?.back;
 let routeTimer = 0;
+let homeRequest = 0;
 
 /**
  * Which way the last route change went, for the screen it brings to slide in from that side (style.css): `forward` to
@@ -334,6 +344,7 @@ export function pushRoute(path, { replace = false } = {}) {
         return;
     }
 
+    homeRequest++;
     heading(path === HOME ? "back" : "forward");
     moved();
     shown = path;
@@ -364,13 +375,46 @@ export function pushRoute(path, { replace = false } = {}) {
  * list leaves the app as it would from any first page. Otherwise `fallback`, which shows the list some other way.
  */
 export function goHome(fallback) {
-    const back = history.state?.pocket?.back;
+    const request = ++homeRequest;
 
-    if (typeof back === "number" && back > 0) {
-        history.go(-(back + depth()));
-    } else {
-        fallback();
-    }
+    return queue(() => {
+        if (request !== homeRequest) {
+            return;
+        }
+
+        const state = history.state;
+        const path = shown;
+        const back = state?.pocket?.back;
+        const steps = typeof back === "number" && back > 0 ? back + depth() : 0;
+
+        // Old entries can be dropped. The length also counts forward entries, so even a jump within it may fail.
+        if (steps <= 0 || steps > history.length - 1) {
+            fallback();
+
+            return;
+        }
+
+        return new Promise((resolve) => {
+            const done = () => {
+                clearTimeout(timer);
+                removeEventListener("popstate", done);
+                resolve();
+            };
+
+            const timer = setTimeout(() => {
+                done();
+
+                // A newer request or route must not be undone by recovery from this one.
+                if (request === homeRequest && shown === path && history.state === state) {
+                    fallback();
+                }
+            }, TRAVERSE_MS);
+
+            // Keep normal popstate handling: Home closes layers as well as changing the route.
+            addEventListener("popstate", done);
+            history.go(-steps);
+        });
+    });
 }
 
 /**

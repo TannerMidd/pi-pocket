@@ -324,7 +324,8 @@ function modeNote(): string {
         case "local":
             return "other devices cannot connect";
         case "lan":
-            return "devices on this network, not encrypted";
+            // It listens on every address (a VPN's, a public one), not only the local network's: say where.
+            return `all addresses (${state.host}), not encrypted`;
         case "cloudflare":
             return state.publicUrl === undefined
                 ? "tunnel not up yet"

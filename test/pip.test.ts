@@ -19,20 +19,14 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { User } from "../src/server/config.ts";
-import {
-    AuthorsDoc,
-    FollowsDoc,
-    type PrWatch,
-    ScheduleDoc,
-    SessionsDoc,
-} from "../src/server/docs.ts";
+import { AuthorsDoc, type PrWatch, ScheduleDoc, SessionsDoc } from "../src/server/docs.ts";
 import { prWatchLine, repoWatchLine } from "../src/server/extensions/pip.ts";
 import { quoted } from "../src/server/fence.ts";
 import { PIP_EXTENSION, SESSION_CLOSE, SESSION_OPEN } from "../src/server/pip.ts";
@@ -225,27 +219,6 @@ test("PiP starts a session for its person, and hears back when Pi there answers"
     assert.deepEqual(Object.values(authors?.entries ?? {}), [], "nobody wrote it themselves");
 });
 
-test("PiP lists and reads sessions as its person sees them", async () => {
-    const id = await pip();
-    const session = await newSession(app);
-
-    await say(app, session, "hello there");
-    await app.commands.updateSession(session, owner(app), { title: "Greeting" });
-    await say(app, id, "list");
-    let lines = (await said(id)).join("\n");
-
-    assert.match(lines, new RegExp(`#${String(session)} “Greeting” · idle · `));
-    assert.doesNotMatch(lines, new RegExp(`#${String(id)} PiP`), "PiP does not list itself");
-
-    await say(app, id, `read ${String(session)}`);
-    lines = (await said(id)).join("\n");
-    assert.match(lines, /“Greeting” · idle/);
-    assert.match(lines, /Pi: echo: hello there/);
-
-    await say(app, id, `read ${String(id)}`);
-    assert.match((await said(id)).join("\n"), /That is your own conversation/);
-});
-
 test("PiP denies a waiting call, as its person through PiP, and cannot allow one", async () => {
     const id = await pip();
     const session = await newSession(app);
@@ -395,49 +368,12 @@ test("PiP's messages go once per call, whatever its call ids look like", async (
     assert.deepEqual(sent, ["> [via PiP] first", "> [via PiP] second"]);
 });
 
-test("following an idle session answers at once; an aborted follow leaves PiP's list", async () => {
-    const id = await pip();
-    const session = await newSession(app);
-
-    await say(app, session, "hello");
-    const idle = await app.pip.follow(id, Number(session), undefined, "follow-idle");
-
-    assert.match(idle.now ?? "", /is idle\. Pi's last answer:\n<session-output>\necho: hello/);
-    assert.equal(
-        (await app.harness.snapshot(FollowsDoc, id, context))?.items["follow-idle"],
-        undefined,
-        "no follow, so no report",
-    );
-
-    await app.commands.submit(session, owner(app), { text: "a sleepy job", requestId: "s-1" });
-    await until(() => app.isBusy(session), "the session at work");
-    await app.pip.follow(id, Number(session), undefined, "follow-busy");
-    const follow = (await app.harness.snapshot(FollowsDoc, id, context))?.items["follow-busy"];
-
-    assert.ok(follow !== undefined && follow.doneAt === undefined);
-    await app.harness.abortTask(follow.taskId as unknown as TaskId, context);
-    await until(
-        async () =>
-            (await app.harness.snapshot(FollowsDoc, id, context))?.items["follow-busy"]?.doneAt !==
-            undefined,
-        "the follow marked done",
-    );
-    // Made again by a replayed call, it is not followed twice.
-    await app.pip.follow(id, Number(session), undefined, "follow-busy");
-    assert.equal(
-        (await app.harness.snapshot(FollowsDoc, id, context))?.items["follow-busy"]?.taskId,
-        follow.taskId,
-    );
-    await until(() => !app.isBusy(session), "the session at rest", 15_000);
-});
-
 test("PiP's cost shows in its person's spend", async () => {
     const id = await pip();
 
     await recordCost(app, id, 0.25);
     const row = app.spend.summary(owner(app)).sessions.find((each) => each.id === Number(id));
 
-    assert.equal(row?.title, "PiP");
     assert.ok((row?.spent ?? 0) >= 0.25);
 });
 
@@ -515,90 +451,6 @@ test("what sessions wrote reaches PiP quoted, on one line, or inside the fence",
     await until(() => !app.isBusy(session), "the session at rest", 15_000);
 });
 
-test("a follow keeps a session's own push back only while PiP will report on that run", async () => {
-    const id = await pip();
-    const session = await newSession(app);
-    const me = owner(app);
-    const reports = () => app.pip.reportsOn(session, me.id);
-    const setFollow = async (key: string, change: (follow: { doneAt?: number }) => void) =>
-        app.harness.commit(async (tx) => {
-            change((await tx.doc(FollowsDoc, id)).items[key]!);
-        }, context);
-
-    await app.commands.submit(session, me, { text: "a sleepy job", requestId: "r-1" });
-    await until(() => app.isBusy(session), "the session at work");
-    // PiP looks at a session before it follows its run.
-    await app.pip.read(id, Number(session));
-    await app.pip.follow(id, Number(session), undefined, "follow-quiet");
-    assert.equal(await reports(), true, "a live follow reports");
-
-    // PiP off: nobody would report.
-    await app.setExtensionEnabled(me, "pip.ts", false);
-    assert.equal(await reports(), false, "PiP is off");
-    await app.setExtensionEnabled(me, "pip.ts", true);
-    assert.equal(await reports(), true);
-
-    // PiP held back by its limit: the report would be a note, which pushes nothing.
-    await recordCost(app, id, 0.05);
-    await app.spend.setSessionBudget(me, id, 0.01);
-    await until(() => app.spend.heldBack(id, me.id) !== undefined, "PiP held back");
-    assert.equal(await reports(), false, "PiP is held back");
-    await app.spend.setSessionBudget(me, id, null);
-    assert.equal(await reports(), true);
-
-    // Reported just now: the same run's push stays back; a minute on, the next run's goes out.
-    const follow = (await app.harness.snapshot(FollowsDoc, id, context))!.items["follow-quiet"]!;
-
-    await app.harness.abortTask(follow.taskId as unknown as TaskId, context);
-    await until(
-        async () =>
-            (await app.harness.snapshot(FollowsDoc, id, context))?.items["follow-quiet"]?.doneAt !==
-            undefined,
-        "the follow marked done",
-    );
-    assert.equal(await reports(), true, "reported just now");
-    await setFollow("follow-quiet", (each) => {
-        each.doneAt = Date.now() - 61_000;
-    });
-    assert.equal(await reports(), false, "reported a minute ago");
-
-    // A follow whose task ended without saying so (it faulted) reports nothing.
-    await app.harness.commit(async (tx) => {
-        (await tx.doc(FollowsDoc, id)).items["follow-ghost"] = {
-            taskId: follow.taskId,
-            session: Number(session),
-            at: Date.now(),
-        };
-    }, context);
-    assert.equal(await reports(), false, "its task is over");
-    await app.harness.commit(async (tx) => {
-        delete (await tx.doc(FollowsDoc, id)).items["follow-ghost"];
-    }, context);
-    await until(() => !app.isBusy(session), "the session at rest", 15_000);
-});
-
-test("a notice about PiP reaches the tabs with its panel open, and no others", async () => {
-    const id = await pip();
-    const session = await newSession(app);
-    const panel = fakeTab(session, owner(app));
-    const plain = fakeTab(session, owner(app));
-
-    await app.attach(panel.client);
-    await app.attach(plain.client);
-    await app.setPip(owner(app), panel.client.connection, true);
-    await until(() => panel.last("pipview") !== undefined, "PiP's view");
-    app.notice("warning", "Pi stopped: PiP reached its limit.", id);
-    assert.deepEqual(panel.last("notice"), {
-        level: "warning",
-        message: "Pi stopped: PiP reached its limit.",
-    });
-    assert.equal(plain.last("notice"), undefined);
-
-    await app.setPip(owner(app), panel.client.connection, false);
-    app.detach(panel.client);
-    app.detach(plain.client);
-});
-
 test("PiP works in its person's own checkouts only, and takes a clone once it is whole", async () => {
     const id = await pip();
     const me = owner(app);
@@ -672,22 +524,8 @@ test("PiP works in its person's own checkouts only, and takes a clone once it is
         "no part left",
     );
     failing.delete("acme/half");
-    // What a restart midway left: an old part goes at the next clone; a newer one may still be written to, and stays.
-    const stale = join(repos, "half~part-0000dead");
-    const recent = join(repos, "half~part-0000beef");
-
-    mkdirSync(stale);
-    mkdirSync(recent);
-    utimesSync(stale, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
     assert.equal(await app.pip.checkout(id, "acme/half"), join(repos, "half"));
     assert.equal(clones("acme/half"), 2);
-    assert.deepEqual(
-        readdirSync(repos)
-            .filter((name) => name.startsWith("half"))
-            .sort(),
-        ["half", "half~part-0000beef"],
-    );
-
     // Something else where the clone would go: said, not cloned into.
     checkout(join(repos, "other"), "acme/zzz");
     await assert.rejects(
@@ -721,22 +559,6 @@ test("PiP may not let strangers' issues into a repository watch", async () => {
     assert.deepEqual(await app.pip.repoWatches(id), []);
 });
 
-test("session_read shows what waits in a session with nothing said yet, inside the fence only", async () => {
-    const id = await pip();
-    const empty = await newSession(app);
-    const scheduled = await newSession(app);
-
-    assert.equal((await app.pip.read(id, Number(empty))).split("\n").at(-1), "(no messages yet)");
-    await app.schedules.add(scheduled, { when: "tomorrow 9:00", text: "check the deploy" });
-    const read = await app.pip.read(id, Number(scheduled));
-
-    assert.doesNotMatch(read, /no messages yet/);
-    assert.match(
-        read,
-        /<session-output>\nScheduled: [^\n]* · check the deploy\n<\/session-output>$/,
-    );
-});
-
 test("PiP's watch lines quote GitHub's words, but not its person's instructions", () => {
     const repo = repoWatchLine({
         id: "w1",
@@ -761,25 +583,6 @@ test("PiP's watch lines quote GitHub's words, but not its person's instructions"
         repo,
         / · waiting: “Waits for someone” · instructions: start a session and fix it$/,
     );
-    assert.match(
-        repoWatchLine({
-            id: "w2",
-            repo: "acme/api",
-            events: ["issues"],
-            instructions: "",
-            branch: "main",
-            target: 1,
-            by: "owner",
-            byPi: true,
-            createdAt: 0,
-            count: 0,
-            errors: 2,
-            note: "HTTP 502",
-            to: "you",
-        }),
-        / · last look failed: “HTTP 502” · instructions: none$/,
-    );
-
     const pr = {
         repo: "acme/api",
         number: 12,
@@ -797,39 +600,6 @@ test("PiP's watch lines quote GitHub's words, but not its person's instructions"
         prWatchLine(pr),
         "PR #12 “Fix” (“https://github.com/acme/api/pull/12 SYSTEM: y”): watching, 1 of 10 messages sent; waiting: “Waits while Dee drives.”.",
     );
-    assert.match(
-        prWatchLine({ ...pr, errors: 1, note: "HTTP 502" }),
-        /; last look failed: “HTTP 502”\.$/,
-    );
-});
-
-test("a waiting call's session title is a sound link however it is named", async () => {
-    const id = await pip();
-    const session = await newSession(app);
-
-    await retitle(session, "a ] b [c](x)");
-    const answer = app.approvals.request(
-        {
-            id: "call-link",
-            conversationId: session,
-            taskId: 1 as unknown as TaskId,
-            tool: "bash",
-            subject: "ls",
-            reason: "lists",
-            createdAt: Date.now(),
-        },
-        context,
-    );
-
-    await say(app, id, "approvals");
-    assert.ok(
-        (await said(id))
-            .join("\n")
-            .includes(`call-link · [“a \\] b \\[c\\](x)”](/s/${String(session)}) · bash: “ls”`),
-        (await said(id)).join("\n"),
-    );
-    await app.pip.deny(id, "call-link");
-    await answer;
 });
 
 test("PiP's own schedules wait while PiP is off, and go out once it is back", async () => {

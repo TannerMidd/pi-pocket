@@ -3,7 +3,17 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { t } from "../i18n.js";
 import { actions, attempt, canSteer, closeSheet, notify, scoped, store } from "../store.js";
-import { anchorStyle, html, Icon, popAnchor, shortPath, timeAgo } from "../ui.js";
+import { useDragToClose } from "../gestures.js";
+import {
+    anchorStyle,
+    BOTTOM_SHEETS,
+    html,
+    Icon,
+    popAnchor,
+    scrimPress,
+    shortPath,
+    timeAgo,
+} from "../ui.js";
 
 const coarsePointer = matchMedia("(pointer: coarse)").matches;
 
@@ -79,6 +89,13 @@ export function BranchPicker() {
     const list = useRef(null);
     // Arrows scroll the list to the row they reach; the mouse does not, or the list would run away under it.
     const keyed = useRef(false);
+
+    // On a phone, a swipe away from where it opens closes it: up, under the top bar's branch.
+    useDragToClose(box, {
+        dir: anchor?.down ? "up" : "down",
+        onClose: closeSheet,
+        enabled: BOTTOM_SHEETS.matches,
+    });
     const blocked = whyNot();
     const needle = query.trim().toLowerCase();
     const matches = (name) => needle === "" || name.toLowerCase().includes(needle);
@@ -261,17 +278,19 @@ export function BranchPicker() {
 
     return html`<div
         class="overlay pop-overlay"
-        onClick=${(event) => event.target === event.currentTarget && closeSheet()}
+        onMouseDown=${scrimPress(closeSheet)}
     >
         <section
-            class=${`pop-menu ${anchor ? (anchor.down ? "down" : "") : "free"}`}
+            class=${`pop-menu branch-picker ${anchor ? (anchor.down ? "down" : "") : "free"}`}
             style=${anchorStyle(anchor)}
             ref=${box}
             role="dialog"
+            aria-modal="true"
             aria-label=${t("Branch")}
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
+            <div class="grip" aria-hidden="true"></div>
             <header class="pop-menu-head">
                 <span>${t("Branch")}</span>
                 <span class="branch-head mono" title=${t(view.branch?.detached ? "No branch: a commit" : "Checked out")}>

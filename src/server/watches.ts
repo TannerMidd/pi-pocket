@@ -416,6 +416,13 @@ export class Watches {
         } catch (error) {
             const said = describe(error);
 
+            if (/no git remotes? found/i.test(said)) {
+                throw new HttpError(
+                    404,
+                    "This folder has no git remote, so it has no pull request to watch. Add its GitHub repository with git remote add origin <address>, then try again.",
+                );
+            }
+
             throw new HttpError(
                 404,
                 /no pull requests? found/i.test(said)

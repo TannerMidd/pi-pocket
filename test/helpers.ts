@@ -166,6 +166,7 @@ export function fakeTab(id: ConversationId | undefined, user: User) {
         connection: `connection-${crypto.randomUUID()}`,
         user,
         conversationId: id,
+        protocol: 2,
         sentEntries: new Set<number>(),
         orderKey: "",
         send: (event: string, data: unknown) =>

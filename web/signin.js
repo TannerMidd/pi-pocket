@@ -34,7 +34,7 @@ export function SignIn() {
             : `/login?token=${encodeURIComponent(text)}`;
     };
 
-    return html`<div class="signin">
+    return html`<div class="signin" data-part="sign-in">
         <div class="pi big">π</div>
         <h1>Pi Pocket</h1>
         <p class="muted">

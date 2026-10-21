@@ -1,0 +1,100 @@
+// The site's sidebar, by repository path. A page that is in the repository but not here fails the build, so no page
+// is lost; a page here that is not in the repository fails it too. A new page is one row here.
+
+export const SIDEBAR = [
+    {
+        label: "Getting started",
+        items: [
+            ["docs/extensions.md", "Overview"],
+            ["docs/extensions/first-extension.md", "Your first extension"],
+            ["docs/customizing.md", "Changes without code"],
+        ],
+    },
+    {
+        label: "Guides",
+        items: [
+            ["docs/extensions/modules.md", "Modules, loading, and errors"],
+            ["docs/extensions/tools.md", "Tools"],
+            ["docs/extensions/prompt-sections.md", "Prompt sections"],
+            ["docs/extensions/hooks.md", "Hooks"],
+            ["docs/extensions/host.md", "Using the host"],
+            ["docs/extensions/linked-sessions.md", "Starting and messaging sessions"],
+            ["docs/extensions/app.md", "Adding to the app"],
+            ["docs/extensions/routes.md", "Routes"],
+            ["docs/extensions/browser-modules.md", "Browser modules"],
+            ["docs/extensions/commands.md", "Slash commands"],
+            ["docs/extensions/tool-calls.md", "How tool calls show"],
+            ["docs/extensions/events.md", "Events"],
+            ["docs/extensions/cleanups.md", "Cleanups"],
+            ["docs/extensions/themes.md", "Themes"],
+            ["docs/extensions/testing.md", "Testing"],
+            ["docs/extensions/publishing.md", "Publishing to the gallery"],
+            ["docs/extensions/built-in.md", "Making it built in"],
+        ],
+    },
+    {
+        label: "Reference",
+        items: [
+            ["docs/extensions/reference/types.md", "Types for your editor"],
+            ["docs/extensions/reference/host.md", "host"],
+            ["docs/extensions/reference/web.md", "web"],
+            ["docs/extensions/reference/pocket.md", "pocket"],
+            ["docs/extensions/reference/command-context.md", "Command context"],
+            ["docs/extensions/reference/theme-surface.md", "Theme surface"],
+            ["docs/extensions/reference/gallery-entry.md", "Gallery entry"],
+            ["docs/extensions/reference/names.md", "Names"],
+            ["docs/extensions/reference/limits.md", "Limits"],
+            ["docs/extensions/reference/api-versions.md", "API versions"],
+            ["docs/extensions/reference/glossary.md", "Glossary"],
+        ],
+    },
+    {
+        label: "Policies",
+        items: [
+            ["docs/extensions/policies/index.md", "About the policies"],
+            ["docs/extensions/policies/core-or-extension.md", "Core or extension"],
+            ["docs/extensions/policies/api-stability.md", "API stability"],
+            ["docs/extensions/policies/security-model.md", "Security for authors"],
+            ["docs/extensions/policies/gallery-review.md", "Gallery review"],
+            ["SECURITY.md", "Security of Pi Pocket"],
+        ],
+    },
+    {
+        label: "Pi Pocket's own code",
+        collapsed: true,
+        items: [
+            ["docs/index.md", "Documentation map"],
+            ["CONTRIBUTING.md", "Contributing"],
+            ["docs/self-editing.md", "Changing the code"],
+            ["docs/map.md", "Project map"],
+            ["docs/architecture.md", "Architecture"],
+            ["docs/features.md", "Features"],
+        ],
+    },
+];
+
+/** Where the sections of the one long extensions.md went, so the check can say where a stale link should go. */
+export const MOVED = {
+    "docs/extensions.md#a-module": "docs/extensions/modules.md",
+    "docs/extensions.md#names": "docs/extensions/reference/names.md",
+    "docs/extensions.md#loading-reloading-and-errors": "docs/extensions/modules.md",
+    "docs/extensions.md#tools": "docs/extensions/tools.md",
+    "docs/extensions.md#prompt-sections": "docs/extensions/prompt-sections.md",
+    "docs/extensions.md#hooks": "docs/extensions/hooks.md",
+    "docs/extensions.md#the-host":
+        "docs/extensions/host.md, or docs/extensions/reference/host.md for its members",
+    "docs/extensions.md#starting-and-messaging-sessions": "docs/extensions/linked-sessions.md",
+    "docs/extensions.md#adding-to-the-app": "docs/extensions/app.md",
+    "docs/extensions.md#routes": "docs/extensions/routes.md",
+    "docs/extensions.md#the-browser-module": "docs/extensions/browser-modules.md",
+    "docs/extensions.md#who-may-use-it": "docs/extensions/routes.md#who-may-use-it",
+    "docs/extensions.md#events": "docs/extensions/events.md",
+    "docs/extensions.md#commands": "docs/extensions/commands.md",
+    "docs/extensions.md#cleanups": "docs/extensions/cleanups.md",
+    "docs/extensions.md#versions": "docs/extensions/reference/api-versions.md",
+    "docs/extensions.md#testing": "docs/extensions/testing.md",
+    "docs/extensions.md#the-gallery": "docs/extensions/publishing.md",
+    "docs/extensions.md#what-an-entry-declares": "docs/extensions/reference/gallery-entry.md",
+    "docs/extensions.md#sharing-yours": "docs/extensions/publishing.md#sharing-yours",
+    "docs/extensions.md#a-built-in-extension": "docs/extensions/built-in.md",
+};

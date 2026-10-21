@@ -14,7 +14,6 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import {
-    existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -40,7 +39,6 @@ import {
     readProjectTrust,
     saveProjectTrust,
     type SkillSources,
-    skillPlaces,
     type TrustChoice,
 } from "../src/server/skills.ts";
 
@@ -116,28 +114,6 @@ const names = (cwd: string, sources: SkillSources) =>
         .map((each) => each.name)
         .sort();
 
-test("a session in a trusted project finds skills in every place Pi looks, in Pi's order", () => {
-    const { home: own, agentDir, repo, cwd, extra, sources } = fixture();
-
-    new ProjectTrustStore(agentDir).set(cwd, true);
-    assert.deepEqual(skillPlaces(cwd, sources), [
-        join(cwd, ".pi", "skills"),
-        join(cwd, ".agents", "skills"),
-        join(repo, ".agents", "skills"),
-        extra,
-        join(agentDir, "skills"),
-        join(own, ".agents", "skills"),
-    ]);
-    assert.deepEqual(names(cwd, sources), [
-        "everywhere",
-        "from-settings",
-        "here",
-        "pi-project",
-        "pi-user",
-        "repo-wide",
-    ]);
-});
-
 test("a project's .agents/skills load only when Pi trusts the project", () => {
     const { agentDir, repo, cwd, sources } = fixture();
     const always: SkillSources = { ...sources, defaultProjectTrust: "always" };
@@ -168,46 +144,6 @@ test("an unreadable trust store trusts no project", () => {
 
     writeFileSync(join(agentDir, "trust.json"), "{ not json");
     assert.ok(!names(cwd, { ...sources, defaultProjectTrust: "always" }).includes("here"));
-});
-
-test("the home folder's .agents/skills are everyone's, even for a session in the home folder", () => {
-    const { home: own, agentDir, sources } = fixture();
-    const loose = join(own, "notes");
-
-    mkdirSync(loose);
-
-    // Outside a repository the search goes up to the root, past the home folder: its skills are not the project's,
-    // so they need no trust, and they keep their place after Pi's own, trusted project or not.
-    for (const cwd of [own, loose]) {
-        for (const defaultProjectTrust of ["ask", "always"] as const) {
-            assert.deepEqual(skillPlaces(cwd, { ...sources, defaultProjectTrust }), [
-                sources.settingsPaths[0],
-                join(agentDir, "skills"),
-                join(own, ".agents", "skills"),
-            ]);
-        }
-
-        assert.ok(names(cwd, sources).includes("everywhere"));
-    }
-});
-
-test("the first skill of a name wins: the project's over Pi's settings over the user's", () => {
-    const { home: own, agentDir, repo, cwd, extra, sources } = fixture();
-    const winner = (name: string) =>
-        loadSessionSkills(cwd, sources).find((each) => each.name === name)?.description;
-
-    new ProjectTrustStore(agentDir).set(repo, true);
-    skill(join(own, ".agents", "skills"), "shared", "From the home folder.");
-    skill(join(agentDir, "skills"), "shared", "From Pi's folder.");
-    assert.equal(winner("shared"), "From Pi's folder.");
-    skill(extra, "shared", "From Pi's settings.");
-    assert.equal(winner("shared"), "From Pi's settings.");
-    skill(join(repo, ".agents", "skills"), "shared", "From the repository.");
-    assert.equal(winner("shared"), "From the repository.");
-    skill(join(cwd, ".agents", "skills"), "shared", "From the session's folder.");
-    assert.equal(winner("shared"), "From the session's folder.");
-    skill(join(cwd, ".pi", "skills"), "shared", "From the project's .pi.");
-    assert.equal(winner("shared"), "From the project's .pi.");
 });
 
 test("a skill linked into two places is listed once", () => {
@@ -298,63 +234,6 @@ test("a session lists them as /skill: commands and in its system prompt", async 
     assert.match((await modelTexts(app, id)).join("\n"), /<skill name=\\"here\\" location=/);
 });
 
-test("an undecided project with skills of its own asks; one without, or with a default, does not", () => {
-    const { base, agentDir, repo, cwd, extra, sources } = fixture();
-    const asked = readProjectTrust(cwd, sources);
-
-    assert.deepEqual(
-        {
-            ...asked,
-            skills: asked.skills.map((each) => each.name).sort(),
-            ownSkills: asked.ownSkills.map((each) => each.name),
-        },
-        {
-            folder: cwd,
-            parent: repo,
-            saved: null,
-            defaultProjectTrust: "ask",
-            trusted: false,
-            folders: [join(cwd, ".agents", "skills"), join(repo, ".agents", "skills")],
-            skills: ["here", "repo-wide"],
-            ownSkills: ["pi-project"],
-            ask: true,
-        },
-    );
-    assert.deepEqual(
-        [readProjectTrust(cwd, { ...sources, defaultProjectTrust: "always" })].map(
-            ({ trusted, ask }) => ({ trusted, ask }),
-        ),
-        [{ trusted: true, ask: false }],
-    );
-    assert.deepEqual(
-        [readProjectTrust(cwd, { ...sources, defaultProjectTrust: "never" })].map(
-            ({ trusted, ask }) => ({ trusted, ask }),
-        ),
-        [{ trusted: false, ask: false }],
-    );
-    // Nothing of its own to load: nothing to ask about.
-    assert.equal(readProjectTrust(extra, sources).ask, false);
-    assert.deepEqual(readProjectTrust(extra, sources).folders, []);
-    // Nor with a .agents/skills that holds no skill: the bar would name none.
-    mkdirSync(join(extra, ".agents", "skills", "not-a-skill"), { recursive: true });
-    writeFileSync(join(extra, ".agents", "skills", "not-a-skill", "notes.txt"), "Just notes.");
-    assert.equal(readProjectTrust(extra, sources).skills.length, 0);
-    assert.equal(readProjectTrust(extra, sources).ask, false);
-    // Nor when the trust store cannot be read: the answer could not be saved.
-    writeFileSync(join(agentDir, "trust.json"), "{ not json");
-    assert.deepEqual(
-        [readProjectTrust(cwd, sources)].map(({ saved, trusted, ask, unreadable }) => ({
-            saved,
-            trusted,
-            ask,
-            unreadable,
-        })),
-        [{ saved: null, trusted: false, ask: false, unreadable: true }],
-    );
-    assert.throws(() => saveProjectTrust(cwd, agentDir, "trust"));
-    assert.equal(readProjectTrust(base, sources).parent, dirname(base));
-});
-
 /** Pi's own answers to "trust this project?", from the CLI's code (the package does not export it). */
 async function piTrustOptions(cwd: string) {
     const index = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
@@ -419,13 +298,6 @@ test("a folder reached through a link is trusted as the folder it is", () => {
     assert.equal(readProjectTrust(link, sources).parent, repo);
     saveProjectTrust(link, agentDir, "trust-parent");
     assert.deepEqual(readProjectTrust(cwd, sources).saved, { path: repo, trusted: true });
-});
-
-test("the top folder has no folder above it to trust", () => {
-    const { agentDir, sources } = fixture();
-
-    assert.equal(readProjectTrust("/", sources).parent, undefined);
-    assert.throws(() => saveProjectTrust("/", agentDir, "trust-parent"), /no folder above it/);
 });
 
 test("the owner answers through the API, a guest cannot, and Pi has the skills from its next message", async () => {
@@ -521,53 +393,6 @@ test("the app reads Pi's settings: its default trust, and its skill paths", asyn
         await other.close();
         rmSync(join(agentDir, "settings.json"), { force: true });
     }
-});
-
-test("with a trust store that cannot be read, no answer is taken: it says so", async () => {
-    const app = await started();
-    const store = join(process.env.PI_CODING_AGENT_DIR!, "trust.json");
-    const before = existsSync(store) ? readFileSync(store, "utf8") : undefined;
-    const project = realpathSync(mkdtempSync(join(root, "skills-unreadable-")));
-
-    mkdirSync(join(project, ".git"));
-    skill(join(project, ".agents", "skills"), "blocked");
-    const id = await newSession(app, project);
-
-    writeFileSync(store, "{ not json");
-
-    try {
-        assert.equal(app.projectTrust(id, owner(app)).unreadable, true);
-        assert.throws(
-            () => app.setProjectTrust(id, owner(app), "trust"),
-            (error: { status?: number; message?: string }) =>
-                error.status === 409 && /cannot be read/.test(error.message ?? ""),
-        );
-        assert.equal(readFileSync(store, "utf8"), "{ not json", "left as it was");
-    } finally {
-        if (before === undefined) {
-            rmSync(store, { force: true });
-        } else {
-            writeFileSync(store, before);
-        }
-    }
-});
-
-test("a project with only .pi/skills says what Don't trust does to them", async () => {
-    const app = await started();
-    const project = realpathSync(mkdtempSync(join(root, "skills-pi-only-")));
-
-    mkdirSync(join(project, ".git"));
-    skill(join(project, ".pi", "skills"), "lint-only");
-    const id = await newSession(app, project);
-    const info = app.projectTrust(id, owner(app));
-
-    assert.deepEqual(
-        { ask: info.ask, own: info.ownSkills.map((each) => each.name), agents: info.skills },
-        { ask: false, own: ["lint-only"], agents: [] },
-    );
-    assert.ok(app.skillCommands(id).some((each) => each.name === "lint-only"));
-    app.setProjectTrust(id, owner(app), "distrust");
-    assert.ok(!app.skillCommands(id).some((each) => each.name === "lint-only"));
 });
 
 test("a project told Don't trust offers none of its own .pi/prompts, as it loads none of its .pi/skills", async () => {

@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
+import type { CommandRequest } from "../extension-commands.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
 
@@ -56,6 +57,22 @@ export async function conversationRoutes(
         });
 
         return json(response, 200, await app.commands.submit(id, user, { ...body, attachments }));
+    }
+
+    if (third === "extension-commands" && fourth === undefined && method === "POST") {
+        const body = await readJson<CommandRequest>(request);
+        const gone = new AbortController();
+
+        // The browser stopped waiting: so does this request. The run goes on, and a retry finds it.
+        response.on("close", () => gone.abort());
+
+        return json(response, 200, await app.extensionCommands.run(id, user, body, gone.signal));
+    }
+
+    if (third === "extension-commands" && parts[4] === "stop" && method === "POST") {
+        await app.extensionCommands.stop(id, user, Number(fourth));
+
+        return json(response, 200, { ok: true });
     }
 
     if (third === "chat" && method === "POST") {
@@ -203,13 +220,21 @@ export async function conversationRoutes(
         return json(response, 200, await app.commands.watchPr(id, user, body.pr));
     }
 
-    // Memory: the lessons that apply here; one added by hand; one changed, forgotten, or approved.
+    // Memory normally applies here. The owner's pending queue reviews all projects, but never adds or edits: `Memory`
+    // checks who may use it, and what it may do with a lesson.
+    const pendingMemory = third === "memory" && url.searchParams.get("pending") === "all";
+
     if (third === "memory" && fourth === undefined) {
         if (method === "GET") {
-            return json(response, 200, await app.memory.view(id, user));
+            return json(response, 200, await app.memory.view(id, user, pendingMemory));
         }
 
         if (method === "POST") {
+            // Saving takes no queue: it would save a lesson as usual.
+            if (pendingMemory) {
+                throw new HttpError(400, "The pending queue only approves or discards lessons.");
+            }
+
             return json(
                 response,
                 200,
@@ -234,15 +259,26 @@ export async function conversationRoutes(
             return json(
                 response,
                 200,
-                await app.memory.edit(id, user, fourth, change, {
-                    text: typeof seen.text === "string" ? seen.text : undefined,
-                    forget: seen.forget === true,
-                }),
+                await app.memory.edit(
+                    id,
+                    user,
+                    fourth,
+                    change,
+                    {
+                        text: typeof seen.text === "string" ? seen.text : undefined,
+                        forget: seen.forget === true,
+                    },
+                    pendingMemory,
+                ),
             );
         }
 
         if (change !== undefined) {
-            return json(response, 200, await app.memory.edit(id, user, fourth, change));
+            return json(
+                response,
+                200,
+                await app.memory.edit(id, user, fourth, change, undefined, pendingMemory),
+            );
         }
     }
 

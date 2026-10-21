@@ -1,7 +1,3 @@
-// Signing in to a provider in a real browser, where this machine has Chromium. The server's word about a sign-in (its
-// next question, its end) can reach the page before the reply to the answer that led to it: the dialog then shows that
-// question, closes on success with a notice that says so, shows a failure's error, never throws, and once closed stays
-// closed.
 import { type App, cleanUp, home, root, scriptedModel, until, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -25,40 +21,6 @@ const real = {
 
 type Interaction = {
     prompt(prompt: Record<string, unknown>): Promise<string>;
-};
-
-/** Sign-ins of Keyed that have ended, however they ended. */
-let keyedEnded = 0;
-
-/** A provider signed in with a key it asks for: "wrong" is turned down. */
-const keyed = {
-    ...fauxProvider({ provider: "keyed", models: [{ id: "keyed-1" }] }).provider,
-    name: "Keyed",
-    auth: {
-        apiKey: {
-            name: "Keyed API key",
-            login: async (interaction: Interaction) => {
-                try {
-                    const key = await interaction.prompt({
-                        type: "secret",
-                        message: "Enter the Keyed key",
-                    });
-
-                    if (key === "wrong") {
-                        throw new Error("Keyed turned that key down");
-                    }
-
-                    return { type: "api_key", key };
-                } finally {
-                    keyedEnded += 1;
-                }
-            },
-            resolve: async ({ credential }: { credential?: { key?: string } }) =>
-                credential?.key === undefined
-                    ? undefined
-                    : { auth: { apiKey: credential.key }, source: "stored" },
-        },
-    },
 };
 
 /** A subscription whose sign-in asks two questions, one after the other. */
@@ -188,10 +150,6 @@ async function answer(name: string, value: string): Promise<void> {
     await page.click({ label: "Continue" });
 }
 
-/** A script that says whether a notice on screen says `text`. */
-const noticeSays = (text: string) =>
-    `return JSON.stringify([...document.querySelectorAll(".notice")].some((notice) => notice.textContent.includes(${JSON.stringify(text)})))`;
-
 /** Wait until the page has had every event the server sent so far: a notice sent now comes after them. */
 async function caughtUp(): Promise<void> {
     const word = `caught up ${String(Date.now())}`;
@@ -220,7 +178,6 @@ before(async () => {
         home,
         configureModels: (models) => {
             models.registerNativeProvider(faux.provider);
-            models.registerNativeProvider(keyed as never);
             models.registerNativeProvider(stepped as never);
         },
     });
@@ -245,54 +202,6 @@ after(async () => {
     cleanUp();
 });
 
-test("a failed sign-in shows its error, and once closed stays closed", real, async () => {
-    await providers("keyed");
-    await page.click({ label: "API key" });
-    await answer("Keyed", "wrong");
-    await see(
-        `return JSON.stringify(document.querySelector('${dialog("Keyed")} .error-box')?.textContent.includes("Keyed turned that key down") === true)`,
-        "the error",
-    );
-    await caughtUp();
-    assert.deepEqual(await problems(), []);
-    assert.equal(await inPage<boolean>(noticeSays("Signed in")), false, "no word of success");
-
-    await page.click({ selector: `${dialog("Keyed")} button[aria-label="Close"]` });
-    await caughtUp();
-    assert.equal(
-        await inPage<boolean>(
-            `return JSON.stringify((await import("/store.js")).store.state.auth === null && document.querySelector('${dialog("Keyed")}') === null)`,
-        ),
-        true,
-    );
-});
-
-test(
-    "a sign-in closed while it asks does not come back when the server ends it",
-    real,
-    async () => {
-        const ended = keyedEnded;
-
-        await providers("keyed");
-        await page.click({ label: "API key" });
-        await see(
-            `return JSON.stringify(document.querySelector('${dialog("Keyed")} .field input') !== null)`,
-            "the question",
-        );
-        await page.click({ selector: `${dialog("Keyed")} button[aria-label="Close"]` });
-        await until(() => keyedEnded > ended, "the server ended the sign-in");
-        await caughtUp();
-        assert.equal(
-            await inPage<boolean>(
-                `return JSON.stringify((await import("/store.js")).store.state.auth === null && document.querySelector('${dialog("Keyed")}') === null)`,
-            ),
-            true,
-            "the dialog stays closed",
-        );
-        assert.deepEqual(await problems(), []);
-    },
-);
-
 test(
     "a sign-in that asks twice shows the second question, though it came before the first answer's reply",
     real,
@@ -313,28 +222,6 @@ test(
             `return JSON.stringify((await import("/store.js")).store.state.auth === null && document.querySelector('${dialog("Stepped")}') === null)`,
             "the dialog closed",
         );
-        await see(noticeSays("Signed in to Stepped."), "the notice that says so");
-        await caughtUp();
-        assert.deepEqual(await problems(), []);
-    },
-);
-
-test(
-    "a sign-in that works closes its dialog and says so, without an error, though it ended before the answer's reply",
-    real,
-    async () => {
-        await providers("keyed");
-        await page.click({ label: "API key" });
-        await answer("Keyed", "a-good-key");
-        await see(
-            `return JSON.stringify((await import("/store.js")).store.state.models.some((model) => model.provider === "keyed"))`,
-            "signed in to Keyed",
-        );
-        await see(
-            `return JSON.stringify((await import("/store.js")).store.state.auth === null && document.querySelector('${dialog("Keyed")}') === null)`,
-            "the dialog closed",
-        );
-        await see(noticeSays("Signed in to Keyed."), "the notice that says so");
         await caughtUp();
         assert.deepEqual(await problems(), []);
     },

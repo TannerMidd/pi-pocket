@@ -1,0 +1,34 @@
+# Builds the docs on a pull request that changes them, so a broken link or a page missing from the sidebar fails
+# the pull request, not the deployment (pages.yml). It reads the code and publishes nothing.
+name: Docs
+
+on:
+    pull_request:
+        paths:
+            - "docs/**"
+            - "docs-site/**"
+            - "types/**"
+            - "SECURITY.md"
+            - "CONTRIBUTING.md"
+            - ".github/workflows/docs.yml"
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+                  cache: npm
+                  cache-dependency-path: docs-site/package-lock.json
+            - name: Build the docs, with every link checked
+              working-directory: docs-site
+              run: |
+                  npm ci --ignore-scripts
+                  npm run check

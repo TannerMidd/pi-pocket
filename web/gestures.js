@@ -20,10 +20,18 @@ const SPRING_MS = 260;
  */
 const fingerOf = (list, id) => [...list].find((touch) => touch.identifier === id);
 
-/** Something scrolled away from its top, from `target` up to `root`: dragging down there scrolls it back first. */
-function scrolledDown(target, root) {
+/**
+ * Something from `target` up to `root` that a drag `dir` would scroll first: scrolled away from its top, for a drag
+ * down; with more below, for a drag up.
+ */
+function scrollsFirst(target, root, dir) {
     for (let node = target; node && node !== root.parentElement; node = node.parentElement) {
-        if (node.scrollTop > 0 && node.scrollHeight > node.clientHeight) {
+        const more =
+            dir === "down"
+                ? node.scrollTop > 0
+                : node.scrollTop + node.clientHeight < node.scrollHeight - 1;
+
+        if (more && node.scrollHeight > node.clientHeight) {
             return true;
         }
     }
@@ -44,8 +52,9 @@ function speedOf(samples) {
 }
 
 /**
- * Drag `ref`'s element to close it: `"down"` for a sheet from the bottom edge, `"left"` for the drawer. It follows the
- * finger and dims the scrim behind it (its parent, or the `scrim` ref's element) as it goes. Let go far or fast enough,
+ * Drag `ref`'s element to close it: `"down"` for a sheet from the bottom edge, `"up"` for a menu down from the top
+ * bar, `"left"` for the drawer. It follows the finger and dims the scrim behind it (its parent, or the `scrim` ref's
+ * element) as it goes. Let go far or fast enough,
  * it calls `onClose` and stays where the finger left it, for its closing animation to go on from there; otherwise it
  * springs back. Only on touch.
  */
@@ -60,25 +69,53 @@ export function useDragToClose(ref, { dir, onClose, enabled = true, scrim: scrim
             return undefined;
         }
 
-        const down = dir === "down";
+        const vertical = dir === "down" || dir === "up";
         // PiP's sheet has a scrim beside it, not around it: dimming its parent would dim the whole app.
         const scrim = scrimRef?.current ?? element.parentElement;
+        // Around the element (a sheet's overlay), the scrim's color fades, so the sheet in it stays solid; beside it
+        // (PiP's), or the element itself (a notice), the whole of it does.
+        const around = scrim !== element && scrim.contains(element);
+        const fading = around ? "background-color" : "opacity";
+        let ground = null;
         let start = null;
         let dragging = false;
         let samples = [];
 
-        const size = () => (down ? element.offsetHeight : element.offsetWidth) || 1;
+        const size = () => (vertical ? element.offsetHeight : element.offsetWidth) || 1;
+
+        const dim = (share) => {
+            if (around) {
+                ground ??= getComputedStyle(scrim).backgroundColor;
+                scrim.style.backgroundColor = `color-mix(in srgb, ${ground} ${Math.round((1 - share) * 100)}%, transparent)`;
+            } else {
+                scrim.style.opacity = String(1 - share);
+            }
+        };
 
         const place = (offset) => {
-            element.style.transform = down ? `translateY(${offset}px)` : `translateX(${-offset}px)`;
-            scrim.style.opacity = String(1 - Math.min(1, offset / size()) * 0.8);
+            element.style.transform =
+                dir === "down"
+                    ? `translateY(${offset}px)`
+                    : dir === "up"
+                      ? `translateY(${-offset}px)`
+                      : dir === "right"
+                        ? `translateX(${offset}px)`
+                        : `translateX(${-offset}px)`;
+            dim(Math.min(1, offset / size()) * 0.8);
         };
 
         const springBack = () => {
-            element.style.transition = `transform ${SPRING_MS}ms var(--ease-out)`;
-            scrim.style.transition = `opacity ${SPRING_MS}ms var(--ease-out)`;
+            const spring = `${SPRING_MS}ms var(--ease-out)`;
+
+            // What fades as it goes may be the element itself (a notice): one transition for both.
+            scrim.style.transition = `${fading} ${spring}`;
+            element.style.transition =
+                scrim === element
+                    ? `transform ${spring}, opacity ${spring}`
+                    : `transform ${spring}`;
             element.style.transform = "";
             scrim.style.opacity = "";
+            scrim.style.backgroundColor = "";
             setTimeout(() => {
                 element.style.transition = "";
                 scrim.style.transition = "";
@@ -93,10 +130,12 @@ export function useDragToClose(ref, { dir, onClose, enabled = true, scrim: scrim
                 springBack();
             }
 
+            ground = null;
+
             start =
                 event.touches.length === 1 &&
                 !ownDrag(target) &&
-                !(down && scrolledDown(target, element))
+                !(vertical && scrollsFirst(target, element, dir))
                     ? {
                           x: event.touches[0].clientX,
                           y: event.touches[0].clientY,
@@ -114,8 +153,15 @@ export function useDragToClose(ref, { dir, onClose, enabled = true, scrim: scrim
                 return;
             }
 
-            const offset = down ? touch.clientY - start.y : start.x - touch.clientX;
-            const across = Math.abs(down ? touch.clientX - start.x : touch.clientY - start.y);
+            const offset =
+                dir === "down"
+                    ? touch.clientY - start.y
+                    : dir === "up"
+                      ? start.y - touch.clientY
+                      : dir === "right"
+                        ? touch.clientX - start.x
+                        : start.x - touch.clientX;
+            const across = Math.abs(vertical ? touch.clientX - start.x : touch.clientY - start.y);
 
             if (!dragging) {
                 if (Math.max(Math.abs(offset), across) < SLOP) {
@@ -200,6 +246,7 @@ export function useDragToClose(ref, { dir, onClose, enabled = true, scrim: scrim
 
             // The scrim may outlive the element: it never stays dimmed by a drag that closed it.
             scrim.style.opacity = "";
+            scrim.style.backgroundColor = "";
             scrim.style.transition = "";
         };
     }, [ref.current, dir, enabled, scrimRef?.current]);
@@ -266,7 +313,8 @@ const edgeBackWanted = () => navigator.standalone === true;
 
 /**
  * Swipe in from the left edge to go back, where nothing else does it. Passive, as the conversation's swipes are: the
- * page has nothing to scroll sideways there, and scrolling never waits on it.
+ * page has nothing to scroll sideways there, and scrolling never waits on it. Not from what is marked `data-no-swipe`
+ * (an extension's page that keeps its swipes, or a part of one), as the other swipes.
  */
 export function startEdgeBack() {
     if (!edgeBackWanted()) {
@@ -287,7 +335,10 @@ export function startEdgeBack() {
             }
 
             start =
-                event.touches.length === 1 && touch.clientX <= EDGE && canGoBack()
+                event.touches.length === 1 &&
+                touch.clientX <= EDGE &&
+                canGoBack() &&
+                !event.target.closest?.("[data-no-swipe]")
                     ? { x: touch.clientX, y: touch.clientY, id: touch.identifier }
                     : null;
             dragging = false;
@@ -352,6 +403,8 @@ export function startEdgeBack() {
 
 /** Where the conversation's swipes work: below the sidebar's width, where the top bar is a stretch for a thumb. */
 const NARROW = matchMedia("(max-width: 959px)");
+/** Where the subagents board, and an extension's page, are a phone's screen of their own (`subagents-board.js`). */
+const PHONE = matchMedia("(max-width: 699px)");
 /** Swipes start this far from the screen's sides, which belong to the system's back gesture (and `startEdgeBack`). */
 const SIDES = 24;
 /** How far up from the message box a swipe goes before it opens what it opens. */
@@ -379,8 +432,10 @@ function scrollsSideways(target, root) {
  * right goes back, left opens a place (the Files tile), each with a mark that follows the finger and lights when
  * letting go would act; the conversation leans a little the same way. In the Files tile, right goes back too. Up from
  * the message box (not its text, nor the queue and bars above it) opens the places; on the subagents board, right goes
- * back. `swipes(where)` says, when a touch starts on `"conversation"`, `"files"`, or `"board"`, what each does now:
- * `{ right, left }` as `{ path, label, run }`, and `up` as a function, or none.
+ * back, and on an extension's page too (`"board"` as well), both at a phone's width only. `swipes(where)` says, when a
+ * touch starts on `"conversation"`, `"files"`, or `"board"`, what each does now: `{ right, left }` as
+ * `{ path, label, run }`, and `up` as a function, or none. No swipe starts in a field, nor in anything marked
+ * `data-no-swipe` (what an extension's page keeps its sideways swipes for, or the whole page).
  */
 export function startSwipes(swipes) {
     let swipe = null;
@@ -420,17 +475,27 @@ export function startSwipes(swipes) {
             const target = event.target;
             const touch = event.touches[0];
 
-            if (target.closest?.("input, textarea, select, [contenteditable], .commands")) {
+            if (
+                target.closest?.(
+                    "input, textarea, select, [contenteditable], .commands, [data-no-swipe]",
+                )
+            ) {
                 return;
             }
 
             const root = target.closest?.(
-                ".pane > .scroller, .files-tile:not(.leaving), .board.phone",
+                ".pane > .scroller, .files-tile:not(.leaving), .board.phone, .ext-page",
             );
+
+            // An extension's page swipes back only at a phone's width, where it fills the screen, as the board does.
+            if (root?.classList.contains("ext-page") && !PHONE.matches) {
+                return;
+            }
+
             const acts = swipes(
                 root?.classList.contains("files-tile")
                     ? "files"
-                    : root?.classList.contains("board")
+                    : root?.classList.contains("board") || root?.classList.contains("ext-page")
                       ? "board"
                       : "conversation",
             );

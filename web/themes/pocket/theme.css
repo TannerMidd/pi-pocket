@@ -1,0 +1,189 @@
+/*
+ * Pocket: the app's own look. Appearance → Duplicate makes a copy of this folder that is yours to change: take the
+ * comment marks off a token below and give it a value, or add rules for the parts of the app (`data-part`). The guide
+ * is docs/extensions/themes.md; every token and part is in docs/extensions/reference/theme-surface.md.
+ *
+ * As it is, this file changes nothing: each value below is the app's own, for reference. A token you set stays as you
+ * set it, so leave the others commented and they follow the app's updates.
+ */
+
+:root {
+    /* The palette, from Colors (theme.js); a theme reads them, and may set them. */
+    /* --o-bg: #1a1b26; */
+    /* --o-bg-dark: #13141c; */
+    /* --o-bg-darker: #0e0e14; */
+    /* --o-bg-light: #24283b; */
+    /* --o-fg: #a9b1d6; */
+    /* --o-fg-dim: #565f89; */
+    /* --o-fg-light: #b4bee6; */
+    /* --o-fg-bright: #c0caf5; */
+    /* --o-accent: #7aa2f7; */
+    /* --o-selection: #292e42; */
+    /* --o-red: #f7768e; */
+    /* --o-yellow: #e0af68; */
+    /* --o-orange: #eb927b; */
+    /* --o-green: #9ece6a; */
+    /* --o-cyan: #449dab; */
+    /* --o-blue: #7aa2f7; */
+    /* --o-magenta: #ad8ee6; */
+
+    /* Surfaces */
+    /* --desk: var(--o-bg-darker); */
+    /* --bg: var(--o-bg); */
+    /* --panel: var(--bg); */
+    /* --card: color-mix(in srgb, var(--body) 4%, var(--bg)); */
+    /* --card-2: color-mix(in srgb, var(--body) 8%, var(--bg)); */
+    /* --raised: color-mix(in srgb, var(--body) 12%, var(--bg)); */
+    /* --hover: color-mix(in srgb, var(--body) 7%, transparent); */
+    /* --pressed: color-mix(in srgb, var(--body) 18%, transparent); */
+    /* --scrim: color-mix(in srgb, var(--desk) 55%, transparent); */
+    /* --code-bg: var(--o-bg-dark); */
+
+    /* Lines */
+    /* --line: color-mix(in srgb, var(--body) 13%, var(--bg)); */
+    /* --line-strong: color-mix(in srgb, var(--body) 26%, var(--bg)); */
+    /* --edge: color-mix(in srgb, var(--body) 25%, transparent); */
+    /* --hair: color-mix(in srgb, var(--body) 10%, transparent); */
+    /* --hair-2: color-mix(in srgb, var(--body) 17%, transparent); */
+
+    /* Text */
+    /* --text: var(--o-fg-bright); */
+    /* --body: var(--o-fg); */
+    /* --muted: color-mix(in oklab, var(--body) 76%, var(--bg)); */
+    /* --faint: color-mix(in oklab, var(--body) 42%, var(--bg)); */
+
+    /* Accent and status */
+    /* --accent: var(--o-accent); */
+    /* --accent-ink: var(--bg); */
+    /* --accent-fill: var(--accent); */
+    /* --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent); */
+    /* --accent-line: color-mix(in srgb, var(--accent) 50%, transparent); */
+    /* --accent-2: var(--spark); */
+    /* --focus-ring: var(--accent); */
+    /* --spark: var(--o-magenta); */
+    /* --brand: var(--o-orange); */
+    /* --ok: var(--o-green); */
+    /* --ok-soft: color-mix(in srgb, var(--o-green) 14%, transparent); */
+    /* --warn: var(--o-yellow); */
+    /* --warn-soft: color-mix(in srgb, var(--o-yellow) 10%, transparent); */
+    /* --warn-line: color-mix(in srgb, var(--o-yellow) 42%, transparent); */
+    /* --err: var(--o-red); */
+    /* --err-soft: color-mix(in srgb, var(--o-red) 14%, transparent); */
+    /* --err-line: color-mix(in srgb, var(--o-red) 50%, transparent); */
+
+    /* Code */
+    /* --hl-kw: var(--o-magenta); */
+    /* --hl-str: var(--o-green); */
+    /* --hl-num: var(--o-orange); */
+    /* --hl-fn: var(--o-blue); */
+    /* --hl-type: var(--o-yellow); */
+    /* --hl-op: var(--o-cyan); */
+    /* --hl-tag: var(--o-red); */
+
+    /* Type */
+    /* --sans: "Pocket Sans", "Geist", ui-sans-serif, system-ui, sans-serif; */
+    /* --mono: "Pocket Mono", "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo, Consolas, monospace; */
+    /* --ligatures: none; */
+
+    /* Corners */
+    /* --r-mark: 3px; */
+    /* --r-tag: 5px; */
+    /* --r-seg: 7px; */
+    /* --r-row: 9px; */
+    /* --r-control: 10px; */
+    /* --r-card: 12px; */
+    /* --r-window: 14px; */
+    /* --r-sheet: 18px; */
+    /* --r-float: 20px; */
+    /* --r-pill: 999px; */
+    /* --radius: var(--r-control); */
+
+    /* Space and layout */
+    /* --gap-out: 8px; */
+    /* --gap-in: 4px; */
+    /* --border: 1px; */
+    /* --space-x: 1; */
+    /* --space-y: 1; */
+    /* --leading: 1.65; */
+    /* --transcript-width: clamp(720px, 72%, 1200px); */
+    /* --composer-width: calc(var(--transcript-width) + 48px); */
+    /* --transcript-gutter: 0px; */
+    /* --timeline-x: 22.5px; */
+    /* --step-mark-size: 19px; */
+    /* --step-gap: 10px; */
+    /* --wallpaper: none; */
+
+    /* Windows */
+    /* --window-border: var(--hair); */
+    /* --window-border-active: var(--accent-line); */
+    /* --window-ring: 0 0 0 3px var(--accent-soft); */
+
+    /* Shadows */
+    /* --sh: rgba(0, 0, 0, 0.5); */
+    /* --shadow: 0 18px 40px -18px var(--sh), 0 2px 6px -2px var(--sh); */
+    /* --pop: 0 24px 60px -16px var(--sh), 0 0 0 1px var(--hair-2); */
+
+    /* Motion */
+    /* --ease-out: cubic-bezier(0.23, 1, 0.32, 1); */
+    /* --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1); */
+    /* --ease-almost: cubic-bezier(0.5, 0.5, 0.75, 1); */
+    /* --t-in: 410ms; */
+    /* --t-out: 150ms; */
+    /* --t-fade: 175ms; */
+    /* --t-border: 540ms; */
+    /* --t-hover: 140ms; */
+}
+
+/* Light colors (a palette with mode = "light") change these. */
+:root[data-mode="light"] {
+    /* --sh: rgba(40, 40, 70, 0.14); */
+    /* --accent-ink: #fff; */
+    /* --scrim: color-mix(in srgb, var(--desk) 55%, transparent); */
+    /* --line: color-mix(in srgb, var(--body) 15%, var(--bg)); */
+    /* --muted: color-mix(in oklab, var(--body) 87%, var(--bg)); */
+    /* --faint: color-mix(in oklab, var(--body) 58%, var(--bg)); */
+    /* --warn: color-mix(in oklab, var(--o-yellow) 62%, var(--o-fg)); */
+    /* --ok: color-mix(in oklab, var(--o-green) 78%, var(--o-fg)); */
+    /* --err: color-mix(in oklab, var(--o-red) 85%, var(--o-fg)); */
+    /* --accent-fill: color-mix(in oklab, var(--accent) 76%, var(--body)); */
+    /* --hl-kw: color-mix(in oklab, var(--o-magenta) 50%, var(--o-fg)); */
+    /* --hl-str: color-mix(in oklab, var(--o-green) 50%, var(--o-fg)); */
+    /* --hl-num: color-mix(in oklab, var(--o-orange) 50%, var(--o-fg)); */
+    /* --hl-fn: color-mix(in oklab, var(--o-blue) 50%, var(--o-fg)); */
+    /* --hl-type: color-mix(in oklab, var(--o-yellow) 40%, var(--o-fg)); */
+    /* --hl-op: color-mix(in oklab, var(--o-cyan) 50%, var(--o-fg)); */
+    /* --hl-tag: color-mix(in oklab, var(--o-red) 50%, var(--o-fg)); */
+}
+
+/*
+ * Examples of changes to the layout. Take the comment marks off one to try it.
+ *
+ * Your messages as bubbles on the right; other people's stay on the left:
+ *
+ *     [data-part="prompt"][data-from="me"] {
+ *         margin-inline-start: auto;
+ *         max-width: 70%;
+ *         background: var(--accent-soft);
+ *     }
+ *
+ * A wider conversation:
+ *
+ *     :root {
+ *         --transcript-width: clamp(720px, 80%, 1400px);
+ *         --composer-width: var(--transcript-width);
+ *     }
+ *
+ * A square message box:
+ *
+ *     [data-part="message-box"] {
+ *         border-radius: 0;
+ *     }
+ *
+ * Phones (below 700 px wide): no status line under the message box.
+ *
+ *     @media (max-width: 699px) {
+ *         [data-part="status-line"] {
+ *             display: none;
+ *         }
+ *     }
+ */

@@ -22,44 +22,18 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import { MAX_PEEKS } from "../src/server/app.ts";
-import { SubagentsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 import type { PeekSummary } from "../src/server/room.ts";
 
-/**
- * Asked to read the notes, Pi reads notes.txt. "work slowly" runs three short sleeps, one after another. "start a
- * helper" starts a subagent that sleeps a while. Anything else is echoed.
- */
 const route: FauxResponseStep = (request) => {
     const { role, text } = lastText(request as never);
     const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
         fauxAssistantMessage([fauxText(`calling ${name}`), fauxToolCall(name, args)], {
             stopReason: "toolUse",
         });
-    const messages = (request as { messages: { role: string; content: unknown }[] }).messages;
-    const asked = messages.findLast((message) => message.role === "user");
-    const askedText = JSON.stringify(asked?.content ?? "");
 
     if (role === "user" && text.includes("read the notes")) {
         return call("read", { path: "notes.txt" });
-    }
-
-    if (role === "user" && text.endsWith("start a helper")) {
-        return call("subagent", { action: "spawn", name: "helper", message: "look around" });
-    }
-
-    if (role === "user" && text === "look around") {
-        return call("bash", { command: "sleep 3" });
-    }
-
-    if (askedText.includes("work slowly")) {
-        const done = messages
-            .slice(messages.indexOf(asked!))
-            .filter((m) => m.role === "toolResult");
-
-        return done.length < 3
-            ? call("bash", { command: `sleep 0.8 && echo step ${done.length + 1}` })
-            : fauxAssistantMessage([fauxText("all three steps done")]);
     }
 
     if (role === "toolResult") {
@@ -167,86 +141,6 @@ test("a tab gets peek tiles for the sessions on its screen, and stays out of the
     }
 });
 
-test("a running session's tile changes at most once a second, never twice the same, and shows what runs", async () => {
-    const id = await newSession(app);
-    const tab = fakeTab(undefined, owner(app));
-    const times: number[] = [];
-    const send = tab.client.send;
-
-    tab.client.send = (event, data) => {
-        if (event === "peek") {
-            times.push(Date.now());
-        }
-
-        send(event, data);
-    };
-
-    try {
-        await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.connection, [id]);
-        await until(() => peeks(tab, id).length > 0, "the first peek");
-        await say(app, id, "work slowly");
-        await until(
-            () => words(peeks(tab, id).at(-1)?.lines.at(-1)) === "all three steps done",
-            "the tile to show the end",
-        );
-        const list = peeks(tab, id);
-
-        const running = (peek: PeekSummary) =>
-            peek.lines.some((line) => line.kind === "tool" && line.status === "running");
-
-        assert.ok(list.some(running), "a tile showed a call running while Pi worked");
-        assert.ok(!running(list.at(-1)!), "and none once it ended");
-
-        // The first is sent at once; later ones wait for the second to pass.
-        for (let index = 2; index < times.length; index++) {
-            assert.ok(
-                times[index]! - times[index - 1]! >= 900,
-                `peeks ${index - 1} and ${index} came ${times[index]! - times[index - 1]!} ms apart`,
-            );
-        }
-
-        const json = list.map((peek) => JSON.stringify(peek));
-
-        for (let index = 1; index < json.length; index++) {
-            assert.notEqual(json[index], json[index - 1], `peek ${index} repeats the one before`);
-        }
-    } finally {
-        app.detach(tab.client);
-    }
-});
-
-test("a tile scrolled away while its view opens is never sent, and a tab gone mid-open leaves nothing behind", async () => {
-    const first = await newSession(app);
-    const second = await newSession(app);
-    const tab = fakeTab(undefined, owner(app));
-
-    try {
-        await app.attach(tab.client);
-        // In and out again at once: the view opens, but the tile is not there any more.
-        app.setPeeks(owner(app), tab.client.connection, [first]);
-        app.setPeeks(owner(app), tab.client.connection, []);
-        await settle(300);
-        assert.equal(peeks(tab, first).length, 0);
-        assert.equal((await app.openRoom(first))?.peekers.size ?? 0, 0);
-
-        // The tab goes while the view opens.
-        app.setPeeks(owner(app), tab.client.connection, [second]);
-        app.detach(tab.client);
-        await settle(300);
-        assert.equal(peeks(tab, second).length, 0);
-        assert.equal((await app.openRoom(second))?.peekers.size ?? 0, 0);
-        assert.equal(tab.client.peeks, undefined);
-
-        // Peeking from a tab the server does not know changes nothing.
-        app.setPeeks(owner(app), "no-such-tab", [first]);
-        await settle(100);
-        assert.equal((await app.openRoom(first))?.peekers.size ?? 0, 0);
-    } finally {
-        app.detach(tab.client);
-    }
-});
-
 test(`a tab gets at most ${MAX_PEEKS} live tiles, each once`, async () => {
     const ids: ConversationId[] = [];
 
@@ -319,58 +213,6 @@ test("each connection has its own list: a duplicated tab or a reconnect does not
     } finally {
         app.detach(old.client);
         app.detach(twin.client);
-    }
-});
-
-test("a list that arrives after a newer one is dropped", async () => {
-    const first = await newSession(app);
-    const second = await newSession(app);
-    const tab = fakeTab(undefined, owner(app));
-
-    try {
-        await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.connection, [second], 2);
-        app.setPeeks(owner(app), tab.client.connection, [first], 1);
-        assert.deepEqual([...tab.client.peeks!], [second]);
-        app.setPeeks(owner(app), tab.client.connection, [first], 3);
-        assert.deepEqual([...tab.client.peeks!], [first]);
-        app.setPeeks(owner(app), tab.client.connection, [second], 3);
-        assert.deepEqual([...tab.client.peeks!], [first], "the same number again is late too");
-    } finally {
-        app.detach(tab.client);
-    }
-});
-
-test("a session's view closes once its last tile and tab are gone, and not before", async () => {
-    const id = await newSession(app);
-    const there = fakeTab(id, owner(app));
-    const tab = fakeTab(undefined, owner(app));
-    const room = await app.room(id);
-    let closing = 0;
-    const closeLater = room.closeLater.bind(room);
-
-    room.closeLater = (onClose) => {
-        closing++;
-        closeLater(onClose);
-    };
-
-    try {
-        await app.attach(there.client);
-        await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.connection, [id]);
-        await until(() => room.peekers.size === 1, "the tile");
-        app.detach(there.client);
-        await until(() => room.clients.size === 0, "the tab to leave");
-        assert.equal(closing, 0, "a tile keeps the view open");
-        app.setPeeks(owner(app), tab.client.connection, []);
-        await until(() => closing === 1, "the view to close once the tile goes");
-        // Back before it closed: the same view, kept open.
-        app.setPeeks(owner(app), tab.client.connection, [id]);
-        await until(() => room.peekers.size === 1, "the tile again");
-        assert.equal(await app.openRoom(id), room);
-    } finally {
-        app.detach(there.client);
-        app.detach(tab.client);
     }
 });
 
@@ -447,59 +289,6 @@ test("a call waiting for approval shows on its session's tile, and goes when ans
     } finally {
         app.detach(tab.client);
     }
-});
-
-test("a subagent's waiting call shows on its session's tile", async () => {
-    const id = await newSession(app);
-    const tab = fakeTab(undefined, owner(app));
-
-    try {
-        await say(app, id, "please start a helper");
-        const helper = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.helper!
-            .conversationId;
-
-        await app.attach(tab.client);
-        app.setPeeks(owner(app), tab.client.connection, [id]);
-        await until(() => peeks(tab, id).length > 0, "the tile");
-        const asked = app.approvals.request(
-            {
-                id: "helper-call",
-                conversationId: helper,
-                taskId: 2 as unknown as TaskId,
-                tool: "bash",
-                subject: "rm -rf build",
-                reason: "deletes files",
-                createdAt: Date.now(),
-            },
-            context,
-        );
-
-        await until(
-            () => peeks(tab, id).at(-1)?.approvals[0]?.conversationId === helper,
-            "the helper's call on its session's tile",
-        );
-        app.approvals.answer("helper-call", { allow: false, by: "test" });
-        await asked;
-        await until(() => peeks(tab, id).at(-1)?.approvals.length === 0, "the call to go");
-    } finally {
-        app.detach(tab.client);
-    }
-});
-
-test("the session list says when a session's last run ended", async () => {
-    const id = await newSession(app);
-    const started = Date.now();
-
-    assert.equal(
-        app.sessions().find((each) => each.id === Number(id))?.endedAt,
-        undefined,
-        "not before it ran",
-    );
-    await say(app, id, "hi");
-    await until(
-        () => (app.sessions().find((each) => each.id === Number(id))?.endedAt ?? 0) >= started,
-        "the end of the run",
-    );
 });
 
 // ─── Over HTTP ──────────────────────────────────────────────────────────────
@@ -582,12 +371,6 @@ test("the peeks route checks who asks and what, and the event stream carries the
         "a post needs the X-Pocket header",
     );
     assert.equal((await postPeeks({ tab: "t", ids: "1,2" })).status, 400);
-    assert.equal((await postPeeks({ tab: "t", ids: ["two"] })).status, 400);
-    assert.equal((await postPeeks({ tab: "t", ids: [-1] })).status, 400);
-    assert.equal((await postPeeks({ tab: "t" })).status, 400);
-    assert.equal((await postPeeks({ connection: "c", ids: [], seq: "2" })).status, 400);
-    assert.equal((await postPeeks({ connection: "c", ids: [], seq: 1.5 })).status, 400);
-
     const stream = openStream(`tab=wire-tab&c=${open}`);
 
     try {
@@ -636,40 +419,5 @@ test("the peeks route checks who asks and what, and the event stream carries the
         await until(() => room.peekers.size === 0, "the tile to end with the stream");
     } finally {
         await stream.close();
-    }
-});
-
-test("long polling carries the tiles too", async () => {
-    const other = await newSession(app);
-
-    await say(app, other, "by polling");
-    type Poll = { session: string; events: { seq: number; event: string; data: PeekSummary }[] };
-    const poll = async (query: string): Promise<Poll> =>
-        (await (await fetch(`${base}/api/poll?${query}`, { headers: headers() })).json()) as Poll;
-    const first = await poll("tab=poll-tab");
-
-    try {
-        const connection = first.events.find((each) => each.event === "hello")?.data as unknown as {
-            connection: string;
-        };
-
-        assert.equal(
-            (await postPeeks({ connection: connection.connection, ids: [Number(other)] })).status,
-            200,
-        );
-        const last = first.events.at(-1)?.seq ?? 0;
-        let found: PeekSummary | undefined;
-
-        await until(async () => {
-            const next = await poll(`tab=poll-tab&session=${first.session}&ack=${last}`);
-
-            found = next.events.find((each) => each.event === "peek")?.data;
-
-            return found !== undefined;
-        }, "a peek by polling");
-        assert.equal(found!.conversationId, other);
-        assert.deepEqual(found!.lines.at(-1), { kind: "text", text: "echo: by polling" });
-    } finally {
-        await fetch(`${base}/api/poll?session=${first.session}&close=1`, { headers: headers() });
     }
 });

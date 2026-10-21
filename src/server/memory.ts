@@ -47,6 +47,8 @@ export type LessonView = {
     id: string;
     text: string;
     scope: LessonScope;
+    /** The lesson's project label in the owner's all-project pending queue. */
+    projectName?: string;
     byPi: boolean;
     by: string;
     byName: string;
@@ -62,7 +64,9 @@ export type LessonView = {
 };
 
 export type MemoryView = {
-    /** This session's project; null for PiP, which has none. */
+    /** Present only for the all-project pending queue, so an older server's scoped view is not mistaken for it. */
+    pendingAll?: true;
+    /** This session's project; null for PiP or the all-project pending queue. */
     project: { name: string } | null;
     lessons: LessonView[];
     owner: boolean;
@@ -205,11 +209,23 @@ export class Memory {
         return this.#isOwner(userId) || (userId !== undefined && lesson.by === userId);
     }
 
-    /** A lesson that applies here, or a 404. */
+    /** Cross-project review is for the human owner in their private PiP, before reading any lesson or writing activity. */
+    #requirePendingOwner(writer: Writer, conversationId: ConversationId): void {
+        if (writer.byPi || !this.#isOwner(writer.userId)) {
+            throw new HttpError(403, "Only the owner can review all pending lessons.");
+        }
+
+        if (this.#app.sessionMeta(this.#app.rootOf(conversationId))?.pip !== writer.userId) {
+            throw new HttpError(403, "Review all pending lessons from your private PiP.");
+        }
+    }
+
+    /** A lesson that applies here (or anywhere for an authorized pending review), or a 404. */
     #find(
         doc: { items: Record<string, Lesson> },
         project: Project | undefined,
         id: string,
+        allProjects = false,
     ): Lesson {
         const key = id.trim().replace(/^\[|\]$/g, "");
         // Own keys only: `constructor` or `__proto__` is no lesson.
@@ -217,7 +233,7 @@ export class Memory {
 
         if (
             lesson === undefined ||
-            (lesson.project !== undefined && lesson.project !== project?.key)
+            (!allProjects && lesson.project !== undefined && lesson.project !== project?.key)
         ) {
             throw new HttpError(404, `There is no lesson ${id} here.`);
         }
@@ -345,7 +361,8 @@ export class Memory {
      * the lesson stays as it is until the owner approves it. One that waits anyway changes as it is.
      *
      * An approval says what the owner saw (`expected`): what waits can change between their look and their tap, so
-     * approving holds only when it would make true what they saw.
+     * approving holds only when it would make true what they saw. `pendingOnly` is a cross-project review mode for the
+     * human owner in their private PiP, limited to approving or discarding lessons that still wait; the Pi tool never sets it.
      */
     async change(
         conversationId: ConversationId,
@@ -354,15 +371,37 @@ export class Memory {
         id: string,
         change: { text: unknown } | "remove" | "approve" | "discard",
         expected?: { text?: string; forget?: boolean },
+        pendingOnly = false,
     ): Promise<Lesson> {
         const app = this.#app;
+
+        // Never let Pi, a guest, or a shared-session review use the cross-project lookup.
+        if (pendingOnly) {
+            this.#requirePendingOwner(writer, conversationId);
+
+            if (change !== "approve" && change !== "discard") {
+                throw new HttpError(400, "The pending queue only approves or discards lessons.");
+            }
+        }
+
         const text = typeof change === "object" ? this.#text(change.text) : undefined;
-        const project = await this.project(conversationId, cwd);
+        const project = pendingOnly ? undefined : await this.project(conversationId, cwd);
         const said = (tx: Tx, line: string) => this.#activity(tx, conversationId, writer, line);
 
         return app.harness.commit(async (tx) => {
             const doc = await tx.doc(MemoryDoc);
-            const lesson = this.#find(doc, project, id);
+
+            if (pendingOnly) {
+                // Recheck after waiting for the transaction: a person's role may have changed meanwhile.
+                this.#requirePendingOwner(writer, conversationId);
+            }
+
+            const lesson = this.#find(doc, project, id, pendingOnly);
+
+            if (pendingOnly && lesson.pending !== true && lesson.proposal === undefined) {
+                throw new HttpError(409, "This lesson changed since you looked: check it again.");
+            }
+
             const before = copy(lesson);
             const quoted = `“${snippet(lesson.text, 80)}”`;
             const owner = !writer.byPi && this.#isOwner(writer.userId);
@@ -532,14 +571,25 @@ export class Memory {
         return { userId: user.id, byPi: false, name: user.name };
     }
 
-    /** The lessons that apply in a session, as this person's Memory sheet shows them. */
-    async view(id: ConversationId, user: User): Promise<MemoryView> {
+    /** The session's lessons, or the human owner's pending lessons across all projects and everywhere in their private PiP. */
+    async view(id: ConversationId, user: User, pendingOnly = false): Promise<MemoryView> {
         const app = this.#app;
+
+        if (pendingOnly) {
+            this.#requirePendingOwner(this.#person(user), id);
+        }
 
         app.requireSee(user, id);
         const owner = user.role === "owner";
-        const project = await this.project(id, app.cwdOf(id));
-        const lessons = (await this.applying(project))
+        const project = pendingOnly ? undefined : await this.project(id, app.cwdOf(id));
+        const applying = pendingOnly
+            ? ordered(
+                  (await this.#all()).filter(
+                      (lesson) => lesson.pending === true || lesson.proposal !== undefined,
+                  ),
+              )
+            : await this.applying(project);
+        const lessons = applying
             .filter((lesson) => lesson.pending !== true || owner || lesson.by === user.id)
             .map((lesson): LessonView => {
                 const from = lesson.from;
@@ -553,6 +603,9 @@ export class Memory {
                     id: lesson.id,
                     text: lesson.text,
                     scope: lesson.project === undefined ? "everywhere" : "project",
+                    ...(pendingOnly && lesson.projectName !== undefined
+                        ? { projectName: lesson.projectName }
+                        : {}),
                     byPi: lesson.byPi,
                     by: lesson.by,
                     byName: app.config.userById(lesson.by)?.name ?? "someone",
@@ -567,7 +620,8 @@ export class Memory {
                               },
                           }
                         : {}),
-                    mine: user.role !== "viewer" && this.#mayChange(lesson, user.id),
+                    mine:
+                        !pendingOnly && user.role !== "viewer" && this.#mayChange(lesson, user.id),
                     ...(lesson.proposal !== undefined && (owner || lesson.proposal.by === user.id)
                         ? {
                               proposal: {
@@ -578,7 +632,7 @@ export class Memory {
                                   byPi: lesson.proposal.byPi,
                                   byName:
                                       app.config.userById(lesson.proposal.by)?.name ?? "someone",
-                                  mine: lesson.proposal.by === user.id,
+                                  mine: !pendingOnly && lesson.proposal.by === user.id,
                               },
                           }
                         : {}),
@@ -586,10 +640,11 @@ export class Memory {
             });
 
         return {
+            ...(pendingOnly ? { pendingAll: true as const } : {}),
             project: project === undefined ? null : { name: project.name },
             lessons,
             owner,
-            canWrite: user.role !== "viewer",
+            canWrite: !pendingOnly && user.role !== "viewer",
             limits: {
                 project: MAX_PROJECT_LESSONS,
                 everywhere: MAX_EVERYWHERE_LESSONS,
@@ -622,13 +677,26 @@ export class Memory {
         lessonId: string,
         change: { text: unknown } | "remove" | "approve" | "discard",
         expected?: { text?: string; forget?: boolean },
+        pendingOnly = false,
     ): Promise<Lesson> {
         const app = this.#app;
+
+        if (pendingOnly) {
+            this.#requirePendingOwner(this.#person(user), id);
+        }
 
         app.requireSee(user, id);
         app.requireSteer(user);
 
-        return this.change(id, app.cwdOf(id), this.#person(user), lessonId, change, expected);
+        return this.change(
+            id,
+            app.cwdOf(id),
+            this.#person(user),
+            lessonId,
+            change,
+            expected,
+            pendingOnly,
+        );
     }
 
     // ─── Tabs ──────────────────────────────────────────────────────────────

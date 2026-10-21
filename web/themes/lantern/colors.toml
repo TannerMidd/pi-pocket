@@ -1,0 +1,25 @@
+# Lantern: warm brown-grey with warm off-white text and a muted amber accent, in Omarchy's colors.toml format.
+# With the theme (direction.css mixes muted and faint text from it), measured in the browser: body text 11.2:1
+# (10.3:1 on cards), titles 13.0:1, muted 5.8 to 7.4:1, faint 4.8 to 6.1:1, the accent 7.2 to 7.7:1.
+mode = "dark"
+
+accent = "#d0a463"
+selection = "#3a3125"
+
+background = "#211e1b"
+dark_background = "#1b1816"
+darker_background = "#171412"
+lighter_background = "#2a2622"
+
+foreground = "#ddd3c4"
+dark_foreground = "#8a8073"
+light_foreground = "#e2d9cb"
+bright_foreground = "#ebe3d6"
+
+red = "#d98a7c"
+yellow = "#d8b46a"
+orange = "#d69a6a"
+green = "#a3b58c"
+cyan = "#8fb5ad"
+blue = "#8fa8c8"
+magenta = "#c49ab5"

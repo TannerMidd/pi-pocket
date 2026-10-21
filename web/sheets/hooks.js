@@ -233,16 +233,18 @@ export function HooksSheet() {
         }).finally(load);
     };
 
-    return html`<${Sheet} title=${t("Webhooks and watches")} onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Webhooks and watches")} onClose=${closeSheet} wide=${true}>
         <p class="muted small">
             ${t("Other services (GitHub, a deploy, a monitor) post to a webhook's address, and each post becomes a message to Pi in a session, or to PiP: your instructions, then what came.")}
         </p>
         ${
             steer &&
             targets.length > 0 &&
-            html`<div class="field">
+            html`<div class="hook-form">
+                <div class="field">
                     <div class="label">${t("Name")}</div>
                     <input
+                        aria-label=${t("Name")}
                         placeholder=${t("Deploys")}
                         maxlength="60"
                         value=${name}
@@ -252,6 +254,7 @@ export function HooksSheet() {
                 <div class="field">
                     <div class="label">${t("What Pi should do with each post")}</div>
                     <textarea
+                        aria-label=${t("What Pi should do with each post")}
                         rows="3"
                         maxlength="2000"
                         placeholder=${t("When a deploy fails, find out why and fix it. Ignore the ones that pass.")}
@@ -262,11 +265,19 @@ export function HooksSheet() {
                 <div class="field">
                     <div class="label">${t("Posted by")}</div>
                     <div class="segmented">
-                        <button class=${github ? "on" : ""} onClick=${() => setGithub(true)}>
+                        <button
+                            class=${github ? "on" : ""}
+                            aria-pressed=${github}
+                            onClick=${() => setGithub(true)}
+                        >
                             GitHub
                         </button>
-                        <button class=${github ? "" : "on"} onClick=${() => setGithub(false)}>
-                            Another service
+                        <button
+                            class=${github ? "" : "on"}
+                            aria-pressed=${!github}
+                            onClick=${() => setGithub(false)}
+                        >
+                            ${t("Another service")}
                         </button>
                     </div>
                     <div class="muted small">
@@ -295,6 +306,7 @@ export function HooksSheet() {
                             ${targets.map(
                                 ([value, label]) => html`<button
                                     class=${target === value ? "on" : ""}
+                                    aria-pressed=${target === value}
                                     onClick=${() => setTarget(value)}
                                 >
                                     ${t(label)}
@@ -312,13 +324,14 @@ export function HooksSheet() {
                     onClick=${make}
                 >
                     ${t("Make webhook")}
-                </button>`
+                </button>
+            </div>`
         }
         ${list === null && html`<p class="muted">${t("Loading…")}</p>`}
         ${
             list?.repoWatches?.length > 0 &&
             html`<div class="group">
-                <div class="group-title">Repositories watched</div>
+                <div class="group-title">${t("Repositories watched")}</div>
                 ${list.repoWatches.map(
                     (watch) =>
                         html`<${WatchRow}
@@ -330,8 +343,8 @@ export function HooksSheet() {
                 )}
             </div>`
         }
-        ${list && html`<div class="group-title">Webhooks</div>`}
-        ${list?.hooks.length === 0 && html`<p class="muted">No webhooks yet.</p>`}
+        ${list && html`<div class="group-title">${t("Webhooks")}</div>`}
+        ${list?.hooks.length === 0 && html`<p class="muted">${t("No webhooks yet.")}</p>`}
         ${list?.hooks.map(
             (hook) => html`<${HookRow}
                 key=${hook.id}

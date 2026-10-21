@@ -10,9 +10,10 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { after, before, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
@@ -37,12 +38,17 @@ let desktop: BrowserPage | undefined;
 let base = "";
 let session: ConversationId;
 let guestToken = "";
+const originalTmpdir = process.env.TMPDIR;
 
 before(async () => {
     if (chromium === undefined) {
         return;
     }
 
+    // Chromium's SingletonSocket has a short Unix path limit. Keep its temp files in
+    // the same candidate-local TMPDIR, spelled relative to cwd; helpers already made
+    // absolute isolated auth/data roots before this hook.
+    process.env.TMPDIR = relative(process.cwd(), tmpdir()) || ".";
     const dropIns = join(dataDir, "extensions");
 
     mkdirSync(dropIns, { recursive: true });
@@ -97,6 +103,12 @@ after(async () => {
     server?.close();
     await app?.close();
     cleanUp();
+
+    if (originalTmpdir === undefined) {
+        delete process.env.TMPDIR;
+    } else {
+        process.env.TMPDIR = originalTmpdir;
+    }
 });
 
 type UiState = {
@@ -162,6 +174,297 @@ function assertNoReloadAndNoDataChanges(state: UiState, initial: UiState) {
         `no horizontal overflow: page ${state.pageWidth}px, viewport ${state.innerWidth}px`,
     );
 }
+
+test(
+    "0.18 gallery hub, technical details and navigation switch on phone and desktop with fixture-only data",
+    real,
+    async () => {
+        assert.ok(app && mobile && desktop);
+        const pages: BrowserPage[] = [mobile, desktop];
+
+        for (const page of pages) {
+            // Real user activation lets back.js create history entries; synthetic DOM
+            // clicks alone do not activate Chromium's history navigation.
+            await page.click({ selector: ".composer textarea" });
+            // Presentation only: no index downloads, installed code, reviews or provider requests.
+            await page.evaluate(`(async () => {
+                const { store, openSheet } = await import('/store.js');
+                window.__localeSaved = { me: store.state.me, trust: store.state.trust, server: store.state.server };
+                window.__localeFetch = window.fetch;
+                window.__localeRequests = [];
+                const declares = { extensions: ['Menu'], tools: ['Menu'], readOnlyTools: [], hooks: [], sections: [], wraps: [], routes: [], commands: [], client: null, access: 'owner' };
+                const installed = { name: 'fixture-installed', title: 'Menu', version: '1.0.0', file: 'fixture.ts', listed: true, enabled: false, revoked: null, changed: [], installedAt: Date.now(), repo: 'fixture/index', commit: 'a'.repeat(40), sourceUrl: 'https://example.invalid/source', declares, update: { version: '2.0.0' } };
+                const entry = { name: installed.name, title: 'Menu', version: '2.0.0', description: 'RAW {{name}} <img>', tags: ['Menu'], author: { name: 'Menu' }, source: { repo: 'fixture/index', commit: 'a'.repeat(40) }, sourceUrl: installed.sourceUrl, revoked: [], files: [], declares, minPocket: '0.18.0', pocketApi: 1, installed, pin: 'fixture-pin' };
+                const listing = { entries: [entry, { ...entry, name: 'fixture-new', installed: null }, { ...entry, name: 'fixture-theme', kind: 'theme', installed: null, themeApi: 1 }], installed: [installed], hidden: { incompatible: 2, invalid: [{ name: 'RAW {{name}} <img>', problem: 'RAW upstream error' }] }, address: 'fixture/index', fetchedAt: null };
+                window.fetch = async (input, init) => {
+                    const url = String(input);
+                    if (url.startsWith('/api/x/gallery/') || url === '/api/extensions') {
+                        window.__localeRequests.push({ url, method: init?.method ?? 'GET' });
+                        if (init?.method && init.method !== 'GET') throw new Error('Unexpected fixture write: ' + url);
+                        const data = url === '/api/extensions' ? { modules: [] }
+                            : url.includes('/source/') ? { title: 'Menu', from: 'installed', files: [{ name: 'Menu.ts', size: 9, text: '/* RAW {{name}} <img> */', binary: false, pinned: true }] }
+                            : url.includes('/update/') ? { title: 'Menu', from: { version: '1.0.0', repo: 'fixture/index', commit: 'a'.repeat(40) }, to: { version: '2.0.0', repo: 'fixture/index', commit: 'b'.repeat(40), pin: 'fixture-pin' }, sourceUrl: installed.sourceUrl, enabled: false, declares: { before: declares, after: declares }, edited: [], files: [], diff: '' }
+                            : url.includes('/settings') ? { default: 'fixture/index' } : listing;
+                        return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+                    }
+                    return window.__localeFetch(input, init);
+                };
+                // This remains an authenticated guest. Cache the trust presentation to prevent
+                // a synthetic owner role from making an unrelated owner-only background read.
+                store.set({ trust: { conversationId: store.state.conversationId, cwd: store.state.view.agent?.cwd, info: null }, me: { ...store.state.me, role: 'owner' }, server: { ...store.state.server, extensions: [...store.state.server.extensions, 'pocket-gallery'] } });
+                openSheet({ type: 'gallery', tab: 'discover' });
+            })()`);
+        }
+
+        try {
+            for (const enabled of [true, false]) {
+                assert.equal((await postExtension(app.config.ownerToken, enabled)).status, 200);
+
+                for (const page of pages) {
+                    await until(
+                        async () => (await ui(page)).lang === (enabled ? "zh-CN" : "en"),
+                        "gallery locale changed",
+                    );
+                    // The real locale hello restores the real guest/server permissions.
+                    // Reapply only this presentation fixture after it; never change auth.
+                    await page.evaluate(`const { store, openSheet } = await import('/store.js');
+                        store.set({ trust: { conversationId: store.state.conversationId, cwd: store.state.view.agent?.cwd, info: null }, me: { ...store.state.me, role: 'owner' }, server: { ...store.state.server, extensions: [...store.state.server.extensions, 'pocket-gallery'] } });
+                        openSheet({ type: 'gallery', tab: 'discover' });`);
+                    const text = () =>
+                        page.evaluate(`document.querySelector('.sheet')?.textContent ?? ''`);
+
+                    await until(
+                        async () =>
+                            (await text()).includes(
+                                enabled ? "索引设置与状态" : "Index settings and status",
+                            ),
+                        "gallery fixture rendered",
+                    );
+                    const tabs = JSON.parse(
+                        await page.evaluate(
+                            `return JSON.stringify([...document.querySelectorAll('.extension-hub-tabs [role=tab]')].map(e => e.textContent.trim()))`,
+                        ),
+                    );
+
+                    assert.deepEqual(
+                        tabs,
+                        enabled
+                            ? ["发现", "已安装扩展", "更新 (1)"]
+                            : ["Discover", "Installed extensions", "Updates (1)"],
+                    );
+                    const content = await text();
+
+                    assert.ok(content.includes(enabled ? "安装主题" : "Install theme"));
+                    assert.ok(
+                        content.includes(enabled ? "安装（保持关闭）" : "Install (stays off)"),
+                    );
+                    assert.ok(content.includes("RAW {{name}} <img>"));
+                    assert.equal(
+                        await page.evaluate(`document.querySelectorAll('.sheet img').length`),
+                        "0",
+                    );
+                    await page.evaluate(
+                        `document.querySelector('.extension-hub-list .gallery-technical summary').click()`,
+                    );
+                    assert.equal(
+                        await page.evaluate(
+                            `document.querySelector('.extension-hub-list .gallery-technical').open`,
+                        ),
+                        "true",
+                    );
+                    const technical = await page.evaluate(
+                        `document.querySelector('.extension-hub-list .gallery-technical').textContent`,
+                    );
+
+                    assert.ok(
+                        technical.includes(
+                            enabled
+                                ? "2 个条目需要更新版本的 Pi Pocket。"
+                                : "2 entries need a newer Pi Pocket.",
+                        ),
+                    );
+                    assert.equal(
+                        (technical.match(/need a newer Pi Pocket/g) ?? []).length,
+                        enabled ? 0 : 1,
+                        "no duplicated sentence suffix",
+                    );
+                    assert.ok(
+                        technical.includes("fixture/index") &&
+                            technical.includes("RAW upstream error"),
+                    );
+                    await page.evaluate(`document.querySelector('.gallery-card-open').click()`);
+                    await until(
+                        async () =>
+                            (await text()).includes(enabled ? "技术详情" : "Technical details"),
+                        "entry selected",
+                    );
+                    await page.evaluate(
+                        `document.querySelector('.gallery-entry-content .gallery-technical summary').click()`,
+                    );
+                    const facts = await page.evaluate(
+                        `document.querySelector('.gallery-entry-content .gallery-technical').textContent`,
+                    );
+
+                    assert.ok(facts.includes(enabled ? "安装时间" : "Installed"));
+                    assert.ok(facts.includes("Menu"), "declarations and author stay raw");
+                    const sourceLabel = enabled ? "查看源码" : "View source";
+
+                    const layersBeforeSource = Number(
+                        await page.evaluate(`history.state?.pocket?.layers ?? 0`),
+                    );
+
+                    await page.evaluate(
+                        `[...document.querySelectorAll('.gallery-actions button')].find(e => e.textContent.trim() === ` +
+                            JSON.stringify(sourceLabel) +
+                            `).click()`,
+                    );
+                    await until(
+                        async () =>
+                            (await text()).includes(enabled ? "源码：Menu" : "Source: Menu"),
+                        "source sheet",
+                    );
+                    assert.ok(
+                        (await text()).includes("RAW {{name}} <img>"),
+                        "source text is untouched",
+                    );
+                    await until(
+                        async () =>
+                            Number(await page.evaluate(`history.state?.pocket?.layers ?? 0`)) >
+                            layersBeforeSource,
+                        `source history settled (before ${layersBeforeSource}, current ${await page.evaluate(`history.state?.pocket?.layers ?? 0`)})`,
+                    );
+                    const sourceLayers = Number(
+                        await page.evaluate(`history.state?.pocket?.layers ?? 0`),
+                    );
+
+                    await page.evaluate(`history.back()`);
+                    await until(
+                        async () =>
+                            Number(await page.evaluate(`history.state?.pocket?.layers ?? 0`)) <
+                            sourceLayers,
+                        "source Back reduces real history layer depth",
+                    );
+                    await until(
+                        async () =>
+                            (await text()).includes(enabled ? "返回发现" : "Back to Discover"),
+                        "source returns to selected entry",
+                    );
+                    await page.evaluate(
+                        `document.querySelector('.extension-hub-detail-back').click()`,
+                    );
+
+                    for (const tab of [1, 2]) {
+                        await page.evaluate(
+                            `document.querySelectorAll('.extension-hub-tabs [role=tab]')[` +
+                                tab +
+                                `].click()`,
+                        );
+                        await until(
+                            async () =>
+                                (
+                                    await page.evaluate(
+                                        `document.querySelector('.extension-hub-tabs [role=tab][aria-selected=true]').textContent`,
+                                    )
+                                ).includes(
+                                    tab === 1
+                                        ? enabled
+                                            ? "已安装扩展"
+                                            : "Installed extensions"
+                                        : enabled
+                                          ? "更新"
+                                          : "Updates",
+                                ),
+                            "hub tab selected",
+                        );
+                        assert.equal(
+                            await page.evaluate(
+                                `document.querySelectorAll('.gallery-card').length`,
+                            ),
+                            "1",
+                        );
+                    }
+
+                    await page.evaluate(
+                        `document.querySelector('.gallery-card-actions button').click()`,
+                    );
+                    await until(
+                        async () => (await text()).includes(enabled ? "更新 Menu" : "Update Menu"),
+                        "update preview",
+                    );
+                    await until(
+                        async () =>
+                            Number(await page.evaluate(`history.state?.pocket?.layers ?? 0`)) >= 2,
+                        "update history settled",
+                    );
+                    await page.evaluate(`history.back()`);
+                    await until(
+                        async () =>
+                            (
+                                await page.evaluate(
+                                    `document.querySelector('.extension-hub-tabs [role=tab][aria-selected=true]')?.textContent ?? ''`,
+                                )
+                            ).includes(enabled ? "更新" : "Updates"),
+                        "update returns to Updates tab",
+                    );
+                    await page.evaluate(
+                        `document.querySelectorAll('.extension-hub-tabs [role=tab]')[0].click()`,
+                    );
+                    await until(
+                        async () =>
+                            (await text()).includes(
+                                enabled ? "索引设置与状态" : "Index settings and status",
+                            ),
+                        "return to Discover",
+                    );
+                    assert.ok((await ui(page)).pageWidth <= (await ui(page)).innerWidth);
+                    const requests = JSON.parse(
+                        await page.evaluate(`JSON.stringify(window.__localeRequests)`),
+                    ) as { url: string; method: string }[];
+
+                    assert.ok(
+                        requests.every(
+                            (request) =>
+                                request.method === "GET" &&
+                                !/\/(?:install|uninstall|review)\//.test(request.url),
+                        ),
+                    );
+                }
+            }
+        } finally {
+            for (const page of pages) {
+                await page.evaluate(
+                    `const { store, closeSheet } = await import('/store.js'); closeSheet(); store.set(window.__localeSaved); window.fetch = window.__localeFetch; delete window.__localeFetch; delete window.__localeSaved; delete window.__localeRequests;`,
+                );
+            }
+        }
+    },
+);
+
+test(
+    "guest trust reads and changes reproduce 403 without altering project trust",
+    real,
+    async () => {
+        assert.ok(app);
+        const trustFile = join(root, "agent", "trust.json");
+        const trustBefore = existsSync(trustFile) ? readFileSync(trustFile, "utf8") : null;
+
+        for (const method of ["GET", "POST"]) {
+            const response = await fetch(`${base}/api/c/${session}/trust`, {
+                method,
+                headers: {
+                    authorization: `Bearer ${guestToken}`,
+                    "x-pocket": "1",
+                    "content-type": "application/json",
+                },
+                ...(method === "POST" ? { body: JSON.stringify({ choice: "trust" }) } : {}),
+            });
+
+            assert.equal(response.status, 403, `guest ${method} trust stays owner-only`);
+        }
+
+        assert.equal(existsSync(trustFile) ? readFileSync(trustFile, "utf8") : null, trustBefore);
+    },
+);
 
 test(
     "upstream speed and unread controls retain live translations on phone and desktop",

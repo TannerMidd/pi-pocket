@@ -27,6 +27,7 @@ import { serveImage } from "./assets.ts";
 import { browserRoutes } from "./browser-routes.ts";
 import { conversationRoutes } from "./conversation-routes.ts";
 import { createEventStreams } from "./events.ts";
+import { extensionRoute } from "./extension-routes.ts";
 import { type ApiRequest, conversationId, type HttpOptions, json, readJson } from "./io.ts";
 import { pushRoutes } from "./push-routes.ts";
 
@@ -163,6 +164,16 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             app.rename(user, name);
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (first === "folder-favorites" && second === undefined && method === "GET") {
+            return json(response, 200, await app.folderFavorites.list(user));
+        }
+
+        if (first === "folder-favorites" && second === undefined && method === "POST") {
+            await app.folderFavorites.set(user, await readJson(request));
 
             return json(response, 200, { ok: true });
         }
@@ -340,6 +351,54 @@ export function createApi(options: HttpOptions, auth: Auth) {
             });
         }
 
+        // Theme folders (`themes.ts`): everyone signed in lists them, as everyone chooses one for their own browsers;
+        // only the owner adds, edits, and removes them.
+        if (first === "themes" && second === undefined && method === "GET") {
+            return json(response, 200, { themes: app.themes.list(user.role === "owner") });
+        }
+
+        if (first === "themes" && second === "default" && method === "PUT") {
+            await app.setThemeDefault(
+                user,
+                (await readJson<{ default?: unknown }>(request)).default,
+            );
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (first === "themes" && second === "duplicate" && method === "POST") {
+            requireOwner(user);
+            const body = await readJson<{ from?: unknown; name?: unknown; colors?: unknown }>(
+                request,
+            );
+
+            if (typeof body.from !== "string") {
+                throw new HttpError(400, "Say which theme or colors to copy");
+            }
+
+            return json(response, 200, {
+                id: await app.themes.duplicate(body.from, body.name, body.colors === true),
+            });
+        }
+
+        if (first === "themes" && second !== undefined && third === "edit" && method === "GET") {
+            requireOwner(user);
+
+            return json(response, 200, app.themes.edit(second));
+        }
+
+        if (
+            first === "themes" &&
+            second !== undefined &&
+            third === undefined &&
+            method === "DELETE"
+        ) {
+            requireOwner(user);
+            app.themes.remove(second);
+
+            return json(response, 200, { ok: true });
+        }
+
         if (first === "theme" && second === "wallpaper" && method === "GET") {
             if (user.role !== "owner") {
                 throw new HttpError(403, "Only the owner sees the desktop's wallpaper");
@@ -444,7 +503,9 @@ export function createApi(options: HttpOptions, auth: Auth) {
         if (first === "approvals" && second !== undefined && method === "POST") {
             const body = await readJson<{ allow?: boolean }>(request);
 
-            if (!(await app.answerApproval(second, body.allow === true, user))) {
+            // An id may hold a slash, which the path decoded into a part of its own: a codemode script's calls are
+            // named `<call>/<n>`.
+            if (!(await app.answerApproval(parts.slice(1).join("/"), body.allow === true, user))) {
                 throw new HttpError(404, "That approval is no longer pending");
             }
 
@@ -559,6 +620,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             });
         }
 
+        // Routes extension modules add, each checking who may use it (`extension-routes.ts`).
+        if (first === "x" && second !== undefined) {
+            return extensionRoute(route, parts.slice(1));
+        }
+
         if (first === "extensions" && second === undefined && method === "GET") {
             return json(response, 200, await app.extensions(user));
         }
@@ -591,6 +657,17 @@ export function createApi(options: HttpOptions, auth: Auth) {
             await app.reloadExtension(second);
 
             return json(response, 200, await app.extensions(user));
+        }
+
+        if (
+            first === "models" &&
+            second === "refresh" &&
+            third === undefined &&
+            method === "POST"
+        ) {
+            requireOwner(user);
+
+            return json(response, 200, await app.providers.modelRefresh.refresh());
         }
 
         // For the owner, each subscription's sign-in is asked afresh first (three seconds at most; a mark found later

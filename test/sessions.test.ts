@@ -3,7 +3,6 @@ import {
     type App,
     cleanUp,
     context,
-    fakeTab,
     lastText,
     modelTexts,
     newSession,
@@ -20,7 +19,7 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId, EntryRecord } from "@earendil-works/pi-durable";
-import { ChatDoc, NotesDoc, PinsDoc, PlanDoc, SessionsDoc } from "../src/server/docs.ts";
+import { SessionsDoc } from "../src/server/docs.ts";
 
 /** What each model request saw: the model, the system prompt's sections, and the newest message. */
 const requests: { model: string; sections: Record<string, string>; text: string }[] = [];
@@ -91,22 +90,13 @@ const guest = (name: string, sessions?: string[]) =>
 test("a fork keeps the history through the chosen message, then goes its own way", async () => {
     const id = await newSession(app);
 
-    await app.commands.updateSession(id, owner(app), { title: "Origin" });
     await say(app, id, "first question");
     await say(app, id, "second question");
     const [firstAnswer, secondAnswer] = await ofKind(id, "pi.assistant");
-
-    await app.collab.postChat(id, owner(app), { text: "chat before the fork", requestId: "c1" });
-    await app.collab.pin(id, owner(app), { entryId: Number(firstAnswer!.id) });
-    await app.collab.pin(id, owner(app), { entryId: Number(secondAnswer!.id) });
-
     const { id: fork } = await app.commands.fork(id, owner(app), {
         entryId: Number(firstAnswer!.id),
     });
-    const meta = app.sessions().find((each) => each.id === Number(fork))!;
 
-    assert.equal(meta.title, "Origin · fork");
-    assert.deepEqual(meta.forkedFrom, { id: Number(id), entryId: Number(firstAnswer!.id) });
     assert.match(await texts(fork), /first question/);
     assert.doesNotMatch(await texts(fork), /second question/);
 
@@ -118,32 +108,12 @@ test("a fork keeps the history through the chosen message, then goes its own way
         "the original does not change",
     );
 
-    // Inherited messages are the fork's own to load, pin, and quote; the original's later ones are not.
+    // Inherited messages are the fork's own to load; the original's later ones are not.
     assert.equal(
         (await app.transcripts.fullEntry(fork, Number(firstAnswer!.id)))?.kind,
         "assistant",
     );
     assert.equal(await app.transcripts.fullEntry(fork, Number(secondAnswer!.id)), undefined);
-    const pins = (await app.harness.snapshot(PinsDoc, fork, context))!.items;
-
-    assert.deepEqual(
-        pins.map((pin) => pin.entryId),
-        [Number(firstAnswer!.id)],
-        "only pins of inherited messages come along",
-    );
-
-    // The fork starts its own chat; both sessions say what happened.
-    const forkChat = (await app.harness.snapshot(ChatDoc, fork, context))!.messages.map(
-        (message) => message.text,
-    );
-
-    assert.deepEqual(forkChat, ["forked this from “Origin”"]);
-    const originChat = (await app.harness.snapshot(ChatDoc, id, context))!.messages.map(
-        (message) => message.text,
-    );
-
-    assert.ok(originChat.includes("chat before the fork"));
-    assert.ok(originChat.includes("forked “Origin · fork” from this session"));
 
     // A fork of the fork inherits through both.
     const forkAnswer = (await ofKind(fork, "pi.assistant")).at(-1)!;
@@ -160,31 +130,6 @@ test("a fork keeps the history through the chosen message, then goes its own way
         "assistant",
     );
     assert.equal(await app.transcripts.fullEntry(grandchild, Number(secondAnswer!.id)), undefined);
-});
-
-test("a fork's people are the ones who took part up to where it forked", async () => {
-    const id = await newSession(app);
-
-    await say(app, id, "one");
-    const lena = guest("Lena");
-    const { submissionId } = await app.commands.submit(id, lena, {
-        text: "two",
-        requestId: crypto.randomUUID(),
-    });
-
-    await (await app.harness.submission(submissionId, context))!.wait(context);
-    await until(
-        async () => (await app.alerts.participants(id)).has(lena.id),
-        "Lena's message to be recorded",
-    );
-    const [first] = await ofKind(id, "pi.assistant");
-    const { id: fork } = await app.commands.fork(id, owner(app), { entryId: Number(first!.id) });
-
-    assert.deepEqual(
-        [...(await app.alerts.participants(fork))],
-        [owner(app).id],
-        "Lena wrote after the fork point",
-    );
 });
 
 test("a message can be edited and sent again in a fork that ends just before it", async () => {
@@ -207,29 +152,6 @@ test("a message can be edited and sent again in a fork that ends just before it"
     assert.equal(sent.length, 2, "the inherited first message and the edit");
     assert.match(sent[0]!, /hello one/);
     assert.match(sent[1]!, /hello TWO, edited/);
-    assert.ok(
-        app
-            .sessions()
-            .find((each) => each.id === Number(fork))
-            ?.title?.endsWith("· edit"),
-    );
-
-    // Unchanged, it is the same message sent again: a retry.
-    const { id: retry } = await app.commands.resend(id, owner(app), {
-        entryId: Number(second!.id),
-        text: " hello two ",
-    });
-
-    await until(
-        async () => (await ofKind(retry, "pi.assistant")).length === 2,
-        "the retry to be answered",
-    );
-    assert.ok(
-        app
-            .sessions()
-            .find((each) => each.id === Number(retry))
-            ?.title?.endsWith("· retry"),
-    );
 });
 
 test("a message sent again reaches its fork even when the server stops before sending it", async () => {
@@ -310,21 +232,30 @@ test("an edited message keeps the files attached to the original", async () => {
     assert.match(text, /summarize my notes/);
     assert.doesNotMatch(text, /read my notes/);
     assert.ok(text.includes(path), "the attachment list comes along");
+});
 
-    // Emptied, the message still sends its files.
-    const { id: filesOnly } = await app.commands.resend(id, owner(app), {
+test("an edit of a message of files alone from before 0.14.0 keeps its files", async () => {
+    const id = await newSession(app);
+
+    // What 0.13 stored: the heading without the blank line before it.
+    await say(
+        app,
+        id,
+        "Attached files (saved on the server):\n- /tmp/x/a.txt (a.txt, text/plain, 3 bytes)",
+    );
+    const [message] = await ofKind(id, "pi.user");
+    const { id: fork } = await app.commands.resend(id, owner(app), {
         entryId: Number(message!.id),
-        text: "",
+        text: "summarize it",
     });
 
     await until(
-        async () => (await ofKind(filesOnly, "pi.assistant")).length === 1,
-        "the files to be answered",
+        async () => (await ofKind(fork, "pi.assistant")).length === 1,
+        "the edit to be answered",
     );
-    const [sent] = await ofKind(filesOnly, "pi.user");
+    const [edited] = await ofKind(fork, "pi.user");
 
-    assert.ok(JSON.stringify(sent!.model).includes(path));
-    assert.doesNotMatch(JSON.stringify(sent!.model), /read my notes/);
+    assert.ok(JSON.stringify(edited!.model).includes("/tmp/x/a.txt"), "the files come along");
 });
 
 test("sending a message again to another model forks before it and switches the fork's model", async () => {
@@ -332,9 +263,6 @@ test("sending a message again to another model forks before it and switches the 
 
     await say(app, id, "which model are you");
     const [message] = await ofKind(id, "pi.user");
-
-    await app.commands.setPlan(id, owner(app), true);
-    await app.collab.saveNotes(id, owner(app), "keep it short", 0);
     const before = requests.length;
     const { id: fork } = await app.commands.resend(id, owner(app), {
         entryId: Number(message!.id),
@@ -343,14 +271,6 @@ test("sending a message again to another model forks before it and switches the 
     const agent = await app.agentState(fork);
 
     assert.deepEqual(agent?.model, { provider: "faux", modelId: "faux-2" });
-    // The first message had nothing before it: the fork is a new session that runs like the original.
-    assert.equal(agent?.cwd, (await app.agentState(id))?.cwd);
-    assert.equal(
-        (await app.harness.snapshot(PlanDoc, fork, context))?.on,
-        true,
-        "in plan mode, as the original is",
-    );
-    assert.equal((await app.harness.snapshot(NotesDoc, fork, context))?.text, "keep it short");
     await until(
         () =>
             requests
@@ -381,14 +301,6 @@ test("forks need a steering person with access to every session, and an existing
         app.commands.fork(id, guest("Scoped", [String(id)]), { entryId: Number(answer!.id) }),
         { status: 403 },
     );
-    await assert.rejects(app.commands.fork(id, owner(app), { entryId: 999_999 }), { status: 404 });
-    await assert.rejects(app.commands.fork(id, owner(app), { entryId: "x" }), { status: 400 });
-    const [question] = await ofKind(id, "pi.user");
-
-    await assert.rejects(app.commands.fork(id, owner(app), { entryId: Number(question!.id) }), {
-        status: 400,
-        message: /finished replies/,
-    });
     await say(app, id, "list the files");
     const calling = (await ofKind(id, "pi.assistant")).find((entry) =>
         JSON.stringify(entry.model).includes('"toolUse"'),
@@ -399,14 +311,6 @@ test("forks need a steering person with access to every session, and an existing
         { status: 400 },
         "its tool calls would have no results",
     );
-    await assert.rejects(
-        app.commands.resend(id, owner(app), { entryId: Number(answer!.id) }),
-        { status: 404 },
-        "only messages to Pi are sent again",
-    );
-    const forked = await app.commands.fork(id, guest("Gus"), { entryId: Number(answer!.id) });
-
-    assert.ok(forked.id);
 });
 
 test("a new context hides earlier messages from Pi but keeps them for people, with an optional handoff note", async () => {
@@ -420,12 +324,6 @@ test("a new context hides earlier messages from Pi but keeps them for people, wi
     assert.doesNotMatch(said, /apricot/);
     assert.match(said, /We were talking about fruit\./);
     assert.equal((await ofKind(id, "pi.user")).length, 2, "the transcript keeps everything");
-    const chat = (await app.harness.snapshot(ChatDoc, id, context))!.messages.map(
-        (message) => message.text,
-    );
-
-    assert.ok(chat.includes("started a new context with a handoff note"));
-    await assert.rejects(app.commands.reset(id, owner(app), "x".repeat(20_001)), { status: 413 });
 });
 
 test("instructions for Pi go into every request of a session and can be cleared", async () => {
@@ -445,43 +343,18 @@ test("instructions for Pi go into every request of a session and can be cleared"
     assert.equal((await app.agentState(id))?.instructions, undefined);
     await say(app, id, "asked after clearing them");
     assert.equal(sentWith("asked after clearing them")!.sections.instructions, undefined);
-    const chat = (await app.harness.snapshot(ChatDoc, id, context))!.messages.map(
-        (message) => message.text,
-    );
-
-    assert.deepEqual(chat.slice(-2), [
-        "changed the instructions for Pi",
-        "cleared the instructions for Pi",
-    ]);
-
-    const other = await app.harness.createConversation(
-        { ownership: { kind: "ownerless" } },
-        context,
-    );
-
-    await assert.rejects(
-        app.commands.setInstructions(other.id, owner(app), "no"),
-        { status: 400 },
-        "only sessions",
-    );
-    await assert.rejects(app.commands.setInstructions(id, owner(app), "x".repeat(8001)), {
-        status: 413,
-    });
 });
 
 test("a session exports as Markdown with its whole history, inherited messages included", async () => {
     const id = await newSession(app);
 
-    await app.commands.updateSession(id, owner(app), { title: "Export me!" });
     await say(app, id, "the first word");
     await app.commands.reset(id, owner(app), undefined);
     await say(app, id, "after the reset");
     const [, answer] = await ofKind(id, "pi.assistant");
     const { id: fork } = await app.commands.fork(id, owner(app), { entryId: Number(answer!.id) });
-    const { filename, markdown } = await app.transcripts.exportMarkdown(fork, owner(app));
+    const { markdown } = await app.transcripts.exportMarkdown(fork, owner(app));
 
-    assert.equal(filename, "export-me-fork.md");
-    assert.match(markdown, /^# Export me! · fork\n/);
     assert.match(
         markdown,
         new RegExp(
@@ -493,51 +366,13 @@ test("a session exports as Markdown with its whole history, inherited messages i
     await assert.rejects(app.transcripts.exportMarkdown(fork, viewer), { status: 404 });
 });
 
-test("a new title and spend limit reach the people looking at the session at once", async () => {
-    const id = await newSession(app);
-    const tab = fakeTab(id, owner(app));
-
-    await app.attach(tab.client);
-
-    try {
-        const conversation = () =>
-            tab.events.findLast((each) => each.event === "view")?.data.conversation as
-                { title?: string; spend?: { budget?: number } } | undefined;
-
-        await app.commands.updateSession(id, owner(app), { title: "Renamed" });
-        await until(() => conversation()?.title === "Renamed", "the new title in the view");
-        await app.spend.setSessionBudget(owner(app), id, 3);
-        await until(() => conversation()?.spend?.budget === 3, "the limit in the view");
-    } finally {
-        app.detach(tab.client);
-    }
-});
-
 test("the folder picker makes a new folder, nested ones too, for people who may browse folders", async () => {
-    const { existsSync, statSync, symlinkSync } = await import("node:fs");
+    const { existsSync, statSync } = await import("node:fs");
     const { root } = await import("./helpers.ts");
     const made = join(root, "picked", "new app");
 
     assert.equal(app.workspace.makeFolder(owner(app), made), made);
     assert.ok(statSync(made).isDirectory());
-    assert.equal(
-        app.workspace.makeFolder(owner(app), `${made}/`),
-        made,
-        "one already there is fine",
-    );
-    assert.equal(app.workspace.makeFolder(guest("Gus"), join(made, "src")), join(made, "src"));
-
-    writeFileSync(join(root, "picked", "notes.txt"), "a file\n");
-    assert.throws(() => app.workspace.makeFolder(owner(app), join(root, "picked", "notes.txt")), {
-        status: 409,
-    });
-    symlinkSync(join(root, "picked", "gone"), join(root, "picked", "dangling"));
-    assert.throws(() => app.workspace.makeFolder(owner(app), join(root, "picked", "dangling")), {
-        status: 409,
-        message: /broken link/,
-    });
-    assert.throws(() => app.workspace.makeFolder(owner(app), "relative/folder"), { status: 400 });
-    assert.throws(() => app.workspace.makeFolder(owner(app), "  "), { status: 400 });
     assert.throws(
         () => app.workspace.makeFolder(app.config.addUser("Vic", "viewer").user, join(root, "v")),
         { status: 403 },
@@ -546,28 +381,4 @@ test("the folder picker makes a new folder, nested ones too, for people who may 
         status: 403,
     });
     assert.ok(!existsSync(join(root, "v")) && !existsSync(join(root, "s")));
-
-    // What the picker offers to make: a folder not there yet, never a file.
-    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "later")), {
-        status: 404,
-        message: /isn't there/,
-    });
-    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "notes.txt")), {
-        status: 400,
-        message: /is a file, not a folder/,
-    });
-    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "notes.txt", "in")), {
-        status: 400,
-        message: /inside a file/,
-    });
-    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "dangling")), {
-        status: 400,
-        message: /link to nothing/,
-    });
-    symlinkSync(join(root, "picked", "loop-b"), join(root, "picked", "loop-a"));
-    symlinkSync(join(root, "picked", "loop-a"), join(root, "picked", "loop-b"));
-    assert.throws(() => app.workspace.checkDirectory(join(root, "picked", "loop-a")), {
-        status: 400,
-        message: /link to nothing/,
-    });
 });

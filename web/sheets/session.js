@@ -19,6 +19,7 @@ export function SessionSheet({ id }) {
     };
 
     return html`<${Sheet} title=${session.title ?? t("New session")} onClose=${closeSheet}>
+        <div class="sheet-list">
         ${
             !session.archived &&
             item(
@@ -47,5 +48,6 @@ export function SessionSheet({ id }) {
             then(() => selectFromList(id)),
             t("then tap others to add them"),
         )}
+        </div>
     <//>`;
 }

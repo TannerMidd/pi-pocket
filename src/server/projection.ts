@@ -5,7 +5,8 @@
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-durable";
 import {
-    ATTACHMENTS_HEADING,
+    COMMAND_ENTRY,
+    type CommandData,
     FILE_BLOCK,
     FROM_PI_ENTRY,
     FROM_PREFIX,
@@ -13,6 +14,7 @@ import {
     NOTE_ENTRY,
     SHELL_ENTRY,
     type ShellData,
+    splitAttachments,
 } from "./entry-format.ts";
 import type { StreamTiming } from "./timing.ts";
 
@@ -67,6 +69,7 @@ export type ClientEntry =
     | { id: number; kind: "compaction"; summary: string }
     | { id: number; kind: "reset"; text?: string }
     | ({ id: number; kind: "shell"; truncated?: number } & ShellData)
+    | ({ id: number; kind: "command"; truncated?: number } & CommandData)
     | { id: number; kind: "note"; text: string; name: string }
     | { id: number; kind: "fromPi"; title: string; file: string }
     | { id: number; kind: "other"; entryKind: string };
@@ -383,6 +386,21 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
             };
         }
 
+        case COMMAND_ENTRY: {
+            const data = entry.data as CommandData;
+            const { text, clipped } = full
+                ? { text: data.output, clipped: undefined }
+                : clip(data.output, OUTPUT_LIMIT);
+
+            return {
+                id,
+                kind: "command",
+                ...data,
+                output: text,
+                ...(clipped === undefined ? {} : { truncated: clipped }),
+            };
+        }
+
         case SHELL_ENTRY: {
             const data = entry.data as ShellData;
             const { text, clipped } = full
@@ -615,7 +633,10 @@ export function snippet(text: string, max = 280): string {
 /** The visible text of a projected entry, as plain text: what a person or Pi wrote. */
 export function entryText(entry: ClientEntry): string {
     if (entry.kind === "user") {
-        return entry.text.split(ATTACHMENTS_HEADING)[0] ?? "";
+        const [written, files] = splitAttachments(entry.text);
+
+        // A message of files alone says so: a quote or a pin of it is not empty.
+        return written.trim() === "" && files !== undefined ? "(attachments)" : written;
     }
 
     if (entry.kind === "assistant") {

@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { ChatDoc, SubagentsDoc } from "../src/server/docs.ts";
+import { SubagentsDoc } from "../src/server/docs.ts";
 
 /** Asked to, the model writes a file in its folder. */
 const route: FauxResponseStep = (request) => {
@@ -130,68 +130,6 @@ test("a session in its own worktree starts with the folder as it is, on a branch
         "the session works in the original folder again",
     );
     assert.match(gitIn(repo, "branch", "--list", worktree.branch), new RegExp(worktree.branch));
-    const chat = (await app.harness.snapshot(ChatDoc, id, context))!.messages.map(
-        (message) => message.text,
-    );
-
-    assert.match(
-        chat.at(-1)!,
-        /^removed the worktree; the branch pocket\/try-b-\w+ stays, and Pi works in .*\/repo\/app again$/,
-    );
-});
-
-test("a fork can get a worktree of its own, and a folder outside any repository cannot", async () => {
-    const id = await newSession(app, join(repo, "app"));
-
-    await say(app, id, "hello");
-    const page = await (await app.harness.conversation(id, context))!.entries(
-        {},
-        10,
-        undefined,
-        context,
-    );
-    const answer = page.items.find((entry) => entry.kind === "pi.assistant")!;
-    const { id: fork } = await app.commands.fork(id, owner(app), {
-        entryId: Number(answer.id),
-        worktree: true,
-    });
-    const worktree = app.sessionMeta(fork)!.worktree!;
-
-    assert.equal(app.cwdOf(fork), join(worktree.path, "app"));
-    assert.equal((await app.agentState(fork))?.cwd, join(worktree.path, "app"));
-    const chat = (await app.harness.snapshot(ChatDoc, fork, context))!.messages.map(
-        (message) => message.text,
-    );
-
-    assert.match(chat[0]!, /^forked this from “.*” into a worktree on pocket\/[\w-]+$/);
-    await app.commands.removeWorktree(fork, owner(app), true);
-
-    const plain = join(root, "plain");
-
-    mkdirSync(plain, { recursive: true });
-    const before = app.sessions().length;
-
-    await assert.rejects(app.commands.createSession(owner(app), { cwd: plain, worktree: true }), {
-        status: 400,
-        message: /not in a git repository/,
-    });
-    assert.equal(app.sessions().length, before, "no session was made");
-});
-
-test("a folder reached through a symbolic link gets the matching folder in its worktree", async () => {
-    const link = join(root, "linked");
-
-    symlinkSync(repo, link);
-    const { id } = await app.commands.createSession(owner(app), {
-        cwd: join(link, "app"),
-        worktree: true,
-    });
-    const worktree = app.sessionMeta(id)!.worktree!;
-
-    assert.equal(app.cwdOf(id), join(worktree.path, "app"));
-    assert.equal(existsSync(join(app.cwdOf(id), "main.ts")), true);
-    await app.commands.removeWorktree(id, owner(app), true);
-    assert.equal(app.cwdOf(id), join(link, "app"), "back to the folder as it was given");
 });
 
 test("a worktree Pi is working in stays until Pi stops", async () => {

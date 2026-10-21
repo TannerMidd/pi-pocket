@@ -670,22 +670,3 @@ export function fingerprint(text) {
 
     return (hash >>> 0).toString(36);
 }
-
-/** The five cells of a change bar, as GitHub draws it: added, removed, and unchanged cells, in proportion. */
-export function changeCells(added = 0, removed = 0) {
-    const total = added + removed;
-
-    if (total === 0) {
-        return ["", "", "", "", ""];
-    }
-
-    const cells = Math.min(5, Math.max(1, Math.ceil(Math.log10(total + 1) * 1.6)));
-    // Each side that changed at all gets a cell, when there are two to share.
-    const green = Math.min(
-        cells - (removed > 0 && cells > 1 ? 1 : 0),
-        Math.max(added > 0 ? 1 : 0, Math.round((added / total) * cells)),
-    );
-    const red = cells - green;
-
-    return [...Array(green).fill("add"), ...Array(red).fill("del"), ...Array(5 - cells).fill("")];
-}

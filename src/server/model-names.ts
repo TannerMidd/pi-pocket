@@ -9,9 +9,24 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 const WRITTEN = /(?:[\p{L}\p{N}]|(?<=\p{N})\.(?=\p{N}))+/gu;
 
 /**
- * A text's lowercased words, split at anything not a letter or digit and where letters and digits meet ("GPT-5.1" is
- * gpt 5 1), and how each joins the word before it: "" inside one written word ("4o", "k3"), "." between the digits of
- * a version ("2.5"), and " " for anything else (a space, a dash).
+ * The scripts written without spaces between words that PiP reads: Han, Kana and Hangul. Thai, Lao, Khmer, Myanmar and
+ * Tibetan write that way too, but their words need a dictionary to tell apart, so they stay one word. Latin letters
+ * touch the first three with no space at all ("用gpt-6.1-sol吧"), so where one of them meets another script, two words
+ * meet, not one.
+ */
+const UNSPACED = "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}";
+
+/** One part of a written word: a run of one of those scripts, a run of other letters, a run of digits, or a version's dot. */
+const PART = new RegExp(`[${UNSPACED}]+|[\\p{L}--[${UNSPACED}]]+|\\p{N}+|\\.`, "gv");
+
+/** Whether a part is a run of one of those scripts. */
+const UNSPACED_PART = new RegExp(`^[${UNSPACED}]+$`, "u");
+
+/**
+ * A text's lowercased words, split at anything not a letter or digit, where letters and digits meet ("GPT-5.1" is
+ * gpt 5 1), and where a script written without spaces meets another ("用gpt" is 用 gpt), and how each joins the word
+ * before it: "" inside one written word ("4o", "k3"), "." between the digits of a version ("2.5"), and " " for
+ * anything else (a space, a dash, the edge of such a script).
  */
 function split(text: string): { words: string[]; joins: string[] } {
     const words: string[] = [];
@@ -19,13 +34,17 @@ function split(text: string): { words: string[]; joins: string[] } {
 
     for (const written of text.toLowerCase().match(WRITTEN) ?? []) {
         let join = " ";
+        let unspacedBefore = false;
 
-        for (const part of written.match(/\p{L}+|\p{N}+|\./gu) ?? []) {
+        for (const part of written.match(PART) ?? []) {
             if (part === ".") {
                 join = ".";
             } else {
+                const unspaced = UNSPACED_PART.test(part);
+
                 words.push(part);
-                joins.push(join);
+                joins.push(unspaced || unspacedBefore ? " " : join);
+                unspacedBefore = unspaced;
                 join = "";
             }
         }
@@ -179,12 +198,18 @@ function shortened(full: string): Phrase | undefined {
 
 /**
  * The phrases that name a model: its id, its name, and its provider with its id. `loosely` adds them as people
- * shorten them (`shortened`).
+ * shorten them (`shortened`). For a person's choice, a whole two-character id or name needs its provider in the
+ * same message: "O3 optimization" is no more a choice than "my K3 laptop". PiP's own text is checked without that
+ * requirement, so it cannot pass on "use o3" when its person chose nothing.
  */
-function phrases(model: Model<Api>, loosely: boolean): Phrase[] {
-    const all: Phrase[] = [model.id, model.name, `${model.provider} ${model.id}`].map((each) => ({
-        words: words(each),
-    }));
+function phrases(model: Model<Api>, loosely: boolean, forPerson: boolean): Phrase[] {
+    const all: Phrase[] = [model.id, model.name, `${model.provider} ${model.id}`].map((each) => {
+        const phrase = { words: words(each) };
+
+        return forPerson && phrase.words.join("").length === 2
+            ? { ...phrase, family: { words: words(model.provider) } }
+            : phrase;
+    });
 
     if (loosely) {
         for (const full of [model.id, model.name]) {
@@ -208,20 +233,22 @@ const VIA = new Set(["on", "via", "through", "with", "using", "from"]);
  * The models among `models` that `text` names, by the phrases above. Where a phrase of one model runs on into a longer
  * phrase of another, from the same word, the text names only the longer one: "gpt-5-nano" names gpt-5-nano, not gpt-5.
  * The models of `among` (every model Pi knows) take part in that too, so words that name a model not signed in do not
- * name a shorter one that is.
+ * name a shorter one that is. `forPerson` requires a two-character id's provider in its message; false also detects
+ * bare ids in PiP's own text, which must not name models its person did not choose.
  */
 export function modelsNamed(
     text: string | Indexed,
     models: readonly Model<Api>[],
     loosely = false,
     among: readonly Model<Api>[] = models,
+    forPerson = true,
 ): Model<Api>[] {
     const said = read(text);
     const all = [
         ...new Map([...among, ...models].map((model) => [modelKey(model), model])).values(),
     ];
     const found = all.map((model) =>
-        phrases(model, loosely).flatMap((phrase) =>
+        phrases(model, loosely, forPerson).flatMap((phrase) =>
             starts(said, phrase).map((start) => ({ start, length: phrase.words.length })),
         ),
     );
@@ -248,9 +275,11 @@ const key = (phrase: Phrase) => `${phrase.words.join(" ")}|${phrase.joins?.join(
 /** Whether a phrase in `text` names both `a` and `b`: the same model at two providers, as far as those words go. */
 export function sharePhrase(text: string | Indexed, a: Model<Api>, b: Model<Api>): boolean {
     const said = read(text);
-    const theirs = new Set(phrases(b, true).map(key));
+    const theirs = new Set(phrases(b, true, false).map(key));
 
-    return phrases(a, true).some((phrase) => theirs.has(key(phrase)) && contains(said, phrase));
+    return phrases(a, true, false).some(
+        (phrase) => theirs.has(key(phrase)) && contains(said, phrase),
+    );
 }
 
 /**
@@ -299,7 +328,7 @@ export function personNamed(
 
     for (const { start, length } of [
         ...named.flat(),
-        ...[model, ...twins].flatMap((each) => phrases(each, true).flatMap(after)),
+        ...[model, ...twins].flatMap((each) => phrases(each, true, false).flatMap(after)),
     ]) {
         longest.set(start, Math.max(longest.get(start) ?? 0, length));
     }

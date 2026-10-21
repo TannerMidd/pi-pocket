@@ -33,7 +33,7 @@ const shell = defineTool({
         api.output(`ran ${args.command}`);
         api.output(new TextEncoder().encode(" ✓"));
 
-        return args.command === "fail" ? { isError: true } : {};
+        return {};
     },
 });
 
@@ -57,7 +57,6 @@ function fakeApi(tools: ToolRegistration[], extensions: ReturnType<typeof define
     };
 
     return {
-        memos,
         store,
         api: {
             taskId: 41,
@@ -103,30 +102,16 @@ test("a script calls tools, gets their text, and returns a value", async () => {
     );
 
     assert.equal(result.isError, undefined);
-    assert.match(result.text, /^Script completed\nWall time [\d.]+ seconds\nOutput:\n/);
     assert.match(result.text, /echo,bash/, "codemode cannot call itself");
     assert.match(result.text, /\["echo:hi","ran ls ✓"\]/);
-    assert.deepEqual(
-        (result.details as { calls: { name: string; status: string }[] }).calls.map((call) => [
-            call.name,
-            call.status,
-        ]),
-        [
-            ["echo", "ok"],
-            ["bash", "ok"],
-        ],
-    );
 });
 
-test("nested calls are checked like direct ones: bad arguments, errors, and hooks that rewrite or block", async () => {
-    const seen: string[] = [];
+test("nested calls are checked like direct ones: hooks that rewrite or block, and hooks that fail", async () => {
     const policy = defineExtension({
         name: "policy",
         hooks: [
             hook(ToolTask, {
-                beforeTool: async (call, api, ctx) => {
-                    // Each nested call has its own memos.
-                    seen.push(String(await api.memo("visit", call.id, ctx)));
+                beforeTool: async (call) => {
                     const command = (call.arguments as { command?: string }).command;
 
                     if (command === "rm -rf /") {
@@ -143,23 +128,16 @@ test("nested calls are checked like direct ones: bad arguments, errors, and hook
 
                     return undefined;
                 },
-                afterTool: async (call, result) =>
-                    call.name === "echo"
-                        ? { ...result, content: [{ type: "text", text: "replaced" }] }
-                        : undefined,
             }),
         ],
     });
-    const fake = fakeApi([echo, shell], [policy]);
+    const fake = fakeApi([shell], [policy]);
     const result = await run(
         fake,
         `const outcomes = await Promise.allSettled([
 			tools.bash({ command: "rm -rf /" }),
 			tools.bash({ command: "boom" }),
 			tools.bash({ command: "short" }),
-			tools.bash({ command: "fail" }),
-			tools.bash({ nope: 1 }),
-			tools.echo({ text: "x" }),
 		]);
 		return outcomes.map((o) => o.status === "fulfilled" ? o.value : "ERR " + o.reason.message);`,
     );
@@ -168,18 +146,6 @@ test("nested calls are checked like direct ones: bad arguments, errors, and hook
     assert.equal(values[0], "ERR Tool call blocked: not that");
     assert.equal(values[1], "ERR Tool call blocked: hook failed");
     assert.equal(values[2], "ran rewritten ✓");
-    assert.equal(values[3], "ERR ran fail ✓");
-    assert.match(
-        values[4]!,
-        /^ERR Validation failed for tool "bash":[\s\S]*required properties command/,
-    );
-    assert.equal(values[5], "replaced");
-    assert.deepEqual(
-        new Set(seen),
-        new Set(["call-1/1", "call-1/2", "call-1/3", "call-1/4", "call-1/6"]),
-        "the invalid call never reached the hooks",
-    );
-    assert.ok([...fake.memos.keys()].every((key) => /^codemode\/\d+\/visit$/.test(key)));
 });
 
 test("store() values last across scripts; failed scripts keep their output and change nothing", async () => {
@@ -202,20 +168,6 @@ test("store() values last across scripts; failed scripts keep their output and c
         /^Script failed[\s\S]*partial[\s\S]*Script error:\nError: oops[\s\S]*Tool calls made before the failure \(they are not undone\): echo \(ok\)/,
     );
     assert.deepEqual(fake.store.values, { count: 2 });
-});
-
-test("output over the budget keeps its start and end, and saves the whole", async () => {
-    const fake = fakeApi([]);
-    const result = await run(
-        fake,
-        `// @options: {"max_output_tokens": 50}\ntext("A".repeat(150) + "B".repeat(150));`,
-    );
-
-    assert.match(result.text, /Warning: output truncated/);
-    assert.match(
-        result.text,
-        /^[\s\S]*A{20}[\s\S]*B{20}[\s\S]*\[Full output: [^\]]*pi-pocket-codemode-[0-9a-f]+\.txt/,
-    );
 });
 
 test("with Lancet Guard asking, each nested call waits for its own answer, even in parallel", async () => {

@@ -7,11 +7,21 @@
 import { Component } from "preact";
 import { t } from "./i18n.js";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { folderColor } from "./avatar.js";
 import { describeCall } from "./calls.js";
-import { workspaceOrder } from "./sessions.js";
-import { actions, api, attempt, canSteer, navigate, notify, store } from "./store.js";
+import { finishedUnseen, markSeen, seenSince } from "./seen.js";
+import {
+    actions,
+    api,
+    attempt,
+    canSteer,
+    navigate,
+    notify,
+    store,
+    workspaceOrder,
+} from "./store.js";
 import { prefs, setPrefs } from "./theme.js";
-import { html, Icon, shortPath, usePresence } from "./ui.js";
+import { html, Icon, railState, shortPath, usePresence } from "./ui.js";
 
 /** Wide enough for the column beside the conversation: where People and the Browser panel dock too. */
 export const PEEK_WIDE = matchMedia("(min-width: 1100px)");
@@ -23,78 +33,12 @@ const MAX_LIVE = 12;
 const ALLOW_LENGTH = 80;
 /** Waits before sending the list again after a send failed, growing with each failure. */
 const RETRY_MS = [1000, 3000, 10_000];
-/** Each session's seen mark is a key of its own, so tabs that mark different sessions at once keep both. */
-const SEEN_PREFIX = "pocket.peekSeen.";
-/** Marks older than this are forgotten: the run they saw is long over, and the server has likely restarted since. */
-const SEEN_KEEP_MS = 30 * 24 * 60 * 60_000;
-const SINCE_KEY = "pocket.peekSince";
 
 PEEK_WIDE.addEventListener("change", () => store.set({}));
 
 const hidden = () => document.visibilityState === "hidden";
 
-// ─── What this browser has seen, by the server's clock ───────────────────────────────
-
-/** How far the server's clock is ahead of this browser's, from its last hello: runs end by the server's clock. */
-let clockOffset = 0;
-const serverNow = () => Date.now() + clockOffset;
-
-/** A time the server took (its clock), on this device's clock: a phone set a few minutes off still counts right. */
-export const fromServer = (ms) => ms - clockOffset;
-
-function readSeen() {
-    const seen = {};
-
-    for (let index = 0; index < localStorage.length; index++) {
-        const key = localStorage.key(index);
-        const at = key?.startsWith(SEEN_PREFIX) ? Number(localStorage.getItem(key)) : 0;
-
-        if (at > 0) {
-            seen[key.slice(SEEN_PREFIX.length)] = at;
-        }
-    }
-
-    return seen;
-}
-
-for (const [id, at] of Object.entries(readSeen())) {
-    if (Date.now() - at > SEEN_KEEP_MS) {
-        localStorage.removeItem(SEEN_PREFIX + id);
-    }
-}
-
-/** Runs that ended before this browser first had peeks are old news. The server's time; null until it has said. */
-let since = Number(localStorage.getItem(SINCE_KEY)) || null;
-
-store.set({ peeks: {}, peekSeen: readSeen() });
-
-// Another tab of this browser marked a session seen (or cleared the storage).
-addEventListener("storage", (event) => {
-    if (event.key === null || event.key.startsWith(SEEN_PREFIX)) {
-        store.set({ peekSeen: readSeen() });
-    }
-});
-
-/** Remember that this browser looked at a session now: a run that ended before is no longer new. */
-export function markSeen(id) {
-    const key = SEEN_PREFIX + id;
-    const ended = store.state.sessions.find((session) => session.id === id)?.endedAt ?? 0;
-    // The latest look counts, whichever tab made it; the run's own end counts too, in case the clocks disagree.
-    const at = Math.max(Number(localStorage.getItem(key)) || 0, serverNow(), ended);
-
-    localStorage.setItem(key, String(at));
-    store.set({ peekSeen: { ...store.state.peekSeen, [id]: at } });
-}
-
-/** A session whose run ended since this browser last had it open. */
-function finishedUnseen(session, state = store.state) {
-    return (
-        since !== null &&
-        !session.busy &&
-        session.endedAt !== undefined &&
-        session.endedAt > Math.max(since, state.peekSeen?.[session.id] ?? 0)
-    );
-}
+store.set({ peeks: {} });
 
 // ─── Which sessions are tiles, in a steady order ─────────────────────────────────────
 
@@ -103,41 +47,14 @@ let slots = [];
 /** The session open before this one: it stays a tile, in the place of the one that was opened. */
 let lastLeft = null;
 let previous = store.state.conversationId;
-/** When the open session's last run ended, as this tab last marked it seen. */
-let openEnded;
-let lastServer;
 
-/** A run that ends while its session is open in sight is seen as it ends. */
-function seeOpen(state) {
-    const id = state.conversationId;
-    const ended = state.sessions.find((session) => session.id === id)?.endedAt;
-
-    if (id !== null && ended !== undefined && ended !== openEnded && !hidden()) {
-        openEnded = ended;
-        markSeen(id);
-    }
-}
-
+// The session left stays a tile, in the place of the one opened. `seen.js` marks both seen.
 store.subscribe((state) => {
-    if (state.server !== lastServer) {
-        lastServer = state.server;
-
-        if (typeof state.server?.now === "number") {
-            clockOffset = state.server.now - Date.now();
-
-            if (since === null) {
-                since = state.server.now;
-                localStorage.setItem(SINCE_KEY, String(since));
-            }
-        }
-    }
-
     if (state.conversationId !== previous) {
         const left = previous;
         const at = slots.indexOf(state.conversationId);
 
         previous = state.conversationId;
-        openEnded = undefined;
 
         if (left !== null) {
             lastLeft = left;
@@ -145,16 +62,8 @@ store.subscribe((state) => {
             if (at >= 0) {
                 slots[at] = left;
             }
-
-            markSeen(left);
-        }
-
-        if (state.conversationId !== null) {
-            markSeen(state.conversationId);
         }
     }
-
-    seeOpen(store.state);
 });
 
 const rank = (session, state, pinned) =>
@@ -179,7 +88,7 @@ export function peekTiles(state = store.state) {
         state.pinned,
         state.peekSeen,
         lastLeft,
-        since,
+        seenSince(),
     ];
 
     if (from.every((value, index) => value === chosen.from[index])) {
@@ -237,6 +146,27 @@ export function togglePeeks() {
     }
 }
 
+/** The rail's switch, where the top bar's is out of room (a narrow pane). */
+export function PeeksRailButton() {
+    if (store.state.server?.peeks !== true) {
+        return null;
+    }
+
+    const on = peeksOn();
+
+    return html`<button
+        class=${`rail-button rail-peeks ${on ? "open" : ""}`}
+        data-part="rail-button"
+        data-state=${railState(on)}
+        title=${t(on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)")}
+        aria-label=${t("Peek tiles")}
+        aria-pressed=${on}
+        onClick=${togglePeeks}
+    >
+        <${Icon} name="tiles" size=${19} />
+    </button>`;
+}
+
 /** The top bar's switch. While off, a dot says another session waits for you. */
 export function PeeksButton() {
     const { server, sessions, conversationId } = store.state;
@@ -252,16 +182,14 @@ export function PeeksButton() {
             (session) => session.waiting && !session.archived && session.id !== conversationId,
         );
 
-    // Quiet while off, unless another session waits for you; where the top bar leads back to the sessions, its way back
-    // counts those waiting, and it stays quiet then too.
     return html`<button
-        class=${`icon-button badge-host ${on ? "on" : waiting ? "quiet-narrow" : "quiet"}`}
+        class=${`icon-button badge-host top-toggle ${on ? "on" : ""}`}
         aria-label=${t("Peek tiles")}
         aria-pressed=${on}
         title=${t(on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)")}
         onClick=${togglePeeks}
     >
-        <${Icon} name="tiles" />
+        <${Icon} name="tiles" size=${18} />
         ${waiting && html`<span class="peek-dot" aria-hidden="true"></span>`}
     </button>`;
 }
@@ -347,7 +275,6 @@ store.subscribe((state) => {
 
 document.addEventListener("visibilitychange", () => {
     settle(hidden() ? 0 : SETTLE_MS);
-    seeOpen(store.state);
 });
 
 /**
@@ -479,36 +406,54 @@ function Status({ status }) {
     return status === "error" ? html`<span class="err" title=${t("Failed")}>✕</span>` : null;
 }
 
+/** A line of a tile: a mark column (who or what), then the words, two lines at most. */
 function PeekLine({ line }) {
     switch (line.kind) {
         case "user":
             return html`<div class="peek-line user">
-                <span class="peek-mark">›</span>${" "}
-                ${line.from && html`<b>${line.from}</b> `}${line.text}
+                <span class="peek-mark">›</span>
+                <span class="peek-text">${line.from && html`<b>${line.from}</b> `}${line.text}</span>
             </div>`;
         case "text":
-            return html`<div class="peek-line text"><span class="pi">π</span> ${line.text}</div>`;
+            return html`<div class="peek-line text">
+                <span class="peek-mark pi">π</span>
+                <span class="peek-text">${line.text}</span>
+            </div>`;
 
         case "tool": {
             const call = describeCall({ name: line.name, args: line.args });
 
-            return html`<div class="peek-line">
-                <span class="peek-mark">${call.icon}</span> ${call.label} ${call.subject}${" "}
-                <${Status} status=${line.status} />
+            return html`<div class="peek-line cmd">
+                <span class="peek-mark">
+                    ${call.iconPath ? html`<${Icon} path=${call.iconPath} size=${12} />` : call.icon}
+                </span>
+                <span class="peek-text">
+                    ${call.label} ${call.subject}${" "}
+                    <${Status} status=${line.status} />
+                </span>
             </div>`;
         }
 
         case "shell":
-            return html`<div class="peek-line">
-                <span class="peek-mark">$</span> ${line.command}${" "}
-                <${Status} status=${line.status} />
+            return html`<div class="peek-line cmd">
+                <span class="peek-mark">${">_"}</span>
+                <span class="peek-text">${line.command}${" "}<${Status} status=${line.status} /></span>
             </div>`;
         case "note":
-            return html`<div class="peek-line faint">${line.name}: ${line.text}</div>`;
+            return html`<div class="peek-line faint">
+                <span class="peek-mark">⑂</span>
+                <span class="peek-text">${line.name}: ${line.text}</span>
+            </div>`;
         case "error":
-            return html`<div class="peek-line err">${line.text}</div>`;
+            return html`<div class="peek-line err">
+                <span class="peek-mark">×</span>
+                <span class="peek-text">${line.text}</span>
+            </div>`;
         default:
-            return html`<div class="peek-line faint">${line.text}</div>`;
+            return html`<div class="peek-line faint">
+                <span class="peek-mark"></span>
+                <span class="peek-text">${line.text}</span>
+            </div>`;
     }
 }
 
@@ -522,8 +467,9 @@ const wholeOnTile = (approval) =>
 /** The call a session waits on, in full when it is short, and why the guard asks. */
 function PeekAsk({ approval, compact }) {
     return html`<div class="peek-ask" title=${`${approval.subject}\n\n${approval.reason}`}>
+        <span class="peek-ask-tool mono"><${Icon} name="shield" size=${12} />${approval.tool}</span>
         <div class=${`peek-ask-what mono ${wholeOnTile(approval) ? "whole" : ""}`}>
-            <${Icon} name="shield" size=${11} /> ${approval.tool}: ${approval.subject}
+            ${approval.subject}
         </div>
         ${!compact && approval.reason && html`<div class="peek-ask-why">${approval.reason}</div>`}
     </div>`;
@@ -565,6 +511,9 @@ function PeekApproval({ approval, me, rule, whole }) {
         }
     </span>`;
 }
+
+/** A tile's square, in the shape the session list gives the same state: its folder's color. */
+const SHAPES = { waiting: "waiting", working: "working", done: "fresh", idle: "seen" };
 
 /**
  * One tile. The whole app renders on every update while a session streams; a tile renders again only when what it
@@ -615,28 +564,32 @@ class PeekTile extends Component {
         // A call answered elsewhere can stay on a tile scrolled away: the session list says whether one still waits.
         const approval = session.waiting ? peek?.approvals?.[0] : undefined;
         const lines = peek?.lines;
-        const shown = compact ? (lines ?? []).slice(-1) : lines;
-        const mark =
-            status === "waiting"
-                ? html`<span class="state-warn">!</span>`
-                : status === "working"
-                  ? html`<span class="mini-sweep"><i></i><i></i><i></i></span>`
-                  : html`<span class="state-idle"></span>`;
+        // The last few lines, which the tile gives two lines of text each.
+        const shown = compact ? (lines ?? []).slice(-1) : lines?.slice(-3);
 
-        return html`<div class=${`peek ${status}`} data-peek=${session.id}>
+        return html`<div
+            class=${`peek ${status}`}
+            data-part="peek-tile"
+            data-state=${status}
+            data-peek=${session.id}
+        >
             <button class="peek-head" title=${t("Open {{title}}", { title })} onClick=${open}>
-                <span class="session-state">${mark}</span>
                 <span class="peek-name">
+                    <span
+                        class=${`state-mark ${SHAPES[status]}`}
+                        style=${`--folder:${folderColor(session.cwd)}`}
+                        aria-hidden="true"
+                    ></span>
                     <span class="peek-title">${title}</span>
-                    <span class="peek-cwd mono">${shortPath(session.cwd, home)}</span>
+                    ${
+                        number !== undefined &&
+                        number < 9 &&
+                        html`<kbd class="session-num">${number + 1}</kbd>`
+                    }
                 </span>
-                ${
-                    number !== undefined &&
-                    number < 9 &&
-                    html`<kbd class="session-num">${number + 1}</kbd>`
-                }
+                <span class="peek-cwd mono">${shortPath(session.cwd, home)}</span>
             </button>
-            <div class="peek-lines mono" onClick=${open}>
+            <div class="peek-lines" onClick=${open}>
                 ${
                     shown === undefined
                         ? html`<span class="peek-skeleton"><i></i><i></i><i></i></span>`
@@ -672,7 +625,7 @@ class PeekTile extends Component {
                         aria-label=${t("Mark as seen")}
                         onClick=${() => markSeen(session.id)}
                     >
-                        <${Icon} name="check" size=${14} />
+                        <${Icon} name="check" size=${16} />
                     </button>`
                 }
             </div>
@@ -755,13 +708,15 @@ function PeekColumn({ tiles, leaving = false }) {
             class=${`peeks-jump ${arrow === "▲" ? "up" : "down"}`}
             onClick=${() => reveal(pick(ids))}
         >
-            ${arrow} ${ids.length} ${verb[ids.length === 1 ? 0 : 1]}
+            ${arrow} ${ids.length} ${t(verb[ids.length === 1 ? 0 : 1])}
         </button>`;
 
     useOnScreen(list);
 
     return html`<aside
         class=${`peeks window ${leaving ? "leaving" : ""}`}
+        data-part="peeks"
+        data-state=${leaving ? "closing" : undefined}
         aria-label=${t("Peeks")}
         inert=${leaving}
     >

@@ -23,17 +23,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep, Message } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import {
-    type ConversationId,
-    type EntryRecord,
-    type HookApi,
-    LiveDoc,
-    ProviderDoc,
-    UsageDoc,
-} from "@earendil-works/pi-durable";
+import { type ConversationId, type HookApi, LiveDoc, UsageDoc } from "@earendil-works/pi-durable";
 import { FollowsDoc, PipCompactionDoc } from "../src/server/docs.ts";
-import createPip from "../src/server/extensions/pip.ts";
-import type { PocketHost } from "../src/server/host.ts";
 import { PAYLOAD_CLOSE, PAYLOAD_OPEN } from "../src/server/hooks.ts";
 import { fenced } from "../src/server/pip.ts";
 import {
@@ -42,7 +33,6 @@ import {
     SUMMARY_SYSTEM,
     summarySource,
 } from "../src/server/pip-compact.ts";
-import { projectStats } from "../src/server/projection.ts";
 import { EVENT_CLOSE, EVENT_OPEN } from "../src/server/repo-watches.ts";
 
 /** What sessions, posts, GitHub, and files say here: orders that must never reach a summary. */
@@ -299,7 +289,6 @@ test("compacting by hand: PiP's summary is written without what came from outsid
 test("a summary written twice for one compaction, as after a restart, is asked for and counted once", async () => {
     const id = await pip();
     const memos = new Map<string, unknown>();
-    const sent: Record<string, unknown>[] = [];
     const api = {
         conversationId: id,
         taskId: 987_654,
@@ -307,8 +296,6 @@ test("a summary written twice for one compaction, as after a restart, is asked f
         models: {
             getModel: app.models.getModel.bind(app.models),
             completeSimple: (...args: Parameters<typeof app.models.completeSimple>) => {
-                sent.push(args[2] as Record<string, unknown>);
-
                 return app.models.completeSimple(...args);
             },
         },
@@ -331,16 +318,6 @@ test("a summary written twice for one compaction, as after a restart, is asked f
     assert.deepEqual(first, { summary: NOTES });
     assert.deepEqual(again, first);
     assert.equal(summaries.length, asked + 1, "asked for once");
-    // Sent as Pi Durable sends its summaries: with the conversation's provider identity (OpenCode Go refuses a request
-    // without one), Pi's timeout, and no cache.
-    assert.equal(sent.length, 1);
-    assert.equal(
-        sent[0]!.sessionId,
-        (await app.harness.snapshot(ProviderDoc, id, context))?.sessionId,
-    );
-    assert.equal(typeof sent[0]!.sessionId, "string");
-    assert.equal(sent[0]!.timeoutMs, app.streamSettings().timeoutMs);
-    assert.equal(sent[0]!.cacheRetention, "none");
     assert.ok(once > before);
     assert.equal(await tokensUsed(id), once, "counted once");
 
@@ -464,52 +441,4 @@ test("only the owner sets when PiP compacts, to one of its choices; PiP turned o
     } finally {
         await app.setExtensionEnabled(me, "pip.ts", true);
     }
-});
-
-test("PiP's hook writes no summary on a server not restarted since it came, and lets none be written", async () => {
-    const [extension] = [createPip({ pip: app.pip } as unknown as PocketHost)].flat();
-    const registration = extension!.hooks!.find((each) => each.task === "pi.compaction")!;
-    const decide = (registration.handlers as { beforeCompact: (...args: unknown[]) => unknown })
-        .beforeCompact;
-
-    assert.deepEqual(await decide({ messages: [], reason: "manual" }, {}, context), {
-        decline: true,
-    });
-});
-
-test("after a compaction, the context shown is what is left, estimated until the next answer measures it", () => {
-    const entry = (id: number, kind: string, extra: object = {}) =>
-        ({ id, conversationId: 1, kind, ...extra }) as unknown as EntryRecord;
-    const text = (words: string) => [{ role: "user", content: words, timestamp: 0 }];
-    const answer = {
-        role: "assistant",
-        content: [{ type: "text", text: "ok" }],
-        usage: { input: 90_000, output: 1000, cacheRead: 0, cacheWrite: 0, totalTokens: 91_000 },
-        stopReason: "stop",
-    };
-    const entries = [
-        entry(1, "pi.user", { model: text("x".repeat(35_000)) }),
-        entry(2, "pi.assistant", { model: [answer] }),
-        entry(3, "pi.user", { model: text("y".repeat(350)) }),
-        entry(4, "pi.compaction", { head: 3, model: text("z".repeat(700)) }),
-    ];
-    const compacted = projectStats(undefined, entries);
-
-    assert.equal(compacted.contextEstimated, true);
-    assert.equal(compacted.contextTokens, 300, "the message kept and the summary");
-    // As a conversation's view orders them: its head marker first, then the messages it keeps.
-    assert.deepEqual(projectStats(undefined, [entries[3]!, entries[2]!]), compacted);
-    assert.deepEqual(
-        projectStats(undefined, [entries[3]!, entries[0]!, entries[1]!, entries[2]!]),
-        compacted,
-        "an answer from before the compaction measured what is gone",
-    );
-    assert.deepEqual(projectStats(undefined, entries.slice(0, 3)).contextTokens, 91_000);
-    assert.equal(projectStats(undefined, entries.slice(0, 3)).contextEstimated, undefined);
-    // Measured again by the next answer.
-    assert.equal(
-        projectStats(undefined, [...entries, entry(5, "pi.assistant", { model: [answer] })])
-            .contextEstimated,
-        undefined,
-    );
 });

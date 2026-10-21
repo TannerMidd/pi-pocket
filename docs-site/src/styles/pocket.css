@@ -1,0 +1,122 @@
+/*
+ * Pi Pocket's look on Starlight, as the product site has it (site/style.css): Tokyo Night colors, JetBrains Mono for
+ * titles and code, square shapes and thin borders. It follows the system's light or dark setting.
+ */
+@font-face {
+    font-family: "Pocket Mono";
+    src: url("../../../site/fonts/JetBrainsMono.woff2") format("woff2");
+    font-weight: 100 800;
+    font-display: swap;
+}
+
+:root {
+    --sl-font-mono:
+        "Pocket Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sl-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --sl-color-accent-low: #1f2a4a;
+    --sl-color-accent: #7aa2f7;
+    --sl-color-accent-high: #c0d4ff;
+    --sl-color-white: #c0caf5;
+    --sl-color-gray-1: #a9b1d6;
+    --sl-color-gray-2: #9aa5ce;
+    --sl-color-gray-3: #7a82ad;
+    --sl-color-gray-4: #3b4261;
+    --sl-color-gray-5: #292e42;
+    --sl-color-gray-6: #1a1b26;
+    --sl-color-black: #13141c;
+    --pocket-ok: #9ece6a;
+    --pocket-warn: #e0af68;
+    --pocket-err: #f7768e;
+}
+
+/* Light: every text color keeps a contrast of 4.5:1 or more on these backgrounds. */
+:root[data-theme="light"] {
+    --sl-color-accent-low: #dbe5fb;
+    --sl-color-accent: #2e5bd8;
+    --sl-color-accent-high: #1f2335;
+    --sl-color-white: #1f2335;
+    --sl-color-gray-1: #3b4261;
+    --sl-color-gray-2: #4c5375;
+    --sl-color-gray-3: #5c6383;
+    --sl-color-gray-4: #b4bccf;
+    --sl-color-gray-5: #d4d9e5;
+    --sl-color-gray-6: #eceef4;
+    --sl-color-gray-7: #f5f6fa;
+    --sl-color-black: #ffffff;
+    --pocket-ok: #3f6d12;
+    --pocket-warn: #8a5a00;
+    --pocket-err: #b4233c;
+}
+
+.site-title,
+h1#_top,
+.sl-markdown-content :is(h1, h2, h3) {
+    font-family: var(--sl-font-mono);
+    letter-spacing: -0.01em;
+}
+
+/* Square shapes, as the product site and the app have. */
+.sl-link-button,
+.card,
+.sl-link-card,
+site-search button,
+.expressive-code .frame,
+.sl-markdown-content code {
+    border-radius: 0 !important;
+}
+
+/* Wide tables scroll inside themselves on a phone, not the page. */
+.sl-markdown-content table {
+    display: block;
+    overflow-x: auto;
+    font-size: var(--sl-text-sm);
+}
+
+/* Code in a heading (a reference member) has no box, and breaks at its dots and brackets on a phone. */
+.sl-markdown-content :is(h2, h3, h4) code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+}
+
+/* "Since 0.14.0 · Stable" under a reference member, as two tags. */
+.sl-markdown-content p.member-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+    font-size: var(--sl-text-xs);
+}
+
+.sl-markdown-content p.member-meta .tag {
+    border: 1px solid var(--sl-color-gray-4);
+    padding: 0 0.4rem;
+    font-family: var(--sl-font-mono);
+    font-style: normal;
+}
+
+.sl-markdown-content p.member-meta .stable {
+    border-color: var(--pocket-ok);
+    color: var(--pocket-ok);
+}
+
+.sl-markdown-content p.member-meta .experimental {
+    border-color: var(--pocket-warn);
+    color: var(--pocket-warn);
+}
+
+.sl-markdown-content p.member-meta .deprecated {
+    border-color: var(--pocket-err);
+    color: var(--pocket-err);
+}
+
+@media (max-width: 50em) {
+    .sl-markdown-content h3 {
+        font-size: var(--sl-text-xl);
+    }
+
+    .site-title {
+        font-size: var(--sl-text-lg);
+    }
+}

@@ -7,6 +7,7 @@ import { type ConversationId, LiveDoc, type TaskGraphNode } from "@earendil-work
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { FollowsDoc, RepoWatchesDoc, ScheduleDoc, SubagentsDoc, WatchDoc } from "./docs.ts";
+import { COMMAND_TASK } from "./extension-commands.ts";
 import { describeMoment } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -49,7 +50,8 @@ async function liveTasks(app: PocketApp): Promise<TaskGraphNode[]> {
 async function describeTask(
     app: PocketApp,
     node: TaskGraphNode,
-): Promise<Pick<RunningTask, "label" | "scheduleId">> {
+    user: User,
+): Promise<Pick<RunningTask, "label" | "scheduleId"> | undefined> {
     const id = node.conversationId;
 
     switch (node.kind) {
@@ -94,6 +96,21 @@ async function describeTask(
             return {
                 label: `scheduled for ${describeMoment(schedule.next, schedule.zone)}: ${schedule.text}`,
                 scheduleId: schedule.id,
+            };
+        }
+
+        case COMMAND_TASK: {
+            const command = await app.extensionCommands.named(node.id);
+
+            if (command?.scope !== "conversation" && user.role !== "owner") {
+                return undefined;
+            }
+
+            return {
+                label:
+                    command === undefined
+                        ? "running an extension command"
+                        : `running /${command.name}`,
             };
         }
 
@@ -179,6 +196,12 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
             continue;
         }
 
+        const description = await describeTask(app, node, user);
+
+        if (description === undefined) {
+            continue;
+        }
+
         const parent = app.parentOf(node.conversationId);
         const subagent =
             parent === undefined
@@ -193,7 +216,7 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
             status: node.state.status,
             conversationId: Number(node.conversationId),
             ...(subagent === undefined ? {} : { subagent }),
-            ...(await describeTask(app, node)),
+            ...description,
         });
     }
 

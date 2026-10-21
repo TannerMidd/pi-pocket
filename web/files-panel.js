@@ -16,7 +16,7 @@ const OPEN_KEY = "pocket.files";
 const TAB_KEY = "pocket.filesTab";
 const WIDTH_KEY = "pocket.filesWidth";
 /** Tree and viewer side by side from this width of the tile; one at a time below it. */
-const SIDE_BY_SIDE = 640;
+const SIDE_BY_SIDE = 600;
 
 /** The tile is for people who can steer: the viewer reads files as Pi would. */
 export const filesAvailable = () => canSteer() && store.state.conversationId !== null;
@@ -30,7 +30,7 @@ export function setFilesOpen(open, tab) {
     } else {
         sessionStorage.removeItem(OPEN_KEY);
 
-        if (document.documentElement.dataset.focus === "files-tile") {
+        if (document.documentElement.dataset.focus === "files-panel") {
             document.documentElement.dataset.focus = "pane";
         }
     }
@@ -175,12 +175,11 @@ function TreeFolder({ path, depth, ctx }) {
             >
                 ${
                     entry.dir
-                        ? html`<${Icon} name="chevron" size=${12} class=${`chev ${open ? "open" : ""}`} />`
+                        ? html`<${Icon} name="chevron" size=${11} class=${`chev ${open ? "open" : ""}`} />`
                         : html`<span class="ft-spacer"></span>`
                 }
-                <${Icon} name=${entry.dir ? "folder" : "file"} size=${14} />
                 <span class="ft-name">${entry.name}</span>
-                ${inside && html`<span class="ft-dot" title=${t("Has changes")}></span>`}
+                ${inside && !open && html`<span class="ft-dot" title=${t("Has changes")}></span>`}
                 ${change && html`<span class=${`ft-kind ${change}`}>${KIND_LETTERS[change]}</span>`}
             </button>
             ${open && html`<${TreeFolder} path=${full} depth=${depth + 1} ctx=${ctx} />`}
@@ -555,7 +554,7 @@ function FilesTab({ changes, covering }) {
                     aria-label=${t("Fold every folder")}
                     onClick=${() => update(() => new Set())}
                 >
-                    <${Icon} name="down" size=${16} class="ft-fold-all" />
+                    <${Icon} name="down" size=${15} />
                 </button>
                 <button
                     class="icon-button"
@@ -568,10 +567,9 @@ function FilesTab({ changes, covering }) {
                         reloadChanges(id);
                     }}
                 >
-                    <${Icon} name="reload" size=${16} />
+                    <${Icon} name="reload" size=${15} />
                 </button>
             </div>
-            <div class="ft-root mono" title=${root}>${shortPath(root, server?.home)}</div>
             <div class="ft-tree" role="tree" aria-label=${t("Files")} onKeyDown=${onTreeKey}>
                 ${
                     query === ""
@@ -594,7 +592,18 @@ function FilesTab({ changes, covering }) {
         </div>
         ${
             shown
-                ? html`<div class=${`ft-view ${selected ? "" : "leaving"}`} inert=${!selected}>
+                ? html`<div
+                      class=${`ft-view ${selected ? "" : "leaving"}`}
+                      inert=${!selected}
+                      tabindex="-1"
+                      onKeyDown=${(event) => {
+                          // Esc goes back to the tree, as back does, where the file covers it.
+                          if (covered && event.key === "Escape" && !event.defaultPrevented) {
+                              event.preventDefault();
+                              closeFile();
+                          }
+                      }}
+                  >
                       <div class="ft-view-head">
                           ${
                               !side &&
@@ -638,7 +647,8 @@ function FilesTab({ changes, covering }) {
 }
 
 export function FilesPanel({ leaving = false }) {
-    const { filesTab } = store.state;
+    const { filesTab, view, server } = store.state;
+    const root = view.agent?.cwd ?? view.conversation?.cwd ?? "";
     const { changes } = useChanges(true);
     // Pi's edits git does not list count too: outside a repository, they are all there is.
     const count = changes ? changes.files.length + changes.piOnly.length : 0;
@@ -650,7 +660,12 @@ export function FilesPanel({ leaving = false }) {
 
     return html`<section
         class=${`files-tile window ${leaving ? "leaving" : ""}`}
+        data-part="files-panel"
+        data-state=${leaving ? "closing" : undefined}
+        role=${beside ? undefined : "dialog"}
+        aria-modal=${beside ? undefined : "true"}
         aria-label=${t("Files")}
+        tabindex="-1"
         inert=${leaving}
     >
         <${ResizeEdge} />
@@ -688,7 +703,7 @@ export function FilesPanel({ leaving = false }) {
                     ${count > 0 && html`<span class="files-count">${count}</span>`}
                 </button>
             </div>
-            <span class="grow"></span>
+            <span class="files-root" title=${root}>${shortPath(root, server?.home)}</span>
             ${
                 beside &&
                 html`<button
@@ -698,7 +713,7 @@ export function FilesPanel({ leaving = false }) {
                     title=${t("Close (Alt+E)")}
                     onClick=${() => setFilesOpen(false)}
                 >
-                    <${Icon} name="close" size=${18} />
+                    <${Icon} name="close" size=${17} />
                 </button>`
             }
         </header>
@@ -724,13 +739,14 @@ export function FilesButton() {
         return null;
     }
 
-    // Quiet while closed: the menu's tiles, Alt+E, and a swipe left on a phone open it.
+    // Out of the top bar where its pane is narrow (a phone's): the menu's tiles, Alt+E, and a swipe left open it.
     return html`<button
-        class=${`icon-button ${filesOpen ? "on" : "quiet"}`}
+        class=${`icon-button top-toggle ${filesOpen ? "on" : ""}`}
         aria-label=${t("Files")}
+        aria-pressed=${filesOpen}
         title=${t("Files and changes (Alt+E)")}
         onClick=${() => toggleFiles()}
     >
-        <${Icon} name="folder" />
+        <${Icon} name="folder" size=${18} />
     </button>`;
 }

@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 	<!--
-		Pi Pocket's icon. The PNGs beside it are drawn from it: test/icons.test.ts says how, and checks them.
+		Pi Pocket's icon. The PNGs beside it are drawn from it by rsvg-convert:
+			rsvg-convert -w N -h N web/icon.svg -o web/<file>   (apple-touch-icon.png at 180, icon-192.png, icon-512.png)
+			rsvg-convert -w 352 -h 352 --page-width 512 --page-height 512 --left 80 --top 80 -b "#13141c" web/icon.svg -o web/icon-maskable-512.png
 		Apple's rounded mask reaches as far in at the corners as the frame starts, so the frame's corners are
 		rounded to follow the mask's and stay clear of it.
 	-->

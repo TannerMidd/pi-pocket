@@ -1,5 +1,8 @@
 node_modules/
+docs-site/dist/
+docs-site/.astro/
 package-lock.json
+flake.lock
 
 *.png
 *.woff2

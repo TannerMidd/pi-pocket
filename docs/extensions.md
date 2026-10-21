@@ -1,20 +1,63 @@
 # Writing extensions
 
-An extension gives Pi something new: a **tool** it can call, a **section** of its system prompt, a **hook** that checks or changes its tool calls and answers, or a durable **task**. Pi Pocket's own features are built this way (`src/server/extensions/`), and the owner can add their own without touching Pi Pocket's code.
+An extension gives Pi something new:
 
-Extensions are Pi Durable's. Its README covers the parts in depth: `node_modules/@earendil-works/pi-durable/README.md` in Pi Pocket's folder (Extensions, Tools, System Prompt, Hooks, Your Own State). This page is what Pi Pocket adds, and how to write one that holds up.
+- a **tool** that Pi can call,
+- a **section** of Pi's system prompt,
+- a **hook** that checks or changes Pi's tool calls and answers,
+- or a durable **task**.
+
+A module can also add to the app itself: **routes** on the server, a **browser module** with rail buttons, pages, sheets, menu rows, and launcher actions, and **commands** that people run from the message box without Pi ([Adding to the app](extensions/app.md)). Pi Pocket's own features are modules too (`src/server/extensions/`). The owner can add modules of their own, without a change to Pi Pocket's code.
+
+Extensions come from Pi Durable. Its README tells about the parts in depth: `node_modules/@earendil-works/pi-durable/README.md` in Pi Pocket's folder (Extensions, Tools, System Prompt, Hooks, Your Own State). These pages tell what Pi Pocket adds, and how to write an extension that works well. The rules for extensions are in [the policies](extensions/policies/index.md).
+
+## Where to read next
+
+This page is the map. Read all of it, then only the pages that your task needs.
+
+| To                                                             | Read                                                                                                            |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Make a first extension, step by step                           | [Your first extension](extensions/first-extension.md)                                                           |
+| Know what the file must be, and how it loads and fails         | [Modules, loading, and errors](extensions/modules.md)                                                           |
+| Give Pi a tool                                                 | [Tools](extensions/tools.md)                                                                                    |
+| Add a rule to Pi's system prompt                               | [Prompt sections](extensions/prompt-sections.md)                                                                |
+| Check or change Pi's tool calls and answers                    | [Hooks](extensions/hooks.md)                                                                                    |
+| Use the app's services, and work with older servers            | [Using the host](extensions/host.md)                                                                            |
+| Start sessions, and send messages between them                 | [Starting and messaging sessions](extensions/linked-sessions.md)                                                |
+| Add to the app: routes, a browser module, commands             | [Adding to the app](extensions/app.md)                                                                          |
+| Answer requests on the server, and say who may use them        | [Routes](extensions/routes.md)                                                                                  |
+| Add rail buttons, pages, sheets, menu rows, launcher actions   | [Browser modules](extensions/browser-modules.md)                                                                |
+| Run something from the message box, without Pi                 | [Slash commands](extensions/commands.md)                                                                        |
+| Show your tool's calls in words                                | [How tool calls show](extensions/tool-calls.md)                                                                 |
+| Send live updates to the browser                               | [Events](extensions/events.md)                                                                                  |
+| Stop timers and close connections when a module loads again    | [Cleanups](extensions/cleanups.md)                                                                              |
+| Test a module                                                  | [Testing](extensions/testing.md)                                                                                |
+| Share a module, or install one that other people wrote         | [Publishing to the gallery](extensions/publishing.md)                                                           |
+| Move a module into Pi Pocket itself                            | [Making it built in](extensions/built-in.md)                                                                    |
+| Find a member of `host`, `web`, `pocket`, or a command's `ctx` | [The reference](extensions/reference/host.md), and the exact types in [types/pocket.d.ts](../types/pocket.d.ts) |
+| Find a limit, or what a word means                             | [Limits](extensions/reference/limits.md), [Glossary](extensions/reference/glossary.md)                          |
+| Know the rules: core or extension, the API, security, gallery  | [The policies](extensions/policies/index.md)                                                                    |
 
 ## Drop-in or built-in
 
-- **Drop-in**: a file in `~/.pi-pocket/extensions/` (the data folder's `extensions/`). It survives updates to Pi Pocket, starts off, and the owner turns it on in Menu → Extensions. Use this for anything one person or one machine wants.
+**A drop-in** is a file in the drop-in folder, `~/.pi-pocket/extensions/` (the `extensions/` folder in the data folder). Use a drop-in for all that one person or one machine wants.
 
-A drop-in runs inside the server, with the owner's rights: it can read `config.json` (the owner's token with it) and every session, and Lancet Guard never sees what its code does. Show the owner the whole file, and say what it does, before you ask them to turn it on.
+- It stays when Pi Pocket updates.
+- It starts off. The owner turns it on in Menu → Extensions.
+- Drop-ins that other people wrote come from the gallery, and the owner can share their own there ([Publishing to the gallery](extensions/publishing.md)).
 
-- **Built-in**: a file in `src/server/extensions/`. It is part of Pi Pocket for everyone who uses this copy. Use this only for a change to Pi Pocket itself, and read [self-editing.md](self-editing.md) first.
+A drop-in runs inside the server, with the owner's rights. It can read `config.json`, with the owner's token, and each session. Lancet Guard never sees what its code does. Its browser module, if it has one, runs in the app's own page, with the rights of the person whose tab loads it. Before you ask the owner to turn on a drop-in, show the owner the whole module, its browser files too, and say what it does.
+
+**A built-in** is a file in `src/server/extensions/`. It is a part of Pi Pocket for each person who uses this copy. Use a built-in only for a change to Pi Pocket itself, and read [self-editing.md](self-editing.md) first ([Making it built in](extensions/built-in.md)).
 
 ## A module
 
-One `.ts` file that default-exports a function. Pi Pocket calls it with the host (below) and installs what it returns: one extension, or a list.
+A module is one `.ts` file with a default export: a function. Pi Pocket calls it with the host ([Using the host](extensions/host.md)) and `web`, what the module adds to the app ([Adding to the app](extensions/app.md)). Then it installs what the function returns: one extension, a list of extensions, or nothing, for a module that only adds to the app.
+
+- The function can be `async`. Pi Pocket loads the module when the promise settles, and the module can register with `web` until then.
+- Pi Pocket installs all that the module returns, or none of it. When it refuses one extension, the version before stays as it was.
+- Pi Pocket refuses an extension without a name, and two extensions with the same name.
+- Pi Pocket refuses a module that returns nothing and adds nothing to the app (no route, browser module, command, or cleanup): it most likely did not return its extensions.
 
 ```typescript
 /**
@@ -44,40 +87,19 @@ export default function createClock() {
 }
 ```
 
-Working examples, tested with every `npm test` (`test/docs-examples.test.ts`):
+The rules for the file, and how it loads, are in [Modules, loading, and errors](extensions/modules.md).
 
-- [examples/clock.ts](examples/clock.ts): a tool.
-- [examples/no-force-push.ts](examples/no-force-push.ts): a hook that blocks some bash calls, and a prompt section that says so.
+These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 
-The file:
+- [examples/my-words.ts](examples/my-words.ts): the module of [Your first extension](extensions/first-extension.md), a tool and a command.
+- [examples/clock.ts](examples/clock.ts): a tool, and a command (`/clock-zone`) that sets the time zone that it uses in a session.
+- [examples/no-force-push.ts](examples/no-force-push.ts): a hook that stops some bash calls, and a prompt section that tells Pi so.
+- [examples/server-status.ts](examples/server-status.ts) with [examples/server-status.js](examples/server-status.js): a page on the rail, with a route that reads the machine's load and memory, and events that keep it live.
+- [examples/zh-cn-ui.ts](examples/zh-cn-ui.ts): a data-only Simplified Chinese UI locale pack.
 
-- is TypeScript that Node runs as it is: only erasable syntax (no `enum`, no `namespace`, no constructor parameter properties). Imports of local files end in `.ts`.
-- imports `@earendil-works/pi-durable`, `@earendil-works/pi-ai`, and the rest of Pi Pocket's packages by name. The drop-in folder has a `node_modules` link to Pi Pocket's own, so a drop-in gets the very modules the server runs.
-- has a file name no built-in module has (a drop-in named `browser.ts` is not loaded). Files that start with `_` or end in `.test.ts` are not modules: use them for helpers and tests. A helper is not reloaded when it changes, even when the module that imports it is: a change to it takes a restart. Keep what you will change often in the module itself.
-- starts with a `/** … */` comment whose first sentence says what it does.
+## UI locale packs (data only)
 
-### UI locale packs (data only)
-
-[`examples/zh-cn-ui.ts`](examples/zh-cn-ui.ts) is an optional Simplified Chinese pack. Copy it into the data folder's `extensions/` directory, then turn it on in **Menu → Extensions**. Like other drop-ins, it starts off. Turning it off restores English, including in already-open panels. It adds no tools or hooks and does not change the model's language or a person's content.
-
-The pack covers fixed application strings, labels, and named templates, not every surface: pre-sign-in pages, persisted activity, raw provider/tool errors, and some dynamic status summaries remain English. Missing keys use their English source. Optional server notice metadata supplies a key and parameters for presentation only; its original message and log remain unchanged.
-
-This separate, data-only path translates fixed Pocket UI. It does not translate user-authored text, model output, provider names, or arbitrary HTML.
-
-A Pocket extension may also return optional `uiLocales` data alongside its ordinary tools, sections, hooks, or tasks. The shape is:
-
-```typescript
-type PocketUiLocale = {
-    locale: string; // a canonical BCP 47 language tag, such as "zh-CN"
-    label: string;
-    default?: boolean;
-    strings: Record<string, string>;
-    templates?: Record<string, string>;
-};
-type PocketExtension = Extension & { uiLocales?: PocketUiLocale[] };
-```
-
-Use exact English source strings as keys. `strings` handles a key with no parameters; `templates` handles a source template with named placeholders:
+A module may return optional `uiLocales` data with its ordinary Pi Durable extensions. Locale packs translate fixed Pocket UI text; they do not translate user-authored text, model output, provider names, or arbitrary HTML. The module itself is still ordinary server code: it runs with the server's rights, while its locale data is validated and sent as data, not as browser JavaScript.
 
 ```typescript
 import { defineExtension } from "@earendil-works/pi-durable";
@@ -101,103 +123,20 @@ export default function createUiLocale() {
 }
 ```
 
-The web app translates only where its code explicitly calls `t("Files")` or `t("Back to sessions, {{count}} waiting for you", { count })`. Missing keys stay in English. A source template and its translation must contain the same set of placeholder names; for example, both templates above contain `{{count}}`. Interpolated values are inserted as-is; they are not looked up or translated again. This is not a DOM-wide translation pass: user messages, names, paths, model names, logs, and other dynamic content are not translated automatically.
+- Use canonical BCP 47 tags and exact English source strings as keys. `strings` is for text without parameters; `templates` is for source text with named `{{placeholders}}`.
+- The browser translates only where its code explicitly calls `t("Files")` or `t("Back to sessions, {{count}} waiting for you", { count })`. A missing key stays English. A translated template must have the same placeholder names as its source; values are inserted as-is and are not translated again. This is not a page-wide translation pass.
+- The loader validates the locale data and rejects an invalid pack or a locale tag already registered by another enabled module. Limits may change; use canonical tags and do not rely on undocumented size or entry limits.
+- A pack marked `default: true` is preferred among packs that are already enabled; it does not turn a module on. Without an enabled pack, the UI uses English. There is no per-person language setting or saved locale choice.
+- Packs reach signed-in clients in `hello.server.uiLocales` and the authenticated `/api/me` response. There is no public dictionary endpoint. The locale data itself adds no route or external fetch.
 
-The loader accepts locale packs only as validated data; their strings and templates are sent to the browser, not extension JavaScript. The same locale cannot be registered by multiple loaded extensions; a conflicting or invalid module is rejected. A drop-in still starts off. Its locale data follows the extension lifecycle: turning it off or removing it removes the pack, editing an enabled module reloads it, and a failed reload leaves the previous extension and pack running.
-
-Only signed-in clients receive the available packs, as `hello.server.uiLocales` (also through the authenticated `/api/me` response). There is no public dictionary endpoint. An unauthenticated page, or a signed-in client with no enabled locale packs, uses English. The browser prefers a pack marked `default: true`, then sorts by the locale string; `default` is only a preference among packs already enabled, not a switch that enables an extension. There is no per-user language choice or saved locale.
-
-The loader's canonical-tag and data validation rules may evolve; write canonical BCP 47 tags and do not rely on undocumented size or entry limits.
-
-### Names
-
-Installing an extension with a name already installed replaces it, and a tool with the name of another replaces it in every session. So Pi Pocket refuses a drop-in that would take a name it keeps for itself, or one another module already has, and says so in Menu → Extensions:
-
-- Extension names `coding-tools`, `pocket-core`, and anything starting with `pocket-` (`pocket-prompt`, `pocket-guard`, and the rest), whether that built-in is on or off.
-- The built-in tools: `read`, `write`, `edit`, `bash`, `artifact`, `browser`, `subagent`, `schedule`, `codemode`, and `memory`, and PiP's: `sessions`, `session_read`, `session_start`, `session_send`, `session_follow`, `session_stop`, `session_archive`, `session_schedule`, `approvals`, `repo_watch`, and `session_watch_pr`, and the triggers' `watch_pr`.
-- An extension or tool name another module installed: the first one in keeps it.
-
-Give every extension and tool a name of your own, with a prefix (`example-clock`, `acme_lookup`). To change how a built-in tool works, wrap it (`wrapTool` in Pi Durable's README) or check its calls with a hook, rather than replacing it.
-
-## Loading, reloading, and errors
-
-- A drop-in shows in Menu → Extensions as soon as its file is there, off. Turning it on loads it; turning it off uninstalls what it installed.
-- Saving a module that is on reloads it about 300 ms later. A tool call already running finishes on the old code; the next one gets the new code.
-- A module that fails to load (a syntax error, a throw while building) is reported in the app and in the Extensions sheet. An edit that fails keeps the previous version running.
-- A restart installs every module that is on again. Work an extension's tasks left pending resumes once it is installed.
-
-You cannot turn a drop-in on yourself: ask the owner to, in Menu → Extensions.
-
-## Tools
-
-`defineTool({ name, description, parameters, execute, replay })`. `parameters` is a TypeBox schema (`Type` from `@earendil-works/pi-ai`); the arguments are checked against it before `execute(args, api, context)` runs.
-
-- Return `{ content: [{ type: "text", text }] }`. Throw an `Error` to give the model an error result with its message.
-- `replay: "safe"` only when running the call twice is harmless (reading, or an action keyed so a repeat finds the first one's result). The default is unsafe: a call cut off by a restart comes back to the model as interrupted instead of running again.
-- `api.conversationId`, `api.taskId`, `api.callId` say which call this is. `${api.taskId}:${api.callId}` is a key that stays the same if the call runs again.
-- `api.env` is the session folder's files and shell; `(await api.agent(context)).cwd` is the folder.
-- `api.output(text)` streams running output, which becomes the result when `execute` returns no `content`.
-- `api.memo(name, context)` reads, and `api.memo(name, value, context)` stores, a value kept with this call: a repeat after a restart finds it. Use it for anything that must not happen twice.
-- `api.snapshot(Doc, api.conversationId, context)` reads a document, such as Pi Pocket's in `src/server/docs.ts`.
-
-The tool's description and parameters go into every request: keep them short and exact.
-
-## Prompt sections
-
-`section(name, render, { tag })`: `render(input, context)` returns text, or `undefined` to leave the section out. By default it is wrapped in `<name>…</name>`; `{ tag: false }` leaves it bare.
-
-Sections render before every request, and only those that changed are sent again. Return the same text while nothing changed: the date, not the time; no counters. `input.conversationId` and `input.read.snapshot(Doc, input.conversationId, context)` let a section depend on the session.
-
-## Hooks
-
-`hook(ToolTask, { beforeTool, afterTool })` and `hook(GenerationTask, { beforeRequest, afterResponse, onYield, afterTools })`.
-
-- `beforeTool(call, api, context)` sees `call.name` and `call.arguments` before the call runs. Return `{ block: "why" }` to stop it (the model gets the reason as an error), or `undefined` to let it run. Codemode scripts' calls go through it too.
-- `onYield(answer, api, context)` runs after Pi's final answer. Return `{ continue: "message" }` to send Pi on with another message, as Done when does (`extensions/goals.ts`).
-- A hook can run again after a restart. Keep what must happen once in `api.memo`, as `extensions/guard.ts` does with an approval.
-
-## The host
-
-What the default export receives. Extensions reach the app only through it; it stays the same while modules reload.
-
-| Member                           | What it is                                                                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `dataDir`, `agentDir`            | Pi Pocket's data folder; Pi's (`~/.pi/agent`)                                                                                 |
-| `notice(level, message, id?)`    | Report something to the server log and the app (`"info"`, `"warning"`, `"error"`); with a conversation's id, to its tabs only |
-| `resolveModel(spec)`             | `provider/modelId` (or a bare id) to a signed-in model whose sign-in works, or an error that names no other models            |
-| `subagentModels()`               | The models the owner allows subagents besides their session's own (`provider/modelId`); empty by default                      |
-| `modelProblem(ref, fresh?)`      | Why a model may not be used now (not signed in, its sign-in expired), or `undefined`; `fresh` asks its provider again         |
-| `requesterOf(conversationId)`    | The id of the person Pi works for in a session now                                                                            |
-| `skillPaths()`                   | The extra skill folders in Pi's settings                                                                                      |
-| `skills(cwd)`                    | Pi's skills for a session working in `cwd`, from every place Pi looks                                                         |
-| `heldBack(conversationId)`       | Why work Pi would start there with nobody asking may not start now (a spend limit), or `undefined`                            |
-| `onLimitsChanged(listener)`      | Call `listener` when the owner changes a spend limit; returns how to stop                                                     |
-| `approvals`, `guard`             | Calls waiting for a person to allow them; Lancet Guard                                                                        |
-| `schedules`, `goals`, `browsers` | Scheduled messages, Done when, and the built-in browser, as their extensions use them                                         |
-| `memory`                         | Lessons Pi keeps across sessions: their projects, the ones in force, saving and changing them                                 |
-| `watches`                        | Sessions' PR watches: starting, stopping, and reading one, and the task that looks                                            |
-| `repoWatches`                    | Repository watches' task, which the triggers extension installs                                                               |
-
-Modules reload into the running server, but the server's own part (the host among it) changes only with a restart. A module that uses a member new to the host must work without it until then: check that it is there (`typeof host.heldBack === "function"`) and do as before when it is not. A module that called a missing member would fail at its first use, in every session.
-
-To type it, import the type by the absolute path of `src/server/host.ts`: `import type { PocketHost } from "/path/to/pi-pocket/src/server/host.ts";`. A type import is gone when the module runs, so the path only matters to the type checker.
+A module may also call `host.notice(level, message, conversationId, { key, params })` to give a notice an optional UI translation key and parameters. The original `message` remains in the server log and in the notice payload; the metadata is only for presentation.
 
 ## Rules that are easy to break
 
-- **Nothing twice.** A restart can run a hook or a safe tool again. Anything that must happen once (a message sent, money spent, a file appended to) goes behind `api.memo` or a key that makes a repeat find the first.
-- **No surprise state.** Keep state in Pi Durable documents or memos, not in variables: a reload starts the module over, and a restart starts the process over.
-- **Do not block.** Tools run in the server process: use async file and process calls, never `execSync` or a busy loop. A slow tool holds up only its call; a blocked event loop holds up everyone.
+- **Nothing two times.** A restart can run a hook or a safe tool again. Some work must occur one time only: a message that you send, money that you spend, a line that you add to a file. Put it behind `api.memo`, or behind a key that lets a second run find the first.
+- **No hidden state.** Keep state in Pi Durable documents or memos, not in variables. A reload starts the module again, and a restart starts the process again.
+- **Your documents are stored data.** Name a document kind after your module (`x.<module>.<name>`, for example `x.word-count.totals`), so that no other module uses the same kind. Name your tasks and your entries' kinds the same way. After anyone has run the module, never rename a kind or a name, and never change what its fields mean. Add new ones beside them.
+- **Name your browser data too.** A browser module that keeps data in `localStorage` or `sessionStorage` uses keys that start with `x.<module>.`, for example `x.word-count.open`. Pi Pocket's own keys start with `pocket.`, and it never uses `x.` keys.
+- **Do not block.** Tools run in the server process. Use async file and process calls, never `execSync` or a busy loop. A slow tool delays only its call; a blocked event loop delays everyone.
 - **Do not get around a block.** A guard or a person said no for a reason.
-- **Secrets stay out.** Text in a section, a tool's description, or a result goes to the model provider.
-
-## Testing
-
-Copy the module into a test app's data folder and turn it on, as `test/docs-examples.test.ts` does: `openApp` with a scripted model (`test/helpers.ts`), the file in `<dataDir>/extensions/`, `app.setExtensionEnabled(owner, file, true)`, then a session whose scripted model calls the tool. Nothing reaches a real provider, and nothing touches the live data.
-
-For a drop-in, run the test from Pi Pocket's folder with the module copied in, or check it by hand: turn it on, ask Pi to use it in a session made for the purpose, and watch Menu → Extensions and the app's notices for errors.
-
-## A built-in extension
-
-A new file in `src/server/extensions/` is loaded into the running server about 300 ms after it is first saved, on, for everyone: there is no way to try it there first. So write it as a drop-in, check it on a copy ([self-editing.md](self-editing.md#check-it-on-a-copy)), and move it in when it works.
-
-Then, in `src/server/reload.ts`, give it its place in `ORDER` and its title in `TITLES` (and `OFF_BY_DEFAULT` if it should start off), and add its tools' names to `BUILT_IN_TOOLS`, so no drop-in takes them (`test/dropins.test.ts` fails until you do). Name the extension `pocket-…`. `reload.ts` is not an extension: these take effect at the next restart. `test/app.test.ts` asserts the order.
+- **Keep secrets out.** The text of a section, a tool's description, and a result go to the model provider.

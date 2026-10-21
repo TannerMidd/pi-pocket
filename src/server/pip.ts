@@ -726,7 +726,7 @@ export class Pip {
         const available = app.models.getAvailableSnapshot();
         const known = app.models.getModels();
         const written = indexed(text);
-        const named = modelsNamed(written, available, true, known);
+        const named = modelsNamed(written, available, true, known, false);
 
         if (named.length === 0) {
             return;
@@ -973,11 +973,15 @@ export class Pip {
         this.#count(user, "start", STARTS_PER_HOUR);
         const folder =
             request.repo === undefined ? request.folder : await this.checkout(pipId, request.repo);
-        const { id } = await app.commands.createSession(user, {
-            ...(folder === undefined ? {} : { cwd: folder }),
-            ...(request.title === undefined ? {} : { title: request.title }),
-            worktree: request.worktree === true,
-        });
+        const { id } = await app.commands.createSession(
+            user,
+            {
+                ...(folder === undefined ? {} : { cwd: folder }),
+                ...(request.title === undefined ? {} : { title: request.title }),
+                worktree: request.worktree === true,
+            },
+            { projectDefaults: model === undefined },
+        );
 
         if (model !== undefined) {
             await app.commands.configure(id, user, { model });

@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint";
 // Layout only: Prettier formats, and these rules give the code room to breathe.
 export default [
     {
-        ignores: ["node_modules/**"],
+        ignores: ["node_modules/**", "docs-site/dist/**", "docs-site/.astro/**"],
     },
     {
         files: ["**/*.ts"],

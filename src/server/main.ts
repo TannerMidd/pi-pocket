@@ -110,7 +110,8 @@ const stop = async (code: number) => {
 
     try {
         // A tool or model stream that ignores its abort must not hold a restart (and the phone's only way in) forever.
-        const limit = new Promise<void>((resolve) => setTimeout(resolve, STOP_LIMIT_MS).unref());
+        // The timer holds the process: if nothing else did, Node would end it before `process.exit` gave the code.
+        const limit = new Promise<void>((resolve) => setTimeout(resolve, STOP_LIMIT_MS));
 
         await Promise.race([app.close(), limit]);
     } catch (error) {
@@ -209,6 +210,7 @@ stopWatching = (() => {
     const stops = [watchTree(join(APP_ROOT, "web"), (file) => opened.reloadClients(file))];
 
     opened.loader.watch();
+    opened.themes.watch();
 
     return () => {
         for (const each of stops) {

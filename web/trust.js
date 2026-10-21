@@ -1,6 +1,6 @@
-// Project trust. A project's own skills (`.agents/skills`) load only in a project Pi trusts, as in Pi's CLI. The bar
-// above the message box asks the owner when a session's project has such skills and nobody decided yet; the sheet
-// (`/trust`, the menu) shows the decision and changes it. Answers are saved where Pi's CLI keeps its own.
+// Project trust gates .agents/skills and model defaults from .pi/settings.json. The bar asks the owner when a
+// session's project has either and nobody decided yet; /trust shows and changes the decision shared with Pi's CLI.
+// Trusting model defaults affects only later new sessions, never the open session.
 import { useEffect } from "preact/hooks";
 import { t } from "./i18n.js";
 import { actions, attempt, closeSheet, notify, openSheet, store } from "./store.js";
@@ -82,7 +82,12 @@ async function decide(choice) {
     store.set({ trust: { conversationId, cwd, info }, templates: null });
 
     if (!info.trusted) {
-        notify("info", t("Not trusted: the project's own skills stay off. /trust changes that."));
+        notify(
+            "info",
+            t(
+                "Not trusted: project model defaults and its own skills stay off. /trust changes that.",
+            ),
+        );
 
         return;
     }
@@ -96,10 +101,14 @@ async function decide(choice) {
             ? ` ${t("Pi has its skills from now on: {{skills}}.", { skills: skillNames(info.skills) })}`
             : "";
 
-    notify("info", t("Trusted {{where}}.", { where }) + skills);
+    const defaults = info.settings
+        ? ` ${t("Project model defaults apply only to later new sessions; this session will not change.")}`
+        : "";
+
+    notify("info", t("Trusted {{where}}.", { where }) + skills + defaults);
 }
 
-/** Above the message box, for the owner: this project has its own skills, waiting for an answer. */
+/** Above the message box, for the owner: this project's skills or settings wait for a trust decision. */
 export function TrustBar() {
     const { conversationId } = store.state;
     const cwd = store.state.view.agent?.cwd;
@@ -118,14 +127,26 @@ export function TrustBar() {
 
     return html`<div class="trust-bar">
         <span class="grow">
-            <strong>${t("Trust this project?")}</strong> ${t("Its skills in .agents/skills ({{skills}}) load only in a project Pi trusts.", { skills: skillNames(info.skills) })}
+            <strong>${t("Trust this project?")}</strong> ${
+                info.settings
+                    ? t(
+                          "Its .pi/settings.json can set the model and thinking level of later new sessions. This session will not change.",
+                      ) +
+                      (info.skills.length > 0
+                          ? ` ${t("Its skills in .agents/skills ({{skills}}) also need trust.", { skills: skillNames(info.skills) })}`
+                          : "")
+                    : t(
+                          "Its skills in .agents/skills ({{skills}}) load only in a project Pi trusts.",
+                          { skills: skillNames(info.skills) },
+                      )
+            }
         </span>
         <span class="trust-actions">
             <button class="link small" onClick=${() => attempt(() => decide("distrust"))}>
-                Don't trust
+                ${t("Don't trust")}
             </button>
             <button class="button small primary" onClick=${() => openSheet({ type: "trust" })}>
-                Review
+                ${t("Review")}
             </button>
             <button
                 class="icon-button"
@@ -141,7 +162,8 @@ export function TrustBar() {
 
 /** An answer in the sheet: what it does, the folder it is about when that is not this one, and whether it is saved. */
 function Choice({ label, detail, current, onClick }) {
-    return html`<button class="list-item trust-choice" onClick=${onClick}>
+    return html`<button class=${`list-item trust-choice ${current ? "active" : ""}`} onClick=${onClick}>
+        <span class="trust-radio" aria-hidden="true"></span>
         <span class="trust-choice-text">
             <span>${label}</span>
             ${detail && html`<span class="muted small mono">${detail}</span>`}
@@ -189,7 +211,13 @@ function ownSkillsText(info) {
 
     return texts.length > 0
         ? texts
-        : [t("It has no skills of its own, so this changes nothing in Pi Pocket here.")];
+        : [
+              t(
+                  info.settings
+                      ? "It has no skills of its own."
+                      : "It has no skills of its own, so this changes nothing in Pi Pocket here.",
+              ),
+          ];
 }
 
 /** Where the decision comes from, in a sentence. */
@@ -239,7 +267,7 @@ export function TrustSheet() {
     const info = currentTrust();
 
     if (!info) {
-        return html`<${Sheet} title="Project trust" onClose=${closeSheet}>
+        return html`<${Sheet} title=${t("Project trust")} onClose=${closeSheet}>
             <${Loader} label=${t("Loading")} />
         <//>`;
     }
@@ -251,10 +279,16 @@ export function TrustSheet() {
         });
     const saved = (path, trusted) => info.saved?.path === path && info.saved.trusted === trusted;
 
-    return html`<${Sheet} title="Project trust" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Project trust")} onClose=${closeSheet}>
         <p class="mono small">${short(info.folder)}</p>
         <p>${status(info, short)}</p>
         ${ownSkillsText(info).map((text) => html`<p>${text}</p>`)}
+        ${
+            info.settings &&
+            html`<p>
+                ${t("In .pi/settings.json: model and thinking defaults apply only to later new sessions, after trust. This session will not change. The owner's Default model still wins; clear it in Menu → Default model to use project defaults. No project setting can grant trust to itself. Extra skill and prompt paths and per-project run policy are not supported yet.")}
+            </p>`
+        }
         <p class="muted small">
             ${t("Pi's CLI goes by the same decision, saved in ~/.pi/agent/trust.json. There, trusting a project also loads its .pi settings, extensions, and packages, which run code on this machine. Trust only folders whose contents you trust.")}
         </p>
@@ -264,21 +298,21 @@ export function TrustSheet() {
                 : !info.unreadable &&
                   html`<div class="group">
                       <${Choice}
-                          label="Trust this folder"
+                          label=${t("Trust this folder")}
                           current=${saved(info.folder, true)}
                           onClick=${() => choose("trust")}
                       />
                       ${
                           info.parent &&
                           html`<${Choice}
-                              label="Trust the folder above it"
+                              label=${t("Trust the folder above it")}
                               detail=${short(info.parent)}
                               current=${saved(info.parent, true)}
                               onClick=${() => choose("trust-parent")}
                           />`
                       }
                       <${Choice}
-                          label="Don't trust"
+                          label=${t("Don't trust")}
                           current=${saved(info.folder, false)}
                           onClick=${() => choose("distrust")}
                       />

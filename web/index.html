@@ -14,27 +14,87 @@
         <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link
-            rel="preload"
-            href="/fonts/JetBrainsMono.woff2"
-            as="font"
-            type="font/woff2"
-            crossorigin
-        />
-        <link rel="stylesheet" href="/style.css" />
-        <!-- The last look this browser used (theme.js keeps it), before the first paint: no flash of another theme. -->
+        <link rel="preload" href="/style.css" as="style" />
+        <!--
+            The cascade layers, in the order they win: the app's own CSS and extensions' (pocket), the colors chosen in
+            Appearance (palette), then the theme (theme.js). Sizes people choose stay inline and win over all three, unless a
+            theme marks a size !important, which themes must not do.
+        -->
+        <style>
+            @layer pocket, palette, theme;
+            @import url("/style.css") layer(pocket);
+        </style>
+        <!--
+            The last look this browser used (theme.js keeps it), before the first paint: no flash of another theme. The
+            theme's stylesheets are written into the page, so it waits for them as for a <link>; not in safe mode
+            (safe-mode.js), and only addresses of theme files. The fonts to preload: a theme's own, else the app's.
+        -->
         <script>
-            try {
-                var look = JSON.parse(localStorage.getItem("pocket.themeCache") || "null");
-                if (look) {
-                    var root = document.documentElement;
-                    for (var name in look.vars) root.style.setProperty(name, look.vars[name]);
-                    for (var key in look.attrs) root.dataset[key] = look.attrs[key];
-                    document
-                        .querySelector('meta[name="theme-color"]')
-                        .setAttribute("content", look.vars["--o-bg"]);
-                }
-            } catch (error) {}
+            (function () {
+                var fonts = ["/fonts/Geist.woff2", "/fonts/JetBrainsMono.woff2"];
+                var sheets = [];
+                try {
+                    var look = JSON.parse(localStorage.getItem("pocket.themeCache") || "null");
+                    if (look) {
+                        var root = document.documentElement;
+                        var light =
+                            look.pair && matchMedia("(prefers-color-scheme: light)").matches;
+                        var chosen = look.pair ? look.pair[light ? "light" : "dark"] : look;
+                        var colors = "";
+                        for (var name in chosen.palette)
+                            colors += name + ":" + chosen.palette[name] + ";";
+                        var palette = document.createElement("style");
+                        palette.id = "pocket-palette";
+                        palette.textContent = "@layer palette{:root{" + colors + "}}";
+                        document.head.appendChild(palette);
+                        var query = new URLSearchParams(location.search);
+                        var safe = query.has("noext")
+                            ? !/^(0|false|off|no)$/i.test(query.get("noext").trim())
+                            : sessionStorage.getItem("pocket.noext") === "1";
+                        if (!safe) {
+                            sheets = (look.css || []).filter(function (url) {
+                                return /^\/themes\/[a-z0-9][a-z0-9-]{1,47}\/[A-Za-z0-9_-]{12}\/theme\.css$/.test(
+                                    url,
+                                );
+                            });
+                            var own = (look.fonts || []).filter(function (url) {
+                                return /^\/themes\/[a-z0-9][a-z0-9-]{1,47}\/[A-Za-z0-9_-]{12}\/([A-Za-z0-9_-][A-Za-z0-9._-]*\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*\.woff2$/.test(
+                                    url,
+                                );
+                            });
+                            if (sheets.length > 0 && own.length > 0) fonts = own;
+                        }
+                        for (var each in look.vars) root.style.setProperty(each, look.vars[each]);
+                        for (var key in look.attrs) root.dataset[key] = look.attrs[key];
+                        if (look.pair) root.dataset.mode = light ? "light" : "dark";
+                        document
+                            .querySelector('meta[name="theme-color"]')
+                            .setAttribute("content", chosen.color || look.vars["--o-bg"]);
+                    }
+                } catch (error) {}
+                document.write(
+                    fonts
+                        .map(function (url) {
+                            return (
+                                '<link rel="preload" href="' +
+                                url +
+                                '" as="font" type="font/woff2" crossorigin>'
+                            );
+                        })
+                        .join("") +
+                        (sheets.length > 0
+                            ? "<style id='pocket-theme' data-urls='" +
+                              JSON.stringify(sheets) +
+                              "'>" +
+                              sheets
+                                  .map(function (url) {
+                                      return '@import url("' + url + '") layer(theme);';
+                                  })
+                                  .join("") +
+                              "</style>"
+                            : ""),
+                );
+            })();
         </script>
         <script type="importmap">
             {
@@ -51,8 +111,8 @@
     <body>
         <!-- The same boot screen the app shows while it starts (Boot in ui.js), so nothing jumps when the script takes over. -->
         <div id="app">
-            <div class="boot" role="status">
-                <div class="boot-mark" aria-hidden="true">π</div>
+            <div class="boot" data-part="boot" role="status">
+                <div class="boot-mark" data-part="brand-mark" aria-hidden="true">π</div>
                 <div class="boot-bar" aria-hidden="true"><span></span></div>
                 <div class="boot-caption">starting</div>
             </div>

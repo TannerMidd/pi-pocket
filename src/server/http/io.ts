@@ -1,4 +1,5 @@
-/** What every route uses: the request it answers, reading its body, and writing its response. */
+/** What every route uses: the request it answers, reading its body or a file, and writing its response. */
+import { closeSync, constants, fstatSync, openSync, readFileSync, readlinkSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "../app.ts";
@@ -6,6 +7,9 @@ import type { User } from "../config.ts";
 import { HttpError } from "../errors.ts";
 
 const MAX_JSON = 1_000_000;
+
+/** Opened on its own, an SVG could run script with the app's origin: give it an opaque one. */
+export const SVG_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 
 export interface HttpOptions {
     app: PocketApp;
@@ -110,4 +114,73 @@ export function conversationId(value: string | undefined): ConversationId {
     }
 
     return id as unknown as ConversationId;
+}
+
+/**
+ * Whether `fd`, with these `stats`, is the file that was checked: the same file (device and inode) as the check saw, and,
+ * where the system says where an open file is (Linux), at the path checked. A folder on the way swapped for a link
+ * between the check and the open leads to another file, which fails the first test everywhere. `proc` is for tests.
+ */
+export function opened(
+    fd: number,
+    checked: { file: string; dev: number; ino: number },
+    stats: { dev: number; ino: number },
+    proc = true,
+): boolean {
+    if (stats.dev !== checked.dev || stats.ino !== checked.ino) {
+        return false;
+    }
+
+    if (!proc) {
+        return true;
+    }
+
+    try {
+        return readlinkSync(`/proc/self/fd/${fd}`) === checked.file;
+    } catch {
+        // No /proc here (macOS): the same file as checked is the test.
+        return true;
+    }
+}
+
+/**
+ * A file to serve, read whole as it was checked: a regular file, not a link, and the very file the check saw (`opened`).
+ * Anything else is a 404; one larger than `max` bytes is a 413 with `tooLarge` as its words, or a 404 without them.
+ */
+export function readChecked(
+    checked: { file: string; dev: number; ino: number },
+    max: number,
+    tooLarge?: string,
+): Buffer {
+    let fd: number;
+
+    // Never waiting: a pipe swapped in after the check would otherwise hold the whole server.
+    try {
+        fd = openSync(
+            checked.file,
+            constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+        );
+    } catch {
+        throw new HttpError(404, "Not found");
+    }
+
+    try {
+        const stats = fstatSync(fd);
+
+        if (!stats.isFile() || !opened(fd, checked, stats)) {
+            throw new HttpError(404, "Not found");
+        }
+
+        if (stats.size > max) {
+            throw tooLarge === undefined
+                ? new HttpError(404, "Not found")
+                : new HttpError(413, tooLarge);
+        }
+
+        return readFileSync(fd);
+    } catch (error) {
+        throw error instanceof HttpError ? error : new HttpError(404, "Not found");
+    } finally {
+        closeSync(fd);
+    }
 }

@@ -256,7 +256,7 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
             aria-label=${t("Copy")}
             onClick=${() => copyText(file.text).then(() => notify("info", t("Copied.")))}
         >
-            ⧉
+            <${Icon} name="copy" size=${16} />
         </button>`
     }
     ${

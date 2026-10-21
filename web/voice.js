@@ -331,7 +331,7 @@ export function useDictation(box, onText, { top = false } = {}) {
 }
 
 /** The mic: starts dictation, and while it listens, stops it. None where the browser cannot recognise speech. */
-export function MicButton({ dictation, class: className = "", size = 17 }) {
+export function MicButton({ dictation, class: className = "", size = 17, part }) {
     if (!voiceAvailable()) {
         return null;
     }
@@ -341,9 +341,10 @@ export function MicButton({ dictation, class: className = "", size = 17 }) {
     return html`<button
         type="button"
         class=${`icon-button mic-button ${listening ? "listening" : ""} ${className}`}
+        data-part=${part}
         aria-label="Dictate"
         aria-pressed=${listening ? "true" : "false"}
-        title=${listening ? "Listening: tap to stop (Alt V)" : "Dictate (Alt V)"}
+        title=${listening ? "Listening: tap to stop (Alt+V)" : "Dictate (Alt+V)"}
         onMouseDown=${(event) => event.preventDefault()}
         onClick=${toggle}
     >

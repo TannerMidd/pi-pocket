@@ -1,0 +1,54 @@
+---
+// The home page: the one page that is not a file in docs/. It only links into them.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<StarlightPage
+    frontmatter={{
+        title: "Extend Pi Pocket",
+        description:
+            "Write extensions for Pi Pocket: tools, prompt sections, and hooks for Pi, and pages, buttons, and commands in the app.",
+        template: "splash",
+        hero: {
+            tagline: `Give Pi new tools, rules, and checks. Add pages, buttons, and commands to the app. Share what you make in the gallery. For Pi Pocket ${__POCKET_VERSION__}.`,
+            actions: [
+                {
+                    text: "Read the guide",
+                    link: `${base}/extensions/`,
+                    icon: "right-arrow",
+                },
+            ],
+        },
+    }}
+>
+    <CardGrid>
+        <Card title="Pick the lightest change" icon="setting">
+            Instructions, AGENTS.md, and skills need no code. Write an extension only when they cannot
+            do the job.
+        </Card>
+        <Card title="Tools, sections, and hooks" icon="seti:typescript">
+            An extension is one TypeScript file in your extensions folder. Pi Pocket loads it again
+            when you save it.
+        </Card>
+        <Card title="Pages in the app" icon="laptop">
+            Add routes on the server, and a browser module with rail buttons, pages, sheets, and slash
+            commands.
+        </Card>
+        <Card title="Safe by design" icon="approve-check">
+            A drop-in starts off. Read the security model before you turn one on or share one.
+        </Card>
+    </CardGrid>
+    <LinkCard
+        title="Changes without code"
+        description="Instructions, AGENTS.md, skills, and prompt templates"
+        href={`${base}/customizing/`}
+    />
+    <LinkCard
+        title="Security"
+        description="What Pi Pocket protects, and what it does not"
+        href={`${base}/security/`}
+    />
+</StarlightPage>

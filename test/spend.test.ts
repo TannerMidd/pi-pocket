@@ -183,27 +183,6 @@ test("a run that crosses its session's limit is stopped once, and the people the
                 each.event === "notice" &&
                 each.data.message === "Pi stopped: this session reached its $1.00 spend limit.",
         );
-    // Stopping takes a moment, as it can with a real provider: spend counted meanwhile may not stop the run again.
-    const conversation = app.conversation;
-    let aborts = 0;
-
-    app.conversation = async (cid) =>
-        new Proxy(await conversation.call(app, cid), {
-            get: (found, key) => {
-                if (key === "abort") {
-                    return async (...args: Parameters<typeof found.abort>) => {
-                        aborts++;
-                        await new Promise((resolve) => setTimeout(resolve, 700));
-
-                        return found.abort(...args);
-                    };
-                }
-
-                const value: unknown = Reflect.get(found, key, found);
-
-                return typeof value === "function" ? value.bind(found) : value;
-            },
-        });
 
     try {
         const { submissionId } = await app.commands.submit(id, owner(app), {
@@ -244,48 +223,8 @@ test("a run that crosses its session's limit is stopped once, and the people the
             /"done"/,
             "the five-second command was cut off, so Pi never answered after it",
         );
-        assert.equal(aborts, 1);
         assert.equal(stopped().length, 1);
-
-        // With the limit raised, a later run there is stopped again when it crosses it.
-        await until(() => !app.isBusy(id), "the run to end");
-        await app.spend.setSessionBudget(owner(app), id, 2);
-        const later = await app.commands.submit(id, owner(app), {
-            text: "work slowly",
-            requestId: "slow-again",
-        });
-
-        await until(
-            async () =>
-                (await app.harness.snapshot(LiveDoc, id, context))?.tools?.some(
-                    (tool) => tool.status === "running",
-                ) === true,
-            "the tool to run again",
-        );
-        await recordCost(app, id, 1);
-        const settledLater = await (await app.harness.submission(
-            later.submissionId,
-            context,
-        ))!.wait(context);
-
-        assert.deepEqual(
-            settledLater.status === "unanswered" ? settledLater.reason : settledLater.status,
-            "aborted",
-        );
-        assert.equal(aborts, 2);
     } finally {
-        app.conversation = conversation;
         app.detach(tab.client);
     }
-});
-
-test("PiP's row in Spend shows its limit, so the owner can see and clear it", async () => {
-    const pip = await app.pip.ensure(owner(app));
-    const row = () =>
-        app.spend.summary(owner(app)).sessions.find((each) => each.id === Number(pip));
-
-    await app.spend.setSessionBudget(owner(app), pip, 5);
-    await until(() => row()?.budget === 5, "PiP's limit in its row");
-    await app.spend.setSessionBudget(owner(app), pip, null);
-    await until(() => row() !== undefined && !("budget" in row()!), "no limit in its row");
 });

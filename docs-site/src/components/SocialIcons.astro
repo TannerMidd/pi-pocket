@@ -1,0 +1,21 @@
+---
+// A link back to the product site, before Starlight's own icons.
+import Default from "@astrojs/starlight/components/SocialIcons.astro";
+---
+
+<a class="home" href="/pi-pocket/">Pi Pocket</a>
+<Default />
+
+<style>
+    .home {
+        color: var(--sl-color-text-accent);
+        font-size: var(--sl-text-sm);
+        text-decoration: none;
+        padding: 0.5em;
+        margin: -0.5em 0.25em -0.5em -0.5em;
+    }
+
+    .home:hover {
+        color: var(--sl-color-white);
+    }
+</style>

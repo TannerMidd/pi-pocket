@@ -1,0 +1,73 @@
+# Publishes the product site (site/) at https://tannermidd.github.io/pi-pocket/ and the docs (docs-site/, built
+# from docs/ where it is) at /pi-pocket/docs/, as one GitHub Pages deployment, from main only. main gets only
+# releases and site changes, so the docs describe the latest release. A run by hand (npm run site:publish, or
+# gh workflow run pages.yml) publishes main again.
+#
+# This needs, once, two settings that the owner makes:
+# - Settings → Pages → Source: GitHub Actions. The gh-pages branch (the old `git subtree push`) is not used;
+#   setting the source back to it brings the old site back.
+# - Settings → Environments → github-pages: add required reviewers, so no deployment goes out without a yes, and
+#   keep its deployment branches to main.
+name: Pages
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "site/**"
+            - "docs/**"
+            - "docs-site/**"
+            - "types/**"
+            - "SECURITY.md"
+            - "CONTRIBUTING.md"
+            - "package.json"
+            - ".github/workflows/pages.yml"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: pages
+    cancel-in-progress: false
+
+jobs:
+    build:
+        # A run by hand on another branch publishes nothing.
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+                  cache: npm
+                  cache-dependency-path: docs-site/package-lock.json
+            - name: Build the docs, with every link checked
+              working-directory: docs-site
+              run: |
+                  npm ci --ignore-scripts
+                  npm run check
+            - name: Put the product site and the docs together
+              run: |
+                  mkdir _site
+                  cp -r site/. _site/
+                  cp -r docs-site/dist _site/docs
+            - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+              with:
+                  path: _site
+
+    deploy:
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            pages: write
+            id-token: write
+        environment:
+            name: github-pages
+            url: ${{ steps.deploy.outputs.page_url }}
+        steps:
+            - id: deploy
+              uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

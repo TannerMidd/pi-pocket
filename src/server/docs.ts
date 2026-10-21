@@ -24,6 +24,8 @@ export type SessionMeta = {
     archived?: boolean;
     /** The session this one was forked from, and the last entry it inherited; no entry: forked before the first message. */
     forkedFrom?: { id: number; entryId?: number };
+    /** The session that started this one (`linked-sessions.ts`): a link only, which gives no access and owns nothing. */
+    linkedFrom?: { id: number };
     /** The most Pi may spend here, in dollars, subagents included. */
     budget?: number;
     /** The git worktree the session works in, when it has one of its own. */
@@ -42,6 +44,56 @@ export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
     kind: "pocket.sessions",
     version: 1,
     scope: "session",
+    initial: () => ({ items: {} }),
+});
+
+/** Favorite working folders in shortcut order, private to each person and shared by their devices. */
+export const FolderFavoritesDoc = defineDoc<{ users: Record<string, string[]> }>({
+    kind: "pocket.folder-favorites",
+    version: 1,
+    scope: "session",
+    initial: () => ({ users: {} }),
+});
+
+/**
+ * The addresses this session knows its linked sessions by, so no session id goes into its transcript. A fork starts with
+ * none, so it leaves the team: the addresses in the history it inherited do not resolve there.
+ */
+export const LinkedSessionPeersDoc = defineDoc<{ peers: Record<string, number> }>({
+    kind: "pocket.linked-session-peers",
+    version: 1,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ peers: {} }),
+});
+
+/**
+ * Messages between the linked sessions of one team since a person last wrote in any of them, kept on the team's top
+ * session (`linked-sessions.ts`): past a limit, sessions stop messaging each other until a person writes.
+ */
+export const LinkedSessionRelayDoc = defineDoc<{ sent: number }>({
+    kind: "pocket.linked-session-relay",
+    version: 1,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ sent: 0 }),
+});
+
+/**
+ * What each call to start or message a linked session did, by its key hashed with the session: the session it made or
+ * messaged, whom Pi worked for, and when. A call run again finds it, so it acts once. `linked-sessions.ts` keeps them
+ * 30 days, and the newest 1000, as `shell.ts` keeps its requests. (Not a document family: those cannot be pruned.)
+ */
+export const LinkedSessionCallsDoc = defineDoc<{
+    items: Record<string, { conversationId?: number; by?: string; at: number }>;
+}>({
+    kind: "pocket.linked-session-calls",
+    version: 1,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
     initial: () => ({ items: {} }),
 });
 
@@ -415,6 +467,20 @@ export const BrowserDoc = defineDoc<{
     history: "latest",
     fork: "current",
     initial: () => ({}),
+});
+
+/**
+ * The extensions' commands one person ran here, keyed by the person's id: each request id with its task, oldest first.
+ * A request sent again, also after a restart, finds its task. A fork starts without them.
+ */
+export const CommandRequestsDoc = defineDocFamily<{ items: Record<string, number> }, null>({
+    kind: "pocket.extension-command-request",
+    version: 1,
+    family: true,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ items: {} }),
 });
 
 /**

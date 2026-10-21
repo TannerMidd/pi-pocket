@@ -1,5 +1,6 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
 import { onRoute, pushRoute } from "./back.js";
+import { sessionForest } from "./session-tree.js";
 import { currentLocale, setUiLocales, t } from "./i18n.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
@@ -71,9 +72,13 @@ export const store = {
         uiLocaleRevision: 0,
         users: [],
         models: [],
+        /** This tab's shared model refresh state and last result (`model-refresh.js`). */
+        modelRefresh: { loading: false, result: null, error: null },
         guard: null,
         server: null,
         sessions: [],
+        /** This person's favorite folders, in shortcut order, sent by the server to every signed-in device. */
+        folderFavorites: [],
         /** False until the server's first session list arrives: an empty list until then means "not here yet". */
         sessionsLoaded: false,
         /** Sessions on their way into the archive (true) or out of it (false), by id, until the list catches up (`sessions.js`). */
@@ -106,6 +111,10 @@ export const store = {
         board: false,
         /** Every subagent in every session, while the board shows; null until the server's first list arrives. */
         boardAgents: null,
+        /** An extension's page in the conversation's place, as the board shows (`extension-ui.js`): `{ module, id }`. */
+        page: null,
+        /** Counts changes to what extensions' browser modules add (`extension-ui.js`), so what shows them draws again. */
+        extensionsRev: 0,
         /** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
         filesLoaded: 0,
         /** `!` commands this tab started that have no entry yet: `{ taskId, command, conversationId, at }`. */
@@ -215,16 +224,63 @@ export function sessionUnread(session, state = store.state) {
     return session.chatAt !== undefined && session.chatBy !== state.me?.id && session.chatAt > read;
 }
 
+/**
+ * Sessions in "workspace" order, as Alt+1…9 and the rail number them: pinned ones first (in the order they were
+ * pinned), then the rest, newest first, each followed by the linked sessions under it, as the list shows them
+ * (`session-tree.js`). Archived sessions are left out.
+ */
+export function workspaceOrder(state = store.state) {
+    const active = state.sessions.filter((session) => !session.archived);
+    const { roots, rows } = sessionForest(active, { pinned: state.pinned });
+    const family = (root) => rows.get(root.id).map((row) => row.session);
+    const pinned = state.pinned.map((id) => roots.find((root) => root.id === id)).filter(Boolean);
+
+    return [
+        ...pinned.flatMap(family),
+        ...roots.filter((root) => !pinned.includes(root)).flatMap(family),
+    ];
+}
+
 /** Server features the web app may use. `collab` 2 adds roles, take turns, reactions, pins, notes, mentions, push. */
 export const collab = () => (store.state.server?.collab ?? 0) >= 2;
 /** Viewers read and chat; they never steer Pi. */
 export const canSteer = () => store.state.me?.role !== "viewer";
+
+/**
+ * Whether this person may turn take turns on or off here, as the server decides: anyone who steers while it is off; the
+ * driver, the owner, or anyone when nobody drives or the driver has left, while it is on.
+ */
+export function canToggleTurns() {
+    const { me, presence, view } = store.state;
+    const turns = view.turns;
+
+    return (
+        canSteer() &&
+        (!turns?.on ||
+            turns.driver === me?.id ||
+            me?.role === "owner" ||
+            !turns.driver ||
+            !presence.some((person) => person.id === turns.driver))
+    );
+}
+
 /** People invited to one session cannot start sessions or invite others. */
 export const scoped = () => Array.isArray(store.state.me?.sessions);
+
+/** The notices that announce chat messages, here or a mention elsewhere, by id: their session's. Reading its chat takes them down. */
+const chatNotices = new Map();
 
 /** Everything in the chat counts as read: called while the chat is open. */
 export function markChatRead() {
     const { chat, chatRead, conversationId } = store.state;
+
+    for (const [id, conversation] of chatNotices) {
+        if (conversation === conversationId) {
+            dismiss(id);
+            chatNotices.delete(id);
+        }
+    }
+
     const last = chat.at(-1)?.at ?? 0;
 
     if (last <= chatRead || conversationId === null) {
@@ -248,7 +304,7 @@ function applyChat(data) {
     store.set({ chat: (data.full ? data.messages : [...state.chat, ...added]).slice(-CHAT_LIMIT) });
 
     // The People panel stays open for long: on its Pinned or Notes tab, new messages still count and show a notice.
-    if (state.sheet?.type === "chat" || chatLogs > 0) {
+    if (chatLogs > 0) {
         markChatRead();
 
         return;
@@ -264,21 +320,29 @@ function applyChat(data) {
     }
 
     const open = () => openSheet({ type: "chat" });
+    const announce = (message, ui) =>
+        chatNotices.set(notify("info", message, open, ui), store.state.conversationId);
 
     if (fresh.length > 1) {
-        return notify("info", t("{{count}} new chat messages", { count: fresh.length }), open);
+        const ui = { key: "{{count}} new chat messages", params: { count: fresh.length } };
+
+        return announce(t(ui.key, ui.params), ui);
     }
 
     const [message] = fresh;
     const name = state.users.find((user) => user.id === message.userId)?.name ?? message.name;
     const text = message.text.replace(/\s+/g, " ");
     const mentioned = message.mentions?.includes(state.me?.id);
+    const ui = {
+        key: "{{name}}{{mention}}: {{text}}",
+        params: {
+            name,
+            mention: mentioned ? ` ${t("mentioned you")}` : "",
+            text: text.length > 120 ? `${text.slice(0, 119)}…` : text,
+        },
+    };
 
-    notify(
-        "info",
-        `${name}${mentioned ? ` ${t("mentioned you")}` : ""}: ${text.length > 120 ? `${text.slice(0, 119)}…` : text}`,
-        open,
-    );
+    announce(t(ui.key, ui.params), ui);
 }
 
 let typingSent = { where: null, at: 0, conversationId: null };
@@ -309,10 +373,12 @@ class ApiError extends Error {
     }
 }
 
+/** Call the server's API: a GET without `body`, a POST with one, or `options.method`; `options.signal` stops it. */
 export async function api(path, body, options = {}) {
     const init = {
         method: body === undefined && !options.method ? "GET" : (options.method ?? "POST"),
         headers: { "X-Pocket": "1" },
+        ...(options.signal ? { signal: options.signal } : {}),
     };
 
     if (body !== undefined) {
@@ -343,18 +409,51 @@ export async function api(path, body, options = {}) {
 }
 
 let nextNotice = 1;
+/** Each notice's countdown, by id: what is left of it, and its timer while it runs. */
+const countdowns = new Map();
 
-/** Show a short notice. With `action`, tapping it runs the action as well as dismissing it. */
+/**
+ * Show a short notice, and return its id. With `action`, tapping it runs the action as well as dismissing it. It stays longer when it
+ * offers something (an Undo) or says what went wrong, and its countdown holds while a pointer or the focus is on it.
+ */
 export function notify(level, message, action, ui) {
     const id = nextNotice++;
+    const life = level === "error" ? 9000 : action ? 7000 : 4500;
 
     store.set((state) => ({
-        notices: [...state.notices, { id, level, message, action, ui }].slice(-4),
+        notices: [...state.notices, { id, level, message, action, life, ui }].slice(-4),
     }));
-    setTimeout(() => dismiss(id), level === "error" ? 9000 : 4500);
+    countdowns.set(id, {
+        left: life,
+        since: Date.now(),
+        timer: setTimeout(() => dismiss(id), life),
+    });
+
+    return id;
+}
+
+/** Hold a notice's countdown (`held`), or let it go on with what was left. */
+export function holdNotice(id, held) {
+    const countdown = countdowns.get(id);
+
+    if (!countdown || held === (countdown.timer === null)) {
+        return;
+    }
+
+    if (held) {
+        clearTimeout(countdown.timer);
+        countdown.timer = null;
+        countdown.left -= Date.now() - countdown.since;
+    } else {
+        countdown.since = Date.now();
+        countdown.timer = setTimeout(() => dismiss(id), Math.max(countdown.left, 1000));
+    }
 }
 
 export function dismiss(id) {
+    clearTimeout(countdowns.get(id)?.timer);
+    countdowns.delete(id);
+    chatNotices.delete(id);
     store.set((state) => ({ notices: state.notices.filter((notice) => notice.id !== id) }));
 }
 
@@ -367,6 +466,14 @@ export async function attempt(action) {
 
         return undefined;
     }
+}
+
+/** End this browser's sign-in, and go to the sign-in page. */
+export function signOut() {
+    return attempt(async () => {
+        await api("logout", {});
+        location.href = "/";
+    });
 }
 
 let source;
@@ -408,13 +515,13 @@ function mergeView(current, data) {
         entries,
         order,
         live: data.live,
-        inbox: data.inbox,
         agent: data.agent,
         stats: data.stats,
         clients: data.clients,
         viewers: data.viewers,
         approvals: data.approvals,
         // The server sends these again only when they change: a missing one keeps its last value.
+        inbox: data.inbox ?? base.inbox,
         artifacts: data.artifacts ?? base.artifacts,
         subagents: data.subagents ?? base.subagents,
         authors: data.authors ?? base.authors,
@@ -448,6 +555,16 @@ export function stillMoving(moving, sessions) {
     return next;
 }
 
+/** Who hears extensions' events: `extension-ui.js`, which imports this module and so cannot be imported here. */
+const extensionListeners = new Set();
+
+/** Hear the events extension modules send their browser modules: `{ module, event, data }`. */
+export function onExtensionEvent(listener) {
+    extensionListeners.add(listener);
+
+    return () => extensionListeners.delete(listener);
+}
+
 /** What the server sends, by event name. Both transports deliver the same events. */
 const handlers = {
     hello: (data) => {
@@ -458,9 +575,12 @@ const handlers = {
             uiLocale,
             uiLocaleRevision: store.state.uiLocaleRevision + 1,
             users: data.users,
+            folderFavorites: data.folderFavorites ?? [],
             models: data.models,
             guard: data.guard,
             server: data.server,
+            // Every theme folder (`theme.js`): an older server lists none.
+            themeList: Array.isArray(data.themes) ? data.themes : [],
             // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
             ...(data.connection === undefined ? {} : { streamId: data.connection }),
         });
@@ -471,7 +591,10 @@ const handlers = {
             sessionsLoaded: true,
             moving: stillMoving(state.moving, sessions),
         })),
+    "folder-favorites": (folderFavorites) => store.set({ folderFavorites }),
     models: (models) => store.set({ models }),
+    // A theme folder came, went, or changed (`theme.js` loads its new version).
+    themes: (themeList) => store.set({ themeList }),
     // Every subagent in every session, while this tab shows the subagents board (`subagents-board.js`).
     subagents: (agents) => store.state.board && store.set({ boardAgents: agents }),
     view: applyView,
@@ -494,9 +617,15 @@ const handlers = {
     // Pi's lessons changed somewhere: a Memory sheet or menu that shows them fetches them again (`sheets/memory.js`).
     memory: () => store.set((state) => ({ memoryRev: (state.memoryRev ?? 0) + 1 })),
     missing: (data) => store.set({ missing: data.message }),
+    // An event an extension module sent its browser module (`extension-ui.js`).
+    ext: (data) => {
+        for (const listener of extensionListeners) {
+            listener(data);
+        }
+    },
     // A notice may link to a conversation, such as a mention elsewhere: tapping it goes there.
-    notice: (data) =>
-        notify(
+    notice: (data) => {
+        const id = notify(
             data.level,
             data.message,
             data.link
@@ -506,7 +635,13 @@ const handlers = {
                       })
                 : undefined,
             data.ui,
-        ),
+        );
+
+        // A mention's: reading that chat takes it down.
+        if (data.link?.sheet === "chat") {
+            chatNotices.set(id, data.link.conversationId);
+        }
+    },
     auth: (data) => handleAuth(data),
     closing: () => store.set({ connection: "closed" }),
     reload: () => {
@@ -516,6 +651,12 @@ const handlers = {
     },
 };
 
+/**
+ * What this code understands of the server's updates, sent with each connection. 2: it keeps the queue when an update
+ * leaves it out. The server sends a tab whose code names none (older code, as a tab asleep through an update keeps)
+ * the queue with each update.
+ */
+const PROTOCOL = 2;
 const TRANSPORT_KEY = "pocket.transport";
 const local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(location.hostname);
 /** After an event stream stalls on this address, poll for a day, then try the stream again: one slow start is not forever. */
@@ -543,7 +684,7 @@ export function connect() {
     source?.close();
     store.set({ connection: "connecting" });
     const id = store.state.conversationId;
-    const query = `tab=${encodeURIComponent(TAB)}${id === null ? "" : `&c=${id}`}`;
+    const query = `tab=${encodeURIComponent(TAB)}&p=${PROTOCOL}${id === null ? "" : `&c=${id}`}`;
 
     source = pollHere() && !local ? pollEvents(query) : streamEvents(query);
 }
@@ -812,9 +953,10 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
         pushRoute(path, { replace });
     }
 
-    // The subagents board shows in the conversation's place: going to one, even the one under it, closes it.
-    if (store.state.board) {
-        store.set({ board: false, boardAgents: null });
+    // The subagents board and extensions' pages show in the conversation's place: going to one, even the one under it,
+    // closes them.
+    if (store.state.board || store.state.page) {
+        store.set({ board: false, boardAgents: null, page: null });
     }
 
     // Its row tapped again counts too.
@@ -877,6 +1019,7 @@ export async function start() {
             models: hello.models,
             guard: hello.guard,
             server: hello.server,
+            themeList: Array.isArray(hello.themes) ? hello.themes : [],
         });
         connect();
     } catch (error) {
@@ -912,6 +1055,9 @@ export const actions = {
     shell: (command, context, requestId = uid()) =>
         api(`c/${current()}/shell`, { command, context, requestId }),
     stopShell: (taskId) => api(`c/${current()}/shell/${taskId}/stop`, {}),
+    /** Run an extension's command; sending the same request id again finds the first run. */
+    extensionCommand: (commandId, args, requestId = uid()) =>
+        api(`c/${current()}/extension-commands`, { commandId, args, requestId }),
     /** A file or folder for the viewer. */
     view: (path) => api(`c/${current()}/view?path=${encodeURIComponent(path)}`),
     /** What changed in the session's folder: git's uncommitted changes, and Pi's edits. */
@@ -980,7 +1126,9 @@ export const actions = {
 
 /** Entries that show as transcript rows. Tool results show inside their call's card instead. */
 export const isRow = (entry) =>
-    ["user", "assistant", "compaction", "reset", "shell", "note", "fromPi"].includes(entry.kind);
+    ["user", "assistant", "compaction", "reset", "shell", "command", "note", "fromPi"].includes(
+        entry.kind,
+    );
 
 /**
  * Show the transcript from this entry down when it is above the rows shown now, as for a jump to a pinned or quoted
@@ -1078,7 +1226,7 @@ export function closePeople() {
     sessionStorage.removeItem(PEOPLE_KEY);
 
     // Its active border goes to the conversation, not nowhere.
-    if (document.documentElement.dataset.focus === "people") {
+    if (document.documentElement.dataset.focus === "people-panel") {
         document.documentElement.dataset.focus = "pane";
     }
 

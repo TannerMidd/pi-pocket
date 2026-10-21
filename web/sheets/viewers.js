@@ -30,30 +30,35 @@ export function ArtifactsSheet() {
         (a, b) => (b.versions.at(-1)?.createdAt ?? 0) - (a.versions.at(-1)?.createdAt ?? 0),
     );
 
-    return html`<${Sheet} title=${t("Artifacts")} onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Artifacts")} onClose=${closeSheet} wide=${true}>
         ${
             items.length === 0 &&
             html`<p class="muted">
                 ${t("No artifacts yet. Ask Pi to build something you can look at: a chart, a demo, a game.")}
             </p>`
         }
-        ${items.map((artifact) =>
-            [...artifact.versions].reverse().map(
-                (version) => html`<button
-                    class="list-item"
-                    onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: version.version })}
-                >
-                    <span>
-                        ${artifact.title}
-                        <br />
-                        <span class="muted small mono">${artifact.id}</span>
-                    </span>
-                    <span class="muted small mono">
-                        ${artifact.type} v${version.version} · ${formatBytes(version.size)} · ${timeAgo(version.createdAt)}
-                    </span>
-                </button>`,
-            ),
-        )}
+        <div class="artifact-grid">
+            ${items.map((artifact) =>
+                [...artifact.versions].reverse().map(
+                    (version) => html`<button
+                        class="artifact-card"
+                        onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: version.version })}
+                    >
+                        <span class="artifact-cover" aria-hidden="true">
+                            <${Icon} name="file" size=${28} />
+                            <span>${artifact.type}</span>
+                        </span>
+                        <span class="artifact-info">
+                            <span class="artifact-name">${artifact.title}</span>
+                            <span class="muted small mono">${artifact.id}</span>
+                            <span class="muted small mono">
+                                ${artifact.type} v${version.version} · ${formatBytes(version.size)} · ${timeAgo(version.createdAt)}
+                            </span>
+                        </span>
+                    </button>`,
+                ),
+            )}
+        </div>
     <//>`;
 }
 
@@ -121,6 +126,7 @@ export function ImageViewer({ src, alt }) {
     return html`<div
         class="lightbox"
         role="dialog"
+        aria-modal="true"
         aria-label=${alt || t("Image")}
         onClick=${closeSheet}
     >

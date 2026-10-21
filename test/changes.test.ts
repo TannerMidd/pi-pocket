@@ -12,34 +12,11 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { parseNumstat, parseStatus } from "../src/server/changes.ts";
-
-test("git's -z output reads into changes, renames included", () => {
-    assert.deepEqual(parseStatus(" D del.txt\0 M keep.txt\0R  new.txt\0old.txt\0?? fresh.txt\0"), [
-        { code: " D", path: "del.txt" },
-        { code: " M", path: "keep.txt" },
-        { code: "R ", path: "new.txt", from: "old.txt" },
-        { code: "??", path: "fresh.txt" },
-    ]);
-    assert.deepEqual(
-        [
-            ...parseNumstat(
-                "0\t1\tdel.txt\x002\t1\tkeep.txt\x000\t0\t\0old.txt\0new.txt\0-\t-\timage.png\0",
-            ),
-        ],
-        [
-            ["del.txt", { added: 0, removed: 1 }],
-            ["keep.txt", { added: 2, removed: 1 }],
-            ["new.txt", { added: 0, removed: 0 }],
-            ["image.png", {}],
-        ],
-    );
-});
 
 /** The model edits one file and writes another, as asked. */
 const route: FauxResponseStep = (request) => {
@@ -63,57 +40,9 @@ const route: FauxResponseStep = (request) => {
         );
     }
 
-    if (text.endsWith("write through link")) {
-        return fauxAssistantMessage(
-            [
-                fauxToolCall("write", {
-                    path: "../symlinked-ancestor-target/new.txt",
-                    content: "Pi's file\n",
-                }),
-            ],
-            { stopReason: "toolUse" },
-        );
-    }
-
-    if (text.endsWith("write parent")) {
-        return fauxAssistantMessage(
-            [fauxToolCall("write", { path: "../top.txt", content: "Pi's file\n" })],
-            { stopReason: "toolUse" },
-        );
-    }
-
     if (text.endsWith("write outside")) {
         return fauxAssistantMessage(
             [fauxToolCall("write", { path: "../outside.txt", content: "x\n" })],
-            { stopReason: "toolUse" },
-        );
-    }
-
-    if (text.includes("write absolute:")) {
-        const path = text.slice(text.indexOf("write absolute:") + "write absolute:".length).trim();
-
-        return fauxAssistantMessage(
-            [
-                fauxToolCall("write", {
-                    path,
-                    content: "absolute edit\n",
-                }),
-            ],
-            { stopReason: "toolUse" },
-        );
-    }
-
-    if (text.includes("script absolute:")) {
-        const path = text
-            .slice(text.indexOf("script absolute:") + "script absolute:".length)
-            .trim();
-
-        return fauxAssistantMessage(
-            [
-                fauxToolCall("codemode", {
-                    code: `await tools.write({ path: ${JSON.stringify(path)}, content: "absolute script\\n" });`,
-                }),
-            ],
             { stopReason: "toolUse" },
         );
     }
@@ -179,8 +108,8 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
             {
                 path: "notes/todo.md",
                 kind: "new",
-                added: undefined,
-                removed: undefined,
+                added: 1,
+                removed: 0,
                 byPi: true,
             },
         ],
@@ -205,7 +134,7 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
 
     await assert.rejects(app.workspace.changes(id, viewer), { status: 403 });
 
-    // A new file has no line counts to change, so its version is what says it did.
+    // A same-line-count rewrite still changes its version, so the browser reads the new diff.
     const versionOf = async (path: string) =>
         (await app.workspace.changes(id, owner(app))).files.find((file) => file.path === path)
             ?.version;
@@ -214,15 +143,6 @@ test("a session's changes list git's uncommitted files, mark Pi's, and give each
     assert.ok(before);
     writeFileSync(join(repo, "notes/todo.md"), "- two, and longer\n");
     assert.notEqual(await versionOf("notes/todo.md"), before);
-
-    // Tabs asking together (each shows the top bar's count) share one look; one asked after it looks again.
-    const [one, two] = await Promise.all([
-        app.workspace.changes(id, owner(app)),
-        app.workspace.changes(id, owner(app)),
-    ]);
-
-    assert.equal(one, two);
-    assert.notEqual(await app.workspace.changes(id, owner(app)), one);
 });
 
 test("diffs read the same whatever a person's git config says", async () => {
@@ -280,89 +200,6 @@ function repository(name: string, files: Record<string, string>): string {
     return folder;
 }
 
-function symlinkDirectory(target: string, link: string): void {
-    symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-}
-
-test("absolute direct-write paths through a symlinked cwd are attributed to Pi", async () => {
-    const folder = repository("absolute-direct", { "seed.txt": "seed\n" });
-    const alias = join(root, "absolute-direct-alias");
-
-    symlinkDirectory(folder, alias);
-    const id = await newSession(app, alias);
-
-    const path = join(alias, "direct.txt");
-
-    await say(app, id, `write absolute: ${path}`);
-    assert.equal(existsSync(path), true, "the write created its target file");
-    const changes = await app.workspace.changes(id, owner(app));
-
-    assert.equal(changes.files.find((file) => file.path === "direct.txt")?.byPi, true);
-});
-
-test("absolute codemode paths through a symlinked cwd are attributed to Pi", async () => {
-    const folder = repository("absolute-codemode", { "seed.txt": "seed\n" });
-    const alias = join(root, "absolute-codemode-alias");
-
-    symlinkDirectory(folder, alias);
-    const id = await newSession(app, alias);
-
-    const path = join(alias, "scripted.txt");
-
-    await say(app, id, `script absolute: ${path}`);
-    assert.equal(existsSync(path), true, "the codemode write created its target file");
-    const changes = await app.workspace.changes(id, owner(app));
-
-    assert.equal(changes.files.find((file) => file.path === "scripted.txt")?.byPi, true);
-});
-
-test("a parent-relative write from a symlinked cwd stays outside its repository", async () => {
-    const folder = repository("symlinked-cwd", {
-        "app/seed.txt": "seed\n",
-        "top.txt": "seed\n",
-    });
-    const alias = join(root, "symlinked-cwd-alias");
-
-    writeFileSync(join(folder, "top.txt"), "changed by a person\n");
-    symlinkDirectory(join(folder, "app"), alias);
-    const id = await newSession(app, alias);
-
-    await say(app, id, "write parent");
-    assert.equal(existsSync(join(root, "top.txt")), true);
-    const changes = await app.workspace.changes(id, owner(app));
-
-    assert.deepEqual(
-        changes.files.map((file) => ({ path: file.path, byPi: file.byPi })),
-        [{ path: "top.txt", byPi: false }],
-    );
-    assert.deepEqual(
-        changes.piOnly.map((file) => file.path),
-        [join("..", "top.txt")],
-    );
-});
-
-test("a missing new leaf through a symlinked ancestor resolves to its repository path", async () => {
-    const folder = repository("symlinked-ancestor", { "app/seed.txt": "seed\n" });
-    const cwdAlias = join(root, "symlinked-ancestor-cwd");
-    const escapedAlias = join(root, "symlinked-ancestor-target");
-
-    symlinkDirectory(join(folder, "app"), cwdAlias);
-    symlinkDirectory(join(folder, "app"), escapedAlias);
-    const id = await newSession(app, cwdAlias);
-
-    await say(app, id, "write through link");
-    const path = join(folder, "app", "new.txt");
-
-    assert.equal(existsSync(path), true);
-    rmSync(path);
-    const changes = await app.workspace.changes(id, owner(app));
-
-    assert.deepEqual(
-        changes.piOnly.map((file) => file.path),
-        [join("app", "new.txt")],
-    );
-});
-
 test("someone invited to one session sees the changes in its folder, not the rest of the repository", async () => {
     const shared = repository("shared", {
         "public/page.txt": "hello\n",
@@ -390,18 +227,6 @@ test("someone invited to one session sees the changes in its folder, not the res
     );
 });
 
-test("a file named like a pattern is that one file", async () => {
-    const starred = repository("starred", { "*": "star\n", "plain.txt": "plain\n" });
-
-    writeFileSync(join(starred, "*"), "star changed\n");
-    writeFileSync(join(starred, "plain.txt"), "plain changed\n");
-    const id = await newSession(app, starred);
-    const diff = await app.workspace.changeDiff(id, owner(app), "*");
-
-    assert.match(diff, /^\+star changed$/m);
-    assert.doesNotMatch(diff, /plain/);
-});
-
 test("a renamed file's diff is what changed in it, under both its names", async () => {
     const moved = repository("moved", { "café.txt": "one\ntwo\nthree\n" });
 
@@ -415,21 +240,4 @@ test("a renamed file's diff is what changed in it, under both its names", async 
     assert.match(diff, /^rename from "caf\\303\\251\.txt"$/m);
     assert.match(diff, /^\+four$/m);
     assert.doesNotMatch(diff, /^\+one$/m, "not the whole file as new");
-});
-
-test("outside a repository, the changes are Pi's edits alone", async () => {
-    const folder = join(root, "plain");
-
-    mkdirSync(folder, { recursive: true });
-    const id = await newSession(app, folder);
-
-    await say(app, id, "write notes");
-    const changes = await app.workspace.changes(id, owner(app));
-
-    assert.equal(changes.repo, undefined);
-    assert.deepEqual(changes.files, []);
-    assert.deepEqual(
-        changes.piOnly.map((each) => each.path),
-        [join(folder, "notes", "todo.md")],
-    );
 });

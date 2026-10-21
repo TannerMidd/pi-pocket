@@ -18,6 +18,7 @@ import {
 import { resizeImage } from "@earendil-works/pi-coding-agent";
 import {
     type AgentChange,
+    AgentDoc,
     type ConversationCreateOptions,
     type ConversationId,
     defineTask,
@@ -43,13 +44,20 @@ import {
     type SubagentRecord,
     SubagentsDoc,
 } from "./docs.ts";
-import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY } from "./entry-format.ts";
+import {
+    ATTACHMENTS_HEADING,
+    FILE_BLOCK,
+    FROM_PREFIX,
+    NOTE_ENTRY,
+    splitAttachments,
+} from "./entry-format.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
+import { globalModelSettings, projectModelDefault } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor } from "./requests.ts";
 import { type Resend, resendContent, resendRequest, ResendTask, userContent } from "./resend.ts";
@@ -342,6 +350,7 @@ export class Commands {
     async createSession(
         user: User,
         request: { cwd?: string; title?: string; worktree?: unknown },
+        { projectDefaults = true }: { projectDefaults?: boolean } = {},
     ): Promise<{ id: ConversationId }> {
         const app = this.#app;
 
@@ -356,7 +365,6 @@ export class Commands {
         const folder = app.workspace.checkDirectory(
             optionalText(request.cwd, "cwd") ?? app.defaultCwd,
         );
-        const initial = this.#defaultModel();
         const now = Date.now();
 
         return this.#inPlace(
@@ -364,6 +372,8 @@ export class Commands {
             request.worktree === true,
             title ?? basename(folder),
             async ({ cwd, worktree }) => {
+                // An internal caller about to apply a person's explicit model keeps its previous starting pair.
+                const initial = this.#defaultModel(undefined, projectDefaults ? cwd : undefined);
                 const conversation = await app.harness.createConversation(
                     {
                         ownership: { kind: "ownerless" },
@@ -551,13 +561,17 @@ export class Commands {
      * The model a new session starts with, always one a person chose: `prefer` (with its thinking level) when it is
      * signed in here, or else the owner's default, even when it is not signed in now: the session then shows that, and
      * its first message fails in sight, where another model would spend on what nobody chose for it. Without an owner's
-     * default, the one last picked, or Pi's default, when signed in. Never the first model there is: with none of
-     * these, the session starts without a model, and someone picks one.
+     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model,
+     * then Pi's global default. A no-cwd caller (imports and PiP itself) keeps the legacy default selection. Never
+     * the first model there is: with none chosen, the session starts without a model, and someone picks one.
      */
-    #defaultModel(prefer?: {
-        model: { provider: string; modelId: string } | null;
-        thinkingLevel: string;
-    }): {
+    #defaultModel(
+        prefer?: {
+            model: { provider: string; modelId: string } | null;
+            thinkingLevel: string;
+        },
+        cwd?: string,
+    ): {
         model?: ModelRef;
         thinkingLevel?: ModelThinkingLevel;
     } {
@@ -572,12 +586,27 @@ export class Commands {
         const chosen = config.defaultModel;
         const owners =
             chosen === undefined ? undefined : models.getModel(chosen.provider, chosen.modelId);
-        const lastPicked = chosen === undefined ? pick(last?.provider, last?.modelId) : undefined;
-        const pis =
-            chosen === undefined && lastPicked === undefined
-                ? pick(settings.getDefaultProvider(), settings.getDefaultModel())
+        const defaults =
+            chosen === undefined && cwd !== undefined ? globalModelSettings(cwd) : settings;
+        const project =
+            chosen === undefined && cwd !== undefined
+                ? projectModelDefault(cwd, defaults, models)
                 : undefined;
-        const model = preferred ?? owners ?? lastPicked ?? pis;
+        const lastPicked =
+            chosen === undefined && project === undefined
+                ? pick(last?.provider, last?.modelId)
+                : undefined;
+        // Ordinary sessions must not inherit a different project's settings from the server's starting folder.
+        // Imported sessions and PiP's own conversation keep their existing selection behavior.
+        const global = cwd === undefined ? undefined : defaults.getGlobalSettings();
+        const pis =
+            chosen === undefined && project === undefined && lastPicked === undefined
+                ? pick(
+                      cwd === undefined ? settings.getDefaultProvider() : global?.defaultProvider,
+                      cwd === undefined ? settings.getDefaultModel() : global?.defaultModel,
+                  )
+                : undefined;
+        const model = preferred ?? owners ?? project?.model ?? lastPicked ?? pis;
 
         if (model === undefined) {
             return {};
@@ -587,9 +616,13 @@ export class Commands {
             ? prefer?.thinkingLevel
             : owners !== undefined
               ? chosen?.thinkingLevel
-              : lastPicked !== undefined
-                ? last?.thinkingLevel
-                : settings.getDefaultThinkingLevel()) ?? "off") as ModelThinkingLevel;
+              : project !== undefined
+                ? project.thinkingLevel
+                : lastPicked !== undefined
+                  ? last?.thinkingLevel
+                  : cwd === undefined
+                    ? settings.getDefaultThinkingLevel()
+                    : global?.defaultThinkingLevel) ?? "off") as ModelThinkingLevel;
 
         return {
             model: { provider: model.provider, modelId: model.id },
@@ -658,6 +691,10 @@ export class Commands {
         user: User,
         request: SubmitRequest,
         via?: string,
+        admission?: {
+            beforeSubmit(): Promise<{ user: User; context: Context }>;
+            afterSubmit(): void;
+        },
     ): Promise<{ submissionId: SubmissionId; requestId: string }> {
         const app = this.#app;
 
@@ -700,8 +737,9 @@ export class Commands {
             (file) =>
                 `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`,
         );
+        // The heading whole, with files alone too: what reads the message splits it there.
         const written =
-            lines.length === 0 ? text : `${text}${ATTACHMENTS_HEADING}${lines.join("\n")}`.trim();
+            lines.length === 0 ? text : `${text}${ATTACHMENTS_HEADING}${lines.join("\n")}`;
         const body = this.messageText(
             user,
             via === undefined ? written : `[via ${via}] ${written}`,
@@ -724,10 +762,7 @@ export class Commands {
             try {
                 parts.push(await modelImage(file.path, file.mime));
             } catch (error) {
-                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id, {
-                    key: "Could not attach {{name}}: {{error}}",
-                    params: { name: file.name, error: describe(error) },
-                });
+                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
             }
         }
 
@@ -738,18 +773,39 @@ export class Commands {
                 : requestFor(user.id, clientKey(request.requestId));
         // A failed subagent's failure as the person writes to it: what their message comes to settles it.
         const failure = await this.#failureOf(id);
-        const submission = await conversation.submit(
-            {
-                type: "input",
-                content,
-                whenBusy: request.mode === "steer" ? "steer" : "followUp",
-                requestId,
-            },
-            context,
-        );
+
+        let submitContext = context;
+
+        // Human extension starts acquire a short policy lease after preparation. Its context checks policy again
+        // when durable admission reaches the mutation line, not just before it joins the queue.
+        if (admission !== undefined) {
+            const accepted = await admission.beforeSubmit();
+
+            user = accepted.user;
+            submitContext = accepted.context;
+            submitContext.abortSignal?.throwIfAborted();
+        }
+
+        const submission = await conversation
+            .submit(
+                {
+                    type: "input",
+                    content,
+                    whenBusy: request.mode === "steer" ? "steer" : "followUp",
+                    requestId,
+                },
+                submitContext,
+            )
+            .finally(() => admission?.afterSubmit());
 
         app.collab.setTyping(id, user, null);
         await this.#touched(id, typed, text === typed ? undefined : text);
+
+        // A person's own words: linked sessions may message each other again (`linked-sessions.ts`).
+        if (via === undefined) {
+            await app.linkedSessions.personWrote(id);
+        }
+
         this.#reportUnanswered(id, submission.wait(context));
 
         if (failure !== undefined) {
@@ -943,10 +999,7 @@ export class Commands {
                     text: `${FILE_BLOCK}${file}">\n${content}${cut}\n</file>`,
                 });
             } catch (error) {
-                app.notice("warning", `Could not send ${mention.written}: ${describe(error)}`, id, {
-                    key: "Could not send {{path}}: {{error}}",
-                    params: { path: mention.written, error: describe(error) },
-                });
+                app.notice("warning", `Could not send ${mention.written}: ${describe(error)}`, id);
             }
         }
 
@@ -1125,12 +1178,18 @@ export class Commands {
             model?: { provider: string; modelId: string };
             thinkingLevel?: string;
             cwd?: string;
+            pipPanel?: boolean;
         },
     ): Promise<void> {
         const app = this.#app;
 
         app.requireSee(user, id);
         await app.requireDriver(id, user);
+
+        if (request.pipPanel === true && app.pip.ownerOf(id) !== user.id) {
+            throw new HttpError(403, "Only your own PiP can use this control.");
+        }
+
         const asked = request.model as { provider?: unknown; modelId?: unknown } | undefined;
 
         checkModel(asked);
@@ -1172,21 +1231,28 @@ export class Commands {
         const cwd =
             request.cwd === undefined ? undefined : app.workspace.checkDirectory(request.cwd);
 
-        await conversation.configure(
-            {
-                ...(request.model === undefined
-                    ? {}
-                    : {
-                          model: {
-                              provider: request.model.provider,
-                              modelId: request.model.modelId,
-                          },
-                      }),
-                thinkingLevel,
-                ...(cwd === undefined ? {} : { cwd }),
-            },
-            context,
-        );
+        const change = {
+            ...(request.model === undefined
+                ? {}
+                : { model: { provider: request.model.provider, modelId: request.model.modelId } }),
+            thinkingLevel,
+            ...(cwd === undefined ? {} : { cwd }),
+        };
+
+        if (request.pipPanel === true) {
+            // Check and save together: a turn may have started while the picker was open.
+            await app.harness.commit(async (tx) => {
+                const live = await tx.doc(LiveDoc, id);
+
+                if (live.run !== undefined || (live.compactions?.length ?? 0) > 0) {
+                    throw new HttpError(409, "PiP is working. Change its model when it is idle.");
+                }
+
+                Object.assign(await tx.doc(AgentDoc, id), change);
+            }, context);
+        } else {
+            await conversation.configure(change, context);
+        }
 
         if (cwd !== undefined && app.sessionMeta(id) !== undefined) {
             await app.harness.commit(async (tx) => {
@@ -1198,7 +1264,7 @@ export class Commands {
             }, context);
         }
 
-        if (ref !== undefined) {
+        if (ref !== undefined && request.pipPanel !== true) {
             app.config.lastModel = { provider: ref.provider, modelId: ref.modelId, thinkingLevel };
         }
 
@@ -1666,12 +1732,10 @@ export class Commands {
         }
 
         const original = userContent(entry.model?.[0]);
-        const [written = "", files] = original.text.split(ATTACHMENTS_HEADING);
+        // Who sent it comes first, then the heading, whole or (from before 0.14.0) without its blank line.
+        const [written, files] = splitAttachments(original.text.replace(FROM_PREFIX, ""));
         // An edit that changes nothing is the same as sending the message again.
-        const edit =
-            edited !== undefined && edited !== written.replace(FROM_PREFIX, "").trim()
-                ? edited
-                : undefined;
+        const edit = edited !== undefined && edited !== written.trim() ? edited : undefined;
 
         if (edit === "" && files === undefined) {
             throw new HttpError(400, "Nothing to send");
@@ -1679,10 +1743,10 @@ export class Commands {
 
         // Sent again, edited or not, the message is from whoever sent it again, with the original's files attached: what
         // Pi does next is on them.
-        const body = edit ?? written.replace(FROM_PREFIX, "").trim();
+        const body = edit ?? written.trim();
         const text = this.messageText(
             user,
-            files === undefined ? body : `${body}${ATTACHMENTS_HEADING}${files}`.trim(),
+            files === undefined ? body : `${body}${ATTACHMENTS_HEADING}${files}`,
         );
         const author =
             (await app.harness.snapshot(AuthorsDoc, id, context))?.entries[String(entryId)] ??
@@ -1938,9 +2002,7 @@ export class Commands {
         const taskId = await conversation.compact(instructions, context);
         const done = pip ? "PiP's context compacted." : "Compacted.";
 
-        app.notice("info", pip ? "Compacting PiP's context…" : "Compacting…", id, {
-            key: pip ? "Compacting PiP's context…" : "Compacting…",
-        });
+        app.notice("info", pip ? "Compacting PiP's context…" : "Compacting…", id);
         await app.collab.activity(id, user, "started compacting the context", false);
         void app.harness.waitForTask(taskId, context).then(
             (receipt) => {
@@ -1952,10 +2014,7 @@ export class Commands {
                     const failed = pip ? app.pipCompaction.failure(Number(taskId)) : undefined;
 
                     if (failed !== undefined) {
-                        app.notice("error", `PiP's context was not compacted: ${failed}`, id, {
-                            key: "PiP's context was not compacted: {{error}}",
-                            params: { error: failed },
-                        });
+                        app.notice("error", `PiP's context was not compacted: ${failed}`, id);
                     } else {
                         app.notice(
                             "info",
@@ -1963,16 +2022,10 @@ export class Commands {
                                 ? "Nothing to compact: the context fits in the recent window."
                                 : done,
                             id,
-                            {
-                                key:
-                                    entryId === undefined && submissionId === undefined
-                                        ? "Nothing to compact: the context fits in the recent window."
-                                        : done,
-                            },
                         );
                     }
                 } else if (outcome.status === "aborted") {
-                    app.notice("info", "Compaction aborted.", id, { key: "Compaction aborted." });
+                    app.notice("info", "Compaction aborted.", id);
                 } else {
                     const why = "error" in outcome ? outcome.error?.message : undefined;
 

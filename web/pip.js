@@ -6,16 +6,26 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { t } from "./i18n.js";
 import { useBack } from "./back.js";
 import { useDragToClose } from "./gestures.js";
-import { api, attempt, isRow, navigate, notify, store, uid } from "./store.js";
+import { createPipDraft } from "./pip-attachments.js";
+import { usePipResize } from "./pip-window.js";
+import { api, attempt, isRow, navigate, notify, openSheet, store, uid } from "./store.js";
+import { memoryAvailable, useMemory } from "./sheets/memory.js";
 import { itemsOf, says, summarize } from "./turns.js";
 import {
     contextLevel,
+    entryImageUrl,
+    fileUrl,
+    formatBytes,
     formatTokens,
     html,
     Icon,
     Markdown,
+    modelLabel,
+    railState,
     readable,
     Spinner,
+    splitAttachments,
+    Thumb,
     usePresence,
 } from "./ui.js";
 import { MicButton, useDictation } from "./voice.js";
@@ -23,6 +33,29 @@ import { MicButton, useDictation } from "./voice.js";
 const OPEN_KEY = "pocket.pip";
 const SEEN_KEY = "pocket.pip.seen";
 const DRAFT_KEY = "pocket.pip.draft";
+// Image previews and in-flight work outlive the panel, but never their PiP/account scope.
+const composerDraft = createPipDraft({
+    loadText: () => localStorage.getItem(DRAFT_KEY) ?? "",
+    saveText: (text) => {
+        if (text === "") {
+            localStorage.removeItem(DRAFT_KEY);
+        } else {
+            localStorage.setItem(DRAFT_KEY, text);
+        }
+    },
+    upload: (id, file) => api(`c/${id}/upload?name=${encodeURIComponent(file.name)}`, file),
+    onError: (message) => notify("error", message),
+});
+const syncDraftScope = (state) =>
+    composerDraft.scope(
+        // Before the first hello, a signed-out/unknown bootstrap is not this tab logging out.
+        state.me === undefined || (state.me === null && !state.server)
+            ? undefined
+            : (state.me?.id ?? null),
+        state.pip?.id,
+    );
+
+syncDraftScope(store.state);
 /** How many of PiP's newest rows the panel shows: it is for the moment, and the full conversation is a tap away. */
 const ROWS = 80;
 /** Below this width the panel is a sheet from the bottom edge; above it, a window in the corner. */
@@ -111,6 +144,8 @@ function tellServer(on) {
 // A reconnect (or the first connection, with the panel kept open across a reload) gets the panel's view again; PiP
 // turned off in Extensions closes the panel.
 store.subscribe((state) => {
+    syncDraftScope(state);
+
     if (!state.pipOpen) {
         return;
     }
@@ -188,13 +223,19 @@ export const togglePip = () => (store.state.pipOpen ? closePip() : openPip());
 /** Send PiP a message from anywhere (`/pip …`), and open the panel to show what it says. */
 export async function askPip(text) {
     if (!pipAvailable()) {
-        notify("error", "PiP is not on here.");
+        notify("error", t("PiP is not on here."));
 
         return;
     }
 
+    const account = store.state.me?.id;
+
     openPip();
     const pip = store.state.pip ?? (await opening);
+
+    if (account !== store.state.me?.id) {
+        return;
+    }
 
     if (!pip) {
         notify("error", t("PiP is not ready yet: your message waits in its box."));
@@ -202,6 +243,10 @@ export async function askPip(text) {
 
     // Not sent: the words wait in PiP's box rather than be lost (`send` said why), after what was there already.
     if (!pip || !(await send(pip.id, text, false))) {
+        if (account !== store.state.me?.id || (pip && store.state.pip?.id !== pip.id)) {
+            return;
+        }
+
         const draft = localStorage.getItem(DRAFT_KEY)?.trim();
 
         openPip(draft ? `${draft}\n\n${text}` : text);
@@ -209,11 +254,16 @@ export async function askPip(text) {
 }
 
 /** Send PiP a message; false when it did not go (a notice says why). PiP made just now is waited for. */
-async function send(id, text, busy) {
+async function send(id, text, busy, attachments = []) {
+    const account = store.state.me?.id;
     const target = id ?? store.state.pip?.id ?? (await opening)?.id;
 
+    if (account !== store.state.me?.id || (id !== undefined && store.state.pip?.id !== id)) {
+        return false;
+    }
+
     if (target === undefined) {
-        notify("error", "PiP is not ready yet. Try again in a moment.");
+        notify("error", t("PiP is not ready yet. Try again in a moment."));
 
         return false;
     }
@@ -221,6 +271,7 @@ async function send(id, text, busy) {
     const sent = await attempt(() =>
         api(`c/${target}/submit`, {
             text,
+            ...(attachments.length > 0 ? { attachments } : {}),
             requestId: uid(),
             // Words for PiP while it works change what it does now, rather than wait for it.
             ...(busy ? { mode: "steer" } : {}),
@@ -241,25 +292,29 @@ function compactPip(id, focus) {
 /** `/compact`, or `/compact what to keep in mind`, typed in PiP's box. */
 const COMPACT = /^\/compact(?:\s+([\s\S]*))?$/;
 
-/** How full PiP's context is, as the status line shows a session's; its title says when PiP compacts itself. */
+/** How close PiP is to its own compaction limit, never beyond the model's context window. */
 function PipContext({ stats, window }) {
     if (!window || stats?.contextTokens === undefined) {
         return null;
     }
 
     const used = stats.contextTokens;
-    const percent = Math.min(100, Math.round((used / window) * 100));
     const at = store.state.server?.pipCompactAt;
+    const limit = at > 0 ? Math.min(at, window) : window;
+    const percent = Math.min(100, Math.round((used / limit) * 100));
     const about = stats.contextEstimated ? "~" : "";
     const tokens = t("{{used}} of {{total}} tokens in PiP's context.", {
         used: `${about}${formatTokens(used)}`,
-        total: formatTokens(window),
+        total: formatTokens(limit),
     });
     const when =
-        at > 0
-            ? t("PiP compacts itself above {{tokens}} once idle.", { tokens: formatTokens(at) })
-            : t("Compact it when it grows.");
-    const title = `${tokens} ${when}`;
+        at > window
+            ? t("PiP's idle compaction limit is {{tokens}} tokens.", { tokens: formatTokens(at) })
+            : at > 0
+              ? t("PiP compacts itself above {{tokens}} once idle.", { tokens: formatTokens(at) })
+              : t("Compact it when it grows.");
+    const cap = at > window ? ` ${t("The meter is capped at the model's context window.")}` : "";
+    const title = `${tokens} ${when}${cap}`;
 
     return html`<span
         class="pip-context"
@@ -310,7 +365,7 @@ function sessionOf(anchor) {
 // ─── The panel ──────────────────────────────────────────────────────────────
 
 /** A report from a session PiP follows, or a webhook's post (with what came as `data`): folded until opened. */
-function Report({ text, label = "Report", data = null }) {
+function Report({ text, label = t("Report"), data = null, conversationId }) {
     const [open, setOpen] = useState(false);
 
     return html`<div class=${`pip-report ${open ? "open" : ""}`}>
@@ -324,52 +379,124 @@ function Report({ text, label = "Report", data = null }) {
             <span>${label}</span>
             <${Icon} name="down" size=${13} class="pip-report-fold" />
         </button>
-        <${Markdown} text=${linkSessions(text)} class="pip-report-text" />
+        <${Markdown}
+            text=${linkSessions(text)}
+            class="pip-report-text"
+            conversationId=${conversationId}
+        />
         ${data !== null && html`<pre class="pip-report-data">${data}</pre>`}
     </div>`;
 }
 
+/**
+ * A message's list of attached files (`splitAttachments`). Uploaded names can contain commas or parentheses: find the
+ * name repeated at the end of its saved path.
+ */
+function attachedFiles(block) {
+    if (block === undefined) {
+        return [];
+    }
+
+    return block.split("\n").flatMap((line) => {
+        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)$/.exec(line);
+
+        if (!suffix) {
+            return [];
+        }
+
+        const candidates = [...suffix[1].matchAll(/ \(/g)].map((separator) => ({
+            path: suffix[1].slice(0, separator.index),
+            name: suffix[1].slice(separator.index + 2),
+            mime: suffix[2],
+        }));
+        const file = candidates.find((candidate) => candidate.path.endsWith(candidate.name));
+
+        return file ? [file] : [];
+    });
+}
+
 /** One of the panel's rows: a message, a report, a group of PiP's calls, or its words. */
-function Item({ item, last, busy }) {
+function Item({ item, last, busy, conversationId }) {
     if (item.type === "row") {
         const entry = item.entry;
 
         if (entry.kind === "user") {
-            const text = written(entry.text);
+            // Reports, posts, and scheduled messages whole: what came from outside may hold anything, an attachment
+            // heading too, and is read only as the plain data it is.
+            const body = written(entry.text);
 
-            if (text.startsWith(REPORT)) {
-                return html`<${Report} text=${text.slice(REPORT.length)} />`;
-            }
-
-            const hook = WEBHOOK.exec(text);
-            const watched = hook ? null : REPO_WATCH.exec(text);
-            const outside = hook ?? watched;
-
-            if (outside) {
-                const posted = post(text.slice(outside[0].length));
-
+            if (body.startsWith(REPORT)) {
                 return html`<${Report}
-                    label=${`${watched ? "GitHub" : "Webhook"}: ${outside[1]}`}
-                    text=${posted.text}
-                    data=${posted.data}
+                    text=${body.slice(REPORT.length)}
+                    conversationId=${conversationId}
                 />`;
             }
 
-            if (text.startsWith(SCHEDULED)) {
+            const hook = WEBHOOK.exec(body);
+            const watched = hook ? null : REPO_WATCH.exec(body);
+            const outside = hook ?? watched;
+
+            if (outside) {
+                const posted = post(body.slice(outside[0].length));
+
+                return html`<${Report}
+                    label=${t("{{source}}: {{name}}", { source: watched ? "GitHub" : "Webhook", name: outside[1] })}
+                    text=${posted.text}
+                    data=${posted.data}
+                    conversationId=${conversationId}
+                />`;
+            }
+
+            if (body.startsWith(SCHEDULED)) {
                 return html`<div class="pip-event">
                     <${Icon} name="pulse" size=${13} />
-                    <span>${text.slice(SCHEDULED.length)}</span>
+                    <span>${body.slice(SCHEDULED.length)}</span>
                 </div>`;
             }
 
-            return html`<div class="pip-you">${text}</div>`;
+            const [text, block] = splitAttachments(body);
+            // Uploaded pictures also remain readable when the chosen model cannot take inline images.
+            const files = attachedFiles(block);
+            const pictures = files.filter((file) => file.mime.startsWith("image/"));
+            const others = files.filter((file) => !pictures.includes(file));
+
+            return html`<div class="pip-you">
+                ${text && html`<div>${text}</div>`}
+                ${
+                    others.length > 0 &&
+                    html`<div class="attachments">
+                        ${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}
+                    </div>`
+                }
+                ${
+                    (pictures.length > 0 || entry.images > 0) &&
+                    html`<div class="thumbs">
+                        ${
+                            pictures.length > 0
+                                ? pictures.map(
+                                      (picture) => html`<${Thumb}
+                                          src=${fileUrl(picture.path, conversationId)}
+                                          alt=${picture.name}
+                                      />`,
+                                  )
+                                : Array.from(
+                                      { length: entry.images },
+                                      (_, index) => html`<${Thumb}
+                                          src=${entryImageUrl(entry.id, index, conversationId)}
+                                          alt=${t("Image {{number}}", { number: index + 1 })}
+                                      />`,
+                                  )
+                        }
+                    </div>`
+                }
+            </div>`;
         }
 
         const line =
             entry.kind === "reset"
-                ? "Fresh start"
+                ? t("Fresh start")
                 : entry.kind === "compaction"
-                  ? "Earlier messages summarized"
+                  ? t("Earlier messages summarized")
                   : entry.kind === "note"
                     ? `${entry.name} ${entry.text}`
                     : null;
@@ -383,7 +510,7 @@ function Item({ item, last, busy }) {
         const working = busy && last;
 
         return html`<div class=${`pip-steps ${working ? "working" : ""}`}>
-            ${working ? html`<${Spinner} hidden=${true} />` : html`<span class="pip-tick">·</span>`}
+            ${working ? html`<${Spinner} hidden=${true} />` : html`<span class="pip-tick"><${Icon} name="check" size=${10} /></span>`}
             <span>${summarize(item.steps, thinking)}</span>
         </div>`;
     }
@@ -394,7 +521,14 @@ function Item({ item, last, busy }) {
         const entry = item.entry;
 
         return html`<div class="pip-reply">
-            ${text.trim() !== "" && html`<${Markdown} text=${linkSessions(text)} cache=${!growing} />`}
+            ${
+                text.trim() !== "" &&
+                html`<${Markdown}
+                    text=${linkSessions(text)}
+                    cache=${!growing}
+                    conversationId=${conversationId}
+                />`
+            }
             ${entry?.stopReason === "aborted" && html`<div class="pip-event"><span>${t("Stopped")}</span></div>`}
             ${
                 entry?.stopReason === "error" &&
@@ -406,24 +540,37 @@ function Item({ item, last, busy }) {
     return null;
 }
 
-function Welcome({ id, name }) {
+function Welcome({ id, name, hasModel }) {
     const first = (name ?? "").split(/\s+/)[0];
 
     return html`<div class="pip-welcome">
         <p class="pip-hello">${first ? t("Hi {{name}}. I’m PiP.", { name: first }) : t("Hi. I’m PiP.")}</p>
         <p class="pip-intro">${t(INTRO)}</p>
+        ${
+            !hasModel &&
+            html`<p class="pip-intro">
+                <button
+                    type="button"
+                    class="button small"
+                    onClick=${() => openSheet({ type: "model", pipId: id })}
+                >
+                    ${t("Choose a model to use these suggestions")}
+                </button>
+            </p>`
+        }
         <div class="pip-chips">
             ${SUGGESTIONS.map(
                 (suggestion) => html`<button
                     type="button"
                     class="pip-chip"
                     key=${suggestion}
+                    disabled=${!hasModel && !suggestion.endsWith("…")}
                     onClick=${() =>
                         suggestion.endsWith("…")
                             ? openPip(suggestion.slice(0, -1))
                             : send(id, suggestion, false)}
                 >
-                    ${suggestion}
+                    ${t(suggestion)}
                 </button>`,
             )}
         </div>
@@ -431,9 +578,28 @@ function Welcome({ id, name }) {
 }
 
 function Composer({ id, busy }) {
-    const [text, setText] = useState(() => localStorage.getItem(DRAFT_KEY) ?? "");
+    const [saved, setSaved] = useState(() => {
+        composerDraft.syncText();
+
+        return composerDraft.state;
+    });
+    const { text, files, pending } = saved;
     const ref = useRef(null);
+    const picker = useRef(null);
     const draft = store.state.pipDraft;
+    const change = composerDraft.changeText;
+    const uploading = files.some((file) => file.state === "uploading");
+    const hasMessage = text.trim() !== "" || files.length > 0;
+    const sendDisabled =
+        !hasMessage || (uploading && !COMPACT.test(text.trim())) || Boolean(pending);
+
+    useLayoutEffect(() => {
+        const unsubscribe = composerDraft.subscribe(setSaved);
+
+        setSaved(composerDraft.state);
+
+        return unsubscribe;
+    }, []);
 
     const fit = () => {
         const box = ref.current;
@@ -441,16 +607,6 @@ function Composer({ id, busy }) {
         if (box) {
             box.style.height = "auto";
             box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
-        }
-    };
-
-    const change = (value) => {
-        setText(value);
-
-        if (value === "") {
-            localStorage.removeItem(DRAFT_KEY);
-        } else {
-            localStorage.setItem(DRAFT_KEY, value);
         }
     };
 
@@ -476,70 +632,209 @@ function Composer({ id, busy }) {
 
     const submit = async (event) => {
         event?.preventDefault();
-        const message = text.trim();
+        // Read the durable-in-this-tab draft, not a render's text or an old panel's queue.
+        const message = composerDraft.state.text.trim();
+        const compact = COMPACT.exec(message);
 
-        if (message === "") {
+        if (message === "" && composerDraft.state.files.length === 0) {
+            return;
+        }
+
+        if (compact && id === undefined) {
+            notify("error", t("PiP is not ready yet. Try again in a moment."));
+
+            return;
+        }
+
+        const token = composerDraft.begin(Boolean(compact));
+
+        if (!token) {
             return;
         }
 
         // What shows is what goes: words still coming would land in the emptied box.
         dictation.stop(true);
-        change("");
+        let success = false;
 
-        const compact = COMPACT.exec(message);
-
-        // A command for the panel, not words for PiP.
-        if (compact) {
-            if ((await compactPip(id, compact[1]?.trim())) === undefined) {
-                change(message);
-            }
-
-            return;
-        }
-
-        // Not sent: the words come back to the box, rather than be lost.
-        if (!(await send(id, message, busy))) {
-            change(message);
+        try {
+            // Compact never sends or removes the attachments waiting in the box.
+            success = compact
+                ? (await compactPip(id, compact[1]?.trim())) !== undefined
+                : await send(
+                      id,
+                      message,
+                      busy,
+                      token.files.map((file) => file.attachment),
+                  );
+        } finally {
+            composerDraft.finish(token, success);
         }
     };
 
-    return html`<form class="pip-composer" onSubmit=${submit}>
-        <textarea
-            ref=${ref}
-            rows="1"
-            value=${text}
-            placeholder=${dictation.listening ? "Listening…" : busy ? "Tell PiP more…" : "Ask PiP…"}
-            aria-label="Message to PiP"
-            enterkeyhint="send"
-            onInput=${(event) => change(event.currentTarget.value)}
-            onKeyDown=${(event) => {
-                if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-                    submit(event);
-                }
-            }}
-        ></textarea>
-        <${MicButton} dictation=${dictation} class="pip-mic" size=${18} />
-        ${
-            busy && text.trim() === ""
-                ? html`<button
-                      type="button"
-                      class="icon-button pip-send"
-                      aria-label="Stop PiP"
-                      title="Stop"
-                      onClick=${() => attempt(() => api(`c/${id}/abort`, {}))}
-                  >
-                      <${Icon} name="stop" size=${18} />
-                  </button>`
-                : html`<button
-                      type="submit"
-                      class="icon-button pip-send"
-                      aria-label="Send to PiP"
-                      disabled=${text.trim() === ""}
-                  >
-                      <${Icon} name="send" size=${18} />
-                  </button>`
+    const onPaste = (event) => {
+        const pasted = [...(event.clipboardData?.files ?? [])];
+
+        if (pasted.length === 0) {
+            return; // Normal text paste retains the browser's caret/selection behavior.
         }
-    </form>`;
+
+        event.preventDefault();
+        composerDraft.addFiles(pasted);
+        const words = event.clipboardData?.getData("text/plain") ?? "";
+        const box = event.currentTarget;
+
+        if (words) {
+            const at = box.selectionStart;
+            const end = box.selectionEnd;
+            const current = composerDraft.state.text;
+
+            change(`${current.slice(0, at)}${words}${current.slice(end)}`);
+            requestAnimationFrame(() =>
+                box.setSelectionRange(at + words.length, at + words.length),
+            );
+        }
+    };
+
+    return html`<div
+        class="pip-composer-wrap"
+        onDragOver=${(event) => {
+            if ([...(event.dataTransfer?.types ?? [])].includes("Files")) {
+                event.preventDefault();
+            }
+        }}
+        onDrop=${(event) => {
+            const dropped = [...(event.dataTransfer?.files ?? [])];
+
+            if (dropped.length > 0) {
+                event.preventDefault();
+                composerDraft.addFiles(dropped);
+            }
+        }}
+    >
+        ${
+            files.length > 0 &&
+            html`<div class="pip-attachments" aria-label=${t("Files attached to PiP")}>
+                ${files.map(
+                    (file) => html`<div class="pip-attachment" key=${file.key}>
+                        ${file.preview && html`<${Thumb} src=${file.preview} alt=${file.name} />`}
+                        <span class="pip-attachment-name">${file.name}</span>
+                        <span class="muted">${formatBytes(file.size)}</span>
+                        ${
+                            file.state === "uploading" &&
+                            html`<${Spinner} label=${`Uploading ${file.name}`} />`
+                        }
+                        <button
+                            type="button"
+                            class="icon-button pip-attachment-remove"
+                            aria-label=${`Remove ${file.name}`}
+                            onClick=${() => composerDraft.removeFile(file.key)}
+                        >
+                            <${Icon} name="close" size=${14} />
+                        </button>
+                    </div>`,
+                )}
+            </div>`
+        }
+        <form class="pip-composer" onSubmit=${submit}>
+            <input
+                class="pip-file-picker"
+                ref=${picker}
+                type="file"
+                multiple
+                hidden
+                disabled=${id === undefined}
+                onChange=${(event) => {
+                    composerDraft.addFiles([...(event.currentTarget.files ?? [])]);
+                    event.currentTarget.value = "";
+                }}
+            />
+            <button
+                type="button"
+                class="icon-button pip-attach"
+                aria-label=${t("Attach files to PiP")}
+                title=${t("Attach files. Images need an image-capable model to be read inline.")}
+                disabled=${id === undefined}
+                onClick=${() => picker.current?.click()}
+            >
+                <${Icon} name="clip" size=${18} />
+            </button>
+            <textarea
+                ref=${ref}
+                rows="1"
+                value=${text}
+                placeholder=${t(dictation.listening ? "Listening…" : busy ? "Tell PiP more…" : "Ask PiP…")}
+                aria-label=${t("Message to PiP")}
+                enterkeyhint="send"
+                onInput=${(event) => change(event.currentTarget.value)}
+                onPaste=${onPaste}
+                onKeyDown=${(event) => {
+                    if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.isComposing &&
+                        event.keyCode !== 229
+                    ) {
+                        submit(event);
+                    }
+                }}
+            ></textarea>
+            <${MicButton} dictation=${dictation} class="pip-mic" size=${18} />
+            ${
+                busy && !hasMessage && !pending
+                    ? html`<button
+                          type="button"
+                          class="icon-button pip-send"
+                          aria-label=${t("Stop PiP")}
+                          title=${t("Stop")}
+                          onClick=${() => attempt(() => api(`c/${id}/abort`, {}))}
+                      >
+                          <${Icon} name="stop" size=${18} />
+                      </button>`
+                    : html`<button
+                          type="submit"
+                          class="icon-button pip-send"
+                          aria-label=${t("Send to PiP")}
+                          disabled=${sendDisabled}
+                      >
+                          <${Icon} name="send" size=${18} />
+                      </button>`
+            }
+        </form>
+    </div>`;
+}
+
+/** The owner's private review queue, not just the memories that apply in the conversation behind PiP. */
+function PendingMemories({ id }) {
+    const data = useMemory(id, true);
+    const count = data?.pendingAll === true ? data.lessons.length : null;
+    const hint = data?.restartRequired
+        ? t("Restart required")
+        : count === null
+          ? t("Loading…")
+          : `${count} pending`;
+
+    return html`<div class="pip-memory">
+        <button
+            type="button"
+            class="button small ghost"
+            aria-label=${t("Pending memories")}
+            aria-describedby="pip-memory-count"
+            onClick=${() => {
+                closePip();
+                openSheet({ type: "memory", conversationId: id, pendingOnly: true });
+            }}
+        >
+            <span>${t("Pending memories")}</span>
+            <span
+                id="pip-memory-count"
+                class=${`pip-memory-count ${count > 0 ? "waiting" : ""}`}
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                ${hint}
+            </span>
+        </button>
+    </div>`;
 }
 
 function PipPanel({ leaving, scrim }) {
@@ -560,6 +855,8 @@ function PipPanel({ leaving, scrim }) {
     const items = itemsOf(rows, blocks.length > 0 ? { kind: "assistant", blocks } : null);
     const speaking = blocks.some(says);
     const busy = live.busy === true;
+    const model = modelLabel(view.agent);
+    const thinking = view.agent?.thinkingLevel === "off" ? "" : (view.agent?.thinkingLevel ?? "");
     // Calls of PiP's held for approval: the panel cannot answer them, so it says so and leads to where they can be.
     const waiting = ready ? (view.approvals ?? []) : [];
     const compacting = ready && (live.compactions ?? []).length > 0;
@@ -574,16 +871,24 @@ function PipPanel({ leaving, scrim }) {
     // Where the focus was before the panel: read as it first renders, before its box takes the focus.
     const [before] = useState(() => document.activeElement);
 
+    usePipResize(ref, me?.id);
     useDragToClose(ref, { dir: "down", onClose: closePip, enabled: NARROW.matches, scrim });
     // Focus goes back where it was when the panel closes.
-    useEffect(
-        () => () => {
-            if (before instanceof HTMLElement && before.isConnected) {
+    useEffect(() => {
+        const panel = ref.current;
+
+        return () => {
+            const active = document.activeElement;
+
+            if (
+                before instanceof HTMLElement &&
+                before.isConnected &&
+                (active === document.body || panel?.contains(active))
+            ) {
                 before.focus({ preventScroll: true });
             }
-        },
-        [],
-    );
+        };
+    }, []);
     // What shows now counts as seen.
     useEffect(markSeen, [pip?.endedAt]);
     // Stay at the newest words while they come, unless someone scrolled up to read.
@@ -614,18 +919,39 @@ function PipPanel({ leaving, scrim }) {
 
     return html`<section
         class=${`pip-panel ${leaving ? "leaving" : ""}`}
+        data-part="pip"
+        data-state=${leaving ? "closing" : undefined}
         ref=${ref}
         role="dialog"
         aria-modal=${NARROW.matches ? "true" : undefined}
         aria-label=${t("PiP, your assistant")}
     >
+        <div class="pip-resize pip-resize-left" data-pip-resize="left" aria-hidden="true"></div>
+        <div class="pip-resize pip-resize-top" data-pip-resize="top" aria-hidden="true"></div>
+        <div class="pip-resize pip-resize-corner" data-pip-resize="corner" aria-hidden="true"></div>
         <header class="pip-head">
             <div class="grip"></div>
             <span class=${`pip-mark ${busy ? "working" : ""}`} aria-hidden="true">
                 <${Icon} name="pip" size=${18} />
             </span>
-            <h2>PiP</h2>
-            <span class="pip-status" aria-live="polite">${status}</span>
+            <div class="pip-heading">
+                <div class="pip-title-line">
+                    <h2>PiP</h2>
+                    <span class="pip-status" aria-live="polite">${status}</span>
+                </div>
+                <button
+                    class="model-chip pip-model"
+                    disabled=${!ready || busy || compacting}
+                    aria-label=${`PiP model: ${model}${thinking ? ` · ${thinking}` : ""}`}
+                    title=${t("Change PiP's model and thinking level")}
+                    onClick=${() => openSheet({ type: "model", pipId: id })}
+                >
+                    <span class="model-name">
+                        ${model.replace(/^(?:anthropic:\s*)?claude\s+/i, "")}
+                    </span>
+                    ${thinking && html`<span class="model-level">${thinking}</span>`}
+                </button>
+            </div>
             ${
                 ready &&
                 html`<${PipContext} stats=${view.stats} window=${view.agent?.contextWindow} />`
@@ -641,7 +967,7 @@ function PipPanel({ leaving, scrim }) {
             </button>
             <button
                 class="icon-button"
-                aria-label="Start fresh"
+                aria-label=${t("Start fresh")}
                 title=${t("Start fresh: PiP forgets this conversation")}
                 disabled=${!ready || busy || rows.length === 0}
                 onClick=${() =>
@@ -679,9 +1005,13 @@ function PipPanel({ leaving, scrim }) {
         >
             ${
                 !ready
-                    ? html`<div class="pip-loading"><${Spinner} label="Waking PiP" /></div>`
+                    ? html`<div class="pip-loading"><${Spinner} label=${t("Waking PiP")} /></div>`
                     : rows.length === 0 && !busy
-                      ? html`<${Welcome} id=${id} name=${me?.name} />`
+                      ? html`<${Welcome}
+                            id=${id}
+                            name=${me?.name}
+                            hasModel=${Boolean(view.agent?.model)}
+                        />`
                       : items.map(
                             (item, index) =>
                                 html`<${Item}
@@ -689,6 +1019,7 @@ function PipPanel({ leaving, scrim }) {
                                     item=${item}
                                     last=${index === items.length - 1}
                                     busy=${busy}
+                                    conversationId=${id}
                                 />`,
                         )
             }
@@ -716,9 +1047,15 @@ function PipPanel({ leaving, scrim }) {
                         navigate(id);
                     }}
                 >
-                    Review
+                    ${t("Review")}
                 </button>
             </div>`
+        }
+        ${
+            ready &&
+            me?.role === "owner" &&
+            memoryAvailable(id) &&
+            html`<${PendingMemories} id=${id} />`
         }
         <${Composer} id=${id} busy=${busy} />
     </section>`;
@@ -740,7 +1077,7 @@ function PipBubble() {
     return html`<button
         class=${`pip-bubble ${kept} ${leaving ? "leaving" : ""}`}
         aria-label=${t(kept === "busy" ? "PiP is working: open PiP" : "PiP has something new: open PiP")}
-        title=${t("PiP (Alt A)")}
+        title=${t("PiP (Alt+A)")}
         onClick=${() => openPip()}
     >
         <${Icon} name="pip" size=${22} />
@@ -787,7 +1124,9 @@ export function PipRailButton() {
 
     return html`<button
         class=${`rail-button rail-pip ${pip?.busy ? "lit" : ""} ${pipOpen ? "open" : ""}`}
-        title=${t("PiP, your assistant (Alt A)")}
+        data-part="rail-button"
+        data-state=${railState(pipOpen, Boolean(pip?.busy))}
+        title=${t("PiP, your assistant (Alt+A)")}
         aria-label=${["PiP", pip?.busy && t("working"), unread && t("something new")].filter(Boolean).join(", ")}
         aria-pressed=${pipOpen}
         onClick=${togglePip}

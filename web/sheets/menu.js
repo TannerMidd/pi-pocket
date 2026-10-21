@@ -1,10 +1,14 @@
 import { t } from "../i18n.js";
 // The menu: what can be done in this session and in the app.
+import { useLayoutEffect, useRef } from "preact/hooks";
 import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
 import { chatUnread } from "../chat.js";
 import { schedulesAvailable, triggersOn, watchAvailable, watchPr } from "../commands.js";
+import { extensionMenuItems, safeMode } from "../extension-ui.js";
+import { useChanges } from "../diff.js";
 import { filesAvailable, setFilesOpen } from "../files-panel.js";
 import { peeksOn, togglePeeks } from "../peeks.js";
+import { modelRefreshAvailable, refreshModels } from "../model-refresh.js";
 import { openPip, pipAvailable, pipUnread } from "../pip.js";
 import { setArchived } from "../sessions.js";
 import { openSubagent } from "../subagents.js";
@@ -13,6 +17,7 @@ import {
     api,
     attempt,
     canSteer,
+    canToggleTurns,
     closeSheet,
     collab,
     navigate,
@@ -20,14 +25,30 @@ import {
     openSheet,
     scoped,
     setUnread,
+    signOut,
     store,
 } from "../store.js";
-import { isPinned, paletteOf, togglePin } from "../theme.js";
+import { isPinned, lookLabel, togglePin } from "../theme.js";
 import { currentTrust, trustAvailable } from "../trust.js";
 import { branchAvailable } from "./branch.js";
 import { memoryAvailable, memoryHint, useMemory } from "./memory.js";
 import { defaultLabel, defaultsKept } from "./model.js";
 import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
+
+// Key hints are for people with a keyboard: a touch screen has none.
+const touch = matchMedia("(pointer: coarse)").matches;
+
+/** The Extensions row's hint: that this tab loads none of their browser parts (safe mode), and Lancet Guard. */
+function extensionsHint() {
+    const { guard } = store.state;
+
+    return [
+        safeMode() && t("browser parts off here"),
+        guard?.enabled ? t("Lancet Guard on") : guard?.available ? t("Lancet Guard off") : "",
+    ]
+        .filter(Boolean)
+        .join(" · ");
+}
 
 /**
  * The session's places as big tiles at the top of the menu: Files, Changes, the browser, artifacts, the chat, find,
@@ -35,13 +56,26 @@ import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
  * thumb's width each.
  */
 function Places() {
-    const { view, browser, browserOpen, server } = store.state;
-    const conversation = view.conversation;
-
-    if (!conversation) {
+    if (!store.state.view.conversation) {
         return null;
     }
 
+    return filesAvailable() ? html`<${PlacesWithChanges} />` : html`<${PlacesGrid} />`;
+}
+
+/** Only people who can open Files request its shared changes data, just as the top bar does. */
+function PlacesWithChanges() {
+    const { changes } = useChanges();
+
+    return html`<${PlacesGrid} changes=${changes} />`;
+}
+
+function PlacesGrid({ changes = null }) {
+    const { view, browser, browserOpen, server, filesOpen, filesTab } = store.state;
+    // Match the top bar: uncommitted files in a repository, Pi's edits elsewhere, plus any unlisted files.
+    const changeCount = changes
+        ? changes.files.length + (changes.repo ? 0 : changes.piOnly.length) + (changes.more ?? 0)
+        : 0;
     const live = browser?.open && browser.url !== "" && browser.url !== "about:blank";
     const unread = collab() ? chatUnread() : 0;
     const places = [
@@ -49,12 +83,16 @@ function Places() {
             id: "files",
             icon: "folder",
             label: t("Files"),
+            on: filesOpen && filesTab === "files",
             run: () => setFilesOpen(true, "files"),
         },
         filesAvailable() && {
             id: "changes",
             icon: "diff",
             label: t("Changes"),
+            count: changeCount,
+            counted: changeCount === 1 ? t("changed file") : t("changed files"),
+            on: filesOpen && filesTab === "changes",
             run: () => setFilesOpen(true, "changes"),
         },
         browserAvailable() && {
@@ -140,7 +178,7 @@ function Places() {
                 onClick=${place.run}
             >
                 <span class="place-icon badge-host">
-                    <${Icon} name=${place.icon} size=${22} />
+                    <${Icon} name=${place.icon} size=${20} />
                     ${place.count > 0 && html`<span class="badge">${place.count}</span>`}
                     ${place.dot && html`<span class="browser-dot" aria-hidden="true"></span>`}
                 </span>
@@ -157,11 +195,149 @@ function Places() {
 export function PlacesSheet() {
     const conversation = store.state.view.conversation;
 
-    return html`<${Sheet} title=${conversation?.title ?? t("Open")} onClose=${closeSheet}>
+    return html`<${Sheet}
+        title=${conversation?.title ?? t("Open")}
+        onClose=${closeSheet}
+        className="places-sheet"
+    >
         <${Places} />
-        ${item(t("Session menu"), () => openSheet({ type: "menu" }), t("rename, context, settings"))}
+        ${item(t("Session menu"), () => openSheet({ type: "menu", fromPlaces: true }), t("rename, context, settings"))}
     <//>`;
 }
+
+/** Keep Sheet's Esc, drag, and focus handling; the sheet trail already owns its back-stack layer. */
+function MenuFrame({ title, children }) {
+    const host = useRef(null);
+
+    useLayoutEffect(() => {
+        const element = host.current;
+        const button = document.querySelector('.topbar [aria-label="Menu"]');
+        const active = document.activeElement;
+        const opener = active === document.body ? button : active;
+
+        const place = () => {
+            const rect = button?.getBoundingClientRect();
+            const top = (rect?.bottom ?? 58) + 6;
+            const bottom =
+                (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? innerHeight);
+            const left = Math.max(
+                8,
+                Math.min((rect?.right ?? innerWidth - 8) - 360, innerWidth - 368),
+            );
+
+            element.style.setProperty("--menu-left", `${left}px`);
+            element.style.setProperty("--menu-top", `${top}px`);
+            element.style.setProperty("--menu-height", `${Math.max(100, bottom - top - 8)}px`);
+        };
+
+        const body = element.querySelector(".sheet-body");
+
+        if (menuScroll !== null) {
+            body.scrollTop = menuScroll;
+            menuScroll = null;
+        }
+
+        place();
+        addEventListener("resize", place);
+        visualViewport?.addEventListener("resize", place);
+
+        return () => {
+            removeEventListener("resize", place);
+            visualViewport?.removeEventListener("resize", place);
+
+            // Another sheet open now: the menu is going back under it, not closing.
+            if (store.state.sheet) {
+                menuScroll = body.scrollTop;
+            }
+
+            const focused = document.activeElement;
+            const back = opener?.isConnected ? opener : button;
+            // As sheets.js does: not behind a sheet the menu opened, and not into a text field on a touch screen,
+            // where its keyboard would pop up.
+            const field =
+                matchMedia("(pointer: coarse)").matches &&
+                back?.matches("input, textarea, [contenteditable]");
+
+            if (
+                !store.state.sheet &&
+                !field &&
+                (focused === document.body || element.contains(focused)) &&
+                back?.isConnected
+            ) {
+                back.focus({ preventScroll: true });
+            }
+        };
+    }, []);
+
+    const onKey = (event) => {
+        if (
+            event.defaultPrevented ||
+            event.isComposing ||
+            event.keyCode === 229 ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey
+        ) {
+            return;
+        }
+
+        const items = [...host.current.querySelectorAll(".place, .list-item")];
+        const active = document.activeElement;
+        const index = items.indexOf(active);
+        let target;
+
+        if (event.key === "Tab") {
+            // Close stays reachable with Tab, but is not part of the menu's item navigation.
+            const controls = [...items, ...host.current.querySelectorAll(".sheet-head button")];
+            const at = controls.indexOf(active);
+            const next =
+                at < 0
+                    ? event.shiftKey
+                        ? controls.length - 1
+                        : 0
+                    : (at + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+
+            target = controls[next];
+        } else if (event.key === "Home") {
+            target = items[0];
+        } else if (event.key === "End") {
+            target = items.at(-1);
+        } else if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) {
+            const down = event.key === "ArrowDown" || event.key === "ArrowRight";
+            const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+            const tiles = host.current.querySelectorAll(".place").length;
+            const step = vertical && index >= 0 && index < tiles ? 3 : 1;
+            let next = index < 0 ? (down ? 0 : items.length - 1) : index + (down ? step : -step);
+
+            // Down from the grid's last row enters the first text row; Up from its first row wraps to the last item.
+            if (vertical && index >= 0 && index < tiles) {
+                next = next < 0 ? items.length - 1 : Math.min(next, tiles);
+            }
+
+            target = items[(next + items.length) % items.length];
+        }
+
+        if (target) {
+            event.preventDefault();
+            target.focus();
+        }
+    };
+
+    return html`<div class="nav-menu-host" data-part="menu" ref=${host} onKeyDown=${onKey}>
+        <${Sheet} title=${title} onClose=${closeSheet} className="nav-menu">
+            ${children}
+        <//>
+    </div>`;
+}
+
+/** The menu's scroll, kept while a sheet it opened shows, so back finds the menu where it was left. */
+let menuScroll = null;
+
+store.subscribe(({ sheet }) => {
+    if (!sheet) {
+        menuScroll = null;
+    }
+});
 
 /** The project's trust in a word, once the server said. */
 function trustHint() {
@@ -183,30 +359,25 @@ function trustHint() {
     return t(info.trusted ? "trusted" : "not trusted");
 }
 
-export function MenuSheet() {
+/** The menu; `places` is false when it opens from the places sheet, which just showed the tiles. */
+export function MenuSheet({ places = true }) {
     const { view, me, server } = store.state;
     const conversation = view.conversation;
     const steer = canSteer();
     const session = conversation?.kind === "session";
     const turns = view.turns;
-    // While take turns is on, settings belong to the driver. Turning it off also works for the owner, or when the
-    // driver has left: the same rules the server applies.
+    // While take turns is on, settings belong to the driver.
     const driving = !turns?.on || turns.driver === me?.id;
-    const canStopTurns =
-        driving ||
-        me?.role === "owner" ||
-        !turns.driver ||
-        !store.state.presence.some((person) => person.id === turns.driver);
     const instructions = view.agent?.instructions;
     const memory = useMemory();
 
-    return html`<${Sheet} title=${conversation?.title ?? t("Menu")} onClose=${closeSheet}>
-        <${Places} />
+    return html`<${MenuFrame} title=${conversation?.title ?? t("Menu")}>
+        ${places && html`<${Places} />`}
+        <div class="menu-session">
         ${
             conversation &&
             collab() &&
-            steer &&
-            (!turns?.on || canStopTurns) &&
+            canToggleTurns() &&
             item(
                 turns?.on ? t("Turn off take turns") : t("Take turns"),
                 () =>
@@ -360,6 +531,7 @@ export function MenuSheet() {
                 setArchived([conversation.id], !conversation.archived);
             })
         }
+        </div>
         ${
             view.subagents.length > 0 &&
             html`<div class="group">
@@ -376,7 +548,8 @@ export function MenuSheet() {
         }
         <div class="group">
             <div class="group-title">${t("App")}</div>
-            ${item(t("Appearance"), () => openSheet({ type: "appearance" }), paletteOf().name)}
+            ${item(t("Appearance"), () => openSheet({ type: "appearance" }), lookLabel())}
+            ${!touch && item(t("Keyboard shortcuts"), () => openSheet({ type: "shortcuts" }), "?")}
             ${
                 me?.role === "owner" &&
                 defaultsKept() &&
@@ -384,20 +557,19 @@ export function MenuSheet() {
                     t("Default model"),
                     () => openSheet({ type: "model", id: "default", forDefault: true }),
                     defaultLabel(server?.defaultModel, store.state.models) ||
-                        t("the last one picked"),
+                        t("project, last picked, then Pi global"),
                 )
             }
-
             ${item(t("Your name"), () => openSheet({ type: "name" }), me?.name)}
             ${collab() ? item(t("People"), () => openSheet({ type: "people" }), me?.role === "viewer" ? t("you can view") : "") : item(t("Sign in another device"), () => openSheet({ type: "invite" }))}
             ${collab() && item(t("Notifications"), () => openSheet({ type: "notifications" }), t("Pi finished, approvals, chat"))}
             ${item(t("Running now"), () => openSheet({ type: "running" }), t("everything Pi is doing"))}
             ${item(t("Spend"), () => openSheet({ type: "spend" }), me?.role === "owner" ? t("by person and session, limits") : t("yours"))}
             ${triggersOn() && me?.role !== "viewer" && item(t("Webhooks and watches"), () => openSheet({ type: "hooks" }), t("GitHub, other services"))}
-            ${item(t("Providers"), () => openSheet({ type: "providers" }))}
-            ${item(t("Extensions"), () => openSheet({ type: "extensions" }), store.state.guard?.enabled ? t("Lancet Guard on") : store.state.guard?.available ? t("Lancet Guard off") : "")}
-
-
+            ${me?.role === "owner" && item(t("Providers"), () => openSheet({ type: "providers" }))}
+            ${modelRefreshAvailable() && item(t("Refresh models"), refreshModels, store.state.modelRefresh.loading ? t("refreshing…") : t("models.json and providers"))}
+            ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}
+            ${item(t("Extensions"), () => openSheet({ type: "extensions" }), extensionsHint())}
             ${
                 me?.role === "owner" &&
                 server?.supervised &&
@@ -415,12 +587,7 @@ export function MenuSheet() {
                     t("running work resumes"),
                 )
             }
-            ${item(t("Sign out"), () =>
-                attempt(async () => {
-                    await api("logout", {});
-                    location.href = "/";
-                }),
-            )}
+            ${item(html`<span class="menu-signout">${t("Sign out")}</span>`, signOut)}
         </div>
     <//>`;
 }

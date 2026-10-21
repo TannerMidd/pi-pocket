@@ -1,0 +1,23 @@
+{
+    "name": "pi-pocket-docs",
+    "private": true,
+    "description": "Pi Pocket's documentation site: renders the repository's docs/ in place with Starlight",
+    "type": "module",
+    "engines": {
+        "node": ">=22.19"
+    },
+    "scripts": {
+        "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+        "build": "ASTRO_TELEMETRY_DISABLED=1 astro build --force",
+        "check": "ASTRO_TELEMETRY_DISABLED=1 astro build --force",
+        "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview"
+    },
+    "dependencies": {
+        "@astrojs/markdown-satteri": "0.4.4",
+        "@astrojs/starlight": "0.42.6",
+        "astro": "7.4.0",
+        "github-slugger": "2.0.0",
+        "satteri": "0.10.5",
+        "typescript": "6.0.3"
+    }
+}

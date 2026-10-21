@@ -101,7 +101,9 @@ export type ProjectTrust = {
     skills: { name: string; description: string }[];
     /** The skills in its `.pi/skills/`, which load unless Pi was told not to trust it. */
     ownSkills: { name: string; description: string }[];
-    /** Whether to ask the owner: the project has such skills, no decision applies, and Pi's setting is to ask. */
+    /** The project has a .pi/settings.json file, whose model defaults require trust. */
+    settings: boolean;
+    /** Whether to ask the owner: project skills or settings exist, no decision applies, and Pi's setting is to ask. */
     ask: boolean;
     /** Pi's trust store cannot be read: nothing is trusted, and no answer can be saved until it is mended. */
     unreadable?: true;
@@ -212,6 +214,7 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
               }).skills.map(({ name, description }) => ({ name, description }));
     const skills = skillsIn(folders);
     const ownSkills = skillsIn(existsSync(own) ? [own] : []);
+    const settings = existsSync(join(folder, CONFIG_DIR_NAME, "settings.json"));
 
     return {
         folder,
@@ -222,9 +225,12 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
         folders,
         skills,
         ownSkills,
-        // Only about skills that would load (an empty .agents/skills, or one of files that are not skills, has none),
-        // and never about a store that cannot be read: the answer could not be saved.
-        ask: skills.length > 0 && saved === null && sources.defaultProjectTrust === "ask",
+        settings,
+        // Empty skill folders do not ask, but a settings-only project does. An unreadable trust store cannot save.
+        ask:
+            (skills.length > 0 || settings) &&
+            saved === null &&
+            sources.defaultProjectTrust === "ask",
         ...(saved === undefined ? { unreadable: true as const } : {}),
     };
 }

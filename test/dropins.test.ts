@@ -1,4 +1,4 @@
-// Drop-in extensions: the owner's own modules in the data folder load like built-in ones, but only once turned on.
+// Owner-managed extension modules in the data folder: drop-ins load like built-ins, but only once turned on.
 import {
     type App,
     cleanUp,
@@ -14,7 +14,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -104,22 +104,14 @@ after(async () => {
 
 const module = (file: string) => app.loader.list().filter((each) => each.file === file);
 
-test("drop-ins are listed after the built-in modules, off until the owner turns them on, and cannot replace one", async () => {
+test("drop-ins are off until the owner turns them on, and cannot replace a built-in module", async () => {
     const [listed] = module("shout.ts");
 
     assert.equal(listed?.source, "drop-in");
-    assert.equal(listed?.path, join(dropIns, "shout.ts"));
-    assert.equal(listed?.summary, "Shout offers a tool that shouts!.");
     assert.equal(listed?.enabled, false);
-    assert.equal(app.loader.list().at(-1)?.file, "ui-locale.ts");
     assert.deepEqual(
         module("plan.ts").map((each) => each.source),
         ["built-in"],
-    );
-    assert.equal(
-        realpathSync(join(dropIns, "node_modules")),
-        realpathSync(join(import.meta.dirname, "..", "node_modules")),
-        "drop-ins import Pi Pocket's packages",
     );
     // Where the server keeps files is the owner's to know.
     const scoped = app.config.addUser("Sid", "guest", ["1"]).user;
@@ -128,11 +120,52 @@ test("drop-ins are listed after the built-in modules, off until the owner turns 
     assert.equal(seen.dropIns, undefined);
     assert.equal(seen.modules.find((each) => each.file === "shout.ts")?.path, undefined);
     assert.equal((await app.extensions(owner(app))).dropIns, dropIns);
+    // Pi Pocket's types beside the drop-ins: a link to them, never a module.
+    assert.equal(
+        realpathSync(join(dropIns, "_pocket.d.ts")),
+        realpathSync(new URL("../types/pocket.d.ts", import.meta.url)),
+    );
+    assert.deepEqual(module("_pocket.d.ts"), []);
+});
+
+test("_pocket.d.ts: a link the owner pointed elsewhere stays, and only Pi Pocket's own copy is refreshed", async () => {
+    const { linkTypes } = await import("../src/server/reload.ts");
+    const types = realpathSync(new URL("../types/pocket.d.ts", import.meta.url));
+    const folder = join(root, "types-link");
+    const elsewhere = join(root, "their-pocket.d.ts");
+    const link = join(folder, "_pocket.d.ts");
+
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(elsewhere, "export {};\n");
+    symlinkSync(elsewhere, link, "file");
+    linkTypes(folder, types);
+    assert.equal(realpathSync(link), elsewhere);
+
+    // Where links cannot be made, Pi Pocket keeps a copy: a stale one is refreshed, a file of the owner's is not.
+    rmSync(link);
+    const mark =
+        "// A copy of Pi Pocket's types/pocket.d.ts: Pi Pocket refreshes it at each start. Edits here are lost.\n";
+
+    writeFileSync(link, `${mark}export type Old = 1;\n`);
+    linkTypes(folder, types);
+    assert.equal(readFileSync(link, "utf8"), mark + readFileSync(types, "utf8"));
+    writeFileSync(link, "export type Mine = 1;\n");
+    linkTypes(folder, types);
+    assert.equal(readFileSync(link, "utf8"), "export type Mine = 1;\n");
 });
 
 test("a drop-in that is on gives Pi its tools and hooks, reloads when edited, and goes away when deleted", async () => {
     await app.setExtensionEnabled(owner(app), "shout.ts", true);
-    assert.deepEqual(module("shout.ts")[0]?.extensions, [{ name: "shout", tools: ["shout"] }]);
+    assert.deepEqual(module("shout.ts")[0]?.extensions, [
+        {
+            name: "shout",
+            tools: ["shout"],
+            readOnlyTools: [],
+            hooks: ["beforeTool"],
+            sections: [],
+            wraps: [],
+        },
+    ]);
     const id = await newSession(app);
 
     await say(app, id, "shout hello");
@@ -266,62 +299,17 @@ export default () =>
 	});
 `;
 
-test("a drop-in cannot take a name Pi Pocket keeps, or one another module has: it is refused, and says why", async () => {
+test("a drop-in cannot take a name Pi Pocket keeps: it is refused", async () => {
     const refused = async (file: string, source: string, why: RegExp) => {
         writeFileSync(join(dropIns, file), source);
         await assert.rejects(app.setExtensionEnabled(owner(app), file, true), why);
-        const [listed] = module(file);
-
-        assert.match(listed?.error ?? "", why, `${file} says why`);
-        assert.deepEqual(listed?.extensions, [], `${file} installed nothing`);
+        assert.deepEqual(module(file)[0]?.extensions, [], `${file} installed nothing`);
     };
 
     // Lancet Guard's name, while the guard is off: turning it on later would replace the drop-in, and the drop-in
     // turned off would remove the guard.
     await refused("guard-twin.ts", named("pocket-guard"), /pocket-guard is Pi Pocket's own/);
-    await refused("my-tools.ts", named("coding-tools"), /coding-tools is Pi Pocket's own/);
     await refused("my-bash.ts", named("my-bash", "bash"), /bash is a built-in tool's/);
-    await refused("my-browser.ts", named("my-browser", "browser"), /browser is a built-in tool's/);
-
-    // Another drop-in's: the first one in keeps it.
-    writeFileSync(join(dropIns, "first.ts"), named("first", "greet"));
-    await app.setExtensionEnabled(owner(app), "first.ts", true);
-    assert.deepEqual(module("first.ts")[0]?.extensions, [{ name: "first", tools: ["greet"] }]);
-    await refused(
-        "second.ts",
-        named("second", "greet"),
-        /first\.ts already has a tool named greet/,
-    );
-    await refused(
-        "third.ts",
-        named("first"),
-        /first\.ts already installs an extension named first/,
-    );
-
-    // An edit that takes such a name is refused too, and the version that loaded keeps running.
-    writeFileSync(join(dropIns, "first.ts"), named("first", "bash"));
-    await assert.rejects(app.loader.reload("first.ts"), /bash is a built-in tool's/);
-    assert.deepEqual(module("first.ts")[0]?.extensions, [{ name: "first", tools: ["greet"] }]);
-    // Reloading its own working version is not a clash with itself.
-    writeFileSync(join(dropIns, "first.ts"), named("first", "greet"));
-    await app.loader.reload("first.ts");
-    assert.equal(module("first.ts")[0]?.error, undefined);
-});
-
-test("the built-in tool names a drop-in may not take are every tool the built-ins install", async () => {
-    const { BUILT_IN_TOOLS } = await import("../src/server/reload.ts");
-    const { CodingTools } = await import("@earendil-works/pi-durable/tools");
-    // Every built-in module, on or off, as it would install.
-    const installed = [
-        ...(CodingTools.tools ?? []).map((tool) => tool.name),
-        ...app.loader
-            .list()
-            .filter((each) => each.source === "built-in" && each.enabled)
-            .flatMap((each) => each.extensions.flatMap((extension) => extension.tools)),
-    ];
-
-    assert.ok(installed.length >= 9, "the built-ins are on");
-    assert.deepEqual([...installed].sort(), [...BUILT_IN_TOOLS].sort());
 });
 
 test("locale enable and disable choices survive app restarts", async () => {

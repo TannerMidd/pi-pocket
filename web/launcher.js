@@ -2,14 +2,19 @@ import { t } from "./i18n.js";
 // The launcher, after Omarchy's Walker: one box for sessions, actions, and themes. Mod+K opens it anywhere. Arrowing
 // onto a theme shows it at once; Enter keeps it, Escape goes back. Start with > for actions only, @ for sessions, # for
 // themes.
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { browserAvailable, toggleBrowser } from "./browser.js";
+import { folderColor } from "./avatar.js";
 import { planAvailable, schedulesAvailable } from "./commands.js";
+import { extensionLauncherItems } from "./extension-ui.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { togglePeeks } from "./peeks.js";
+import { modelRefreshAvailable, refreshModels } from "./model-refresh.js";
 import { openPip, pipAvailable } from "./pip.js";
-import { setArchived, workspaceOrder } from "./sessions.js";
+import { setArchived } from "./sessions.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
+import { recentLabels } from "./sheets/folder.js";
+import { galleryAvailable } from "./sheets/gallery.js";
 import { piSessionsAvailable } from "./sheets/pi-sessions.js";
 import {
     actions,
@@ -20,23 +25,32 @@ import {
     notify,
     openSheet,
     scoped,
+    signOut,
     store,
+    workspaceOrder,
 } from "./store.js";
 import {
+    BASE_LOOK,
+    chooseLook,
+    folderPaletteIds,
+    lookIds,
     paletteOf,
     prefs,
     preview,
     setPrefs,
-    THEMES,
     themeIds,
     themeVars,
     varsStyle,
 } from "./theme.js";
-import { copyText, html, Icon, Keys, Marked, shortPath, Slide, timeAgo, useSlide } from "./ui.js";
+import { APPLE, copyText, html, Icon, Keys, Marked, scrimPress, shortPath, timeAgo } from "./ui.js";
+
+/** How far a letter that does not begin a word may be from the one before it, in a match that is not contiguous. */
+const MAX_GAP = 3;
 
 /**
  * How well `query` matches `text` as a subsequence: null for no match, else a score (higher is better) and the matched
- * places. Runs of letters, letters at word starts, and an early first letter count for more.
+ * places. Runs of letters, letters at word starts, and an early first letter count for more. Letters scattered through a
+ * text must stay close (within a few characters) or begin a word, so "files" does not match "fix the login loop".
  */
 function fuzzy(text, query) {
     if (query === "") {
@@ -73,6 +87,10 @@ function fuzzy(text, query) {
         const run = hits.length > 0 && hits[hits.length - 1] === at - 1;
         const start = at === 0 || /[\s/._-]/.test(hay[at - 1]);
 
+        if (hits.length > 0 && !start && at - from > MAX_GAP) {
+            return null;
+        }
+
         score += 1 + (run ? 5 : 0) + (start ? 8 : 0) - Math.min(at - from, 10) * 0.3;
         hits.push(at);
         from = at + 1;
@@ -83,11 +101,15 @@ function fuzzy(text, query) {
 
 /** The actions that make sense here, as launcher items. */
 function actionItems() {
-    const { view, conversationId, me } = store.state;
+    const { view, conversationId, me, folderFavorites, server } = store.state;
     const conversation = conversationId !== null ? view.conversation : null;
     const session = conversation?.kind === "session";
     const steer = canSteer();
     const canStart = steer && !scoped();
+    // The folder a session starts in "here": the one the open session works in. Issue #96, reported by @poncardasm.
+    const here = view.agent?.cwd ?? conversation?.cwd ?? null;
+    // As the folder picker names them: folders of one name get their parent's too.
+    const favoriteNames = recentLabels(folderFavorites, server?.home);
     const wide = matchMedia("(min-width: 960px)").matches;
     const list = [
         canStart && {
@@ -96,6 +118,19 @@ function actionItems() {
             keys: "Alt N",
             run: () => openSheet({ type: "cwd", mode: "new" }),
         },
+        canStart &&
+            here !== null && {
+                label: t("New session here"),
+                detail: shortPath(here, server?.home),
+                keywords: "in this folder",
+                icon: "plus",
+                run: () =>
+                    attempt(async () => {
+                        const created = await actions.createSession(here);
+
+                        navigate(created.id);
+                    }),
+            },
         piSessionsAvailable() && {
             label: t("Continue a Pi session"),
             detail: t("from Pi in the terminal"),
@@ -116,7 +151,7 @@ function actionItems() {
         },
         {
             label: t("Appearance"),
-            detail: t("theme, tiling, motion, text size, reply speed"),
+            detail: t("theme, colors, tiling, motion, text size, thinking, reply speed"),
             icon: "palette",
             run: () => openSheet({ type: "appearance" }),
         },
@@ -134,6 +169,13 @@ function actionItems() {
             run: togglePeeks,
         },
         {
+            label: t(prefs().showThinking ? "Hide thinking" : "Show thinking"),
+            detail: t("Pi's thoughts above the live line and in the conversation"),
+            icon: "sparkle",
+            keys: "Alt T",
+            run: () => setPrefs({ showThinking: !prefs().showThinking }),
+        },
+        {
             label: t(prefs().speed ? "Hide reply speed" : "Show reply speed"),
             detail: t("how fast the last answer came, under the message box"),
             icon: "pulse",
@@ -148,7 +190,7 @@ function actionItems() {
         store.state.me?.role === "owner" &&
             store.state.server?.defaultModel !== undefined && {
                 label: t("Default model"),
-                detail: t("the model and thinking new sessions start with"),
+                detail: t("owner default first; otherwise project, last picked, then Pi global"),
                 icon: "sparkle",
                 run: () => openSheet({ type: "model", id: "default", forDefault: true }),
             },
@@ -180,6 +222,7 @@ function actionItems() {
             filesAvailable() && {
                 label: t("Changes"),
                 detail: t("review what changed, file by file"),
+                keywords: "diff",
                 icon: "fork",
                 run: () => toggleFiles("changes"),
             },
@@ -232,8 +275,8 @@ function actionItems() {
                 run: () => setArchived([conversation.id], !conversation.archived),
             },
         pipAvailable() && {
-            label: "Ask PiP",
-            detail: "your assistant, over any screen",
+            label: t("Ask PiP"),
+            detail: t("your assistant, over any screen"),
             icon: "pip",
             keys: "Alt A",
             run: () => openPip(),
@@ -244,13 +287,28 @@ function actionItems() {
             icon: "pulse",
             run: () => openSheet({ type: "running" }),
         },
-        {
+        me?.role === "owner" && {
             label: t("Providers"),
             detail: t("sign in to model providers"),
             icon: "key",
             run: () => openSheet({ type: "providers" }),
         },
+        modelRefreshAvailable() && {
+            label: t("Refresh models"),
+            detail: store.state.modelRefresh.loading
+                ? t("refresh in progress")
+                : t("reload configured models and check providers"),
+            icon: "reload",
+            run: refreshModels,
+        },
         { label: t("Extensions"), icon: "shield", run: () => openSheet({ type: "extensions" }) },
+        galleryAvailable() && {
+            label: t("Find extensions"),
+            detail: t("browse and install drop-ins"),
+            keywords: "gallery",
+            icon: "search",
+            run: () => openSheet({ type: "gallery" }),
+        },
         { label: t("Spend"), icon: "pulse", run: () => openSheet({ type: "spend" }) },
         collab()
             ? {
@@ -275,13 +333,31 @@ function actionItems() {
             icon: "users",
             run: () => openSheet({ type: "name" }),
         },
+        { label: t("Sign out"), detail: t("this browser"), icon: "logout", run: signOut },
+        // What extensions' browser modules added (`extension-ui.js`).
+        ...extensionLauncherItems(),
+        // Last: a list that is cut keeps the actions above, however many favorites there are (up to 100).
+        ...(canStart
+            ? folderFavorites.map((path, index) => ({
+                  key: `action:new-favorite:${path}`,
+                  label: t("New session in {{folder}}", { folder: favoriteNames[index] }),
+                  detail: shortPath(path, server?.home),
+                  icon: "star",
+                  run: () =>
+                      attempt(async () => {
+                          const created = await actions.createSession(path);
+
+                          navigate(created.id);
+                      }),
+              }))
+            : []),
     ];
 
     return list.filter(Boolean).map((item) => ({
         ...item,
         kind: "action",
-        key: `action:${item.label}`,
-        text: `${item.label} ${item.detail ?? ""}`,
+        key: item.key ?? `action:${item.label}`,
+        text: `${item.label} ${item.detail ?? ""} ${item.keywords ?? ""}`,
     }));
 }
 
@@ -289,57 +365,121 @@ function sessionItems() {
     const { sessions, server } = store.state;
     const order = workspaceOrder();
     const archived = sessions.filter((session) => session.archived);
+    const numbers = new Map(order.map((session, index) => [session.id, index]));
 
     return [...order, ...archived].map((session) => {
-        const number = order.indexOf(session);
+        const number = numbers.get(session.id) ?? -1;
 
         return {
             kind: "session",
             key: `session:${session.id}`,
             label: session.title ?? t("New session"),
-            detail: `${shortPath(session.cwd, server?.home)} · ${session.busy ? t("working") : timeAgo(session.updatedAt)}${session.archived ? ` · ${t("archived")}` : ""}`,
+            detail: shortPath(session.cwd, server?.home),
+            status:
+                [
+                    session.id === store.state.conversationId ? t("Current") : null,
+                    session.waiting ? t("Waiting") : session.busy ? t("Working") : null,
+                    session.archived ? t("Archived") : null,
+                ]
+                    .filter(Boolean)
+                    .join(" · ") || timeAgo(session.updatedAt),
             text: `${session.title ?? "New session"} ${shortPath(session.cwd, server?.home)}`,
-            icon: session.waiting ? "shield" : session.busy ? "pulse" : "chat",
             keys: number >= 0 && number < 9 ? `Alt ${number + 1}` : undefined,
             rank: session.archived ? -20 : -number * 0.01,
             run: () => navigate(session.id),
-            id: session.id,
+            folder: folderColor(session.cwd),
+            tone: session.waiting ? "waiting" : session.busy ? "working" : "quiet",
         };
     });
+}
+
+/** Theme folders that change the look, as launcher items: no preview (their stylesheets load when chosen). */
+function lookItems() {
+    const vars = themeVars(paletteOf());
+
+    return lookIds()
+        .map(
+            (id) =>
+                store.state.themeList?.find((each) => each.id === id && each.usable) ??
+                (id === BASE_LOOK ? { id, name: "Pocket", builtIn: true } : null),
+        )
+        .filter(Boolean)
+        .map((look) => ({
+            kind: "theme",
+            key: `look:${look.id}`,
+            label: look.name,
+            detail: t(look.builtIn ? "theme, built in" : "theme"),
+            text: `theme ${look.name} ${look.id}`,
+            look: look.id,
+            vars,
+        }));
 }
 
 function themeItems() {
     const desktop = store.state.desktopTheme;
-    const ids = [...(desktop ? ["desktop"] : []), ...themeIds()];
+    const ids = [...(desktop ? ["desktop"] : []), ...themeIds(), ...folderPaletteIds()];
 
-    return ids.map((id) => {
-        const palette = paletteOf(id);
-        const name =
-            id === "desktop" ? t("Desktop · {{theme}}", { theme: palette.name }) : THEMES[id].name;
+    return [
+        ...lookItems(),
+        ...ids.map((id) => {
+            const palette = paletteOf(id);
+            const name =
+                id === "desktop" ? t("Desktop · {{theme}}", { theme: palette.name }) : palette.name;
 
-        return {
-            kind: "theme",
-            key: `theme:${id}`,
-            label: name,
-            detail:
-                id === "desktop"
-                    ? t("follows your Omarchy theme")
-                    : t(palette.colors.mode === "light" ? "light" : "dark"),
-            text: `theme ${name} ${id}`,
-            theme: id,
-            vars: themeVars(palette),
-        };
-    });
+            return {
+                kind: "theme",
+                key: `theme:${id}`,
+                label: name,
+                detail:
+                    id === "desktop"
+                        ? t("follows your Omarchy theme")
+                        : t(palette.colors.mode === "light" ? "light" : "dark"),
+                text: `theme ${name} ${id}`,
+                theme: id,
+                vars: themeVars(palette),
+            };
+        }),
+    ];
 }
 
 const PREFIXES = { ">": "action", "@": "session", "#": "theme" };
 
-export function Launcher({ leaving }) {
+/** Hits in one displayed field, without changing the text or score used by the fuzzy matcher. */
+function fieldHits(hits, start, length) {
+    return hits.filter((at) => at >= start && at < start + length).map((at) => at - start);
+}
+
+/** Keep the distinguishing end of a long folder path; a match in the hidden prefix uses the full path instead. */
+function resultDetail(item, hits) {
+    const text = item.detail ?? "";
+
+    if (item.kind !== "session") {
+        return { text, hits };
+    }
+
+    const end = text.lastIndexOf("/");
+    const start = text.lastIndexOf("/", end - 1) + 1;
+
+    if (text.length < 32 || start < 3 || hits.some((at) => at < start)) {
+        return { text, hits };
+    }
+
+    const prefix = text.startsWith("~/") ? "~/…/" : text.startsWith("/") ? "/…/" : "…/";
+
+    return {
+        text: prefix + text.slice(start),
+        hits: hits.map((at) => prefix.length + at - start),
+    };
+}
+
+const optionId = (item) => `launcher-option-${encodeURIComponent(item.key)}`;
+
+export function Launcher({ leaving, returnTo }) {
     const [query, setQuery] = useState("");
     const [pick, setPick] = useState(0);
+    const [announcement, setAnnouncement] = useState("");
     const input = useRef(null);
     const list = useRef(null);
-    const returnTo = useRef(document.activeElement);
     const chosen = useRef(false);
 
     const prefix = PREFIXES[query[0]];
@@ -362,9 +502,28 @@ export function Launcher({ leaving }) {
                 continue;
             }
 
-            const hits = match.hits.filter((at) => at < item.label.length);
+            // Themes' scorer text begins with "theme ", not with their displayed label.
+            const hits = fieldHits(match.hits, item.kind === "theme" ? 6 : 0, item.label.length);
+            const detailHits =
+                item.kind === "theme"
+                    ? []
+                    : fieldHits(match.hits, item.label.length + 1, (item.detail ?? "").length);
+            const detail = resultDetail(item, detailHits);
+            const matchNote =
+                match.hits.length > 0 && hits.length === 0 && detailHits.length === 0
+                    ? item.kind === "theme"
+                        ? t("Theme name or ID match")
+                        : t("Keyword match")
+                    : null;
 
-            scored.push({ ...item, score: match.score + (item.rank ?? 0), hits });
+            scored.push({
+                ...item,
+                score: match.score + (item.rank ?? 0),
+                hits,
+                fullDetail: item.detail,
+                detail,
+                matchNote,
+            });
         }
 
         const byKind = new Map();
@@ -383,18 +542,17 @@ export function Launcher({ leaving }) {
             }
 
             const limit =
-                needle === "" && prefix === undefined
-                    ? kind === "session"
-                        ? 6
-                        : kind === "theme"
-                          ? 99
-                          : 99
-                    : 40;
+                needle === "" && prefix === undefined ? (kind === "session" ? 6 : 99) : 40;
 
-            return { kind, items: items.slice(0, limit), best: items[0]?.score ?? 0 };
+            return {
+                kind,
+                items: items.slice(0, limit),
+                total: items.length,
+                best: items[0]?.score ?? 0,
+            };
         });
 
-        // With a query, the group with the best match comes first; without, sessions, then actions, then themes.
+        // Preserve group-first ranking: with a query the best group's matches come first.
         if (needle !== "") {
             out.sort((a, b) => b.best - a.best);
         }
@@ -406,44 +564,148 @@ export function Launcher({ leaving }) {
         uiLocaleRevision,
         sessions,
         view.conversation,
+        view.agent?.cwd,
         view.plan?.on,
+        view.branch,
         conversationId,
+        store.state.pinned,
+        store.state.browserOpen,
+        store.state.filesOpen,
+        store.state.filesTab,
         store.state.desktopTheme,
         store.state.appearance,
-        // Who you are and what the server keeps (the default model is the owner's), once they are known.
         store.state.me,
         store.state.server,
+        store.state.folderFavorites,
+        store.state.extensionsRev,
     ]);
 
-    const flat = groups.flatMap((group) => group.items);
+    const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
     const index = Math.min(pick, Math.max(0, flat.length - 1));
     const selected = flat[index];
-    const slide = useSlide(list, ".launcher-item.on");
+    const recent =
+        needle === "" && prefix === undefined
+            ? groups.find((group) => group.kind === "session")
+            : null;
 
-    useEffect(() => {
-        input.current?.focus();
+    const limitedRecent = recent && recent.total > recent.items.length;
+
+    // Focus after inert is removed, not in a pending passive effect. LauncherHost keys every logical opening,
+    // including a same-task reopen, so query, selection, and the theme commit flag cannot leak across openings.
+    // Issue #62, reported by @arunsathiya.
+    useLayoutEffect(() => {
+        if (leaving) {
+            return;
+        }
+
+        const overlay = input.current?.closest(".launcher-overlay");
+        const parent = overlay?.parentElement;
+        const blocked = new Map();
+
+        const restore = (child, { attribute, value }) => {
+            if (value === null) {
+                child.removeAttribute(attribute);
+            } else {
+                child.setAttribute(attribute, value);
+            }
+        };
+
+        const rememberOwners = (records) => {
+            for (const record of records) {
+                const owner = blocked.get(record.target);
+
+                if (record.type === "attributes" && record.attributeName === owner?.attribute) {
+                    owner.value = record.target.getAttribute(owner.attribute);
+                }
+            }
+        };
+
+        const isolate = (records = []) => {
+            rememberOwners([...records, ...owners.takeRecords()]);
+            // Do not observe our own isolation writes. Retained layers can change their state while blocked.
+            owners.disconnect();
+
+            for (const record of records) {
+                for (const child of record.removedNodes) {
+                    if (blocked.has(child)) {
+                        restore(child, blocked.get(child));
+                        blocked.delete(child);
+                    }
+                }
+            }
+
+            for (const child of parent?.children ?? []) {
+                if (child === overlay || child.classList.contains("launcher-overlay")) {
+                    continue;
+                }
+
+                if (!blocked.has(child)) {
+                    // Native inert is costly on a sidebar with thousands of controls. The large primary windows
+                    // are hidden from AT instead; the overlay and focus guard block pointer and keyboard access.
+                    const attribute = child.matches(".sidebar, .pane") ? "aria-hidden" : "inert";
+
+                    blocked.set(child, { attribute, value: child.getAttribute(attribute) });
+                }
+
+                const { attribute } = blocked.get(child);
+
+                child.setAttribute(attribute, attribute === "aria-hidden" ? "true" : "");
+                owners.observe(child, { attributes: true, attributeFilter: [attribute] });
+            }
+        };
+
+        const keepFocus = (event) => {
+            if (!overlay?.contains(event.target)) {
+                input.current?.focus({ preventScroll: true });
+            }
+        };
+
+        const owners = new MutationObserver(isolate);
+        const observer = new MutationObserver(isolate);
+
+        // Move focus out before hiding its old ancestor from AT (Chromium rejects aria-hidden on focused content).
+        document.addEventListener("focusin", keepFocus);
+        input.current?.focus({ preventScroll: true });
+        isolate();
+
+        if (parent) {
+            observer.observe(parent, { childList: true });
+        }
 
         return () => {
+            rememberOwners(owners.takeRecords());
+            observer.disconnect();
+            owners.disconnect();
+            document.removeEventListener("focusin", keepFocus);
+
+            for (const [child, owner] of blocked) {
+                restore(child, owner);
+            }
+        };
+    }, [leaving]);
+    useEffect(
+        () => () => {
             if (!chosen.current) {
                 preview(null);
             }
 
-            // Back to where focus was, or into the sheet an action opened.
-            const sheet = document.querySelector(".sheet-host:not(.leaving) .sheet");
-            const back = sheet ?? returnTo.current;
-
-            // Only when the focus left with the launcher: another launcher (opened again at once) or what took the
-            // focus since keeps it.
             const active = document.activeElement;
             const lost = active === null || active === document.body || active === input.current;
+            const sheet = document.querySelector(".sheet-host:not(.leaving) .sheet");
+            const back = sheet?.contains(returnTo) ? returnTo : (sheet ?? returnTo);
 
-            if (lost && back && back.isConnected && typeof back.focus === "function") {
+            // A new launcher or a destination that already took focus keeps it.
+            if (
+                !store.state.launcher &&
+                lost &&
+                back?.isConnected &&
+                typeof back.focus === "function"
+            ) {
                 back.focus({ preventScroll: true });
             }
-        };
-    }, []);
-    useEffect(() => setPick(0), [needle, prefix]);
-    // Arrowing onto a theme shows it right away; anything else shows the theme in use.
+        },
+        [],
+    );
     useEffect(() => {
         if (leaving) {
             if (!chosen.current) {
@@ -453,11 +715,39 @@ export function Launcher({ leaving }) {
             return;
         }
 
-        preview(selected?.kind === "theme" ? selected.theme : null);
+        preview(selected?.kind === "theme" && selected.theme ? selected.theme : null);
     }, [selected?.key, leaving]);
+    useLayoutEffect(() => {
+        if (!leaving) {
+            list.current?.querySelector(".launcher-item.on")?.scrollIntoView({ block: "nearest" });
+        }
+    }, [selected?.key, index, needle, prefix, leaving]);
     useEffect(() => {
-        list.current?.querySelector(".launcher-item.on")?.scrollIntoView({ block: "nearest" });
-    }, [index]);
+        const timer = setTimeout(() => {
+            setAnnouncement(
+                flat.length === 0
+                    ? `No results for ${needle}.`
+                    : `${flat.length} results${prefix ? ` in ${GROUP_NAMES[prefix].toLowerCase()}` : ""}.`,
+            );
+        }, 150);
+
+        return () => clearTimeout(timer);
+    }, [flat.length, needle, prefix]);
+
+    const changeQuery = (next) => {
+        setQuery(next);
+        setPick(0);
+    };
+
+    const chooseType = (next) => {
+        changeQuery(next + (prefix ? query.slice(1) : query));
+        input.current?.focus({ preventScroll: true });
+    };
+
+    const clear = () => {
+        changeQuery("");
+        input.current?.focus({ preventScroll: true });
+    };
 
     const close = () => store.set({ launcher: false });
 
@@ -472,6 +762,12 @@ export function Launcher({ leaving }) {
         if (item.kind === "theme") {
             preview(null);
 
+            if (item.look) {
+                chooseLook(item.look, event);
+
+                return;
+            }
+
             if (item.theme !== prefs().theme) {
                 setPrefs({ theme: item.theme });
             }
@@ -482,14 +778,30 @@ export function Launcher({ leaving }) {
         item.run(event);
     };
 
-    const move = (by) => setPick((index + by + flat.length) % Math.max(1, flat.length));
+    const move = (by) => {
+        setPick((index + by + flat.length) % Math.max(1, flat.length));
+        input.current?.focus({ preventScroll: true });
+    };
 
     const onKey = (event) => {
-        if (event.isComposing) {
+        if (event.isComposing || event.keyCode === 229) {
             return;
         }
 
         const key = event.key;
+
+        if (key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            close();
+
+            return;
+        }
+
+        // Toolbar buttons keep their native Enter/Space behavior; options and the input share navigation.
+        if (event.target !== input.current && !event.target.closest(".launcher-item")) {
+            return;
+        }
 
         if (
             key === "ArrowDown" ||
@@ -514,102 +826,253 @@ export function Launcher({ leaving }) {
         } else if (key === "Enter") {
             event.preventDefault();
             run(selected, event);
-        } else if (key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            close();
         }
     };
 
     let at = 0;
-    const mode = prefix ? groupNames[prefix] : null;
 
     return html`<div
         class=${`launcher-overlay ${leaving ? "leaving" : ""}`}
+        data-part="scrim"
+        data-for="launcher"
         inert=${leaving}
-        onMouseDown=${(event) => event.target === event.currentTarget && close()}
+        onMouseDown=${scrimPress(close)}
     >
         <section
             class="launcher"
+            data-part="launcher"
+            data-state=${leaving ? "closing" : undefined}
             role="dialog"
             aria-modal="true"
             aria-label=${t("Launcher")}
+            onKeyDown=${onKey}
             onMouseDown=${(event) => event.target !== input.current && event.preventDefault()}
         >
-            <label class="launcher-input">
+            <div class="launcher-input" data-part="launcher-input">
                 <span class="prompt" aria-hidden="true">❯</span>
                 <input
                     ref=${input}
                     value=${query}
                     placeholder=${t("Sessions, actions, themes…")}
+                    aria-label=${t("Search sessions, actions, and themes")}
                     autocomplete="off"
                     autocapitalize="none"
                     spellcheck=${false}
                     role="combobox"
                     aria-expanded="true"
-                    onInput=${(event) => setQuery(event.currentTarget.value)}
-                    onKeyDown=${onKey}
+                    aria-autocomplete="list"
+                    aria-controls="launcher-results"
+                    aria-activedescendant=${selected ? optionId(selected) : undefined}
+                    onInput=${(event) => changeQuery(event.currentTarget.value)}
                 />
-                ${mode && html`<span class="launcher-mode">${mode}</span>`}
-            </label>
-            <div class="launcher-list" ref=${list} role="listbox">
-                <${Slide} box=${slide} />
-                ${
-                    flat.length === 0 &&
-                    html`<div class="launcher-empty">${t("Nothing matches “{{query}}”.", { query: needle })}</div>`
-                }
-                ${groups.map(
-                    (group) => html`<div class="launcher-group">${groupNames[group.kind]}</div>
-                    ${group.items.map((item) => {
-                        const mine = at++;
-                        const on = mine === index;
-
-                        return html`<button
-                            key=${item.key}
-                            class=${`launcher-item ${on ? "on" : ""}`}
-                            role="option"
-                            aria-selected=${on}
-                            onMouseMove=${() => mine !== index && setPick(mine)}
-                            onClick=${(event) => run(item, event)}
-                        >
-                            ${
-                                item.kind === "theme"
-                                    ? html`<span class="swatch" style=${varsStyle(item.vars)}>
-                                        <i style="background:var(--o-bg)"></i>
-                                        <i style="background:var(--o-accent)"></i>
-                                        <i style="background:var(--o-green)"></i>
-                                        <i style="background:var(--o-red)"></i>
-                                    </span>`
-                                    : html`<span class="glyph">
-                                        ${
-                                            item.kind === "session" && item.id === conversationId
-                                                ? "●"
-                                                : html`<${Icon} name=${item.icon} size=${15} />`
-                                        }
-                                    </span>`
-                            }
-                            <span class="main">
-                                <span><${Marked} text=${item.label} hits=${item.hits} /></span>
-                                ${item.detail && html`<span class="detail">${item.detail}</span>`}
-                            </span>
-                            ${
-                                item.kind === "theme" &&
-                                item.theme === prefs().theme &&
-                                html`<span class="hint">${t("current")}</span>`
-                            }
-                            ${
-                                item.keys &&
-                                html`<span class="hint"><${Keys} keys=${item.keys} /></span>`
-                            }
-                        </button>`;
-                    })}`,
+                <kbd class="launcher-escape" aria-hidden="true">esc</kbd>
+                <button class="launcher-close" aria-label=${t("Close launcher")} onClick=${close}>
+                    <${Icon} name="close" size=${18} />
+                </button>
+            </div>
+            <div
+                class="launcher-types"
+                data-part="launcher-filters"
+                role="group"
+                aria-label=${t("Search type")}
+            >
+                ${[
+                    ["", t("All")],
+                    ["@", t("Sessions")],
+                    [">", t("Actions")],
+                    ["#", t("Themes")],
+                ].map(
+                    ([token, label]) => html`<button
+                        aria-pressed=${(prefix ? query[0] : "") === token}
+                        onClick=${() => chooseType(token)}
+                    >
+                        ${label}${token && html`<kbd aria-hidden="true">${token}</kbd>`}
+                    </button>`,
                 )}
             </div>
+            ${
+                limitedRecent &&
+                html`<div
+                    class="launcher-summary"
+                    role="group"
+                    aria-label=${t("Recent session options")}
+                >
+                    <div class="launcher-group" data-part="launcher-group">
+                        <span id="launcher-group-session">${t("Recent sessions")}</span>
+                        <span class="launcher-count">
+                            ${t("{{shown}} of {{total}}", { shown: recent.items.length, total: recent.total })}
+                        </span>
+                    </div>
+                    <button aria-label=${t("Show all sessions")} onClick=${() => chooseType("@")}>
+                        ${t("Show all")} <span aria-hidden="true">@</span>
+                    </button>
+                </div>`
+            }
+            <div
+                class="launcher-list"
+                id="launcher-results"
+                ref=${list}
+                role="listbox"
+                aria-label=${t("Search results")}
+            >
+                ${groups.map(
+                    (group) => html`
+                        <div role="group" aria-labelledby=${`launcher-group-${group.kind}`}>
+                            ${
+                                !(group.kind === "session" && limitedRecent) &&
+                                html`<div class="launcher-group" data-part="launcher-group">
+                                    <span id=${`launcher-group-${group.kind}`}>
+                                        ${
+                                            group.kind === "session" && recent
+                                                ? t("Recent sessions")
+                                                : groupNames[group.kind]
+                                        }
+                                    </span>
+                                    <span class="launcher-count">
+                                        ${group.items.length}${
+                                            group.total > group.items.length
+                                                ? ` ${t("of {{total}}", { total: group.total })}`
+                                                : ""
+                                        }
+                                    </span>
+                                </div>`
+                            }
+                            ${group.items.map((item) => {
+                                const mine = at++;
+                                const on = mine === index;
+                                const fullDetail = item.fullDetail;
+                                const description = [
+                                    item.label,
+                                    fullDetail,
+                                    item.status,
+                                    item.matchNote,
+                                    item.keys?.replace("Mod", APPLE ? "Command" : "Control"),
+                                ]
+                                    .filter(Boolean)
+                                    .join(", ");
+
+                                return html`<button
+                                    key=${item.key}
+                                    id=${optionId(item)}
+                                    class=${`launcher-item ${on ? "on" : ""}`}
+                                    data-part="launcher-row"
+                                    role="option"
+                                    tabindex="-1"
+                                    aria-label=${description}
+                                    aria-selected=${on}
+                                    title=${description}
+                                    onFocus=${() => mine !== index && setPick(mine)}
+                                    onMouseMove=${() => mine !== index && setPick(mine)}
+                                    onClick=${(event) => run(item, event)}
+                                >
+                                    ${
+                                        item.kind === "theme"
+                                            ? html`
+                                                <span
+                                                    class="swatch"
+                                                    style=${varsStyle(item.vars)}
+                                                    aria-hidden="true"
+                                                >
+                                                    <i style="background:var(--o-bg)"></i>
+                                                    <i style="background:var(--o-accent)"></i>
+                                                    <i style="background:var(--o-green)"></i>
+                                                    <i style="background:var(--o-red)"></i>
+                                                </span>
+                                            `
+                                            : html`
+                                                <span class="glyph" aria-hidden="true">
+                                                    ${
+                                                        item.kind === "session"
+                                                            ? html`<span
+                                                                class="launcher-folder"
+                                                                style=${`--folder:${item.folder}`}
+                                                            ></span>`
+                                                            : html`
+                                                                <${Icon}
+                                                                    name=${item.icon}
+                                                                    path=${item.iconPath}
+                                                                    size=${16}
+                                                                />
+                                                            `
+                                                    }
+                                                </span>
+                                            `
+                                    }
+                                    <span class="main">
+                                        <span class="launcher-title">
+                                            <${Marked} text=${item.label} hits=${item.hits} />
+                                        </span>
+                                        ${
+                                            (item.detail.text || item.matchNote) &&
+                                            html`<span class="detail">
+                                                <span
+                                                    class=${`launcher-path ${item.kind === "session" ? "session-path" : ""}`}
+                                                >
+                                                    <${Marked}
+                                                        text=${item.detail.text}
+                                                        hits=${item.detail.hits}
+                                                    />
+                                                </span>
+                                                ${
+                                                    item.matchNote &&
+                                                    html`<span class="launcher-match-note">
+                                                        ${item.matchNote}
+                                                    </span>`
+                                                }
+                                            </span>`
+                                        }
+                                    </span>
+                                    ${
+                                        item.status &&
+                                        html`<span class=${`launcher-state ${item.tone}`}>
+                                            ${item.status}
+                                        </span>`
+                                    }
+                                    ${
+                                        item.kind === "theme" &&
+                                        (item.look
+                                            ? item.look === prefs().look
+                                            : item.theme === prefs().theme) &&
+                                        html`<span class="hint">${t("current")}</span>`
+                                    }
+                                    ${
+                                        item.keys &&
+                                        html`<span class="hint">
+                                            <${Keys} keys=${item.keys} />
+                                        </span>`
+                                    }
+                                </button>`;
+                            })}
+                        </div>
+                    `,
+                )}
+            </div>
+            ${
+                flat.length === 0 &&
+                html`<div class="launcher-empty">
+                    <strong>${t("No matches for “{{query}}”.", { query: needle })}</strong>
+                    <span>${t("Try fewer words, or search all types.")}</span>
+                    <button class="button" onClick=${clear}>${t("Clear search")}</button>
+                </div>`
+            }
+            <div
+                class="launcher-status"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                ${announcement}
+            </div>
             <div class="launcher-foot">
-                <span><kbd>↑</kbd><kbd>↓</kbd> ${t("move")}</span>
-                <span><kbd>↵</kbd> ${t("open")}</span>
-                <span><kbd>esc</kbd> ${t("close")}</span>
-                <span><kbd>></kbd> ${t("actions")} <kbd>@</kbd> ${t("sessions")} <kbd>#</kbd> ${t("themes")}</span>
+                <span class="launcher-key-help">
+                    <kbd>↑</kbd><kbd>↓</kbd> ${t("move")} <kbd>↵</kbd> ${t("open")} <kbd>esc</kbd> ${t("close")}
+                </span>
+                <span class="launcher-prefix-help">
+                    <kbd>></kbd> ${t("actions")} <kbd>@</kbd> ${t("sessions")} <kbd>#</kbd> ${t("themes")}
+                </span>
+                <span class="launcher-touch-help">
+                    ${t("Tap a result · > actions, @ sessions, # themes")}
+                </span>
             </div>
         </section>
     </div>`;

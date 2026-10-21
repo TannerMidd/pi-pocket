@@ -1,0 +1,60 @@
+/*
+ * The direction: Lantern (dusk). Its palette is colors.toml; this file is how its turns look. No cards at all: your
+ * messages are set off by a quiet amber bar at their start and the brighter text color, with who and when above; Pi's
+ * answers are plain prose, with a little more room between the lines, for long reading at night.
+ */
+
+/* Quiet text that still reads with this palette: muted and faint text 4.5:1 or more on every surface. */
+:root {
+    --muted: color-mix(in oklab, var(--body) 78%, var(--bg));
+    --faint: color-mix(in oklab, var(--body) 70%, var(--bg));
+}
+
+/* A little more leading than the app's, at every density. */
+[data-part~="transcript"] {
+    line-height: calc(var(--leading) + 0.05);
+}
+
+[data-part~="prompt"] {
+    gap: 4px;
+    padding-block: 2px 3px;
+    padding-inline: calc(16px * var(--space-x)) 0;
+    border: 0;
+    border-inline-start: 2px solid color-mix(in oklab, var(--accent) 55%, var(--bg));
+    border-radius: 0;
+    background: none;
+}
+
+@media (hover: hover) {
+    [data-part~="prompt"]:hover {
+        border-start-end-radius: var(--r-card);
+        border-end-end-radius: var(--r-card);
+        background: var(--hover);
+    }
+}
+
+[data-part~="prompt-head"] {
+    font-size: 12.5px;
+}
+
+[data-part~="author-mark"] {
+    width: 18px;
+    height: 18px;
+    font-size: 8.5px;
+}
+
+[data-part~="prompt-author"] {
+    font-weight: 550;
+    color: var(--body);
+}
+
+/* The words under the name; a phone keeps the whole width for them. */
+[data-part~="prompt-text"] {
+    padding-inline-start: 26px;
+}
+
+@media (max-width: 699px) {
+    [data-part~="prompt-text"] {
+        padding-inline-start: 0;
+    }
+}

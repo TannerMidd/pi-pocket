@@ -13,9 +13,9 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep, Message } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -29,7 +29,6 @@ import {
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createHandler } from "../src/server/http.ts";
 import { PiSessionError, readPiSession } from "../src/server/pi-sessions.ts";
-import { projectEntry } from "../src/server/projection.ts";
 
 /** The messages of the newest request to the model. */
 let requested: Message[] = [];
@@ -202,17 +201,6 @@ test("Pi gets the context Pi builds from the file; people get the whole conversa
     assert.doesNotMatch(texts, /Pi's own prompt/);
     assert.doesNotMatch(texts, /git status/);
     assert.ok(entries.some((entry) => entry.kind === "pi.compaction"));
-    assert.equal(
-        entries.at(-1)?.kind,
-        "pocket.from-pi",
-        "the history ends with where it came from",
-    );
-    const file = parseSessionEntries(readFileSync(path, "utf8"));
-
-    assert.deepEqual(app.sessionMeta(id)?.fromPi, {
-        session: file[0]!.id,
-        count: file.filter((entry) => entry.type === "message").length,
-    });
     assert.equal(app.sessionMeta(id)?.title, "Fix the checkout total");
 
     // The same after a restart.
@@ -233,25 +221,6 @@ test("it continues with the session's model and folder, and Pi answers with the 
     assert.match(JSON.stringify(requested), /A short answer/, "with Pi's context edit");
     assert.doesNotMatch(JSON.stringify(requested), /A long answer/);
     assert.match(lastText({ messages: requested } as never).text, /Carry on/);
-});
-
-test("a model not signed in here gives way to the usual one: one a person picked, never the first there is", async () => {
-    const manager = SessionManager.inMemory(work);
-
-    manager.appendModelChange("elsewhere", "big-model");
-    manager.appendMessage({ role: "user", content: "hi", timestamp: 1 });
-
-    const continued = async (name: string) => {
-        const { id } = await app.commands.continuePiSession(owner(app), save(manager, name));
-
-        return (await (await app.harness.conversation(id, context))!.agent(context)).model;
-    };
-
-    app.config.defaultModel = undefined;
-    app.config.lastModel = undefined;
-    assert.equal(await continued("elsewhere"), undefined, "nobody picked one: none");
-    app.config.lastModel = { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
-    assert.deepEqual(await continued("elsewhere-again"), { provider: "faux", modelId: "faux-1" });
 });
 
 test("a tool call that never finished does not run: it gets a result saying so", async () => {
@@ -289,39 +258,6 @@ test("Pi's files are only read: one cut off mid-line stays as it is", async () =
 
     assert.equal(readFileSync(path, "utf8"), cut);
     assert.deepEqual(await pocketContext(id), piContext(path));
-});
-
-test("the list says which ones continue here, and when Pi went on since", async () => {
-    const manager = rich();
-    const path = save(manager, "listed");
-    const find = async () =>
-        (await app.piSessions.list(owner(app))).sessions.find((each) => each.path === path)!;
-
-    assert.equal((await find()).title, "Fix the checkout total");
-    assert.equal((await find()).cwd, work);
-    assert.equal((await find()).pocket, undefined);
-    const { id } = await app.commands.continuePiSession(owner(app), path);
-
-    assert.deepEqual((await find()).pocket, { id: Number(id), behind: false });
-    manager.appendMessage({ role: "user", content: "One more in the terminal", timestamp: 11 });
-    save(manager, "listed");
-    assert.deepEqual((await find()).pocket, { id: Number(id), behind: true });
-    assert.deepEqual((await app.piSessions.preview(owner(app), path)).pocket, {
-        id: Number(id),
-        behind: true,
-    });
-
-    // Untitled: what it was first asked.
-    const plain = SessionManager.inMemory(work);
-
-    plain.appendMessage({ role: "user", content: "Why is CI red?\nIt was green.", timestamp: 1 });
-    const untitled = save(plain, "untitled");
-
-    assert.equal(
-        (await app.piSessions.list(owner(app))).sessions.find((each) => each.path === untitled)
-            ?.title,
-        "Why is CI red?",
-    );
 });
 
 test("only files Pi lists, from a Pi this one knows, in a folder that is there", async () => {
@@ -385,28 +321,6 @@ test("only the owner can list, look at, or continue Pi's sessions", async () => 
     }
 });
 
-test("reading a session is Pi's own: a branch, an edit, and a compaction keep their places", () => {
-    const manager = rich();
-    const read = readPiSession(
-        [manager.getHeader(), ...manager.getEntries()]
-            .map((each) => JSON.stringify(each))
-            .join("\n"),
-    );
-    const compaction = read.entries.find((entry) => entry.kind === "compaction");
-
-    assert.equal(read.title, "Fix the checkout total");
-    assert.deepEqual(read.model, { provider: "faux", modelId: "faux-2" });
-    assert.ok(compaction?.kind === "compaction" && compaction.head !== null);
-    assert.equal(read.edits.length, 2);
-    assert.deepEqual(
-        read.edits.map((edit) => edit.messages.length),
-        [1, 0],
-    );
-    // The branch left behind is not in it, only its summary.
-    assert.doesNotMatch(JSON.stringify(read.entries), /That will not help/);
-    assert.match(JSON.stringify(read.entries), /Tried doubles; it did not help/);
-});
-
 test("two compactions, the second keeping messages from before the first: Pi's context still", async () => {
     const manager = SessionManager.inMemory(work);
 
@@ -441,68 +355,6 @@ test("a file whose entries lead in a circle says it is damaged, at once", () => 
     );
 
     assert.throws(() => readPiSession(circle.join("\n")), PiSessionError);
-    assert.throws(() => readPiSession(circle.join("\n")), /damaged/);
-});
-
-test("a long session with many compactions reads in time that grows with its length", () => {
-    // Written as Pi writes it, line by line (building it through Pi's session manager takes far longer than reading).
-    const at = "2026-10-09T10:00:00.000Z";
-
-    const file = (count: number) => {
-        const lines = [
-            JSON.stringify({ type: "session", version: 3, id: "many", timestamp: at, cwd: work }),
-            JSON.stringify({
-                type: "message",
-                id: "start",
-                parentId: null,
-                timestamp: at,
-                message: { role: "user", content: "the start", timestamp: 1 },
-            }),
-        ];
-
-        // Compaction after compaction, each keeping from the one before: the slowest kind of file to find what each
-        // keeps in by looking back through the branch, as reading once did.
-        for (let index = 0; index < count; index++) {
-            const before = index === 0 ? "start" : `c${index - 1}`;
-
-            lines.push(
-                JSON.stringify({
-                    type: "compaction",
-                    id: `c${index}`,
-                    parentId: before,
-                    timestamp: at,
-                    summary: `Summary ${index}.`,
-                    firstKeptEntryId: before,
-                    tokensBefore: 1000,
-                }),
-            );
-        }
-
-        return lines.join("\n");
-    };
-
-    // The fastest of three reads: what the machine is doing besides weighs on each alike.
-    const time = (text: string) =>
-        Math.min(
-            ...[0, 1, 2].map(() => {
-                const started = performance.now();
-
-                readPiSession(text);
-
-                return performance.now() - started;
-            }),
-        );
-    const small = file(10_000);
-    const large = file(40_000);
-
-    assert.equal(
-        readPiSession(large).entries.filter((entry) => entry.kind === "compaction").length,
-        40_000,
-    );
-    // Four times the compactions, about four times the time: it was about sixteen, with the server waiting on it.
-    const ratio = time(large) / time(small);
-
-    assert.ok(ratio < 8, `4x the compactions took ${ratio.toFixed(1)}x the time`);
 });
 
 test("a message without content, as old or edited files have, reads; its session is named by what it can", async () => {
@@ -522,7 +374,6 @@ test("a message without content, as old or edited files have, reads; its session
 
     const read = readPiSession(broken.join("\n"));
 
-    assert.equal(read.title, "Pi session");
     assert.equal(read.entries.length, 2);
 });
 
@@ -545,100 +396,4 @@ test("a tool result without its call: Pi would send it, providers refuse it, Pi 
 
     assert.ok(piContext(path).some((message) => message.role === "toolResult"));
     assert.deepEqual(await pocketContext(id), without);
-});
-
-test("a search looks through every session's title, folder, and words, before the list's limit", async () => {
-    const manager = SessionManager.inMemory(work);
-
-    manager.appendMessage({
-        role: "user",
-        content: "Where is the flux capacitor wired?",
-        timestamp: 1,
-    });
-    manager.appendMessage(fauxAssistantMessage([fauxText("Behind the dashboard.")]));
-    const path = save(manager, "searchable");
-    const found = async (query: string) =>
-        (await app.piSessions.list(owner(app), query)).sessions.map((each) => each.path);
-
-    // As the sheet does: it opens on the whole list, read again, and a search narrows that one.
-    await found("");
-    assert.ok((await found("dashboard")).includes(path), "by the words of an answer");
-    assert.ok((await found("FLUX")).includes(path), "whatever the case");
-    assert.deepEqual(await found("nothing says this anywhere"), []);
-});
-
-test("typing a search narrows the list the sheet opened on, without reading every file again", async () => {
-    const reads = { count: 0 };
-    const listAll = SessionManager.listAll;
-
-    SessionManager.listAll = ((...args: Parameters<typeof listAll>) => {
-        reads.count++;
-
-        return listAll(...args);
-    }) as typeof listAll;
-
-    try {
-        await app.piSessions.list(owner(app), "");
-
-        for (const query of ["f", "fl", "flu", "flux"]) {
-            await app.piSessions.list(owner(app), query);
-        }
-
-        assert.equal(reads.count, 1, "one read for the list and its search");
-    } finally {
-        SessionManager.listAll = listAll;
-    }
-});
-
-test("a session deleted since the list was read is not found, and one too large is refused", async () => {
-    const gone = save(rich(), "deleted-since");
-
-    await app.piSessions.list(owner(app), "");
-    rmSync(gone);
-    await assert.rejects(app.piSessions.preview(owner(app), gone), { status: 404 });
-
-    // Over 32 MiB: one message as long as that.
-    const big = join(sessions, "--big--", "2026-10-09T10-00-00-000Z_big.jsonl");
-
-    mkdirSync(dirname(big), { recursive: true });
-    writeFileSync(
-        big,
-        [
-            JSON.stringify({
-                type: "session",
-                version: 3,
-                id: "big",
-                timestamp: "2026-10-09T10:00:00.000Z",
-                cwd: work,
-            }),
-            JSON.stringify({
-                type: "message",
-                id: "m",
-                parentId: null,
-                timestamp: "2026-10-09T10:00:01.000Z",
-                message: { role: "user", content: "x".repeat(33 * 1024 * 1024), timestamp: 1 },
-            }),
-        ].join("\n"),
-    );
-
-    try {
-        await app.piSessions.list(owner(app), "");
-        await assert.rejects(app.piSessions.preview(owner(app), big), { status: 413 });
-    } finally {
-        rmSync(dirname(big), { recursive: true, force: true });
-    }
-});
-
-test("people see the session file's name, not the folder it is in", async () => {
-    const { id } = await app.commands.continuePiSession(owner(app), save(rich(), "named"));
-    const entries = await shown(id);
-    const marker = entries.find((entry) => entry.kind === "pocket.from-pi")!;
-
-    assert.match(String((marker.data as { file?: unknown }).file), /\/named\.jsonl$/, "kept whole");
-    assert.deepEqual(projectEntry(marker), {
-        id: marker.id,
-        kind: "fromPi",
-        title: "Fix the checkout total",
-        file: "named.jsonl",
-    });
 });

@@ -6,14 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import { t } from "./i18n.js";
 import { useBack } from "./back.js";
 import { jumpToEntry } from "./chat.js";
-import {
-    changeCells,
-    fingerprint,
-    firstLine,
-    hunkRows,
-    markRanges,
-    parseDiff,
-} from "./diff-parse.js";
+import { fingerprint, firstLine, hunkRows, markRanges, parseDiff } from "./diff-parse.js";
 import { highlight, highlightLines, langOf } from "./highlight.js";
 import { branchAvailable } from "./sheets/branch.js";
 import { actions, attempt, canSteer, notify, openSheet, store } from "./store.js";
@@ -418,7 +411,7 @@ function GapRow({ left, columns, onShow, first, last }) {
 /**
  * One file's diff. `path` is where the file is now, for opening it at a line and for the lines the diff leaves out
  * (`expand`, read again whenever `version` changes); `head` draws its header bar, with `tools` (buttons) at its end;
- * `open` and `onToggle` fold it; `loading` says its lines are on their way. Colors, pairs, and rows are worked out only
+ * `open` and `onToggle` fold it; `loading` says its lines are on their way, `error` that they did not come. Colors, pairs, and rows are worked out only
  * for a diff that is drawn, and the table is made again only when what it shows changes.
  */
 function DiffFile({
@@ -434,6 +427,7 @@ function DiffFile({
     onToggle = null,
     note = null,
     loading = false,
+    error = null,
 }) {
     const ref = useRef(null);
     const width = useWidth(ref);
@@ -608,8 +602,11 @@ function DiffFile({
 
     let body;
 
-    if (loading) {
-        body = null;
+    // A failure shows folded too: a folded file that could not be read must not look like one that could.
+    if (error) {
+        body = html`<p class="dv-empty err">${error}</p>`;
+    } else if (loading) {
+        body = html`<div class="dv-wait"><${Loader} label=${t("Reading the diff")} /></div>`;
     } else if (file.binary) {
         body = html`<p class="dv-empty">${t("A binary file: no lines to compare.")}</p>`;
     } else if (file.hunks.length === 0) {
@@ -645,7 +642,7 @@ function DiffFile({
         ref=${ref}
     >
         ${head && html`<${FileHead} file=${file} tools=${tools} viewed=${viewed} onViewed=${onViewed} open=${open} onToggle=${onToggle} note=${note} />`}
-        ${open && body}
+        ${open ? body : error && html`<p class="dv-empty err">${error}</p>`}
     </section>`;
 }
 
@@ -656,17 +653,6 @@ function PathLabel({ path }) {
     return html`<span class="dv-path" title=${path}>
         ${at >= 0 && html`<span class="dv-dir">${path.slice(0, at + 1)}</span>`}
         <span class="dv-name">${path.slice(at + 1)}</span>
-    </span>`;
-}
-
-/** A change bar's five cells; none for a file with no lines counted, binary say. */
-function ChangeBar({ added, removed }) {
-    if (added + removed === 0) {
-        return null;
-    }
-
-    return html`<span class="dv-bar" aria-hidden="true">
-        ${changeCells(added, removed).map((cell) => html`<i class=${cell}></i>`)}
     </span>`;
 }
 
@@ -707,13 +693,13 @@ function FileHead({ file, tools, viewed, onViewed, open, onToggle, note }) {
         }
         ${note}
         <${ChangeCounts} added=${file.added} removed=${file.removed} />
-        <${ChangeBar} added=${file.added} removed=${file.removed} />
         ${tools}
         ${
             onViewed &&
             html`<label class=${`dv-viewed ${viewed ? "on" : ""}`} title=${t("Mark as viewed (v)")}>
                 <input
                     type="checkbox"
+                    aria-label=${t("Viewed")}
                     checked=${Boolean(viewed)}
                     onChange=${(event) => onViewed(event.currentTarget.checked)}
                 />
@@ -733,7 +719,7 @@ export function DiffBlock({ text, path = "", bare = false }) {
         return html`<pre class="diff" dangerouslySetInnerHTML=${{ __html: highlight(text, "diff") }}></pre>`;
     }
 
-    return html`<div class="dv-block">
+    return html`<div class="dv-block" data-part="diff">
         ${files.map(
             (file) => html`<${DiffFile}
                 file=${file}
@@ -746,30 +732,41 @@ export function DiffBlock({ text, path = "", bare = false }) {
 
 // ─── Settings bar ────────────────────────────────────────────────────────────────────
 
-/** Unified or split, and wrapping: the same on every diff of this device. */
-function DiffSettings() {
-    const { layout, wrap } = diffPrefs;
-    const next = nextLayout(layout);
+const LAYOUTS = [
+    ["auto", "Auto"],
+    ["unified", "Unified"],
+    ["split", "Split"],
+];
 
-    return html`<span class="dv-settings">
-        <button
-            type="button"
-            class="chip toggle"
-            title=${t("Layout: {{layout}}. Tap for {{next}} (s)", { layout: t(layout), next: t(next) })}
-            onClick=${() => setDiffPrefs({ layout: next })}
-        >
-            ${t(layout === "auto" ? "Auto" : layout === "split" ? "Split" : "Unified")}
-        </button>
-        <button
-            type="button"
-            class=${`chip toggle ${wrap ? "on" : ""}`}
-            title=${t("Wrap long lines (w)")}
-            aria-pressed=${wrap ? "true" : "false"}
-            onClick=${() => setDiffPrefs({ wrap: !wrap })}
-        >
-            ${t("Wrap")}
-        </button>
-    </span>`;
+/** Auto, unified, or split: the same on every diff of this device (`s` steps through them). */
+function LayoutSwitch() {
+    return html`<div class="dr-layout" role="group" aria-label=${t("Diff layout")} title=${t("Layout (s)")}>
+        ${LAYOUTS.map(
+            ([layout, label]) => html`<button
+                type="button"
+                class=${diffPrefs.layout === layout ? "on" : ""}
+                aria-pressed=${diffPrefs.layout === layout ? "true" : "false"}
+                onClick=${() => setDiffPrefs({ layout })}
+            >
+                ${t(label)}
+            </button>`,
+        )}
+    </div>`;
+}
+
+/** Wrapping long lines instead of scrolling them, the same on every diff of this device (`w`). */
+function WrapToggle() {
+    const { wrap } = diffPrefs;
+
+    return html`<button
+        type="button"
+        class=${`chip toggle ${wrap ? "on" : ""}`}
+        title=${t("Wrap long lines (w)")}
+        aria-pressed=${wrap ? "true" : "false"}
+        onClick=${() => setDiffPrefs({ wrap: !wrap })}
+    >
+        ${t("Wrap")}
+    </button>`;
 }
 
 // ─── Review: every change in the folder ───────────────────────────────────────────────
@@ -1204,7 +1201,7 @@ function ReviewFile({
             aria-label=${t("Open the file")}
             onClick=${() => openFile(`${root}/${file.path}`)}
         >
-            <${Icon} name="file" size=${15} />
+            <${Icon} name="file" size=${16} />
         </button>`
     }
     ${
@@ -1217,7 +1214,7 @@ function ReviewFile({
             aria-label=${t("Undo changes")}
             onClick=${undo}
         >
-            ${undoing ? t(fresh ? "Delete?" : "Undo?") : "↺"}
+            ${undoing ? t(fresh ? "Delete?" : "Undo?") : html`<${Icon} name="undo" size=${16} />`}
         </button>`
     }`;
 
@@ -1227,6 +1224,7 @@ function ReviewFile({
             path=${`${root}/${file.path}`}
             version=${file.version ?? ""}
             loading=${!entry}
+            error=${error}
             expand=${true}
             tools=${tools}
             viewed=${viewed}
@@ -1235,8 +1233,7 @@ function ReviewFile({
             onToggle=${onToggle}
             note=${html`${file.byPi && html`<span class="chip dv-chip">Pi</span>`}${stale && html`<span class="chip dv-chip warn" title=${t("It changed after you marked it viewed")}>${t("changed")}</span>`}`}
         />
-        ${open && !viewed && !entry && !error && html`<div class="dv-wait"><${Loader} label=${t("Reading the diff")} /></div>`}
-        ${error && html`<p class="dv-empty err">${error}</p>`}
+
     </div>`;
 }
 
@@ -1248,7 +1245,8 @@ function ReviewFile({
  */
 export function DiffReview({ active = true, autoFocus = false, covering = false }) {
     const id = store.state.conversationId;
-    const { server } = store.state;
+    const { server, view } = store.state;
+    const cwd = view.agent?.cwd ?? view.conversation?.cwd ?? "";
     const { changes, error } = useChanges(active);
     const load = () => reloadChanges(id);
 
@@ -1453,27 +1451,31 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
     }
 
     const all = changes.files;
-    const progress = files.length === 0 ? 0 : seen / files.length;
 
     return html`<div class=${`dr ${wide ? "wide" : ""}`} ref=${ref} tabindex="-1" onKeyDown=${onKey}>
         <div class="dr-summary">
             ${
                 changes.repo
                     ? html`<span class="dr-where mono">
-                          <span class="dr-path">${shortPath(changes.repo.root, server?.home)}</span>${
-                              changes.repo.branch && " · "
+                          ${
+                              changes.repo.root !== cwd &&
+                              html`<span class="dr-path">${shortPath(changes.repo.root, server?.home)}</span>`
                           }${
                               changes.repo.branch &&
                               (branchAvailable()
                                   ? html`<button
-                                        class="link dr-branch"
+                                        class="dr-branch"
                                         type="button"
                                         title=${t("Switch or make a branch")}
                                         onClick=${() => openSheet({ type: "branch" })}
                                     >
-                                        ⎇ ${changes.repo.branch}
+                                        <${Icon} name="fork" size=${12} />
+                                        ${changes.repo.branch}
                                     </button>`
-                                  : html`<span title=${t("Branch")}>⎇ ${changes.repo.branch}</span>`)
+                                  : html`<span class="dr-branch" title=${t("Branch")}>
+                                        <${Icon} name="fork" size=${12} />
+                                        ${changes.repo.branch}
+                                    </span>`)
                           }
                       </span>`
                     : html`<span class="muted small">${t("Not a git repository: only Pi's edits are listed.")}</span>`
@@ -1481,23 +1483,23 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
             ${
                 all.length > 0 &&
                 html`<span class="dr-stats">
-                    <strong>${files.length}</strong> ${t("files")}
+                    <strong>${files.length} ${t(files.length === 1 ? "file" : "files")}</strong>
                     <${ChangeCounts} added=${added} removed=${removed} />
-                    <span class="dr-progress" title=${t("{{seen}} of {{total}} viewed", { seen, total: files.length })}>
-                        <i style=${`width:${progress * 100}%`}></i>
-                    </span>
-                    <span class="muted">${t("{{seen}}/{{total}} viewed", { seen, total: files.length })}</span>
-                </span>`
+                </span>
+                <span class="dr-viewed">${t("{{seen}} of {{total}} viewed", { seen, total: files.length })}</span>`
             }
-            <button
-                class="icon-button dv-tool"
-                type="button"
-                title=${t("Look again")}
-                aria-label=${t("Refresh")}
-                onClick=${refresh}
-            >
-                <${Icon} name="reload" size=${15} />
-            </button>
+            <span class="dr-actions">
+                ${all.length > 0 && html`<${LayoutSwitch} />`}
+                <button
+                    class="icon-button dv-tool"
+                    type="button"
+                    title=${t("Look again")}
+                    aria-label=${t("Refresh")}
+                    onClick=${refresh}
+                >
+                    <${Icon} name="reload" size=${15} />
+                </button>
+            </span>
         </div>
         ${
             all.length > 0 &&
@@ -1524,7 +1526,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                         ${t("π only")}
                     </button>`
                 }
-                <${DiffSettings} />
+                <${WrapToggle} />
                 ${
                     !wide &&
                     html`<button

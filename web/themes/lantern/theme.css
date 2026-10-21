@@ -1,0 +1,10 @@
+/*
+ * Lantern: a calm, warm dark theme for reading for hours. Soft off-white text on a dim surface, never black or
+ * white; one accent, used sparingly; 1px lines and tonal surfaces instead of shadows; Geist for words and JetBrains
+ * Mono only for code, paths, and numbers (the app's own fonts).
+ *
+ * frame.css is the frame. direction.css (how the turns look) and colors.toml (the palette) are the direction:
+ * changing those two changes the direction, and the frame stays.
+ */
+@import "frame.css";
+@import "direction.css";

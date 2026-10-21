@@ -25,6 +25,8 @@ const stopWatching = watchTree(join(APP_ROOT, "web"), (file) => app.reloadClient
 
 // Extension modules reload when saved, as in the real server (`app.close()` stops this).
 app.loader.watch();
+// Theme folders too.
+app.themes.watch();
 
 await new Promise<void>((resolve) => server.listen(port, host, resolve));
 // Something to look at: a session with one exchange in it.

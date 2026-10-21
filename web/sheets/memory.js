@@ -9,9 +9,10 @@ export const memoryAvailable = (id) =>
     (id ?? store.state.conversationId) !== null &&
     store.state.server?.extensions?.includes("pocket-memory") === true;
 
-const path = (id, rest = "") => `c/${id}/memory${rest}`;
+const path = (id, rest = "", pendingOnly = false) =>
+    `c/${id}/memory${rest}${pendingOnly ? "?pending=all" : ""}`;
 
-/** The lessons last fetched, `{ id, data }`: the menu shows its hint from them at once while it asks again. */
+/** The lessons last fetched, keyed by person, conversation, and view: the menu can show its hint while asking again. */
 let last = null;
 /**
  * The fetch under way for each conversation, `{ rev, promise }`: the sheet, the menu, and each memory call ask once
@@ -19,20 +20,20 @@ let last = null;
  */
 const asking = new Map();
 
-function fetchLessons(id, rev) {
-    const fetching = asking.get(id);
+function fetchLessons(id, rev, key, pendingOnly) {
+    const fetching = asking.get(key);
 
     if (fetching?.rev === rev) {
         return fetching.promise;
     }
 
-    const asked = { rev, promise: api(path(id)) };
+    const asked = { rev, promise: api(path(id, "", pendingOnly)) };
 
-    asking.set(id, asked);
+    asking.set(key, asked);
     // A fetch that failed is not kept: the next one asks again.
     asked.promise.catch(() => {
-        if (asking.get(id) === asked) {
-            asking.delete(id);
+        if (asking.get(key) === asked) {
+            asking.delete(key);
         }
     });
 
@@ -43,14 +44,17 @@ function fetchLessons(id, rev) {
  * The lessons that apply in conversation `id` (the one open when absent), fetched when it shows and again whenever
  * they change on the server.
  */
-export function useMemory(conversationId) {
+export function useMemory(conversationId, pendingOnly = false) {
     const id = conversationId ?? store.state.conversationId;
+    const { me } = store.state;
+    const key = `${me?.id}:${me?.role}:${id}:${pendingOnly ? "pending" : "applying"}`;
     // Followed here, not read from the render: a call's card in the conversation is not drawn again on every change.
-    const [rev, setRev] = useState(store.state.memoryRev ?? 0);
+    const revision = (state) => `${state.memoryRev ?? 0}:${state.streamId ?? ""}`;
+    const [rev, setRev] = useState(() => revision(store.state));
 
-    useEffect(() => store.subscribe((state) => setRev(state.memoryRev ?? 0)), []);
-    const on = memoryAvailable(id);
-    const [data, setData] = useState(last?.id === id ? last.data : null);
+    useEffect(() => store.subscribe((state) => setRev(revision(state))), []);
+    const on = memoryAvailable(id) && (!pendingOnly || me?.role === "owner");
+    const [data, setData] = useState(last?.key === key ? last : null);
     // Asked again a few times when a fetch fails (a dropped connection, a restart), rather than loading for ever.
     const [retry, setRetry] = useState(0);
 
@@ -62,12 +66,18 @@ export function useMemory(conversationId) {
             return undefined;
         }
 
-        fetchLessons(id, rev).then(
+        fetchLessons(id, rev, key, pendingOnly).then(
             (fetched) => {
-                last = { id, data: fetched };
-
                 if (live) {
-                    setData(fetched);
+                    // An older running server ignores the new query: never label its scoped view as an all-project queue.
+                    last = {
+                        key,
+                        data:
+                            pendingOnly && fetched.pendingAll !== true
+                                ? { restartRequired: true }
+                                : fetched,
+                    };
+                    setData(last);
                 }
             },
             () => {
@@ -81,9 +91,9 @@ export function useMemory(conversationId) {
             live = false;
             clearTimeout(timer);
         };
-    }, [id, rev, on, retry]);
+    }, [key, rev, on, retry]);
 
-    return last?.id === id ? (data ?? last.data) : data;
+    return !on ? null : data?.key === key ? data.data : last?.key === key ? last.data : null;
 }
 
 /** Fetch again after a write here, without waiting for the server's word. */
@@ -113,8 +123,8 @@ export function memoryHint(data) {
 }
 
 /** Save a lesson by hand: for this project, or everywhere. */
-export async function remember(text, scope = "project") {
-    const id = store.state.conversationId;
+export async function remember(text, scope = "project", conversationId) {
+    const id = conversationId ?? store.state.conversationId;
     const lesson = await api(path(id), { text, scope });
 
     refresh();
@@ -156,18 +166,20 @@ function Source({ lesson }) {
 
 /** Where a lesson applies, said where it waits: everywhere's reach every session and PiP. */
 const reach = (lesson) =>
-    t(lesson.scope === "everywhere" ? "everywhere: every session, and PiP" : "this project");
+    lesson.scope === "everywhere"
+        ? t("everywhere: every session, and PiP")
+        : (lesson.projectName ?? t("this project"));
 
 /** One lesson: its text, where it came from, and what this person may do with it. */
-function Lesson({ lesson, data }) {
-    const id = store.state.conversationId;
+function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
+    const id = conversationId ?? store.state.conversationId;
     const [draft, setDraft] = useState(null);
     const [forgetting, setForgetting] = useState(false);
     const act = (rest, body = {}, done = "") =>
         attempt(async () => {
             // Fetched again either way: after a refusal (it changed since), the sheet shows what waits now.
             try {
-                await api(path(id, `/${encodeURIComponent(lesson.id)}${rest}`), body);
+                await api(path(id, `/${encodeURIComponent(lesson.id)}${rest}`, pendingOnly), body);
             } finally {
                 refresh();
             }
@@ -218,7 +230,7 @@ function Lesson({ lesson, data }) {
         ${
             (lesson.pending || lesson.proposal) &&
             !data.owner &&
-            html`<div class="muted small">Waits for the owner's approval; until then Pi goes on as before.</div>`
+            html`<div class="muted small">${t("Waits for the owner's approval; until then Pi goes on as before.")}</div>`
         }
         <div class="lesson-foot">
             <${Source} lesson=${lesson} />
@@ -236,7 +248,7 @@ function Lesson({ lesson, data }) {
                                     t("Approved: Pi goes by it from its next message."),
                                 )}
                         >
-                            Approve
+                            ${t("Approve")}
                         </button>`
                     }
                     ${
@@ -262,7 +274,7 @@ function Lesson({ lesson, data }) {
                             onClick=${() => (forgetting ? act("/remove") : setForgetting(true))}
                             onBlur=${() => setForgetting(false)}
                         >
-                            ${forgetting ? "Forget it" : "Forget"}
+                            ${t(forgetting ? "Forget it" : "Forget")}
                         </button>`
                     }
                 </div>`
@@ -272,24 +284,54 @@ function Lesson({ lesson, data }) {
 }
 
 /** A group of lessons with its title, or nothing when it has none. */
-function Group({ title, lessons, data, empty }) {
+function Group({ title, lessons, data, empty, conversationId, pendingOnly = false }) {
     return html`<div class="group">
         <div class="group-title">${title}</div>
         ${lessons.length === 0 && empty && html`<p class="muted small">${empty}</p>`}
-        ${lessons.map((lesson) => html`<${Lesson} key=${lesson.id} lesson=${lesson} data=${data} />`)}
+        ${
+            lessons.length > 0 &&
+            html`<div class="sheet-list">
+                ${lessons.map(
+                    (lesson) => html`<${Lesson}
+                        key=${lesson.id}
+                        lesson=${lesson}
+                        data=${data}
+                        conversationId=${conversationId}
+                        pendingOnly=${pendingOnly}
+                    />`,
+                )}
+            </div>`
+        }
     </div>`;
 }
 
 /** The lessons Pi keeps: what waits for approval, this project's, and everywhere's; and one added by hand. */
-export function MemorySheet({ draft: initial = "" }) {
-    const data = useMemory();
+export function MemorySheet({ draft: initial = "", conversationId, pendingOnly = false }) {
+    const id = conversationId ?? store.state.conversationId;
+    const data = useMemory(id, pendingOnly);
     const [text, setText] = useState(initial);
     const [scope, setScope] = useState("project");
     const [busy, setBusy] = useState(false);
 
+    const title = t(pendingOnly ? "Pending memories" : "Memory");
+
+    if (pendingOnly && store.state.me?.role !== "owner") {
+        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+            <p class="muted">${t("Only the owner can review pending memories.")}</p>
+        <//>`;
+    }
+
     if (!data) {
-        return html`<${Sheet} title="Memory" onClose=${closeSheet}>
+        return html`<${Sheet} title=${title} onClose=${closeSheet}>
             <p class="muted">${t("Loading…")}</p>
+        <//>`;
+    }
+
+    if (pendingOnly && data.restartRequired) {
+        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+            <p class="muted">
+                ${t("Restart the server from Menu → Restart server to review pending memories across projects.")}
+            </p>
         <//>`;
     }
 
@@ -307,7 +349,7 @@ export function MemorySheet({ draft: initial = "" }) {
 
         setBusy(true);
         attempt(async () => {
-            const lesson = await remember(text, chosen);
+            const lesson = await remember(text, chosen, id);
 
             setText("");
             notify(
@@ -319,7 +361,23 @@ export function MemorySheet({ draft: initial = "" }) {
         }).finally(() => setBusy(false));
     };
 
-    return html`<${Sheet} title="Memory" onClose=${closeSheet}>
+    if (pendingOnly) {
+        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+            <p class="muted small">
+                ${t("Memories waiting for your approval, across every project and everywhere. Approve only what you want Pi to keep; until then Pi goes on as before.")}
+            </p>
+            <${Group}
+                title=${t("To approve · {{count}}", { count: waiting.length })}
+                lessons=${waiting}
+                data=${data}
+                conversationId=${id}
+                pendingOnly=${true}
+                empty=${t("No memories waiting for approval.")}
+            />
+        <//>`;
+    }
+
+    return html`<${Sheet} title=${title} onClose=${closeSheet}>
         <p class="muted small">
             ${t("Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences.")} ${project ? t("Those for {{project}} go to every session in it, worktrees too; the rest go everywhere.", { project: project.name }) : t("PiP keeps lessons for everywhere.")} ${t("Pi proposes them as it learns, and the owner approves; yours count at once.")}
         </p>
@@ -349,7 +407,7 @@ export function MemorySheet({ draft: initial = "" }) {
                                 class=${chosen === "project" ? "on" : ""}
                                 onClick=${() => setScope("project")}
                             >
-                                This project
+                                ${t("This project")}
                             </button>
                             <button
                                 role="radio"
@@ -366,14 +424,19 @@ export function MemorySheet({ draft: initial = "" }) {
                         disabled=${busy || text.trim() === ""}
                         onClick=${add}
                     >
-                        Remember
+                        ${t("Remember")}
                     </button>
                 </div>
             </div>`
         }
         ${
             waiting.length > 0 &&
-            html`<${Group} title=${t("To approve · {{count}}", { count: waiting.length })} lessons=${waiting} data=${data} />`
+            html`<${Group}
+                title=${t("To approve · {{count}}", { count: waiting.length })}
+                lessons=${waiting}
+                data=${data}
+                conversationId=${id}
+            />`
         }
         ${
             project &&
@@ -381,6 +444,7 @@ export function MemorySheet({ draft: initial = "" }) {
                 title=${`${t("This project")}: ${project.name}`}
                 lessons=${shown.filter((lesson) => lesson.scope === "project")}
                 data=${data}
+                conversationId=${id}
                 empty=${t("Nothing yet.")}
             />`
         }
@@ -388,6 +452,7 @@ export function MemorySheet({ draft: initial = "" }) {
             title=${t("Everywhere")}
             lessons=${shown.filter((lesson) => lesson.scope === "everywhere")}
             data=${data}
+            conversationId=${id}
             empty=${t("Nothing yet.")}
         />
     <//>`;
@@ -422,12 +487,12 @@ export function LessonCall({ lessonId, conversationId }) {
     // One waiting for the owner is hidden from others: say nothing rather than that it is gone.
     if (!lesson) {
         return data.owner
-            ? html`<div class="lesson-call muted small">No longer in memory.</div>`
+            ? html`<div class="lesson-call muted small">${t("No longer in memory.")}</div>`
             : null;
     }
 
     if (!lesson.pending && !lesson.proposal) {
-        return html`<div class="lesson-call muted small">In memory: Pi goes by it.</div>`;
+        return html`<div class="lesson-call muted small">${t("In memory: Pi goes by it.")}</div>`;
     }
 
     const what = lesson.pending
@@ -453,13 +518,13 @@ export function LessonCall({ lessonId, conversationId }) {
                             t("Approved: Pi goes by it from its next message."),
                         )}
                 >
-                    Approve
+                    ${t("Approve")}
                 </button>
                 <button
                     class="button small ghost"
                     onClick=${() => act("/discard", {}, t("Discarded."))}
                 >
-                    Discard
+                    ${t("Discard")}
                 </button>`
         }
     </div>`;

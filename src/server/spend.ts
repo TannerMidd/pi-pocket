@@ -174,18 +174,70 @@ export class Spend {
         return spent;
     }
 
+    /**
+     * The session at the top of a linked family (`linked-sessions.ts`): the one that started this one, and so on up. A
+     * session no link started is its own.
+     */
+    teamRoot(root: ConversationId): ConversationId {
+        const seen = new Set<ConversationId>([root]);
+        let at = root;
+
+        for (;;) {
+            const from = this.#app.sessionMeta(at)?.linkedFrom?.id as ConversationId | undefined;
+
+            if (from === undefined || seen.has(from)) {
+                return at;
+            }
+
+            seen.add(from);
+            at = from;
+        }
+    }
+
+    /** What a linked family spent: its top session and every session linked under it, subagents included. */
+    #teamSpent(top: ConversationId): number {
+        let spent = 0;
+
+        for (const [id, cost] of this.#costs) {
+            if (this.teamRoot(this.#app.rootOf(id)) === top) {
+                spent += cost;
+            }
+        }
+
+        return spent;
+    }
+
+    /**
+     * What counts against a session's own limit, to show beside it: itself and its subagents, and, for a session that
+     * started linked sessions, theirs too, as `#reached` counts it.
+     */
+    budgetSpent(root: ConversationId): number {
+        return this.teamRoot(root) === root ? this.#teamSpent(root) : this.sessionSpent(root);
+    }
+
     personSpent(userId: string): number {
         return this.#people[userId] ?? 0;
     }
 
     /** The limit work in a conversation reached when `userId` pays for it: the session's, or theirs. */
-    #reached(id: ConversationId, userId: string): { budget: number; person?: User } | undefined {
+    #reached(
+        id: ConversationId,
+        userId: string,
+    ): { budget: number; person?: User; team?: true } | undefined {
         const app = this.#app;
         const root = app.rootOf(id);
         const budget = app.sessionMeta(root)?.budget;
 
         if (budget !== undefined && this.sessionSpent(root) >= budget) {
             return { budget };
+        }
+
+        // The budget of the session that started a team covers it all: what its linked sessions spend counts too.
+        const top = this.teamRoot(root);
+        const team = app.sessionMeta(top)?.budget;
+
+        if (team !== undefined && this.#teamSpent(top) >= team) {
+            return top === root ? { budget: team } : { budget: team, team: true };
         }
 
         const person = app.config.userById(userId);
@@ -207,7 +259,11 @@ export class Spend {
         }
 
         const whose =
-            reached.person === undefined ? "This session reached its" : "You reached your";
+            reached.person !== undefined
+                ? "You reached your"
+                : reached.team
+                  ? "The session that started this one reached its"
+                  : "This session reached its";
 
         throw new HttpError(
             409,
@@ -226,9 +282,11 @@ export class Spend {
             return undefined;
         }
 
-        return reached.person === undefined
-            ? `this session reached its ${dollars(reached.budget)} spend limit`
-            : `${reached.person.name} reached their ${dollars(reached.budget)} spend limit`;
+        return reached.person !== undefined
+            ? `${reached.person.name} reached their ${dollars(reached.budget)} spend limit`
+            : reached.team
+              ? `the session that started this one reached its ${dollars(reached.budget)} spend limit`
+              : `this session reached its ${dollars(reached.budget)} spend limit`;
     }
 
     /** Call `listener` whenever the owner changes a session's or a person's limit; returns how to stop. */
@@ -344,7 +402,7 @@ export class Spend {
             return {
                 id: session.id,
                 title: session.title ?? "New session",
-                spent: byRoot.get(id) ?? 0,
+                spent: budget === undefined ? (byRoot.get(id) ?? 0) : this.budgetSpent(id),
                 ...(budget === undefined ? {} : { budget }),
             };
         });

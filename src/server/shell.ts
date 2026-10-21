@@ -29,6 +29,8 @@ const TIMEOUT_SECONDS = 600;
 /** How much of what a command printed is kept: its end, where results and errors usually are. */
 const TAIL_CHARS = 30_000;
 const MAX_COMMAND = 4000;
+/** Terminal escape codes (colors, cursor moves): some tools print them even when nobody reads a terminal. */
+const ANSI = /\u001b\[[0-9;?]*[A-Za-z]/g;
 
 export type ShellInput = { command: string; by: string; name: string; context: boolean };
 
@@ -190,8 +192,9 @@ export class Shell {
     }
 
     /** Write a command's entry, once per command whatever runs it again. */
-    async #record(id: ConversationId, data: ShellData, context: Context): Promise<void> {
+    async #record(id: ConversationId, raw: ShellData, context: Context): Promise<void> {
         const app = this.#app;
+        const data = { ...raw, output: raw.output.replace(ANSI, "") };
         const entry: EntryDraft = {
             kind: SHELL_ENTRY,
             data,
@@ -341,7 +344,7 @@ export class Shell {
 
     /** What a running command has printed so far (its end), or undefined when it printed nothing or is not running. */
     printed(taskId: number): string | undefined {
-        return this.#tails.get(taskId)?.output;
+        return this.#tails.get(taskId)?.output.replace(ANSI, "");
     }
 
     /** The command a running task runs, for Running now. */

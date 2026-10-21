@@ -1,0 +1,254 @@
+/*
+ * The calm frame: the parts of the look that do not change with the direction. Quiet windows, one readable column, tool
+ * calls as one quiet line, a plain message box. The direction (direction.css and colors.toml) brings the palette, the
+ * quiet text's tones, and how the turns look.
+ */
+
+/* ─── Tokens ─── */
+
+:root {
+    /* Surfaces: the sidebar and code a step below the conversation. */
+    --panel: var(--o-bg-dark);
+    --code-bg: var(--o-bg-dark);
+    --line-strong: color-mix(in srgb, var(--body) 21%, var(--bg));
+    --scrim: color-mix(in srgb, var(--desk) 60%, transparent);
+
+    /* Modest, consistent corners. Pills and avatars stay round. */
+    --r-mark: 3px;
+    --r-tag: 5px;
+    --r-seg: 6px;
+    --r-row: 6px;
+    --r-control: 8px;
+    --r-card: 8px;
+    --r-window: 10px;
+    --r-sheet: 12px;
+    --r-float: 12px;
+
+    --gap-out: 6px;
+    --gap-in: 3px;
+
+    /* Windows: a hairline, a stronger one in focus, no glow. */
+    --window-border-active: var(--line-strong);
+    --window-ring: none;
+
+    /* No shadows at rest; what floats gets a hairline and a faint drop. */
+    --sh: rgb(0 0 0 / 0.45);
+    --shadow: none;
+    --pop: 0 0 0 1px var(--line), 0 16px 40px -20px var(--sh);
+
+    /* One column for the conversation and the message box: about 72 characters a line at the conversation's own text
+     * size, with their padding, and wider on a wide screen (64% of the pane, at most 1080px), a little narrower than
+     * Pocket's. Appearance's Width (Wide, Full) sets these inline, and so wins. */
+    --transcript-width: clamp(calc(36 * var(--text-size, 15px) + 56px), 64%, 1080px);
+    --composer-width: calc(var(--transcript-width) - 8px);
+}
+
+/* The π, quieter: the brand's color, a little toward the ground. */
+[data-part~="brand-mark"] {
+    color: color-mix(in oklab, var(--brand) 82%, var(--bg));
+}
+
+/* ─── The session list ─── */
+
+/* The open session: a raised row, not the accent's fill. The others' titles in the body color, a step below it. */
+[data-part~="session-button"][aria-current="page"] {
+    background: var(--card-2);
+}
+
+[data-part~="session-button"]:not([aria-current="page"]) {
+    --text: var(--body);
+}
+
+/* ─── The top bar: the title, then its folder and branch ─── */
+
+[data-part~="topbar-title"] {
+    font-size: 14.5px;
+    font-weight: 600;
+}
+
+[data-part~="topbar-sub"] {
+    color: var(--muted);
+}
+
+/* ─── The conversation ─── */
+
+/* Turns stand apart, a little more than the steps inside them. */
+[data-part~="transcript"] {
+    gap: calc(16px * var(--space-y));
+}
+
+[data-part~="transcript"] > [data-part~="prompt-row"]:not(:first-child) {
+    margin-top: calc(10px * var(--space-y));
+}
+
+/* Code in Pi's words: a quiet tag on a hairline. */
+[data-part~="reply"] [data-part~="inline-code"] {
+    padding: 1px 5px;
+    border: 1px solid var(--hair);
+    background: var(--card);
+    font-size: 0.86em;
+}
+
+[data-part~="reply-actions"] {
+    color: var(--faint);
+}
+
+/* ─── What Pi did: one quiet line until opened ─── */
+
+/* Closed, a group is a line of muted text after its chevron: no card, no border. */
+[data-part~="activity"] {
+    border-color: transparent;
+    background: none;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+[data-part~="activity-head"] {
+    min-height: calc(22px + 10px * var(--space-y));
+    padding-inline: 10px;
+    border-radius: var(--r-card);
+    font-size: 13px;
+    color: var(--muted);
+}
+
+/* Opened: a tonal panel on a hairline. */
+[data-part~="activity"][data-state~="open"] {
+    border-color: var(--hair);
+    background: var(--card);
+}
+
+[data-part~="activity"][data-state~="open"] > [data-part~="activity-head"] {
+    border-bottom-color: var(--hair);
+    border-radius: var(--r-card) var(--r-card) 0 0;
+}
+
+/* The marks stand on the panel's color. A call that worked, a thought: grey; only trouble and work have color. */
+[data-part~="step-mark"] {
+    background-color: var(--card);
+    box-shadow: 0 0 0 3px var(--card);
+    font-weight: 500;
+}
+
+:is([data-part~="tool-call"][data-state="ok"], [data-part~="thinking"]) [data-part~="step-mark"] {
+    background-image: none;
+    background-color: color-mix(in srgb, var(--body) 8%, var(--card));
+    color: var(--muted);
+}
+
+[data-part~="tool-call"][data-state="waiting"] [data-part~="step-mark"] {
+    box-shadow:
+        inset 0 0 0 1px var(--warn-line),
+        0 0 0 3px var(--card);
+}
+
+[data-part~="step-label"] {
+    font-weight: 500;
+    color: var(--body);
+}
+
+[data-part~="live-line"] {
+    color: var(--muted);
+}
+
+/* ─── Code ─── */
+
+[data-part~="code-block"] {
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--code-bg);
+}
+
+[data-part~="code-head"] {
+    border-bottom-color: var(--hair);
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* ─── The message box: one plain field ─── */
+
+[data-part~="message-box"] {
+    border: 1px solid var(--line);
+    border-radius: var(--r-sheet);
+    background: var(--card);
+    box-shadow: none;
+}
+
+[data-part~="message-box"]:focus-within {
+    border-color: var(--line-strong);
+}
+
+/* The model: quiet, its sparkle in the chip's own color rather than the accent. */
+[data-part~="model-chip"] {
+    --accent: currentColor;
+    background: none;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    [data-part~="model-chip"]:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+}
+
+[data-part~="plan-chip"] {
+    border-color: var(--hair-2);
+    color: var(--muted);
+}
+
+[data-part~="status-line"] {
+    color: var(--faint);
+}
+
+/* ─── Sheets, the launcher ─── */
+
+[data-part~="sheet-head"] {
+    border-bottom: 1px solid var(--hair);
+}
+
+[data-part~="launcher"] {
+    background: var(--panel);
+}
+
+[data-part~="launcher-row"][aria-selected="true"] {
+    background: var(--card-2);
+}
+
+/* ─── The home screen: as it is, quieter ─── */
+
+[data-part~="home-logo"] {
+    font-size: 10px;
+    color: color-mix(in oklab, var(--brand) 78%, var(--bg));
+}
+
+[data-part~="home-title"] {
+    font-family: var(--sans);
+    font-size: 16px;
+}
+
+[data-part~="home-title"] b {
+    color: var(--text);
+}
+
+[data-part~="home-color"] {
+    width: 12px;
+    height: 12px;
+    border-radius: var(--r-mark);
+}
+
+/* `button` and `primary` are the documented classes of the app's buttons. */
+[data-part~="home-actions"] .button {
+    border-color: var(--line);
+    border-radius: var(--r-control);
+    background: none;
+}
+
+[data-part~="home-actions"] .button.primary {
+    background: var(--accent-fill);
+}
+
+[data-part~="home-recent-key"] {
+    border-color: var(--hair-2);
+    border-radius: var(--r-tag);
+}

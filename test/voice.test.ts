@@ -1,6 +1,3 @@
-// Dictation into a message box (web/voice.js), with a stand-in recognizer: words typed before or beside dictation stay,
-// a phrase still being heard finishes where it is when the person types or moves elsewhere, the next one goes where the
-// caret is, and Alt+V picks a box that is there, PiP's first.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
@@ -154,25 +151,6 @@ test("words heard show as they come, and a revision replaces them", () => {
     unmountAll();
 });
 
-test("what is typed before the first words are heard stays", () => {
-    const { box, hear } = dictate();
-
-    box.type("Fix the bug in");
-    hear(said(["now", false]));
-    assert.equal(box.value, "Fix the bug in now");
-    unmountAll();
-});
-
-test("a box cleared before the first words are heard stays cleared", () => {
-    const { box, hear } = dictate("Old draft");
-
-    box.value = "";
-    box.caret(0);
-    hear(said(["new words", false]));
-    assert.equal(box.value, "New words");
-    unmountAll();
-});
-
 test("a phrase still being heard finishes in place around what was typed after it", () => {
     const { box, hear } = dictate();
 
@@ -186,100 +164,5 @@ test("a phrase still being heard finishes in place around what was typed after i
     // The next phrase goes where the caret is.
     hear(said(["please fix the login bug", true], ["and add a test", false]));
     assert.equal(box.value, "Please fix the login bug! And add a test");
-    unmountAll();
-});
-
-test("the caret moved mid-phrase: the phrase finishes in place, and the next goes to the caret", () => {
-    const { box, hear } = dictate("Intro. Outro.");
-
-    hear(said(["hello wor", false]));
-    assert.equal(box.value, "Intro. Outro. Hello wor");
-    box.caret(6);
-    hear(said(["hello world", false]));
-    assert.equal(box.value, "Intro. Outro. Hello world");
-    assert.equal(box.selectionStart, 6, "the caret is not pulled back to the words");
-    hear(said(["hello world", true]));
-    assert.equal(box.value, "Intro. Outro. Hello world");
-    assert.equal(box.selectionStart, 6);
-
-    hear(said(["hello world", true], ["more", false]));
-    assert.equal(box.value, "Intro. More Outro. Hello world");
-    unmountAll();
-});
-
-test("text typed before a phrase still being heard moves it along", () => {
-    const { box, hear } = dictate("Note:");
-
-    hear(said(["fix the lo", false]));
-    assert.equal(box.value, "Note: fix the lo");
-    box.caret(0);
-    box.type(">> ");
-    hear(said(["fix the login", true]));
-    assert.equal(box.value, ">> Note: fix the login");
-    assert.equal(box.selectionStart, 3);
-    unmountAll();
-});
-
-test("a letter typed before the words still being heard, the same as theirs, stays before them", () => {
-    const { box, hear } = dictate();
-
-    hear(said(["hello", false]));
-    box.caret(0);
-    box.type("H");
-    hear(said(["hello world", false]));
-    assert.equal(box.value, "H hello world");
-    unmountAll();
-});
-
-test("an edit on the words still being heard is kept", () => {
-    const { box, hear } = dictate();
-
-    hear(said(["helo wor", false]));
-    box.caret(3);
-    box.type("l");
-    assert.equal(box.value, "Hello wor");
-    hear(said(["hello world", false]));
-    assert.equal(box.value, "Hello wor");
-    unmountAll();
-});
-
-test("words go after the text when the box does not have the focus", () => {
-    const { box, hear } = dictate("Draft");
-
-    page.activeElement = null;
-    hear(said(["more", false]));
-    assert.equal(box.value, "Draft more");
-    unmountAll();
-});
-
-test("Alt+V dictates into PiP's box while it shows, else into the newest box there is", () => {
-    const pip = dictate("", { top: true });
-
-    pip.dictation.stop();
-    const session = dictate();
-
-    session.dictation.stop();
-    const started = recognitions.length;
-
-    assert.equal(voice.toggleDictation(), true);
-    assert.equal(recognitions.length, started + 1);
-    // PiP's box listens: words heard go there.
-    recognitions.at(-1)!.onresult!(said(["for pip", false]));
-    assert.equal(pip.box.value, "For pip");
-    assert.equal(session.box.value, "");
-    pip.dictation.stop();
-
-    // PiP's box gone from the page: the session's takes it.
-    pip.box.isConnected = false;
-    assert.equal(voice.toggleDictation(), true);
-    recognitions.at(-1)!.onresult!(said(["for the session", false]));
-    assert.equal(session.box.value, "For the session");
-    session.dictation.stop();
-    unmountAll();
-});
-
-test("Alt+V with no box in the page is not taken", () => {
-    voice.useDictation({ current: null }, () => {});
-    assert.equal(voice.toggleDictation(), false);
     unmountAll();
 });

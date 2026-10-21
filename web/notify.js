@@ -199,7 +199,11 @@ export function NotificationsSheet() {
               )
             : "";
 
-    return html`<${Sheet} title=${t("Notifications")} onClose=${closeSheet}>
+    return html`<${Sheet}
+        title=${t("Notifications")}
+        onClose=${closeSheet}
+        className="notifications-sheet"
+    >
         <p class="muted small">
             ${t("Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.")}
         </p>
@@ -207,38 +211,42 @@ export function NotificationsSheet() {
         ${
             !info || subscription === undefined
                 ? html`<${Loader} label=${t("Checking this device")} />`
-                : html`<div class="extension">
-                    <div class="extension-main">
-                        <div class="extension-title">${t("This device")}</div>
-                        <div class="muted small">
-                            ${t(on ? "Notifications are on." : "Notifications are off.")} ${devices}
-                        </div>
-                    </div>
-                    <div class="extension-actions">
-                        <${Switch}
-                            on=${on}
-                            disabled=${busy || (!on && problem !== null)}
-                            label=${t("Notifications on this device")}
-                            onChange=${on ? disable : enable}
-                        />
-                    </div>
-                </div>
-                <div class="group-title">${t("Notify me about")}</div>
-                ${KINDS.map(
-                    ([key, title, hint]) => html`<div class="extension">
+                : html`<div class="sheet-list">
+                    <div class="extension">
                         <div class="extension-main">
-                            <div>${t(title)}</div>
-                            <div class="muted small">${t(hint)}</div>
+                            <div class="extension-title">${t("This device")}</div>
+                            <div class="muted small">
+                                ${t(on ? "Notifications are on." : "Notifications are off.")} ${devices}
+                            </div>
                         </div>
                         <div class="extension-actions">
                             <${Switch}
-                                on=${info.prefs[key]}
-                                label=${t(title)}
-                                onChange=${() => setPref(key, !info.prefs[key])}
+                                on=${on}
+                                disabled=${busy || (!on && problem !== null)}
+                                label=${t("Notifications on this device")}
+                                onChange=${on ? disable : enable}
                             />
                         </div>
-                    </div>`,
-                )}
+                    </div>
+                </div>
+                <div class="group-title">${t("Notify me about")}</div>
+                <div class="sheet-list">
+                    ${KINDS.map(
+                        ([key, title, hint]) => html`<div class="extension">
+                            <div class="extension-main">
+                                <div>${t(title)}</div>
+                                <div class="muted small">${t(hint)}</div>
+                            </div>
+                            <div class="extension-actions">
+                                <${Switch}
+                                    on=${info.prefs[key]}
+                                    label=${t(title)}
+                                    onChange=${() => setPref(key, !info.prefs[key])}
+                                />
+                            </div>
+                        </div>`,
+                    )}
+                </div>
                 ${
                     on &&
                     html`<button class="button wide" onClick=${test}>

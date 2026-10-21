@@ -1,6 +1,6 @@
 {
     "name": "pi-pocket",
-    "version": "0.13.2",
+    "version": "0.18.0",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
     "private": true,
     "type": "module",
@@ -23,9 +23,9 @@
     "scripts": {
         "start": "node bin/pi-pocket.js",
         "dev": "node bin/pi-pocket.js --cwd .",
-        "check": "tsc --noEmit -p .",
+        "check": "tsc --noEmit -p . && node test/types-file.ts && node docs-site/check-reference.mjs",
         "test": "node --test test/*.test.ts",
-        "site:publish": "git subtree push --prefix site origin gh-pages",
+        "site:publish": "gh workflow run pages.yml",
         "format": "eslint --fix . && prettier --write .",
         "format:check": "prettier --check . && eslint .",
         "lint": "eslint ."
@@ -36,6 +36,7 @@
         "@earendil-works/pi-codemode": "1.1.0",
         "@earendil-works/pi-coding-agent": "1.1.0",
         "@earendil-works/pi-durable": "1.1.0",
+        "@earendil-works/pi-mcp": "1.1.0",
         "dompurify": "^3.4.16",
         "htm": "^3.1.1",
         "jiti": "2.7.0",

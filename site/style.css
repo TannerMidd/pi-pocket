@@ -1392,6 +1392,13 @@ kbd {
     }
 }
 
+/* With the section links, the guides and the docs need their short names to fit beside them. */
+@media (min-width: 1240px) {
+    .nav-long {
+        display: none;
+    }
+}
+
 /* On a phone, the logo and the GitHub button show only their icons. */
 @media (max-width: 520px) {
     .nav .wrap {

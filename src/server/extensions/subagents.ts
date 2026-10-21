@@ -40,6 +40,9 @@ import { levelAtMost, sameModel, THINKING_LEVELS } from "../models.ts";
 import { requestFor } from "../requests.ts";
 import { whyUnanswered } from "../subagent-runs.ts";
 
+// Exclude Agent Teams by name even while it is off; enabling it later must not give nested agents delegation.
+const AgentTeams = defineExtension({ name: "pocket-agent-teams" });
+
 function textOf(message: AssistantMessage | undefined): string {
     return (message?.content ?? [])
         .flatMap((part) => (part.type === "text" ? [part.text] : []))
@@ -992,7 +995,7 @@ export default function createSubagents(host: PocketHost) {
                     });
 
                     await configure(tx, child.id, {
-                        extensions: { remove: [SubagentTools] },
+                        extensions: { remove: [SubagentTools, AgentTeams] },
                         instructions: `You are the subagent "${name}". You work for another agent, not directly for a person, although a person may open your conversation and talk to you. Answer requests completely but concisely: your final answer is what gets reported back.`,
                         ...(model === undefined ? {} : { model }),
                         ...(thinking === undefined ? {} : { thinkingLevel: thinking }),
