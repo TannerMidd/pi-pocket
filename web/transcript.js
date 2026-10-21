@@ -539,8 +539,9 @@ function outcome({ call, result, details, status }) {
         return { text: shortError(result?.text ?? ""), tone: "err" };
     }
 
-    // A call whose result is not stored yet has nothing to count.
-    if (status !== "done" || !result) {
+    // A call whose result is not stored yet has nothing to count, nor one whose input or output came light, as a session
+    // opens (`partial`): it is counted when it comes whole, an instant later.
+    if (status !== "done" || !result || result.partial || call.partial) {
         return null;
     }
 
@@ -715,7 +716,9 @@ function callStatus({ result, slot, approval, decision, streaming, canRun, busy 
 function ThoughtStep({ block, streaming, reading }) {
     // With Show thinking on, a thought once written shows its words (the live line shows the one being written).
     const [chosen, setChosen] = useState(null);
-    const open = chosen ?? (reading && !streaming && Boolean(block.text?.trim()));
+    // One whose words have not come yet (`partial`, as a session opens) opens once they have, if it was asked to.
+    const open =
+        !block.partial && (chosen ?? (reading && !streaming && Boolean(block.text?.trim())));
 
     return html`<div
         class=${`step ${open ? "open" : ""}`}
@@ -1173,9 +1176,13 @@ function ActivityGroup({
     const lone = all.length === 1 && all[0].block.type === "thinking" ? all[0] : null;
     // Show thinking on: thoughts show their words once written.
     const reading = prefs().showThinking === true;
+    // A thought whose words have not come yet (`partial`, as a session opens) opens once they have.
     const open =
-        chosen ??
-        (lone ? reading && !lone.streaming && Boolean(lone.block.text?.trim()) : live || newest);
+        !lone?.block.partial &&
+        (chosen ??
+            (lone
+                ? reading && !lone.streaming && Boolean(lone.block.text?.trim())
+                : live || newest));
     // Calls that failed, said on the line too: folded, "edited 1" alone would read as done. A call someone denied did
     // not fail, nor a script stopped by a denial: its line says who denied it.
     const failed = all.filter((step) => {

@@ -52,6 +52,7 @@ import {
     type ClientLive,
     type ClientLiveUpdate,
     firstEntries,
+    lightEntry,
     liveMessageDelta,
     PEEK_LINES,
     type PeekLine,
@@ -140,8 +141,8 @@ export interface Client {
     /**
      * What the tab's code understands of updates (`PROTOCOL` in `web/store.js`): 2 keeps the queue an update leaves out;
      * 3 also takes the live message as what changed (`liveMessageDelta`); 4 also takes a full view with only the newest
-     * entries (`firstEntries`). A tab below 3 gets the whole live message with each update; older code, which names
-     * none, also gets the queue.
+     * entries (`firstEntries`); 5 also takes them light at first (`lightEntry`), whole in the update after. A tab below
+     * 3 gets the whole live message with each update; older code, which names none, also gets the queue.
      */
     readonly protocol?: number;
     /** The blocks of the live message this tab has, for protocol 3: undefined when it has none. */
@@ -516,7 +517,9 @@ export class Room {
     /**
      * Send this client what changed since its last update, or everything with `full`. A tab of protocol 4 gets the
      * whole order but, in full, only the entries of the newest rows (`firstEntries`): it asks for earlier ones
-     * (`entriesBefore`) as it shows them. A long session's every entry, in one event, made opening it slow.
+     * (`entriesBefore`) as it shows them. A long session's every entry, in one event, made opening it slow. A tab of
+     * protocol 5 gets those entries light (`lightEntry`), so the rows show at once, and whole in an update right after:
+     * what shows only when a step is opened was most of what it waited for.
      */
     push(client: Client, full: boolean): void {
         const view = this.#view?.value;
@@ -537,18 +540,42 @@ export class Room {
         const projected = this.#projectedEntries(view.entries);
         const order = projected.map((entry) => entry.id);
         const from = full && (client.protocol ?? 1) >= 4 ? firstEntries(projected) : 0;
+        const light = full && (client.protocol ?? 1) >= 5;
         const entries: ClientEntry[] = [];
+        let partial = false;
 
         projected.forEach((entry, index) => {
-            if (!client.sentEntries.has(entry.id)) {
-                // One before the newest rows is the tab's to ask for: it is not sent with a later update either.
+            if (client.sentEntries.has(entry.id)) {
+                return;
+            }
+
+            // One before the newest rows is the tab's to ask for: it is not sent with a later update either.
+            if (index < from) {
                 client.sentEntries.add(entry.id);
 
-                if (index >= from) {
-                    entries.push(entry);
-                }
+                return;
             }
+
+            const lighter = light ? lightEntry(entry) : null;
+
+            // A light one is not counted as sent: the next update brings it whole.
+            if (lighter === null) {
+                client.sentEntries.add(entry.id);
+            } else {
+                partial = true;
+            }
+
+            entries.push(lighter ?? entry);
         });
+
+        // That update goes at once, after the rest of what a tab gets as it opens the session (`PocketApp.attach`).
+        if (partial) {
+            setImmediate(() => {
+                if (this.clients.has(client)) {
+                    this.push(client, false);
+                }
+            });
+        }
 
         const orderKey = order.join(",");
         const orderChanged = orderKey !== client.orderKey;

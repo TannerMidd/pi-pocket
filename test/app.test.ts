@@ -21,7 +21,12 @@ import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { after, before, mock, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import {
+    fauxAssistantMessage,
+    fauxText,
+    fauxThinking,
+    fauxToolCall,
+} from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { Attachment } from "../src/server/commands.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
@@ -75,6 +80,17 @@ const route: FauxResponseStep = (context, options) => {
 
     if (text.includes("say hi please")) {
         return fauxAssistantMessage([fauxText("hi from helper")]);
+    }
+
+    // A long thought and a large file: what a view's first part leaves out.
+    if (text.includes("think and write a big file")) {
+        return fauxAssistantMessage(
+            [
+                fauxThinking("pondering ".repeat(200)),
+                fauxToolCall("write", { path: "big.txt", content: "line\n".repeat(400) }),
+            ],
+            { stopReason: "toolUse" },
+        );
     }
 
     // About 5 s of streaming at the scripted model's 2000 tokens a second.
@@ -1023,6 +1039,81 @@ test("a tab of protocol 4 opens a long session with its newest rows, and asks fo
 
         await until(() => sent().length >= 2, "the update with the answer");
         assert.deepEqual(sent(), ["one more", "assistant"]);
+    } finally {
+        app.detach(tab.client);
+        app.detach(old.client);
+    }
+});
+
+test("a tab of protocol 5 gets a session's newest entries light first, and whole right after", async () => {
+    const id = await newSession();
+
+    await say(id, "think and write a big file");
+    const tab = fakeTab(id, owner(), 5);
+    const old = fakeTab(id, owner(), 4);
+
+    type Block = { type: string; text?: string; args?: { content?: string }; partial?: boolean };
+    type Entry = {
+        id: number;
+        kind: string;
+        text?: string;
+        blocks?: Block[];
+        partial?: boolean;
+    };
+    const views = (of: typeof tab) =>
+        of.events
+            .filter((each) => each.event === "view")
+            .map((each) => each.data as { full: boolean; entries: Entry[] });
+
+    await app.attach(tab.client);
+    await app.attach(old.client);
+
+    try {
+        await until(() => views(tab).length >= 2 && views(old).length >= 1, "the views");
+        const whole = views(old)[0]!.entries;
+        const [first, next] = views(tab);
+        const call = whole.find((entry) =>
+            entry.blocks?.some((block) => block.type === "thinking"),
+        )!;
+        const result = whole.find((entry) => entry.kind === "toolResult")!;
+        const light = first!.entries.find((entry) => entry.id === call.id)!;
+
+        // The first view has the same entries, the thought without its words and the file cut short, marked partial.
+        assert.equal(first!.full, true);
+        assert.deepEqual(
+            first!.entries.map((entry) => entry.id),
+            whole.map((entry) => entry.id),
+        );
+        assert.equal(light.partial, true);
+        assert.deepEqual(
+            light.blocks!.map((block) => [block.type, block.partial]),
+            [
+                ["thinking", true],
+                ["toolCall", true],
+            ],
+        );
+        assert.equal(light.blocks![0]!.text, "");
+        assert.equal(light.blocks![1]!.args!.content!.length, 300);
+        // A short result is whole already, and words are never cut.
+        assert.equal(first!.entries.find((entry) => entry.id === result.id)!.partial, undefined);
+        assert.ok(first!.entries.every((entry) => entry.kind !== "user" || !entry.partial));
+
+        // The next update brings the light ones whole, and nothing else.
+        assert.equal(next!.full, false);
+        assert.deepEqual(next!.entries, [call]);
+
+        // And later updates do not bring them again.
+        await say(id, "one more");
+        await until(
+            () =>
+                views(tab).some((each) => each.entries.some((entry) => entry.text === "one more")),
+            "the update with the message",
+        );
+        assert.ok(
+            views(tab)
+                .slice(2)
+                .every((each) => each.entries.every((entry) => entry.id !== call.id)),
+        );
     } finally {
         app.detach(tab.client);
         app.detach(old.client);

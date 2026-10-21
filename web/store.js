@@ -507,6 +507,14 @@ function mergeView(current, data) {
     const entries = new Map(data.full && same ? current.entries : base.entries);
 
     for (const entry of data.entries) {
+        // A light one (`partial`) does not replace the whole one this tab has, as after a reconnect: it is sent whole
+        // again right after.
+        const had = entries.get(entry.id);
+
+        if (entry.partial && had !== undefined && !had.partial) {
+            continue;
+        }
+
         entries.set(entry.id, entry);
     }
 
@@ -691,10 +699,11 @@ const handlers = {
 /**
  * What this code understands of the server's updates, sent with each connection. 2: it keeps the queue when an update
  * leaves it out. 3: it takes the message being written as what changed (`mergeLive`). 4: a full view brings only the
- * entries of the newest rows, and it loads earlier ones as it shows them (`loadEarlier`). The server sends a tab below 3 the
- * whole message with each update, and one whose code names none (as a tab asleep through an update keeps) the queue too.
+ * entries of the newest rows, and it loads earlier ones as it shows them (`loadEarlier`). 5: those entries come light
+ * (`partial`) at first, whole in the update after. The server sends a tab below 3 the whole message with each update,
+ * and one whose code names none (as a tab asleep through an update keeps) the queue too.
  */
-const PROTOCOL = 4;
+const PROTOCOL = 5;
 const TRANSPORT_KEY = "pocket.transport";
 const local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(location.hostname);
 /** After an event stream stalls on this address, poll for a day, then try the stream again: one slow start is not forever. */

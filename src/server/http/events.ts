@@ -277,6 +277,10 @@ export function createEventStreams(app: PocketApp) {
             }
         }
 
+        // A tab's first answer goes as soon as its first view is built: the rest of that view, whole (`Room.push`),
+        // follows in the next, rather than with it a moment later.
+        let first = false;
+
         if (poller === undefined) {
             // A new tab, or one whose session ended (the server restarted): attach afresh, which sends hello and a full view.
             const created: Poller = {
@@ -364,6 +368,7 @@ export function createEventStreams(app: PocketApp) {
             // Its time starts again, now that its first view is built.
             keepPoller(created);
             poller = created;
+            first = true;
         }
 
         const current = poller;
@@ -374,6 +379,13 @@ export function createEventStreams(app: PocketApp) {
         }
 
         current.waiting = response;
+
+        if (first && current.queue.length > 0) {
+            answerPoll(current);
+
+            return;
+        }
+
         current.timer = setTimeout(
             () => answerPoll(current),
             current.queue.length > 0 ? 30 : POLL_HOLD_MS,
