@@ -271,7 +271,15 @@ test("New session here starts in the open session's folder", real, async () => {
     // New itself opens the picker there, with no walking to the folder.
     await page.press("Alt+n");
     await see(
-        `return JSON.stringify(document.querySelector('.fp-target .mono')?.textContent === ${JSON.stringify(folder)})`,
+        `
+        const { store } = await import('/store.js');
+        const { shortPath } = await import('/ui.js');
+
+        // As the picker shows it: a folder under the home folder is ~/…, and a build's sandbox puts the
+        // test's folder there.
+        return JSON.stringify(document.querySelector('.fp-target .mono')?.textContent ===
+            shortPath(${JSON.stringify(folder)}, store.state.server?.home));
+    `,
         "the New session picker at the session's folder",
     );
     await page.evaluate(`(await import('/store.js')).closeSheet()`);

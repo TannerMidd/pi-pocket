@@ -16,7 +16,7 @@ import {
     setFilesOpen,
     toggleFiles,
 } from "./files-panel.js";
-import { ExtensionPage } from "./extension-ui.js";
+import { ExtensionPage, ExtensionPanel, extPanelShown } from "./extension-ui.js";
 import { startEdgeBack, startSwipes, useDragToClose } from "./gestures.js";
 import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
@@ -36,6 +36,7 @@ import { Drawer, RailNav, ResizeHandle, SessionList, toSessions } from "./sessio
 import "./rich.js";
 import { takeShare } from "./share.js";
 import { Sheets } from "./sheets.js";
+import { defineItem, slotItems } from "./slots.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { SignIn } from "./signin.js";
 import { openSubagents } from "./subagents.js";
@@ -101,18 +102,108 @@ function ChangesButton() {
     </button>`;
 }
 
+// The top bar's buttons after the title: the app's own items of the `topbar` slot (slots.js), which a person can hide
+// and reorder in Appearance, with extensions' between them. The menu stays last.
+defineItem("topbar", {
+    id: "core:subagents",
+    label: "Subagents working",
+    order: 100,
+    render() {
+        const busy = (store.state.view.subagents ?? []).filter((agent) => agent.busy).length;
+
+        return (
+            busy > 0 &&
+            html`<button
+                class="icon-button"
+                aria-label=${t("Subagents: {{count}} working", { count: busy })}
+                title=${t("Subagents working")}
+                onClick=${openSubagents}
+            >
+                <span class="pulse"></span>
+                <span class="count">${busy}</span>
+            </button>`
+        );
+    },
+});
+defineItem("topbar", {
+    id: "core:changes",
+    label: "Changes",
+    order: 200,
+    render: () => filesAvailable() && html`<${ChangesButton} key=${store.state.conversationId} />`,
+});
+defineItem("topbar", {
+    id: "core:peeks",
+    label: "Peek tiles",
+    order: 300,
+    render: () => html`<${PeeksButton} />`,
+});
+defineItem("topbar", {
+    id: "core:files",
+    label: "Files",
+    order: 400,
+    render: () => html`<${FilesButton} />`,
+});
+defineItem("topbar", {
+    id: "core:browser",
+    label: "Browser",
+    order: 500,
+    render: () => html`<${BrowserButton} />`,
+});
+defineItem("topbar", {
+    id: "core:artifacts",
+    label: "Artifacts",
+    order: 600,
+    render() {
+        const artifacts = store.state.view.artifacts?.length ?? 0;
+
+        return html`<button
+            class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
+            aria-label=${t("Artifacts")}
+            title=${t("Artifacts")}
+            onClick=${() => openSheet({ type: "artifacts" })}
+        >
+            <${Icon} name="artifact" />
+            ${artifacts > 0 && html`<span class="badge">${artifacts}</span>`}
+        </button>`;
+    },
+});
+defineItem("topbar", {
+    id: "core:people",
+    label: "People",
+    order: 700,
+    render: () => html`<${PeopleButton} />`,
+});
+defineItem("topbar", {
+    id: "core:menu",
+    label: "Menu",
+    order: 1000,
+    fixed: true,
+    render: () =>
+        html`<button
+            class="icon-button"
+            aria-label=${t("Menu")}
+            title=${t("Menu")}
+            aria-haspopup="dialog"
+            aria-expanded=${store.state.sheet?.type === "menu"}
+            onClick=${() => openSheet({ type: "menu" })}
+        >
+            <${Icon} name="more" />
+        </button>`,
+});
+
 function Topbar() {
-    const { view, server, conversationId } = store.state;
+    const { view, server } = store.state;
     const conversation = view.conversation;
-    const artifacts = view.artifacts?.length ?? 0;
     const cwd = view.agent?.cwd ?? conversation?.cwd;
     const folder = String(cwd ?? "")
         .replace(/\/+$/, "")
         .split("/")
         .pop();
     const branch = headLabel(view.branch) || conversation?.worktree?.branch;
-    const title = conversation?.title ?? (store.state.missing ? t("Not found") : t("Loading…"));
-    const busySubagents = (view.subagents ?? []).filter((agent) => agent.busy).length;
+    const title =
+        conversation?.title ??
+        store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ??
+        (store.state.missing ? t("Not found") : t("Loading…"));
     // Other sessions waiting for an approval, counted on the way back to them.
     const waiting = store.state.sessions.filter(
         (session) =>
@@ -184,42 +275,7 @@ function Topbar() {
                 }
             </span>
         </div>
-        ${
-            busySubagents > 0 &&
-            html`<button
-                class="icon-button"
-                aria-label=${t("Subagents: {{count}} working", { count: busySubagents })}
-                title=${t("Subagents working")}
-                onClick=${openSubagents}
-            >
-                <span class="pulse"></span>
-                <span class="count">${busySubagents}</span>
-            </button>`
-        }
-        ${filesAvailable() && html`<${ChangesButton} key=${conversationId} />`}
-        <${PeeksButton} />
-        <${FilesButton} />
-        <${BrowserButton} />
-        <button
-            class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
-            aria-label=${t("Artifacts")}
-            title=${t("Artifacts")}
-            onClick=${() => openSheet({ type: "artifacts" })}
-        >
-            <${Icon} name="artifact" />
-            ${artifacts > 0 && html`<span class="badge">${artifacts}</span>`}
-        </button>
-        <${PeopleButton} />
-        <button
-            class="icon-button"
-            aria-label=${t("Menu")}
-            title=${t("More")}
-            aria-haspopup="dialog"
-            aria-expanded=${store.state.sheet?.type === "menu"}
-            onClick=${() => openSheet({ type: "menu" })}
-        >
-            <${Icon} name="more" />
-        </button>
+        ${slotItems("topbar").map(({ node }) => node)}
     </header>`;
 }
 
@@ -376,7 +432,9 @@ function PanelHost({ shown, panel }) {
         }
 
         const opener = document.activeElement;
-        const box = document.querySelector(".layout > :is(.files-tile, .browser):not(.leaving)");
+        const box = document.querySelector(
+            ".layout > :is(.files-tile, .browser, .ext-panel):not(.leaving)",
+        );
 
         if (box && !box.contains(opener)) {
             box.focus({ preventScroll: true });
@@ -437,15 +495,17 @@ function App() {
     const browsing =
         inConversation && !placed && state.browserOpen && browserAvailable() && !state.missing;
     const filing = !placed && filesShown(state);
-    const people = !placed && !browsing && !filing && peopleDocked(state);
+    // An extension's panel, in the same place: one panel at a time, so opening one closes the others.
+    const paneling = !placed && !browsing && !filing && extPanelShown(state);
+    const people = !placed && !browsing && !filing && !paneling && peopleDocked(state);
     const peeking = !placed && peeksWanted(state);
     const tiles = peeking ? peekTiles(state) : [];
     // The column takes the place beside the conversation when Browser and People leave it free; otherwise a strip,
     // which only shows when there are tiles.
-    const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !filing && !people;
+    const peekColumn = peeking && PEEK_WIDE.matches && !browsing && !filing && !paneling && !people;
 
     return html`<div
-        class=${`layout ${inConversation || placed ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""}`}
+        class=${`layout ${inConversation || placed ? "" : "home"} ${browsing ? "browsing" : ""} ${filing ? "filing" : ""} ${paneling ? "paneling" : ""}`}
         data-part="app"
     >
         <aside class="sidebar window" data-part="sidebar">
@@ -487,7 +547,7 @@ function App() {
             html`<${PeekHost}
                 shown=${peekColumn}
                 tiles=${tiles}
-                replaced=${browsing || filing || people}
+                replaced=${browsing || filing || paneling || people}
             />`
         }
         <${PanelHost}
@@ -496,7 +556,15 @@ function App() {
             panel=${BrowserPanel}
         />
         <${PanelHost} key=${`files:${state.conversationId}`} shown=${filing} panel=${FilesPanel} />
-        ${inConversation && html`<${PeopleHost} shown=${people} replaced=${browsing || filing} />`}
+        <${PanelHost}
+            key=${`ext:${state.conversationId}`}
+            shown=${paneling}
+            panel=${ExtensionPanel}
+        />
+        ${
+            inConversation &&
+            html`<${PeopleHost} shown=${people} replaced=${browsing || filing || paneling} />`
+        }
         <${Drawer} />
         <${PipHost} />
         <${Sheets} />
@@ -519,11 +587,17 @@ function focusWindow(event) {
         return;
     }
 
-    // By the window's part name, as themes know it: `sidebar`, `peeks`, `people-panel`, `browser-panel`, `files-panel`.
+    // By the window's part name, as themes know it: `sidebar`, `peeks`, `people-panel`, `browser-panel`, `files-panel`,
+    // `extension-panel`.
     const name =
-        ["sidebar", "peeks", "people-panel", "browser-panel", "files-panel"].find((each) =>
-            win.matches(`[data-part~="${each}"]`),
-        ) ?? "pane";
+        [
+            "sidebar",
+            "peeks",
+            "people-panel",
+            "browser-panel",
+            "files-panel",
+            "extension-panel",
+        ].find((each) => win.matches(`[data-part~="${each}"]`)) ?? "pane";
 
     if (document.documentElement.dataset.focus !== name) {
         document.documentElement.dataset.focus = name;

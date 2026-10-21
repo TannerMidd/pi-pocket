@@ -158,7 +158,7 @@ pocketApi: number;
 
 Since 0.14.0 · Stable
 
-The version of the extension API that the extension needs, such as `1`. For a newer version than Pi Pocket's, the gallery hides the entry.
+The version of the extension API that the extension needs, such as `2`. An extension that returns `output` from a tool needs 2. For a newer version than Pi Pocket's, the gallery hides the entry.
 
 ### `minPocket`
 

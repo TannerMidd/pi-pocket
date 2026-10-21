@@ -249,14 +249,22 @@ export interface SafeText {
  */
 export interface LinkedSessions {
     /**
-     * Starts a session linked to `source`, in its folder, and sends it `message` as its first message. `model` is
-     * `provider/modelId`; `thinking` is a level no higher than the source's.
+     * Starts a session linked to `source`, in `cwd` or the source's folder, and sends it `message` as its first
+     * message. `model` is `provider/modelId`; `thinking` is a level no higher than the source's. `cwd` is since 0.19.0:
+     * an older Pi Pocket ignores it, and starts the session in the source's folder. A blank `cwd` counts as none; a
+     * relative one resolves against the server process's folder, not the source's.
      * @since 0.14.0
      * @experimental
      */
     start(
         source: ConversationId,
-        request: { title?: string; message: string; model?: string; thinking?: string },
+        request: {
+            title?: string;
+            message: string;
+            model?: string;
+            thinking?: string;
+            cwd?: string;
+        },
         key: string,
     ): Promise<{ session: ConversationId; address: string }>;
     /**
@@ -333,11 +341,19 @@ export interface HumanLinkedSession extends LinkedSession {
  */
 export interface HumanLinkedSessions {
     /**
-     * Starts once for this key, as the clicking person. Explicit thinking must be supported and no higher than source.
+     * Starts once for this key, as the clicking person. Optional `cwd` (since 0.19.0) selects an existing folder: blank
+     * counts as none, and a relative one resolves against the server process's folder.
+     * Explicit thinking must be supported and no higher than source.
      * @since 0.16.0
      */
     start(
-        request: { title?: string; message: string; model?: string; thinking?: ModelThinkingLevel },
+        request: {
+            title?: string;
+            message: string;
+            model?: string;
+            thinking?: ModelThinkingLevel;
+            cwd?: string;
+        },
         key: string,
     ): Promise<{ session: ConversationId; address: string }>;
     /**
@@ -605,13 +621,15 @@ export interface BrowserModule {
 }
 
 /**
- * What a rail button, menu row, or launcher action does when a person uses it: exactly one of these.
+ * What a rail button, menu row, or launcher action does when a person uses it: exactly one of these. `panel` (since
+ * 0.19.0) opens one of the module's panels.
  * @since 0.14.0
  */
 export type Action =
-    | { page: string; sheet?: never; run?: never }
-    | { sheet: string; page?: never; run?: never }
-    | { run: () => unknown; page?: never; sheet?: never };
+    | { page: string; sheet?: never; panel?: never; run?: never }
+    | { sheet: string; page?: never; panel?: never; run?: never }
+    | { panel: string; page?: never; sheet?: never; run?: never }
+    | { run: () => unknown; page?: never; sheet?: never; panel?: never };
 
 /**
  * A button on the rail.
@@ -784,6 +802,246 @@ export interface SheetSpec<P extends object = object> {
      * @since 0.14.0
      */
     wide?: boolean;
+}
+
+/**
+ * A panel beside the conversation, where the Browser and Files panels dock; over the conversation on a narrow screen.
+ * The top bar and the places get a button that opens it.
+ * @since 0.19.0
+ * @experimental
+ */
+export interface PanelSpec {
+    /**
+     * The panel's id in the module.
+     * @since 0.19.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * The panel's title, and its buttons' label.
+     * @since 0.19.0
+     * @experimental
+     */
+    title: string;
+    /**
+     * What the panel shows.
+     * @since 0.19.0
+     * @experimental
+     */
+    component: ComponentType<PageProps>;
+    /**
+     * The name of one of the app's icons, for its buttons.
+     * @since 0.19.0
+     * @experimental
+     */
+    icon?: string;
+    /**
+     * An icon of your own: a stroked path in a 24 × 24 box.
+     * @since 0.19.0
+     * @experimental
+     */
+    iconPath?: string;
+    /**
+     * A short count or word on its buttons, as on a rail button.
+     * @since 0.19.0
+     * @experimental
+     */
+    badge?: number | string | null | false;
+    /**
+     * With `true`, the panel is wider beside the conversation.
+     * @since 0.19.0
+     * @experimental
+     */
+    wide?: boolean;
+}
+
+/**
+ * An item in the status line under the message box, before the spend. With an action, it is a button.
+ * @since 0.19.0
+ * @experimental
+ */
+export type StatusSpec = (Action | { page?: never; sheet?: never; panel?: never; run?: never }) & {
+    /**
+     * The item's id in the module.
+     * @since 0.19.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * What the item says: `"46W · 74° · 95%"`.
+     * @since 0.19.0
+     * @experimental
+     */
+    text: string;
+    /**
+     * What it says on a line too narrow for `text`: `"46W"`.
+     * @since 0.19.0
+     * @experimental
+     */
+    short?: string;
+    /**
+     * Its tooltip, and what a tap on the line says on a touch screen.
+     * @since 0.19.0
+     * @experimental
+     */
+    title?: string;
+    /**
+     * Its color: `"warn"`, `"error"`, or `"muted"` (greyed, as for a service that is out of reach).
+     * @since 0.19.0
+     * @experimental
+     */
+    tone?: "warn" | "error" | "muted";
+    /**
+     * Its name in Appearance → Layout. By default, the module's title.
+     * @since 0.19.0
+     * @experimental
+     */
+    label?: string;
+} & Placement;
+
+/**
+ * Where an item goes in its slot: just before or just after another item, such as `"core:spend"`. Without either, it
+ * goes in the place the slot keeps for extensions. A person's own order wins.
+ * @since 0.19.0
+ * @experimental
+ */
+export type Placement = { before?: string; after?: never } | { after?: string; before?: never };
+
+/**
+ * A button in the top bar, after `core:browser` and before `core:artifacts`, `core:people`, and the menu.
+ * @since 0.19.0
+ * @experimental
+ */
+export type TopbarSpec = Action &
+    Placement & {
+        /**
+         * The button's id in the module.
+         * @since 0.19.0
+         * @experimental
+         */
+        id: string;
+        /**
+         * The button's label.
+         * @since 0.19.0
+         * @experimental
+         */
+        title: string;
+        /**
+         * The name of one of the app's icons.
+         * @since 0.19.0
+         * @experimental
+         */
+        icon?: string;
+        /**
+         * An icon of your own: a stroked path in a 24 × 24 box.
+         * @since 0.19.0
+         * @experimental
+         */
+        iconPath?: string;
+        /**
+         * A short count or word on the button.
+         * @since 0.19.0
+         * @experimental
+         */
+        badge?: number | string | null | false;
+    };
+
+/**
+ * A button on the left of the message box's row, after the app's own (Attach, the model, Plan).
+ * @since 0.19.0
+ * @experimental
+ */
+export type ComposerButtonSpec = TopbarSpec;
+
+/**
+ * One of Pi's answers, as an action under it gets it.
+ * @since 0.19.0
+ * @experimental
+ */
+export interface Reply {
+    /**
+     * The answer's id in its session.
+     * @since 0.19.0
+     * @experimental
+     */
+    readonly id: string;
+    /**
+     * Its words, as Markdown.
+     * @since 0.19.0
+     * @experimental
+     */
+    readonly text: string;
+    /**
+     * The session it is in.
+     * @since 0.19.0
+     * @experimental
+     */
+    readonly conversationId: number;
+}
+
+/**
+ * An action under Pi's answers, before More. `run` gets the answer; a sheet gets it as the prop `reply`.
+ * @since 0.19.0
+ * @experimental
+ */
+export type ReplyActionSpec = (
+    { run: (reply: Reply) => unknown; sheet?: never } | { sheet: string; run?: never }
+) &
+    Placement & {
+        /**
+         * The action's id in the module.
+         * @since 0.19.0
+         * @experimental
+         */
+        id: string;
+        /**
+         * The action's words.
+         * @since 0.19.0
+         * @experimental
+         */
+        label: string;
+        /**
+         * The name of one of the app's icons, before the words.
+         * @since 0.19.0
+         * @experimental
+         */
+        icon?: string;
+        /**
+         * An icon of your own: a stroked path in a 24 × 24 box.
+         * @since 0.19.0
+         * @experimental
+         */
+        iconPath?: string;
+    };
+
+/**
+ * A place in the app built from named items: `"topbar"` (the buttons after the session's title), `"status"` (the
+ * status line under the message box), `"places"` (the tiles of the places and the menu), `"composer"` (the buttons on
+ * the left of the message box's row), or `"reply"` (the actions under Pi's answers).
+ * @since 0.19.0
+ * @experimental
+ */
+export type SlotName = "topbar" | "status" | "places" | "composer" | "reply";
+
+/**
+ * How a module arranges a slot: items to hide, and an order for some of them. The named items take the places those
+ * items had, in this order; the rest stay. The app's items are `core:…`, extensions' `ext:<module>:<id>`.
+ * @since 0.19.0
+ * @experimental
+ */
+export interface Arrangement {
+    /**
+     * Ids of items to hide. Fixed items (the menu, Lancet Guard, the connection's warning) always show.
+     * @since 0.19.0
+     * @experimental
+     */
+    hide?: string[];
+    /**
+     * Ids of items, in the order they show.
+     * @since 0.19.0
+     * @experimental
+     */
+    order?: string[];
 }
 
 /**
@@ -1096,6 +1354,48 @@ export interface Pocket {
      */
     sheet<P extends object = object>(spec: SheetSpec<P>): Added<SheetSpec<P>>;
     /**
+     * Adds a panel beside the conversation, with a button in the top bar and in the places.
+     * @since 0.19.0
+     * @experimental
+     */
+    panel(spec: PanelSpec): Added<PanelSpec>;
+    /**
+     * Adds an item in the status line under the message box.
+     * @since 0.19.0
+     * @experimental
+     */
+    status(spec: StatusSpec): Added<StatusSpec>;
+    /**
+     * Adds a button in the top bar.
+     * @since 0.19.0
+     * @experimental
+     */
+    topbar(spec: TopbarSpec): Added<TopbarSpec>;
+    /**
+     * Adds a button on the left of the message box's row.
+     * @since 0.19.0
+     * @experimental
+     */
+    composerButton(spec: ComposerButtonSpec): Added<ComposerButtonSpec>;
+    /**
+     * Adds an action under Pi's answers.
+     * @since 0.19.0
+     * @experimental
+     */
+    replyAction(spec: ReplyActionSpec): Added<ReplyActionSpec>;
+    /**
+     * Puts text into the message box, after what is there, for the person to send. It never sends.
+     * @since 0.19.0
+     * @experimental
+     */
+    insertText(text: string, options?: { inline?: boolean }): void;
+    /**
+     * Hides or reorders a slot's items, the app's own too. A person's own choices in Appearance → Layout win.
+     * @since 0.19.0
+     * @experimental
+     */
+    arrange(slot: SlotName, arrangement: Arrangement): { remove(): void };
+    /**
      * Sets how the calls of one of the module's tools show.
      * @since 0.14.0
      */
@@ -1120,6 +1420,18 @@ export interface Pocket {
      * @since 0.14.0
      */
     closeSheet(): void;
+    /**
+     * Opens one of the module's panels. It takes the place of the panel that shows.
+     * @since 0.19.0
+     * @experimental
+     */
+    openPanel(id: string): void;
+    /**
+     * Closes the module's panel that shows.
+     * @since 0.19.0
+     * @experimental
+     */
+    closePanel(): void;
     /**
      * Loads a stylesheet from the browser module's folder.
      * @since 0.14.0

@@ -46,10 +46,27 @@ type Scorer = (
     windows?: number;
 }>;
 
+/** Where the LANCET model stands on disk: the classifier's weights are a one-time download, not part of the package. */
+export interface ModelStatus {
+    state: "ready" | "missing" | "downloading" | "failed";
+    detail: string;
+}
+
 export interface GuardStatus {
     available: boolean;
     enabled: boolean;
     detail: string;
+    /** Absent when the guard package is not installed (or too old to carry the model downloader). */
+    model?: ModelStatus;
+}
+
+/** The package's `model-store.mjs`: it checks for the model and downloads it, verified against pinned digests. */
+interface ModelStore {
+    modelState(): { installed: boolean; problem?: string };
+    installModel(options: {
+        signal?: AbortSignal;
+        onProgress?: (step: string) => void;
+    }): Promise<{ installed: boolean; reason: string }>;
 }
 
 export interface ToolJudgement {
@@ -66,6 +83,11 @@ export class LancetGuard {
     readonly settingsFile = join(homedir(), ".pi", "lancet-guard.json");
     #modules: Promise<LancetModules> | undefined;
     #loadError: string | undefined;
+    #store: Promise<ModelStore> | undefined;
+    #download: Promise<void> | undefined;
+    #step: string | undefined;
+    #failure: string | undefined;
+    readonly #abort = new AbortController();
     readonly #verdicts = new Map<string, Awaited<ReturnType<Scorer>>>();
 
     /** True when PI_POCKET_GUARD=off turned the guard off for this process. */
@@ -131,6 +153,101 @@ export class LancetGuard {
         return this.#modules;
     }
 
+    #modelStore(): Promise<ModelStore> {
+        if (this.directory === undefined) {
+            return Promise.reject(new Error("specpi-lancet-guard is not installed in Pi"));
+        }
+
+        this.#store ??= import(
+            pathToFileURL(join(this.directory, "src", "model-store.mjs")).href
+        ).then((store) => store as ModelStore);
+        this.#store.catch(() => {
+            this.#store = undefined;
+        });
+
+        return this.#store;
+    }
+
+    /** Whether the LANCET model is on disk, being downloaded, or failed to download. Undefined without a guard package. */
+    async model(): Promise<ModelStatus | undefined> {
+        if (this.#download !== undefined) {
+            return {
+                state: "downloading",
+                detail:
+                    this.#step === "verify"
+                        ? "Checking the LANCET model against its checksums."
+                        : "Downloading the LANCET model (about 109 MB).",
+            };
+        }
+
+        let state: ReturnType<ModelStore["modelState"]>;
+
+        try {
+            state = (await this.#modelStore()).modelState();
+        } catch {
+            // A package from before the model downloader: Pi's `/lancet-guard setup` is the way.
+            return undefined;
+        }
+
+        if (state.installed) {
+            return { state: "ready", detail: "The LANCET model is installed." };
+        }
+
+        return this.#failure === undefined
+            ? {
+                  state: "missing",
+                  detail:
+                      state.problem === "not downloaded"
+                          ? "The LANCET model is not downloaded."
+                          : `The LANCET model is not usable: ${state.problem}.`,
+              }
+            : { state: "failed", detail: `The LANCET model download failed: ${this.#failure}` };
+    }
+
+    /**
+     * Download and check the pinned LANCET model, the same download Pi's `/lancet-guard setup` does. One download at a
+     * time: a call while one runs joins it. `changed` runs when its step changes. Nothing else starts this.
+     */
+    setupModel(changed: () => void = () => {}): Promise<void> {
+        if (this.#download !== undefined) {
+            return this.#download;
+        }
+
+        this.#failure = undefined;
+        this.#step = "download";
+
+        const run = (async () => {
+            try {
+                const store = await this.#modelStore();
+
+                await store.installModel({
+                    signal: this.#abort.signal,
+                    onProgress: (step) => {
+                        this.#step = step;
+                        changed();
+                    },
+                });
+            } catch (error) {
+                this.#failure = describe(error);
+
+                throw error;
+            } finally {
+                this.#download = undefined;
+                this.#step = undefined;
+            }
+        })();
+
+        this.#download = run;
+        run.catch(() => {});
+
+        return run;
+    }
+
+    /** Stop a download in progress. */
+    close(): void {
+        this.#abort.abort();
+    }
+
     /**
      * Whether the settings file turns the guard on, read as the guard reads it: off unless `enabled` is true, and off
      * when the file is missing or unreadable. Needs none of the guard's code, so it answers when the guard cannot load.
@@ -171,6 +288,17 @@ export class LancetGuard {
         try {
             const modules = await this.#load();
             const settings = modules.loadSettings(this.settingsFile);
+            const model = await this.model();
+            const withModel = model === undefined ? {} : { model };
+
+            if (settings.enabled === true && model !== undefined && model.state !== "ready") {
+                return {
+                    available: false,
+                    enabled: true,
+                    detail: `Lancet Guard is on but has no model yet, so bash calls the local rules leave open are blocked: ${model.detail}`,
+                    ...withModel,
+                };
+            }
 
             return {
                 available: true,
@@ -178,6 +306,7 @@ export class LancetGuard {
                 detail: settings.enabled
                     ? "Lancet Guard checks bash, write, and edit calls."
                     : `Lancet Guard is off in ${this.settingsFile}.`,
+                ...withModel,
             };
         } catch (error) {
             const reason = this.#loadError ?? describe(error);

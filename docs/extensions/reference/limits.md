@@ -16,7 +16,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 [Names](names.md)
 
 - **A module that adds to the app:** a name of 64 characters at most. [Modules, loading, and errors](../modules.md)
-- **An id of a rail button, menu row, launcher action, page, or sheet:** 64 characters at most. [Browser modules](../browser-modules.md)
+- **An id of a rail button, menu row, launcher action, page, sheet, panel, status item, top bar button, message box button, or action under answers:** 64 characters at most. [Browser modules](../browser-modules.md)
 - **A command's name:** 64 characters at most. [Slash commands](../commands.md)
 - **An event's name:** 1 to 64 characters. [Events](../events.md)
 - **A gallery entry's name:** 2 to 64 characters. [Publishing to the gallery](../publishing.md)
@@ -31,11 +31,13 @@ All the numbers that limit a module, in one place. Each group links to the guide
 
 [Starting and messaging sessions](../linked-sessions.md)
 
-- **Sessions that one session starts:** 10 at most. A linked session cannot start sessions.
-- **Messages between the sessions of a team:** 20 at most since a person last wrote in one of them. Then a person must write.
+- **Sessions that one session starts:** no limit, since 0.19.0. Before 0.19.0, 10 at most. A linked session cannot start sessions.
+- **Messages between the sessions of a team:** no limit, since 0.19.0. Before 0.19.0, 20 at most since a person last wrote in one of them. The spend limit of the session that started the team still applies.
 - **A message:** 20,000 characters at most.
 - **A title:** one line of 120 characters at most.
 - **A call's key:** Pi Pocket keeps the record of a `key` for 30 days, and the records of the last 1,000 calls of each session.
+
+**Note:** since 0.19.0, no count limit applies to a team. The spend limit of the top session is the brake. The owner can set a session budget for a team in Menu → Spend.
 
 ## Browser modules
 
@@ -50,7 +52,8 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Notices from `pocket.notify`:** 5 every 5 s for a module, for all its versions together. The app drops the rest.
 - **Rail buttons of modules:** together, the height of 4 buttons. Past that, they scroll.
 - **A count on a rail button:** a count past 99, and `Infinity`, shows "99+".
-- **Text on a rail button:** past 24 characters, it is cut to 23 characters and "…".
+- **Text on a rail button:** past 24 characters, it is cut to 23 characters and "…". A panel's badge is the same.
+- **Text of a status item:** past 40 characters, `text` and `short` are cut to 39 characters and "…".
 - **Swipe back on a page:** on touch screens up to 699 px wide.
 
 ## Tool calls

@@ -128,7 +128,7 @@ test(
             "the Extensions menu item",
         );
         await click("Extensions");
-        await see(`document.querySelector('.gallery-card') !== null`, "Discover's listing");
+        await see(`document.querySelector('.ext-row') !== null`, "Discover's listing");
         assert.equal(
             await inPage<boolean>(
                 `return JSON.stringify([...document.querySelectorAll('[role="tab"]')].some((tab) => tab.textContent.trim() === 'Discover' && tab.getAttribute('aria-selected') === 'true'))`,
@@ -138,12 +138,12 @@ test(
         );
         await settle();
         await page.type({ selector: '.extension-hub input[type="search"]' }, "clock");
-        await page.click({ selector: ".gallery-card-open" });
+        await page.click({ selector: ".ext-row-open" });
         await see(
             `document.querySelector('.extension-hub-layout.has-selection') !== null`,
             "the phone's selected detail",
         );
-        await click("Back to Discover");
+        await click("Back");
         await see(
             `document.querySelector('.extension-hub-layout.has-selection') === null`,
             "the listing after detail Back",
@@ -155,12 +155,12 @@ test(
             "clock",
             "phone detail Back preserves the search",
         );
-        await click("Install (stays off)");
+        await click("Install");
         await until(async () => (await installed())?.version === "1.0.0", "the listing install");
         assert.equal((await installed())?.enabled, false);
         assert.equal(pinOf(provenance()), first.pin);
         await see(
-            `document.querySelector('.gallery-card')?.textContent.toLowerCase().includes('installed') === true`,
+            `document.querySelector('.ext-row')?.textContent.toLowerCase().includes('installed') === true`,
             "the listing's installed state without reopening",
         );
 
@@ -169,10 +169,10 @@ test(
         await click("Updates");
         await click("Refresh");
         await see(
-            `[...document.querySelectorAll('.gallery-card button')].some((button) => button.textContent.trim() === 'Review update')`,
+            `[...document.querySelectorAll('.ext-row button')].some((button) => button.textContent.trim() === 'Update')`,
             "the update's direct review action",
         );
-        await click("Review update");
+        await click("Update");
         await see(
             `document.querySelector('[data-part="diff"], .diff')?.textContent.includes('2.0.0') === true`,
             "the update diff",

@@ -5,6 +5,7 @@ import {
     context,
     fakeTab,
     lastText,
+    modelTexts,
     openApp,
     owner as ownerOf,
     root,
@@ -912,6 +913,120 @@ test("a tab gets the queue when it changes, not with each update of a turn, and 
         app.detach(tab.client);
         app.detach(late.client);
     }
+});
+
+test("a tab of protocol 3 gets the answer being written as what changed, an older tab whole", async () => {
+    const { liveMessage } = (await import(new URL("../web/live.js", import.meta.url).href)) as {
+        liveMessage: (current: unknown, update: unknown) => unknown;
+    };
+    const id = await newSession();
+    const tab = fakeTab(id, owner(), 3);
+    const old = fakeTab(id, owner(), 2);
+
+    type Live = { generation?: { message?: { keep?: number } } };
+    const lives = (of: typeof tab) =>
+        of.events.flatMap((each) => (each.event === "view" ? [each.data.live as Live] : []));
+    const size = (of: typeof tab) => JSON.stringify(lives(of)).length;
+
+    await app.attach(tab.client);
+    await app.attach(old.client);
+
+    try {
+        await app.commands.submit(id, owner(), {
+            text: "stream a long answer",
+            requestId: crypto.randomUUID(),
+        });
+        await until(() => size(old) > 200_000, "the answer to stream a while");
+        // Both tabs get each update at once: the new one's changes add up to the old one's whole message.
+        let shown: unknown = undefined;
+
+        for (const live of lives(tab)) {
+            shown = liveMessage(shown, live.generation?.message);
+        }
+
+        assert.deepEqual(shown, lives(old).at(-1)!.generation?.message);
+        assert.ok(lives(tab).some((live) => live.generation?.message?.keep !== undefined));
+        assert.ok(lives(old).every((live) => live.generation?.message?.keep === undefined));
+        assert.ok(size(tab) * 5 < size(old), `${size(tab)} bytes, against ${size(old)}`);
+        await app.commands.abort(id, owner());
+    } finally {
+        app.detach(tab.client);
+        app.detach(old.client);
+    }
+});
+
+test("a tab does not get the session list again when it did not change", async () => {
+    const id = await newSession();
+    const tab = fakeTab(id, owner());
+    const again = fakeTab(id, owner());
+    const lists = () => tab.events.filter((each) => each.event === "sessions").length;
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 600));
+
+    await app.attach(tab.client);
+
+    try {
+        await pause();
+        const before = lists();
+
+        // The same person in the same session again: the list says the same, though it is worked out again.
+        await app.attach(again.client);
+        await pause();
+        assert.equal(lists(), before);
+    } finally {
+        app.detach(tab.client);
+        app.detach(again.client);
+    }
+});
+
+test("interrupt stops a streaming run and withdraws the queue, then Pi answers the new message", async () => {
+    const id = await newSession();
+    const started = Date.now();
+
+    await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "i-1" });
+    await until(() => app.isBusy(id), "the run to start");
+    await app.commands.submit(id, owner(), { text: "queued one", requestId: "i-2" });
+    const { submissionId } = await app.commands.submit(id, owner(), {
+        text: "never mind",
+        mode: "interrupt",
+        requestId: "i-3",
+    });
+
+    await (await app.harness.submission(submissionId, context))!.wait(context);
+    const texts = (await modelTexts(app, id)).join("\n");
+
+    assert.match(texts, /echo: never mind/);
+    assert.doesNotMatch(texts, /queued one/);
+    assert.ok(Date.now() - started < 4000, "it did not wait for the long answer");
+});
+
+test("an interrupt sent again with the same request id does not stop the run that it started", async () => {
+    const id = await newSession();
+
+    await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "r-1" });
+    await until(() => app.isBusy(id), "the first run");
+    const request = {
+        text: "stream a long answer again",
+        mode: "interrupt" as const,
+        requestId: "r-2",
+    };
+    const first = await app.commands.submit(id, owner(), request);
+
+    await until(
+        async () => (await modelTexts(app, id)).some((text) => text.includes("long answer again")),
+        "the second run",
+    );
+    await until(() => app.isBusy(id), "the second run to stream");
+    // A proxy or a client sends the same POST again, after a network drop.
+    const again = await app.commands.submit(id, owner(), request);
+
+    assert.equal(again.submissionId, first.submissionId);
+    await (await app.harness.submission(first.submissionId, context))!.wait(context);
+    const entries = await app.transcripts.allEntries(id, false);
+    const last = entries.findLast((entry) => entry.kind === "assistant") as
+        { stopReason?: string } | undefined;
+
+    // The second run answers in full: the retry did not abort it.
+    assert.equal(last?.stopReason, "stop");
 });
 
 test("requests with the wrong types are refused, and nothing odd is stored", async () => {

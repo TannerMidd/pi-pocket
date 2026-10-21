@@ -62,8 +62,8 @@ Set by Colors (`colors.toml`, an Omarchy palette, or the desktop's). A theme rea
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--sans`, `--mono`                                             | Geist for words; JetBrains Mono for code, paths, counts, keys                                                                                                                                                                                               |
 | `--ligatures`                                                  | `none`: no ligatures, as in a terminal. `contextual` turns on a font's `calt`; `normal`, all its usual ones                                                                                                                                                 |
-| `--r-mark`, `--r-tag`, `--r-seg`, `--r-row`, `--r-control`     | 3, 5, 7, 9, 10 px: state squares, tags, segments, rows, fields                                                                                                                                                                                              |
-| `--r-card`, `--r-window`, `--r-sheet`, `--r-float`, `--r-pill` | 12, 14, 18, 20, 999 px: cards, windows, sheets, PiP, pills                                                                                                                                                                                                  |
+| `--r-mark`, `--r-tag`, `--r-seg`, `--r-row`, `--r-control`     | 2, 4, 5, 6, 7 px: state squares, tags, segments, rows, fields                                                                                                                                                                                               |
+| `--r-card`, `--r-window`, `--r-sheet`, `--r-float`, `--r-pill` | 8, 10, 12, 12, 999 px: cards, windows, sheets, PiP, pills                                                                                                                                                                                                   |
 | `--radius`                                                     | A control's corner that names none (`--r-control`)                                                                                                                                                                                                          |
 | `--gap-out`, `--gap-in`, `--border`                            | 8, 4, 1 px: the tiled windows' gaps and border                                                                                                                                                                                                              |
 | `--window-border`, `--window-border-active`                    | A tiled window's border color (`--hair`), and the one in focus (`--accent-line`)                                                                                                                                                                            |
@@ -144,18 +144,19 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 ### The composer
 
-| Part                                      | What                                                                          |
-| ----------------------------------------- | ----------------------------------------------------------------------------- |
-| `composer`                                | All of it, under the conversation                                             |
-| `dock`                                    | What sits above the message box: the queue and the bars                       |
-| `subagents-bar`                           | The subagents' bar                                                            |
-| `message-box`                             | The box you type in, with its buttons                                         |
-| `composer-tools`                          | The row of buttons in it                                                      |
-| `composer-button`                         | Each of its own buttons: Places, Attach, Plan, the mic, Steer and Queue, Stop |
-| `plan-chip`, `mode-switch`, `stop-button` | Plan, Steer and Queue, and Stop, each also a `composer-button`                |
-| `model-chip`                              | The model's button                                                            |
-| `send-button`                             | Send                                                                          |
-| `status-line`                             | The line under the box: who is here, context, cost                            |
+| Part                                      | What                                                                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `composer`                                | All of it, under the conversation                                                                                       |
+| `dock`                                    | What sits above the message box: the queue and the bars                                                                 |
+| `subagents-bar`                           | The subagents' bar                                                                                                      |
+| `message-box`                             | The box you type in, with its buttons                                                                                   |
+| `composer-tools`                          | The row of buttons in it                                                                                                |
+| `composer-button`                         | Each of its own buttons: Places, Attach, Plan, the mic, Steer and Queue, Stop, and an extension's button (since 0.19.0) |
+| `plan-chip`, `mode-switch`, `stop-button` | Plan, Steer and Queue, and Stop, each also a `composer-button`                                                          |
+| `model-chip`                              | The model's button                                                                                                      |
+| `send-button`                             | Send                                                                                                                    |
+| `status-line`                             | The line under the box: who is here, context, cost                                                                      |
+| `status-item`                             | An extension's item in it, with `data-module` naming its module (since 0.19.0)                                          |
 
 ### Layers over the app
 
@@ -172,17 +173,18 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 ### Panels
 
-| Part                 | What                                                      |
-| -------------------- | --------------------------------------------------------- |
-| `people-panel`       | People: who is here, the side chat                        |
-| `peeks`, `peek-tile` | The peek tiles' column or strip, and each tile            |
-| `files-panel`        | The Files tile                                            |
-| `browser-panel`      | The Browser panel                                         |
-| `pip`                | PiP's panel                                               |
-| `subagents-board`    | The subagents board                                       |
-| `extension-page`     | An extension's page, with `data-module` naming its module |
-| `diff`               | A diff, in a tool call, a reply, or the review            |
-| `sign-in`            | The sign-in screen                                        |
+| Part                 | What                                                                      |
+| -------------------- | ------------------------------------------------------------------------- |
+| `people-panel`       | People: who is here, the side chat                                        |
+| `peeks`, `peek-tile` | The peek tiles' column or strip, and each tile                            |
+| `files-panel`        | The Files tile                                                            |
+| `browser-panel`      | The Browser panel                                                         |
+| `pip`                | PiP's panel                                                               |
+| `subagents-board`    | The subagents board                                                       |
+| `extension-page`     | An extension's page, with `data-module` naming its module                 |
+| `extension-panel`    | An extension's panel, with `data-module` naming its module (since 0.19.0) |
+| `diff`               | A diff, in a tool call, a reply, or the review                            |
+| `sign-in`            | The sign-in screen                                                        |
 
 ## States
 
@@ -206,17 +208,17 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 On `<html>`:
 
-| Attribute      | Values                                                                                                                                                                                                                                                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data-mode`    | `dark` or `light`: the colors' mode                                                                                                                                                                                                                                                            |
-| `data-theme`   | The theme in use: `pocket`, or a theme folder's id                                                                                                                                                                                                                                             |
-| `data-colors`  | The colors in use: `desktop`, a palette's id, or a folder's (`id`, `id@dark`, `id@light`)                                                                                                                                                                                                      |
-| `data-tiling`  | `on` or `off`: tiled windows on wide screens                                                                                                                                                                                                                                                   |
-| `data-rail`    | `on` when the sidebar is folded to the rail                                                                                                                                                                                                                                                    |
-| `data-width`   | `comfortable` (the theme's width), `wide`, or `full`: Appearance's Width. With `wide` or `full`, the widths are the person's; a theme that lays things out by the column's width reads this, as `:root[data-width="full"]`                                                                     |
-| `data-density` | `comfortable`, `compact`, or `tight`                                                                                                                                                                                                                                                           |
-| `data-motion`  | `full` or `reduced`                                                                                                                                                                                                                                                                            |
-| `data-focus`   | The window in focus: `pane` (the conversation's, at first), `sidebar`, `peeks`, `people-panel`, `browser-panel`, or `files-panel`: the window's part name. The app draws the focus only on wide screens with tiling on: `:root[data-tiling="on"][data-focus="sidebar"] [data-part~="sidebar"]` |
+| Attribute      | Values                                                                                                                                                                                                                                                                                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data-mode`    | `dark` or `light`: the colors' mode                                                                                                                                                                                                                                                                                              |
+| `data-theme`   | The theme in use: `pocket`, or a theme folder's id                                                                                                                                                                                                                                                                               |
+| `data-colors`  | The colors in use: `desktop`, a palette's id, or a folder's (`id`, `id@dark`, `id@light`)                                                                                                                                                                                                                                        |
+| `data-tiling`  | `on` or `off`: tiled windows on wide screens                                                                                                                                                                                                                                                                                     |
+| `data-rail`    | `on` when the sidebar is folded to the rail                                                                                                                                                                                                                                                                                      |
+| `data-width`   | `comfortable` (the theme's width), `wide`, or `full`: Appearance's Width. With `wide` or `full`, the widths are the person's; a theme that lays things out by the column's width reads this, as `:root[data-width="full"]`                                                                                                       |
+| `data-density` | `comfortable`, `compact`, or `tight`                                                                                                                                                                                                                                                                                             |
+| `data-motion`  | `full` or `reduced`                                                                                                                                                                                                                                                                                                              |
+| `data-focus`   | The window in focus: `pane` (the conversation's, at first), `sidebar`, `peeks`, `people-panel`, `browser-panel`, `files-panel`, or `extension-panel` (since 0.19.0): the window's part name. The app draws the focus only on wide screens with tiling on: `:root[data-tiling="on"][data-focus="sidebar"] [data-part~="sidebar"]` |
 
 Widths: below 700 px is the phone layout (sheets from the bottom, one screen at a time); the sidebar shows from 960 px; from 1100 px the Files tile and the Browser panel sit beside the conversation.
 

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EntryRecord } from "@earendil-works/pi-durable";
-import { projectEntry, projectStats } from "../src/server/projection.ts";
+import {
+    type ClientBlock,
+    liveMessageDelta,
+    projectEntry,
+    projectStats,
+} from "../src/server/projection.ts";
 
 const entry = (kind: string, message: unknown, id = 1) =>
     ({ id, conversationId: 2, kind, model: [message] }) as unknown as EntryRecord;
@@ -54,4 +59,23 @@ test("stats add the cost of models and tools", () => {
     const stats = projectStats(usage as never, entries);
 
     assert.equal(stats.cost, 0.75);
+});
+
+test("a live update that does not fit what the browser has is refused, not shown wrong", async () => {
+    const { liveMessage } = (await import(new URL("../web/live.js", import.meta.url).href)) as {
+        liveMessage: (current: unknown, update: unknown) => unknown;
+    };
+    const had = { blocks: [{ type: "text", text: "ab" }] };
+
+    assert.equal(
+        liveMessage(had, { keep: 0, blocks: [{ type: "text", from: 3, text: "d" }] }),
+        null,
+    );
+    assert.deepEqual(
+        liveMessage(
+            had,
+            liveMessageDelta(had.blocks as ClientBlock[], [{ type: "text", text: "abc" }]),
+        ),
+        { blocks: [{ type: "text", text: "abc" }] },
+    );
 });

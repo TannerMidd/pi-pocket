@@ -41,7 +41,7 @@ export default function createSchedules(host: PocketHost) {
         // that is gone changes nothing.
         replay: "safe",
         execute: async (args, api) => {
-            const reply = (text: string) => ({ content: [{ type: "text" as const, text }] });
+            const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
             const line = (item: Schedule) =>
                 `${item.id}: ${item.every === undefined ? describeMoment(item.next, item.zone) : `${describeRepeat(item.every)}, next ${describeMoment(item.next, item.zone)}`} · ${item.text}`;
 

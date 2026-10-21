@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import type { ConversationId } from "@earendil-works/pi-durable";
 
 /** The model edits one file and writes another, as asked. */
 const route: FauxResponseStep = (request) => {
@@ -240,4 +241,30 @@ test("a renamed file's diff is what changed in it, under both its names", async 
     assert.match(diff, /^rename from "caf\\303\\251\.txt"$/m);
     assert.match(diff, /^\+four$/m);
     assert.doesNotMatch(diff, /^\+one$/m, "not the whole file as new");
+});
+
+test("each look finds Pi's edits since the last one, in a fork too", async () => {
+    const folder = repository("looks", { "keep.txt": "a\nb\n" });
+    const id = await newSession(app, folder);
+
+    const byPi = async (session: ConversationId) => {
+        const changes = await app.workspace.changes(session, owner(app));
+
+        return [
+            ...changes.files.filter((file) => file.byPi).map((file) => file.path),
+            ...changes.piOnly.map((each) => each.path),
+        ];
+    };
+
+    await say(app, id, "edit it");
+    assert.deepEqual(await byPi(id), ["keep.txt"]);
+    await say(app, id, "write notes");
+    assert.deepEqual(await byPi(id), ["keep.txt", "notes/todo.md"]);
+
+    const last = (await app.transcripts.allEntries(id, false)).at(-1)!;
+    const { id: fork } = await app.commands.fork(id, owner(app), { entryId: last.id });
+
+    assert.deepEqual(await byPi(fork), ["keep.txt", "notes/todo.md"]);
+    await say(app, fork, "write outside");
+    assert.deepEqual(await byPi(fork), ["keep.txt", "notes/todo.md", "../outside.txt"]);
 });

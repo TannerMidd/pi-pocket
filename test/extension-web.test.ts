@@ -640,6 +640,27 @@ test("bound routes use the clicking actor, keep receipts private, and expose aut
     );
 });
 
+test("a human linked start admits the requested folder and leaves its source in place", async () => {
+    const id = await newSession(app);
+    const original = app.cwdOf(id);
+    const cwd = join(root, "human-specialist-repository");
+
+    mkdirSync(cwd);
+    const body = { message: "Work in another repository", cwd, key: "human-other-folder" };
+    const first = await call("owner", `/api/x/workspace/start/${id}`, { method: "POST", body });
+
+    assert.equal(first.status, 200);
+    const target = (first.data as { session: ConversationId }).session;
+
+    assert.equal(app.cwdOf(target), cwd);
+    assert.equal((await app.agentState(target))?.cwd, cwd);
+    assert.equal(app.cwdOf(id), original);
+    assert.deepEqual(
+        (await call("owner", `/api/x/workspace/start/${id}`, { method: "POST", body })).data,
+        first.data,
+    );
+});
+
 /** Pause the network-facing model check, then change policy before it answers. */
 async function whileChecking(
     t: import("node:test").TestContext,

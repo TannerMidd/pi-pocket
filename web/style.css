@@ -138,15 +138,15 @@
      * buttons and list rows; icon buttons, fields, and segmented tracks; cards and primary buttons; windows, approval
      * cards, and peek tiles; the message box, sheets, and the launcher; PiP. Pills and avatars are round (999px).
      */
-    --r-mark: 3px;
-    --r-tag: 5px;
-    --r-seg: 7px;
-    --r-row: 9px;
-    --r-control: 10px;
-    --r-card: 12px;
-    --r-window: 14px;
-    --r-sheet: 18px;
-    --r-float: 20px;
+    --r-mark: 2px;
+    --r-tag: 4px;
+    --r-seg: 5px;
+    --r-row: 6px;
+    --r-control: 7px;
+    --r-card: 8px;
+    --r-window: 10px;
+    --r-sheet: 12px;
+    --r-float: 12px;
     --r-pill: 999px;
     /* Fields and plain controls that name no corner of their own. */
     --radius: var(--r-control);
@@ -822,10 +822,13 @@ kbd {
     :root[data-tiling="on"][data-focus="sidebar"] .sidebar,
     :root[data-tiling="on"][data-focus="browser-panel"] .browser,
     :root[data-tiling="on"][data-focus="files-panel"] .files-tile,
+    :root[data-tiling="on"][data-focus="extension-panel"] .ext-panel,
     :root[data-tiling="on"][data-focus="people-panel"] .people,
     :root[data-tiling="on"]:not([data-focus="sidebar"]):not([data-focus="browser-panel"]):not(
             [data-focus="files-panel"]
-        ):not([data-focus="people-panel"]):not([data-focus="peeks"])
+        ):not([data-focus="extension-panel"]):not([data-focus="people-panel"]):not(
+            [data-focus="peeks"]
+        )
         .pane {
         border-color: var(--window-border-active);
         box-shadow: var(--window-ring);
@@ -1537,7 +1540,7 @@ kbd {
 }
 
 .reply > .md > *,
-.reply > .md > .md-part > * {
+.reply > .md > :where(.md-part) > * {
     margin: 0;
 }
 
@@ -3138,6 +3141,25 @@ pre.diff .del {
     }
 }
 
+/* Steer, Queue, and Interrupt leave no room for the model on a narrow box while Pi works: it shows again after. */
+@container composer (max-width: 480px) {
+    .composer.busy .composer-row .model-chip {
+        display: none;
+    }
+}
+
+/* Below a 360 px screen (an iPhone SE is 320 px), Steer, Queue, and Interrupt would push Stop out of the box: while Pi
+ * works, Attach goes and the three get closer. Attach comes back when Pi stops. A 360 px screen's box is 334 px. */
+@container composer (max-width: 333px) {
+    .composer.busy .composer-row .attach-button {
+        display: none;
+    }
+
+    .composer.busy .mode-switch button {
+        padding-inline: 6px;
+    }
+}
+
 .chip {
     display: inline-flex;
     align-items: center;
@@ -3240,6 +3262,10 @@ pre.diff .del {
 .mode-switch button.on {
     color: var(--text);
     background: var(--raised);
+}
+
+.mode-switch button.interrupt.on {
+    color: var(--err);
 }
 
 .stop-button,
@@ -3482,6 +3508,39 @@ pre.diff .del {
 
 .status-line[data-short~="words"] .speed .short {
     display: inline;
+}
+
+/* Extensions' items: their text, in a tone, and their short form on a narrow line. */
+.status-line .ext-status .short,
+.status-line[data-short~="ext"] .ext-status .long {
+    display: none;
+}
+
+.status-line[data-short~="ext"] .ext-status .short {
+    display: inline;
+}
+
+.status-line .ext-status.warn {
+    color: var(--warn);
+}
+
+.status-line .ext-status.error {
+    color: var(--err);
+}
+
+.status-line .ext-status.muted {
+    color: var(--faint);
+}
+
+/* One whose page or panel is open: lit in the accent, as the top bar's toggles are. */
+.status-line .ext-status.on {
+    color: var(--accent);
+}
+
+@media (hover: hover) {
+    .status-line button.ext-status:hover {
+        color: var(--text);
+    }
 }
 
 /* Words that go from sight but not from a screen reader: "77%" is still the context's, "1.2s" the first token's. */
@@ -6429,14 +6488,21 @@ pre.diff .del {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
+    gap: 16px;
+    padding: 14px 16px;
     background: var(--bg);
 }
 
-.provider > :first-child {
+.provider-info {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.provider-name {
+    font-weight: 500;
 }
 
 .provider .provider-needs {
@@ -6452,6 +6518,122 @@ pre.diff .del {
     .provider {
         flex-direction: column;
         align-items: stretch;
+        gap: 10px;
+    }
+}
+
+/* Providers by state: what needs a sign-in first, then what works, then the rest. */
+.providers-main {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+.providers-main > *,
+.providers-side > * {
+    flex-shrink: 0;
+}
+
+.provider-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.provider-group-head {
+    margin: 0 2px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--faint);
+}
+
+.provider-group-head .muted {
+    margin-left: 4px;
+}
+
+.providers-side {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/*
+ * Wide screens, the owner's view: the providers to sign in to on the left, and what is shared on the right (the refresh,
+ * and the models for subagents). A fixed height, and each side scrolls on its own. Narrower: one column, as on a phone.
+ */
+@media (min-width: 700px) {
+    .sheet.providers-sheet.with-side {
+        max-width: 760px;
+    }
+}
+
+@media (min-width: 1000px) {
+    .sheet.providers-sheet.with-side {
+        max-width: 1160px;
+        height: min(86dvh, 880px);
+    }
+    .providers-sheet.with-side .sheet-body {
+        overflow-y: hidden;
+    }
+    .providers-sheet .providers-layout {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+        gap: 24px;
+    }
+    .providers-sheet .providers-main {
+        grid-column: 1;
+        grid-row: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding-right: 6px;
+    }
+    .providers-sheet .providers-side {
+        grid-column: 2;
+        grid-row: 1;
+        min-height: 0;
+        padding: 16px;
+        gap: 4px;
+        border: 1px solid var(--hair);
+        border-radius: var(--r-card);
+        background: var(--card);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+    .providers-side .model-refresh {
+        margin-top: 0;
+    }
+    .providers-side .subagent-models {
+        flex: 1 1 0;
+        min-height: 18rem;
+        margin: 0;
+        padding: 12px 0 0;
+        border-bottom: 0;
+        border-top: 1px solid var(--line);
+    }
+    .providers-side .subagent-models > .label {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+    }
+    .providers-side .subagent-models-list {
+        flex: 1;
+        min-height: 8rem;
+        max-height: none;
+        background: var(--bg);
+    }
+    .providers-main .search {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        flex: none;
+        min-height: 40px;
+        /* Opaque, so rows scrolling under it do not show through. */
+        background: linear-gradient(var(--card), var(--card)), var(--panel);
     }
 }
 
@@ -8762,6 +8944,33 @@ textarea.notes {
     color: var(--muted);
 }
 
+/* Appearance → Layout: a slot's items, each with arrows to move it and a switch to show it. */
+.slot-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.slot-moves {
+    display: flex;
+    flex: none;
+}
+
+.slot-moves .icon-button {
+    width: 30px;
+    height: 30px;
+    color: var(--muted);
+}
+
+.slot-moves .icon-button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.slot-moves .slot-earlier {
+    transform: scaleX(-1);
+}
+
 .shortcuts {
     display: grid;
     grid-template-columns: 9.5rem 1fr;
@@ -9411,6 +9620,190 @@ textarea.notes {
     width: 60%;
 }
 
+/* The subagents at work in a peek tile: a row each, those waiting first, then how many more. */
+.agent-tiles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 8px 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--hair);
+}
+
+.agent-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    padding: 7px 9px 8px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    background: var(--card-2);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    /* A double tap picks and opens it; the browser's double-tap zoom would take the second tap. */
+    touch-action: manipulation;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .agent-tile:hover {
+        border-color: var(--line);
+        background: var(--hover);
+    }
+}
+
+.agent-tile:focus-visible {
+    outline-offset: -2px;
+}
+
+/* The board's selected one: ringed as its square is. */
+.agent-tile.on {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.agent-tile.waiting.on {
+    outline-color: var(--warn);
+}
+
+.agent-tile.waiting {
+    border-color: var(--warn-line);
+    background: var(--warn-soft);
+}
+
+.agent-tile-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* The session list's square, in its folder's color, a step larger here. */
+.agent-tile .state-mark {
+    width: 9px;
+    height: 9px;
+    --q: 4px;
+    --cut: 2px;
+}
+
+.agent-tile-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--accent);
+    font: 600 12px / 1.4 var(--mono);
+}
+
+.agent-tile.waiting .agent-tile-name {
+    color: var(--warn);
+}
+
+.agent-tile-state {
+    flex: none;
+    color: var(--faint);
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+}
+
+.agent-tile.waiting .agent-tile-state {
+    color: var(--warn);
+}
+
+.agent-tile-now {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font: 11.5px / 1.45 var(--mono);
+}
+
+/* In a peek tile, one line each: the square and the name, then what it does, cut short. */
+.agent-tiles .agent-tile {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-color: transparent;
+    background: transparent;
+}
+
+.agent-tiles .agent-tile-head {
+    flex: 0 1 auto;
+    max-width: 45%;
+}
+
+.agent-tiles .agent-tile-name {
+    flex: 0 1 auto;
+}
+
+/* The square's shape and the row's color say its state; the words are its label's. */
+.agent-tiles .agent-tile-state {
+    display: none;
+}
+
+.agent-tiles .agent-tile-now {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.agent-tiles .agent-tile.waiting {
+    border-color: var(--warn-line);
+    background: var(--warn-soft);
+}
+
+/* The rest, counted: the board shows them all. */
+.agent-more {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--muted);
+    font: 500 11.5px / 1.4 var(--sans);
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.agent-more svg:last-child {
+    margin-left: auto;
+    color: var(--faint);
+}
+
+.agent-more-wait {
+    color: var(--warn);
+}
+
+@media (hover: hover) {
+    .agent-more:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+}
+
+.agent-more:focus-visible {
+    outline-offset: -2px;
+}
+
 /* The call a session waits on: the whole command when it is short enough to allow from here, and the guard's reason. */
 .peek-ask {
     flex: none;
@@ -9431,6 +9824,16 @@ textarea.notes {
     font-size: 12px;
     font-weight: 600;
     color: var(--warn);
+}
+
+/* Which subagent asks, where the session's tile shows a subagent's call. */
+.peek-ask-who {
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--muted);
+    font: 500 11.5px / 1.4 var(--sans);
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 .peek-ask-what {
@@ -10414,6 +10817,101 @@ textarea.notes {
         left: 0;
         right: auto;
     }
+}
+
+/* ─── Extension panels ─────────────────────────────────────── */
+
+/* An extension's panel takes the Files tile's place: over the conversation below 1100px, a window beside it above. */
+.ext-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    animation: popin var(--t-in) var(--ease-out);
+}
+
+@media (max-width: 1099px) {
+    :root[data-tiling="on"] .ext-panel.window {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+}
+
+@media (min-width: 1100px) {
+    .layout.paneling .ext-panel {
+        position: relative;
+        inset: auto;
+        z-index: auto;
+        flex: 0 0 var(--ext-panel-w, 400px);
+        max-width: calc(100% - 440px);
+        height: 100dvh;
+        border-left: 1px solid var(--hair);
+        animation-delay: 90ms;
+    }
+    .layout.paneling .ext-panel.wide {
+        --ext-panel-w: 44%;
+    }
+    :root[data-tiling="on"] .layout.paneling .ext-panel {
+        height: auto;
+    }
+}
+
+.ext-panel-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: calc(58px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 10px 0 14px;
+    border-bottom: 1px solid var(--hair);
+}
+
+.ext-panel-bar .icon-button {
+    width: 34px;
+    height: 34px;
+    color: var(--muted);
+}
+
+.ext-panel-bar .ext-panel-back {
+    width: 44px;
+    height: 44px;
+    margin-left: -8px;
+    color: var(--text);
+}
+
+@media (hover: hover) {
+    .ext-panel-bar .icon-button:hover {
+        color: var(--text);
+    }
+}
+
+.ext-panel-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.ext-panel-title h2 {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.ext-panel-sub {
+    color: var(--faint);
+    font-size: 11.5px;
+}
+
+.ext-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
 }
 
 /* The bar: Files and Changes as a switch, the folder, and close. */
@@ -11971,7 +12469,7 @@ textarea.notes {
 }
 
 /* Focus lands on the whole tile or panel where it covers the conversation: no ring around the screen. */
-.layout > :is(.files-tile, .browser):focus-visible {
+.layout > :is(.files-tile, .browser, .ext-panel):focus-visible {
     outline: none;
 }
 
@@ -11982,11 +12480,13 @@ textarea.notes {
 @media (max-width: 1099px) {
     /* Past the tiled windows' pop-in, which would otherwise win. */
     :root .layout > .files-tile.window,
-    :root .layout > .browser.window {
+    :root .layout > .browser.window,
+    :root .layout > .ext-panel.window {
         animation: push-in 0.36s var(--ease-out);
     }
     :root .layout > .files-tile.window.leaving,
-    :root .layout > .browser.window.leaving {
+    :root .layout > .browser.window.leaving,
+    :root .layout > .ext-panel.window.leaving {
         animation: push-out 0.24s var(--ease-in-out) forwards;
     }
 }
@@ -13224,16 +13724,55 @@ textarea.notes {
     font-size: 0.85rem;
 }
 
-/* A session: its title and how its subagents are, then a square for each. */
+/* A session: its title and how its subagents are, a square for each, and a sub-tile for each at work. */
 .board-row {
     display: flex;
-    align-items: center;
-    gap: 16px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
     margin-bottom: 8px;
     padding: 12px 14px;
     border: 1px solid var(--hair);
     border-radius: var(--r-card);
     transition: opacity var(--t-fade) var(--ease-almost);
+}
+
+.board-row-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* The subagents at work in it: what each does now, at a glance, without opening one. */
+.board-live {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--hair);
+}
+
+.board-live-more {
+    grid-column: 1 / -1;
+    justify-self: start;
+    min-height: 28px;
+    padding: 4px 10px;
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font: 500 12px / 1.4 var(--sans);
+    cursor: pointer;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .board-live-more:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
 }
 
 .board-session {
@@ -13648,11 +14187,18 @@ textarea.notes {
 }
 
 .board.phone .board-row {
-    display: flex;
+    gap: 8px;
+    padding: 12px;
+}
+
+.board.phone .board-row-head {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
-    padding: 12px;
+}
+
+.board.phone .board-live {
+    grid-template-columns: 1fr;
 }
 
 .board.phone .board-session {
@@ -14601,55 +15147,133 @@ textarea.notes {
 
 /* ─── Extension gallery ────────────────────────────────────── */
 
-/* One workspace for discovery and upkeep, not a stack of narrow pickers. */
+/*
+ * One calm place for extensions: quiet rows like the menu's, each with a steady mark, one action at a time, and the
+ * technical words folded away until asked for.
+ */
 .sheet.extension-hub {
-    max-width: 1280px;
+    max-width: 1180px;
 }
 
-.extension-hub-tabs {
+.ext-hub-bar {
     display: flex;
-    gap: 6px;
-    border-bottom: 1px solid var(--hair);
-    padding-bottom: 10px;
+    flex-direction: column;
+    gap: 10px;
 }
 
-.extension-hub-tab {
+/* Discover, Installed, Updates: a segmented track, as the session list's tabs. */
+.ext-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    flex: none;
+    padding: 3px;
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.ext-tabs button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    min-height: 42px;
-    padding: 9px 16px;
-    border: 1px solid transparent;
-    border-radius: var(--r-control);
-    background: transparent;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: var(--r-seg);
     color: var(--muted);
-    font: inherit;
-    font-size: 14px;
-    cursor: pointer;
+    font-size: 13px;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
 }
 
-.extension-hub-tab.on {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: var(--hair);
+.ext-tabs button.on {
+    background: var(--raised);
+    color: var(--text);
+    font-weight: 500;
+}
+
+@media (hover: hover) {
+    .ext-tabs button:not(.on):hover {
+        color: var(--text);
+    }
+}
+
+.ext-count {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: var(--r-seg);
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
 }
 
 .extension-hub-toolbar {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    min-width: 0;
 }
 
-.extension-hub-toolbar .find-input {
+.ext-search {
+    position: relative;
     flex: 1;
-    min-width: 160px;
-    margin: 0;
+    min-width: 0;
 }
 
-.extension-hub-toolbar .gallery-tags {
-    flex-basis: 100%;
+.ext-search > .icon {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    translate: 0 -50%;
+    color: var(--faint);
+    pointer-events: none;
+}
+
+.ext-search input {
+    min-height: 40px;
+    padding-left: 36px;
+    border-color: transparent;
+    border-radius: var(--r-card);
+}
+
+/* Squarer buttons than elsewhere, to match the rows. */
+:is(.extension-hub, .extension-detail-sheet) .button {
+    border-radius: var(--r-row);
+}
+
+.ext-icon-button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: var(--r-card);
+    color: var(--muted);
+}
+
+/* Kinds and tags: one row that scrolls sideways on a phone, so the list starts high. */
+.gallery-tags.ext-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: -2px;
+    padding: 2px;
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+
+.ext-filters::-webkit-scrollbar {
+    display: none;
+}
+
+.ext-filters .gallery-tag {
+    flex: none;
+}
+
+.ext-filters-gap {
+    flex: none;
+    width: 1px;
+    margin: 6px 2px;
+    background: var(--hair-2);
 }
 
 .extension-hub-layout {
@@ -14663,85 +15287,239 @@ textarea.notes {
 .extension-hub-detail {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     min-width: 0;
 }
 
-.extension-hub-list .gallery-list {
+/* Reassurance, not alarm: what keeps the owner safe, in one line. */
+.ext-assure {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
-    overflow: visible;
-    border: 0;
-    background: transparent;
-}
-
-.gallery-card {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 16px;
-    border: 1px solid var(--hair);
+    align-items: flex-start;
+    gap: 9px;
+    margin: 0;
+    padding: 10px 12px;
     border-radius: var(--r-card);
-    background: var(--bg);
-    transition:
-        border-color var(--t-hover) var(--ease-out),
-        background-color var(--t-hover) var(--ease-out);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
 }
 
-.gallery-list > .gallery-card:not(:first-child) {
-    border-top: 1px solid var(--hair);
+.ext-assure > .icon {
+    flex: none;
+    margin-top: 1px;
+    color: var(--ok);
 }
 
-.gallery-card.selected,
-.gallery-card[aria-current="true"] {
-    border-color: var(--accent);
+.ext-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* A row: its mark and words open it; its one action or switch sits at the end. */
+.ext-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 10px;
+    padding: 4px 10px 4px 4px;
+    border-radius: var(--r-card);
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.ext-row.selected {
     background: var(--accent-soft);
 }
 
-.gallery-card-open {
-    display: block;
+.ext-row-open {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
     width: 100%;
     min-width: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
+    padding: 8px;
+    border-radius: var(--r-row);
     color: var(--text);
-    font: inherit;
     text-align: left;
-    cursor: pointer;
 }
 
-.gallery-card .gallery-row-title {
+@media (hover: hover) {
+    .ext-row:not(.selected):hover {
+        background: var(--card);
+    }
+}
+
+.ext-tile {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--r-control);
+    background: color-mix(in srgb, var(--tint) 14%, transparent);
+    color: var(--tint);
     font-size: 15px;
-    line-height: 1.4;
+    font-weight: 600;
+    transition:
+        opacity var(--t-hover) var(--ease-out),
+        filter var(--t-hover) var(--ease-out);
 }
 
-.gallery-card .gallery-row-desc {
-    font-size: 13px;
-    line-height: 1.6;
+.ext-tile.large {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--r-window);
+    font-size: 21px;
 }
 
-.gallery-card .gallery-row-name {
-    display: none;
+.ext-row.off .ext-tile {
+    filter: saturate(0);
+    opacity: 0.55;
 }
 
-.gallery-card-actions {
+.ext-row-text {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding-top: 1px;
 }
 
-.gallery-card-actions:empty {
+.ext-row-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.ext-row.off .ext-row-title {
+    color: var(--muted);
+}
+
+.ext-row-desc {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.ext-row-meta {
+    color: var(--faint);
+    font-size: 11.5px;
+}
+
+.ext-row-meta.warn {
+    color: var(--warn);
+}
+
+.ext-row-meta.accent {
+    color: var(--accent);
+}
+
+.ext-row-chevron {
+    color: var(--faint);
+    transition: rotate var(--t-hover) var(--ease-out);
+}
+
+.ext-row.open .ext-row-chevron {
+    rotate: 180deg;
+}
+
+.ext-row-end {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+/* What sits under a row, lined up with its words. */
+.ext-row-under {
+    grid-column: 1 / -1;
+    margin: 0 0 8px 56px;
+}
+
+.ext-row-under:empty {
     display: none;
 }
 
-.gallery-card-actions .button {
-    min-height: 40px;
+.ext-row-under > .setting {
+    margin-top: 0;
 }
 
-.gallery-entry-content,
+.ext-row-more {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.ext-row-more > .setting {
+    margin-top: 0;
+}
+
+.ext-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.ext-state.on {
+    color: var(--ok);
+}
+
+.ext-state.bad {
+    color: var(--err);
+}
+
+.ext-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+.button.ext-get {
+    border-radius: var(--r-row);
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding-inline: 14px;
+}
+
+@media (hover: hover) {
+    .button.ext-get:hover {
+        background: color-mix(in srgb, var(--accent) 24%, transparent);
+    }
+}
+
+.ext-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--text);
+    font-size: 12.5px;
+}
+
+.ext-row-under.guard-confirm {
+    margin-top: 0;
+}
+
 .extension-management {
     display: flex;
     flex-direction: column;
@@ -14749,18 +15527,259 @@ textarea.notes {
     min-width: 0;
 }
 
-.gallery-entry-content .pi-title {
-    font-size: 22px;
-    line-height: 1.3;
+.extension-management .group {
+    display: flex;
+    flex-direction: column;
+}
+
+.ext-intro {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+.ext-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--hair);
+    color: var(--faint);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.ext-footer .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    text-decoration: none;
+}
+
+/* One entry. */
+.gallery-entry-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.ext-back {
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: 4px;
+    min-height: 36px;
+    margin-left: -4px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.ext-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.ext-detail-name {
+    min-width: 0;
+}
+
+.ext-detail-name .pi-title {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.ext-detail-by {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12.5px;
 }
 
 .gallery-entry-content .gallery-description {
+    margin: 0;
     font-size: 14px;
-    line-height: 1.7;
+    line-height: 1.65;
 }
 
-.gallery-entry-content .gallery-actions {
+.ext-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: -6px;
+    color: var(--faint);
+    font-size: 12px;
+}
+
+.ext-callout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 12px 10px 14px;
+    border-radius: var(--r-card);
+    background: var(--accent-soft);
+    color: var(--text);
+    font-size: 13px;
+}
+
+/* The steps to trust something new: numbered marks on a thin line, the one to take now in the accent. */
+.ext-steps {
+    display: flex;
+    flex-direction: column;
     margin: 0;
+    padding: 16px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    list-style: none;
+}
+
+.ext-step {
+    position: relative;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 12px;
+    padding-bottom: 18px;
+}
+
+.ext-step:last-child {
+    padding-bottom: 0;
+}
+
+.ext-step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    top: 30px;
+    bottom: 4px;
+    left: 12.5px;
+    width: 1px;
+    background: var(--hair-2);
+}
+
+.ext-step-mark {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-row);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.ext-step.now .ext-step-mark {
+    border-color: transparent;
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+}
+
+.ext-step.done .ext-step-mark {
+    border-color: transparent;
+    background: var(--ok-soft);
+    color: var(--ok);
+}
+
+.ext-step-body {
+    min-width: 0;
+}
+
+.ext-step-title {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 26px;
+}
+
+.ext-step:not(.now, .done) .ext-step-title {
+    color: var(--muted);
+}
+
+.ext-step-text {
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
+.ext-step-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.ext-row-more > .ext-step-actions {
+    margin-top: 0;
+}
+
+.ext-on {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+}
+
+.ext-on-text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13.5px;
+}
+
+.ext-on-text strong {
+    color: var(--ok);
+    font-weight: 600;
+}
+
+.ext-adds dl {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+}
+
+.ext-adds dl > div {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 12px;
+    font-size: 13px;
+}
+
+.ext-adds dt {
+    color: var(--muted);
+}
+
+.ext-adds dd {
+    margin: 0;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.ext-adds dd.ext-sentence::first-letter {
+    text-transform: uppercase;
+}
+
+.ext-adds dd.mono {
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.ext-remove {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
 }
 
 .extension-hub-empty {
@@ -14769,29 +15788,36 @@ textarea.notes {
     align-items: center;
     justify-content: center;
     gap: 12px;
-    min-height: 220px;
+    min-height: 200px;
     padding: 32px;
     color: var(--muted);
+    font-size: 13.5px;
     text-align: center;
     line-height: 1.6;
 }
 
-.extension-hub-detail-back {
-    align-self: flex-start;
-    min-height: 40px;
+.ext-empty-mark {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-window);
+    background: var(--ok-soft);
+    color: var(--ok);
 }
 
-.extension-hub-layout.installed .extension-hub-list > .extension-hub-empty {
-    min-height: 0;
-    padding: 0;
-    align-items: flex-start;
-    text-align: left;
-    font-size: 12px;
+.ext-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .gallery-technical {
     border-top: 1px solid var(--hair);
-    padding-top: 14px;
+    padding-top: 12px;
 }
 
 .gallery-technical > summary {
@@ -14809,34 +15835,42 @@ textarea.notes {
     margin-top: 16px;
 }
 
-@media (hover: hover) {
-    .extension-hub-tab:hover {
-        color: var(--text);
-        background: var(--card);
+@media (max-width: 520px) {
+    .ext-adds dl > div {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
     }
-    .gallery-card:hover {
-        border-color: var(--hair-2);
-    }
-    .gallery-card-open:hover .gallery-row-title {
-        color: var(--accent);
+    .ext-row-under {
+        margin-left: 12px;
     }
 }
 
 @media (min-width: 1000px) {
     .sheet.extension-hub {
-        height: min(900px, 88dvh);
+        height: min(860px, 88dvh);
         max-height: 88dvh;
     }
     .extension-hub > .sheet-body {
         overflow: hidden;
-        padding: 20px 24px 24px;
-        gap: 18px;
+        padding: 18px 24px 24px;
+        gap: 14px;
+    }
+    .ext-hub-bar {
+        flex-direction: row;
+        align-items: center;
+        gap: 16px;
+    }
+    .ext-tabs {
+        width: 360px;
+    }
+    .extension-hub-toolbar {
+        flex: 1;
     }
     .extension-hub-layout {
         flex: 1;
         flex-shrink: 1;
-        grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
-        gap: 24px;
+        grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.1fr);
+        gap: 0;
         overflow: hidden;
     }
     .extension-hub-list,
@@ -14844,13 +15878,13 @@ textarea.notes {
         overflow-y: auto;
         overscroll-behavior: contain;
         scrollbar-gutter: stable;
-        padding-right: 8px;
+        padding: 2px 16px 8px 0;
     }
     .extension-hub-detail {
         border-left: 1px solid var(--hair);
-        padding-left: 24px;
+        padding-left: 28px;
     }
-    .extension-hub-detail-back {
+    .ext-back {
         display: none;
     }
     .extension-hub-layout:is(.installed, .updates):not(.has-selection) {
@@ -14859,19 +15893,9 @@ textarea.notes {
     .extension-hub-layout:is(.installed, .updates):not(.has-selection) > .extension-hub-detail {
         display: none;
     }
-    .extension-hub-layout:is(.installed, .updates):not(.has-selection) .gallery-list,
-    .extension-hub-layout.installed:not(.has-selection) .extension-management .group > .sheet-list {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-        border: 0;
-        background: transparent;
-        overflow: visible;
-    }
-    .extension-hub-layout.installed:not(.has-selection) .extension {
-        border: 1px solid var(--hair);
-        border-radius: var(--r-card);
-        padding: 16px;
+    /* One readable column, not a wall of cards, when nothing is open beside it. */
+    .extension-hub-layout:is(.installed, .updates):not(.has-selection) > .extension-hub-list {
+        padding-inline: max(0px, calc((100% - 760px) / 2));
     }
     .extension-hub-empty {
         flex: 1;
@@ -14882,104 +15906,18 @@ textarea.notes {
 }
 
 @media (max-width: 999px) {
-    .extension-hub:has(.extension-hub-layout.has-selection) .extension-hub-toolbar {
+    .extension-hub:has(.extension-hub-layout.has-selection) :is(.ext-hub-bar, .ext-filters) {
         display: none;
     }
-    .extension-hub-layout:not(.has-selection) .gallery-card.selected {
-        border-color: var(--hair);
-        background: var(--bg);
+    .extension-hub-layout:not(.has-selection) .ext-row.selected {
+        background: none;
     }
     .extension-hub-layout.has-selection > .extension-hub-list,
     .extension-hub-layout:not(.has-selection) > .extension-hub-detail {
         display: none;
     }
-    .extension-hub-tab {
-        flex: 1;
-        padding-inline: 10px;
-    }
 }
 
-/* A row of the Browse list: what it is, its tags, and how it stands here. */
-.gallery-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 0.6rem;
-    width: 100%;
-    min-height: 3.2rem;
-    padding: 0.7rem 0.6rem 0.7rem 0.85rem;
-    background: none;
-    border: 0;
-    color: var(--text);
-    font: inherit;
-    font-size: 13.5px;
-    text-align: left;
-    cursor: pointer;
-    transition: background-color var(--t-hover) var(--ease-out);
-}
-
-@media (hover: hover) {
-    .gallery-row:hover {
-        background: var(--card-2);
-    }
-    .gallery-row:hover .gallery-row-title {
-        color: var(--accent);
-    }
-}
-
-.gallery-row > .icon {
-    color: var(--muted);
-}
-
-.gallery-row-text {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    min-width: 0;
-}
-
-.gallery-row-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.15rem 0.5rem;
-    min-width: 0;
-}
-
-.gallery-row-title {
-    font-weight: 600;
-    overflow-wrap: anywhere;
-}
-
-.gallery-row-name {
-    color: var(--muted);
-    font-size: 0.76rem;
-    overflow-wrap: anywhere;
-}
-
-.gallery-row-desc {
-    color: var(--body);
-    overflow-wrap: anywhere;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-.gallery-row-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.1rem 0.55rem;
-    color: var(--muted);
-    font-size: 0.76rem;
-    overflow-wrap: anywhere;
-}
-
-.gallery-tag-text {
-    color: var(--faint);
-}
-
-.gallery-pills,
 .extension-gallery {
     display: flex;
     flex-wrap: wrap;
@@ -15002,7 +15940,7 @@ textarea.notes {
     background: var(--card-2);
 }
 
-/* Tag pills: one at a time filters the list. */
+/* Filter chips: one at a time filters the list. */
 .gallery-tags {
     display: flex;
     flex-wrap: wrap;
@@ -15010,13 +15948,14 @@ textarea.notes {
 }
 
 .gallery-tag {
-    min-height: 32px;
+    min-height: 30px;
     padding: 4px 12px;
     border: 1px solid var(--hair-2);
-    border-radius: var(--r-pill);
+    border-radius: var(--r-row);
     background: none;
     color: var(--muted);
     font-size: 12.5px;
+    white-space: nowrap;
     transition:
         background-color var(--t-hover) var(--ease-out),
         border-color var(--t-hover) var(--ease-out),
@@ -15025,8 +15964,8 @@ textarea.notes {
 
 @media (pointer: coarse) {
     .gallery-tag {
-        min-height: 38px;
-        padding: 6px 14px;
+        min-height: 34px;
+        padding: 5px 13px;
     }
 }
 
@@ -15041,13 +15980,6 @@ textarea.notes {
     color: var(--accent);
     border-color: var(--accent-line);
     background: var(--accent-soft);
-}
-
-.gallery-hidden {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.3rem 0.8rem;
 }
 
 .gallery-problems,
@@ -15074,14 +16006,6 @@ textarea.notes {
 
 .gallery-wrap {
     flex-wrap: wrap;
-}
-
-/* One entry. */
-.gallery-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.3rem 0.6rem;
 }
 
 .gallery-description {

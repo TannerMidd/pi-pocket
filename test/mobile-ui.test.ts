@@ -425,3 +425,65 @@ test(
         await noPip();
     },
 );
+
+test(
+    "a streamed update draws only the answer's last block, and not the session list",
+    real,
+    async () => {
+        await fresh();
+        await goTo(first);
+        await reach({ path: `/s/${first}` }, "the session");
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${Number(first)})`,
+                )) === true,
+            "its view",
+        );
+        const drawn = await inPage<{
+            kept: boolean;
+            text: string;
+            quiet: number;
+            listed: number;
+            image: string | null;
+        }>(`
+        const { h, options, render } = await import("preact");
+        const { Markdown } = await import("/ui.js");
+        const { store } = await import("/store.js");
+        const settle = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
+        const box = document.createElement("div");
+
+        render(h(Markdown, { text: "First block.\\n\\n![x](a.png)\\n\\nSecond", cache: false }), box);
+        const first = box.querySelector("p");
+
+        render(h(Markdown, { text: "First block.\\n\\n![x](a.png)\\n\\nSecond, longer", cache: false }), box);
+        let rows = 0;
+        const diffed = options.diffed;
+
+        let quiet;
+
+        options.diffed = (vnode) => {
+            rows += vnode.type?.name === "SessionRow" ? 1 : 0;
+            diffed?.(vnode);
+        };
+
+        try {
+            store.set((state) => ({ view: { ...state.view } }));
+            await settle();
+            quiet = rows;
+            store.set((state) => ({ sessions: [...state.sessions] }));
+            await settle();
+        } finally {
+            options.diffed = diffed;
+        }
+
+        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
+    `);
+
+        assert.ok(drawn.kept, "the first block stays as it was drawn");
+        assert.match(drawn.text, /Second, longer/, "the last block grows");
+        assert.match(drawn.image ?? "", /^\/api\//, "an image path points at the server");
+        assert.equal(drawn.quiet, 0, "a new view leaves the session list alone");
+        assert.ok(drawn.listed > 0, "a new session list draws it");
+    },
+);

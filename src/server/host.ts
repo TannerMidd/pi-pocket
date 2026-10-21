@@ -39,12 +39,18 @@ export interface LinkedSession {
  */
 export interface LinkedSessionsApi {
     /**
-     * Start a session linked to `source`, in its folder, with a copy of its agent settings but not its history, and send
-     * it `message` as its first message. `model` is `provider/modelId`; `thinking` a level no higher than the source's.
+     * Start a session linked to `source`, in `cwd` or its folder, with a copy of its agent settings but not its history,
+     * and send it `message` as its first message. `model` is `provider/modelId`; `thinking` a level no higher than the source's.
      */
     start(
         source: ConversationId,
-        request: { title?: string; message: string; model?: string; thinking?: string },
+        request: {
+            title?: string;
+            message: string;
+            model?: string;
+            thinking?: string;
+            cwd?: string;
+        },
         key: string,
     ): Promise<{ session: ConversationId; address: string }>;
     /** Send `message` to the linked session at address `to`: a follow-up, or with `steer` at its next pause. */
@@ -64,7 +70,13 @@ export interface HumanLinkedSession extends LinkedSession {
 
 export interface HumanLinkedSessions {
     start(
-        request: { title?: string; message: string; model?: string; thinking?: ModelThinkingLevel },
+        request: {
+            title?: string;
+            message: string;
+            model?: string;
+            thinking?: ModelThinkingLevel;
+            cwd?: string;
+        },
         key: string,
     ): Promise<{ session: ConversationId; address: string }>;
     list(): Promise<HumanLinkedSession[]>;

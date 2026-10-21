@@ -293,7 +293,7 @@ export default function createArtifacts(_host: PocketHost) {
             }
 
             return {
-                content: [
+                output: [
                     {
                         type: "text",
                         text: `Published "${args.title}" as artifact ${id}, version ${version}. The user opens it from the artifact card.`,

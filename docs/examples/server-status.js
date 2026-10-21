@@ -1,6 +1,6 @@
-// Server status's browser module: a button on the rail, an action in the launcher, and a page in the conversation's
-// place with what `server-status.ts` reports. The app loads it and calls its default export with `pocket`, the app's
-// API for extensions (docs/extensions.md).
+// Server status's browser module: a button on the rail, an action in the launcher, an item in the status line, and a
+// page in the conversation's place with what `server-status.ts` reports. The app loads it and calls its default
+// export with `pocket`, the app's API for extensions (docs/extensions.md).
 
 /** The version of `pocket` this module was written for: an older app does not load it. */
 export const pocketApi = 1;
@@ -86,4 +86,21 @@ export default function setup(pocket) {
         iconPath: GAUGE,
         page: "status",
     });
+
+    // The load in the status line under the message box, which opens the page. New in 0.19.0: an older app has none.
+    if (typeof pocket.status === "function") {
+        const shown = (status) => ({
+            text: `load ${status.load[0]} · ${gib(status.memory.free)} free`,
+            short: `load ${status.load[0]}`,
+            title: `${status.host}: load over 1, 5, and 15 minutes: ${status.load.join(" · ")}`,
+            tone: status.load[0] > status.cpus ? "warn" : undefined,
+        });
+        const item = pocket.status({ id: "load", text: "load …", page: "status" });
+
+        pocket.api("status").then(
+            (status) => item.update(shown(status)),
+            () => {},
+        );
+        pocket.on("status", (status) => item.update(shown(status)));
+    }
 }

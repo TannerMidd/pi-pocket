@@ -21,7 +21,7 @@ const echo = defineTool({
     name: "echo",
     description: "Echo text",
     parameters: Type.Object({ text: Type.String() }),
-    execute: async (args) => ({ content: [{ type: "text", text: `echo:${args.text}` }] }),
+    execute: async (args) => ({ output: [{ type: "text", text: `echo:${args.text}` }] }),
 });
 /** Streams its output and returns no content, like bash. */
 const shell = defineTool({
@@ -88,9 +88,7 @@ const run = async (fake: Fake, code: string) => {
 
     return {
         ...result,
-        text: (result.content ?? [])
-            .map((part) => (part.type === "text" ? part.text : ""))
-            .join(""),
+        text: (result.output ?? []).map((part) => (part.type === "text" ? part.text : "")).join(""),
     };
 };
 

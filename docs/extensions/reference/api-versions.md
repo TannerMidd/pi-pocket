@@ -4,16 +4,20 @@ This page tells how Pi Pocket marks the age and the stability of each part of th
 
 ## The API version
 
-`web.api` on the server and `pocket.version` in the browser give the version of the extension API. It is 1 now.
+`web.api` on the server and `pocket.version` in the browser give the version of the extension API. It is 2 since 0.19.0. It was 1 from 0.14.0.
 
 The version goes up only when a change breaks something that modules use. Additions do not change it.
+
+- **Why 2:** Pi Durable 1.2 renamed the result field of a tool from `content` to `output`. Pi Pocket still reads `content` from the `execute` of a drop-in's tool. But a hook (`afterTool`) or a wrap (`wrapTool`) that returns `content` gives the model an empty result, with no error.
+- **The oldest supported version is 1.** A module that exports `pocketApi = 1`, or no `pocketApi`, still loads. A module for an older version than 1 does not load.
+- **A module that returns `output` exports `pocketApi = 2`.** Pi Pocket 0.18 then refuses it with a clear message, and does not give the model an empty result.
 
 ## `pocketApi`
 
 A module can export `pocketApi`: the server module, the browser module, or both.
 
 ```typescript
-export const pocketApi = 1;
+export const pocketApi = 2;
 ```
 
 A Pi Pocket with an older API version does not set up such a module. It says why in the Extensions sheet.
@@ -56,12 +60,16 @@ A gallery entry gives `pocketApi` and `minPocket`: the API version and the oldes
 
 Each member in the reference has its own Since line. These parts came together:
 
-| Part                                               | Since  |
-| -------------------------------------------------- | ------ |
-| Built-in modules, the host, tools, sections, hooks | 0.1.0  |
-| Drop-ins in the drop-in folder                     | 0.3.0  |
-| `web`: routes, browser modules, events, cleanups   | 0.14.0 |
-| `pocketApi`, `web.api`, and `pocket.version`       | 0.14.0 |
-| Slash commands (`web.command`)                     | 0.14.0 |
-| `pocket.toolCall`                                  | 0.14.0 |
-| `host.linkedSessions`                              | 0.14.0 |
+| Part                                                                                            | Since  |
+| ----------------------------------------------------------------------------------------------- | ------ |
+| Built-in modules, the host, tools, sections, hooks                                              | 0.1.0  |
+| Drop-ins in the drop-in folder                                                                  | 0.3.0  |
+| `web`: routes, browser modules, events, cleanups                                                | 0.14.0 |
+| `pocketApi`, `web.api`, and `pocket.version`                                                    | 0.14.0 |
+| `pocketApi` 2                                                                                   | 0.19.0 |
+| Slash commands (`web.command`)                                                                  | 0.14.0 |
+| `pocket.toolCall`                                                                               | 0.14.0 |
+| `host.linkedSessions`                                                                           | 0.14.0 |
+| `pocket.panel` and `pocket.status` (experimental)                                               | 0.19.0 |
+| Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental) | 0.19.0 |
+| `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                 | 0.19.0 |

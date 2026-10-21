@@ -236,27 +236,31 @@ test(
                     await until(
                         async () =>
                             (await text()).includes(
-                                enabled ? "索引设置与状态" : "Index settings and status",
+                                enabled ? "这些内容的来源" : "Where these come from",
                             ),
                         "gallery fixture rendered",
                     );
                     const tabs = JSON.parse(
                         await page.evaluate(
-                            `return JSON.stringify([...document.querySelectorAll('.extension-hub-tabs [role=tab]')].map(e => e.textContent.trim()))`,
+                            `return JSON.stringify([...document.querySelectorAll('.ext-tabs [role=tab]')].map(e => e.textContent.trim()))`,
                         ),
                     );
 
                     assert.deepEqual(
                         tabs,
                         enabled
-                            ? ["发现", "已安装扩展", "更新 (1)"]
-                            : ["Discover", "Installed extensions", "Updates (1)"],
+                            ? ["发现", "已安装", "更新1"]
+                            : ["Discover", "Installed", "Updates1"],
                     );
                     const content = await text();
 
-                    assert.ok(content.includes(enabled ? "安装主题" : "Install theme"));
+                    assert.ok(content.includes(enabled ? "安装" : "Install"));
                     assert.ok(
-                        content.includes(enabled ? "安装（保持关闭）" : "Install (stays off)"),
+                        content.includes(
+                            enabled
+                                ? "安装后保持关闭，启用前不会运行。"
+                                : "Extensions install turned off. Nothing runs until you turn it on.",
+                        ),
                     );
                     assert.ok(content.includes("RAW {{name}} <img>"));
                     assert.equal(
@@ -292,7 +296,7 @@ test(
                         technical.includes("fixture/index") &&
                             technical.includes("RAW upstream error"),
                     );
-                    await page.evaluate(`document.querySelector('.gallery-card-open').click()`);
+                    await page.evaluate(`document.querySelector('.ext-row-open').click()`);
                     await until(
                         async () =>
                             (await text()).includes(enabled ? "技术详情" : "Technical details"),
@@ -314,7 +318,7 @@ test(
                     );
 
                     await page.evaluate(
-                        `[...document.querySelectorAll('.gallery-actions button')].find(e => e.textContent.trim() === ` +
+                        `[...document.querySelectorAll('.sheet button')].find(e => e.textContent.trim() === ` +
                             JSON.stringify(sourceLabel) +
                             `).click()`,
                     );
@@ -346,16 +350,13 @@ test(
                     );
                     await until(
                         async () =>
-                            (await text()).includes(enabled ? "返回发现" : "Back to Discover"),
+                            (await text()).includes(enabled ? "技术详情" : "Technical details"),
                         "source returns to selected entry",
-                    );
-                    await page.evaluate(
-                        `document.querySelector('.extension-hub-detail-back').click()`,
                     );
 
                     for (const tab of [1, 2]) {
                         await page.evaluate(
-                            `document.querySelectorAll('.extension-hub-tabs [role=tab]')[` +
+                            `document.querySelectorAll('.ext-tabs [role=tab]')[` +
                                 tab +
                                 `].click()`,
                         );
@@ -363,13 +364,13 @@ test(
                             async () =>
                                 (
                                     await page.evaluate(
-                                        `document.querySelector('.extension-hub-tabs [role=tab][aria-selected=true]').textContent`,
+                                        `document.querySelector('.ext-tabs [role=tab].on').textContent`,
                                     )
                                 ).includes(
                                     tab === 1
                                         ? enabled
-                                            ? "已安装扩展"
-                                            : "Installed extensions"
+                                            ? "已安装"
+                                            : "Installed"
                                         : enabled
                                           ? "更新"
                                           : "Updates",
@@ -377,16 +378,12 @@ test(
                             "hub tab selected",
                         );
                         assert.equal(
-                            await page.evaluate(
-                                `document.querySelectorAll('.gallery-card').length`,
-                            ),
+                            await page.evaluate(`document.querySelectorAll('.ext-row').length`),
                             "1",
                         );
                     }
 
-                    await page.evaluate(
-                        `document.querySelector('.gallery-card-actions button').click()`,
-                    );
+                    await page.evaluate(`document.querySelector('.ext-row-end button').click()`);
                     await until(
                         async () => (await text()).includes(enabled ? "更新 Menu" : "Update Menu"),
                         "update preview",
@@ -401,18 +398,18 @@ test(
                         async () =>
                             (
                                 await page.evaluate(
-                                    `document.querySelector('.extension-hub-tabs [role=tab][aria-selected=true]')?.textContent ?? ''`,
+                                    `document.querySelector('.ext-tabs [role=tab].on')?.textContent ?? ''`,
                                 )
                             ).includes(enabled ? "更新" : "Updates"),
                         "update returns to Updates tab",
                     );
                     await page.evaluate(
-                        `document.querySelectorAll('.extension-hub-tabs [role=tab]')[0].click()`,
+                        `document.querySelectorAll('.ext-tabs [role=tab]')[0].click()`,
                     );
                     await until(
                         async () =>
                             (await text()).includes(
-                                enabled ? "索引设置与状态" : "Index settings and status",
+                                enabled ? "这些内容的来源" : "Where these come from",
                             ),
                         "return to Discover",
                     );

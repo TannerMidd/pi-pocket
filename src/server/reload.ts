@@ -29,7 +29,7 @@ import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Extension, Registry } from "@earendil-works/pi-durable";
 import { describe } from "./errors.ts";
-import { ExtensionWebs, POCKET_API } from "./extension-web.ts";
+import { ExtensionWebs, OLDEST_POCKET_API, POCKET_API } from "./extension-web.ts";
 import type {
     ExtensionModule,
     PocketExtension,
@@ -866,7 +866,16 @@ export class ExtensionLoader {
 
         const needs = loaded.pocketApi;
 
-        if (needs !== undefined && (typeof needs !== "number" || !(needs <= POCKET_API))) {
+        if (typeof needs === "number" && Number.isInteger(needs) && needs < OLDEST_POCKET_API) {
+            throw new Error(
+                `the module was written for version ${String(needs)} of Pi Pocket's extension API, and this Pi Pocket loads ${OLDEST_POCKET_API} to ${POCKET_API}: update the module`,
+            );
+        }
+
+        if (
+            needs !== undefined &&
+            (typeof needs !== "number" || !Number.isInteger(needs) || !(needs <= POCKET_API))
+        ) {
             throw new Error(
                 `the module needs version ${String(needs)} of Pi Pocket's extension API, and this Pi Pocket has ${POCKET_API}: update Pi Pocket`,
             );
@@ -923,17 +932,22 @@ export class ExtensionLoader {
             }
 
             this.#checkUiLocaleNames(file, extensions);
+
+            // A new array, so that one the module froze or keeps is not changed.
+            const installed =
+                module.source === "drop-in" ? extensions.map(keepsContent) : extensions;
+
             this.#webs.check(part);
-            this.#replace(extensions, this.#installed.get(file) ?? []);
-            this.#installed.set(file, extensions);
+            this.#replace(installed, this.#installed.get(file) ?? []);
+            this.#installed.set(file, installed);
             this.#errors.delete(file);
             this.#webs.commit(
                 part,
-                extensions.flatMap((extension) => declared(extension).tools),
+                installed.flatMap((extension) => declared(extension).tools),
             );
             committed = true;
 
-            return extensions;
+            return installed;
         } finally {
             if (!committed) {
                 this.#webs.discard(part);
@@ -1281,6 +1295,49 @@ class Overtaken extends Error {
     constructor(file: string) {
         super(`a newer load of ${file} replaced this one`);
     }
+}
+
+/**
+ * Pi Durable 1.2 renamed a tool result's `content` to `output`. A drop-in written before still returns `content`, and
+ * would give the model nothing: read it as `output`, so those modules keep working.
+ */
+function keepsContent(extension: Extension): Extension {
+    if (extension.tools === undefined) {
+        return extension;
+    }
+
+    const tools = extension.tools.map((tool) =>
+        withValues(tool, {
+            execute: async (...args: Parameters<typeof tool.execute>) => {
+                const result = await tool.execute(...args);
+
+                if (typeof result !== "object" || result === null) {
+                    return result;
+                }
+
+                const { content, ...rest } = result as typeof result & { content?: unknown };
+
+                return content === undefined || result.output !== undefined
+                    ? result
+                    : ({ ...rest, output: content } as typeof result);
+            },
+        }),
+    );
+
+    return withValues(extension, { tools });
+}
+
+/** A copy of `object` with these values replaced: its prototype, getters, and other properties stay as they were. */
+function withValues<T extends object>(object: T, values: Partial<T>): T {
+    return Object.create(Object.getPrototypeOf(object), {
+        ...Object.getOwnPropertyDescriptors(object),
+        ...Object.fromEntries(
+            Object.entries(values).map(([key, value]) => [
+                key,
+                { value, enumerable: true, writable: true, configurable: true },
+            ]),
+        ),
+    }) as T;
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

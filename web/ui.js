@@ -417,11 +417,7 @@ function markdownParts(
         return out;
     }
 
-    rendering = conversationId ?? null;
-    linkBase = base;
-    out = partsOf(sanitize(marked.parse(fencePage(text), { async: false, breaks }), cache));
-    rendering = null;
-    linkBase = null;
+    out = renderParts(fencePage(text), conversationId, base, breaks, cache);
 
     if (cache) {
         if (markdownCache.size >= MARKDOWN_CACHE) {
@@ -429,6 +425,51 @@ function markdownParts(
         }
 
         markdownCache.set(key, out);
+    }
+
+    return out;
+}
+
+/** Markdown parsed, sanitized, and split into parts (`partsOf`), for the conversation and folder given. */
+function renderParts(text, conversationId, base, breaks, fold) {
+    rendering = conversationId ?? null;
+    linkBase = base;
+
+    try {
+        return partsOf(sanitize(marked.parse(text, { async: false, breaks }), fold));
+    } finally {
+        rendering = null;
+        linkBase = null;
+    }
+}
+
+/**
+ * Markdown still growing, as parts: each top-level block (a paragraph, a list, a code block) drawn on its own, and kept
+ * in `kept` from one update to the next, so an update draws again only the blocks that changed, mostly the last. The
+ * blocks are found again in the whole text each time (block level only, which is quick), so a block that a later line
+ * turns into another (a paragraph into a heading, a list that goes on) is drawn as it is now. A reference link whose
+ * definition is in another block shows as written until the text is whole. Returns `{ key, parts }` for each block.
+ */
+function liveBlocks(text, conversationId, base, breaks, kept) {
+    const blocks = new marked.Lexer(marked.defaults)
+        .blockTokens(text.replace(/\r\n|\r/g, "\n"), [])
+        .filter((token) => token.type !== "space");
+    const next = new Map();
+    const out = blocks.map((token, index) => {
+        const parts =
+            next.get(token.raw) ??
+            kept.get(token.raw) ??
+            renderParts(token.raw, conversationId, base, breaks, false);
+
+        next.set(token.raw, parts);
+
+        return { key: index, parts };
+    });
+
+    kept.clear();
+
+    for (const [raw, parts] of next) {
+        kept.set(raw, parts);
     }
 
     return out;
@@ -453,8 +494,30 @@ export function Markdown({
     cache = true,
     base = null,
     breaks = true,
-    conversationId,
+    conversationId = currentConversation(),
 }) {
+    const live = useRef(null);
+
+    // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
+    if (!cache && fencePage(text) === text) {
+        const settings = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+
+        if (live.current?.settings !== settings) {
+            live.current = { settings, kept: new Map() };
+        }
+
+        const blocks = liveBlocks(text, conversationId, base, breaks, live.current.kept);
+
+        return html`<div class=${`md ${className}`}>
+            ${blocks.flatMap(({ key, parts }) =>
+                parts
+                    .filter((part) => part.kind !== undefined || part.html.trim() !== "")
+                    .map((part, index) => drawPart(part, `${key}.${index}`, true)),
+            )}
+        </div>`;
+    }
+
+    live.current = null;
     const parts = markdownParts(text, conversationId, cache, base, breaks);
 
     if (parts.length === 1 && parts[0].kind === undefined) {
@@ -465,17 +528,19 @@ export function Markdown({
     }
 
     return html`<div class=${`md ${className}`}>
-        ${parts.map((part, index) =>
-            part.kind === undefined || RichBlock === null
-                ? html`<div
-                      key=${index}
-                      class="md-part"
-                      dangerouslySetInnerHTML=${{ __html: part.html }}
-                  ></div>`
-                : html`<${RichBlock} key=${index} ...${part} streaming=${!cache} />`,
-        )}
+        ${parts.map((part, index) => drawPart(part, index, !cache))}
     </div>`;
 }
+
+/** One part of rendered markdown (`partsOf`): a run of HTML, or a code block that shows more than code. */
+const drawPart = (part, key, streaming) =>
+    part.kind === undefined || RichBlock === null
+        ? html`<div
+              key=${key}
+              class="md-part"
+              dangerouslySetInnerHTML=${{ __html: part.html }}
+          ></div>`
+        : html`<${RichBlock} key=${key} ...${part} streaming=${streaming} />`;
 
 /** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
 const FILE_TYPES = new Set(
@@ -1277,6 +1342,60 @@ export class Boundary extends Component {
     }
 }
 
+/** The parts of the store a streaming answer changes several times a second: the open conversation's, and PiP's. */
+const VIEWS = new Set(["view", "pipView"]);
+
+/**
+ * Whether the store changed between two states only in the views (`VIEWS`). Nothing changed at all is no: `store.set({})`
+ * draws everything again.
+ */
+function onlyViews(before, after) {
+    let views = false;
+
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (before[key] !== after[key]) {
+            if (!VIEWS.has(key)) {
+                return false;
+            }
+
+            views = true;
+        }
+    }
+
+    return views;
+}
+
+const sameProps = (a, b) =>
+    Object.keys(a).length === Object.keys(b).length &&
+    Object.keys(a).every((key) => Object.is(a[key], b[key]));
+
+class ApartFromViews extends Component {
+    shouldComponentUpdate(next) {
+        return !(
+            next.component === this.props.component &&
+            onlyViews(this.props.state, next.state) &&
+            sameProps(this.props.props, next.props)
+        );
+    }
+
+    render({ component, props }) {
+        return h(component, props);
+    }
+}
+
+/**
+ * `component`, drawn again on every change to the store but one that changes only the views (`VIEWS`), as an answer
+ * streams: for big parts that read neither, such as the session list, which stays drawn off-screen on phones. Its own
+ * state draws it again as usual.
+ */
+export function apartFromViews(component) {
+    const Wrapped = (props) => h(ApartFromViews, { component, props, state: store.state });
+
+    Wrapped.displayName = component.name;
+
+    return Wrapped;
+}
+
 /** Phones: sheets from the bottom edge, which drag back down to close, and menus that a swipe closes. */
 export const BOTTOM_SHEETS = matchMedia("(max-width: 699px)");
 
@@ -1515,4 +1634,42 @@ export function readable(text) {
     } catch {
         return text;
     }
+}
+
+/** A place's tile: its icon, with a count or a dot, and its label. */
+export function PlaceTile({ place }) {
+    const label = t(place.label);
+    const counted = place.counted ? t(place.counted) : "";
+    const aria =
+        place.count > 0
+            ? t("{{label}}, {{count}} {{kind}}", {
+                  label,
+                  count: place.count,
+                  kind: counted,
+              }).trim()
+            : place.badge
+              ? t("{{label}}, {{detail}}", { label, detail: place.badge })
+              : place.dot
+                ? t("{{label}}, {{detail}}", {
+                      label,
+                      detail: place.dotLabel ? t(place.dotLabel) : t("a page open"),
+                  })
+                : label;
+
+    return html`<button
+        type="button"
+        class=${`place ${place.on ? "on" : ""}`}
+        data-place=${place.id}
+        aria-label=${aria}
+        aria-pressed=${place.on === undefined ? undefined : place.on ? "true" : "false"}
+        onClick=${place.run}
+    >
+        <span class="place-icon badge-host">
+            <${Icon} name=${place.icon} path=${place.iconPath} size=${20} />
+            ${place.count > 0 && html`<span class="badge">${place.count}</span>`}
+            ${place.badge && html`<span class="badge">${place.badge}</span>`}
+            ${place.dot && html`<span class="browser-dot" aria-hidden="true"></span>`}
+        </span>
+        <span class="place-label">${label}</span>
+    </button>`;
 }

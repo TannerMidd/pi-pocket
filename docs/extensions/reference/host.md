@@ -225,7 +225,7 @@ Each call acts as the person that Pi works for in `source`, and that person's ch
 ```ts
 start(
     source: ConversationId,
-    request: { title?: string; message: string; model?: string; thinking?: string },
+    request: { title?: string; message: string; model?: string; thinking?: string; cwd?: string },
     key: string,
 ): Promise<{ session: ConversationId; address: string }>;
 ```
@@ -234,7 +234,7 @@ Since 0.14.0 · Experimental
 
 Makes a session linked to `source` and sends it `message` as its first message. It returns the new session's id, and the address that `source` uses for it.
 
-- The new session works in the folder of `source`. It gets a copy of the agent settings of `source`, but not its history.
+- The new session works in `cwd` when supplied, otherwise the folder of `source`. `cwd` must name an existing folder and uses the normal folder-picker path rules. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. `cwd` is since 0.19.0: an older Pi Pocket ignores it and uses the folder of `source`, so a gallery entry that needs it sets `minPocket` to `0.19.0`. It gets a copy of the agent settings of `source`, but not its history.
 - Without `title`, the title is the first line of `message`.
 - `model` is `provider/modelId`. It must be the model of `source`, or a model that the owner lets subagents use. Without it, the session uses the model of `source`.
 - `thinking` is a level no higher than the level of `source`. Without it, the session uses the level of `source`. Pi Pocket lowers it to the highest level that the model has.

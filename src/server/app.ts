@@ -140,8 +140,11 @@ const SUBAGENTS_FILE = "subagents.ts";
 /** The most models the owner may allow subagents besides their session's own. */
 const MAX_SUBAGENT_MODELS = 50;
 
-/** The most peek tiles a tab gets live at once: the ones on its screen, which a tall screen fits a handful of. */
-export const MAX_PEEKS = 12;
+/**
+ * The most conversations a tab gets live peeks for at once: the sessions on its screen, and the subagents working
+ * there, each row asking for its own as the tiles do.
+ */
+export const MAX_PEEKS = 20;
 /**
  * How a run that failed leaves its messages: the model or its provider answered with an error, no model was there to
  * ask, or the run broke. Stopped (`aborted`), cleared (`reset`), and replaced (`stale`) runs did not fail.
@@ -1071,7 +1074,7 @@ export class PocketApp {
         }
 
         client.send("hello", this.#helloFor(client, hello));
-        client.send("sessions", this.sessions(client.user));
+        this.#sendSessions(client, this.sessions(client.user));
         this.#sendPip(client);
 
         if (client.user.role === "owner" && this.themes.failure !== undefined) {
@@ -1834,16 +1837,19 @@ export class PocketApp {
         this.#sessionsTimer = setTimeout(() => {
             this.#sessionsTimer = undefined;
             const all = this.sessions();
+            const allJson = JSON.stringify(all);
             let board: SubagentEntry[] | undefined;
 
             for (const client of this.#clients) {
                 const scope = client.user.sessions;
 
-                client.send(
-                    "sessions",
+                if (scope === undefined) {
+                    this.#sendSessions(client, all, allJson);
+                } else {
                     // Scoped lists need their own metadata projection, not just a filter over the global list.
-                    scope === undefined ? all : this.sessions(client.user),
-                );
+                    this.#sendSessions(client, this.sessions(client.user));
+                }
+
                 this.#sendPip(client);
 
                 if (client.board === true) {
@@ -1857,6 +1863,18 @@ export class PocketApp {
                 }
             }
         }, 400);
+    }
+
+    /** Send a tab its session list, unless it is what the tab last got: the list is large, and changes come often. */
+    #sendSessions(
+        client: Client,
+        sessions: ReturnType<PocketApp["sessions"]>,
+        json = JSON.stringify(sessions),
+    ): void {
+        if (json !== client.sessionsSent) {
+            client.sessionsSent = json;
+            client.send("sessions", sessions);
+        }
     }
 
     /** The session list, with who is in each session and its newest chat message. Scoped people see only theirs. */
@@ -2239,7 +2257,7 @@ export class PocketApp {
             }
 
             client.send("hello", this.#helloFor(client, await this.hello(user)));
-            client.send("sessions", this.sessions(user));
+            this.#sendSessions(client, this.sessions(user));
 
             // An open board too: it must not keep subagents of sessions no longer shared.
             if (client.board === true) {
@@ -2510,6 +2528,41 @@ export class PocketApp {
         } finally {
             await this.#refreshClients();
         }
+    }
+
+    /**
+     * The owner starts the LANCET model download. It runs on in the background; every tab hears each step in the guard's
+     * status, and everyone in the app is told how it ended.
+     */
+    async setupGuardModel(user: User): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (this.guard.directory === undefined) {
+            throw new HttpError(400, "specpi-lancet-guard is not installed in Pi");
+        }
+
+        if ((await this.guard.model())?.state === "ready") {
+            return;
+        }
+
+        const refresh = () => void this.#refreshClients().catch(() => {});
+        const run = this.guard.setupModel(refresh);
+
+        this.notice("info", `${user.name} started the LANCET model download.`);
+        refresh();
+        run.then(
+            () => {
+                this.notice("info", "The LANCET model is installed.");
+
+                if (this.guardOn()) {
+                    void this.guard.warm().catch(() => {});
+                }
+            },
+            (error: unknown) =>
+                this.notice("warning", `The LANCET model download failed: ${describe(error)}`),
+        ).finally(refresh);
     }
 
     /** The owner changes who may allow risky calls. */
@@ -2878,6 +2931,7 @@ export class PocketApp {
             this.#unsubscribeCommits?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
+            this.guard.close();
 
             // Modules' cleanups may wait (closing a connection), but not for long: the rest must close too.
             const cleaned = this.loader?.close();

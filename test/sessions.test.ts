@@ -287,6 +287,36 @@ test("sending a message again to another model forks before it and switches the 
     );
 });
 
+test("a message sent again with the same model takes the model the session runs on now", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "first, on the old model");
+    await say(app, id, "which model are you");
+    const [, message] = await ofKind(id, "pi.user");
+
+    await app.commands.configure(id, owner(app), {
+        model: { provider: "faux", modelId: "faux-2" },
+    });
+    const before = requests.length;
+    const { id: fork } = await app.commands.resend(id, owner(app), {
+        entryId: Number(message!.id),
+    });
+
+    assert.equal((await app.agentState(fork))?.model?.modelId, "faux-2");
+    await until(
+        () =>
+            requests
+                .slice(before)
+                .some(
+                    (each) => each.model === "faux-2" && each.text.endsWith("which model are you"),
+                ),
+        "the current model to answer the message again",
+    );
+    await app.commands.configure(id, owner(app), {
+        model: { provider: "faux", modelId: "faux-1" },
+    });
+});
+
 test("forks need a steering person with access to every session, and an existing message", async () => {
     const id = await newSession(app);
 

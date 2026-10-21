@@ -2,7 +2,7 @@
 // panel itself is browser-panel.js.
 
 import { t } from "./i18n.js";
-import { api, attempt, closePeople, notify, store } from "./store.js";
+import { api, attempt, closePeople, EXT_PANEL_KEY, notify, store } from "./store.js";
 
 const OPEN_KEY = "pocket.browser";
 
@@ -18,13 +18,18 @@ export function setBrowserOpen(open) {
     if (open) {
         sessionStorage.setItem(OPEN_KEY, "1");
         sessionStorage.removeItem("pocket.files");
+        sessionStorage.removeItem(EXT_PANEL_KEY);
         closePeople();
     } else {
         sessionStorage.removeItem(OPEN_KEY);
     }
 
-    // One panel beside the conversation at a time: the browser takes the Files tile's place too.
-    store.set({ browserOpen: open, drawer: false, ...(open ? { filesOpen: false } : {}) });
+    // One panel beside the conversation at a time: the browser takes the Files tile's and an extension's place too.
+    store.set({
+        browserOpen: open,
+        drawer: false,
+        ...(open ? { filesOpen: false, extPanel: null } : {}),
+    });
 }
 
 export const toggleBrowser = () => setBrowserOpen(!store.state.browserOpen);

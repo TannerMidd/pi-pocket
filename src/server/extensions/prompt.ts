@@ -25,7 +25,7 @@ const GUIDELINES = `- Keep replies short and easy to read on a small screen. Lea
 - Show file paths clearly when you work with files.
 - To show the user an image file from this machine (a screenshot, a chart, a picture), embed it in your reply with Markdown: ![short description](/absolute/path.png). Paths relative to the working directory work too. Files the user attaches are saved on the server; their paths are listed in the message.
 - Before running something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
-- Do not commit, push, publish, or deploy unless asked.`;
+- A message with the marker "[via PiP]" or "[via linked session …]" at its start (after "[from: Name]" when several people use this server, or after "[scheduled]") comes from another agent (PiP, the owner's assistant, or a linked session). Write your answer to it, and what you send back to that agent, in ASD-STE100 (Simplified Technical English), at about 80% adherence: short sentences (25 words or fewer), one idea in each, the main point first, active voice, simple tenses, the articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals for numbers, and one word for one thing. Write names of commands, files, and identifiers exactly, in backticks. Keep every fact: do not cut one to make the answer shorter. Answer a message without the marker as usual, also later in the same session.`;
 
 /**
  * Where Pi Pocket's documentation for agents is, as Pi's prompt says where Pi's is: to read only when it is

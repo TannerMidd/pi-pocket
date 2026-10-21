@@ -7,7 +7,7 @@ An extension gives Pi something new:
 - a **hook** that checks or changes Pi's tool calls and answers,
 - or a durable **task**.
 
-A module can also add to the app itself: **routes** on the server, a **browser module** with rail buttons, pages, sheets, menu rows, and launcher actions, and **commands** that people run from the message box without Pi ([Adding to the app](extensions/app.md)). Pi Pocket's own features are modules too (`src/server/extensions/`). The owner can add modules of their own, without a change to Pi Pocket's code.
+A module can also add to the app itself: **routes** on the server, a **browser module** with rail buttons, pages, sheets, panels, status-line items, menu rows, and launcher actions, and **commands** that people run from the message box without Pi ([Adding to the app](extensions/app.md)). Pi Pocket's own features are modules too (`src/server/extensions/`). The owner can add modules of their own, without a change to Pi Pocket's code.
 
 Extensions come from Pi Durable. Its README tells about the parts in depth: `node_modules/@earendil-works/pi-durable/README.md` in Pi Pocket's folder (Extensions, Tools, System Prompt, Hooks, Your Own State). These pages tell what Pi Pocket adds, and how to write an extension that works well. The rules for extensions are in [the policies](extensions/policies/index.md).
 
@@ -26,7 +26,7 @@ This page is the map. Read all of it, then only the pages that your task needs.
 | Start sessions, and send messages between them                 | [Starting and messaging sessions](extensions/linked-sessions.md)                                                |
 | Add to the app: routes, a browser module, commands             | [Adding to the app](extensions/app.md)                                                                          |
 | Answer requests on the server, and say who may use them        | [Routes](extensions/routes.md)                                                                                  |
-| Add rail buttons, pages, sheets, menu rows, launcher actions   | [Browser modules](extensions/browser-modules.md)                                                                |
+| Add rail buttons, pages, sheets, panels, status items, menus   | [Browser modules](extensions/browser-modules.md)                                                                |
 | Run something from the message box, without Pi                 | [Slash commands](extensions/commands.md)                                                                        |
 | Show your tool's calls in words                                | [How tool calls show](extensions/tool-calls.md)                                                                 |
 | Send live updates to the browser                               | [Events](extensions/events.md)                                                                                  |
@@ -73,7 +73,7 @@ const clock = defineTool({
     parameters: Type.Object({ zone: Type.Optional(Type.String()) }),
     replay: "safe",
     execute: async (args) => ({
-        content: [
+        output: [
             {
                 type: "text" as const,
                 text: new Date().toLocaleString("en-US", { timeZone: args.zone }),
@@ -81,6 +81,9 @@ const clock = defineTool({
         ],
     }),
 });
+
+// It returns `output`, so it needs version 2 of the extension API: Pi Pocket 0.18 says so, and does not load it.
+export const pocketApi = 2;
 
 export default function createClock() {
     return defineExtension({ name: "example-clock", tools: [clock] });

@@ -94,7 +94,7 @@ function toolHooks(extensions: readonly Extension[]): { before: BeforeTool[]; af
 
 /** A result's text as the model would read it: text parts, then its diagnostics. */
 function resultText(result: ToolExecutionResult, diagnostics: readonly ToolDiagnostic[]): string {
-    const parts = (result.content ?? []).flatMap((part) =>
+    const parts = (result.output ?? []).flatMap((part) =>
         part.type === "text" ? [part.text] : [],
     );
 
@@ -293,10 +293,10 @@ export default function createCodemode(_host: PocketHost) {
                     };
                     let result = await tool.execute(callArgs, toolApi, scope);
 
-                    if (result.content === undefined) {
+                    if (result.output === undefined) {
                         result = {
                             ...result,
-                            content: [{ type: "text", text: output.join("") + decoder.decode() }],
+                            output: [{ type: "text", text: output.join("") + decoder.decode() }],
                         };
                     }
 
@@ -395,7 +395,7 @@ export default function createCodemode(_host: PocketHost) {
             const header = `${result.ok ? "Script completed" : "Script failed"}\nWall time ${((performance.now() - started) / 1000).toFixed(1)} seconds\nOutput:\n`;
 
             return {
-                content: [{ type: "text", text: header }, ...shown.items],
+                output: [{ type: "text", text: header }, ...shown.items],
                 details: {
                     calls,
                     ...(shown.fullOutputPath === undefined

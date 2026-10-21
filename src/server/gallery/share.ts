@@ -256,6 +256,21 @@ async function ownFiles(
  * comment, its files' sizes and hashes, and, while it is on, what it declares. What only its author knows (where its
  * files are on GitHub) stays to fill in. `version` is this Pi Pocket's.
  */
+/**
+ * The extension API version a module was written for: the highest `export const pocketApi = N` in its files, else 1
+ * (no export counts as 1). Never newer than this Pi Pocket's, so a draft never asks for an API that does not exist.
+ */
+export function apiOf(texts: readonly { text?: string }[]): number {
+    // A file that is not text (an image) says nothing.
+    const found = texts.flatMap(({ text = "" }) =>
+        [...text.matchAll(/\bexport\s+const\s+pocketApi\s*=\s*(\d+)/g)].map((match) =>
+            Number(match[1]),
+        ),
+    );
+
+    return Math.min(POCKET_API, Math.max(1, ...found));
+}
+
 export async function shareDraft(options: {
     root: string;
     module: ExtensionInfo;
@@ -333,7 +348,7 @@ export async function shareDraft(options: {
             sha256: sha256(each.bytes),
             size: each.bytes.byteLength,
         })),
-        pocketApi: POCKET_API,
+        pocketApi: apiOf(texts),
         minPocket: options.version.replace(/[-+].*$/, ""),
         declares,
     };

@@ -11,7 +11,7 @@ import { quoted } from "../fence.ts";
 import type { PocketHost } from "../host.ts";
 import { endedText, MAX_SENT, TRIGGERS_EXTENSION, WATCH_VIA } from "../watches.ts";
 
-const reply = (text: string) => ({ content: [{ type: "text" as const, text }] });
+const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
 
 /** A watch in a line, as Pi reads it: a note with no failed look says why it waits. */
 export function describeWatch(watch: PrWatch): string {

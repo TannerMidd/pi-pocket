@@ -379,7 +379,7 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
 
     return html`<${Sheet} title=${title} onClose=${closeSheet}>
         <p class="muted small">
-            ${t("Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences.")} ${project ? t("Those for {{project}} go to every session in it, worktrees too; the rest go everywhere.", { project: project.name }) : t("PiP keeps lessons for everywhere.")} ${t("Pi proposes them as it learns, and the owner approves; yours count at once.")}
+${t("Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences.")} ${project ? html`${t("Those for")} <b>${project.name}</b> ${t("go to every session in it, worktrees too; the rest go everywhere.")}` : t("PiP keeps lessons for everywhere.")} ${t("Pi proposes one only when asked, or when sure it will help in many later sessions, and the owner approves; yours count at once.")}
         </p>
         ${
             data.canWrite &&

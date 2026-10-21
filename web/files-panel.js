@@ -9,7 +9,7 @@ import { useBack } from "./back.js";
 import { DiffReview, KIND_LETTERS, reloadChanges, useChanges, useWidth } from "./diff.js";
 import { loadFiles, suggestFiles } from "./files.js";
 import { FileView } from "./sheets/file.js";
-import { actions, canSteer, closePeople, panelsBeside, store } from "./store.js";
+import { actions, canSteer, closePeople, EXT_PANEL_KEY, panelsBeside, store } from "./store.js";
 import { html, Icon, Loader, Marked, shortPath, usePresence } from "./ui.js";
 
 const OPEN_KEY = "pocket.files";
@@ -26,6 +26,7 @@ export function setFilesOpen(open, tab) {
     if (open) {
         sessionStorage.setItem(OPEN_KEY, "1");
         sessionStorage.removeItem("pocket.browser");
+        sessionStorage.removeItem(EXT_PANEL_KEY);
         closePeople();
     } else {
         sessionStorage.removeItem(OPEN_KEY);
@@ -46,6 +47,7 @@ export function setFilesOpen(open, tab) {
         ...(open
             ? {
                   browserOpen: false,
+                  extPanel: null,
                   sheet: null,
                   filesAsk: { tab: tab ?? store.state.filesTab, at: Date.now() },
               }

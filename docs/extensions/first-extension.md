@@ -33,9 +33,12 @@ const wordCount = defineTool({
     parameters: Type.Object({ text: Type.String({ description: "The text to count" }) }),
     replay: "safe",
     execute: async (args) => ({
-        content: [{ type: "text" as const, text: `${countWords(args.text)} words` }],
+        output: [{ type: "text" as const, text: `${countWords(args.text)} words` }],
     }),
 });
+
+// It returns `output`, so it needs version 2 of the extension API: Pi Pocket 0.18 says so, and does not load it.
+export const pocketApi = 2;
 
 export default function createMyWords(_host: unknown, web: Web) {
     web.command("my-words", {

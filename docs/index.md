@@ -51,4 +51,3 @@ The same pages are on the web, with search: https://tannermidd.github.io/pi-pock
 - **Ask first.** A change to Pi Pocket reaches each person who uses it, at once. Say what you will change and why. Then wait for a yes, unless the person asked for exactly that change.
 - **Do not test on the live data.** Check a change on a copy of Pi Pocket with its own data folder ([self-editing.md](self-editing.md#check-it-on-a-copy)), not on the server that people use.
 - **Do not restart while your own tool call runs**, and do not restart without asking. Tell the person to use Menu → Restart server.
-- **Do not commit, push, or publish** unless the person asks.
