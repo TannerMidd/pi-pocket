@@ -116,7 +116,16 @@ test(
                 );
             }
 
-            await page.click(await blank(ids[0]!));
+            const point = await blank(ids[0]!);
+
+            assert.equal(
+                await value(
+                    `return JSON.stringify(getComputedStyle(document.elementFromPoint(${point.x}, ${point.y})).cursor)`,
+                ),
+                "pointer",
+                `clickable blank tag-row space uses a pointer cursor at ${width}px`,
+            );
+            await page.click(point);
             await pause();
             assert.equal(
                 await value(
@@ -163,6 +172,79 @@ test(
                 join(process.env.POLISH_EVIDENCE_DIR, "filter-hover.jpg"),
                 Buffer.from(shot.data, "base64"),
             );
+        }
+    },
+);
+
+test(
+    "polish: batch-removal hover and click reach the right edge on desktop and phone",
+    real,
+    async () => {
+        await app.commands.updateSessionTags(owner(app), {
+            ids: [Number(ids[1]!)],
+            add: ["review"],
+            remove: ["polish"],
+        });
+
+        try {
+            for (const width of [1280, 390, 320]) {
+                await fresh(width);
+                const point = await blank(ids[0]!);
+
+                await page.evaluate(`
+                    const target = document.elementFromPoint(${point.x}, ${point.y});
+                    target.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true, detail: 1 }));
+                `);
+                await page.click({ selector: `${row(ids[1]!)} .chip` });
+                const edit = await value<{ x: number; y: number }>(`
+                    const button = [...document.querySelectorAll(${JSON.stringify(`${list} .select-bar button`)})]
+                        .find(each => each.textContent.trim() === 'Edit tags');
+                    const box = button.getBoundingClientRect();
+                    return JSON.stringify({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+                `);
+
+                await page.click(edit);
+                await pause();
+                const geometry = await value<{ gap: number; x: number; y: number }>(`
+                    const list = document.querySelector('.sheet-host:not(.leaving) .tag-remove-options');
+                    const option = list.querySelector('label');
+                    const outer = list.getBoundingClientRect(), box = option.getBoundingClientRect();
+                    const edge = outer.right - parseFloat(getComputedStyle(list).borderRightWidth);
+                    return JSON.stringify({ gap: edge - box.right, x: edge - 2, y: box.y + box.height / 2 });
+                `);
+
+                await page.hover({
+                    selector: ".sheet-host:not(.leaving) .tag-remove-options label",
+                });
+                await pause();
+
+                if (process.env.POLISH_EVIDENCE_DIR) {
+                    const shot = await page.screenshot();
+
+                    writeFileSync(
+                        join(process.env.POLISH_EVIDENCE_DIR, `batch-removal-hover-${width}.jpg`),
+                        Buffer.from(shot.data, "base64"),
+                    );
+                }
+
+                assert.ok(geometry.gap < 1, `${width}px right edge gap is ${geometry.gap}px`);
+                await page.click({ x: geometry.x, y: geometry.y });
+                assert.equal(
+                    await value(
+                        `return JSON.stringify(!!document.querySelector('.tag-remove-options label.marked input:checked'))`,
+                    ),
+                    true,
+                    "right-edge click queues a removal through the native label",
+                );
+                await page.press("Escape");
+                await pause();
+            }
+        } finally {
+            await app.commands.updateSessionTags(owner(app), {
+                ids: [Number(ids[1]!)],
+                add: ["polish"],
+                remove: ["review"],
+            });
         }
     },
 );

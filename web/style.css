@@ -4829,6 +4829,7 @@ pre.diff .del {
 /* Named tags are siblings of the row-open button, never nested controls or a new action gutter. */
 .session-tags {
     padding: 4px 10px 6px 29px;
+    cursor: pointer;
 }
 
 .session-tags .chip {
@@ -6157,7 +6158,6 @@ pre.diff .del {
     max-height: min(196px, 28dvh);
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-gutter: stable;
 }
 
 .tag-remove-options > .list-item {
