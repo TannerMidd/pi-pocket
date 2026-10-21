@@ -462,7 +462,21 @@ function SessionRow({
         </button>
         ${
             (session.tags ?? []).length > 0 &&
-            html`<div class="session-tags" role="group" aria-label="Session tags">
+            html`<div
+            class="session-tags"
+            role="group"
+            aria-label="Session tags"
+            onPointerDown=${(event) => {
+                if (event.target === event.currentTarget) {
+                    onSelect(event, session.id);
+                }
+            }}
+            onClick=${(event) => {
+                if (event.target === event.currentTarget) {
+                    onPick(event, session.id);
+                }
+            }}
+        >
             ${session.tags.map(
                 (tag) => html`<button
                 class="chip"
@@ -773,7 +787,7 @@ function AllSessions({ compact = false }) {
         }
 
         const { pointerId, clientX: x, clientY: y } = event;
-        const opener = event.currentTarget;
+        const opener = event.currentTarget.closest(".session-row").querySelector(".session");
         let fired = false;
         let after = 0;
         const root = document.documentElement;
@@ -1078,7 +1092,7 @@ function AllSessions({ compact = false }) {
                 html`<button
                     class="new-button"
                     title="New session (Alt+N)"
-                    onClick=${() => openSheet({ type: "cwd", mode: "new" })}
+                    onClick=${() => openSheet({ type: "cwd", mode: "new", tags: [...tagFilters] })}
                 >
                     <${Icon} name="plus" size=${14} />
                     New

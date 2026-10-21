@@ -391,7 +391,7 @@ export class Commands {
     /** Start a session in a folder; with `worktree`, in a git worktree of its own made from that folder. */
     async createSession(
         user: User,
-        request: { cwd?: string; title?: string; worktree?: unknown },
+        request: { cwd?: string; title?: string; worktree?: unknown; tags?: unknown },
         { projectDefaults = true }: { projectDefaults?: boolean } = {},
     ): Promise<{ id: ConversationId }> {
         const app = this.#app;
@@ -400,6 +400,12 @@ export class Commands {
 
         if (user.sessions !== undefined) {
             throw new HttpError(403, "You were invited to one session and cannot start new ones.");
+        }
+
+        const tags = sessionTagNames(request.tags);
+
+        if (tags.length > MAX_SESSION_TAGS) {
+            throw new HttpError(409, "A session can have at most 10 tags. Nothing was created.");
         }
 
         const given = optionalText(request.title, "title");
@@ -436,6 +442,7 @@ export class Commands {
                                 createdBy: user.id,
                                 ...(title === undefined ? {} : { title }),
                                 ...(worktree === undefined ? {} : { worktree }),
+                                ...(tags.length === 0 ? {} : { tags }),
                             };
                         },
                     },

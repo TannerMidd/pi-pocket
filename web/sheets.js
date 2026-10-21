@@ -210,7 +210,7 @@ function sheetBody(sheet) {
             body = view.conversation ? html`<${BranchPicker} />` : null;
             break;
         case "cwd":
-            body = html`<${CwdSheet} mode=${sheet.mode} />`;
+            body = html`<${CwdSheet} mode=${sheet.mode} tags=${sheet.tags} />`;
             break;
         case "artifacts":
             body = html`<${ArtifactsSheet} />`;

@@ -1136,8 +1136,12 @@ export const actions = {
     unwatchPr: () => api(`c/${current()}/watch`, { stop: true }),
     approve: (id, allow) => api(`approvals/${encodeURIComponent(id)}`, { allow }),
     /** `worktree`: the session works in a git worktree of its own, made from the folder. */
-    createSession: (cwd, { worktree = false } = {}) =>
-        api("sessions", { cwd, ...(worktree ? { worktree } : {}) }),
+    createSession: (cwd, { worktree = false, tags = [] } = {}) =>
+        api("sessions", {
+            cwd,
+            ...(worktree ? { worktree } : {}),
+            ...(tags.length ? { tags } : {}),
+        }),
     updateSession: (id, patch) => api(`sessions/${id}`, patch),
     /** Atomically patch shared tags on exactly these sessions; list events carry committed state. */
     updateSessionTags: (patch) => api("sessions/tags", patch),

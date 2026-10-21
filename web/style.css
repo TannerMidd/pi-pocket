@@ -6068,7 +6068,6 @@ pre.diff .del {
     max-height: min(196px, 28dvh);
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-gutter: stable;
 }
 
 .tag-filter-results > .list-item {

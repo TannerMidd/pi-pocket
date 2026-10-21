@@ -117,7 +117,7 @@ function LineInput({ value, placeholder, label, onSubmit, onCancel, class: class
     </form>`;
 }
 
-export function CwdSheet({ mode }) {
+export function CwdSheet({ mode, tags = [] }) {
     const { view, server, folderFavorites: favorites } = store.state;
     const changing = mode === "change";
     // Where it opens: the folder of the session you are in (New session here), else the server's own. Issue #96.
@@ -247,7 +247,7 @@ export function CwdSheet({ mode }) {
                 await actions.configure({ cwd: path });
                 closeSheet();
             } else {
-                const created = await actions.createSession(path, { worktree });
+                const created = await actions.createSession(path, { worktree, tags });
 
                 navigate(created.id);
             }
