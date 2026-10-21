@@ -1137,13 +1137,19 @@ function AllSessions({ compact = false }) {
             <button
                 class=${`search-filters ${tagFilters.length ? "on" : ""}`}
                 aria-label=${`Filters${tagFilters.length ? `, ${tagFilters.length} active tags` : ""}`}
+                title=${`Filters${tagFilters.length ? `, ${tagFilters.length} active tags` : ""}`}
                 onClick=${(event) => {
                     event.preventDefault();
                     filterTags();
                 }}
             >
                 <${Icon} name="filter" size=${14} />
-                Filters${tagFilters.length ? ` · ${tagFilters.length}` : ""}
+                <span class="search-filter-label">Filters${tagFilters.length ? " ·" : ""}</span>
+                ${
+                    tagFilters.length
+                        ? html`<span class="search-filter-count">${tagFilters.length}</span>`
+                        : ""
+                }
             </button>
         </label>
         <div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>

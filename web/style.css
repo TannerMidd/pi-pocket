@@ -9549,10 +9549,36 @@ textarea.notes {
     opacity: 0;
 }
 
-/* A narrow list keeps the search's words whole: its keys give way. */
-@container sessions (max-width: 200px) {
+/* Make room for the search's words before optional keys or Filters wording. These widths
+ * measure the list's content, not the sidebar, which also includes the rail and padding. */
+@container sessions (max-width: 300px) {
     .search-keys {
         display: none;
+    }
+    .search-filters {
+        padding-inline: 4px;
+    }
+}
+
+@container sessions (max-width: 216px) {
+    .sessions .search {
+        gap: 4px;
+        padding-inline: 6px;
+    }
+    .search-filter-label {
+        display: none;
+    }
+}
+
+@media (pointer: coarse) {
+    @container sessions (max-width: 256px) {
+        .search-filter-label {
+            display: none;
+        }
+        .search-filters {
+            min-width: 40px;
+            justify-content: center;
+        }
     }
 }
 
