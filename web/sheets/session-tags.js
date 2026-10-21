@@ -9,46 +9,113 @@ const vocabulary = () => [...new Set(store.state.sessions.flatMap(tagsOf))].sort
 /** Filters narrow the current search/view immediately; closing does not undo them. */
 export function SessionTagFilter({ tags, onChange, scope: currentScope, scopeName }) {
     const [selected, setSelected] = useState(tags);
+    const [query, setQuery] = useState("");
+    const searchRef = useRef(null);
+    const selectedRef = useRef(null);
+
+    useChipTrayFocus(selectedRef, selected.length > 0);
+
     const scope = currentScope();
     const matches = scope.filter((session) =>
         selected.every((tag) => tagsOf(session).includes(tag)),
     );
-    const options = [...new Set([...vocabulary(), ...selected])].sort();
+    const allOptions = [...new Set([...vocabulary(), ...selected])].sort();
+    const options = allOptions.filter((tag) => tag.includes(query.trim().toLowerCase()));
 
     const change = (next) => {
         setSelected(next);
         onChange(next);
     };
 
-    return html`<${Sheet} title="Filter sessions" onClose=${closeSheet}>
-        <p class="muted small">Match all selected tags. Changes apply immediately.</p>
-        <p class="muted small">${scopeName}</p>
-        <div class="sheet-list tag-options">
-            ${options.map(
-                (tag) => html`<label class="list-item check" key=${tag}>
-                <span>${tag}</span>
-                <input
-                    type="checkbox"
-                    checked=${selected.includes(tag)}
-                    onChange=${(event) =>
-                        change(
-                            event.currentTarget.checked
-                                ? [...selected, tag]
-                                : selected.filter((each) => each !== tag),
-                        )}
-                />
-            </label>`,
-            )}
-            ${options.length === 0 && html`<p class="muted small">No tags yet. Add tags from a session's actions.</p>`}
+    const removeSelected = (event, tag) => {
+        const button = event.currentTarget;
+        const siblings = [...button.parentElement.querySelectorAll("button")];
+        const index = siblings.indexOf(button);
+        const host = button.closest(".sheet-host");
+        const sheet = store.state.sheet;
+        const keyboard = event.detail === 0 && document.activeElement === button;
+
+        change(selected.filter((each) => each !== tag));
+
+        if (keyboard) {
+            requestAnimationFrame(() => {
+                if (
+                    store.state.sheet !== sheet ||
+                    !host?.isConnected ||
+                    host.classList.contains("leaving") ||
+                    (document.activeElement !== document.body && document.activeElement !== button)
+                ) {
+                    return;
+                }
+
+                const next = [siblings[index + 1], siblings[index - 1], searchRef.current].find(
+                    (control) => control?.isConnected && control.closest(".sheet-host") === host,
+                );
+
+                next?.focus();
+            });
+        }
+    };
+
+    return html`<${Sheet} title="Filter sessions" onClose=${closeSheet} className="session-tag-filter-sheet">
+        <div class="tag-filter-content">
+            <p class="muted small">${scopeName} · Match all selected tags. Changes apply immediately.</p>
+            <input
+                type="search"
+                ref=${searchRef}
+                aria-label="Search tags"
+                placeholder="Search tags"
+                autocomplete="off"
+                value=${query}
+                onInput=${(event) => setQuery(event.currentTarget.value)}
+            />
+            ${
+                selected.length > 0 &&
+                html`<div class="tag-filter-pending">
+                <p class="small">Selected · ${selected.length}</p>
+                <div class="tag-filter-selected" ref=${selectedRef}>
+                    ${selected.map(
+                        (tag) => html`<button
+                        class="chip"
+                        key=${tag}
+                        aria-label=${`Remove ${tag} filter`}
+                        onClick=${(event) => removeSelected(event, tag)}
+                    ><span dir="auto">${tag}</span><${Icon} name="close" size=${12} /></button>`,
+                    )}
+                </div>
+            </div>`
+            }
+            <div class="sheet-list tag-options tag-filter-results">
+                ${options.map(
+                    (
+                        tag,
+                    ) => html`<label class=${`list-item check${selected.includes(tag) ? " marked" : ""}`} key=${tag}>
+                    <span dir="auto">${tag}</span>
+                    <input
+                        type="checkbox"
+                        checked=${selected.includes(tag)}
+                        onChange=${(event) =>
+                            change(
+                                event.currentTarget.checked
+                                    ? [...selected, tag]
+                                    : selected.filter((each) => each !== tag),
+                            )}
+                    />
+                </label>`,
+                )}
+                ${options.length === 0 && html`<p class="muted small tag-empty">${allOptions.length === 0 ? "No tags yet. Add tags from a session's actions." : "No matching tags."}</p>`}
+            </div>
         </div>
-        <p class="small" role="status" aria-live="polite">
-            ${matches.length} matching ${matches.length === 1 ? "session" : "sessions"} in this view
-        </p>
-        <div class="sheet-actions">
-            <button class="button" onClick=${() => change([])} disabled=${selected.length === 0}>
-                Clear tags
-            </button>
-            <button class="button primary" onClick=${closeSheet}>Done</button>
+        <div class="tag-filter-footer">
+            <p class="small" role="status" aria-live="polite">
+                ${matches.length} matching ${matches.length === 1 ? "session" : "sessions"} in this view
+            </p>
+            <div class="sheet-actions">
+                <button class="button" onClick=${() => change([])} disabled=${selected.length === 0}>
+                    Clear tags
+                </button>
+                <button class="button primary" onClick=${closeSheet}>Done</button>
+            </div>
         </div>
     <//>`;
 }
@@ -73,31 +140,7 @@ export function SessionTagsSheet({ ids, batch = false, submit }) {
     const removalListRef = useRef(null);
     const removalDraftRef = useRef(null);
 
-    useLayoutEffect(() => {
-        const tray = removalDraftRef.current;
-        const sheet = store.state.sheet;
-
-        if (!tray) {
-            return;
-        }
-
-        const observer = new ResizeObserver(() => {
-            const focused = document.activeElement;
-
-            if (
-                store.state.sheet === sheet &&
-                tray.isConnected &&
-                tray.closest(".sheet-host:not(.leaving)") &&
-                tray.contains(focused)
-            ) {
-                focused.scrollIntoView({ block: "nearest", inline: "nearest" });
-            }
-        });
-
-        observer.observe(tray);
-
-        return () => observer.disconnect();
-    }, [remove.length > 0]);
+    useChipTrayFocus(removalDraftRef, remove.length > 0);
 
     const original = targets[0].tags;
     const union = [...new Set(targets.flatMap((session) => session.tags))].sort();
@@ -378,4 +421,33 @@ export function SessionTagsSheet({ ids, batch = false, submit }) {
             </div>
         </div>
     <//>`;
+}
+
+/** Keep a focused chip visible when its bounded tray reflows, without moving focus. */
+function useChipTrayFocus(ref, hasChips) {
+    useLayoutEffect(() => {
+        const tray = ref.current;
+        const sheet = store.state.sheet;
+
+        if (!tray) {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            const focused = document.activeElement;
+
+            if (
+                store.state.sheet === sheet &&
+                tray.isConnected &&
+                tray.closest(".sheet-host:not(.leaving)") &&
+                tray.contains(focused)
+            ) {
+                focused.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+        });
+
+        observer.observe(tray);
+
+        return () => observer.disconnect();
+    }, [hasChips]);
 }

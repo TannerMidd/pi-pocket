@@ -6041,6 +6041,84 @@ pre.diff .del {
     gap: 8px;
 }
 
+/* Personal tag filters keep choices bounded and actions outside their scrolling content. */
+.session-tag-filter-sheet .sheet-body {
+    overflow: hidden;
+}
+
+.tag-filter-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: calc(14px * var(--space-y));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: -3px;
+    padding: 3px;
+}
+
+.tag-filter-content > * {
+    flex-shrink: 0;
+}
+
+.tag-filter-content > .tag-filter-results {
+    flex: 1 1 196px;
+    min-height: 44px;
+    max-height: min(196px, 28dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.tag-filter-results > .list-item {
+    min-height: 44px;
+    padding-block: 8px;
+}
+
+.tag-filter-results > .marked {
+    background: var(--accent-soft);
+}
+
+.tag-filter-content > .tag-filter-pending {
+    display: flex;
+    flex-direction: column;
+    flex: 0 1 auto;
+    min-height: 60px;
+    gap: 6px;
+}
+
+.tag-filter-selected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 40px;
+    max-height: 80px;
+    overflow-y: auto;
+    scroll-padding: 3px;
+    padding: 3px;
+    margin: -3px;
+}
+
+.tag-filter-selected .chip {
+    min-height: 40px;
+    max-width: 100%;
+}
+
+.tag-filter-selected .chip > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.tag-filter-footer {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    gap: calc(14px * var(--space-y));
+    padding-top: 12px;
+    border-top: 1px solid var(--hair);
+}
+
 /* Tag editing uses the standard sheet fields/actions. Only Save sends an explicit patch. */
 .tag-add {
     display: flex;
