@@ -557,7 +557,7 @@ export function parseEntry(value: unknown): Entry {
     }
 
     if (!Number.isSafeInteger(shape.pocketApi) || (shape.pocketApi as number) < 1) {
-        throw new EntryError("pocketApi is not a version of the extension API, such as 1");
+        throw new EntryError("pocketApi is not a version of the extension API, such as 2");
     }
 
     const { minPocket, revoked, ...rest } = about;

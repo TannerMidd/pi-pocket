@@ -201,6 +201,7 @@ export const PARTS = [
     "send-button",
     "model-chip",
     "status-line",
+    "status-item",
     // Layers over the app
     "sheet",
     "sheet-head",
@@ -223,6 +224,7 @@ export const PARTS = [
     "pip",
     "subagents-board",
     "extension-page",
+    "extension-panel",
     "diff",
     "sign-in",
 ];

@@ -79,4 +79,3 @@ The full list is in [map.md](map.md#rules-that-are-easy-to-break). These cost th
 - **Only erasable TypeScript** in `src/`: no `enum`, no `namespace`, and no parameter properties. Imports end in `.ts`. Node runs the code as it is.
 - **The web app has no build.** It is plain ES modules with Preact and htm. Lay out the markup by hand ([AGENTS.md](../AGENTS.md) tells how). In htm, a line break is not a space.
 - **Phones first.** Controls must be big enough for a thumb (about 40 px), nothing can be wider than the screen, and back closes what opened last (`useBack`, [map.md](map.md#adding-things)). Check at 390 × 844.
-- **Do not commit, push, or publish** unless the person asks. Show the diff instead.

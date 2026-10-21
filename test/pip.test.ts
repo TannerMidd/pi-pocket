@@ -34,11 +34,15 @@ import { PIP_EXTENSION, SESSION_CLOSE, SESSION_OPEN } from "../src/server/pip.ts
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
     fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 
+/** The newest request that PiP and a session sent the model, as JSON: what each prompt says. */
+const lastRequest = { pip: "", session: "" };
+
 const route: FauxResponseStep = (request) => {
     // PiP's requests carry its prompt; the prompt and the tools come as the transcript's system messages.
-    const isPip = JSON.stringify((request as { messages: unknown[] }).messages).includes(
-        "You are PiP",
-    );
+    const all = JSON.stringify((request as { messages: unknown[] }).messages);
+    const isPip = all.includes("You are PiP");
+
+    lastRequest[isPip ? "pip" : "session"] = all;
     const { role, text: written } = lastText(request as never);
     // With more than one person on the server, a message starts with who sent it.
     const text = written.replace(/^\[from: [^\]]+\] /, "");
@@ -217,6 +221,31 @@ test("PiP starts a session for its person, and hears back when Pi there answers"
     );
 
     assert.deepEqual(Object.values(authors?.entries ?? {}), [], "nobody wrote it themselves");
+});
+
+test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it", async () => {
+    const id = await pip();
+
+    await say(app, id, "start write the release notes");
+    await until(
+        () => lastRequest.session.includes("write the release notes"),
+        "the session's request",
+    );
+
+    assert.match(lastRequest.pip, /Write to agents in ASD-STE100 \(Simplified Technical English\)/);
+    assert.match(lastRequest.pip, /It does not cover your answers to your person/);
+    // PiP asks each session to answer it in ASD-STE100, and a session answers a message through PiP so.
+    assert.match(
+        lastRequest.pip,
+        /In each task, ask the session to write its answers to you in ASD-STE100 too/,
+    );
+    assert.doesNotMatch(lastRequest.session, /Write to agents in ASD-STE100/);
+    // The session sees the marker that its rule names.
+    assert.match(lastRequest.session, /\[via PiP\] write the release notes/);
+    assert.match(
+        lastRequest.session,
+        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent \(PiP, .* Write your answer to it, and what you send back to that agent, in ASD-STE100/,
+    );
 });
 
 test("PiP denies a waiting call, as its person through PiP, and cannot allow one", async () => {

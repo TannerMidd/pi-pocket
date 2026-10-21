@@ -46,7 +46,7 @@ const clock = defineTool({
             throw new Error(`There is no time zone ${zone}.`);
         }
 
-        return { content: [{ type: "text" as const, text: `${now} (${zone})` }] };
+        return { output: [{ type: "text" as const, text: `${now} (${zone})` }] };
     },
 });
 
@@ -60,6 +60,9 @@ function known(zone: string): boolean {
         return false;
     }
 }
+
+// It returns `output`, so it needs version 2 of the extension API: Pi Pocket 0.18 says so, and does not load it.
+export const pocketApi = 2;
 
 export default function createClock(_host: unknown, web: Web) {
     // `/clock-zone` shows the session's time zone, and `/clock-zone Europe/Berlin` sets it, without asking Pi.

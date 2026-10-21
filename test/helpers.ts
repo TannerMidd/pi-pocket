@@ -159,14 +159,14 @@ export async function modelTexts(app: App, id: ConversationId): Promise<string[]
 }
 
 /** A browser tab as the app sees it, recording every event it is sent. Attach it with `app.attach(tab.client)`. */
-export function fakeTab(id: ConversationId | undefined, user: User) {
+export function fakeTab(id: ConversationId | undefined, user: User, protocol = 2) {
     const events: { event: string; data: Record<string, unknown> }[] = [];
     const client: Client = {
         id: `tab-${crypto.randomUUID()}`,
         connection: `connection-${crypto.randomUUID()}`,
         user,
         conversationId: id,
-        protocol: 2,
+        protocol,
         sentEntries: new Set<number>(),
         orderKey: "",
         send: (event: string, data: unknown) =>

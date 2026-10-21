@@ -20,3 +20,9 @@ a manifest are treated as unmanaged too.
 The `extension-management` flake check exercises the file reconciliation directly,
 including collisions, invalid manifests and symlinks. It verifies that cleanup
 never follows a file symlink or replaces an unmanaged extensions directory.
+
+The build sandbox sets `HOME` to the build directory, and the tests' temporary
+folders are made inside it. A test that reads a path back from the app compares
+the shortening the app shows (`shortPath`, `~/…`), not the absolute path it
+passed in. `installed.mjs` compares whole `ExtensionInfo` records, so a member
+added to them belongs there too.

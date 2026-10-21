@@ -23,13 +23,13 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 const dataDir = join(root, "data");
 const dropIns = join(dataDir, "extensions");
 
-/** A drop-in that imports Pi Durable and pi-ai by name, offers a tool, and blocks bash with a hook. */
+/** A drop-in that imports Pi Durable and pi-ai by name, offers a tool (with the old `content` result, which Pi Pocket still reads), and blocks bash with a hook. It returns a frozen list. */
 const shout = (suffix: string) => `/** Shout offers a tool that shouts${suffix}. */
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
 
 export default () =>
-	defineExtension({
+	Object.freeze([defineExtension({
 		name: "shout",
 		tools: [
 			defineTool({
@@ -40,7 +40,7 @@ export default () =>
 			}),
 		],
 		hooks: [hook(ToolTask, { beforeTool: (call) => (call.name === "bash" ? { block: "no shell while shouting" } : undefined) })],
-	});
+	})]);
 `;
 
 const route: FauxResponseStep = (request) => {
@@ -199,7 +199,7 @@ export default () =>
 		tools: [${
             tool === undefined
                 ? ""
-                : `defineTool({ name: "${tool}", description: "x", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "${extension}" }] }) })`
+                : `defineTool({ name: "${tool}", description: "x", parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: "${extension}" }] }) })`
         }],
 	});
 `;
@@ -215,4 +215,67 @@ test("a drop-in cannot take a name Pi Pocket keeps: it is refused", async () => 
     // turned off would remove the guard.
     await refused("guard-twin.ts", named("pocket-guard"), /pocket-guard is Pi Pocket's own/);
     await refused("my-bash.ts", named("my-bash", "bash"), /bash is a built-in tool's/);
+});
+
+/** A drop-in that says which version of the extension API it was written for, with a tool that returns `output`. */
+const versioned = (name: string, api: string) => `/** Versioned ${name}. */
+import { Type } from "@earendil-works/pi-ai";
+import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+
+${api}
+
+export default () =>
+	defineExtension({
+		name: "${name}",
+		tools: [defineTool({ name: "${name}_tool", description: "x", parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: "ok" }] }) })],
+	});
+`;
+
+test("a drop-in for API 2, 1, or none loads; one for a newer API is refused with a clear error", async () => {
+    for (const [file, api] of [
+        ["api-two.ts", "export const pocketApi = 2;"],
+        ["api-one.ts", "export const pocketApi = 1;"],
+        ["api-none.ts", ""],
+    ] as const) {
+        writeFileSync(
+            join(dropIns, file),
+            versioned(file.replace(/\W/g, "_").replace(/_ts$/, ""), api),
+        );
+        await app.setExtensionEnabled(owner(app), file, true);
+        assert.equal(module(file)[0]?.error, undefined, `${file} loads`);
+        assert.equal(module(file)[0]?.extensions.length, 1, `${file} installed its extension`);
+    }
+
+    writeFileSync(
+        join(dropIns, "api-three.ts"),
+        versioned("api_three", "export const pocketApi = 3;"),
+    );
+    await assert.rejects(
+        app.setExtensionEnabled(owner(app), "api-three.ts", true),
+        /needs version 3 of Pi Pocket's extension API, and this Pi Pocket has 2: update Pi Pocket/,
+    );
+    assert.deepEqual(module("api-three.ts")[0]?.extensions, [], "api-three.ts installed nothing");
+
+    // Older than the oldest supported version (1), or not a version at all.
+    writeFileSync(
+        join(dropIns, "api-zero.ts"),
+        versioned("api_zero", "export const pocketApi = 0;"),
+    );
+    await assert.rejects(
+        app.setExtensionEnabled(owner(app), "api-zero.ts", true),
+        /written for version 0 of Pi Pocket's extension API, and this Pi Pocket loads 1 to 2: update the module/,
+    );
+    writeFileSync(
+        join(dropIns, "api-half.ts"),
+        versioned("api_half", "export const pocketApi = 1.5;"),
+    );
+    await assert.rejects(
+        app.setExtensionEnabled(owner(app), "api-half.ts", true),
+        /needs version 1\.5 of Pi Pocket's extension API/,
+    );
+
+    // A draft for the gallery says the version that the module was written for, not this Pi Pocket's.
+    assert.equal((await app.gallery.share("api-none.ts")).entry.pocketApi, 1);
+    assert.equal((await app.gallery.share("api-one.ts")).entry.pocketApi, 1);
+    assert.equal((await app.gallery.share("api-two.ts")).entry.pocketApi, 2);
 });

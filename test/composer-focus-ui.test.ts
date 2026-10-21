@@ -178,3 +178,89 @@ test(
         await page.press("Escape");
     },
 );
+
+/** Pretend Pi works in the open session, or stops: the composer reads `view.live.busy`. */
+const setBusy = (busy: boolean) =>
+    page.evaluate(`
+        const { store } = await import("/store.js");
+        store.set((state) => ({ view: { ...state.view, live: { ...state.view.live, busy: ${busy} } } }));
+        for (let frame = 0; frame < 3; frame++) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+    `);
+const modes = () =>
+    inPage<Record<string, string | null>>(`
+        return JSON.stringify(Object.fromEntries([...document.querySelectorAll(".mode-switch [role=radio]")]
+            .map((each) => [each.textContent.trim(), each.getAttribute("aria-checked")])));
+    `);
+
+test("an Interrupt chosen but not used does not stay armed for the next run", real, async () => {
+    await home(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${Number(one)}`);
+    await opened(one);
+    await setBusy(true);
+    await page.click({ selector: ".mode-switch .interrupt" });
+    assert.equal((await modes()).Interrupt, "true");
+    await setBusy(false);
+    await setBusy(true);
+    assert.deepEqual(await modes(), { Steer: "true", Queue: "false", Interrupt: "false" });
+    await setBusy(false);
+});
+
+test("a chosen Queue stays chosen for the next run", real, async () => {
+    await home(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${Number(one)}`);
+    await opened(one);
+    await setBusy(true);
+    await page.click({ selector: '.mode-switch [role="radio"]:nth-child(2)' });
+    assert.equal((await modes()).Queue, "true");
+    await setBusy(false);
+    await setBusy(true);
+    assert.deepEqual(await modes(), { Steer: "false", Queue: "true", Interrupt: "false" });
+    await setBusy(false);
+});
+
+test(
+    "at 320 px and 350 px wide, Stop stays inside the message box while Pi works",
+    real,
+    async () => {
+        for (const width of [320, 350]) {
+            await home({ width, height: 700, scale: 2, mobile: true });
+            await page.navigate(`${base}/s/${Number(one)}`);
+            await opened(one);
+
+            // With an empty box (the mic) and with words in it (Send in the mic's place).
+            for (const words of ["", "a few words"]) {
+                await page.type({ selector: BOX }, words);
+                await setBusy(true);
+                const fit = await inPage<{
+                    scroll: number;
+                    client: number;
+                    stop: number;
+                    right: number;
+                }>(`
+                const row = document.querySelector(".composer-row");
+                const stop = row.querySelector(".stop-button").getBoundingClientRect();
+                return JSON.stringify({
+                    scroll: row.scrollWidth,
+                    client: row.clientWidth,
+                    stop: stop.right,
+                    right: row.getBoundingClientRect().right,
+                });
+            `);
+
+                await setBusy(false);
+                assert.ok(
+                    fit.scroll <= fit.client,
+                    `the row overflows at ${width} px: ${JSON.stringify(fit)}`,
+                );
+                assert.ok(
+                    fit.stop <= fit.right,
+                    `Stop is outside the row at ${width} px: ${JSON.stringify(fit)}`,
+                );
+            }
+
+            await page.type({ selector: BOX }, "");
+        }
+    },
+);

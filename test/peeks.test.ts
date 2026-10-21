@@ -40,6 +40,18 @@ const route: FauxResponseStep = (request) => {
         return fauxAssistantMessage([fauxText("read them")]);
     }
 
+    if (text.includes("start a slow helper")) {
+        return call("subagent", {
+            action: "spawn",
+            name: "helper",
+            message: "work slowly please",
+        });
+    }
+
+    if (text.includes("work slowly please")) {
+        return call("bash", { command: "sleep 30" });
+    }
+
     return fauxAssistantMessage([fauxText(`echo: ${text}`)]);
 };
 
@@ -138,6 +150,52 @@ test("a tab gets peek tiles for the sessions on its screen, and stays out of the
     } finally {
         app.detach(there.client);
         app.detach(tab.client);
+    }
+});
+
+test("a session's tile names its subagents at work, and each row's own peek says what it does", async () => {
+    const parent = await newSession(app);
+
+    await say(app, parent, "start a slow helper");
+
+    const tab = fakeTab(undefined, owner(app));
+    let helper: ConversationId | undefined;
+
+    try {
+        await app.attach(tab.client);
+        app.setPeeks(owner(app), tab.client.connection, [parent]);
+        await until(
+            () => (peeks(tab, parent).at(-1)?.agents ?? []).length > 0,
+            "the tile to name the subagent at work",
+        );
+
+        const [agent] = peeks(tab, parent).at(-1)!.agents;
+
+        assert.equal(agent!.name, "helper");
+        assert.match(agent!.asked ?? "", /work slowly/);
+        helper = agent!.conversationId;
+
+        // The tile's row asks for its own peek while it shows, as the tiles themselves do: it says what the subagent
+        // does this moment.
+        app.setPeeks(owner(app), tab.client.connection, [parent, helper]);
+        await until(() => {
+            const last = peeks(tab, helper).at(-1)?.lines.at(-1);
+
+            return last?.kind === "tool" && last.name === "bash" && last.status === "running";
+        }, "the subagent's working call");
+        assert.deepEqual(peeks(tab, helper).at(-1)!.lines.at(-1), {
+            kind: "tool",
+            name: "bash",
+            args: { command: "sleep 30" },
+            status: "running",
+        });
+    } finally {
+        app.detach(tab.client);
+
+        if (helper !== undefined) {
+            await app.commands.abort(helper, owner(app)).catch(() => {});
+            await until(() => !app.isBusy(helper!), "the helper to stop").catch(() => {});
+        }
     }
 });
 

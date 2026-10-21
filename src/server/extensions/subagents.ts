@@ -646,7 +646,7 @@ function courierFor(limits: Limits) {
     });
 }
 
-const GUIDE = `You can delegate to background subagents with the subagent tool. A subagent is a separate agent with its own transcript that works while you keep talking to the user; its answer comes back to you at your next pause (after a tool call, or when you are done) as a message starting with "${REPORT_PREFIX}<name> answered". Answers that arrive together come in one message. Use them for independent, self-contained work (research, long builds, test runs, a second opinion). Give each message everything the subagent needs: it does not see this conversation. Do not poll: wait for the report. The user can open a subagent and talk to it directly.
+const GUIDE = `You can delegate to background subagents with the subagent tool. A subagent is a separate agent with its own transcript that works while you keep talking to the user; its answer comes back to you at your next pause (after a tool call, or when you are done) as a message starting with "${REPORT_PREFIX}<name> answered". Answers that arrive together come in one message. Use them for independent, self-contained work (research, long builds, test runs, a second opinion). Give each message everything the subagent needs: it does not see this conversation. Do not poll: wait for the report. The user can open a subagent and talk to it directly. Write each message to a subagent in ASD-STE100 (Simplified Technical English), at about 80% adherence: short sentences, one idea in each, the main point first, active voice, simple tenses, one word for one thing, and every fact kept. Ask the subagent to write its report to you in ASD-STE100 too. This applies to that report only, not to answers to a person who talks to it.
 A subagent runs on your model, thinking as hard as you or less. Models are the user's to choose: never pick one on your own. If a subagent fails because of its model or provider (a sign-in, a missing model, a quota), stop and tell the user what failed; never start it again on another model.`;
 
 /** What the tool says when Pi names a model, and none but its own may be used. */
@@ -825,7 +825,7 @@ export default function createSubagents(host: PocketHost) {
         execute: async (args, api, context) => {
             const { action, name, message, followUp } = args;
             const reply = (text: string, conversationId?: ConversationId) => ({
-                content: [{ type: "text" as const, text }],
+                output: [{ type: "text" as const, text }],
                 ...(conversationId === undefined || name === undefined
                     ? {}
                     : {

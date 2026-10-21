@@ -180,8 +180,16 @@ test(
             const current = await module();
 
             assert.equal(current.enabled, true);
+            // A drop-in with tools alone installs no read-only tools, hooks, sections, or wraps.
             assert.deepEqual(current.extensions, [
-                { name: `runtime-${version}`, tools: [`probe_${version}`] },
+                {
+                    name: `runtime-${version}`,
+                    tools: [`probe_${version}`],
+                    readOnlyTools: [],
+                    hooks: [],
+                    sections: [],
+                    wraps: [],
+                },
             ]);
             assert.equal(jsonFile("runtime-probe.json").version, version);
         }

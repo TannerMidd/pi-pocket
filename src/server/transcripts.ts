@@ -133,14 +133,29 @@ export class Transcripts {
 
     /** A conversation's whole history, oldest first, as browsers get it (`full`: nothing clipped). */
     async allEntries(id: ConversationId, full: boolean): Promise<ClientEntry[]> {
+        return (await this.entriesAfter(id, 0, full)).entries;
+    }
+
+    /**
+     * The entries of a conversation's history newer than `after`, oldest first, as browsers get them, and the newest id
+     * read (`after` when there is none). Entries never change, and a later one has a larger id, inherited ones too.
+     */
+    async entriesAfter(
+        id: ConversationId,
+        after: number,
+        full: boolean,
+    ): Promise<{ entries: ClientEntry[]; last: number }> {
         const conversation = await this.#app.conversation(id);
+        const query = after > 0 ? { minEntryId: (after + 1) as unknown as EntryId } : {};
         const entries: ClientEntry[] = [];
+        let last = after;
         let cursor: Cursor | undefined;
 
         do {
-            const page = await conversation.entries({}, 256, cursor, context);
+            const page = await conversation.entries(query, 256, cursor, context);
 
             for (const entry of page.items) {
+                last = Math.max(last, entry.id as unknown as number);
                 const projected = projectEntry(entry, full);
 
                 if (projected !== undefined) {
@@ -151,7 +166,7 @@ export class Transcripts {
             cursor = page.next;
         } while (cursor !== undefined);
 
-        return entries.reverse();
+        return { entries: entries.reverse(), last };
     }
 
     /** A session as a Markdown file: its whole history, with who wrote what. */

@@ -7,6 +7,7 @@ import {
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     until,
 } from "./helpers.ts";
@@ -64,11 +65,20 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     launcher: true,
     page: true,
     sheet: true,
+    panel: true,
+    status: true,
+    topbar: true,
+    composerButton: true,
+    replyAction: true,
+    insertText: true,
+    arrange: true,
     toolCall: true,
     openPage: true,
     closePage: true,
     openSheet: true,
     closeSheet: true,
+    openPanel: true,
+    closePanel: true,
     style: true,
     onDispose: true,
 };
@@ -101,6 +111,10 @@ export default function (pocket) {
 	}
 
 	pocket.page({ id: "meter", title: "Meter", component: Meter });
+	pocket.panel({ id: "dial", title: "Dial", icon: "pulse", component: () => html\`<p class="dial">Dial</p>\` });
+	pocket.status({ id: "watts", text: "46W · 74° · 95%", short: "46W", title: "Node 1", panel: "dial", before: "core:here" });
+	pocket.arrange("status", { hide: ["core:spend"] });
+	pocket.replyAction({ id: "quote", label: "Quote", run: (reply) => pocket.insertText("> " + reply.text) });
 	const rail = pocket.rail({ id: "meter", title: "Meter", icon: "pulse", page: "meter" });
 	// The tests reach this version's pocket, and its rail button, through these.
 	globalThis.meterPocket = pocket;
@@ -216,6 +230,23 @@ before(async () => {
 };
 `,
     );
+
+    // Browser modules for API 2 (this one), 3 (a newer app's), and 0 (older than the oldest): only the first loads.
+    for (const [name, api] of [
+        ["fresh", 2],
+        ["future", 3],
+        ["past", 0],
+    ] as const) {
+        writeFileSync(
+            join(dropIns, `${name}.ts`),
+            `/** ${name}: a browser module for API ${api}. */\nexport default (_host, web) => { web.client("${name}.js"); };\n`,
+        );
+        writeFileSync(
+            join(dropIns, `${name}.js`),
+            `export const pocketApi = ${api};\nexport default (pocket) => { pocket.rail({ id: "x", title: "${name}", run() {} }); };\n`,
+        );
+    }
+
     app = await openApp(scriptedModel());
 
     // Broken is turned on in its own test: its notice would cover the top bar's buttons in the others.
@@ -281,6 +312,187 @@ test(
             async () => (await has(".composer")) && !(await has(".ext-page")),
             "normal conversation navigation",
         );
+    },
+);
+
+test(
+    "a status item opens its panel beside the conversation, which the Files panel replaces",
+    real,
+    async () => {
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has('[data-part="status-item"]'), "the meter's status item");
+        assert.equal(await text('[data-part="status-item"] .long'), "46W · 74° · 95%");
+        // The module put its item first and hid the spend; the person's own choice brings the spend back.
+        const line = () =>
+            inPage<string>(
+                `return JSON.stringify(document.querySelector(".status-line").innerText.replace(/\\s+/g, " ").trim())`,
+            );
+
+        assert.match(await line(), /^46W · 74° · 95% 1 here/);
+        assert.doesNotMatch(await line(), /\$0\.00/);
+        await inPage(
+            `(await import("/slots.js")).setShown("status", "core:spend", true); return "null";`,
+        );
+        await until(async () => /\$0\.00/.test(await line()), "the spend shown again");
+        await inPage(`(await import("/slots.js")).resetSlot("status"); return "null";`);
+        await settled();
+        await page.click({ selector: '[data-part="status-item"]' });
+        await until(
+            () => has(".layout.paneling .ext-panel .dial"),
+            "the panel beside the conversation",
+        );
+        assert.equal(await has(".composer"), true, "the conversation stays beside it");
+
+        // A reload keeps it, and one panel shows at a time.
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(".ext-panel .dial"), "the panel after a reload");
+        await inPage(`(await import("/files-panel.js")).setFilesOpen(true); return "null";`);
+        await until(async () => !(await has(".ext-panel")), "the Files panel in its place");
+        await inPage(`(await import("/files-panel.js")).setFilesOpen(false); return "null";`);
+    },
+);
+
+test(
+    "an action under Pi's answer gets the answer, and puts text into the message box",
+    real,
+    async () => {
+        await say(app, session, "quote me");
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(".ext-reply-action"), "the action under the answer");
+        await settled();
+        await page.click({ selector: ".ext-reply-action" });
+        await until(
+            async () =>
+                (await inPage<string>(
+                    `return JSON.stringify(document.querySelector(".composer textarea").value)`,
+                )) === "> echo: quote me",
+            "the quote in the message box",
+        );
+        await inPage(`(await import("/store.js")).drafts.set(${session}, ""); return "null";`);
+    },
+);
+
+test("an action under answers redraws on update, and runs the new run", real, async () => {
+    await say(app, session, "an answer to act on");
+    await page.navigate(`${base}/s/${session}`);
+    await until(() => has(".ext-reply-action"), "the actions under the answer");
+    await withMeter(
+        `globalThis.sayAction = pocket.replyAction({ id: "say", label: "Say v1", run: () => { globalThis.said = "v1"; } }); return "null";`,
+    );
+    const labels = () =>
+        inPage<string[]>(
+            `return JSON.stringify([...document.querySelectorAll(".ext-reply-action")].map((each) => each.textContent.trim()))`,
+        );
+
+    await until(async () => (await labels()).includes("Say v1"), "the new action");
+    await withMeter(
+        `globalThis.sayAction.update({ label: "Say v2", run: () => { globalThis.said = "v2"; } }); return "null";`,
+    );
+    await until(async () => (await labels()).includes("Say v2"), "the updated label");
+    await inPage(
+        `[...document.querySelectorAll(".ext-reply-action")].find((each) => each.textContent.trim() === "Say v2").click(); return "null";`,
+    );
+    await until(
+        async () => (await inPage<string>(`return JSON.stringify(globalThis.said ?? "")`)) === "v2",
+        "the new run",
+    );
+    await withMeter(`globalThis.sayAction.remove(); return "null";`);
+});
+
+test(
+    "the same action under answers added again keeps the slot's key; a new run changes it and runs",
+    real,
+    async () => {
+        await say(app, session, "an answer for the same action");
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(".ext-reply-action"), "the actions under the answer");
+        const key = () =>
+            inPage<string>(`return JSON.stringify((await import("/slots.js")).slotKey("reply"))`);
+
+        // (a) The same object 2 times.
+        await withMeter(
+            `globalThis.sameSpec = { id: "same", label: "Same", run: () => { globalThis.ran = "first"; } }; pocket.replyAction(globalThis.sameSpec); return "null";`,
+        );
+        const first = await key();
+
+        await withMeter(`pocket.replyAction(globalThis.sameSpec); return "null";`);
+        assert.equal(await key(), first, "the same object keeps the key");
+        // (b) A new object with the same fields and the same run.
+        await withMeter(`pocket.replyAction({ ...globalThis.sameSpec }); return "null";`);
+        assert.equal(await key(), first, "the same fields and run keep the key");
+        // (c) A new run: the key changes, and the new run runs.
+        await withMeter(
+            `pocket.replyAction({ ...globalThis.sameSpec, run: () => { globalThis.ran = "second"; } }); return "null";`,
+        );
+        assert.notEqual(await key(), first, "a new run changes the key");
+        await sleep(200);
+        await inPage(
+            `[...document.querySelectorAll(".ext-reply-action")].findLast((each) => each.textContent.trim() === "Same").click(); return "null";`,
+        );
+        await until(
+            async () =>
+                (await inPage<string>(`return JSON.stringify(globalThis.ran ?? "")`)) === "second",
+            "the new run",
+        );
+        await withMeter(`pocket.replyAction(globalThis.sameSpec).remove(); return "null";`);
+    },
+);
+
+test(
+    "a top bar button cannot take its panel's id, and an order that names an id twice keeps every button",
+    real,
+    async () => {
+        const clash = await withMeter<string>(
+            `try { pocket.topbar({ id: "dial", title: "Twin", run() {} }); return JSON.stringify("accepted"); } catch (error) { return JSON.stringify(error.message); }`,
+        );
+
+        assert.match(clash, /share their ids/);
+        const ids = () =>
+            inPage<string[]>(
+                `return JSON.stringify((await import("/slots.js")).arranged("topbar").map(({ item }) => item.id))`,
+            );
+        const before = await ids();
+
+        await withMeter(
+            `pocket.arrange("topbar", { order: ["core:files", "core:files", "core:changes"] }); return "null";`,
+        );
+        const after = await ids();
+
+        assert.deepEqual([...after].sort(), [...before].sort(), "each button once, none lost");
+        await withMeter(`pocket.arrange("topbar", {}); return "null";`);
+    },
+);
+
+test(
+    "a browser module for API 2 loads, and one for a newer API says why it does not",
+    real,
+    async () => {
+        await app.setExtensionEnabled(owner(app), "fresh.ts", true);
+        await app.setExtensionEnabled(owner(app), "future.ts", true);
+        await app.setExtensionEnabled(owner(app), "past.ts", true);
+        await page.navigate(`${base}/s/${session}`);
+        await until(
+            async () =>
+                (await notices()).some((each) =>
+                    each.includes(
+                        "it needs version 3 of the app's extension API, and this app has 2",
+                    ),
+                ),
+            "the newer API's notice",
+        );
+        await until(
+            async () =>
+                (await notices()).some((each) =>
+                    each.includes("it was written for version 0 of the app's extension API"),
+                ),
+            "the older API's notice",
+        );
+        await until(() => has(rail("fresh")), "the API 2 module's button");
+        assert.equal(await has(rail("future")), false);
+        assert.equal(await has(rail("past")), false);
+        await app.setExtensionEnabled(owner(app), "fresh.ts", false);
+        await app.setExtensionEnabled(owner(app), "future.ts", false);
+        await app.setExtensionEnabled(owner(app), "past.ts", false);
     },
 );
 

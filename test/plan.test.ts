@@ -102,7 +102,7 @@ const tool = (name: string, annotations?: object) =>
 		description: name,
 		parameters: Type.Object({}),
 		...(annotations === undefined ? {} : { annotations }),
-		execute: async () => ({ content: [{ type: "text", text: name + " ran" }] }),
+		execute: async () => ({ output: [{ type: "text", text: name + " ran" }] }),
 	});
 
 const peek = tool("peek");

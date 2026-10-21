@@ -27,6 +27,7 @@ import { finishedUnseen } from "./seen.js";
 import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
 import {
     APPLE,
+    apartFromViews,
     html,
     Icon,
     railState,
@@ -572,7 +573,7 @@ const TABS = [
  */
 const listKept = { query: "", scroll: 0 };
 
-export function SessionList({ compact = false }) {
+function AllSessions({ compact = false }) {
     const { sessions, sessionsLoaded, server, pinned } = store.state;
     const canStart = canSteer() && !scoped();
     const [query, setQueryState] = useState(() => (compact ? "" : listKept.query));
@@ -1324,6 +1325,9 @@ export function SessionList({ compact = false }) {
     </div>`;
 }
 
+/** Not drawn again as an answer streams: it reads no conversation's view, and on a phone it stays drawn off-screen. */
+export const SessionList = apartFromViews(AllSessions);
+
 /**
  * Subagents across the sessions, by state, as the rail counts them: archived sessions only while a subagent works
  * there, as the subagents board shows them.
@@ -1389,7 +1393,7 @@ function RailTiles() {
  * running now, the subagents board, people, providers, the theme) and you. Folded, it holds the sessions too, numbered.
  * In the drawer and on a phone's home screen it does not fold, and Pi is a mark.
  */
-export function RailNav({ foldable = false, folded = false }) {
+function Rail({ foldable = false, folded = false }) {
     const { sessions, board, me } = store.state;
     const canStart = canSteer() && !scoped();
     const busy = sessions.filter((session) => session.busy).length;
@@ -1543,6 +1547,9 @@ export function RailNav({ foldable = false, folded = false }) {
         </button>
     </nav>`;
 }
+
+/** Not drawn again as an answer streams: it reads no conversation's view. */
+export const RailNav = apartFromViews(Rail);
 
 /** The sidebar's list is this wide at least and at most; the rail beside it stays 56px. */
 const LIST_MIN = 204;

@@ -5,6 +5,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "../app.ts";
 import type { User } from "../config.ts";
 import { HttpError } from "../errors.ts";
+import { accepted, compressed, compressible, MIN_COMPRESS_BYTES } from "./compress.ts";
 
 const MAX_JSON = 1_000_000;
 
@@ -28,6 +29,7 @@ export interface ApiRequest {
     readonly user: User;
 }
 
+/** An answer, compressed when it is text the browser takes compressed and large enough to gain from it. */
 export function send(
     response: ServerResponse,
     status: number,
@@ -35,6 +37,23 @@ export function send(
     type = "text/plain; charset=utf-8",
     headers: Record<string, string> = {},
 ): void {
+    const encoding =
+        compressible(type) &&
+        headers["content-encoding"] === undefined &&
+        Buffer.byteLength(body) >= MIN_COMPRESS_BYTES
+            ? accepted(response.req)
+            : undefined;
+
+    if (encoding !== undefined) {
+        body = compressed(body, encoding);
+        headers = {
+            ...headers,
+            "content-encoding": encoding,
+            vary:
+                headers.vary === undefined ? "accept-encoding" : `${headers.vary}, accept-encoding`,
+        };
+    }
+
     response.writeHead(status, { "content-type": type, "cache-control": "no-store", ...headers });
     response.end(body);
 }

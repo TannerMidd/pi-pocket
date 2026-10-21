@@ -25,6 +25,12 @@ const held = typeof host.heldBack === "function" ? host.heldBack(conversationId)
 
 A module that calls a member that is not there fails when it first uses it, in each session.
 
+## Model requests
+
+`host.shapeModelRequests(shape)` lets a module shape what every model call sends, after Pi and the caller built the request. Return a replacement payload, or nothing to keep it. The effect lasts until you call the returned function, so pass that to `host.onDispose`.
+
+A shaper can change what a provider bills, or how it answers. Tell the owner that before you ask them to turn the module on.
+
 ## Types
 
 To get the types of the host in your editor, import them from `_pocket.d.ts`. Pi Pocket links this file into the drop-in folder:

@@ -184,91 +184,115 @@ export function ProvidersSheet() {
                 a.name.localeCompare(b.name),
         );
 
-    return html`<${Sheet} title="Providers" onClose=${closeSheet}>
+    // Signed-out providers wait at the end, and an expired sign-in comes first: that is the one to act on.
+    const groups = [
+        ["Needs sign-in", list.filter((provider) => provider.needsSignIn)],
+        ["Signed in", list.filter((provider) => !provider.needsSignIn && provider.configured)],
+        [
+            "Not configured",
+            list.filter((provider) => !provider.needsSignIn && !provider.configured),
+        ],
+    ].filter(([, each]) => each.length > 0);
+
+    const row = (provider) => html`<div class="provider" key=${provider.id}>
+        <div class="provider-info">
+            <div class="provider-name">
+                ${provider.name}
+                ${
+                    provider.needsSignIn
+                        ? html` <span class="warn provider-needs">needs sign-in</span>`
+                        : provider.configured && html` <span class="ok">✓</span>`
+                }
+            </div>
+            <div class="muted small">
+                ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
+            </div>
+            ${
+                provider.needsSignIn &&
+                html`<div class="muted small mono provider-why">${provider.needsSignIn}</div>`
+            }
+        </div>
+        ${
+            owner &&
+            html`<div class="provider-actions">
+                ${
+                    provider.oauth &&
+                    html`<button
+                        class="button small"
+                        onClick=${(event) => login(provider, "oauth", event.currentTarget)}
+                    >
+                        ${provider.oauth}
+                    </button>`
+                }
+                ${
+                    provider.apiKey &&
+                    html`<button
+                        class="button small"
+                        onClick=${(event) => login(provider, "api_key", event.currentTarget)}
+                    >
+                        API key
+                    </button>`
+                }
+                ${
+                    provider.configured &&
+                    provider.source === "stored" &&
+                    html`<button class="button small ghost" onClick=${() => logout(provider)}>
+                        Log out
+                    </button>`
+                }
+            </div>`
+        }
+    </div>`;
+
+    return html`<${Sheet}
+        title="Providers"
+        onClose=${closeSheet}
+        className=${`providers-sheet ${owner ? "with-side" : ""}`}
+    >
         <p class="muted small">
             Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
         </p>
-        <${RefreshModels} />
-        ${
-            owner &&
-            html`<${SubagentModels}
-                names=${Object.fromEntries((providers ?? []).map((each) => [each.id, each.name]))}
-            />`
-        }
-        ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
-        <label class="search">
-            <${Icon} name="search" size=${16} />
-            <input
-                placeholder="Search providers"
-                value=${query}
-                onInput=${(event) => setQuery(event.currentTarget.value)}
-            />
-        </label>
-        ${providers === null && html`<${Loader} label="Loading providers" />`}
-        <div class="sheet-list">
+        <div class="providers-layout">
             ${
-                providers !== null &&
-                list.length === 0 &&
-                needle !== "" &&
-                html`<div class="launcher-empty" role="status">
-                    <strong>No providers match “${query.trim()}”.</strong>
-                    <button class="button" onClick=${() => setQuery("")}>Clear search</button>
-                </div>`
+                owner &&
+                html`<aside class="providers-side" aria-label="Models">
+                    <${RefreshModels} />
+                    <${SubagentModels}
+                        names=${Object.fromEntries(
+                            (providers ?? []).map((each) => [each.id, each.name]),
+                        )}
+                    />
+                </aside>`
             }
-            ${list.map(
-                (provider) => html`<div class="provider">
-                    <div>
-                        <div>
-                            ${provider.name}
-                            ${
-                                provider.needsSignIn
-                                    ? html` <span class="warn provider-needs">needs sign-in</span>`
-                                    : provider.configured && html` <span class="ok">✓</span>`
-                            }
-                        </div>
-                        <div class="muted small">
-                            ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
-                        </div>
-                        ${
-                            provider.needsSignIn &&
-                            html`<div class="muted small mono provider-why">${provider.needsSignIn}</div>`
-                        }
-                    </div>
-                    ${
-                        owner &&
-                        html`<div class="provider-actions">
-                            ${
-                                provider.oauth &&
-                                html`<button
-                                    class="button small"
-                                    onClick=${(event) => login(provider, "oauth", event.currentTarget)}
-                                >
-                                    ${provider.oauth}
-                                </button>`
-                            }
-                            ${
-                                provider.apiKey &&
-                                html`<button
-                                    class="button small"
-                                    onClick=${(event) => login(provider, "api_key", event.currentTarget)}
-                                >
-                                    API key
-                                </button>`
-                            }
-                            ${
-                                provider.configured &&
-                                provider.source === "stored" &&
-                                html`<button
-                                    class="button small ghost"
-                                    onClick=${() => logout(provider)}
-                                >
-                                    Log out
-                                </button>`
-                            }
-                        </div>`
-                    }
-                </div>`,
-            )}
+            <div class="providers-main">
+                ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
+                <label class="search">
+                    <${Icon} name="search" size=${16} />
+                    <input
+                        placeholder="Search providers"
+                        value=${query}
+                        onInput=${(event) => setQuery(event.currentTarget.value)}
+                    />
+                </label>
+                ${providers === null && html`<${Loader} label="Loading providers" />`}
+                ${
+                    providers !== null &&
+                    list.length === 0 &&
+                    needle !== "" &&
+                    html`<div class="launcher-empty" role="status">
+                        <strong>No providers match “${query.trim()}”.</strong>
+                        <button class="button" onClick=${() => setQuery("")}>Clear search</button>
+                    </div>`
+                }
+                ${groups.map(
+                    ([title, each]) => html`<section class="provider-group" key=${title}>
+                        <h3 class="provider-group-head">
+                            ${title} <span class="muted">${each.length}</span>
+                        </h3>
+                        <div class="sheet-list">${each.map(row)}</div>
+                    </section>`,
+                )}
+            </div>
         </div>
     <//>`;
 }

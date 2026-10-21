@@ -8,6 +8,7 @@ import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
 import { fromServer } from "./seen.js";
+import { defineItem, slotItems, slotKey } from "./slots.js";
 import { Highlighted } from "./rich.js";
 import {
     actions,
@@ -1393,6 +1394,88 @@ function ApprovalCard({ approval }) {
 
 // ─── Pi's words ───────────────────────────────────────────────────────────────────────
 
+// The actions under Pi's answers, after its reactions: the app's own items of the `reply` slot (slots.js), which a
+// person can hide and reorder in Appearance, with extensions' before More, which stays last. Each gets the answer
+// (`entry`, its `text`), whether it is pinned, and the reaction picker's state.
+defineItem("reply", {
+    id: "core:react",
+    label: "React",
+    order: 100,
+    render: ({ picking, setPicking, react }) =>
+        html`<span class="reaction-host answer-tool">
+            <button
+                class="reaction add"
+                aria-label="React"
+                title="React"
+                onClick=${() => setPicking(!picking)}
+            >
+                ☺+
+            </button>
+            ${
+                picking &&
+                html`<span class="reaction-picker">
+                    ${(store.state.server?.reactions ?? []).map(
+                        (emoji) => html`<button onClick=${() => react(emoji)}>${emoji}</button>`,
+                    )}
+                </span>`
+            }
+        </span>`,
+});
+defineItem("reply", {
+    id: "core:discuss",
+    label: "Discuss",
+    order: 200,
+    render: ({ entry, text }) =>
+        html`<button
+            class="answer-tool"
+            onClick=${() => discuss(entry.id, plainText(text).replace(/\s+/g, " ").slice(0, 280))}
+        >
+            Discuss
+        </button>`,
+});
+defineItem("reply", {
+    id: "core:pin",
+    label: "Pin",
+    order: 300,
+    render: ({ entry, pinned }) =>
+        html`<button
+            class="answer-tool"
+            onClick=${() => attempt(() => actions.pin({ entryId: entry.id }))}
+        >
+            ${pinned ? html`<${Icon} name="pin" size=${12} /> Pinned` : "Pin"}
+        </button>`,
+});
+defineItem("reply", {
+    id: "core:copy",
+    label: "Copy",
+    order: 400,
+    render: ({ text }) =>
+        html`<button
+            class="answer-tool"
+            onClick=${() =>
+                copyText(text).then(
+                    () => notify("info", "Copied."),
+                    () => notify("error", "Could not copy."),
+                )}
+        >
+            Copy
+        </button>`,
+});
+defineItem("reply", {
+    id: "core:more",
+    label: "More",
+    order: 1000,
+    fixed: true,
+    render: ({ entry }) =>
+        html`<button
+            class="answer-tool"
+            title="Fork, retry"
+            onClick=${() => openSheet({ type: "message", entryId: entry.id })}
+        >
+            More
+        </button>`,
+});
+
 /** Under Pi's answers: reactions, and ways to talk about the answer with the people here. */
 function AnswerActions({ entry }) {
     const { view, me, users, server } = store.state;
@@ -1423,53 +1506,7 @@ function AnswerActions({ entry }) {
                     ${emoji} <span>${ids.length}</span>
                 </button>`,
         )}
-        <span class="reaction-host answer-tool">
-            <button
-                class="reaction add"
-                aria-label="React"
-                title="React"
-                onClick=${() => setPicking(!picking)}
-            >
-                ☺+
-            </button>
-            ${
-                picking &&
-                html`<span class="reaction-picker">
-                    ${(server?.reactions ?? []).map(
-                        (emoji) => html`<button onClick=${() => react(emoji)}>${emoji}</button>`,
-                    )}
-                </span>`
-            }
-        </span>
-        <button
-            class="answer-tool"
-            onClick=${() => discuss(entry.id, plainText(text).replace(/\s+/g, " ").slice(0, 280))}
-        >
-            Discuss
-        </button>
-        <button
-            class="answer-tool"
-            onClick=${() => attempt(() => actions.pin({ entryId: entry.id }))}
-        >
-            ${pinned ? html`<${Icon} name="pin" size=${12} /> Pinned` : "Pin"}
-        </button>
-        <button
-            class="answer-tool"
-            onClick=${() =>
-                copyText(text).then(
-                    () => notify("info", "Copied."),
-                    () => notify("error", "Could not copy."),
-                )}
-        >
-            Copy
-        </button>
-        <button
-            class="answer-tool"
-            title="Fork, retry"
-            onClick=${() => openSheet({ type: "message", entryId: entry.id })}
-        >
-            More
-        </button>
+        ${slotItems("reply", { entry, text, pinned, picking, setPicking, react }).map(({ node }) => node)}
     </div>`;
 }
 
@@ -1861,6 +1898,8 @@ function replyDeps(item) {
         view.conversation?.id,
         reactions === undefined ? "" : JSON.stringify(reactions),
         (view.pins ?? []).some((pin) => pin.entryId === entry.id),
+        // The actions under it: the app's and extensions', as arranged (`slots.js`).
+        slotKey("reply"),
     ];
 }
 

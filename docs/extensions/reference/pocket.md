@@ -1,6 +1,6 @@
 # pocket
 
-`pocket` is the app's API for a browser module: the argument of the browser module's default export. With it, a browser module adds rail buttons, menu rows, launcher actions, pages, and sheets, and sets how the calls of its tools show. It also calls its module's routes and gets its module's events. [Browser modules](../browser-modules.md) tells you how to write one, and what happens when it fails.
+`pocket` is the app's API for a browser module: the argument of the browser module's default export. With it, a browser module adds rail buttons, menu rows, launcher actions, pages, sheets, panels, and status-line items, and sets how the calls of its tools show. It also calls its module's routes and gets its module's events. [Browser modules](../browser-modules.md) tells you how to write one, and what happens when it fails.
 
 The types are `Pocket` and the types that it uses, in [types/pocket.d.ts](../../../types/pocket.d.ts). A browser module is JavaScript: [Types for your editor](types.md) tells you how to use the types in JSDoc.
 
@@ -346,6 +346,76 @@ Since 0.14.0 · Stable
 
 Adds a sheet, as the app's own sheets. See [`SheetSpec`](#sheetspec).
 
+### `panel`
+
+```ts
+panel(spec: PanelSpec): Added<PanelSpec>;
+```
+
+Since 0.19.0 · Experimental
+
+Adds a panel beside the conversation, in the place where the Browser and Files panels dock. One panel shows at a time: a panel that opens closes the Browser, Files, or People panel, and they close it. On a narrow screen it covers the conversation, and back closes it. The top bar (where there is room) and the places get a button that opens it. See [`PanelSpec`](#panelspec).
+
+### `status`
+
+```ts
+status(spec: StatusSpec): Added<StatusSpec>;
+```
+
+Since 0.19.0 · Experimental
+
+Adds an item in the status line under the message box, before the spend. With an action, the item is a button. On a line too narrow for one row, the item shows its `short` text, after "1 here" goes and before the guard loses its word. See [`StatusSpec`](#statusspec).
+
+### `topbar`
+
+```ts
+topbar(spec: TopbarSpec): Added<TopbarSpec>;
+```
+
+Since 0.19.0 · Experimental
+
+Adds a button in the top bar, after `core:browser` and before `core:artifacts`, `core:people`, and the menu. On a phone, and in a narrow pane, it goes from the top bar, as the Files button does. See [`TopbarSpec`](#topbarspec).
+
+### `composerButton`
+
+```ts
+composerButton(spec: ComposerButtonSpec): Added<ComposerButtonSpec>;
+```
+
+Since 0.19.0 · Experimental
+
+Adds a button on the left of the message box's row, after the app's own (Attach, the model, Plan). Send, Stop, the mic, and Steer, Queue and Interrupt stay on the right. See [`ComposerButtonSpec`](#composerbuttonspec).
+
+### `replyAction`
+
+```ts
+replyAction(spec: ReplyActionSpec): Added<ReplyActionSpec>;
+```
+
+Since 0.19.0 · Experimental
+
+Adds an action under Pi's answers, before More. Its `run` gets the answer, or its sheet gets it as the prop `reply`. See [`ReplyActionSpec`](#replyactionspec) and [`Reply`](#reply). The actions show under each finished answer, as the app's own (Discuss, Pin, Copy) do.
+
+### `insertText`
+
+```ts
+insertText(text: string, options?: { inline?: boolean }): void;
+```
+
+Since 0.19.0 · Experimental
+
+Puts text into the message box of the session that the tab shows, after what is there: on a new paragraph, or with `inline: true`, after a space. The person sends it, or not: it never sends. A sheet that shows closes, so the box shows. With no session open, it does nothing. Text past 100,000 characters throws.
+
+### `arrange`
+
+```ts
+arrange(slot: SlotName, arrangement: Arrangement): { remove(): void };
+```
+
+Since 0.19.0 · Experimental
+
+Hides or reorders the items of a slot, the app's own too, in the tabs that load the module. A second call for the same slot replaces the first. `remove` takes it back. When two modules arrange one slot, the one later in the server's order of modules wins. What a person chooses in Appearance → Layout wins over all modules: there, an item that a module hid says so, and the person can show it again. Fixed items always show, in their own places. See [Slots](#slots), [`SlotName`](#slotname), and [`Arrangement`](#arrangement).
+
 ### `toolCall`
 
 ```ts
@@ -400,6 +470,26 @@ Since 0.14.0 · Stable
 
 Closes the module's sheet that shows.
 
+### `openPanel`
+
+```ts
+openPanel(id: string): void;
+```
+
+Since 0.19.0 · Experimental
+
+Opens the module's panel with this `id`. It takes the place of the panel that shows. A page, or a sheet or the launcher, closes so that the panel shows. With no session open, the panel shows when a session opens.
+
+### `closePanel`
+
+```ts
+closePanel(): void;
+```
+
+Since 0.19.0 · Experimental
+
+Closes the module's panel that shows, whichever panel it is.
+
 ## Notices, styles, and cleanups
 
 ### `notify`
@@ -438,20 +528,22 @@ Runs `dispose` when this version goes: an edit replaces it, or the owner turns t
 
 ```ts
 type Action =
-    | { page: string; sheet?: never; run?: never }
-    | { sheet: string; page?: never; run?: never }
-    | { run: () => unknown; page?: never; sheet?: never };
+    | { page: string; sheet?: never; panel?: never; run?: never }
+    | { sheet: string; page?: never; panel?: never; run?: never }
+    | { panel: string; page?: never; sheet?: never; run?: never }
+    | { run: () => unknown; page?: never; sheet?: never; panel?: never };
 ```
 
 Since 0.14.0 · Stable
 
-What a rail button, a menu row, or a launcher action does when a person uses it. Give exactly one of these fields:
+What a rail button, a menu row, a launcher action, or a status item does when a person uses it. Give exactly one of these fields:
 
 - `page`: the id of a page that the module adds. The button, row, or action opens it.
 - `sheet`: the id of a sheet that the module adds. It opens it.
+- `panel` (since 0.19.0, experimental): the id of a panel that the module adds. It opens it.
 - `run`: a function that it calls. When the function throws, or its promise rejects, a notice says so.
 
-A rail button that opens a page shows when the page is open. A second tap closes the page.
+A rail button or status item that opens a page or a panel shows when it is open. A second tap closes it.
 
 Buttons, rows, and actions of modules show in the order in which the server lists the modules. An edit keeps the module's place.
 
@@ -565,6 +657,171 @@ A sheet, as the app's own sheets.
 - `wide`: with `true`, the sheet is wider.
 
 A page or sheet can open with an id that the module never added. Then it says that the module no longer has it.
+
+### `PanelSpec`
+
+```ts
+interface PanelSpec {
+    id: string;
+    title: string;
+    component: ComponentType<PageProps>;
+    icon?: string;
+    iconPath?: string;
+    badge?: number | string | null | false;
+    wide?: boolean;
+}
+```
+
+Since 0.19.0 · Experimental
+
+A panel beside the conversation.
+
+- `id`: the panel's id in the module.
+- `title`: the panel's title, and the label of its buttons.
+- `component`: what the panel shows. It gets [`PageProps`](#pageprops). The panel's body scrolls.
+- `icon`, `iconPath`: the icon of its buttons, as for a rail button.
+- `badge`: a short count or word on its buttons, as for a rail button.
+- `wide`: with `true`, the panel takes more of the width beside the conversation.
+
+The panel shows only in a session. The app keeps it open in the tab across a reload, and closes it when its module goes.
+
+### `StatusSpec`
+
+```ts
+type StatusSpec = (Action | { page?: never; sheet?: never; panel?: never; run?: never }) & {
+    id: string;
+    text: string;
+    short?: string;
+    title?: string;
+    tone?: "warn" | "error" | "muted";
+    label?: string;
+} & Placement;
+```
+
+Since 0.19.0 · Experimental
+
+An item in the status line. Give one [`Action`](#action), or none for an item that only shows.
+
+- `id`: the item's id in the module.
+- `text`: what the item says, such as `"46W · 74° · 95%"`. Long text is cut, with "…". [Limits](limits.md#browser-modules) gives the length.
+- `short`: what it says on a narrow line, such as `"46W"`. Without it, the item keeps `text`.
+- `title`: its tooltip. On a touch screen, a tap on the line says it.
+- `tone`: its color: `"warn"`, `"error"`, or `"muted"`, greyed, for a service that is out of reach.
+- `label`: its name in Appearance → Layout. The default is the module's title.
+- `before`, `after`: where it goes. See [`Placement`](#placement).
+
+The items of modules show in the order in which the server lists the modules. Update an item from a timer or an event, not as a component draws.
+
+### `Placement`
+
+```ts
+type Placement = { before?: string; after?: never } | { after?: string; before?: never };
+```
+
+Since 0.19.0 · Experimental
+
+Where a status item, a top bar button, a message box button, or an action under answers goes in its slot: just before or just after the item with this id, such as `"core:spend"`. When that item is not there, or without either field, it goes in the place that the slot keeps for extensions. A person's order wins. [Slots](#slots) lists the ids.
+
+### `TopbarSpec`
+
+```ts
+type TopbarSpec = Action &
+    Placement & {
+        id: string;
+        title: string;
+        icon?: string;
+        iconPath?: string;
+        badge?: number | string | null | false;
+    };
+```
+
+Since 0.19.0 · Experimental
+
+A button in the top bar. `title`, `icon`, `iconPath`, and `badge` are as for a rail button. A button that opens a page or a panel shows when it is open, and a second tap closes it.
+
+### `ComposerButtonSpec`
+
+```ts
+type ComposerButtonSpec = TopbarSpec;
+```
+
+Since 0.19.0 · Experimental
+
+A button in the message box's row, with the same fields as a top bar button.
+
+### `Reply`
+
+```ts
+interface Reply {
+    readonly id: string;
+    readonly text: string;
+    readonly conversationId: number;
+}
+```
+
+Since 0.19.0 · Experimental
+
+One of Pi's answers: its id in its session, its words as Markdown, and its session.
+
+### `ReplyActionSpec`
+
+```ts
+type ReplyActionSpec = (
+    { run: (reply: Reply) => unknown; sheet?: never } | { sheet: string; run?: never }
+) &
+    Placement & {
+        id: string;
+        label: string;
+        icon?: string;
+        iconPath?: string;
+    };
+```
+
+Since 0.19.0 · Experimental
+
+An action under Pi's answers: its `label`, an icon before it when you give one, and `run` or `sheet`. `run` gets the answer. The sheet gets it as the prop `reply`. When `run` throws or rejects, a notice says so.
+
+### `SlotName`
+
+```ts
+type SlotName = "topbar" | "status" | "places" | "composer" | "reply";
+```
+
+Since 0.19.0 · Experimental
+
+A slot: `"topbar"`, the buttons after the session's title; `"status"`, the status line under the message box; `"places"`, the tiles in the places and at the top of the menu; `"composer"`, the buttons on the left of the message box's row; or `"reply"`, the actions under Pi's answers.
+
+### `Arrangement`
+
+```ts
+interface Arrangement {
+    hide?: string[];
+    order?: string[];
+}
+```
+
+Since 0.19.0 · Experimental
+
+- `hide`: the ids of items to hide. Fixed items do not hide.
+- `order`: ids of items in the order they show. The items in it take the places that those items had, in this order. The other items stay in their places, and so does an item that comes later. Fixed items do not move.
+
+An id that is not in the slot does nothing.
+
+## Slots
+
+A slot is a place in the app that is a list of named items: the app's own items and those of modules. Each item has an id. The app's items are `core:…`. A module's items are `ext:<module>:<id>`, with the `id` that the module gave: a panel's top bar button has the panel's id. The ids of the app's items are kept as the theme surface's names are ([API stability](../policies/api-stability.md)).
+
+What shows comes in layers, the last one wins: each item's default place, then the `before` or `after` of a module's own item, then each module's `arrange`, then the person's own choices in Appearance → Layout. These are kept in the browser.
+
+| Slot       | Ids, in their default order                                                                                                       | Fixed                                                                          | Modules' items go           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------- |
+| `topbar`   | `core:subagents`, `core:changes`, `core:peeks`, `core:files`, `core:browser`, `core:artifacts`, `core:people`, `core:menu`        | `core:menu`, last                                                              | after `core:browser`        |
+| `status`   | `core:connection`, `core:here`, `core:speed`, `core:context`, `core:cache`, `core:spend`, `core:guard`                            | `core:connection`, `core:guard`                                                | after `core:cache`          |
+| `places`   | `core:files`, `core:changes`, `core:browser`, `core:artifacts`, `core:chat`, `core:find`, `core:branch`, `core:pip`, `core:peeks` | none                                                                           | last: a tile for each panel |
+| `composer` | `core:places`, `core:attach`, `core:model`, `core:plan`                                                                           | none (Send, Stop, the mic, and Steer, Queue and Interrupt are not in the slot) | after `core:plan`           |
+| `reply`    | `core:react`, `core:discuss`, `core:pin`, `core:copy`, `core:more`                                                                | `core:more`, last                                                              | before `core:more`          |
+
+An item that has nothing to show now shows nothing, wherever it is: Changes with no changes, the cache before the first answer, a quiet button.
 
 ### `PageProps`
 

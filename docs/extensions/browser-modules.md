@@ -1,6 +1,6 @@
 # Browser modules
 
-A browser module is JavaScript that the app loads in the tabs of the people that it is for. It adds rail buttons, pages, sheets, menu rows, and launcher actions to the app. It gets `pocket`, the app's API for extensions. The members of `pocket` are in [the pocket reference](reference/pocket.md).
+A browser module is JavaScript that the app loads in the tabs of the people that it is for. It adds rail buttons, pages, sheets, panels, status-line items, menu rows, and launcher actions to the app. It gets `pocket`, the app's API for extensions. The members of `pocket` are in [the pocket reference](reference/pocket.md).
 
 ## Add a browser module
 
@@ -49,7 +49,7 @@ export default function setup(pocket) {
 }
 ```
 
-Keep the top level of the module to declarations, and do its work in the default export: the app checks `pocketApi` after it imports the module ([API versions](reference/api-versions.md)).
+Keep the top level of the module to declarations, and do its work in the default export: the app checks `pocketApi` after it imports the module ([API versions](reference/api-versions.md)). This module uses nothing that changed in version 2 of the extension API (a tool's `output`), so it keeps `pocketApi = 1` and still loads on Pi Pocket 0.18.
 
 ## What the folder serves
 
@@ -80,6 +80,7 @@ Each of these does one thing when a person uses it:
 
 - `page: "id"` opens a page that the module adds. A rail button that opens a page shows that the page is open, and closes it on a second tap.
 - `sheet: "id"` opens a sheet that the module adds.
+- `panel: "id"` opens a panel that the module adds, and closes it on a second tap of a rail button.
 - `run: () => …` runs a function.
 
 The buttons, rows, and actions of modules show in the order that the server lists the modules. An edit keeps a module's place.
@@ -100,11 +101,50 @@ The components of pages and sheets get `pocket` and `close`. A sheet's component
 - `close` closes only that page or sheet, of that version, while it shows. When you keep it for later, it closes nothing else. `pocket.closePage()` closes the module's page that shows.
 - A page or sheet with an `id` that the module never added says that the module no longer has it.
 
+## Panels and the status line
+
+These, and slots, came in 0.19.0, and are experimental: they can change in a minor release ([API versions](reference/api-versions.md)). Check that they are there (`typeof pocket.panel === "function"`) to work with an older app too.
+
+**`panel({ id, title, component, icon or iconPath, badge, wide })`** shows beside the conversation, in the place where the Browser and Files panels dock.
+
+- One panel shows at a time. A panel that opens closes the Browser, Files, or People panel, and each of them closes it.
+- The top bar gets a button that opens and closes it, where there is room. The places (the menu's tiles, and the places button by the message box on a phone) get one too.
+- On a screen narrower than 1100 px, it covers the conversation, as the Files panel does. Back closes it.
+- It shows only in a session. The tab keeps it open across a reload. It closes when its module goes.
+- `pocket.openPanel(id)` and `pocket.closePanel()` open and close it. Its component gets `pocket` and `close`, as a page's does.
+
+**`status({ id, text, short, title, tone, … })`** adds an item to the status line under the message box, before the spend.
+
+- `short` is what the item says on a narrow line. A line that does not fit on one row takes the items' short forms after "1 here" goes, and before the guard loses its word.
+- `title` is its tooltip. On a touch screen, a tap on the line says it.
+- `tone` is `"warn"`, `"error"`, or `"muted"`: greyed, for a service that is out of reach.
+- With `page`, `sheet`, `panel`, or `run`, the item is a button. Without them, it only shows.
+- Update it from a timer or an event: `const item = pocket.status({ … }); item.update({ text })`.
+
+**`topbar({ id, title, icon or iconPath, badge, … })`** adds a button to the top bar, after the app's own buttons for the session's places and before the menu. It does one thing, as a rail button does.
+
+**`composerButton({ id, title, icon or iconPath, … })`** adds a button on the left of the message box's row. **`insertText(text)`** puts text into the message box for the person to send: a prompt template, a snippet, a screenshot's description. It never sends.
+
+**`replyAction({ id, label, run(reply) or sheet })`** adds an action under Pi's answers, before More: "Send to Linear", "Read aloud". `run` gets the answer as `{ id, text, conversationId }`, and a sheet gets it as the prop `reply`.
+
+## Slots and layout
+
+The top bar's buttons, the status line's items, the places' tiles, the message box's buttons on its left, and the actions under Pi's answers are **slots**: lists of named items, the app's own (`core:files`, `core:spend`) and modules' (`ext:<module>:<id>`). The same rules place them all, so a module, or a person, can change how they show.
+
+- **Where a module's item goes:** give a status item, a top bar button, a message box button, or an action under answers `before` or `after` an id: `pocket.status({ id: "watts", text, after: "core:context" })`.
+- **Arranging a slot:** `pocket.arrange("topbar", { hide: ["core:artifacts"], order: ["core:files", "core:browser"] })` hides and reorders items, the app's own too, in the tabs that load the module. This is for an owner who wants their own layout in a drop-in.
+- **A person's own choice wins.** Appearance → Layout lists each slot's items, with a switch to show or hide each one and arrows to move it. An item that a module hid says so there, and the person can show it again. Reset goes back to the defaults and what modules arranged.
+- **Fixed items** always show, in their places: the menu, More under an answer, the connection's warning, and Lancet Guard. Send, Stop, the mic, and Steer, Queue and Interrupt are not in a slot.
+
+[The pocket reference](reference/pocket.md#slots) lists the ids of each slot.
+
+To show data from a service on your network, read it in a route on the server ([Other sites](#other-sites)), and send it to the tabs with `web.send`, or let the browser module poll the route. One reading on the server can serve every tab.
+
 ## Ids and updates
 
 - Each thing that a module adds has an `id` of its own: letters, digits, `.`, `_`, `:`, and `-`, that starts with a letter or a digit, up to a [length](reference/limits.md#names).
 - To add a thing with the same `id` again replaces it.
-- Each `rail`, `menu`, `launcher`, `page`, and `sheet` returns `{ update(patch), remove() }`. `update` takes an object.
+- Each `rail`, `menu`, `launcher`, `page`, `sheet`, `panel`, `status`, `topbar`, `composerButton`, and `replyAction` returns `{ update(patch), remove() }`. `update` takes an object.
 
 ## Redraws
 

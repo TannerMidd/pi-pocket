@@ -27,12 +27,13 @@ import {
     signOut,
     store,
 } from "../store.js";
+import { defineItem, slotItems } from "../slots.js";
 import { isPinned, lookLabel, togglePin } from "../theme.js";
 import { currentTrust, trustAvailable } from "../trust.js";
 import { branchAvailable } from "./branch.js";
 import { memoryAvailable, memoryHint, useMemory } from "./memory.js";
 import { defaultLabel, defaultsKept } from "./model.js";
-import { copyText, html, Icon, item, Sheet, shortPath } from "../ui.js";
+import { copyText, html, Icon, item, PlaceTile, Sheet, shortPath } from "../ui.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
 const touch = matchMedia("(pointer: coarse)").matches;
@@ -69,106 +70,142 @@ function PlacesWithChanges() {
     return html`<${PlacesGrid} changes=${changes} />`;
 }
 
-function PlacesGrid({ changes = null }) {
-    const { view, browser, browserOpen, server, filesOpen, filesTab } = store.state;
-    // Match the top bar: uncommitted files in a repository, Pi's edits elsewhere, plus any unlisted files.
-    const changeCount = changes
-        ? changes.files.length + (changes.repo ? 0 : changes.piOnly.length) + (changes.more ?? 0)
-        : 0;
-    const live = browser?.open && browser.url !== "" && browser.url !== "about:blank";
-    const unread = collab() ? chatUnread() : 0;
-    const places = [
-        filesAvailable() && {
-            id: "files",
-            icon: "folder",
-            label: "Files",
-            on: filesOpen && filesTab === "files",
-            run: () => setFilesOpen(true, "files"),
-        },
-        filesAvailable() && {
-            id: "changes",
-            icon: "diff",
-            label: "Changes",
-            count: changeCount,
-            counted: changeCount === 1 ? "changed file" : "changed files",
-            on: filesOpen && filesTab === "changes",
-            run: () => setFilesOpen(true, "changes"),
-        },
-        browserAvailable() && {
-            id: "browser",
-            icon: "globe",
-            label: "Browser",
-            on: browserOpen,
-            dot: live,
-            run: () => {
-                setBrowserOpen(true);
-                closeSheet();
+/**
+ * The app's own places, items of the `places` slot (slots.js), which a person can hide and reorder in Appearance, with
+ * extensions' panels after them. Each gets `{ changes }`: the folder's changes, for the count on Changes.
+ */
+const PLACES = [
+    {
+        id: "core:files",
+        label: "Files",
+        place: () =>
+            filesAvailable() && {
+                icon: "folder",
+                on: store.state.filesOpen && store.state.filesTab === "files",
+                run: () => setFilesOpen(true, "files"),
             },
-        },
-        {
-            id: "artifacts",
-            icon: "artifact",
-            label: "Artifacts",
-            count: view.artifacts.length,
-            run: () => openSheet({ type: "artifacts" }),
-        },
-        collab() && {
-            id: "chat",
-            icon: "chat",
-            label: "Chat",
-            count: unread,
-            counted: "unread",
-            run: () => openSheet({ type: "chat" }),
-        },
-        { id: "find", icon: "search", label: "Find", run: () => openSheet({ type: "find" }) },
-        branchAvailable() && {
-            id: "branch",
-            icon: "fork",
-            label: "Branch",
-            run: () => openSheet({ type: "branch" }),
-        },
-        pipAvailable() && {
-            id: "pip",
-            icon: "pip",
-            label: "PiP",
-            dot: pipUnread(),
-            dotLabel: "something new",
-            run: () => {
-                openPip();
-                closeSheet();
-            },
-        },
-        server?.peeks === true && {
-            id: "peeks",
-            icon: "tiles",
-            label: "Peeks",
-            on: peeksOn(),
-            run: () => {
-                togglePeeks();
-                closeSheet();
-            },
-        },
-    ].filter(Boolean);
+    },
+    {
+        id: "core:changes",
+        label: "Changes",
+        place({ changes }) {
+            // Match the top bar: uncommitted files in a repository, Pi's edits elsewhere, plus any unlisted files.
+            const count = changes
+                ? changes.files.length +
+                  (changes.repo ? 0 : changes.piOnly.length) +
+                  (changes.more ?? 0)
+                : 0;
 
+            return (
+                filesAvailable() && {
+                    icon: "diff",
+                    count,
+                    counted: count === 1 ? "changed file" : "changed files",
+                    on: store.state.filesOpen && store.state.filesTab === "changes",
+                    run: () => setFilesOpen(true, "changes"),
+                }
+            );
+        },
+    },
+    {
+        id: "core:browser",
+        label: "Browser",
+        place() {
+            const { browser, browserOpen } = store.state;
+
+            return (
+                browserAvailable() && {
+                    icon: "globe",
+                    on: browserOpen,
+                    dot: browser?.open && browser.url !== "" && browser.url !== "about:blank",
+                    run: () => {
+                        setBrowserOpen(true);
+                        closeSheet();
+                    },
+                }
+            );
+        },
+    },
+    {
+        id: "core:artifacts",
+        label: "Artifacts",
+        place: () => ({
+            icon: "artifact",
+            count: store.state.view.artifacts.length,
+            run: () => openSheet({ type: "artifacts" }),
+        }),
+    },
+    {
+        id: "core:chat",
+        label: "Chat",
+        place: () =>
+            collab() && {
+                icon: "chat",
+                count: chatUnread(),
+                counted: "unread",
+                run: () => openSheet({ type: "chat" }),
+            },
+    },
+    {
+        id: "core:find",
+        label: "Find",
+        place: () => ({ icon: "search", run: () => openSheet({ type: "find" }) }),
+    },
+    {
+        id: "core:branch",
+        label: "Branch",
+        place: () =>
+            branchAvailable() && { icon: "fork", run: () => openSheet({ type: "branch" }) },
+    },
+    {
+        id: "core:pip",
+        label: "PiP",
+        place: () =>
+            pipAvailable() && {
+                icon: "pip",
+                dot: pipUnread(),
+                dotLabel: "something new",
+                run: () => {
+                    openPip();
+                    closeSheet();
+                },
+            },
+    },
+    {
+        id: "core:peeks",
+        label: "Peeks",
+        place: () =>
+            store.state.server?.peeks === true && {
+                icon: "tiles",
+                on: peeksOn(),
+                run: () => {
+                    togglePeeks();
+                    closeSheet();
+                },
+            },
+    },
+];
+
+PLACES.forEach(({ id, label, place }, index) =>
+    defineItem("places", {
+        id,
+        label,
+        order: (index + 1) * 100,
+        render(context) {
+            const shown = place(context);
+
+            // As before slots: `data-place="files"`, which tests and themes may select.
+            return (
+                shown &&
+                html`<${PlaceTile} place=${{ id: id.replace(/^core:/, ""), label, ...shown }} />`
+            );
+        },
+    }),
+);
+
+function PlacesGrid({ changes = null }) {
     return html`<nav class="places" aria-label="Places">
-        ${places.map(
-            (place) => html`<button
-                key=${place.id}
-                type="button"
-                class=${`place ${place.on ? "on" : ""}`}
-                data-place=${place.id}
-                aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.dot ? `${place.label}, ${place.dotLabel ?? "a page open"}` : place.label}
-                aria-pressed=${place.on === undefined ? undefined : place.on ? "true" : "false"}
-                onClick=${place.run}
-            >
-                <span class="place-icon badge-host">
-                    <${Icon} name=${place.icon} size=${20} />
-                    ${place.count > 0 && html`<span class="badge">${place.count}</span>`}
-                    ${place.dot && html`<span class="browser-dot" aria-hidden="true"></span>`}
-                </span>
-                <span class="place-label">${place.label}</span>
-            </button>`,
-        )}
+        ${slotItems("places", { changes }).map(({ node }) => node)}
     </nav>`;
 }
 

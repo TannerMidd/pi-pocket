@@ -39,6 +39,27 @@ const route: FauxResponseStep = (request) => {
     const asked = messages.findLast((message) => message.role === "user");
     const done = messages.slice(messages.indexOf(asked!)).filter((m) => m.role === "toolResult");
 
+    if (text.includes("start a slow helper")) {
+        return fauxAssistantMessage(
+            [
+                fauxText("Starting a helper."),
+                fauxToolCall("subagent", {
+                    action: "spawn",
+                    name: "helper",
+                    message: "work slowly please",
+                }),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.includes("work slowly please")) {
+        return fauxAssistantMessage(
+            [fauxText("Working slowly."), fauxToolCall("bash", { command: "sleep 30" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
     if (JSON.stringify(asked?.content ?? "").includes("keep working")) {
         const call =
             done.length === 0
@@ -61,7 +82,10 @@ let browsers: Browsers;
 let page: BrowserPage;
 let base = "";
 /** The sessions, by what they are doing. */
-const ids = {} as Record<"open" | "idle" | "pinned" | "waiting" | "finished", ConversationId> & {
+const ids = {} as Record<
+    "open" | "idle" | "pinned" | "waiting" | "finished" | "helper",
+    ConversationId
+> & {
     working: ConversationId[];
 };
 
@@ -100,7 +124,7 @@ const onScreen = (where = ".peeks-list") =>
         const list = document.querySelector("${where}");
         const box = list.getBoundingClientRect();
 
-        return JSON.stringify([...list.querySelectorAll(".peek")]
+        return JSON.stringify([...list.querySelectorAll(".peek, .agent-tile")]
             .filter((tile) => {
                 const rect = tile.getBoundingClientRect();
 
@@ -124,6 +148,16 @@ async function serverPeeks(on = page): Promise<number[] | undefined> {
 
     return client?.peeks === undefined ? undefined : [...client.peeks].map(Number).sort();
 }
+
+/** The subagent rows a session's tile shows: each one's name, what it does now, and its conversation. */
+const agentRows = (id: ConversationId) =>
+    inPage<{ id: number; name: string; now: string }[]>(`
+        return JSON.stringify([...document.querySelectorAll('.peek[data-peek="${id}"] .agent-tile')].map((row) => ({
+            id: Number(row.dataset.peek),
+            name: row.querySelector(".agent-tile-name")?.textContent ?? "",
+            now: row.querySelector(".agent-tile-now")?.textContent ?? "",
+        })));
+    `);
 
 const sorted = (list: number[]) => [...list].sort();
 
@@ -176,6 +210,9 @@ before(async () => {
         });
     }
 
+    // A session whose own work is done while its subagent still works.
+    ids.helper = await newSession(app);
+    await say(app, ids.helper, "start a slow helper");
     ids.open = await newSession(app);
     await say(app, ids.open, "the session in view");
     app.approvals.request(
@@ -238,6 +275,12 @@ after(async () => {
         await app.commands.abort(id, owner(app)).catch(() => {});
     }
 
+    for (const agent of app?.subagents(owner(app)) ?? []) {
+        if (agent.busy) {
+            await app.commands.abort(agent.conversationId, owner(app)).catch(() => {});
+        }
+    }
+
     await until(() => (ids.working ?? []).every((id) => !app.isBusy(id)), "the work to stop").catch(
         () => {},
     );
@@ -246,6 +289,31 @@ after(async () => {
     server?.close();
     await app?.close();
     cleanUp();
+});
+
+test("a tile names its subagents at work and says what each does", real, async () => {
+    if ((await pressed()) !== "true") {
+        await page.evaluate(`${SWITCH}.click()`);
+    }
+
+    // The tile names the subagent as soon as the session list says one works; its words come from its own peek,
+    // which the tab asks for once the row is on its screen.
+    await until(
+        async () => {
+            const [row] = await agentRows(ids.helper);
+
+            return row?.now.includes("sleep 30") === true;
+        },
+        "the subagent row to say what it does",
+        20_000,
+    );
+    const [row] = await agentRows(ids.helper);
+
+    assert.equal(row!.name, "helper");
+    await until(
+        async () => (await serverPeeks())?.includes(row!.id) === true,
+        "the subagent row's own peek",
+    );
 });
 
 test(

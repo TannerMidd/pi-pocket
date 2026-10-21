@@ -66,6 +66,17 @@ const route: FauxResponseStep = (request) => {
             return fauxAssistantMessage([fauxText(`has ${rest[0]}: ${given.includes(rest[0]!)}`)]);
         }
 
+        // "check-text A PHRASE": the same, for a phrase with spaces.
+        case "check-text": {
+            const { messages, systemPrompt } = request as {
+                messages: unknown[];
+                systemPrompt?: string;
+            };
+            const given = JSON.stringify({ systemPrompt, messages: messages.slice(0, -1) });
+
+            return fauxAssistantMessage([fauxText(`has: ${given.includes(rest.join(" "))}`)]);
+        }
+
         default:
             return fauxAssistantMessage([fauxText(`echo: ${text}`)]);
     }
@@ -150,6 +161,46 @@ async function sayAs(user: User, id: ConversationId, text: string): Promise<void
 
     await (await app.harness.submission(submissionId, context))!.wait(context);
 }
+
+test("Pi saves a lesson only when asked, or when sure it helps many later sessions", async () => {
+    // A fresh session for each phrase: only its system prompt can hold it, not an earlier check.
+    const has = async (phrase: string, id?: ConversationId) => {
+        const where = id ?? (await newSession(app, elsewhere));
+
+        await say(app, where, `check-text ${phrase}`);
+
+        return (await answer(where)) === "has: true";
+    };
+
+    assert.ok(await has("only in two cases: a person asks you to save or remember something"));
+    assert.ok(await has("you are sure it will clearly help in many later sessions here"));
+    assert.ok(
+        await has("On your own, never save a one-off fact, a niche detail, a result of this task"),
+    );
+    assert.ok(await has("When unsure, do not save"));
+    // The safety rules stay.
+    assert.ok(await has("Never save secrets"));
+    assert.ok(await has("Use scope everywhere only for a person's general preferences"));
+    assert.ok(!(await has("when you learn something that will help later sessions")));
+    const id = await newSession(app, elsewhere);
+    const memory = (await (await app.conversation(id)).agent(context)).tools.find(
+        (each) => each.name === "memory",
+    );
+
+    assert.match(
+        memory?.description ?? "",
+        /Use add only when a person asks you to save or remember/,
+    );
+
+    // PiP gets the same rule.
+    const pip = await app.pip.ensure(owner(app));
+
+    await app.commands.configure(pip, owner(app), {
+        model: { provider: "faux", modelId: "faux-1" },
+        thinkingLevel: "off",
+    });
+    assert.ok(await has("only in two cases: a person asks you to save or remember something", pip));
+});
 
 test("a lesson Pi saves reaches later sessions in the repository and its worktrees, not other folders", async () => {
     const id = await newSession(app, repo);

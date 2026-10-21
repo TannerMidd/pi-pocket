@@ -50,6 +50,8 @@ const DEFAULTS = {
     speed: false,
     /** Pi's current thought above the live line, and its finished thoughts open. Off until turned on. */
     showThinking: false,
+    /** This browser's own layout of each slot (`slots.js`): `{ [slot]: { order: [ids], hidden: { [id]: boolean } } }`. */
+    layout: {},
 };
 
 function readJson(key, fallback) {

@@ -1,23 +1,17 @@
 // The subagents board: every subagent in every session, in the conversation's place while it is open. One square per
-// subagent and one row per session, the sessions that need you first; a bar that says how many are in each state and
-// filters by it; what needs you (approvals, and failures nobody has dealt with) in a queue; and the one selected, with
-// Open, Stop, and Dismiss. The arrows move between squares and Enter opens one. Phones get one column and a bar at the
-// bottom for the one selected.
+// subagent and one row per session, the sessions that need you first, and under a row a sub-tile for each subagent at
+// work there, saying what it does now; a bar that says how many are in each state and filters by it; what needs you
+// (approvals, and failures nobody has dealt with) in a queue; and the one selected, with Open, Stop, and Dismiss. The
+// arrows move between squares and Enter opens one. Phones get one column and a bar at the bottom for the one selected.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { nowDoing } from "./agent-now.js";
+import { AgentTile } from "./agent-tile.js";
 import { folderColor } from "./avatar.js";
 import { useBack } from "./back.js";
 import { useOnScreen } from "./peeks.js";
 import { fromServer } from "./seen.js";
 import { api, attempt, canSteer, navigate, notify, store } from "./store.js";
-import {
-    dismiss,
-    elapsed,
-    nowDoing,
-    ordered,
-    seeFailure,
-    stateOf,
-    unresolved,
-} from "./subagents.js";
+import { dismiss, elapsed, ordered, seeFailure, stateOf, unresolved } from "./subagents.js";
 import { html, Icon, timeAgo } from "./ui.js";
 
 /** The states, most urgent first: the order of the bar, the legend, the squares, and the sessions' summaries. */
@@ -79,6 +73,10 @@ function sync(state) {
 }
 
 store.subscribe(sync);
+
+/** A session's sub-tiles on the board before "Show N more": two rows on a wide screen, three in a phone's column. */
+const BOARD_TILES = 6;
+const BOARD_TILES_PHONE = 3;
 
 /** Close the board: back to the conversation, or the home screen, it took the place of. */
 export const closeBoard = () => store.set({ board: false, boardAgents: null });
@@ -431,8 +429,13 @@ export function SubagentsBoard() {
     const [query, setQuery] = useState("");
     const [selected, setSelected] = useState(null);
     const [hovered, setHovered] = useState(null);
+    // The sessions whose every sub-tile shows, past the first few.
+    const [unfolded, setUnfolded] = useState(() => new Set());
     const [, tick] = useState(0);
     const box = useRef(null);
+    // A subagent to bring into view once its square is drawn: one a peek tile's "N more" asked for.
+    const reveal = useRef(null);
+    const { boardFocus } = store.state;
     const agents = boardAgents ?? [];
     const titles = new Map(sessions.map((session) => [session.id, session.title ?? "New session"]));
     const cwds = new Map(sessions.map((session) => [session.id, session.cwd]));
@@ -481,7 +484,8 @@ export function SubagentsBoard() {
     const working = agents.some((agent) => live(boardState(agent)));
 
     useBack(true, closeBoard);
-    // What the selected and hovered subagents do now: their peeks, while they show.
+    // What the subagents at work do now, each sub-tile's own peek, and the selected and hovered ones': their peeks,
+    // while they show.
     useOnScreen(box);
 
     // The first that waits for an approval is selected when the board opens, or else the first square.
@@ -493,6 +497,29 @@ export function SubagentsBoard() {
             );
         }
     }, [grid.length > 0]);
+
+    // A peek tile's "N more" opens the board at the first it left out: selected, and in view once the board has it.
+    useEffect(() => {
+        if (boardFocus === undefined || boardFocus === null) {
+            return;
+        }
+
+        setSelected(boardFocus);
+        reveal.current = boardFocus;
+        store.set({ boardFocus: null });
+    }, [boardFocus]);
+
+    useEffect(() => {
+        const cell =
+            reveal.current === null
+                ? null
+                : box.current?.querySelector(`.board-cell[data-agent="${reveal.current}"]`);
+
+        if (cell) {
+            reveal.current = null;
+            cell.scrollIntoView({ block: "center" });
+        }
+    });
 
     // Elapsed times tick while one works.
     useEffect(() => {
@@ -640,52 +667,89 @@ export function SubagentsBoard() {
         const tone = top === undefined || top === "done" || top === "stopped" ? "quiet" : top;
         const title = titles.get(id) ?? `Session ${id}`;
 
-        return html`<div
-            key=${id}
-            class="board-row"
-        >
-            <button
-                class="board-session"
-                title=${`Open ${title}`}
-                onClick=${() => openSession(id)}
-            >
-                <span class="board-session-title">
-                    <span
-                        class="folder-mark"
-                        style=${`--folder:${folderColor(cwds.get(id))}`}
-                    ></span>
-                    <span class="board-session-name">${title}</span>
+        const folder = folderColor(cwds.get(id));
+        // The ones at work now, as sub-tiles: what each does, without opening any of them. The filter and search apply.
+        const active = list.filter((agent) => live(boardState(agent)) && matches(agent));
+        // The first few, and the selected one wherever it is; the rest a click away.
+        const cap = phone ? BOARD_TILES_PHONE : BOARD_TILES;
+        const all = unfolded.has(id) || active.length <= cap + 1;
+        const tiles = all
+            ? active
+            : active.filter((agent, index) => index < cap || agent.conversationId === selected);
+        const toggle = () =>
+            setUnfolded((was) => {
+                const next = new Set(was);
+
+                if (!next.delete(id)) {
+                    next.add(id);
+                }
+
+                return next;
+            });
+
+        return html`<div key=${id} class="board-row">
+            <div class="board-row-head">
+                <button
+                    class="board-session"
+                    title=${`Open ${title}`}
+                    onClick=${() => openSession(id)}
+                >
+                    <span class="board-session-title">
+                        <span class="folder-mark" style=${`--folder:${folder}`}></span>
+                        <span class="board-session-name">${title}</span>
+                        ${
+                            phone &&
+                            html`<span class=${`board-summary ${tone}`}>
+                                ${summaryOf(own, { short: true })}
+                            </span>`
+                        }
+                    </span>
+                    ${!phone && html`<span class=${`board-summary ${tone}`}>${summaryOf(own)}</span>`}
+                </button>
+                <div class="board-cells">
+                    ${list.map(
+                        (agent) => html`<${Cell}
+                            key=${agent.conversationId}
+                            agent=${agent}
+                            state=${boardState(agent)}
+                            dim=${!matches(agent)}
+                            selected=${agent.conversationId === selected}
+                            onPick=${pick}
+                            onHover=${phone ? () => {} : setHovered}
+                        />`,
+                    )}
                     ${
-                        phone &&
-                        html`<span class=${`board-summary ${tone}`}>
-                            ${summaryOf(own, { short: true })}
+                        older > 0 &&
+                        html`<span
+                            class="board-older"
+                            title=${`${older} more, finished earlier: open the session to see them`}
+                        >
+                            +${older}
                         </span>`
                     }
-                </span>
-                ${!phone && html`<span class=${`board-summary ${tone}`}>${summaryOf(own)}</span>`}
-            </button>
-            <div class="board-cells">
-                ${list.map(
-                    (agent) => html`<${Cell}
-                        key=${agent.conversationId}
-                        agent=${agent}
-                        state=${boardState(agent)}
-                        dim=${!matches(agent)}
-                        selected=${agent.conversationId === selected}
-                        onPick=${pick}
-                        onHover=${phone ? () => {} : setHovered}
-                    />`,
-                )}
-                ${
-                    older > 0 &&
-                    html`<span
-                        class="board-older"
-                        title=${`${older} more, finished earlier: open the session to see them`}
-                    >
-                        +${older}
-                    </span>`
-                }
+                </div>
             </div>
+            ${
+                active.length > 0 &&
+                html`<div class="board-live" role="group" aria-label="Subagents at work">
+                    ${tiles.map(
+                        (agent) => html`<${AgentTile}
+                            key=${agent.conversationId}
+                            agent=${agent}
+                            folder=${folder}
+                            selected=${agent.conversationId === selected}
+                            onActivate=${() => pick(agent.conversationId)}
+                            onOpen=${() => open(agent)}
+                        />`,
+                    )}
+                    ${
+                        active.length > cap + 1 &&
+                        html`<button class="board-live-more" onClick=${toggle}>
+                            ${all ? "Show fewer" : `Show ${active.length - tiles.length} more`}
+                        </button>`
+                    }
+                </div>`
+            }
         </div>`;
     });
 

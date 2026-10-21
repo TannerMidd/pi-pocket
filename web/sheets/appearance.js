@@ -27,6 +27,7 @@ import {
     themeVars,
     varsStyle,
 } from "../theme.js";
+import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
 import { galleryAvailable } from "./gallery.js";
 
@@ -369,6 +370,67 @@ function SettingRow({ title, detail, children }) {
     </div>`;
 }
 
+/**
+ * One slot's items, as Layout lists them: each with a switch to show or hide it and arrows to move it, the app's own and
+ * extensions' alike. Fixed ones (the menu, Lancet Guard) always show, in their place. Saved in this browser.
+ */
+function SlotLayout({ slot }) {
+    const list = arranged(slot);
+    const movable = list.filter(({ item }) => !item.fixed).map(({ item }) => item.id);
+    const changed = Object.keys(prefs().layout?.[slot] ?? {}).length > 0;
+
+    return html`<div class="label slot-label">
+            <span>${SLOTS[slot].label}</span>
+            ${
+                changed &&
+                html`<button class="button ghost small" onClick=${() => resetSlot(slot)}>
+                    Reset
+                </button>`
+            }
+        </div>
+        <div class="sheet-list slot-layout" data-slot=${slot}>
+            ${list.map(({ item, hidden, hiddenBy }) => {
+                const at = movable.indexOf(item.id);
+                const detail = [
+                    item.module && `From ${item.module}`,
+                    hiddenBy && `Hidden by ${hiddenBy}`,
+                    item.fixed && "Always shown",
+                ]
+                    .filter(Boolean)
+                    .join(" · ");
+
+                return html`<${SettingRow} key=${item.id} title=${item.label} detail=${detail}>
+                    ${
+                        !item.fixed &&
+                        html`<div class="slot-moves">
+                            <button
+                                class="icon-button"
+                                aria-label=${`Move ${item.label} earlier`}
+                                disabled=${at <= 0}
+                                onClick=${() => move(slot, item.id, -1)}
+                            >
+                                <${Icon} name="chevron" size=${16} class="slot-earlier" />
+                            </button>
+                            <button
+                                class="icon-button"
+                                aria-label=${`Move ${item.label} later`}
+                                disabled=${at === movable.length - 1}
+                                onClick=${() => move(slot, item.id, 1)}
+                            >
+                                <${Icon} name="chevron" size=${16} />
+                            </button>
+                        </div>
+                        <${Switch}
+                            on=${!hidden}
+                            label=${`Show ${item.label}`}
+                            onChange=${() => setShown(slot, item.id, hidden)}
+                        />`
+                    }
+                <//>`;
+            })}
+        </div>`;
+}
+
 export function AppearanceSheet() {
     const p = prefs();
     const desktop = store.state.desktopTheme;
@@ -555,6 +617,7 @@ export function AppearanceSheet() {
                 />
             <//>
         </div>
+        ${Object.keys(SLOTS).map((slot) => html`<${SlotLayout} key=${slot} slot=${slot} />`)}
         ${
             !touch &&
             html`<button

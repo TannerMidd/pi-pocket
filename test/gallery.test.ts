@@ -26,7 +26,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 export default () => defineExtension({
     name: "test-clock",
     tools: [defineTool({ name: "test_clock", description: "Now", parameters: Type.Object({}),
-        execute: async () => ({ content: [{ type: "text", text: "now" }] }) })],
+        execute: async () => ({ output: [{ type: "text", text: "now" }] }) })],
 });
 `;
 
