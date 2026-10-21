@@ -5995,37 +5995,98 @@ pre.diff .del {
     min-width: 0;
 }
 
-.tag-targets summary {
-    cursor: pointer;
-    color: var(--muted);
-    font-size: 13px;
-}
-
-.tag-targets ul {
-    padding-inline-start: 20px;
-    max-height: 180px;
-    overflow-y: auto;
-}
-
-.tag-targets li {
-    margin-block: 8px;
-    overflow-wrap: anywhere;
-}
-
-.tag-targets li > span {
-    display: block;
-}
-
 .tag-options .list-item > span:first-child {
     min-width: 0;
     overflow-wrap: anywhere;
 }
 
-.tag-options .tag-membership {
+.tag-remove-options .list-item > .tag-membership {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 2px 8px;
+    flex: 1;
+}
+
+.tag-membership > small:not(.tag-remove-intent) {
+    white-space: nowrap;
+}
+
+.tag-remove-intent {
+    grid-column: 1 / -1;
+    color: var(--accent);
+}
+
+.tag-remove-options {
+    max-height: min(196px, 28dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.tag-remove-options > .list-item {
+    min-height: 44px;
+    padding-block: 8px;
+}
+
+.tag-remove-options > .marked {
+    background: var(--accent-soft);
+}
+
+.tag-empty {
+    padding: 12px 14px;
+}
+
+.session-tags-sheet .sheet-body {
+    overflow: hidden;
+}
+
+.session-tags-sheet .tag-editor-content {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: calc(14px * var(--space-y));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* Leave space for native input and button focus rings at the scroll edges. */
+    margin: -3px;
+    padding: 3px;
+}
+
+.tag-editor-content > * {
+    flex-shrink: 0;
+}
+
+.tag-remove-pending {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tag-remove-draft {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 80px;
+    overflow-y: auto;
+    scroll-padding: 3px;
+    padding: 3px;
+    margin: -3px;
+}
+
+.tag-remove-draft .chip {
+    min-height: 40px;
+    max-width: 100%;
+}
+
+.tag-remove-draft .chip > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.session-tags-sheet .tag-suggestion-hint {
+    margin-top: -8px;
 }
 
 .tag-options input {
@@ -6043,11 +6104,13 @@ pre.diff .del {
 }
 
 .tag-save {
-    position: sticky;
-    bottom: -1px;
+    flex: none;
     padding-block: 8px 1px;
     background: var(--bg);
     border-top: 1px solid var(--hair);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 /* Shared menu rows: inset groups in sheets, quiet standalone rows elsewhere. */

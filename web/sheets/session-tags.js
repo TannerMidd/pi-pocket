@@ -1,5 +1,5 @@
 // Shared session tags: personal list filters and explicit, cancelable tag patches.
-import { useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { canSteer, closeSheet, notify, store } from "../store.js";
 import { html, Icon, Sheet } from "../ui.js";
 
@@ -67,6 +67,38 @@ export function SessionTagsSheet({ ids, batch = false, submit }) {
     const [input, setInput] = useState("");
     const [error, setError] = useState("");
     const [saving, setSaving] = useState(false);
+    const [removalQuery, setRemovalQuery] = useState("");
+    const inputRef = useRef(null);
+    const removalSearchRef = useRef(null);
+    const removalListRef = useRef(null);
+    const removalDraftRef = useRef(null);
+
+    useLayoutEffect(() => {
+        const tray = removalDraftRef.current;
+        const sheet = store.state.sheet;
+
+        if (!tray) {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            const focused = document.activeElement;
+
+            if (
+                store.state.sheet === sheet &&
+                tray.isConnected &&
+                tray.closest(".sheet-host:not(.leaving)") &&
+                tray.contains(focused)
+            ) {
+                focused.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+        });
+
+        observer.observe(tray);
+
+        return () => observer.disconnect();
+    }, [remove.length > 0]);
+
     const original = targets[0].tags;
     const union = [...new Set(targets.flatMap((session) => session.tags))].sort();
     const add = batch ? draft : draft.filter((tag) => !original.includes(tag));
@@ -85,6 +117,56 @@ export function SessionTagsSheet({ ids, batch = false, submit }) {
                 removed.some((tag) => tagsOf(session).includes(tag))),
     ).length;
     const tooMany = current.some((session) => session && project(session).length > 10);
+    const suggestions = vocabulary().filter(
+        (tag) =>
+            !draft.includes(tag) &&
+            !remove.includes(tag) &&
+            (!batch || !targets.every((session) => session.tags.includes(tag))) &&
+            tag.includes(input.trim().toLowerCase()),
+    );
+    const removalOptions = union.filter((tag) => tag.includes(removalQuery.trim().toLowerCase()));
+
+    // Removing a focused chip must not strand keyboard focus on the document body.
+    const cancelQueued = (event, tag, removal = false) => {
+        const button = event.currentTarget;
+        const siblings = [...button.parentElement.querySelectorAll("button")];
+        const index = siblings.indexOf(button);
+        const host = button.closest(".sheet-host");
+        const sheet = store.state.sheet;
+        const restore = event.detail === 0 && document.activeElement === button;
+
+        if (removal) {
+            setRemove(remove.filter((each) => each !== tag));
+        } else {
+            setDraft(draft.filter((each) => each !== tag));
+        }
+
+        if (restore) {
+            requestAnimationFrame(() => {
+                if (
+                    store.state.sheet !== sheet ||
+                    !host?.isConnected ||
+                    host.classList.contains("leaving") ||
+                    (document.activeElement !== document.body && document.activeElement !== button)
+                ) {
+                    return;
+                }
+
+                const fallback = removal
+                    ? (removalSearchRef.current ??
+                      removalListRef.current?.querySelector("input:not(:disabled)"))
+                    : inputRef.current;
+                const next = [siblings[index + 1], siblings[index - 1], fallback].find(
+                    (control) =>
+                        control?.isConnected &&
+                        !control.disabled &&
+                        control.closest(".sheet-host") === host,
+                );
+
+                next?.focus();
+            });
+        }
+    };
 
     const queue = (value) => {
         const tag = value.trim().toLowerCase();
@@ -161,109 +243,131 @@ export function SessionTagsSheet({ ids, batch = false, submit }) {
         onClose=${closeSheet}
         className="session-tags-sheet"
     >
-        <p class="muted small">${
-            batch
-                ? "Only the selected sessions shown when you opened this editor are included. Other tags stay unchanged."
-                : targets[0].title
-        }</p>
-        <p class="muted small">Shared with everyone who can see these sessions.</p>
-        ${
-            batch &&
-            html`<details class="tag-targets">
-            <summary>Review ${targets.length} selected ${targets.length === 1 ? "session" : "sessions"}</summary>
-            <ul>${targets.map(
-                (session) => html`<li key=${session.id}>
-                <strong>${session.title}</strong>
-                <span class="muted small">${session.tags.join(", ") || "No tags"}</span>
-            </li>`,
-            )}</ul>
-        </details>`
-        }
-        <div class="field">
-            <label class="label" for="session-tag-input">${batch ? "Add to selected sessions" : "Add a tag"}</label>
-            <form class="tag-add" onSubmit=${(event) => {
-                event.preventDefault();
-                queue(input);
-            }}>
-                <input
-                    id="session-tag-input"
-                    value=${input}
-                    autofocus
-                    autocomplete="off"
-                    placeholder="Tag name"
-                    disabled=${saving}
-                    onInput=${(event) => setInput(event.currentTarget.value)}
-                />
-                <button class="button" disabled=${saving || !input.trim()} type="submit">Add</button>
-            </form>
-        </div>
-        <div class="tag-draft">
-            ${draft.map(
-                (tag) => html`<button
-                class="chip"
-                key=${tag}
-                disabled=${saving}
-                aria-label=${batch ? `Cancel adding ${tag}` : `Remove tag ${tag}`}
-                onClick=${() => setDraft(draft.filter((each) => each !== tag))}
-            >
-                <span>${tag}</span><${Icon} name="close" size=${12} />
-            </button>`,
-            )}
-            ${!batch && draft.length === 0 && html`<p class="muted small">No tags yet.</p>`}
-        </div>
-        <div class="tag-suggestions">
-            ${vocabulary()
-                .filter((tag) => !draft.includes(tag) && !remove.includes(tag))
-                .map(
-                    (tag) => html`<button
-                class="chip"
-                key=${tag}
-                disabled=${saving}
-                aria-label=${`Add ${tag}`}
-                onClick=${() => queue(tag)}
-            >+ ${tag}</button>`,
-                )}
-        </div>
-        ${
-            batch &&
-            html`<div class="label">Remove from selected sessions</div>
-            <div class="sheet-list tag-options">
-                ${union.map(
-                    (tag) => html`<label class="list-item check" key=${tag}>
-                    <span class="tag-membership">
-                        <span>${tag}</span>
-                        <small class="muted">On ${targets.filter((session) => session.tags.includes(tag)).length} of ${targets.length} ${targets.length === 1 ? "session" : "sessions"}</small>
-                    </span>
+        <div class="tag-editor-content">
+            ${!batch && html`<p class="muted small">${targets[0].title}</p>`}
+            <p class="muted small">Shared with everyone who can see these sessions.</p>
+            <div class="field">
+                <label class="label" for="session-tag-input">${batch ? "Add to selected sessions" : "Add a tag"}</label>
+                <form class="tag-add" onSubmit=${(event) => {
+                    event.preventDefault();
+                    queue(input);
+                }}>
                     <input
-                        type="checkbox"
-                        disabled=${saving || draft.includes(tag)}
-                        checked=${remove.includes(tag)}
-                        onChange=${(event) =>
-                            setRemove(
-                                event.currentTarget.checked
-                                    ? [...remove, tag]
-                                    : remove.filter((each) => each !== tag),
-                            )}
+                        id="session-tag-input"
+                        ref=${inputRef}
+                        value=${input}
+                        autofocus
+                        autocomplete="off"
+                        placeholder="Tag name"
+                        disabled=${saving}
+                        onInput=${(event) => setInput(event.currentTarget.value)}
                     />
-                </label>`,
+                    <button class="button" disabled=${saving || !input.trim()} type="submit">Add</button>
+                </form>
+            </div>
+            <div class="tag-draft">
+                ${draft.map(
+                    (tag) => html`<button
+                    class="chip"
+                    key=${tag}
+                    disabled=${saving}
+                    aria-label=${batch ? `Cancel adding ${tag}` : `Remove tag ${tag}`}
+                    onClick=${(event) => cancelQueued(event, tag)}
+                >
+                    <span>${tag}</span><${Icon} name="close" size=${12} />
+                </button>`,
                 )}
-                ${union.length === 0 && html`<p class="muted small">These sessions have no tags to remove.</p>`}
-            </div>`
-        }
-        <p class="tag-error small" role="alert">${
-            error ||
-            (!available
-                ? "A selected session is no longer available. Close this editor and select again."
-                : tooMany
-                  ? "A session would exceed 10 tags. Adjust the changes before saving."
-                  : "")
-        }</p>
+                ${!batch && draft.length === 0 && html`<p class="muted small">No tags yet.</p>`}
+            </div>
+            <div class="tag-suggestions">
+                ${suggestions.slice(0, 6).map(
+                    (tag) => html`<button
+                    class="chip"
+                    key=${tag}
+                    disabled=${saving}
+                    aria-label=${`Add ${tag}`}
+                    onClick=${() => queue(tag)}
+                >+ ${tag}</button>`,
+                )}
+            </div>
+            ${suggestions.length > 6 && html`<p class="muted small tag-suggestion-hint">Type to find more tags.</p>`}
+            ${
+                batch &&
+                html`<section class="field tag-remove" aria-labelledby="tag-remove-heading">
+                    <h3 class="label" id="tag-remove-heading">Remove from selected sessions</h3>
+                    ${
+                        union.length > 8 &&
+                        html`<input
+                        id="session-tag-remove-search"
+                        ref=${removalSearchRef}
+                        type="search"
+                        aria-label="Find tags to remove"
+                        placeholder="Find a tag"
+                        autocomplete="off"
+                        value=${removalQuery}
+                        disabled=${saving}
+                        onInput=${(event) => setRemovalQuery(event.currentTarget.value)}
+                    />`
+                    }
+                    ${
+                        remove.length > 0 &&
+                        html`<div class="tag-remove-pending">
+                        <p class="small tag-remove-count">Will remove · ${remove.length}</p>
+                        <div class="tag-remove-draft" ref=${removalDraftRef}>
+                            ${remove.map(
+                                (tag) => html`<button
+                                class="chip"
+                                key=${tag}
+                                aria-label=${`Cancel removing ${tag}`}
+                                disabled=${saving}
+                                onClick=${(event) => cancelQueued(event, tag, true)}
+                            ><span dir="auto">${tag}</span><${Icon} name="close" size=${12} /></button>`,
+                            )}
+                        </div>
+                    </div>`
+                    }
+                    <div class="sheet-list tag-options tag-remove-options" ref=${removalListRef}>
+                        ${removalOptions.map(
+                            (
+                                tag,
+                            ) => html`<label class=${`list-item check${remove.includes(tag) ? " marked" : ""}`} key=${tag}>
+                            <span class="tag-membership">
+                                <span dir="auto">${tag}</span>
+                                <small class="muted">${targets.filter((session) => session.tags.includes(tag)).length} of ${targets.length}</small>
+                                ${remove.includes(tag) && html`<small class="tag-remove-intent">Will remove</small>`}
+                            </span>
+                            <input
+                                type="checkbox"
+                                disabled=${saving || draft.includes(tag)}
+                                checked=${remove.includes(tag)}
+                                onChange=${(event) =>
+                                    setRemove(
+                                        event.currentTarget.checked
+                                            ? [...remove, tag]
+                                            : remove.filter((each) => each !== tag),
+                                    )}
+                            />
+                        </label>`,
+                        )}
+                        ${removalOptions.length === 0 && html`<p class="muted small tag-empty">${union.length === 0 ? "No tags to remove." : "No matching tags."}</p>`}
+                    </div>
+                </section>`
+            }
+            <p class="tag-error small" role="alert">${
+                error ||
+                (!available
+                    ? "A selected session is no longer available. Close this editor and select again."
+                    : tooMany
+                      ? "A session would exceed 10 tags. Adjust the changes before saving."
+                      : "")
+            }</p>
+        </div>
         <div class="tag-save">
             <p class="muted small" role="status" aria-live="polite">${
                 changed
-                    ? `${changed} ${changed === 1 ? "session" : "sessions"} will change. Other tags stay.`
+                    ? `${changed} ${changed === 1 ? "session" : "sessions"} will change.`
                     : "No changes to save."
-            }</p>
+            }${batch && (add.length > 0 || removed.length > 0) && html`<span> · ${add.length} to add · ${removed.length} to remove</span>`}</p>
             <div class="sheet-actions">
                 <button class="button" onClick=${closeSheet}>Cancel</button>
                 <button

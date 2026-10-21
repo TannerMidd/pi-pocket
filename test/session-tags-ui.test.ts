@@ -427,8 +427,8 @@ test(
         await clickText("Edit tags", `${list} .select-bar`);
         await sheetType("session-tags");
         await expectPage(
-            `document.querySelector(${JSON.stringify(`${sheet} .tag-targets summary`)})?.textContent.trim().startsWith('Review 1 selected session')`,
-            "only the visible selected target included",
+            `document.querySelector(${JSON.stringify(sheet)})?.textContent.includes('Edit tags · 1 session') && !document.querySelector(${JSON.stringify(`${sheet} .tag-targets`)})`,
+            "header identifies the sole visible selected target without a redundant review disclosure",
         );
         const untouched = structuredClone(app.sessionMeta(first)?.tags);
 
@@ -833,5 +833,362 @@ test(
                 );
             }
         }
+    },
+);
+
+test(
+    "batch refinement: synthetic keyboard-click scheduling race preserves intentional focus",
+    real,
+    async () => {
+        const target = await newSession(app);
+
+        await app.commands.updateSession(target, owner(app), { title: "Draft focus race" });
+        await fresh(390);
+        await openFromKeyboard(target);
+        await addName("race-first");
+        await addName("race-second");
+        const focus = await inPage<{ intended: boolean; activeLabel: string | null }>(`
+        const host = document.querySelector(${JSON.stringify(sheet)});
+        const removed = host.querySelector('.tag-draft [aria-label="Remove tag race-first"]');
+        const intended = host.querySelector('#session-tag-input');
+        // Synthetic detail=0 models keyboard-style click scheduling, not hardware-keyboard acceptance.
+        removed.focus();
+        removed.click();
+        intended.focus();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return JSON.stringify({ intended: document.activeElement === intended, activeLabel: document.activeElement?.getAttribute('aria-label') });
+    `);
+
+        assert.equal(
+            focus.intended,
+            true,
+            `deferred chip cleanup must not steal intentionally moved focus (${focus.activeLabel})`,
+        );
+        await clickText("Cancel");
+        await sheetType(null);
+        assert.deepEqual(
+            app.sessionMeta(target)?.tags ?? [],
+            [],
+            "the race does not persist a draft",
+        );
+    },
+);
+
+test(
+    "batch refinement: focused removal chip stays visible after viewport reflow",
+    real,
+    async () => {
+        const targets = [await newSession(app), await newSession(app)];
+        const [firstTarget, secondTarget] = targets;
+
+        assert.ok(firstTarget !== undefined && secondTarget !== undefined);
+
+        const selectedTags = [
+            "topic-128",
+            ...Array.from(
+                { length: 7 },
+                (_, index) => `topic-${String(index + 1).padStart(3, "0")}`,
+            ),
+        ];
+
+        for (const [index, id] of targets.entries()) {
+            await app.commands.updateSession(id, owner(app), {
+                title: `Chip reflow fixture ${index}`,
+            });
+            await app.commands.updateSessionTags(owner(app), {
+                ids: [Number(id)],
+                add: index === 0 ? selectedTags : ["topic-120", "topic-121", "topic-122"],
+            });
+        }
+
+        await fresh(320);
+        await page.setViewport({ width: 320, height: 500, scale: 1, mobile: true });
+        await page.type(
+            { selector: `${list} input[aria-label="Search sessions"]` },
+            "Chip reflow fixture",
+        );
+        await expectPage(
+            `document.querySelectorAll(${JSON.stringify(`${list} .session-row`)}).length === 2`,
+            "two real reflow targets",
+        );
+        await page.evaluate(
+            `document.querySelector(${JSON.stringify(`${row(firstTarget)} > .session`)}).focus()`,
+        );
+        await page.press("Shift+F10");
+        await sheetType("session");
+        await clickText("Select");
+        await sheetType(null);
+        await click({ selector: `${row(secondTarget)} > .session` });
+        await clickText("Edit tags", `${list} .select-bar`);
+        await sheetType("session-tags");
+        await new Promise((resolve) => setTimeout(resolve, 320));
+
+        for (const tag of selectedTags) {
+            await page.type({ selector: "#session-tag-remove-search" }, tag);
+            await expectPage(
+                `document.querySelectorAll(${JSON.stringify(`${sheet} .tag-remove-options input[type="checkbox"]`)}).length === 1`,
+                `find ${tag} to mark`,
+            );
+            await click({ selector: `${sheet} .tag-remove-options input[type="checkbox"]` });
+        }
+
+        await page.type({ selector: "#session-tag-remove-search" }, "topic-120");
+        await page.evaluate(
+            `document.querySelector(${JSON.stringify(`${sheet} .tag-remove-draft [aria-label="Cancel removing topic-007"]`)}).focus()`,
+        );
+        await page.setViewport({ width: 390, height: 844, scale: 1, mobile: true });
+        const geometry = await inPage<{
+            focused: boolean;
+            top: number;
+            bottom: number;
+            trayTop: number;
+            trayBottom: number;
+        }>(`
+        await document.fonts.ready;
+        await new Promise(resolve => setTimeout(resolve, 350));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const chip = document.querySelector(${JSON.stringify(`${sheet} .tag-remove-draft [aria-label="Cancel removing topic-007"]`)});
+        const tray = chip.closest('.tag-remove-draft').getBoundingClientRect();
+        const box = chip.getBoundingClientRect();
+        return JSON.stringify({ focused: document.activeElement === chip, top: box.top, bottom: box.bottom, trayTop: tray.top, trayBottom: tray.bottom });
+    `);
+
+        assert.equal(geometry.focused, true, "viewport reflow preserves the existing focused chip");
+        assert.ok(
+            geometry.top >= geometry.trayTop && geometry.bottom <= geometry.trayBottom,
+            `focused chip remains inside pending-removal tray after reflow: ${JSON.stringify(geometry)}`,
+        );
+        await clickText("Cancel");
+        await sheetType(null);
+    },
+);
+
+test("batch refinement: scope header replaces review and verbose copy", real, async () => {
+    const target = await newSession(app);
+
+    await app.commands.updateSession(target, owner(app), { title: "Batch refinement scope" });
+    await fresh(1280);
+    await page.evaluate(
+        `document.querySelector(${JSON.stringify(`${row(target)} > .session`)}).focus()`,
+    );
+    await page.press("Shift+F10");
+    await sheetType("session");
+    await clickText("Select");
+    await sheetType(null);
+    await clickText("Edit tags", `${list} .select-bar`);
+    await sheetType("session-tags");
+    const scope = await inPage<{ header: boolean; review: boolean; verbose: boolean }>(`
+        const sheet = document.querySelector(${JSON.stringify(sheet)});
+        return JSON.stringify({
+            header: sheet.textContent.includes('Edit tags · 1 session'),
+            review: sheet.querySelector('.tag-targets') !== null,
+            verbose: sheet.textContent.includes('Only the selected sessions shown when you opened this editor'),
+        });
+    `);
+
+    assert.equal(scope.header, true, "the native header states the captured scope");
+    assert.equal(scope.review, false, "no redundant selected-session review disclosure");
+    assert.equal(scope.verbose, false, "no redundant batch-scope paragraph");
+    await clickText("Cancel");
+    await sheetType(null);
+});
+
+test(
+    "batch refinement: large real union stays searchable and bounded; Cancel and Save preserve captured scope",
+    real,
+    async () => {
+        const targets: ConversationId[] = [];
+        const originals = new Map<ConversationId, string[]>();
+
+        for (let index = 0; index < 16; index++) {
+            const id = await newSession(app);
+            const tags = Array.from(
+                { length: 8 },
+                (_, tag) => `scale-${String(index).padStart(2, "0")}-${tag}`,
+            );
+
+            targets.push(id);
+            originals.set(id, tags);
+            await app.commands.updateSession(id, owner(app), { title: `Batch scale ${index}` });
+            await app.commands.updateSessionTags(owner(app), { ids: [Number(id)], add: tags });
+        }
+
+        const firstTarget = targets[0];
+
+        assert.ok(firstTarget !== undefined);
+
+        const outside = await newSession(app);
+
+        await app.commands.updateSession(outside, owner(app), { title: "Outside batch scope" });
+        await app.commands.updateSessionTags(owner(app), {
+            ids: [Number(outside)],
+            add: ["outside-only"],
+        });
+        await fresh(390);
+        await page.type({ selector: `${list} input[aria-label="Search sessions"]` }, "Batch scale");
+        await expectPage(
+            `document.querySelectorAll(${JSON.stringify(`${list} .session-row`)}).length === 16`,
+            "sixteen real searchable targets",
+        );
+        await page.evaluate(
+            `document.querySelector(${JSON.stringify(`${row(firstTarget)} > .session`)}).focus()`,
+        );
+        await page.press("Shift+F10");
+        await sheetType("session");
+        await clickText("Select");
+        await sheetType(null);
+
+        for (const id of targets.slice(1)) {
+            await page.evaluate(
+                `document.querySelector(${JSON.stringify(`${row(id)} > .session`)}).scrollIntoView({ block: 'center' })`,
+            );
+            await click({ selector: `${row(id)} > .session` });
+        }
+
+        await expectPage(
+            `document.querySelectorAll(${JSON.stringify(`${list} .session-row.selected`)}).length === 16`,
+            "all sixteen targets selected natively",
+        );
+        await clickText("Edit tags", `${list} .select-bar`);
+        await sheetType("session-tags");
+        const layout = await inPage<{
+            header: boolean;
+            search: boolean;
+            options: number;
+            bounded: boolean;
+            headingsEqual: boolean;
+            footerSeparate: boolean;
+            suggestions: number;
+            overflow: boolean;
+        }>(`
+        const sheet = document.querySelector(${JSON.stringify(sheet)});
+        const options = sheet.querySelector('.tag-remove-options');
+        const add = sheet.querySelector('.field > .label');
+        const remove = sheet.querySelector('.tag-remove.field > .label');
+        const paint = element => element ? ['color', 'fontWeight', 'fontSize', 'opacity'].map(key => getComputedStyle(element)[key]).join('|') : null;
+        const content = sheet.querySelector('.tag-editor-content');
+        const footer = sheet.querySelector('.tag-save');
+        return JSON.stringify({
+            header: sheet.textContent.includes('Edit tags · 16 sessions'),
+            search: sheet.querySelector('#session-tag-remove-search[aria-label="Find tags to remove"]') !== null,
+            options: options?.querySelectorAll('input[type="checkbox"]').length ?? 0,
+            bounded: !!options && options.clientHeight <= Math.min(196, innerHeight * .28) + 1 && options.scrollHeight > options.clientHeight && getComputedStyle(options).overflowY === 'auto',
+            headingsEqual: !!add && !!remove && paint(add) === paint(remove),
+            footerSeparate: !!content && !!footer && !content.contains(footer) && content.parentElement === footer.parentElement,
+            suggestions: sheet.querySelectorAll('.tag-suggestions button').length,
+            overflow: document.documentElement.scrollWidth > innerWidth,
+        });
+    `);
+
+        assert.equal(layout.header, true, "header carries captured batch scope");
+        assert.equal(layout.search, true, "large union has a native accessible removal search");
+        assert.equal(layout.options, 128, "all 128 distinct tags remain reachable, not truncated");
+        assert.equal(layout.bounded, true, "large union scrolls inside a bounded removal list");
+        assert.equal(layout.headingsEqual, true, "Remove has the same visible emphasis as Add");
+        assert.equal(
+            layout.footerSeparate,
+            true,
+            "save controls remain outside the scrolling editor content",
+        );
+        assert.ok(layout.suggestions <= 6, "suggestions are capped at six");
+        assert.equal(layout.overflow, false, "phone editor has no horizontal overflow");
+
+        const lateTag = "scale-15-7";
+
+        const queueChanges = async () => {
+            // Match the app's native 280ms post-transition tap guard, as addName does.
+            await new Promise((resolve) => setTimeout(resolve, 320));
+            await page.type({ selector: "#session-tag-remove-search" }, lateTag);
+            await expectPage(
+                `document.querySelectorAll(${JSON.stringify(`${sheet} .tag-remove-options input[type="checkbox"]`)}).length === 1`,
+                "late union tag found through native search",
+            );
+            await click({ selector: `${sheet} .tag-remove-options input[type="checkbox"]` });
+            await expectPage(
+                `document.querySelector(${JSON.stringify(`${sheet} .tag-remove-options`)})?.textContent.includes('Will remove')`,
+                "marked removal has a literal preview",
+            );
+            await page.type({ selector: "#session-tag-remove-search" }, "no-such-scale-tag");
+            await expectPage(
+                `document.querySelectorAll(${JSON.stringify(`${sheet} .tag-remove-options input[type="checkbox"]`)}).length === 0`,
+                "search can hide the marked row",
+            );
+            await expectPage(
+                `document.querySelector(${JSON.stringify(`${sheet} .tag-remove-count`)})?.textContent.includes('Will remove · 1') && document.querySelector(${JSON.stringify(`${sheet} .tag-remove-draft [aria-label="Cancel removing scale-15-7"]`)}) !== null`,
+                "hidden marked removal remains counted and reachable as a pending chip",
+            );
+            await page.evaluate(
+                `document.querySelector(${JSON.stringify(`${sheet} .tag-remove-draft [aria-label="Cancel removing scale-15-7"]`)}).focus()`,
+            );
+            await page.press("Enter");
+            await expectPage(
+                `!document.querySelector(${JSON.stringify(`${sheet} .tag-remove-draft [aria-label="Cancel removing scale-15-7"]`)}) && document.activeElement === document.querySelector('#session-tag-remove-search')`,
+                "keyboard cancel removes the hidden selection and restores search focus",
+            );
+            await page.type({ selector: "#session-tag-remove-search" }, lateTag);
+            await expectPage(
+                `document.querySelectorAll(${JSON.stringify(`${sheet} .tag-remove-options input[type="checkbox"]`)}).length === 1`,
+                "late tag found again",
+            );
+            await click({ selector: `${sheet} .tag-remove-options input[type="checkbox"]` });
+            await page.type({ selector: "#session-tag-remove-search" }, "scale-00");
+            await expectPage(
+                `document.querySelector(${JSON.stringify(`${sheet} .tag-remove-draft [aria-label="Cancel removing scale-15-7"]`)}) !== null && document.querySelectorAll(${JSON.stringify(`${sheet} .tag-remove-options input[type="checkbox"]`)}).length === 8`,
+                "search leaves pending removal chips intact",
+            );
+            await addName("scale-added");
+        };
+
+        await queueChanges();
+        await clickText("Cancel");
+        await sheetType(null);
+
+        for (const id of targets) {
+            assert.deepEqual(
+                app.sessionMeta(id)?.tags,
+                originals.get(id),
+                "Cancel leaves every target unchanged",
+            );
+        }
+
+        assert.deepEqual(app.sessionMeta(outside)?.tags, ["outside-only"]);
+        await clickText("Edit tags", `${list} .select-bar`);
+        await sheetType("session-tags");
+        await queueChanges();
+        // Change matching visibility and metadata after opening; Save must still use only captured IDs.
+        await app.commands.updateSession(outside, owner(app), {
+            title: "Batch scale late outsider",
+        });
+        await app.commands.updateSession(firstTarget, owner(app), { archived: true });
+        await app.commands.updateSessionTags(owner(app), {
+            ids: [Number(firstTarget)],
+            add: ["concurrent-kept"],
+        });
+        await clickText("Save tags");
+        await sheetType(null);
+        await until(
+            () => targets.every((id) => app.sessionMeta(id)?.tags?.includes("scale-added")),
+            "saved addition reaches all captured IDs, including externally archived target",
+        );
+
+        for (const id of targets) {
+            const expected = [
+                ...originals.get(id)!.filter((tag) => tag !== lateTag),
+                "scale-added",
+                ...(id === firstTarget ? ["concurrent-kept"] : []),
+            ].sort();
+
+            assert.deepEqual(
+                app.sessionMeta(id)?.tags,
+                expected,
+                "Save applies only the explicit patch and preserves unmentioned/concurrent tags",
+            );
+        }
+
+        assert.deepEqual(
+            app.sessionMeta(outside)?.tags,
+            ["outside-only"],
+            "a newly matching outsider is not added to captured scope",
+        );
     },
 );
