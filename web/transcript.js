@@ -2022,8 +2022,11 @@ function callDeps(block, results, slots, approvals) {
     return deps;
 }
 
-/** What a run of Pi's words shows besides its text: the answer's reactions and pin, and who is looking. */
-function replyDeps(item) {
+/**
+ * What a run of Pi's words shows besides its text: the answer's reactions and pin, who is looking, and the actions under
+ * it (`actions`, the reply slot's `slotKey`, the same for every answer of a draw).
+ */
+function replyDeps(item, actions) {
     const { view, users, me, server } = store.state;
     const { entry } = item;
     const reactions = view.reactions?.[entry.id];
@@ -2040,7 +2043,7 @@ function replyDeps(item) {
         reactions === undefined ? "" : JSON.stringify(reactions),
         (view.pins ?? []).some((pin) => pin.entryId === entry.id),
         // The actions under it: the app's and extensions', as arranged (`slots.js`).
-        slotKey("reply"),
+        actions,
     ];
 }
 
@@ -2082,6 +2085,7 @@ function partialEntry(blocks) {
  */
 function Items({ items, results, slots, approvals, busy, past = false, conversationId }) {
     let lastMessage = -1;
+    const actions = slotKey("reply");
 
     items.forEach((item, index) => {
         if (item.type === "row" && item.entry.kind === "user") {
@@ -2133,7 +2137,7 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
         }
 
         if (item.type === "reply") {
-            return html`<${Memo} key=${item.key} deps=${replyDeps(item)}>
+            return html`<${Memo} key=${item.key} deps=${replyDeps(item, actions)}>
                 <${Reply} item=${item} conversationId=${conversationId} />
             <//>`;
         }

@@ -33,7 +33,7 @@ import {
     panelsBeside,
     store,
 } from "./store.js";
-import { fromExtensions, SLOTS } from "./slots.js";
+import { fromExtensions, SLOTS, slotsChanged } from "./slots.js";
 import { setCallSummary } from "./turns.js";
 import {
     html,
@@ -232,8 +232,13 @@ function chargeOpen(record) {
 /** Whether a redraw is due at the next frame, for every change made until then. */
 let due = false;
 
-/** Draw what extensions add again at the next frame: every change until then goes in the same redraw. */
+/**
+ * Draw what extensions add again at the next frame: every change until then goes in the same redraw. The slots' orders
+ * (`slots.js`) are worked out again at once, for a draw that comes before then.
+ */
 function redraw() {
+    slotsChanged();
+
     if (due) {
         return;
     }
@@ -552,6 +557,7 @@ function teardown(record) {
     }
 
     record.arrangements.clear();
+    slotsChanged();
 
     if (record.calls.size > 0) {
         record.calls.clear();

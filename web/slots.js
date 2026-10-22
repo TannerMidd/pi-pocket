@@ -25,16 +25,27 @@ const core = new Map(Object.keys(SLOTS).map((slot) => [slot, []]));
 let extensionItems = () => [];
 /** What extensions arranged: `(slot) => [{ module, title, hide, order }]`, in the server's order of modules. */
 let extensionArrangements = () => [];
+/** Counts changes to the items and arrangements above: each slot's order (`arranged`) is kept until the next. */
+let version = 0;
+/** Each slot's order as it was last worked out: `{ version, layout, list, key }`. */
+const kept = new Map();
 
 /** Add one of the app's own items to a slot. */
 export function defineItem(slot, item) {
     core.get(slot).push(item);
+    version++;
 }
 
 /** Where extensions' items and arrangements come from: `extension-ui.js`, which imports this module. */
 export function fromExtensions(items, arrangements) {
     extensionItems = items;
     extensionArrangements = arrangements;
+    version++;
+}
+
+/** Extensions' items or arrangements changed: `extension-ui.js` says so as they do, before it draws them. */
+export function slotsChanged() {
+    version++;
 }
 
 /**
@@ -69,9 +80,37 @@ function place(list, item, target, after) {
 /**
  * Every item of a slot, in the order it shows: `{ item, hidden, hiddenBy }`, `hiddenBy` naming the extension that hid it
  * when the person made no choice of their own. Items that show nothing now (no artifacts yet, say) are here too: the
- * Layout settings list them all.
+ * Layout settings list them all. Worked out again only when the items, what extensions arranged, or the person's
+ * layout changed: the top bar, the message box, the status line, and each of Pi's answers ask on every draw.
  */
 export function arranged(slot) {
+    return keptFor(slot).list;
+}
+
+function keptFor(slot) {
+    const layout = prefs().layout;
+    const last = kept.get(slot);
+
+    if (last?.version === version && last.layout === layout) {
+        return last;
+    }
+
+    const list = arrange(slot);
+    const next = {
+        version,
+        layout,
+        list,
+        key: list
+            .map(({ item, hidden }) => `${item.id}${item.revision ?? ""}${hidden ? "-" : "+"}`)
+            .join(),
+    };
+
+    kept.set(slot, next);
+
+    return next;
+}
+
+function arrange(slot) {
     const defaultPlace = (item) => item.order ?? SLOTS[slot].extensions;
     let list = [...core.get(slot), ...extensionItems(slot)]
         .map((item, index) => ({ item, index }))
@@ -131,10 +170,7 @@ export function slotItems(slot, context = {}) {
  * What a slot holds and how it is arranged, as one string: for a place that draws again only when its inputs change
  * (the transcript's answers), so a change to the slot draws it again.
  */
-export const slotKey = (slot) =>
-    arranged(slot)
-        .map(({ item, hidden }) => `${item.id}${item.revision ?? ""}${hidden ? "-" : "+"}`)
-        .join();
+export const slotKey = (slot) => keptFor(slot).key;
 
 // ─── This browser's person's own choices ─────────────────────────────────────
 
