@@ -2188,12 +2188,16 @@ kbd {
 .timeline {
     position: relative;
     padding: calc(6px * var(--space-y)) 0;
-    animation: unroll var(--t-in) var(--ease-out);
 }
 
 /* A group that is one thought alone: its words, under the line that names it. */
 .activity-thought {
     padding: calc(10px * var(--space-y)) calc(12px * var(--space-x)) calc(12px * var(--space-y));
+}
+
+/* What a person opened unrolls (`unrolling`, transcript.js); what opens by itself (a session's open groups, a group
+ * that goes live) shows at once. A clip-path is painted on each frame, which a phone cannot spare as a session opens. */
+:is(.timeline, .activity-thought, .step-body).unrolling {
     animation: unroll var(--t-in) var(--ease-out);
 }
 
@@ -2398,10 +2402,6 @@ kbd {
 
 .step-extras + .step-body {
     margin-top: 0;
-}
-
-.step-body {
-    animation: unroll var(--t-in) var(--ease-out);
 }
 
 .step-extras > .thumbs {
@@ -16801,7 +16801,7 @@ pre.gallery-code {
 }
 
 /* A group of steps opening: it unrolls on the glide, and its first steps drop in one after another. */
-:root[data-motion="fluid"] :is(.timeline, .activity-thought, .step-body) {
+:root[data-motion="fluid"] :is(.timeline, .activity-thought, .step-body).unrolling {
     animation: unroll var(--t-glide) var(--ease-glide);
 }
 

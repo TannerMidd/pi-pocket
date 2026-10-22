@@ -718,10 +718,18 @@ function callStatus({ result, slot, approval, decision, streaming, canRun, busy 
     return streaming || (busy && canRun) ? "running" : "stopped";
 }
 
+/**
+ * `unrolling` for what a person opened just now (`unrolled`, when they tapped it): it unrolls (style.css). What opens by
+ * itself, as a session opens or a group goes live, shows at once. Never tapped is -Infinity, not 0: the page's clock
+ * starts at 0 as it loads, so 0 would read as a tap just now.
+ */
+const unrolling = (unrolled) => (performance.now() - unrolled.current < 600 ? "unrolling" : "");
+
 /** A thought, on the timeline: open it to read it. */
 function ThoughtStep({ block, streaming, reading }) {
     // With Show thinking on, a thought once written shows its words (the live line shows the one being written).
     const [chosen, setChosen] = useState(null);
+    const unrolled = useRef(-Infinity);
     // One whose words have not come yet (`partial`, as a session opens) opens once they have, if it was asked to.
     const open =
         !block.partial && (chosen ?? (reading && !streaming && Boolean(block.text?.trim())));
@@ -736,7 +744,10 @@ function ThoughtStep({ block, streaming, reading }) {
                 class="step-head"
                 data-part="step-head"
                 aria-expanded=${open}
-                onClick=${() => setChosen(!open)}
+                onClick=${() => {
+                    unrolled.current = open ? -Infinity : performance.now();
+                    setChosen(!open);
+                }}
             >
                 <${StepMark} status=${streaming ? "running" : "done"} kind="thought" />
                 <span class="step-label" data-part="step-label">
@@ -748,7 +759,7 @@ function ThoughtStep({ block, streaming, reading }) {
         </div>
         ${
             open &&
-            html`<div class="step-body" data-part="step-detail">
+            html`<div class=${`step-body ${unrolling(unrolled)}`} data-part="step-detail">
                 <div class="thought-body">${block.text}</div>
             </div>`
         }
@@ -768,6 +779,7 @@ function ToolStep({
     conversationId,
 }) {
     const [open, setOpen] = useState(false);
+    const unrolled = useRef(-Infinity);
     const [full, setFull] = useState(null);
     const view = store.state.view;
     const decision = decisionOf(view.decisions, call, result);
@@ -945,7 +957,9 @@ function ToolStep({
             parts.push(html`<button class="link" onClick=${loadFull}>Load everything</button>`);
         }
 
-        body = html`<div class="step-body" data-part="step-detail">${parts}</div>`;
+        body = html`<div class=${`step-body ${unrolling(unrolled)}`} data-part="step-detail">
+            ${parts}
+        </div>`;
     }
 
     const artifact = isArtifactCall(call.name) && details?.id ? details : null;
@@ -990,7 +1004,10 @@ function ToolStep({
                 class="step-head"
                 data-part="step-head"
                 aria-expanded=${open}
-                onClick=${() => setOpen(!open)}
+                onClick=${() => {
+                    unrolled.current = open ? -Infinity : performance.now();
+                    setOpen(!open);
+                }}
             >
                 <${StepMark} status=${status} kind=${call.name === "subagent" ? "agent" : ""} />
                 <span class="step-label" data-part="step-label">${label}</span>
@@ -1166,8 +1183,8 @@ function ActivityGroup({
     const id = `${conversationId}:${item.key}`;
     const [, redraw] = useState(0);
     const [fresh] = useState(() => settledFor !== null && settledFor === conversationId);
-    // When a click opened it: its first steps then drop in one after another (Fluid motion, style.css).
-    const unrolled = useRef(0);
+    // When a click opened it: it unrolls, and with Fluid motion its first steps drop in one after another (style.css).
+    const unrolled = useRef(-Infinity);
 
     if (
         revealing.entryId !== null &&
@@ -1270,7 +1287,7 @@ function ActivityGroup({
             data-part="activity-head"
             aria-expanded=${open}
             onClick=${() => {
-                unrolled.current = open ? 0 : performance.now();
+                unrolled.current = open ? -Infinity : performance.now();
                 keep(openedGroups, id, !open);
                 redraw((n) => n + 1);
             }}
@@ -1283,7 +1300,7 @@ function ActivityGroup({
         ${
             open &&
             lone &&
-            html`<div class="activity-thought">
+            html`<div class=${`activity-thought ${unrolling(unrolled)}`}>
                 <div class="thought-body">${lone.block.text}</div>
             </div>`
         }
@@ -1291,7 +1308,7 @@ function ActivityGroup({
             open &&
             !lone &&
             html`<div
-                class=${`timeline ${performance.now() - unrolled.current < 600 ? "unrolling" : ""}`}
+                class=${`timeline ${unrolling(unrolled)}`}
                 data-part="timeline"
             >
                 ${
