@@ -397,9 +397,7 @@ function SessionRow({
     const mark = stateMark(session, live > 0, marked, unseen);
     // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
     // And the first extension action with an icon (`pocket.sessionAction`). None where nothing hovers (`hovers`).
-    const acts = hovers
-        ? (steers ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0)
-        : 0;
+    const acts = hovers ? (steers ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0) : 0;
 
     return html`<div
         class=${`session-row ${arrival === null ? "" : "arriving"} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
@@ -570,6 +568,24 @@ function SessionRow({
 
 /** A row draws again when what it shows changes. Its place (`index`) counts only as it mounts, for its rise-in. */
 const MemoRow = memo(SessionRow, ["index"]);
+
+/**
+ * The branch lines a linked row draws, one array for each shape: the forest makes new ones each time, and a memoized
+ * row would draw again for an array that only looks the same. There are few shapes (a row is at most a few deep).
+ */
+const branchShapes = new Map();
+
+function sameBranches(branches) {
+    const key = branches.join();
+    let shape = branchShapes.get(key);
+
+    if (shape === undefined) {
+        shape = Object.freeze([...branches]);
+        branchShapes.set(key, shape);
+    }
+
+    return shape;
+}
 
 /**
  * Sessions in groups: pinned, then by day or by folder. While searching, one flat list of matches. `today` is when
@@ -1119,10 +1135,7 @@ function AllSessions({ compact = false }) {
 
     // The tabs are as wide as each other: only another tab, or the bar resized, moves the marker.
     const tabBar = useSlide(tabs, "button.on", "x", tab);
-    const count = useMemo(
-        () => sessions.filter((session) => !session.archived).length,
-        [sessions],
-    );
+    const count = useMemo(() => sessions.filter((session) => !session.archived).length, [sessions]);
     const filters = sessionFilters();
     const steers = canSteer();
     // Made again only when extensions or this person's steering change: rows keep the same action while they do not.
@@ -1148,7 +1161,7 @@ function AllSessions({ compact = false }) {
         return html`<${MemoRow}
             key=${session.id}
             session=${session}
-            branches=${branches}
+            branches=${sameBranches(branches)}
             index=${index}
             number=${numbers.get(session.id)}
             needle=${needle}

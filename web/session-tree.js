@@ -1,3 +1,6 @@
+/** A top row's branches: none. One array for all of them, so a memoized row sees the same value each time. */
+const NO_BRANCHES = Object.freeze([]);
+
 // Presentation only: linked sessions stay independent sessions, never subagents of the one that started them.
 export function sessionForest(shown, { pinned = [], folders = false } = {}) {
     const byId = new Map(shown.map((session) => [session.id, session]));
@@ -52,7 +55,7 @@ export function sessionForest(shown, { pinned = [], folders = false } = {}) {
         }
 
         const family = [];
-        const pending = [{ session, branches: [] }];
+        const pending = [{ session, branches: NO_BRANCHES }];
         let updatedAt = session.updatedAt;
 
         while (pending.length > 0) {
