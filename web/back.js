@@ -384,6 +384,12 @@ function heading(way) {
 }
 
 /**
+ * A route's slide plays now: what it brings in needs no entrance of its own (`transcript.js`). Only narrower than the
+ * sidebar shows (style.css).
+ */
+export const routeSliding = () => routeWindow !== null && matchMedia("(max-width: 959px)").matches;
+
+/**
  * Show a route: its own entry, after the layers above this one, so back from it comes back here. With `replace`, it
  * takes this route's place instead. The history entry follows the app a moment later while open layers come off.
  */

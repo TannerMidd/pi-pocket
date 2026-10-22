@@ -1463,6 +1463,10 @@ kbd {
     gap: calc(16px * var(--space-y));
     font-size: var(--text-size, 15px);
     line-height: var(--leading);
+}
+
+/* A session opened rises into place; on a phone, where the route slides it in, the slide alone (`transcript.js`). */
+.transcript.rising {
     animation: rise-in 0.36s var(--ease-out);
 }
 
@@ -16750,7 +16754,7 @@ pre.gallery-code {
 }
 
 /* A session opened: its conversation settles up into place. */
-:root[data-motion="fluid"] .transcript {
+:root[data-motion="fluid"] .transcript.rising {
     animation: fluid-rise var(--t-glide) var(--ease-glide);
 }
 

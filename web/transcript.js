@@ -3,6 +3,7 @@
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { initials, personColor } from "./avatar.js";
+import { routeSliding } from "./back.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
@@ -2520,6 +2521,13 @@ export function Transcript() {
     const keep = useRef(null);
     const counted = useRef(0);
     const [showJump, setShowJump] = useState(false);
+    // Opened by a route on a phone, the scroller slides in with it: the column does not rise in as well, unless it comes
+    // after the slide (a slow connection). Chosen as the column first draws, so a draw after does not start it.
+    const entrance = useRef(null);
+
+    if (entrance.current === null && view.conversation && !missing) {
+        entrance.current = routeSliding() ? "" : "rising";
+    }
 
     // Keep the snapshot's rows stable across unrelated UI updates, including scrolling the thought reading area. Only
     // the entries this tab has, which are the newest: earlier ones load as "Show earlier messages" shows them.
@@ -2850,7 +2858,7 @@ export function Transcript() {
         conversation.forkedFrom && sessions.find((each) => each.id === conversation.forkedFrom.id);
 
     return html`<main class="scroller" ref=${scroller} onScroll=${onScroll}>
-        <div class="transcript" data-part="transcript" ref=${column}>
+        <div class=${`transcript ${entrance.current}`} data-part="transcript" ref=${column}>
             <${LinkedSessions} />
             ${
                 conversation.forkedFrom &&
