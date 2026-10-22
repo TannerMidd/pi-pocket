@@ -2556,23 +2556,6 @@ export function Transcript() {
     );
     const [fetching, setFetching] = useState(false);
 
-    // The room the pane gives, for what may run wider than the column (a reply's code blocks and tables: style.css).
-    useEffect(() => {
-        const element = scroller.current;
-
-        if (!element || typeof ResizeObserver !== "function") {
-            return undefined;
-        }
-
-        const measure = new ResizeObserver(() =>
-            element.style.setProperty("--pane-room", `${element.clientWidth}px`),
-        );
-
-        measure.observe(element);
-
-        return () => measure.disconnect();
-    }, [scroller.current]);
-
     // After a draw that can change the rows, not after every change to the store (each draws the app): to the bottom, or
     // back to where the reader was, before the draw shows. What grows between such draws is the ResizeObserver's below.
     useLayoutEffect(() => {

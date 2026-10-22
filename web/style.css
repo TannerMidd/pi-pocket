@@ -1444,6 +1444,11 @@ kbd {
      * message box, when a session long enough to scroll opens. */
     scrollbar-gutter: stable both-edges;
     position: relative;
+    /* The room it gives, for what may run wider than the column (a reply's code blocks and tables, below): the
+     * browser's own measure as it lays out, inside the scroll bar's gutters, so no script restyles the conversation
+     * after it is drawn. A fixed or sticky element in it keeps its place: inline-size containment makes neither a
+     * containing block nor a stacking context. */
+    container-type: inline-size;
 }
 
 /* A column of turns: a person's message, what Pi did, Pi's reply, an approval, the live line. Its text size is
@@ -1758,16 +1763,13 @@ kbd {
 }
 
 /*
- * A reply's code blocks and tables may run wider than its words, up to the pane's room (--pane-room, which
- * transcript.js measures) less the column's padding. A code block as wide as its longest line, at least the column's
- * width, centered on the column; a table as wide as its cells, from the column's start toward the pane's edge. On a
- * phone, and in a pane no wider than the column, the room is the column, so nothing changes.
+ * A reply's code blocks and tables may run wider than its words, up to the pane's room (the scroller's width, `cqi`)
+ * less the column's padding. A code block as wide as its longest line, at least the column's width, centered on the
+ * column; a table as wide as its cells, from the column's start toward the pane's edge. On a phone, and in a pane no
+ * wider than the column, the room is the column, so nothing changes.
  */
 .transcript {
-    --wide-room: max(
-        100%,
-        calc(var(--pane-room, 100%) - 56px * var(--space-x) - var(--transcript-gutter))
-    );
+    --wide-room: max(100%, calc(100cqi - 56px * var(--space-x) - var(--transcript-gutter)));
 }
 
 [data-part~="reply"] :is(.md, .md-part) > .code {
