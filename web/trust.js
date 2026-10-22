@@ -43,12 +43,21 @@ export function loadTrust({ force = false } = {}) {
         return;
     }
 
-    store.set({ trust: { conversationId, cwd, info: known ? trust.info : null } });
+    // Asked for, which nothing shows until the answer: noted without a draw (each draw is the whole app's). The answer
+    // draws only when it says something new.
+    if (!known) {
+        store.note({ trust: { conversationId, cwd, info: null } });
+    }
+
     actions.trust().then(
         (info) => {
             const now = store.state.trust;
 
-            if (now?.conversationId === conversationId && now.cwd === cwd) {
+            if (
+                now?.conversationId === conversationId &&
+                now.cwd === cwd &&
+                JSON.stringify(info) !== JSON.stringify(now.info)
+            ) {
                 store.set({ trust: { ...now, info } });
             }
         },
