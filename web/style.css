@@ -4493,6 +4493,11 @@ pre.diff .del {
 .session-row {
     position: relative;
     padding-inline-start: calc(var(--linked-depth, 0) * 14px);
+}
+
+/* A row new to this page rises in, the rows in turn. Back to the list builds it again: those rows show as they were,
+ * and the list slides in whole (`data-route`), so it does not flicker (`sessions.js`). */
+.session-row.arriving {
     animation: rise-in 0.38s var(--ease-out) backwards;
     animation-delay: calc(min(var(--i, 0), 14) * 18ms);
 }

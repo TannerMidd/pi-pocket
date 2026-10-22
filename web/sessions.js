@@ -296,6 +296,12 @@ const ROW_STATES = {
     seen: "idle",
 };
 
+/**
+ * Sessions whose rows this page has drawn. A row rises in only the first time: back to the list on a phone builds the
+ * list anew, and every row rising in again made it flicker. A session new to the page (started since) still rises in.
+ */
+const shownRows = new Set();
+
 /** A session's square, as its row in the list draws it (the home screen's Jump back in too). */
 export function sessionMark(session) {
     const counts = session.subagents ?? {};
@@ -325,6 +331,12 @@ function SessionRow({
     onSelect,
     hoverAction,
 }) {
+    // Where it rises in, in turn, when it is new to this page; null when it shows as it was.
+    const [arrival] = useState(() => (shownRows.has(session.id) ? null : index));
+
+    useLayoutEffect(() => {
+        shownRows.add(session.id);
+    }, []);
     const { conversationId, server, me } = store.state;
     const pinned = isPinned(session.id);
     const open = session.id === conversationId && !session.archived;
@@ -377,11 +389,11 @@ function SessionRow({
     const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0);
 
     return html`<div
-        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
+        class=${`session-row ${arrival === null ? "" : "arriving"} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
         data-part="session-row"
         data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
-        style=${`--i:${index};--linked-depth:${Math.min(branches.length, 3)}`}
+        style=${`${arrival === null ? "" : `--i:${arrival};`}--linked-depth:${Math.min(branches.length, 3)}`}
     >
         ${
             branches.length > 0 &&
