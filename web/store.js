@@ -791,7 +791,8 @@ const handlers = {
     subagents: (agents) => store.state.board && store.set({ boardAgents: agents }),
     view: applyView,
     // This person's PiP: its conversation, whether it works, and when it last answered (`pip.js`); null for none.
-    pip: (pip) => store.set({ pip }),
+    // Sent again on each connect, mostly as it was.
+    pip: (pip) => setChanged({ pip: kept(store.state.pip, pip) }),
     // PiP's conversation, while this tab's PiP panel is open.
     pipview: applyPipView,
     chat: applyChat,
