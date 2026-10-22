@@ -114,6 +114,19 @@ async function describeTask(
             };
         }
 
+        case "pocket.usage-resume": {
+            const record = await app.harness.getTask(node.id, context);
+            const at = (record?.input as { at?: number } | undefined)?.at;
+            const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+            return {
+                label:
+                    at === undefined
+                        ? "waiting for the usage reset"
+                        : `auto-resume after usage reset at ${describeMoment(at, zone)}`,
+            };
+        }
+
         case "pocket.shell": {
             const command = await app.shell.describe(node.id);
 

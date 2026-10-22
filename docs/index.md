@@ -42,6 +42,7 @@ A drop-in extension stays when Pi Pocket updates, and the owner can turn it off 
 - [map.md](map.md): where each part of the code is, and how to add the usual things.
 - [architecture.md](architecture.md): how the parts depend on each other, and the orders that they need.
 - [features.md](features.md): what each feature does, as people use it.
+- [auto-resume.md](auto-resume.md): continue a chat after a supported subscription usage reset, with global defaults, per-chat choices, and cancellation.
 - [../SECURITY.md](../SECURITY.md): what Pi Pocket protects, and what it does not.
 
 The same pages are on the web, with search: https://tannermidd.github.io/pi-pocket/docs/.

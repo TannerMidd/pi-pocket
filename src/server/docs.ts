@@ -369,6 +369,28 @@ export const PlanDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({
     initial: () => ({ on: false }),
 });
 
+export type UsageResume = {
+    on: boolean;
+    /** Explicit per-chat choice; absent on older documents and chats following the app default. */
+    override?: boolean;
+    pending?: {
+        taskId: TaskId;
+        sourceTaskId: TaskId;
+        at: number;
+        provider: string;
+    };
+};
+
+/** Opt-in continuation after a subscription usage reset. Forks never inherit a pending wake-up. */
+export const UsageResumeDoc = defineDoc<UsageResume>({
+    kind: "pocket.usage-resume",
+    version: 1,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ on: false }),
+});
+
 export type Schedule = {
     /** Short and stable: what people and Pi use to cancel it. */
     id: string;

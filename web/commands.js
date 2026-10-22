@@ -295,6 +295,32 @@ const COMMANDS = [
         },
     },
     {
+        name: "auto-resume",
+        args: "[on|off|default]",
+        description: "Continue this chat automatically after a five-hour subscription usage reset",
+        available: isSession,
+        run: async (arg) => {
+            if (arg !== "" && arg !== "on" && arg !== "off" && arg !== "default") {
+                throw new Error("Use /auto-resume on, off, or default.");
+            }
+
+            const on =
+                arg === "default"
+                    ? null
+                    : arg === ""
+                      ? !store.state.view.usageResume?.on
+                      : arg === "on";
+
+            await actions.setUsageResume(on);
+            notify(
+                "info",
+                on === null
+                    ? "Auto-resume follows the app default."
+                    : `Auto-resume after usage reset is ${on ? "on" : "off"}.`,
+            );
+        },
+    },
+    {
         name: "schedule",
         args: "<when> <message>",
         description:

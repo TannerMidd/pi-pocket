@@ -469,6 +469,21 @@ export function MenuSheet({ places = true }) {
             ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
             ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
             ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
+            ${
+                session &&
+                steer &&
+                driving &&
+                item(
+                    "Auto-resume after usage reset",
+                    () => attempt(() => actions.setUsageResume(!view.usageResume?.on)),
+                    view.usageResume?.pending
+                        ? `waiting until ${new Date(view.usageResume.pending.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        : view.usageResume?.on
+                          ? `on${view.usageResume.inherited ? " (app default)" : " (this chat)"}`
+                          : `off${view.usageResume?.inherited ? " (app default)" : " (this chat)"}`,
+                )
+            }
+            ${session && steer && driving && view.usageResume?.inherited === false && item("Use app auto-resume default", () => attempt(() => actions.setUsageResume(null)), server?.usageResumeDefault ? "on" : "off")}
             ${conversation && memoryAvailable() && item("Memory", () => openSheet({ type: "memory" }), memoryHint(memory))}
             ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), view.schedules.length === 0 ? "none" : `${view.schedules.length} coming`)}
             ${
@@ -524,6 +539,7 @@ export function MenuSheet({ places = true }) {
         }
         <div class="group">
             <div class="group-title">App</div>
+            ${me?.role === "owner" && server?.usageResumeDefault !== undefined && item("Auto-resume by default", () => attempt(() => actions.setUsageResumeDefault(!server.usageResumeDefault)), `${server.usageResumeDefault ? "on" : "off"} · all chats unless overridden`)}
             ${item("Appearance", () => openSheet({ type: "appearance" }), lookLabel())}
             ${!touch && item("Keyboard shortcuts", () => openSheet({ type: "shortcuts" }), "?")}
             ${

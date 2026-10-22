@@ -576,6 +576,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 defaultModel?: unknown;
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
+                usageResumeDefault?: unknown;
             }>(request);
 
             // One at a time: a second that fails must not leave the first changed.
@@ -585,9 +586,14 @@ export function createApi(options: HttpOptions, auth: Auth) {
                     body.defaultModel,
                     body.pipCompactAt,
                     body.subagentModels,
+                    body.usageResumeDefault,
                 ].filter((value) => value !== undefined).length > 1
             ) {
                 throw new HttpError(400, "Change one setting at a time.");
+            }
+
+            if (body.usageResumeDefault !== undefined) {
+                await app.setUsageResumeDefault(user, body.usageResumeDefault);
             }
 
             // The models subagents may run on besides their session's own: the owner's (checked in `app.ts`).

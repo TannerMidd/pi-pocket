@@ -82,6 +82,8 @@ interface PocketConfig {
      * Absent or empty: none, and subagents always run on their session's model.
      */
     subagentModels?: string[];
+    /** Auto-resume main chats unless they have a per-chat override. */
+    usageResumeDefault?: boolean;
 }
 
 /** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
@@ -230,6 +232,15 @@ export class ConfigStore {
 
     get disabledExtensions(): readonly string[] {
         return this.#config.disabledExtensions ?? [];
+    }
+
+    get usageResumeDefault(): boolean {
+        return this.#config.usageResumeDefault === true;
+    }
+
+    set usageResumeDefault(on: boolean) {
+        this.#config.usageResumeDefault = on;
+        this.save();
     }
 
     get enabledExtensions(): readonly string[] {

@@ -181,6 +181,22 @@ export async function conversationRoutes(
         return json(response, 200, { ok: true });
     }
 
+    if (third === "usage-resume" && fourth === "stop" && method === "POST") {
+        const body = await readJson<{ taskId?: unknown }>(request);
+
+        await app.usageResumes.cancel(id, user, body.taskId);
+
+        return json(response, 200, { ok: true });
+    }
+
+    if (third === "usage-resume" && fourth === undefined && method === "POST") {
+        const body = await readJson<{ on?: unknown }>(request);
+
+        await app.usageResumes.set(id, user, body.on);
+
+        return json(response, 200, { ok: true });
+    }
+
     if (third === "plan" && method === "POST") {
         const body = await readJson<{ on?: unknown; approve?: unknown }>(request);
 

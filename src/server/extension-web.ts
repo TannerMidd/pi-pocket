@@ -75,6 +75,7 @@ export const BUILT_IN_COMMANDS: ReadonlySet<string> = new Set([
     "name",
     "cwd",
     "plan",
+    "auto-resume",
     "schedule",
     "remember",
     "until",
