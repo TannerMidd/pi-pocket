@@ -803,13 +803,30 @@ export function reloadChanges(id = store.state.conversationId) {
 
     // The conversation's newest entry when it asked: nothing newer, and Pi quiet, what it said still holds.
     const entry = id === store.state.conversationId ? store.state.view.order?.at(-1) : undefined;
+    // What shows now: an answer the same as it draws nothing again (each draw is the whole app's).
+    const shown = JSON.stringify([known.data, known.error]);
 
     known.pending = actions.changes(id).then(
-        (data) => Object.assign(known, { data, error: null, pending: null, at: Date.now(), entry }),
+        (data) => {
+            // The same answer keeps its object, so what is built from it is not built again.
+            const same = JSON.stringify(data) === JSON.stringify(known.data);
+
+            Object.assign(known, {
+                data: same ? known.data : data,
+                error: null,
+                pending: null,
+                at: Date.now(),
+                entry,
+            });
+        },
         (failure) => Object.assign(known, { error: failure.message, pending: null }),
     );
     changesCache.set(id, known);
-    known.pending.finally(() => store.set({}));
+    known.pending.finally(() => {
+        if (JSON.stringify([known.data, known.error]) !== shown) {
+            store.set({});
+        }
+    });
 
     return known.pending;
 }
