@@ -21,6 +21,7 @@ import type { PipCompaction } from "./pip-compact.ts";
 import type { Schedules } from "./schedules.ts";
 import type { RepoWatches } from "./repo-watches.ts";
 import type { Watches } from "./watches.ts";
+import type { WebAccessManager } from "./web-access.ts";
 
 /** A session linked to another, as `host.linkedSessions.list` gives it to the session that asks. */
 export interface LinkedSession {
@@ -276,6 +277,11 @@ export interface PocketHost {
      * @experimental In 0.14: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     readonly linkedSessions: LinkedSessionsApi;
+    /** Configured web operations for the built-in web access tools. */
+    readonly webAccess: Pick<
+        WebAccessManager,
+        "search" | "fetchContent" | "crawl" | "research" | "researchStatus"
+    >;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "list" | "task">;
     /** Sessions' goals: the goals extension runs their checks and counts them. */

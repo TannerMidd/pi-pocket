@@ -1,7 +1,15 @@
 // Model providers: signing in and out, the models subagents may use besides their session's own, and the dialog a
 // sign-in uses to ask for a code or a key.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
+import {
+    api,
+    attempt,
+    closeSheet,
+    closeSignIn,
+    openSheet,
+    signInAnswered,
+    store,
+} from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 import { RefreshModels } from "../model-refresh.js";
 
@@ -257,6 +265,13 @@ export function ProvidersSheet() {
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
                     <${RefreshModels} />
+                    <button
+                        class="button small ghost"
+                        style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; margin-block: 4px;"
+                        onClick=${() => openSheet({ type: "web-access" })}
+                    >
+                        <${Icon} name="globe" size=${14} /> Web search providers →
+                    </button>
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
