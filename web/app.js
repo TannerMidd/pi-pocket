@@ -1,6 +1,6 @@
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { folderColor } from "./avatar.js";
 import { canGoBack, goBack, replaceAddress, startHistory, useBack } from "./back.js";
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
@@ -199,15 +199,21 @@ function Topbar() {
         .split("/")
         .pop();
     const branch = headLabel(view.branch) || conversation?.worktree?.branch;
-    const title =
-        conversation?.title ??
-        store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ??
-        (store.state.missing ? "Not found" : "Loading…");
+    const { sessions, conversationId } = store.state;
+    // Both read every session: again only when the list changes, not on each word Pi streams.
+    const listed = useMemo(
+        () => sessions.find((session) => session.id === conversationId)?.title,
+        [sessions, conversationId],
+    );
+    const title = conversation?.title ?? listed ?? (store.state.missing ? "Not found" : "Loading…");
     // Other sessions waiting for an approval, counted on the way back to them.
-    const waiting = store.state.sessions.filter(
-        (session) =>
-            session.waiting && !session.archived && session.id !== store.state.conversationId,
-    ).length;
+    const waiting = useMemo(
+        () =>
+            sessions.filter(
+                (session) => session.waiting && !session.archived && session.id !== conversationId,
+            ).length,
+        [sessions, conversationId],
+    );
     // How far down it reaches: PiP's window on a short wide screen stops below its buttons.
     const edge = useEdge("--topbar-h", (rect) => rect.bottom);
 
