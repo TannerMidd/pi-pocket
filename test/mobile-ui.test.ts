@@ -597,7 +597,8 @@ test(
         const fetched = window.fetch;
         window.fetch = (url, init) =>
             String(url).endsWith("/submit") ? Promise.reject(new TypeError("offline")) : fetched(url, init);
-        (await import("/pip.js")).askPip("hello pip");
+        // Awaited: a promise the script leaves behind can be collected before it settles, which fails the call.
+        await (await import("/pip.js")).askPip("hello pip");
     `);
         await until(
             async () =>
