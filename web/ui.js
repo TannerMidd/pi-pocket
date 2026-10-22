@@ -1428,38 +1428,45 @@ export class Boundary extends Component {
     }
 }
 
-/** The parts of the store a streaming answer changes several times a second: the open conversation's, and PiP's. */
-const VIEWS = new Set(["view", "pipView"]);
-
 /**
- * Whether the store changed between two states only in the views (`VIEWS`). Nothing changed at all is no: `store.set({})`
- * draws everything again.
+ * Whether the store changed in none of `keys` between two states. A change to nothing at all is a change:
+ * `store.set({})` draws everything again (a media query that changed, say).
  */
-function onlyViews(before, after) {
-    let views = false;
+function quietFor(keys, before, after) {
+    if (before === after) {
+        return false;
+    }
 
-    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    let changed = false;
+
+    for (const key in after) {
         if (before[key] !== after[key]) {
-            if (!VIEWS.has(key)) {
+            if (keys.has(key)) {
                 return false;
             }
 
-            views = true;
+            changed = true;
         }
     }
 
-    return views;
+    for (const key in before) {
+        if (!(key in after)) {
+            return false;
+        }
+    }
+
+    return changed;
 }
 
 const sameProps = (a, b) =>
     Object.keys(a).length === Object.keys(b).length &&
     Object.keys(a).every((key) => Object.is(a[key], b[key]));
 
-class ApartFromViews extends Component {
+class DrawnFor extends Component {
     shouldComponentUpdate(next) {
         return !(
             next.component === this.props.component &&
-            onlyViews(this.props.state, next.state) &&
+            quietFor(next.keys, this.props.state, next.state) &&
             sameProps(this.props.props, next.props)
         );
     }
@@ -1470,12 +1477,15 @@ class ApartFromViews extends Component {
 }
 
 /**
- * `component`, drawn again on every change to the store but one that changes only the views (`VIEWS`), as an answer
- * streams: for big parts that read neither, such as the session list, which stays drawn off-screen on phones. Its own
- * state draws it again as usual.
+ * `component`, drawn again only when the store changes in one of `keys`, its props change, or `store.set({})` asks
+ * everything to draw again: for big parts that read little of the store, such as the session list. `keys` must name
+ * every key of the store it reads as it draws, and every key the functions it calls read (`prefs()` reads
+ * `appearance`, `canSteer()` reads `me`): a key left out shows stale data. What it reads only in an event handler
+ * does not count. Its own state draws it again as usual.
  */
-export function apartFromViews(component) {
-    const Wrapped = (props) => h(ApartFromViews, { component, props, state: store.state });
+export function drawnFor(keys, component) {
+    const set = new Set(keys);
+    const Wrapped = (props) => h(DrawnFor, { component, props, keys: set, state: store.state });
 
     Wrapped.displayName = component.name;
 

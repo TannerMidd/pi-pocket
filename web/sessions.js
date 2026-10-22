@@ -34,7 +34,7 @@ import { finishedUnseen } from "./seen.js";
 import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
 import {
     APPLE,
-    apartFromViews,
+    drawnFor,
     html,
     Icon,
     memo,
@@ -1399,8 +1399,34 @@ function AllSessions({ compact = false }) {
     </div>`;
 }
 
-/** Not drawn again as an answer streams: it reads no conversation's view, and on a phone it stays drawn off-screen. */
-export const SessionList = apartFromViews(AllSessions);
+/**
+ * The store's keys the session list reads as it draws, itself and through what it calls: `prefs()` (`appearance`),
+ * `canSteer()`, `scoped()`, and `collab()` (`me`, `server`), `isPinned` and `workspaceOrder` (`pinned`), `isUnread`
+ * (`unread`), `sessionUnread` (`conversationId`, `chatRead`, `chatReads`, `me`), `finishedUnseen` and `sessionMark`
+ * (`peekSeen`, and `server` for when this browser started), and extensions' chips, words, filters, and actions
+ * (`extensionsRev`). The sheet and the launcher it reads only as keys are pressed.
+ */
+const LIST_KEYS = [
+    "sessions",
+    "sessionsLoaded",
+    "server",
+    "me",
+    "pinned",
+    "unread",
+    "moving",
+    "conversationId",
+    "chatRead",
+    "chatReads",
+    "peekSeen",
+    "appearance",
+    "extensionsRev",
+];
+
+/**
+ * Drawn again only when what it reads changes (`LIST_KEYS`): not as an answer streams, nor for the chat, people, or
+ * the connection. Back to the list and each reconnect change little of it.
+ */
+export const SessionList = drawnFor(LIST_KEYS, AllSessions);
 
 /**
  * Subagents across the sessions, by state, as the rail counts them: archived sessions only while a subagent works
@@ -1630,8 +1656,31 @@ function Rail({ foldable = false, folded = false }) {
     </nav>`;
 }
 
-/** Not drawn again as an answer streams: it reads no conversation's view. */
-export const RailNav = apartFromViews(Rail);
+/**
+ * The store's keys the rail reads as it draws, itself and through its buttons: the session list's for its numbered
+ * sessions (`RailTiles`), the board, PiP's (`pip`, `pipOpen`), peek tiles' (`appearance`), and extensions' buttons,
+ * which show their page or panel as open (`page`, `extPanel`, `extensionsRev`).
+ */
+const RAIL_KEYS = [
+    "sessions",
+    "server",
+    "me",
+    "pinned",
+    "unread",
+    "conversationId",
+    "chatRead",
+    "chatReads",
+    "appearance",
+    "board",
+    "pip",
+    "pipOpen",
+    "page",
+    "extPanel",
+    "extensionsRev",
+];
+
+/** Drawn again only when what it reads changes (`RAIL_KEYS`): not as an answer streams. */
+export const RailNav = drawnFor(RAIL_KEYS, Rail);
 
 /** The sidebar's list is this wide at least and at most; the rail beside it stays 56px. */
 const LIST_MIN = 204;
