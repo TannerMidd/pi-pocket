@@ -2523,8 +2523,32 @@ export function Transcript() {
         () => view.order.slice(unloaded).map((id) => view.entries.get(id)),
         [view.order, view.entries, unloaded],
     );
-    const rows = entries.filter(isRow);
-    const start = windowStart(rows, transcriptFrom);
+    // Built again only when the entries change: the app draws for every change to the store, and a streamed answer's
+    // updates bring no new entries (`mergeView`).
+    const rows = useMemo(() => entries.filter(isRow), [entries]);
+    const start = useMemo(() => windowStart(rows, transcriptFrom), [rows, transcriptFrom]);
+    const talk = collab();
+    const from = useMemo(() => rowsBefore(rows, start, talk), [rows, start, talk]);
+    const partial = partialEntry(view.live.generation?.message?.blocks ?? []);
+    const items = useMemo(
+        () => itemsOf(rows.slice(start), partial, { from, talk }),
+        [rows, start, partial, from, talk],
+    );
+    const results = useMemo(() => {
+        const map = new Map();
+
+        for (const entry of [...(history ?? []), ...entries]) {
+            if (entry.kind === "toolResult") {
+                map.set(entry.callId, entry);
+            }
+        }
+
+        return map;
+    }, [history, entries]);
+    const slots = useMemo(
+        () => new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot])),
+        [view.live.tools],
+    );
     const [fetching, setFetching] = useState(false);
 
     // The room the pane gives, for what may run wider than the column (a reply's code blocks and tables: style.css).
@@ -2706,7 +2730,7 @@ export function Transcript() {
     }, [view.conversation?.id]);
 
     // A `!` command whose entry arrived is no longer pending.
-    const shells = rows.filter((row) => row.kind === "shell").length;
+    const shells = useMemo(() => rows.filter((row) => row.kind === "shell").length, [rows]);
 
     useEffect(() => {
         const pending = store.state.pendingShells;
@@ -2803,18 +2827,8 @@ export function Transcript() {
         }).finally(() => setFetching(false));
     };
 
-    const results = new Map();
-
-    for (const entry of [...(history ?? []), ...entries]) {
-        if (entry.kind === "toolResult") {
-            results.set(entry.callId, entry);
-        }
-    }
-
-    const slots = new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot]));
     const approvals = view.approvals ?? [];
     const first = entries[0];
-    const partial = partialEntry(view.live.generation?.message?.blocks ?? []);
     const busy = view.live.busy;
     const compacting = (view.live.compactions ?? []).length > 0;
     const conversation = view.conversation;
@@ -2865,10 +2879,7 @@ export function Transcript() {
                 </div>`
             }
             <${Items}
-                items=${itemsOf(rows.slice(start), partial, {
-                    from: rowsBefore(rows, start, collab()),
-                    talk: collab(),
-                })}
+                items=${items}
                 results=${results}
                 slots=${slots}
                 approvals=${approvals}

@@ -504,7 +504,13 @@ function applyPipView(data) {
 function mergeView(current, data) {
     const same = current.conversation?.id === data.conversation.id;
     const base = data.full || !same ? emptyView() : current;
-    const entries = new Map(data.full && same ? current.entries : base.entries);
+
+    // Most updates while Pi writes bring no entries: the same Map then, so what is built from it (the transcript's rows)
+    // is not built again for each of them.
+    const unchanged = !data.full && same && data.entries.length === 0 && !data.order;
+    const entries = unchanged
+        ? current.entries
+        : new Map(data.full && same ? current.entries : base.entries);
 
     // A light one held from before (the tab left before the whole one came) goes: past the newest rows, the server
     // counts it as sent, so only `loadEarlier` brings it whole, and it asks for what is missing.
@@ -1263,11 +1269,20 @@ export function loadEarlier({ rows, from } = {}) {
     return promise;
 }
 
+/** The kinds of entries that show as transcript rows. */
+const ROW_KINDS = new Set([
+    "user",
+    "assistant",
+    "compaction",
+    "reset",
+    "shell",
+    "command",
+    "note",
+    "fromPi",
+]);
+
 /** Entries that show as transcript rows. Tool results show inside their call's card instead. */
-export const isRow = (entry) =>
-    ["user", "assistant", "compaction", "reset", "shell", "command", "note", "fromPi"].includes(
-        entry.kind,
-    );
+export const isRow = (entry) => ROW_KINDS.has(entry.kind);
 
 /**
  * Show the transcript from this entry down when it is above the rows shown now, as for a jump to a pinned or quoted
