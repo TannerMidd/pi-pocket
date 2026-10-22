@@ -431,8 +431,9 @@ export function Composer() {
     const dock = useRef(null);
     const picker = useRef(null);
     const list = useRef(null);
-    // One per `!` command: sending it again after a lost reply runs it once.
-    const requestId = useRef(uid());
+    // One per `!` command: sending it again after a lost reply runs it once. Made when the first is sent, not on each
+    // draw of the message box.
+    const requestId = useRef(null);
     // An extension's command while its send is unresolved: sending the same text again finds the first run.
     const commandRequest = useRef(null);
     const busy = view.live.busy;
@@ -717,7 +718,7 @@ export function Composer() {
 
         setSending(true);
         const started = await attempt(() =>
-            actions.shell(command, !full.startsWith("!!"), requestId.current),
+            actions.shell(command, !full.startsWith("!!"), (requestId.current ??= uid())),
         );
 
         setSending(false);
@@ -732,7 +733,7 @@ export function Composer() {
                 { taskId: started.taskId, command, conversationId, at: Date.now() },
             ],
         }));
-        requestId.current = uid();
+        requestId.current = null;
         sent(full);
     };
 
