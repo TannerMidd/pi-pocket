@@ -144,6 +144,15 @@ const PURIFY = {
     RETURN_DOM_FRAGMENT: true,
 };
 
+/**
+ * The app's own sanitizer, with its settings read once (`setConfig`): given them on each call, it reads them again for
+ * each reply. Its own instance, so what it is set to and its hooks (below) change nothing for an extension's module that
+ * imports `dompurify` too.
+ */
+const purify = DOMPurify(window);
+
+purify.setConfig(PURIFY);
+
 /** Images the app serves for a conversation (files, stored images, artifacts), or inline data. Nothing else loads. */
 const localImage = (src) =>
     /^\/api\/c\/\d+\/(file\?|image\/)/.test(src) ||
@@ -245,7 +254,7 @@ function codeBlock(pre, fold) {
  * it loads, and code blocks are drawn by `codeBlock` (folded when long, if `fold`). Returns the element holding it.
  */
 function sanitize(html, fold) {
-    const fragment = DOMPurify.sanitize(html, PURIFY);
+    const fragment = purify.sanitize(html);
 
     // `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
     for (const code of fragment.querySelectorAll("code")) {
@@ -367,19 +376,35 @@ function fencePage(text) {
 /** The conversation whose markdown is being sanitized, for image paths relative to its folder. */
 let rendering = null;
 
-DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
-    // Before the URL check, so file:// and plain paths become app URLs instead of being dropped.
-    if (node.nodeName === "IMG" && data.attrName === "src") {
-        data.attrValue = imageSource(data.attrValue, rendering);
-    } else if (node.nodeName === "A" && data.attrName === "href") {
-        // `app.ts:42` looks like a URL scheme to the sanitizer; `./app.ts:42` is the same local file.
-        if (/^[a-z][a-z0-9+.-]*:/i.test(data.attrValue) && linkedPath(data.attrValue) !== null) {
-            data.attrValue = `./${data.attrValue}`;
+/**
+ * An element's attribute as the sanitizer reads it next. Before any of its checks (the URL check too), and before the
+ * attributes are read: a hook on each attribute would make it copy its lists of allowed names on each call.
+ */
+function rewrite(node, name, change) {
+    const value = node.getAttribute(name);
+
+    if (value !== null) {
+        const next = change(value.trim());
+
+        if (next !== value) {
+            node.setAttribute(name, next);
         }
+    }
+}
+
+purify.addHook("beforeSanitizeAttributes", (node) => {
+    // Before the URL check, so file:// and plain paths become app URLs instead of being dropped.
+    if (node.nodeName === "IMG") {
+        rewrite(node, "src", (src) => imageSource(src, rendering));
+    } else if (node.nodeName === "A") {
+        // `app.ts:42` looks like a URL scheme to the sanitizer; `./app.ts:42` is the same local file.
+        rewrite(node, "href", (href) =>
+            /^[a-z][a-z0-9+.-]*:/i.test(href) && linkedPath(href) !== null ? `./${href}` : href,
+        );
     }
 });
 
-DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+purify.addHook("afterSanitizeAttributes", (node) => {
     if (node.tagName === "A") {
         node.setAttribute("target", "_blank");
         node.setAttribute("rel", "noopener noreferrer");
