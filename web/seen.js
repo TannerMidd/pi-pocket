@@ -55,15 +55,29 @@ addEventListener("storage", (event) => {
     }
 });
 
-/** Remember that this browser looked at a session now: a run that ended before is no longer new. */
-export function markSeen(id) {
-    const key = SEEN_PREFIX + id;
-    const ended = store.state.sessions.find((session) => session.id === id)?.endedAt ?? 0;
-    // The latest look counts, whichever tab made it; the run's own end counts too, in case the clocks disagree.
-    const at = Math.max(Number(localStorage.getItem(key)) || 0, serverNow(), ended);
+/**
+ * Remember that this browser looked at sessions now: a run that ended before is no longer new. One change to the store
+ * for all of them, and none when their marks are as they were (each change draws the whole app).
+ */
+export function markSeen(...ids) {
+    const changed = {};
 
-    localStorage.setItem(key, String(at));
-    store.set({ peekSeen: { ...store.state.peekSeen, [id]: at } });
+    for (const id of ids) {
+        const key = SEEN_PREFIX + id;
+        const ended = store.state.sessions.find((session) => session.id === id)?.endedAt ?? 0;
+        // The latest look counts, whichever tab made it; the run's own end counts too, in case the clocks disagree.
+        const at = Math.max(Number(localStorage.getItem(key)) || 0, serverNow(), ended);
+
+        localStorage.setItem(key, String(at));
+
+        if (store.state.peekSeen?.[id] !== at) {
+            changed[id] = at;
+        }
+    }
+
+    if (Object.keys(changed).length > 0) {
+        store.set({ peekSeen: { ...store.state.peekSeen, ...changed } });
+    }
 }
 
 /**
@@ -119,14 +133,7 @@ store.subscribe((state) => {
 
         previous = state.conversationId;
         openEnded = undefined;
-
-        if (left !== null) {
-            markSeen(left);
-        }
-
-        if (state.conversationId !== null) {
-            markSeen(state.conversationId);
-        }
+        markSeen(...[left, state.conversationId].filter((id) => id !== null));
     }
 
     seeOpen(store.state);
