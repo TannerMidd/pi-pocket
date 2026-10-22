@@ -176,7 +176,11 @@ test("a failed reload keeps the commands, and turning the module off takes them 
 
     writeFileSync(join(app.dataDir, "extensions", FILE), MODULE);
     await app.setExtensionEnabled(owner(app), FILE, false);
-    assert.deepEqual(app.webs.commands(), []);
+    // Only the built-in auto-resume's command stays.
+    assert.deepEqual(
+        app.webs.commands().map((each) => each.name),
+        ["auto-resume"],
+    );
 
     const id = await newSession(app);
 

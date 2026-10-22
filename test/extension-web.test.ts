@@ -258,10 +258,10 @@ test("a browser module loads for the people it is for, and its folder serves onl
     const panelUrl = ownerUi.find((each) => each.module === "panel")!.url;
     const soloUrl = ownerUi.find((each) => each.module === "solo")!.url;
 
-    // Panel's is for everyone with every session; Solo's for the owner alone.
+    // Panel's is for everyone with every session, as the built-in auto-resume's is; Solo's for the owner alone.
     assert.deepEqual(
         (await uiFor("Vic")).map((each) => each.module),
-        ["panel"],
+        ["auto-resume", "panel"],
     );
     assert.deepEqual(await uiFor("Sid"), []);
 
