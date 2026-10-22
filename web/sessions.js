@@ -1056,7 +1056,8 @@ function AllSessions({ compact = false }) {
         setClosed(next);
     };
 
-    const tabBar = useSlide(tabs, "button.on", "x");
+    // The tabs are as wide as each other: only another tab, or the bar resized, moves the marker.
+    const tabBar = useSlide(tabs, "button.on", "x", tab);
     const count = sessions.filter((session) => !session.archived).length;
     const filters = sessionFilters();
     const extActions = sessionActions();
@@ -1327,7 +1328,9 @@ function RailTiles() {
     const { conversationId } = store.state;
     const items = useRef(null);
     const order = workspaceOrder();
-    const indicator = useSlide(items, ".ws.active");
+    // The tiles are as tall as each other: the open session's place in the order says where its marker goes.
+    const at = order.findIndex((session) => session.id === conversationId);
+    const indicator = useSlide(items, ".ws.active", "y", at);
 
     return html`<div class="rail-items" ref=${items}>
         <${Slide} box=${indicator} />

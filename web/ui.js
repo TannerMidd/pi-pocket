@@ -1212,11 +1212,13 @@ export function usePresence(value, ms = 200) {
 }
 
 /**
- * Where a sliding indicator goes: the offset and size of the element matching `selector` inside `ref`, measured after
- * every render. null when there is none, or it is in a folded group. `instant` is true the first time it shows, so it
- * appears in place instead of sliding in from the top.
+ * Where a sliding indicator goes: the offset and size of the element matching `selector` inside `ref`. null when there
+ * is none, or it is in a folded group. `instant` is true the first time it shows, so it appears in place instead of
+ * sliding in from the top. `key` says which element is selected: it is measured again when `key` changes, and when the
+ * list resizes or settles, not after every render. Measured after every render, each copy of the list laid the page out
+ * early, and Back to the list on a phone froze the longer for it.
  */
-export function useSlide(ref, selector, axis = "y") {
+export function useSlide(ref, selector, axis = "y", key = undefined) {
     const [box, setBox] = useState(null);
     const hidden = useRef(true);
 
@@ -1232,7 +1234,7 @@ export function useSlide(ref, selector, axis = "y") {
         setBox((box) => (next?.at === box?.at && next?.size === box?.size ? box : next));
     };
 
-    useLayoutEffect(measure);
+    useLayoutEffect(measure, [key]);
     // Rows move without a render while a group folds, or the window resizes: measure again when they settle.
     useEffect(() => {
         const host = ref.current;
@@ -1242,8 +1244,11 @@ export function useSlide(ref, selector, axis = "y") {
         }
 
         const settle = (event) => event.target !== host && measure();
+        // A theme's stylesheets can move the element without resizing the list.
+        const again = () => measure();
 
         host.addEventListener("transitionend", settle);
+        document.addEventListener("pocket:theme", again);
         const observer =
             typeof ResizeObserver === "function" ? new ResizeObserver(() => measure()) : null;
 
@@ -1251,6 +1256,7 @@ export function useSlide(ref, selector, axis = "y") {
 
         return () => {
             host.removeEventListener("transitionend", settle);
+            document.removeEventListener("pocket:theme", again);
             observer?.disconnect();
         };
     }, [ref.current]);
