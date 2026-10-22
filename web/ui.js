@@ -1137,12 +1137,18 @@ export function useEdge(name, measure) {
                 }
             };
 
+            // Its first measure too, once the page is laid out and before it paints: measured as it mounts, it would lay
+            // out the page in the middle of a draw.
             const observer = new ResizeObserver(update);
             // A pane popping in (`popin` scales it) moves the element without resizing it: measured again as an
-            // animation around it ends.
+            // animation around it ends. Not for the others (a row that rose in, a group that unrolled).
             let frame = 0;
 
-            const settled = () => {
+            const settled = (event) => {
+                if (!(event.target instanceof Node) || !event.target.contains(element)) {
+                    return;
+                }
+
                 cancelAnimationFrame(frame);
                 frame = requestAnimationFrame(update);
             };
@@ -1151,7 +1157,6 @@ export function useEdge(name, measure) {
             observer.observe(element);
             addEventListener("resize", update);
             document.addEventListener("animationend", settled);
-            update();
 
             return () => {
                 observer.disconnect();
