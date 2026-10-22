@@ -14,9 +14,10 @@
 // - Only where even that leaves the conversation less than a quarter of the room (a phone on its side with every bar
 //   up) does the dock stop there, and scroll: the conversation always keeps a few lines.
 //
-// CSS cannot measure the bars, so this sets the queue's and the list's heights. It does so after each render, and
-// whenever the conversation's height changes (a window resized, a message box that grew).
-import { useEffect, useLayoutEffect } from "preact/hooks";
+// CSS cannot measure the bars, so this sets the queue's and the list's heights. It does so as the dock's content changes
+// (not after every draw of the message box, which comes with each word Pi streams), and whenever the conversation's
+// height changes (a window resized, a message box that grew).
+import { useLayoutEffect, useRef } from "preact/hooks";
 
 /** The dock's share of the room it and the conversation have together. */
 const SHARE = 0.45;
@@ -232,31 +233,67 @@ export function fitDock(dock) {
     }
 }
 
-/** Keep the dock in `ref` fitted: after every render, and when the conversation's height changes. */
-export function useDock(ref) {
-    useLayoutEffect(() => fitDock(ref.current));
-    useEffect(() => {
-        const dock = ref.current;
-        const scroller = dock
-            ?.closest(".composer-wrap")
-            ?.parentElement?.querySelector(":scope > .scroller");
+/**
+ * What can change the room the dock's parts take: what comes and goes in it (a bar, the queue's rows, the list's), what
+ * opens there, and words that change and may wrap anew. Not `style` or `data-` attributes, which `fitDock` writes.
+ */
+const CONTENT = {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["class", "open", "aria-expanded", "hidden"],
+};
 
-        if (!dock || !scroller) {
+/** Fit `dock` now, and again as its content or the conversation's height changes. Returns what stops it. */
+function watch(dock) {
+    // Before the change shows: mutations are told at the end of the task that drew them.
+    const content = new MutationObserver(() => fitDock(dock));
+    const scroller = dock
+        .closest(".composer-wrap")
+        ?.parentElement?.querySelector(":scope > .scroller");
+    let frame = 0;
+    // A frame later: fitting changes the very heights this watches.
+    const room = new ResizeObserver(() => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => fitDock(dock));
+    });
+
+    content.observe(dock, CONTENT);
+
+    if (scroller) {
+        room.observe(scroller);
+    }
+
+    fitDock(dock);
+
+    return () => {
+        cancelAnimationFrame(frame);
+        content.disconnect();
+        room.disconnect();
+    };
+}
+
+/** Keep the dock in `ref` fitted: as it mounts, as its content changes, and when the conversation's height changes. */
+export function useDock(ref) {
+    const watched = useRef(null);
+
+    // Only a new dock element is watched anew (the message box and View only draw their own): nothing is measured here.
+    useLayoutEffect(() => {
+        const dock = ref.current ?? null;
+
+        if (dock === (watched.current?.dock ?? null)) {
             return;
         }
 
-        let frame = 0;
-        // A frame later: fitting changes the very heights this watches.
-        const observer = new ResizeObserver(() => {
-            cancelAnimationFrame(frame);
-            frame = requestAnimationFrame(() => fitDock(dock));
-        });
-
-        observer.observe(scroller);
-
-        return () => {
-            cancelAnimationFrame(frame);
-            observer.disconnect();
-        };
-    }, []);
+        watched.current?.stop();
+        watched.current = dock === null ? null : { dock, stop: watch(dock) };
+    });
+    useLayoutEffect(
+        () => () => {
+            watched.current?.stop();
+            watched.current = null;
+        },
+        [],
+    );
 }
