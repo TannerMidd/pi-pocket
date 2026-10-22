@@ -33,6 +33,8 @@ export function updateBadge(state) {
     if (
         countedFrom?.sessions === state.sessions &&
         countedFrom.chatRead === state.chatRead &&
+        countedFrom.chatReads === state.chatReads &&
+        countedFrom.me === state.me &&
         countedFrom.conversationId === state.conversationId
     ) {
         return;
@@ -41,6 +43,8 @@ export function updateBadge(state) {
     countedFrom = {
         sessions: state.sessions,
         chatRead: state.chatRead,
+        chatReads: state.chatReads,
+        me: state.me,
         conversationId: state.conversationId,
     };
     const count = state.sessions.filter(

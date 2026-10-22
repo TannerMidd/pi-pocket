@@ -35,6 +35,30 @@ function unreadOf() {
     }
 }
 
+/** How far this browser has read a session's chat: the time of the newest message seen, in `pocket.chatRead.<id>`. */
+const CHAT_READ_PREFIX = "pocket.chatRead.";
+
+/**
+ * Every session's read time, by id, from local storage. Read once at load and kept in the store (`chatReads`): the list
+ * asks for each row as it draws, and storage is slow to ask.
+ */
+function readChatReads() {
+    const reads = {};
+
+    for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        const at = key?.startsWith(CHAT_READ_PREFIX) ? Number(localStorage.getItem(key)) : 0;
+
+        if (at > 0) {
+            reads[key.slice(CHAT_READ_PREFIX.length)] = at;
+        }
+    }
+
+    return reads;
+}
+
+const firstReads = readChatReads();
+
 const TAB = sessionStorage.getItem(TAB_KEY) ?? uid();
 
 sessionStorage.setItem(TAB_KEY, TAB);
@@ -100,7 +124,9 @@ export const store = {
         unread: unreadOf(),
         conversationId: routeConversation(),
         view: emptyView(),
-        ...peopleFor(routeConversation()),
+        /** How far this browser has read each session's chat, by id: what `pocket.chatRead.<id>` keeps. */
+        chatReads: firstReads,
+        ...peopleFor(routeConversation(), firstReads),
         history: null,
         /** The id of the oldest transcript entry shown, or null for the newest `TRANSCRIPT_ROWS` rows. */
         transcriptFrom: null,
@@ -183,7 +209,18 @@ export const store = {
 
 // ─── Marked-unread sessions (this browser) ──────────────────────────────────────
 
-export const isUnread = (id) => store.state.unread.includes(id);
+/** The marked-unread ids as a set, made again only when the list changes: rows ask for each session as they draw. */
+let unreadSet = { list: null, set: new Set() };
+
+export function isUnread(id) {
+    const list = store.state.unread;
+
+    if (unreadSet.list !== list) {
+        unreadSet = { list, set: new Set(list) };
+    }
+
+    return unreadSet.set.has(id);
+}
 
 /** Mark a session unread, or clear it again, in this browser only. Opening the session clears it (`opened`). */
 export function setUnread(id, unread) {
@@ -214,30 +251,31 @@ function routeConversation() {
 
 const CHAT_LIMIT = 500;
 
-// A function declaration, not a const: the store's initial state calls it before this line runs.
-function readKey(id) {
-    return `pocket.chatRead.${id}`;
-}
-
-/** Fresh people state for a conversation: no one known yet, and how far this browser has read its chat. */
-function peopleFor(id) {
+/**
+ * Fresh people state for a conversation: no one known yet, and how far this browser has read its chat. A function
+ * declaration, not a const: the store's initial state calls it before this line runs, with `reads` given.
+ */
+function peopleFor(id, reads = store.state.chatReads) {
     return {
         chat: [],
         presence: [],
         notes: null,
         chatQuote: null,
-        chatRead: id === null ? 0 : chatReadOf(id),
+        chatRead: id === null ? 0 : (reads[id] ?? 0),
     };
 }
 
-/** How far this browser has read a conversation's chat: the time of the newest message seen. */
-function chatReadOf(id) {
-    return Number(localStorage.getItem(readKey(id)) ?? 0);
-}
+// Another tab of this browser read a chat (or the storage was cleared): the list's marks follow.
+addEventListener("storage", (event) => {
+    if (event.key === null || event.key.startsWith(CHAT_READ_PREFIX)) {
+        setChanged({ chatReads: kept(store.state.chatReads, readChatReads()) });
+    }
+});
 
 /** Someone else chatted in a session after this browser last read its chat. */
 export function sessionUnread(session, state = store.state) {
-    const read = session.id === state.conversationId ? state.chatRead : chatReadOf(session.id);
+    const read =
+        session.id === state.conversationId ? state.chatRead : (state.chatReads[session.id] ?? 0);
 
     return session.chatAt !== undefined && session.chatBy !== state.me?.id && session.chatAt > read;
 }
@@ -248,16 +286,32 @@ export function sessionUnread(session, state = store.state) {
  * (`session-tree.js`). Archived sessions are left out.
  */
 export function workspaceOrder(state = store.state) {
-    const active = state.sessions.filter((session) => !session.archived);
-    const { roots, rows } = sessionForest(active, { pinned: state.pinned });
-    const family = (root) => rows.get(root.id).map((row) => row.session);
-    const pinned = state.pinned.map((id) => roots.find((root) => root.id === id)).filter(Boolean);
+    const { sessions, pinned: pins } = state;
 
-    return [
+    // The list, the rail, the home screen, and peek tiles all ask as they draw: the order is made once for each list.
+    if (ordered.sessions === sessions && ordered.pinned === pins) {
+        return ordered.order;
+    }
+
+    const active = sessions.filter((session) => !session.archived);
+    const { roots, rows } = sessionForest(active, { pinned: pins });
+    const family = (root) => rows.get(root.id).map((row) => row.session);
+    const byId = new Map(roots.map((root) => [root.id, root]));
+    const pinned = pins.map((id) => byId.get(id)).filter(Boolean);
+    const first = new Set(pinned);
+    // Shared by every caller until the next list: frozen, so none changes it for the others.
+    const order = Object.freeze([
         ...pinned.flatMap(family),
-        ...roots.filter((root) => !pinned.includes(root)).flatMap(family),
-    ];
+        ...roots.filter((root) => !first.has(root)).flatMap(family),
+    ]);
+
+    ordered = { sessions, pinned: pins, order };
+
+    return order;
 }
+
+/** The last workspace order, and the lists it was made from. */
+let ordered = { sessions: null, pinned: null, order: [] };
 
 /** Server features the web app may use. `collab` 2 adds roles, take turns, reactions, pins, notes, mentions, push. */
 export const collab = () => (store.state.server?.collab ?? 0) >= 2;
@@ -305,8 +359,11 @@ export function markChatRead() {
         return;
     }
 
-    localStorage.setItem(readKey(conversationId), String(last));
-    store.set({ chatRead: last });
+    localStorage.setItem(CHAT_READ_PREFIX + conversationId, String(last));
+    store.set((state) => ({
+        chatRead: last,
+        chatReads: { ...state.chatReads, [conversationId]: last },
+    }));
 }
 
 function applyChat(data) {

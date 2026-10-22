@@ -245,7 +245,18 @@ export const themeDefault = () => store.state.server?.themeDefault ?? null;
 
 // ─── Pinned sessions (this browser) ──────────────────────────────────────────────
 
-export const isPinned = (id) => store.state.pinned.includes(id);
+/** The pinned ids as a set, made again only when the list changes: rows ask for each session as they draw. */
+let pinnedSet = { list: null, set: new Set() };
+
+export function isPinned(id) {
+    const list = store.state.pinned;
+
+    if (pinnedSet.list !== list) {
+        pinnedSet = { list, set: new Set(list) };
+    }
+
+    return pinnedSet.set.has(id);
+}
 
 export function togglePin(id) {
     const pinned = isPinned(id)

@@ -40,14 +40,22 @@ export function personColor(id) {
     return COLORS[hashOf(id) % COLORS.length];
 }
 
+/** Each folder's color, by path: the list asks for every row as it draws, and a few folders hold most sessions. */
+const folderColors = new Map();
+
 /** A steady color per folder, from its last part, for the mark on its sessions' rows. */
 export function folderColor(path) {
-    const name = String(path ?? "")
-        .replace(/\/+$/, "")
-        .split("/")
-        .pop();
+    const key = String(path ?? "");
+    let color = folderColors.get(key);
 
-    return FOLDER_COLORS[hashOf(name) % FOLDER_COLORS.length];
+    if (color === undefined) {
+        const name = key.replace(/\/+$/, "").split("/").pop();
+
+        color = FOLDER_COLORS[hashOf(name) % FOLDER_COLORS.length];
+        folderColors.set(key, color);
+    }
+
+    return color;
 }
 
 /** "Tanner - Mac" → "TM", "alex" → "AL". */
