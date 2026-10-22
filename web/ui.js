@@ -854,6 +854,50 @@ export function formatWhen(ms) {
     return `${day} ${time}`;
 }
 
+/** The minute now, for what shows a time ago: a memo that keys on it draws again as the minute turns (`useMinute`). */
+const minuteNow = () => Math.floor(Date.now() / 60_000);
+
+/** Listeners to the minute's turn, and its timer while any listen. */
+const minuteListeners = new Set();
+let minuteTimer = 0;
+
+function tickMinute() {
+    minuteTimer = setTimeout(tickMinute, 60_000 - (Date.now() % 60_000));
+
+    for (const listener of minuteListeners) {
+        listener(minuteNow());
+    }
+}
+
+/**
+ * The minute now, which draws the component again as it turns: memoized rows that show "5m" would otherwise keep it.
+ * One timer for every component that uses it.
+ */
+export function useMinute() {
+    const [minute, setMinute] = useState(minuteNow);
+
+    useEffect(() => {
+        minuteListeners.add(setMinute);
+
+        if (minuteListeners.size === 1) {
+            minuteTimer = setTimeout(tickMinute, 60_000 - (Date.now() % 60_000));
+        }
+
+        // A minute that turned before this effect ran.
+        setMinute(minuteNow());
+
+        return () => {
+            minuteListeners.delete(setMinute);
+
+            if (minuteListeners.size === 0) {
+                clearTimeout(minuteTimer);
+            }
+        };
+    }, []);
+
+    return minute;
+}
+
 export function timeAgo(ms) {
     const seconds = Math.max(0, (Date.now() - ms) / 1000);
 
@@ -1438,8 +1482,41 @@ export function apartFromViews(component) {
     return Wrapped;
 }
 
+class Memo extends Component {
+    shouldComponentUpdate(next) {
+        const { ignored } = next;
+        const before = this.props.props;
+        const after = next.props;
+        const keys = Object.keys(after).filter((key) => !ignored.includes(key));
+
+        return (
+            next.component !== this.props.component ||
+            Object.keys(before).length !== Object.keys(after).length ||
+            keys.some((key) => !Object.is(before[key], after[key]))
+        );
+    }
+
+    render({ component, props }) {
+        return h(component, props);
+    }
+}
+
+/**
+ * `component`, drawn again only when its props change (each compared with `Object.is`) or its own state does. It must
+ * read nothing else as it draws, such as `store.state`: what it needs comes as props. `ignored` names props it reads
+ * only as it mounts, whose change alone does not draw it again.
+ */
+export function memo(component, ignored = []) {
+    const Wrapped = (props) => h(Memo, { component, props, ignored });
+
+    Wrapped.displayName = component.name;
+
+    return Wrapped;
+}
+
 /** Phones: sheets from the bottom edge, which drag back down to close, and menus that a swipe closes. */
 export const BOTTOM_SHEETS = matchMedia("(max-width: 699px)");
+
 
 /** The sheet host supplies a back action only when another sheet is under this one. */
 export const SheetBack = createContext(null);

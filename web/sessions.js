@@ -37,11 +37,13 @@ import {
     apartFromViews,
     html,
     Icon,
+    memo,
     railState,
     scrimPress,
     shortPath,
     Slide,
     timeAgo,
+    useMinute,
     usePresence,
     useSide,
     useSlide,
@@ -175,13 +177,17 @@ const readClosed = () => {
 
 const DAY = 86_400_000;
 
-/** Which day bucket a time falls in, in this device's time zone. */
-function dayGroup(ms) {
+/** When today began, in this device's time zone: worked out once for each grouping, not once for each session. */
+function todayStart() {
     const today = new Date();
 
     today.setHours(0, 0, 0, 0);
-    const start = today.getTime();
 
+    return today.getTime();
+}
+
+/** Which day bucket a time falls in, in this device's time zone: `start` is when today began (`todayStart`). */
+function dayGroup(ms, start) {
     if (ms >= start) {
         return "Today";
     }
@@ -267,8 +273,8 @@ export function selectFromList(id) {
  * holds wins: a call waiting for you, Pi or its subagents at work, a failed run (solid while new, drawn once seen),
  * finished since this browser last looked or marked unread (solid), and read or never run (hollow).
  */
-function stateMark(session, working, marked) {
-    const fresh = marked || finishedUnseen(session);
+function stateMark(session, working, marked, unseen = finishedUnseen(session)) {
+    const fresh = marked || unseen;
 
     if (session.waiting) {
         return { shape: "waiting", label: "Waiting for approval" };
@@ -316,7 +322,8 @@ export function sessionMark(session) {
 /**
  * One session on one line: its folder's color in the shape of its state, its title, and on the right what goes on there (its working subagents,
  * who else is in it, Pi working, a call waiting for you), unread chat, and how long ago. Its folder and model are in
- * its tooltip.
+ * its tooltip. Memoized (`memo`): it reads nothing of the store as it draws, only its props, which `AllSessions` works
+ * out for it. `minute` and `extensionsRev` draw it again as time passes and as extensions' chips and words change.
  */
 function SessionRow({
     session,
@@ -330,6 +337,17 @@ function SessionRow({
     onPick,
     onSelect,
     hoverAction,
+    open,
+    pinned,
+    marked,
+    unread,
+    unseen,
+    moving,
+    home,
+    meId,
+    collabs,
+    steers,
+    hovers,
 }) {
     // Where it rises in, in turn, when it is new to this page; null when it shows as it was.
     const [arrival] = useState(() => (shownRows.has(session.id) ? null : index));
@@ -337,14 +355,8 @@ function SessionRow({
     useLayoutEffect(() => {
         shownRows.add(session.id);
     }, []);
-    const { conversationId, server, me } = store.state;
-    const pinned = isPinned(session.id);
-    const open = session.id === conversationId && !session.archived;
-    const marked = isUnread(session.id);
-    const unread = collab() && sessionUnread(session) && !open;
-    const moving = store.state.moving[session.id] !== undefined;
     const title = session.title ?? "New session";
-    const path = shortPath(session.cwd, server?.home);
+    const path = shortPath(session.cwd, home);
     const where = [
         session.worktree ? `${path} ⎇ ${session.worktree.branch}` : path,
         session.model,
@@ -380,13 +392,13 @@ function SessionRow({
     const failed = failing(counts);
     // Subagents at work, or failed ones nobody dealt with, but not over a call waiting for you: that says more.
     const fork = !session.waiting && (live > 0 || failed > 0);
-    const person = collab() ? (session.people ?? []).find((each) => each.id !== me?.id) : undefined;
-    const mark = stateMark(session, live > 0, marked);
-    // Finished since this browser last looked: its result is unread, so its title reads bold.
-    const unseen = finishedUnseen(session);
+    const person = collabs ? (session.people ?? []).find((each) => each.id !== meId) : undefined;
+    const mark = stateMark(session, live > 0, marked, unseen);
     // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
-    // And the first extension action with an icon (`pocket.sessionAction`).
-    const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0);
+    // And the first extension action with an icon (`pocket.sessionAction`). None where nothing hovers (`hovers`).
+    const acts = hovers
+        ? (steers ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0)
+        : 0;
 
     return html`<div
         class=${`session-row ${arrival === null ? "" : "arriving"} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
@@ -460,7 +472,7 @@ function SessionRow({
                 ${
                     session.waiting &&
                     html`<span class="session-needs" title="Waiting for approval">
-                        ${canSteer() ? "needs you" : "waiting"}
+                        ${steers ? "needs you" : "waiting"}
                     </span>`
                 }
                 ${
@@ -503,7 +515,9 @@ function SessionRow({
                 )}
             </span>`
         }
-        <span class="session-actions">
+        ${
+            hovers &&
+            html`<span class="session-actions">
             ${
                 hoverAction &&
                 html`<button
@@ -516,7 +530,7 @@ function SessionRow({
                 </button>`
             }
             ${
-                canSteer() &&
+                steers &&
                 html`<button
                     class="session-act"
                     title=${session.archived ? "Unarchive" : "Archive"}
@@ -548,28 +562,37 @@ function SessionRow({
                     <${Icon} name=${marked ? "check" : "unread"} size=${14} />
                 </button>`
             }
-        </span>
+        </span>`
+        }
     </div>`;
 }
 
-/** Sessions in groups: pinned, then by day or by folder. While searching, one flat list of matches. */
-function groupsOf(shown, { tab, needle, home, pinned }) {
+/** A row draws again when what it shows changes. Its place (`index`) counts only as it mounts, for its rise-in. */
+const MemoRow = memo(SessionRow, ["index"]);
+
+/**
+ * Sessions in groups: pinned, then by day or by folder. While searching, one flat list of matches. `today` is when
+ * today began, and changes the day groups as days pass.
+ */
+function groupsOf(shown, { tab, needle, home, pinned, today }) {
     if (needle !== "" || tab === "archived") {
         return [{ key: "flat", label: needle ? "Matches" : "Archived", rows: shown }];
     }
 
     const groups = [];
-    const pins = shown.filter((session) => pinned.includes(session.id));
+    const pins = new Set(pinned);
+    const first = shown.filter((session) => pins.has(session.id));
 
-    if (pins.length > 0) {
-        groups.push({ key: "pinned", label: "Pinned", rows: pins });
+    if (first.length > 0) {
+        groups.push({ key: "pinned", label: "Pinned", rows: first });
     }
 
-    const rest = shown.filter((session) => !pinned.includes(session.id));
+    const rest = shown.filter((session) => !pins.has(session.id));
     const byKey = new Map();
 
     for (const session of rest) {
-        const key = tab === "folders" ? `dir:${session.cwd}` : `day:${dayGroup(session.updatedAt)}`;
+        const day = tab === "folders" ? "" : dayGroup(session.updatedAt, today);
+        const key = tab === "folders" ? `dir:${session.cwd}` : `day:${day}`;
 
         if (!byKey.has(key)) {
             byKey.set(key, {
@@ -577,7 +600,7 @@ function groupsOf(shown, { tab, needle, home, pinned }) {
                 label:
                     tab === "folders"
                         ? html`<${FolderName} path=${shortPath(session.cwd, home)} />`
-                        : dayGroup(session.updatedAt),
+                        : day,
                 rows: [],
             });
         }
@@ -681,34 +704,59 @@ function AllSessions({ compact = false }) {
         }
     };
 
-    // Extensions' filters that are on (`pocket.sessionFilter`): a session shows only when each keeps it.
-    const kept = sessionFilterTest();
-    const shown = sessions.filter(
-        (session) =>
-            Boolean(session.archived) === archived &&
-            (needle === "" ||
-                `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, server?.home)} ${session.model ?? ""} ${sessionWords(session).join(" ")}`
-                    .toLowerCase()
-                    .includes(needle)) &&
-            (kept === null || kept(session)),
-    );
-    const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
-    const groups = groupsOf(forest.roots, { tab, needle, home: server?.home, pinned }).map(
-        (group) => ({
-            ...group,
-            rows: group.rows.flatMap((root) => forest.rows.get(root.id)),
-        }),
-    );
+    // What changes the list's rows: the sessions and pins, the tab and the search, extensions' filters and words
+    // (`extensionsRev`), and the day, which moves sessions between the day groups. Worked out again only when one of
+    // them changes, not on every draw.
+    const { extensionsRev } = store.state;
+    const minute = useMinute();
+    const today = useMemo(todayStart, [minute]);
+    const home = server?.home;
+    const { shown, kept, groups } = useMemo(() => {
+        // Extensions' filters that are on (`pocket.sessionFilter`): a session shows only when each keeps it.
+        const kept = sessionFilterTest();
+        const shown = sessions.filter(
+            (session) =>
+                Boolean(session.archived) === archived &&
+                (needle === "" ||
+                    `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, home)} ${session.model ?? ""} ${sessionWords(session).join(" ")}`
+                        .toLowerCase()
+                        .includes(needle)) &&
+                (kept === null || kept(session)),
+        );
+        const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
+        const groups = groupsOf(forest.roots, { tab, needle, home, pinned, today }).map(
+            (group) => ({
+                ...group,
+                rows: group.rows.flatMap((root) => forest.rows.get(root.id)),
+            }),
+        );
 
-    visible.current = groups.flatMap((group) =>
-        closed.has(group.key) && group.key !== "flat"
-            ? []
-            : group.rows.map(({ session }) => session.id),
+        return { shown, kept, groups };
+    }, [sessions, pinned, tab, needle, home, today, extensionsRev]);
+
+    visible.current = useMemo(
+        () =>
+            groups.flatMap((group) =>
+                closed.has(group.key) && group.key !== "flat"
+                    ? []
+                    : group.rows.map(({ session }) => session.id),
+            ),
+        [groups, closed],
     );
-    const chosen = shown.filter((session) => selected.has(session.id)).map((session) => session.id);
+    const chosen = useMemo(
+        () =>
+            selected.size === 0
+                ? []
+                : shown.filter((session) => selected.has(session.id)).map((session) => session.id),
+        [shown, selected],
+    );
     // Taps select while the bar shows: not for rows selected and then hidden (archived, or searched away).
     const tapping = tapSelects && chosen.length > 0;
-    const numbers = new Map(workspaceOrder().map((session, index) => [session.id, index]));
+    const order = workspaceOrder();
+    const numbers = useMemo(
+        () => new Map(order.map((session, index) => [session.id, index])),
+        [order],
+    );
 
     /** The rows from `from` to `to` as they show, or just `to` when either is out of view. */
     const span = (from, to) => {
@@ -1070,10 +1118,60 @@ function AllSessions({ compact = false }) {
 
     // The tabs are as wide as each other: only another tab, or the bar resized, moves the marker.
     const tabBar = useSlide(tabs, "button.on", "x", tab);
-    const count = sessions.filter((session) => !session.archived).length;
+    const count = useMemo(
+        () => sessions.filter((session) => !session.archived).length,
+        [sessions],
+    );
     const filters = sessionFilters();
-    const extActions = sessionActions();
+    const steers = canSteer();
+    // Made again only when extensions or this person's steering change: rows keep the same action while they do not.
+    const extActions = useMemo(sessionActions, [extensionsRev, steers]);
     const hoverAction = extActions.find((action) => action.iconPath !== null);
+    // Rows' handlers that stay the same from draw to draw, so a row draws again only when what it shows changes. They
+    // call this draw's `pick` and `select`, which see this draw's selection.
+    const handlers = useRef(null);
+
+    handlers.current = { pick, select };
+    const [onPick] = useState(() => (event, id) => handlers.current.pick(event, id));
+    const [onSelect] = useState(() => (event, id) => handlers.current.select(event, id));
+    // What every row reads of the store, read once here: rows read none of it themselves (`SessionRow`). Marks, seen
+    // marks, and read times come through `isUnread`, `finishedUnseen`, and `sessionUnread`.
+    const { conversationId, me, moving } = store.state;
+    const collabs = collab();
+    const hovers = true;
+
+    const rowOf = ({ session, branches }, index) => {
+        const open = session.id === conversationId && !session.archived;
+
+        return html`<${MemoRow}
+            key=${session.id}
+            session=${session}
+            branches=${branches}
+            index=${index}
+            number=${numbers.get(session.id)}
+            needle=${needle}
+            selected=${selected.has(session.id)}
+            pressing=${pressing === session.id}
+            folders=${tab === "folders" && needle === ""}
+            onPick=${onPick}
+            onSelect=${onSelect}
+            hoverAction=${hoverAction}
+            open=${open}
+            pinned=${isPinned(session.id)}
+            marked=${isUnread(session.id)}
+            unread=${collabs && !open && sessionUnread(session)}
+            unseen=${finishedUnseen(session)}
+            moving=${moving[session.id] !== undefined}
+            home=${home}
+            meId=${me?.id}
+            collabs=${collabs}
+            steers=${steers}
+            hovers=${hovers}
+            minute=${minute}
+            extensionsRev=${extensionsRev}
+        />`;
+    };
+
     let index = 0;
 
     return html`<div
@@ -1235,23 +1333,7 @@ function AllSessions({ compact = false }) {
                     }
                     <div class="group-body" inert=${isClosed}>
                         <div>
-                            ${group.rows.map(
-                                ({ session, branches }) =>
-                                    html`<${SessionRow}
-                                        key=${session.id}
-                                        session=${session}
-                                        branches=${branches}
-                                        index=${index++}
-                                        number=${numbers.get(session.id)}
-                                        needle=${needle}
-                                        selected=${selected.has(session.id)}
-                                        pressing=${pressing === session.id}
-                                        folders=${tab === "folders" && needle === ""}
-                                        onPick=${pick}
-                                        onSelect=${select}
-                                        hoverAction=${hoverAction}
-                                    />`,
-                            )}
+                            ${group.rows.map((row) => rowOf(row, index++))}
                         </div>
                     </div>
                 </section>`;
