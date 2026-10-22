@@ -116,7 +116,7 @@ Why Pi cannot use a model now, in words that Pi can tell a person. For example, 
 registerModelProvider(provider: string, config: ProviderConfig): () => void;
 ```
 
-Since 0.20.0 · Experimental
+Since 0.21.0 · Experimental
 
 Registers a model provider with Pi's model runtime, as a Pi extension does. `config` is Pi's own `ProviderConfig`: the provider's name, base URL, API key, API, headers, and models or `refreshModels` function. When Pi refuses the config, the call throws and changes nothing. Open tabs get the provider's models once Pi refreshed it locally.
 
@@ -182,6 +182,18 @@ Since 0.12.0 · Stable
 
 Why Pi cannot start work in a session now when nobody asked for it, for example to read a subagent's report. The reason is a spend limit: the session's limit, or the limit of the person who pays there. It is `undefined` when Pi can start.
 
+### `responseLimits`
+
+```ts
+responseLimits(message: AssistantMessage): ResponseLimit | undefined;
+```
+
+Since 0.21.0 · Experimental
+
+The HTTP status and the rate-limit headers of the response that ended in `message`, as `{ at, status, headers }`. A generation hook reads them in `afterResponse`, to know why a request failed, and when the provider says to try again. Headers are by lower-case name. Pi Pocket keeps only limit headers (`retry-after`, `x-ratelimit-*`, `anthropic-ratelimit-*`, `x-codex-*`), never cookies or ids.
+
+It is `undefined` when the provider's API does not report its responses, as for Google's APIs and for providers that extensions add. Then only the error's words say why.
+
 ### `onLimitsChanged`
 
 ```ts
@@ -242,7 +254,7 @@ Keeps the lines of the text, but leaves no closing tag in it. Use it for text th
 fetchPublic(url: string | URL, init?: PublicFetchInit): Promise<Response>;
 ```
 
-Since 0.20.0 · Experimental
+Since 0.21.0 · Experimental
 
 Fetches an address that came from outside (from Pi, a page, or a person) as `fetch` does, but filters non-public ranges and this machine's interface addresses. Use it for each address that the module did not write itself: a tool that reads a page that Pi names, a crawl, or a link from a search result.
 
@@ -281,7 +293,7 @@ interface PublicFetchInit {
 }
 ```
 
-Since 0.20.0 · Experimental
+Since 0.21.0 · Experimental
 
 What `fetchPublic` takes besides the address.
 

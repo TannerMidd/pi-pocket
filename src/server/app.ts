@@ -97,6 +97,7 @@ import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./p
 import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { measureModelStreams } from "./timing.ts";
+import { ProviderLimits, recordResponses } from "./provider-limits.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
@@ -268,6 +269,7 @@ export class PocketApp {
     access: AccessInfo | undefined;
     harness!: Harness;
     models!: ModelRuntime;
+    readonly providerLimits: ProviderLimits;
     settings!: SettingsManager;
     loader!: ExtensionLoader;
     readonly commands = new Commands(this);
@@ -363,6 +365,7 @@ export class PocketApp {
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
+        this.providerLimits = new ProviderLimits(this.now);
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
         this.config = new ConfigStore(options.dataDir);
@@ -594,6 +597,7 @@ export class PocketApp {
         this.models = await ModelRuntime.create();
         installRequestShaping(this.models, this.#shapers, this.#log);
         this.providers.modelRefresh.watch(this.models);
+        recordResponses(this.models, this.providerLimits);
         this.#configureModels?.(this.models);
         measureModelStreams(this.models);
         await this.models.getAvailable().catch(() => []);
@@ -647,6 +651,7 @@ export class PocketApp {
             },
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
+            responseLimits: (message) => this.providerLimits.forResponse(message),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),

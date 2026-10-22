@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type {
     ConversationId,
     DocumentReader,
@@ -18,6 +18,7 @@ import type { LancetGuard } from "./lancet.ts";
 import type { Memory } from "./memory.ts";
 import type { Pip } from "./pip.ts";
 import type { PipCompaction } from "./pip-compact.ts";
+import type { ProviderLimit } from "./provider-limits.ts";
 import type { Schedules } from "./schedules.ts";
 import type { RepoWatches } from "./repo-watches.ts";
 import type { Watches } from "./watches.ts";
@@ -277,6 +278,11 @@ export interface PocketHost {
     readonly fetchPublic: FetchPublic;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /**
+     * The HTTP status and rate-limit headers of the response that ended in `message`, when its provider's API reports
+     * them (`provider-limits.ts`): a generation hook reads them in `afterResponse`. Only limit headers are kept.
+     */
+    responseLimits(message: AssistantMessage): ProviderLimit | undefined;
     /** Report something odd to the log and the connected clients: with `conversationId`, to that session's tabs only. */
     notice(
         level: "info" | "warning" | "error",

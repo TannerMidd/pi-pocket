@@ -42,6 +42,7 @@ These members are public:
 - `notice(level, message, id?)`
 - `resolveModel(spec)`, `subagentModels()`, `modelProblem(ref, fresh?)`, `modelInfo(spec)` (exact local metadata, since 0.16.0)
 - `requesterOf(conversationId)`
+- `responseLimits(message)` (experimental, since 0.21.0, see [Experimental](#experimental))
 - `skillPaths()`, `skills(cwd)`
 - `heldBack(conversationId)`, `onLimitsChanged(listener)`
 - `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental))
@@ -140,6 +141,8 @@ All public interfaces are stable, unless the docs mark them experimental or depr
   _Reason:_ the owner then knows that an update of Pi Pocket can break it.
 
 `host.linkedSessions` remains experimental in 0.16.0. The human-bound `linkedSessions` on a conversation route is a separate stable interface, added in 0.16.0. Other public members are stable unless marked otherwise.
+
+Since 0.21.0, `host.responseLimits` and its `ResponseLimit` type are experimental.
 
 Since 0.19.0, these `pocket` members are experimental too: `panel`, `openPanel`, `closePanel`, `status`, `topbar`, `composerButton`, `replyAction`, `insertText`, `arrange`, and their types. The `core:` ids of the items in slots are public, with the same promise as the names of the theme surface.
 
