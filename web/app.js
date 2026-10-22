@@ -1,6 +1,6 @@
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { folderColor } from "./avatar.js";
 import { canGoBack, goBack, replaceAddress, startHistory, useBack } from "./back.js";
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
@@ -199,15 +199,20 @@ function Topbar() {
         .split("/")
         .pop();
     const branch = headLabel(view.branch) || conversation?.worktree?.branch;
-    const title =
-        conversation?.title ??
-        store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ??
-        (store.state.missing ? "Not found" : "Loading…");
-    // Other sessions waiting for an approval, counted on the way back to them.
-    const waiting = store.state.sessions.filter(
-        (session) =>
-            session.waiting && !session.archived && session.id !== store.state.conversationId,
-    ).length;
+    const { sessions, conversationId } = store.state;
+    // The top bar draws with each update of the conversation, as an answer streams: the session list is looked
+    // through again only when it changes.
+    const { listed, waiting } = useMemo(
+        () => ({
+            listed: sessions.find((session) => session.id === conversationId)?.title,
+            // Other sessions waiting for an approval, counted on the way back to them.
+            waiting: sessions.filter(
+                (session) => session.waiting && !session.archived && session.id !== conversationId,
+            ).length,
+        }),
+        [sessions, conversationId],
+    );
+    const title = conversation?.title ?? listed ?? (store.state.missing ? "Not found" : "Loading…");
     // How far down it reaches: PiP's window on a short wide screen stops below its buttons.
     const edge = useEdge("--topbar-h", (rect) => rect.bottom);
 

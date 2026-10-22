@@ -1,6 +1,6 @@
 // The sidebar: the rail (Pi, the tools, and you; folded, numbered sessions too) and the session list beside it, in the
 // sidebar, the drawer, and a phone's home screen; and the order and archiving of sessions.
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Avatar, folderColor, initials } from "./avatar.js";
 import { goHome, useBack } from "./back.js";
 import {
@@ -1375,8 +1375,14 @@ function RailTiles() {
 function Rail({ foldable = false, folded = false }) {
     const { sessions, board, me } = store.state;
     const canStart = canSteer() && !scoped();
-    const busy = sessions.filter((session) => session.busy).length;
-    const agents = subagentTotals(sessions);
+    // Counted again only when the session list changes, not on each draw of the rail.
+    const { busy, agents } = useMemo(
+        () => ({
+            busy: sessions.filter((session) => session.busy).length,
+            agents: subagentTotals(sessions),
+        }),
+        [sessions],
+    );
     const live = agents.working + agents.waiting;
     const failed = failing(agents);
     const keys = APPLE ? "⌘B" : "Ctrl+B";
