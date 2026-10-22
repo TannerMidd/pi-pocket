@@ -1706,6 +1706,20 @@ function Divider({ entry }) {
 
 function History({ firstId, results, keepPlace, conversationId }) {
     const history = store.state.history;
+    const { entries } = store.state.view;
+    const talk = collab();
+    // Built again only when the history or the entries change, not on each draw of the transcript.
+    const items = useMemo(
+        () =>
+            history === null
+                ? []
+                : itemsOf(
+                      history.filter((entry) => isRow(entry) && !entries.has(entry.id)),
+                      null,
+                      { prefix: "h", talk },
+                  ),
+        [history, entries, talk],
+    );
 
     if (history === null) {
         return html`<div class="divider">
@@ -1735,11 +1749,7 @@ function History({ firstId, results, keepPlace, conversationId }) {
 
     return html`<div class="history">
         <${Items}
-            items=${itemsOf(
-                history.filter((entry) => isRow(entry) && !store.state.view.entries.has(entry.id)),
-                null,
-                { prefix: "h", talk: collab() },
-            )}
+            items=${items}
             results=${results}
             slots=${NO_SLOTS}
             approvals=${NO_APPROVALS}
@@ -1954,14 +1964,28 @@ const NO_SLOTS = new Map();
 
 const NO_APPROVALS = [];
 
+/** `agentsKey` for each list of subagents the server sent: every report and subagent call asks, on every draw. */
+const agentsKeys = new WeakMap();
+const NO_AGENTS = [];
+
 /** The subagents as their rows and lines show them: who, where, and how they stand. */
-const agentsKey = (view) =>
-    (view.subagents ?? [])
-        .map(
-            (agent) =>
-                `${agent.name}:${agent.conversationId}:${stateOf(agent)}:${agent.askedAt ?? ""}:${agent.answeredAt ?? ""}`,
-        )
-        .join();
+function agentsKey(view) {
+    const agents = view.subagents ?? NO_AGENTS;
+
+    if (!agentsKeys.has(agents)) {
+        agentsKeys.set(
+            agents,
+            agents
+                .map(
+                    (agent) =>
+                        `${agent.name}:${agent.conversationId}:${stateOf(agent)}:${agent.askedAt ?? ""}:${agent.answeredAt ?? ""}`,
+                )
+                .join(),
+        );
+    }
+
+    return agentsKeys.get(agents);
+}
 
 /**
  * Everything a row shows besides its entry, as values that compare with Object.is. Each update from the server builds
