@@ -616,6 +616,76 @@ export function stillMoving(moving, sessions) {
     return next;
 }
 
+/** Whether two values the server sent as JSON are the same: the same plain values, arrays, and objects, all the way down. */
+function sameJson(a, b) {
+    if (a === b) {
+        return true;
+    }
+
+    if (
+        typeof a !== "object" ||
+        typeof b !== "object" ||
+        a === null ||
+        b === null ||
+        Array.isArray(a) !== Array.isArray(b)
+    ) {
+        return false;
+    }
+
+    const keys = Object.keys(a);
+
+    return (
+        keys.length === Object.keys(b).length &&
+        keys.every((key) => Object.hasOwn(b, key) && sameJson(a[key], b[key]))
+    );
+}
+
+/**
+ * What the server sent, or what the store has when it is the same. Each connect sends hello and the lists again, mostly
+ * as they were: what did not change keeps its identity, so memos hold and identity checks (`theme.js`) see no change.
+ */
+const kept = (had, next) => (sameJson(had, next) ? had : next);
+
+/** A list of items with ids, each item kept where it is the same, and the list itself when all are: one session changed draws one row again. */
+function keptEach(had, next) {
+    if (!Array.isArray(had) || !Array.isArray(next)) {
+        return next;
+    }
+
+    const byId = new Map(had.map((item) => [item?.id, item]));
+    const items = next.map((item) => kept(byId.get(item?.id), item));
+
+    return items.length === had.length && items.every((item, index) => item === had[index])
+        ? had
+        : items;
+}
+
+/** How far the server's clock is ahead of this browser's, from its last hello (`seen.js`). */
+let clockOffset = 0;
+
+export const serverClockOffset = () => clockOffset;
+
+/**
+ * The server's facts from a hello. Its clock (`now`) is new in each one and is no change to them: the clock goes to
+ * `clockOffset`, and the facts keep the clock of the hello that brought them.
+ */
+function keptServer(had, next) {
+    if (typeof next?.now === "number") {
+        clockOffset = next.now - Date.now();
+    }
+
+    return had && next && sameJson({ ...had, now: 0 }, { ...next, now: 0 }) ? had : next;
+}
+
+/** Set only what changed, and nothing when nothing did: data sent again as it was draws nothing again. */
+function setChanged(change) {
+    const changed = Object.entries(change).filter(([key, value]) => store.state[key] !== value);
+
+    if (changed.length > 0) {
+        store.set(Object.fromEntries(changed));
+    }
+}
+
 /** Who hears extensions' events: `extension-ui.js`, which imports this module and so cannot be imported here. */
 const extensionListeners = new Set();
 
@@ -628,29 +698,38 @@ export function onExtensionEvent(listener) {
 
 /** What the server sends, by event name. Both transports deliver the same events. */
 const handlers = {
-    hello: (data) =>
-        store.set({
-            me: data.user,
-            users: data.users,
-            folderFavorites: data.folderFavorites ?? [],
-            models: data.models,
-            guard: data.guard,
-            server: data.server,
+    // Sent again on each connect, mostly as it was: what is the same keeps its identity (`kept`).
+    hello: (data) => {
+        const state = store.state;
+
+        setChanged({
+            me: kept(state.me, data.user),
+            users: keptEach(state.users, data.users),
+            folderFavorites: kept(state.folderFavorites, data.folderFavorites ?? []),
+            models: kept(state.models, data.models),
+            guard: kept(state.guard, data.guard),
+            server: keptServer(state.server, data.server),
             // Every theme folder (`theme.js`): an older server lists none.
-            themeList: Array.isArray(data.themes) ? data.themes : [],
+            themeList: kept(state.themeList, Array.isArray(data.themes) ? data.themes : []),
             // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
             ...(data.connection === undefined ? {} : { streamId: data.connection }),
-        }),
-    sessions: (sessions) =>
-        store.set((state) => ({
+        });
+    },
+    sessions: (list) => {
+        const state = store.state;
+        const sessions = keptEach(state.sessions, list);
+
+        setChanged({
             sessions,
             sessionsLoaded: true,
-            moving: stillMoving(state.moving, sessions),
-        })),
-    "folder-favorites": (folderFavorites) => store.set({ folderFavorites }),
-    models: (models) => store.set({ models }),
+            moving: kept(state.moving, stillMoving(state.moving, sessions)),
+        });
+    },
+    "folder-favorites": (folderFavorites) =>
+        setChanged({ folderFavorites: kept(store.state.folderFavorites, folderFavorites) }),
+    models: (models) => setChanged({ models: kept(store.state.models, models) }),
     // A theme folder came, went, or changed (`theme.js` loads its new version).
-    themes: (themeList) => store.set({ themeList }),
+    themes: (themeList) => setChanged({ themeList: kept(store.state.themeList, themeList) }),
     // Every subagent in every session, while this tab shows the subagents board (`subagents-board.js`).
     subagents: (agents) => store.state.board && store.set({ boardAgents: agents }),
     view: applyView,
@@ -669,7 +748,7 @@ const handlers = {
     // Another session as its peek tile shows it (`peeks.js`): kept after it scrolls away, as the tile's last look.
     peek: (data) =>
         store.set((state) => ({ peeks: { ...state.peeks, [data.conversationId]: data } })),
-    users: (users) => store.set({ users }),
+    users: (users) => setChanged({ users: keptEach(store.state.users, users) }),
     // Pi's lessons changed somewhere: a Memory sheet or menu that shows them fetches them again (`sheets/memory.js`).
     memory: () => store.set((state) => ({ memoryRev: (state.memoryRev ?? 0) + 1 })),
     missing: (data) => store.set({ missing: data.message }),
@@ -1064,7 +1143,7 @@ export async function start() {
             users: hello.users,
             models: hello.models,
             guard: hello.guard,
-            server: hello.server,
+            server: keptServer(store.state.server, hello.server),
             themeList: Array.isArray(hello.themes) ? hello.themes : [],
         });
         connect();

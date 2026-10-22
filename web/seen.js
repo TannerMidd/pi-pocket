@@ -5,7 +5,7 @@
 // Kept per browser, in localStorage, like pins and marks. To share it between someone's devices, the server would keep
 // each person's marks (a per-user document beside `SessionsDoc`), `markSeen` would send them, and the session list
 // would carry them back; `finishedUnseen` would not change.
-import { store } from "./store.js";
+import { serverClockOffset, store } from "./store.js";
 
 /** Each session's seen mark is a key of its own, so tabs that mark different sessions at once keep both. */
 const SEEN_PREFIX = "pocket.peekSeen.";
@@ -15,12 +15,11 @@ const SINCE_KEY = "pocket.peekSince";
 
 const hidden = () => document.visibilityState === "hidden";
 
-/** How far the server's clock is ahead of this browser's, from its last hello: runs end by the server's clock. */
-let clockOffset = 0;
-const serverNow = () => Date.now() + clockOffset;
+/** The server's time now: runs end by the server's clock, which each hello gives (`serverClockOffset`). */
+const serverNow = () => Date.now() + serverClockOffset();
 
 /** A time the server took (its clock), on this device's clock: a phone set a few minutes off still counts right. */
-export const fromServer = (ms) => ms - clockOffset;
+export const fromServer = (ms) => ms - serverClockOffset();
 
 function readSeen() {
     const seen = {};
@@ -103,13 +102,9 @@ store.subscribe((state) => {
     if (state.server !== lastServer) {
         lastServer = state.server;
 
-        if (typeof state.server?.now === "number") {
-            clockOffset = state.server.now - Date.now();
-
-            if (since === null) {
-                since = state.server.now;
-                localStorage.setItem(SINCE_KEY, String(since));
-            }
+        if (typeof state.server?.now === "number" && since === null) {
+            since = state.server.now;
+            localStorage.setItem(SINCE_KEY, String(since));
         }
     }
 
