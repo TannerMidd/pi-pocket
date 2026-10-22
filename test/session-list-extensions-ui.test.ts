@@ -111,6 +111,10 @@ before(async () => {
         dataDir: mkdtempSync(join(root, "session-list-ui-")),
         load: async () => undefined,
         save: () => {},
+        // A mouse, whatever this machine has: rows draw their buttons only where a pointer can hover.
+        args: [
+            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+        ],
     });
     page = await browsers.open(1);
     await page.setViewport({ width: 1440, height: 900, scale: 1, mobile: false });
@@ -295,7 +299,10 @@ test(
                 ),
             "the action in the bar",
         );
-        await page.click({ label: "Note" });
+        // The bar's: each row has a Note button too, where a mouse hovers.
+        await inPage(
+            `[...document.querySelectorAll(".sidebar .select-bar .button")].find((each) => each.textContent.trim() === "Note").click(); return "null"`,
+        );
         await until(
             async () => ((await value<number[]>("noted")) ?? []).length === 2,
             "the action's run",

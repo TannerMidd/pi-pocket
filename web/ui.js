@@ -1517,6 +1517,19 @@ export function memo(component, ignored = []) {
 /** Phones: sheets from the bottom edge, which drag back down to close, and menus that a swipe closes. */
 export const BOTTOM_SHEETS = matchMedia("(max-width: 699px)");
 
+/**
+ * Wide screens, where the sidebar and the home screen's splash show (style.css's 960px). Narrower, the app does not
+ * draw them at all: hidden, they cost a phone the list's whole draw again.
+ */
+export const WIDE = matchMedia("(min-width: 960px)");
+
+/** No pointer that hovers (a touch screen): what only hovering shows, such as a row's buttons, is not drawn. */
+export const NO_HOVER = matchMedia("(hover: none)");
+
+// Either changing (a window resized, a mouse plugged in) draws the app again, with or without them.
+for (const query of [WIDE, NO_HOVER]) {
+    query.addEventListener("change", () => store.set({}));
+}
 
 /** The sheet host supplies a back action only when another sheet is under this one. */
 export const SheetBack = createContext(null);

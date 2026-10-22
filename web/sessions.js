@@ -38,6 +38,7 @@ import {
     html,
     Icon,
     memo,
+    NO_HOVER,
     railState,
     scrimPress,
     shortPath,
@@ -1138,7 +1139,8 @@ function AllSessions({ compact = false }) {
     // marks, and read times come through `isUnread`, `finishedUnseen`, and `sessionUnread`.
     const { conversationId, me, moving } = store.state;
     const collabs = collab();
-    const hovers = true;
+    // Row buttons that only a hovering pointer shows (`NO_HOVER`): touch screens draw none.
+    const hovers = !NO_HOVER.matches;
 
     const rowOf = ({ session, branches }, index) => {
         const open = session.id === conversationId && !session.archived;
