@@ -174,6 +174,14 @@ export const store = {
             listener(this.state);
         }
     },
+    /**
+     * Change the state without drawing anything again: for what the last draw already showed, so a draw for it would
+     * change nothing on screen. Kept in the same state object, which `apartFromViews` compares, so the next change draws
+     * as if this one was always there.
+     */
+    note(patch) {
+        Object.assign(this.state, patch);
+    },
     subscribe(listener) {
         this.listeners.add(listener);
 

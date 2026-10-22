@@ -1857,6 +1857,9 @@ const PENDING_MS = 11 * 60_000;
 /** How long a scroller may glide on after a finger lets go of it, at most. */
 const GLIDE_MS = 3000;
 
+/** How long after a tap or a key in the conversation what grows there is what the reader opened, not new rows. */
+const OPENED_MS = 1000;
+
 /** A touch screen, where scrollers glide on after a flick and their scroll bars take no room. */
 const COARSE = matchMedia("(pointer: coarse)");
 
@@ -2508,6 +2511,8 @@ function windowStart(rows, from) {
 export function Transcript() {
     const { view, missing, history, transcriptFrom } = store.state;
     const scroller = useRef(null);
+    /** The column of rows in the scroller, whose growth keeps it at the bottom (below). */
+    const column = useRef(null);
     const stick = useRef(true);
     /** A jump to a message is under way: the reader has not scrolled or tapped since. */
     const jumping = useRef(false);
@@ -2568,6 +2573,8 @@ export function Transcript() {
         return () => measure.disconnect();
     }, [scroller.current]);
 
+    // After a draw that can change the rows, not after every change to the store (each draws the app): to the bottom, or
+    // back to where the reader was, before the draw shows. What grows between such draws is the ResizeObserver's below.
     useLayoutEffect(() => {
         const element = scroller.current;
 
@@ -2604,14 +2611,15 @@ export function Transcript() {
             return;
         }
 
-        // Fix the first row shown, so rows arriving below never push the ones being read off the top. While the reader
+        // Fix the first row shown, so rows arriving below never push the ones being read off the top: noted without a
+        // draw, as this draw began there already (`revealEntry` and "Show earlier messages" read it). While the reader
         // follows along at the bottom, drop the oldest once there are twice as many as a fresh open shows.
         if (rows[start].id !== transcriptFrom) {
-            store.set({ transcriptFrom: rows[start].id });
+            store.note({ transcriptFrom: rows[start].id });
         } else if (grew && stick.current && rows.length - start > 2 * TRANSCRIPT_ROWS) {
             store.set({ transcriptFrom: rows[rows.length - TRANSCRIPT_ROWS].id });
         }
-    });
+    }, [view, history, start]);
 
     // Once the rows a session opens with are on screen, rows that mount later are new and animate in.
     const conversationId = view.conversation?.id;
@@ -2630,7 +2638,8 @@ export function Transcript() {
     }, [conversationId, hasRows]);
 
     // The conversation gets shorter or taller as what is above the message box changes (the queue, the subagents' list,
-    // a message box that grows): stay at the bottom if we were there, before the change shows.
+    // a message box that grows), and its rows grow between draws (a card that draws late, a font that loads, a line
+    // under a reply): stay at the bottom if we were there, before the change shows.
     useEffect(() => {
         const element = scroller.current;
 
@@ -2661,8 +2670,19 @@ export function Transcript() {
         const gliding = () =>
             touching ||
             (performance.now() - released < GLIDE_MS && performance.now() - moved < 100);
-        const observer = new ResizeObserver(() => {
-            if (stick.current && !gliding()) {
+        // Nor what a tap or a key there opened (a group, a step): it unrolls in place, where the reader looks. The next
+        // draw of new rows takes them down again.
+        let pressed = -Infinity;
+
+        const press = () => {
+            pressed = performance.now();
+        };
+
+        const opened = (changes) =>
+            performance.now() - pressed < OPENED_MS &&
+            changes.every((change) => change.target !== element);
+        const observer = new ResizeObserver((changes) => {
+            if (stick.current && !gliding() && !opened(changes)) {
                 element.scrollTop = element.scrollHeight;
             }
         });
@@ -2671,7 +2691,13 @@ export function Transcript() {
         element.addEventListener("touchend", up, { passive: true });
         element.addEventListener("touchcancel", up, { passive: true });
         element.addEventListener("scroll", scrolled, { passive: true });
+        element.addEventListener("pointerdown", press, { capture: true, passive: true });
+        element.addEventListener("keydown", press, { capture: true, passive: true });
         observer.observe(element);
+
+        if (column.current) {
+            observer.observe(column.current);
+        }
 
         return () => {
             observer.disconnect();
@@ -2679,6 +2705,8 @@ export function Transcript() {
             element.removeEventListener("touchend", up);
             element.removeEventListener("touchcancel", up);
             element.removeEventListener("scroll", scrolled);
+            element.removeEventListener("pointerdown", press, { capture: true });
+            element.removeEventListener("keydown", press, { capture: true });
         };
     }, [view.conversation?.id]);
 
@@ -2839,7 +2867,7 @@ export function Transcript() {
         conversation.forkedFrom && sessions.find((each) => each.id === conversation.forkedFrom.id);
 
     return html`<main class="scroller" ref=${scroller} onScroll=${onScroll}>
-        <div class="transcript" data-part="transcript">
+        <div class="transcript" data-part="transcript" ref=${column}>
             <${LinkedSessions} />
             ${
                 conversation.forkedFrom &&
