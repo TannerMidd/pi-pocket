@@ -12742,7 +12742,7 @@ textarea.notes {
 
 /*
  * Phones: a session opened slides in from the right, and going back brings the list (or the session before) in from
- * the left, so where back goes is where things came from. `data-route` is set while it slides (back.js).
+ * the left, so where back goes is where things came from. `data-route` is set on the window while it slides (back.js).
  */
 @media (max-width: 959px) {
     /* Held inside the window: a scroller sliding in from the right (a route, a swipe's lean) would make the page wider
@@ -12750,11 +12750,11 @@ textarea.notes {
     .pane {
         overflow-x: clip;
     }
-    :root[data-route="forward"] .pane > .scroller {
+    .pane[data-route="forward"] > .scroller {
         animation: route-forward 0.32s var(--ease-out);
     }
-    :root[data-route="back"] .pane > .scroller,
-    :root[data-route="back"] .home-list {
+    .pane[data-route="back"] > .scroller,
+    .pane[data-route="back"] > .home-list {
         animation: route-back 0.32s var(--ease-out);
     }
 }
@@ -16911,11 +16911,11 @@ pre.gallery-code {
 }
 
 @media (max-width: 959px) {
-    :root[data-motion="fluid"][data-route="forward"] .pane > .scroller {
+    :root[data-motion="fluid"] .pane[data-route="forward"] > .scroller {
         animation: route-forward var(--t-glide) var(--ease-glide);
     }
-    :root[data-motion="fluid"][data-route="back"] .pane > .scroller,
-    :root[data-motion="fluid"][data-route="back"] .home-list {
+    :root[data-motion="fluid"] .pane[data-route="back"] > .scroller,
+    :root[data-motion="fluid"] .pane[data-route="back"] > .home-list {
         animation: route-back var(--t-glide) var(--ease-glide);
     }
 }

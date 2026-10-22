@@ -352,14 +352,35 @@ function guardRoot() {
     shownBack = 0;
 }
 
+/** The window a route slides into (the conversation's, or the list's on phones), whose mark says which way. */
+let routeWindow = null;
+
+/** The route slide ended: its mark goes. A slide that never played (a wide screen, reduced motion) ends on a timer. */
+function landed() {
+    clearTimeout(routeTimer);
+    routeWindow?.removeEventListener("animationend", slid);
+    delete routeWindow?.dataset.route;
+    routeWindow = null;
+}
+
+const slid = (event) => /^route-(forward|back)$/.test(event.animationName) && landed();
+
 /**
  * Which way the last route change went, for the screen it brings to slide in from that side (style.css): `forward` to
- * a session, `back` to the one before or up to the list. Only while it slides.
+ * a session, `back` to the one before or up to the list. Only while it slides. On the window, not the page's root: a
+ * mark there would restyle the whole page twice for each route.
  */
 function heading(way) {
-    document.documentElement.dataset.route = way;
-    clearTimeout(routeTimer);
-    routeTimer = setTimeout(() => delete document.documentElement.dataset.route, 600);
+    landed();
+    routeWindow = document.querySelector(".pane");
+
+    if (routeWindow === null) {
+        return;
+    }
+
+    routeWindow.dataset.route = way;
+    routeWindow.addEventListener("animationend", slid);
+    routeTimer = setTimeout(landed, 600);
 }
 
 /**

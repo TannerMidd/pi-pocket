@@ -98,7 +98,7 @@ test("a home screen app keeps the session list under back, also at its root", as
     });
     Object.defineProperty(globalThis, "document", {
         configurable: true,
-        value: { documentElement: { dataset: {} } },
+        value: { documentElement: { dataset: {} }, querySelector: () => null },
     });
     globals.addEventListener = add;
     globals.removeEventListener = remove;
