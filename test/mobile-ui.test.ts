@@ -615,6 +615,8 @@ test(
     real,
     async () => {
         await fresh();
+        // Wide, where the sidebar's list shows beside the session: a phone in a session draws no list at all.
+        await page.setViewport(VIEWPORTS.desktop);
         await goTo(first);
         await reach({ path: `/s/${first}` }, "the session");
         await until(
@@ -628,7 +630,8 @@ test(
             kept: boolean;
             text: string;
             quiet: number;
-            listed: number;
+            same: number;
+            listed: string[];
             image: string | null;
         }>(`
         const { h, options, render } = await import("preact");
@@ -641,33 +644,193 @@ test(
         const first = box.querySelector("p");
 
         render(h(Markdown, { text: "First block.\\n\\n![x](a.png)\\n\\nSecond, longer", cache: false }), box);
-        let rows = 0;
+        let rows = [];
         const diffed = options.diffed;
 
         let quiet;
+        let same;
 
         options.diffed = (vnode) => {
-            rows += vnode.type?.name === "SessionRow" ? 1 : 0;
+            if (vnode.type?.name === "SessionRow") {
+                rows.push(vnode.props.session.title ?? "");
+            }
+
             diffed?.(vnode);
         };
 
         try {
             store.set((state) => ({ view: { ...state.view } }));
             await settle();
-            quiet = rows;
+            quiet = rows.length;
+            // The same sessions in a new list: no row has anything new to show.
             store.set((state) => ({ sessions: [...state.sessions] }));
+            await settle();
+            same = rows.length - quiet;
+            rows = [];
+            // One session renamed: its row, and no other.
+            store.set((state) => ({
+                sessions: state.sessions.map((session) =>
+                    session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
+                ),
+            }));
             await settle();
         } finally {
             options.diffed = diffed;
         }
 
-        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
+        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, same, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
     `);
 
         assert.ok(drawn.kept, "the first block stays as it was drawn");
         assert.match(drawn.text, /Second, longer/, "the last block grows");
         assert.match(drawn.image ?? "", /^\/api\//, "an image path points at the server");
         assert.equal(drawn.quiet, 0, "a new view leaves the session list alone");
-        assert.ok(drawn.listed > 0, "a new session list draws it");
+        assert.equal(drawn.same, 0, "the same sessions again draw no row");
+        assert.deepEqual(drawn.listed, ["Renamed here"], "a changed session draws its row alone");
     },
 );
+
+test(
+    "a reconnect that brings the same data keeps it, and draws and themes nothing",
+    real,
+    async () => {
+        await fresh();
+        const after = await inPage<{
+            same: Record<string, boolean>;
+            rows: number;
+            root: number;
+            offset: boolean;
+        }>(`
+        const { options } = await import("preact");
+        const { connect, serverClockOffset, store } = await import("/store.js");
+        const settle = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
+        // Not users: the server tells everyone when this person was last here, which a reconnect changes.
+        const keys = ["me", "models", "guard", "server", "themeList", "folderFavorites", "sessions", "moving"];
+        const before = Object.fromEntries(keys.map((key) => [key, store.state[key]]));
+        const me = store.state.me.id;
+        const people = store.state.users;
+        const offset = serverClockOffset();
+        let rows = 0;
+        let root = 0;
+        const diffed = options.diffed;
+        // The theme put on again sets the page root's attributes again.
+        const watch = new MutationObserver((records) => (root += records.length));
+
+        options.diffed = (vnode) => {
+            rows += vnode.type?.name === "SessionRow" ? 1 : 0;
+            diffed?.(vnode);
+        };
+        watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-mode", "data-colors"] });
+
+        try {
+            const stream = store.state.streamId;
+
+            connect();
+            await new Promise((resolve) => {
+                const stop = store.subscribe((state) => {
+                    if (state.connection === "open" && state.streamId !== stream && state.sessionsLoaded) {
+                        stop();
+                        resolve();
+                    }
+                });
+            });
+            // The session list comes after hello: wait for the server's events to settle.
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            await settle();
+        } finally {
+            options.diffed = diffed;
+            watch.disconnect();
+        }
+
+        return JSON.stringify({
+            same: Object.fromEntries([
+                ...keys.map((key) => [key, store.state[key] === before[key]]),
+                // Each person who did not change keeps their object; this person's last visit moved.
+                ...people
+                    .filter((person) => person.id !== me)
+                    .map((person) => ["user " + person.name, store.state.users.includes(person)]),
+            ]),
+            rows,
+            root,
+            offset: typeof serverClockOffset() === "number" && Math.abs(serverClockOffset() - offset) < 60_000,
+        });
+    `);
+
+        assert.deepEqual(
+            Object.entries(after.same).filter(([, same]) => !same),
+            [],
+            "every equal value keeps its identity",
+        );
+        assert.equal(after.rows, 0, "no session row draws again");
+        assert.equal(after.root, 0, "the theme is not put on again");
+        assert.ok(after.offset, "the server's clock is still known");
+    },
+);
+
+test("back to the list slides it in whole, and its rows do not rise in again", real, async () => {
+    await fresh();
+    // Rows new to the page rise in once.
+    assert.ok(
+        await inPage<boolean>(
+            `return JSON.stringify(document.querySelector(".home-list .session-row.arriving") !== null)`,
+        ),
+        "rows rise in when the page first shows them",
+    );
+    await tap(row(first));
+    await reach({ path: `/s/${first}` }, "the session");
+    await back();
+    await reach({ path: "/" }, "back to the list");
+    const shown = await inPage<{
+        rows: number;
+        arriving: number;
+        rowAnimations: number;
+        slide: string;
+    }>(`
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const rows = [...document.querySelectorAll(".home-list .session-row")];
+
+        return JSON.stringify({
+            rows: rows.length,
+            arriving: rows.filter((each) => each.classList.contains("arriving")).length,
+            rowAnimations: rows.flatMap((each) => each.getAnimations()).length,
+            slide: document.documentElement.dataset.route ?? "",
+        });
+    `);
+
+    assert.ok(shown.rows > 0, "the list shows its rows");
+    assert.equal(shown.arriving, 0, "no row rises in again");
+    assert.equal(shown.rowAnimations, 0, "no row animates");
+    assert.equal(shown.slide, "back", "the list slides in from the left");
+});
+
+test("a phone draws no sidebar, no splash, and no row buttons it would hide", real, async () => {
+    await fresh();
+    const phone = await inPage<Record<string, number>>(`
+        return JSON.stringify({
+            width: innerWidth,
+            sidebarLists: document.querySelectorAll(".sidebar .sessions, .sidebar .rail").length,
+            homeLists: document.querySelectorAll(".home-list .sessions").length,
+            splash: document.querySelectorAll(".splash").length,
+            rowButtons: document.querySelectorAll(".session-actions").length,
+        });
+    `);
+
+    assert.deepEqual(phone, {
+        width: 390,
+        sidebarLists: 0,
+        homeLists: 1,
+        splash: 0,
+        rowButtons: 0,
+    });
+
+    // Widened, the sidebar and the splash come back at once.
+    await page.setViewport(VIEWPORTS.desktop);
+    await until(
+        () =>
+            inPage<boolean>(`
+                return JSON.stringify(document.querySelector(".sidebar .sessions") !== null &&
+                    document.querySelector(".splash") !== null);
+            `),
+        "the sidebar's list and the splash, on a wide screen",
+    );
+});
