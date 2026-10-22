@@ -862,19 +862,40 @@ export function formatBytes(bytes) {
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// Times as this device writes them, each format made once: making one costs more than using it, and a transcript
+// writes a time for each message.
+const TIME = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+const DAY = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
+const WEEKDAY = new Intl.DateTimeFormat([], { weekday: "short" });
+
+/** Whether a date is today, on this device's clock. */
+function isToday(date) {
+    const now = new Date();
+
+    return (
+        date.getDate() === now.getDate() &&
+        date.getMonth() === now.getMonth() &&
+        date.getFullYear() === now.getFullYear()
+    );
+}
+
+/** When something happened, on this device's clock: "10:42" today, "Oct 3 10:42" before. */
+export function clockTime(date) {
+    const time = TIME.format(date);
+
+    return isToday(date) ? time : `${DAY.format(date)} ${time}`;
+}
+
 /** A time ahead, on this device's clock: "14:30" today, "Mon 09:00" this week, "Oct 20 09:00" later. */
 export function formatWhen(ms) {
     const at = new Date(ms);
-    const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const time = TIME.format(at);
 
-    if (at.toDateString() === new Date().toDateString()) {
+    if (isToday(at)) {
         return time;
     }
 
-    const day =
-        ms - Date.now() < 6 * 86_400_000
-            ? at.toLocaleDateString([], { weekday: "short" })
-            : at.toLocaleDateString([], { month: "short", day: "numeric" });
+    const day = ms - Date.now() < 6 * 86_400_000 ? WEEKDAY.format(at) : DAY.format(at);
 
     return `${day} ${time}`;
 }

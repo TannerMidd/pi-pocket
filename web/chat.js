@@ -25,7 +25,7 @@ import {
     store,
     typing,
 } from "./store.js";
-import { copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
+import { clockTime, copyText, html, Icon, Loader, Sheet, Spinner, timeAgo } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
 
@@ -120,14 +120,7 @@ export function TypingLine({ where }) {
     </div>`;
 }
 
-function clock(at) {
-    const date = new Date(at);
-    const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-    return date.toDateString() === new Date().toDateString()
-        ? time
-        : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
-}
+const clock = (at) => clockTime(new Date(at));
 
 /** The newest jump: an earlier one still loading gives way to it. */
 let jumps = 0;

@@ -46,6 +46,7 @@ import {
 } from "./turns.js";
 import {
     Boot,
+    clockTime,
     copyText,
     entryImageUrl,
     fileUrl,
@@ -244,14 +245,7 @@ function span(ms) {
 }
 
 /** When a message was sent, from the server's time: "10:42" today, "Oct 3 10:42" before. */
-function clock(at) {
-    const date = new Date(fromServer(at));
-    const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-    return date.toDateString() === new Date().toDateString()
-        ? time
-        : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
-}
+const clock = (at) => clockTime(new Date(fromServer(at)));
 
 /**
  * A person's message: a filled row with a prompt mark, the accent's for your own and the author's color for someone
