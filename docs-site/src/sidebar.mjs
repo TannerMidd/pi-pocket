@@ -69,7 +69,6 @@ export const SIDEBAR = [
             ["docs/map.md", "Project map"],
             ["docs/architecture.md", "Architecture"],
             ["docs/features.md", "Features"],
-            ["docs/web-access.md", "Web access"],
         ],
     },
 ];

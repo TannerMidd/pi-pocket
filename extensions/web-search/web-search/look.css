@@ -1,0 +1,364 @@
+/* ─── Web access & search provider configuration sheet ─────────── */
+
+.web-access-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.web-select-primary {
+    max-width: 220px;
+    width: auto;
+    padding: 6px 10px;
+    font-size: 13px;
+    border-radius: var(--r-control);
+    background: var(--card);
+    border: 1px solid var(--hair-2);
+    color: var(--text);
+    flex: 0 0 auto;
+}
+
+@media (max-width: 520px) {
+    .setting-row:has(.web-select-primary) {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .setting-row:has(.web-select-primary) .setting-text {
+        flex-basis: 100%;
+    }
+    .web-select-primary {
+        max-width: 100%;
+        width: 100%;
+    }
+}
+
+.web-provider-row {
+    padding: 13px 15px;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.web-provider-row.is-primary {
+    background: color-mix(in srgb, var(--accent) 3.5%, var(--bg));
+}
+
+.web-provider-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.web-provider-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.web-provider-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.web-provider-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.web-provider-desc {
+    line-height: 1.45;
+}
+
+.web-access-sheet .badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.web-access-sheet .badge.primary {
+    background: var(--accent);
+    color: var(--accent-contrast, #fff);
+}
+
+.web-access-sheet .badge.ok {
+    background: var(--ok-soft, rgba(46, 160, 67, 0.15));
+    color: var(--ok);
+}
+
+.web-access-sheet .badge.warn {
+    background: var(--warn-soft, rgba(210, 153, 34, 0.15));
+    color: var(--warn);
+}
+
+.web-access-sheet .badge.muted {
+    background: var(--card-2);
+    color: var(--muted);
+}
+
+.web-provider-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+}
+
+.web-provider-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.web-test-status {
+    padding: 7px 11px;
+    border-radius: var(--r-control);
+    font-size: 12px;
+    line-height: 1.4;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.web-test-status.ok {
+    background: var(--ok-soft, rgba(46, 160, 67, 0.12));
+    color: var(--ok);
+    border: 1px solid var(--ok);
+}
+
+.web-test-status.warn {
+    background: color-mix(in srgb, var(--err, #f85149) 12%, transparent);
+    color: var(--err);
+    border: 1px solid var(--err);
+}
+
+.web-key-drawer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--card);
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-control);
+    margin-top: 2px;
+}
+
+.web-key-input-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    position: relative;
+}
+
+.web-key-input-wrap input {
+    width: 100%;
+    padding-right: 36px;
+    background: var(--bg);
+}
+
+.web-key-input-wrap button {
+    position: absolute;
+    right: 4px;
+}
+
+.web-search-card {
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.web-live-search-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.web-live-search-form .search {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.web-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.web-search-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.web-meta-bold {
+    color: var(--text);
+}
+
+.web-meta-query {
+    color: var(--text);
+    font-style: normal;
+}
+
+.web-synthesis-box {
+    padding: 11px 13px;
+    background: var(--card-2);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r-control);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.web-synthesis-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--accent);
+}
+
+.web-results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.web-result-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    background: var(--card);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+}
+
+.web-result-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.web-result-index {
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+}
+
+.web-result-link {
+    font-weight: 500;
+    font-size: 13.5px;
+    word-break: break-word;
+}
+
+.web-result-url {
+    font-size: 11.5px;
+    overflow-wrap: anywhere;
+}
+
+.web-result-snippet {
+    color: var(--muted);
+    line-height: 1.45;
+    margin-top: 2px;
+}
+
+@media (max-width: 600px) {
+    .web-provider-main {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .web-provider-actions {
+        justify-content: flex-start;
+    }
+    .web-key-drawer {
+        flex-wrap: wrap;
+    }
+    .web-key-input-wrap {
+        width: 100%;
+        flex-basis: 100%;
+    }
+}
+/* Web routing controls wrap at phone widths. */
+.web-options-group {
+    min-width: 0;
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+}
+
+.web-options-fields {
+    min-width: 0;
+    padding: 8px 0;
+    border: 0;
+}
+
+.web-route-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.web-route-row select {
+    flex: 1 1 120px;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 40px;
+}
+
+.web-route-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.web-option-field {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.web-option-field input:not([type="checkbox"]),
+.web-option-field select {
+    min-width: 0;
+    max-width: 100%;
+    min-height: 40px;
+}
+
+.web-option-field input[type="checkbox"] {
+    width: 24px;
+    height: 40px;
+}
+
+.web-usage-row {
+    display: grid;
+    gap: 4px;
+    margin: 12px 0;
+    overflow-wrap: anywhere;
+}

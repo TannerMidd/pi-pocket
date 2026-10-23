@@ -57,7 +57,6 @@ const ORDER = [
     "pip.ts",
     "triggers.ts",
     "gallery.ts",
-    "web-access.ts",
 ];
 
 /** The built-in modules' names (their files' without `.ts`): a drop-in with one of them is never loaded. */
@@ -84,7 +83,6 @@ const TITLES: Record<string, string> = {
     "pip.ts": "PiP",
     "triggers.ts": "Triggers",
     "gallery.ts": "Extension gallery",
-    "web-access.ts": "Web access",
 };
 
 /**
@@ -119,11 +117,6 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "watch_pr",
     "repo_watch",
     "session_watch_pr",
-    "web_search",
-    "fetch_content",
-    "web_crawl",
-    "web_research",
-    "web_research_status",
 ]);
 
 /** Pi Pocket's own modules, or the owner's from the drop-in folder. */

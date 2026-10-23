@@ -28,7 +28,7 @@ export async function updateWebFile<T>(path: string, fallback: T, update: (data:
             const data = await readWebFile(path, fallback);
 
             update(data);
-            await mkdir(dirname(path), { recursive: true });
+            await mkdir(dirname(path), { recursive: true, mode: 0o700 });
             await writeFile(`${path}.tmp`, JSON.stringify(data, null, 2), { mode: 0o600 });
             await rename(`${path}.tmp`, path);
 

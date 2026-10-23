@@ -1,0 +1,13 @@
+{
+    "name": "web-search",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Standalone web search extension for Pi Pocket 0.20.0+",
+    "license": "MIT",
+    "scripts": {
+        "test": "node test/manager.test.ts && node test/module.test.ts && node test/integration.test.ts",
+        "test:browser": "node test/browser.test.ts",
+        "check": "tsc --noEmit -p tsconfig.json"
+    }
+}

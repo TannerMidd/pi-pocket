@@ -1,18 +1,21 @@
 // Web Access & Search provider management tests
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { cleanUp, openApp, root, scriptedModel } from "./helpers.ts";
-import { WebAccessManager } from "../src/server/web-access.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+const root = mkdtempSync(join(tmpdir(), "standalone-web-search-"));
+const cleanUp = () => rmSync(root, { recursive: true, force: true });
+const transport = { fetchPublic: (url: string | URL, init: any) => fetch(String(url), init) };
+
+import { WebAccessManager } from "../web-search/manager.ts";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DEFAULT_TIERS } from "../src/server/web-access-settings.ts";
-import { createServer } from "node:http";
-import { createHandler } from "../src/server/http.ts";
+import { DEFAULT_TIERS } from "../web-search/settings.ts";
 
 after(cleanUp);
 
 test("WebAccessManager reports all supported providers and default configuration", async () => {
-    const manager = new WebAccessManager();
+    const manager = new WebAccessManager(join(root, "defaults"), transport);
     const state = await manager.getState();
 
     assert.equal(typeof state.enabled, "boolean");
@@ -33,53 +36,17 @@ test("WebAccessManager reports all supported providers and default configuration
     assert.equal(ddg?.keyConfigured, true);
 });
 
-test("WebAccessManager rejects local loopback addresses in fetchContent", async () => {
-    const manager = new WebAccessManager();
-
-    await assert.rejects(
-        () => manager.fetchContent("http://localhost:8080/secret"),
-        /Local loopback addresses cannot be fetched/,
-    );
-    await assert.rejects(
-        () => manager.fetchContent("http://127.0.0.1:3000/api"),
-        /Local loopback addresses cannot be fetched/,
-    );
-});
-
 test("WebAccessManager testConnection fails fast on missing key for keyed providers", async () => {
-    const manager = new WebAccessManager();
+    const manager = new WebAccessManager(join(root, "defaults"), transport);
     const result = await manager.testConnection("tavily", "");
 
     assert.equal(result.ok, false);
     assert.ok(result.error?.includes("No API key"));
 });
 
-test("Web access HTTP routes allow configuring keys, settings, and testing", async () => {
-    const app = await openApp(scriptedModel());
-
-    try {
-        const state = await app.webAccess.getState();
-
-        assert.ok(Array.isArray(state.providers));
-
-        // Test updating primary provider and max results
-        await app.webAccess.saveConfig({
-            provider: "duckduckgo",
-            maxResults: 10,
-        });
-
-        const updated = await app.webAccess.getState();
-
-        assert.equal(updated.primaryProvider, "duckduckgo");
-        assert.equal(updated.maxResults, 10);
-    } finally {
-        await app.close();
-    }
-});
-
 async function fixture() {
     const directory = await mkdtemp(join(root, "web-access-"));
-    const manager = new WebAccessManager(directory);
+    const manager = new WebAccessManager(directory, transport);
 
     await manager.saveConfig({
         tavilyApiKey: "fake-tavily",
@@ -90,9 +57,9 @@ async function fixture() {
     return { manager, directory };
 }
 
-test("web providers do not reuse subscription tokens or execute key commands", async () => {
+test("web providers ignore auth files, subscription tokens and key commands", async () => {
     const directory = await mkdtemp(join(root, "web-auth-"));
-    const manager = new WebAccessManager(directory);
+    const manager = new WebAccessManager(directory, transport);
 
     await mkdir(join(directory, "agent"));
     await writeFile(
@@ -107,8 +74,7 @@ test("web providers do not reuse subscription tokens or execute key commands", a
     assert.deepEqual(await manager.resolveKey("openai"), { source: "none" });
     assert.deepEqual(await manager.resolveKey("exa"), { source: "none" });
     assert.deepEqual(await manager.resolveKey("brave"), {
-        key: "fake-brave-key",
-        source: "auth.json",
+        source: "none",
     });
 });
 
@@ -123,6 +89,10 @@ test("quick routing follows the configured order, reports attempts, and tracks f
     const calls: string[] = [];
 
     t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+        if (init?.method === "HEAD") {
+            return new Response(null);
+        }
+
         calls.push(url);
 
         if (url.includes("brave")) {
@@ -242,7 +212,7 @@ test("legacy routing and unknown fields survive saves and concurrent key/config 
     });
     assert.equal((await manager.getState()).tierRoutingEnabled, false);
     assert.equal((await manager.search("query")).provider, "brave");
-    const other = new WebAccessManager(directory);
+    const other = new WebAccessManager(directory, transport);
 
     await Promise.all([
         manager.setApiKey("tavily", "new-key"),
@@ -285,7 +255,7 @@ test("provider settings reach exact Tavily/Exa requests and persist across manag
         });
     });
     await manager.search("query", "tavily");
-    const exa = await new WebAccessManager(directory).search("query", "exa");
+    const exa = await new WebAccessManager(directory, transport).search("query", "exa");
 
     assert.equal(bodies[0].search_depth, "advanced");
     assert.equal(bodies[0].include_answer, false);
@@ -298,7 +268,7 @@ test("provider settings reach exact Tavily/Exa requests and persist across manag
 
 test("concurrent requests across managers keep exact counts and no query or credentials in usage", async (t) => {
     const { manager, directory } = await fixture();
-    const other = new WebAccessManager(directory);
+    const other = new WebAccessManager(directory, transport);
 
     t.mock.method(globalThis, "fetch", async () =>
         jsonResponse({ results, usage: { credits: 1 } }),
@@ -308,7 +278,7 @@ test("concurrent requests across managers keep exact counts and no query or cred
             (i % 2 ? manager : other).search("secret-query", "tavily"),
         ),
     );
-    const state = await new WebAccessManager(directory).getState();
+    const state = await new WebAccessManager(directory, transport).getState();
     const counters = Object.values(state.usage.days).flatMap(Object.values);
 
     assert.equal(counters[0]?.requests, 16);
@@ -335,75 +305,41 @@ test("request timeouts remain unknown and connection tests are counted separatel
     assert.equal(counters.find((r) => r.operation === "test")?.requests, 1);
 });
 
-test("extraction order, direct redirects, Tavily extract, and Exa contents use supported settings", async (t) => {
+test("direct reads and cloud extraction use the host transport and count preflight requests", async (t) => {
     const { manager } = await fixture();
-    const calls: string[] = [];
 
-    t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
-        calls.push(url);
-
-        if (url === "https://example.com/") {
-            return new Response(null, {
-                status: 302,
-                headers: { location: "https://example.com/page" },
-            });
+    t.mock.method(globalThis, "fetch", async (url: string, init: any) => {
+        if (init?.method === "HEAD") {
+            return new Response(null, { status: 405 });
         }
 
-        if (url === "https://example.com/page") {
-            return new Response("<h1>Readable</h1><script>hidden</script>");
+        if (url.includes("api.tavily.com")) {
+            return jsonResponse({ results: [{ raw_content: "Tavily extracted" }] });
         }
 
-        const body = JSON.parse(init.body as string);
-
-        if (url.endsWith("/extract")) {
-            assert.equal(body.extract_depth, "advanced");
-            assert.equal(body.include_usage, true);
-
-            return jsonResponse({ results: [{ raw_content: "Extracted" }], usage: { credits: 1 } });
+        if (url.includes("api.exa.ai")) {
+            return jsonResponse({ results: [{ text: "Exa extracted" }] });
         }
 
-        assert.ok(url.endsWith("/contents"));
-        assert.equal(body.text.maxCharacters, 20000);
-
-        return jsonResponse({ results: [{ text: "Exa extracted" }] });
+        return new Response("<h1>Readable</h1><script>hidden</script>");
     });
     assert.equal((await manager.fetchContent("https://example.com")).text, "Readable");
-    await manager.saveConfig({
-        providerSettings: { tavily: { extractDepth: "advanced" } },
-        extractOrder: ["tavily", "exa", "direct"],
-    });
-    assert.equal((await manager.fetchContent("https://example.com")).provider, "tavily");
+    assert.equal(
+        (await manager.fetchContent("https://example.com", 20000, "tavily")).text,
+        "Tavily extracted",
+    );
     assert.equal(
         (await manager.fetchContent("https://example.com", 20000, "exa")).text,
         "Exa extracted",
     );
-    assert.equal(calls.length, 4);
-});
+    const state = await manager.getState();
 
-test("private URLs and redirected loopback URLs are blocked before sending a local request", async (t) => {
-    const { manager } = await fixture();
-    const stub = t.mock.method(
-        globalThis,
-        "fetch",
-        async () =>
-            new Response(null, { status: 302, headers: { location: "http://127.0.0.1/secret" } }),
+    assert.equal(
+        Object.values(state.usage.days)
+            .flatMap(Object.values)
+            .reduce((n: any, r: any) => n + r.requests, 0),
+        5,
     );
-
-    for (const url of [
-        "http://[::1]",
-        "http://127.2.3.4",
-        "http://192.168.1.2",
-        "http://localhost.",
-    ]) {
-        await assert.rejects(() => manager.fetchContent(url), /Local loopback/);
-        await assert.rejects(() => manager.crawl(url), /Local loopback/);
-    }
-
-    await assert.rejects(
-        () => manager.fetchContent("https://example.com", 20000, "direct"),
-        /Local loopback/,
-    );
-    assert.equal(stub.mock.callCount(), 1);
 });
 
 test("crawl limits and research jobs persist; repeated polls do not double count credits", async (t) => {
@@ -423,6 +359,10 @@ test("crawl limits and research jobs persist; repeated polls do not double count
     const calls: string[] = [];
 
     t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+        if (init?.method === "HEAD") {
+            return new Response(null);
+        }
+
         calls.push(url);
 
         if (url.endsWith("/crawl")) {
@@ -448,7 +388,7 @@ test("crawl limits and research jobs persist; repeated polls do not double count
     });
     await manager.crawl("https://example.com", "Find documentation");
     await manager.research("Research question");
-    const restarted = new WebAccessManager(directory);
+    const restarted = new WebAccessManager(directory, transport);
 
     await Promise.all([restarted.researchStatus("job-1"), manager.researchStatus("job-1")]);
     const state = await restarted.getState();
@@ -473,87 +413,6 @@ test("uncertain research submission is sent once", async (t) => {
         /not retried; submission may have reached/,
     );
     assert.equal(stub.mock.callCount(), 1);
-});
-
-test("HTTP validates routing changes and keeps settings writes owner-only", async () => {
-    const app = await openApp(scriptedModel());
-    const server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
-    );
-
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const call = (token: string, body: unknown) =>
-        fetch(`${base}/api/web-access`, {
-            method: "POST",
-            headers: {
-                authorization: `Bearer ${token}`,
-                "x-pocket": "1",
-                "content-type": "application/json",
-            },
-            body: JSON.stringify(body),
-        });
-
-    try {
-        const guest = app.config.addUser("Guest", "guest");
-        const viewer = app.config.addUser("Viewer", "viewer");
-
-        for (const token of [guest.token, viewer.token]) {
-            assert.equal(
-                (
-                    await fetch(`${base}/api/web-access`, {
-                        headers: { authorization: `Bearer ${token}` },
-                    })
-                ).status,
-                403,
-            );
-            assert.equal(
-                (
-                    await fetch(`${base}/api/web-access/search`, {
-                        method: "POST",
-                        headers: {
-                            authorization: `Bearer ${token}`,
-                            "x-pocket": "1",
-                            "content-type": "application/json",
-                        },
-                        body: JSON.stringify({ query: "test" }),
-                    })
-                ).status,
-                403,
-            );
-        }
-
-        assert.equal((await call(guest.token, { tierRouting: DEFAULT_TIERS })).status, 403);
-        assert.equal(
-            (await call(app.config.ownerToken, { providerSettings: { exa: { mode: "invalid" } } }))
-                .status,
-            400,
-        );
-        const saved = await call(app.config.ownerToken, {
-            tierRouting: DEFAULT_TIERS,
-            extractOrder: ["exa", "direct"],
-            providerSettings: { exa: { mode: "lite" } },
-        });
-
-        assert.equal(saved.status, 200);
-        const state = (await saved.json()) as any;
-
-        assert.equal(state.tierRouting.quick[0].provider, "brave");
-        assert.deepEqual(state.extractOrder, ["exa", "direct"]);
-        assert.equal(state.providerSettings.exa.mode, "lite");
-        assert.equal(
-            (
-                await fetch(`${base}/api/web-access`, {
-                    headers: { authorization: `Bearer ${app.config.ownerToken}` },
-                })
-            ).status,
-            200,
-        );
-    } finally {
-        server.closeAllConnections();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        await app.close();
-    }
 });
 
 test("invalid provider JSON is redacted and fallback still runs", async (t) => {

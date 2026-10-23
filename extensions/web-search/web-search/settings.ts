@@ -1,5 +1,4 @@
 /** Supported web operations, provider options, and validation shared with the settings sheet. */
-import { HttpError } from "./errors.ts";
 
 export type SearchTier = "quick" | "standard" | "deep";
 export type WebOperation = "search" | "extract" | "crawl" | "research";
@@ -223,7 +222,7 @@ export function settingsFor(settings: ProviderSettings | undefined, provider: st
 }
 
 export function invalidWeb(message: string): never {
-    throw new HttpError(400, message);
+    throw Object.assign(new Error(message), { status: 400 });
 }
 
 export function validateMode(provider: string, mode?: string) {

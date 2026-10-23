@@ -1,12 +1,11 @@
 /**
  * Web Access & Search manager for Pi Pocket.
  * Coordinates web search providers (Tavily, Exa, Brave, Serper, OpenAI, DuckDuckGo),
- * manages API keys and routing configuration in ~/.pi/web-search.json,
+ * keeps its own API keys, settings, and request ledger below host.dataDir,
  * tests connectivity, and executes live searches and web fetches.
  */
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import type { Host, PublicFetchInit } from "../_pocket.d.ts";
 import {
     CAPABILITIES,
     DEFAULT_TIERS,
@@ -22,7 +21,7 @@ import {
     type SearchTier,
     type TierRouting,
     type WebOperation,
-} from "./web-access-settings.ts";
+} from "./settings.ts";
 import {
     emptyWebUsage,
     incrementUsage,
@@ -30,7 +29,7 @@ import {
     updateWebFile,
     type UsageCounter,
     type WebUsage,
-} from "./web-access-storage.ts";
+} from "./storage.ts";
 
 export interface SearchResult {
     title: string;
@@ -56,7 +55,7 @@ export interface WebProviderDescriptor {
     website: string;
     apiKeyRequired: boolean;
     keyConfigured: boolean;
-    keySource?: "env" | "web-search.json" | "auth.json" | "none";
+    keySource?: "extension" | "none";
     maskedKey?: string;
     connected?: boolean;
     latencyMs?: number;
@@ -179,18 +178,19 @@ function cleanHtml(html: string): string {
 
 export class WebAccessManager {
     readonly #configPath: string;
-    readonly #authPath: string;
+    readonly #host: Pick<Host, "fetchPublic">;
+    readonly #alive = new AbortController();
     readonly #usagePath: string;
     #testCache = new Map<string, { ok: boolean; latencyMs?: number; error?: string; at: number }>();
 
-    constructor(
-        directory = process.env.PI_CODING_AGENT_DIR
-            ? dirname(process.env.PI_CODING_AGENT_DIR)
-            : join(homedir(), ".pi"),
-    ) {
+    constructor(directory: string, host: Pick<Host, "fetchPublic">) {
         this.#configPath = join(directory, "web-search.json");
-        this.#authPath = join(directory, "agent", "auth.json");
         this.#usagePath = join(directory, "web-usage.json");
+        this.#host = host;
+    }
+
+    dispose(): void {
+        this.#alive.abort();
     }
 
     async loadConfig(): Promise<WebSearchConfig> {
@@ -221,56 +221,13 @@ export class WebAccessManager {
         });
     }
 
-    async loadAuth(): Promise<Record<string, any>> {
-        try {
-            const raw = await readFile(this.#authPath, "utf-8");
-
-            return JSON.parse(raw);
-        } catch {
-            return {};
-        }
-    }
-
-    async resolveKey(
-        providerId: string,
-    ): Promise<{ key?: string; source: "env" | "web-search.json" | "auth.json" | "none" }> {
-        const envKeyName = `${providerId.toUpperCase()}_API_KEY`;
-
-        if (process.env[envKeyName]) {
-            return { key: process.env[envKeyName], source: "env" };
-        }
-
+    async resolveKey(providerId: string): Promise<{ key?: string; source: "extension" | "none" }> {
         const config = await this.loadConfig();
-        const configKey =
-            (config as Record<string, any>)[`${providerId}ApiKey`] ||
-            (config as Record<string, any>)[providerId]?.apiKey ||
-            (config as Record<string, any>)[providerId]?.key;
+        const value = (config as Record<string, unknown>)[`${providerId}ApiKey`];
 
-        if (typeof configKey === "string" && configKey.trim()) {
-            return { key: configKey.trim(), source: "web-search.json" };
-        }
-
-        const auth = await this.loadAuth();
-        const authEntry = auth[providerId];
-        const authKey =
-            typeof authEntry === "string"
-                ? authEntry
-                : authEntry?.type === "oauth"
-                  ? undefined
-                  : authEntry?.apiKey || authEntry?.key;
-
-        if (typeof authKey === "string" && authKey.trim()) {
-            const value = authKey.trim();
-            const key = process.env[value] ?? value;
-
-            if (value.startsWith("!") || (/^[A-Z][A-Z0-9_]+$/.test(value) && !process.env[value])) {
-                return { source: "none" };
-            }
-
-            return { key, source: "auth.json" };
-        }
-
-        return { source: "none" };
+        return typeof value === "string" && value.trim()
+            ? { key: value.trim(), source: "extension" }
+            : { source: "none" };
     }
 
     async getState(): Promise<WebAccessState> {
@@ -383,7 +340,7 @@ export class WebAccessManager {
         }
 
         const start = Date.now();
-        const fetch = (url: string, init: RequestInit) =>
+        const fetch = (url: string, init: PublicFetchInit) =>
             this.#request(
                 { provider: providerId, operation: "test", mode: "connection", purpose: "test" },
                 url,
@@ -617,7 +574,7 @@ export class WebAccessManager {
         purpose = "tool",
         fallback = false,
     ): Promise<SearchResponse> {
-        const fetch = (url: string, init: RequestInit) =>
+        const fetch = (url: string, init: PublicFetchInit) =>
             this.#request(
                 { provider, operation: "search", mode: mode ?? "default", purpose },
                 url,
@@ -886,7 +843,7 @@ export class WebAccessManager {
     async #request(
         info: Pick<UsageCounter, "provider" | "operation" | "mode" | "purpose">,
         url: string,
-        init: RequestInit,
+        init: PublicFetchInit,
         json = true,
         fallback = false,
     ): Promise<Response> {
@@ -903,12 +860,22 @@ export class WebAccessManager {
         let received = false;
 
         try {
-            const response = await fetch(url, init);
+            const response = await this.#host.fetchPublic(url, {
+                ...init,
+                redirect: info.provider === "direct" ? "follow" : "error",
+                timeoutMs: 180000,
+                maxBytes: 10 * 1024 * 1024,
+                signal: AbortSignal.any([
+                    this.#alive.signal,
+                    ...(init.signal ? [init.signal] : []),
+                ]),
+            });
 
             received = true;
 
             if (
                 !response.ok &&
+                info.operation !== "url-check" &&
                 !(info.provider === "direct" && response.status >= 300 && response.status < 400)
             ) {
                 throw new Error(`${info.provider} HTTP ${response.status}`);
@@ -943,7 +910,9 @@ export class WebAccessManager {
                     usage,
                     info,
                     {
-                        ...(received ? { failures: 1, unknown: -1 } : {}),
+                        ...(received || String(error.code ?? "").startsWith("POCKET_")
+                            ? { failures: 1, unknown: -1 }
+                            : {}),
                     },
                     date,
                 ),
@@ -964,25 +933,6 @@ export class WebAccessManager {
             invalidWeb("Only HTTP and HTTPS protocols are supported.");
         }
 
-        const host = parsed.hostname
-            .toLowerCase()
-            .replace(/^\[|\]$/g, "")
-            .replace(/\.$/, "");
-
-        if (
-            host === "localhost" ||
-            host.endsWith(".localhost") ||
-            /^(127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) ||
-            host === "::1" ||
-            host === "::" ||
-            /^(fc|fd|fe[89ab])[0-9a-f]*:/.test(host) ||
-            host.startsWith("::ffff:")
-        ) {
-            invalidWeb(
-                "Local loopback addresses cannot be fetched via web tools (private addresses are also blocked).",
-            );
-        }
-
         if (parsed.username || parsed.password) {
             invalidWeb("URL credentials are not supported");
         }
@@ -995,7 +945,7 @@ export class WebAccessManager {
         maxChars = 20000,
         provider?: string,
     ): Promise<{ text: string; truncated: boolean; length: number; provider: string }> {
-        let parsed = this.#publicUrl(url);
+        const parsed = this.#publicUrl(url);
 
         webNumber(maxChars, 500, 200000, "Character limit");
         const config = await this.loadConfig();
@@ -1041,41 +991,20 @@ export class WebAccessManager {
                 let cleaned: string;
 
                 if (pid === "direct") {
-                    let response: Response;
-
-                    for (let redirects = 0; ; redirects++) {
-                        response = await this.#request(
-                            info,
-                            parsed.toString(),
-                            {
-                                headers: {
-                                    "User-Agent":
-                                        "Mozilla/5.0 (compatible; PiPocket-WebAccess/1.0)",
-                                    Accept: "text/html,text/plain,*/*",
-                                },
-                                redirect: "manual",
-                                signal: AbortSignal.timeout(15000),
-                            },
-                            false,
-                            fallback,
-                        );
-
-                        // Redirects are separate requests and must pass the same URL checks.
-                        if (response.status < 300 || response.status >= 400) {
-                            break;
-                        }
-
-                        if (redirects >= 5 || !response.headers.get("location")) {
-                            throw new Error("Too many redirects or missing redirect location");
-                        }
-
-                        parsed = this.#publicUrl(
-                            new URL(response.headers.get("location")!, parsed).toString(),
-                        );
-                    }
+                    const response = await this.#request(
+                        info,
+                        parsed.toString(),
+                        {
+                            headers: { Accept: "text/html,text/plain;q=0.9" },
+                            signal: AbortSignal.timeout(15000),
+                        },
+                        false,
+                        fallback,
+                    );
 
                     cleaned = cleanHtml(await response.text());
                 } else {
+                    await this.#checkPublicTarget(parsed.toString());
                     const tavily = pid === "tavily";
                     const response = await this.#request(
                         info,
@@ -1122,7 +1051,7 @@ export class WebAccessManager {
                     provider: pid,
                 };
             } catch (error: any) {
-                if (error.name === "AbortError") {
+                if (error.name === "AbortError" || String(error.code ?? "").startsWith("POCKET_")) {
                     throw error;
                 }
 
@@ -1167,6 +1096,17 @@ export class WebAccessManager {
         return response.json() as Promise<any>;
     }
 
+    async #checkPublicTarget(url: string) {
+        const response = await this.#request(
+            { provider: "direct", operation: "url-check", mode: "HEAD", purpose: "validation" },
+            url,
+            { method: "HEAD", signal: AbortSignal.timeout(15000) },
+            false,
+        );
+
+        await response.body?.cancel();
+    }
+
     async crawl(url: string, instructions?: string) {
         this.#publicUrl(url);
 
@@ -1175,6 +1115,18 @@ export class WebAccessManager {
         }
 
         const settings = settingsFor((await this.loadConfig()).providerSettings, "tavily");
+
+        const config = await this.loadConfig();
+
+        if (!this.#available(config, "tavily", "crawl")) {
+            invalidWeb("Tavily crawl is disabled");
+        }
+
+        if (!(await this.resolveKey("tavily")).key) {
+            invalidWeb("No API key configured for Tavily");
+        }
+
+        await this.#checkPublicTarget(url);
 
         return this.#tavilyOperation(
             "crawl",

@@ -300,4 +300,3 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 - `pip`: what the tools of PiP, the owner's assistant, do.
 - `pipCompaction`: PiP's own summaries when its context is compacted.
 - `gallery`: the extension gallery, for its own routes.
-- `webAccess`: configured search, extraction, crawl, and research, for the built-in web tools.
