@@ -6,6 +6,7 @@
 // Everything the index says is untrusted: it shows as text only, and links go only to addresses the server built.
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { personColor } from "../avatar.js";
+import { t } from "../i18n.js";
 import { planAvailable } from "../commands.js";
 import { DiffBlock } from "../diff.js";
 import { Highlighted } from "../rich.js";
@@ -49,8 +50,13 @@ function useRoute(path, setData, setProblem) {
 }
 
 const short = (commit) => (commit ?? "").slice(0, 7);
-const plural = (count, word) =>
-    `${count} ${count === 1 ? word : word.endsWith("y") ? `${word.slice(0, -1)}ies` : `${word}s`}`;
+const incompatibleEntries = (count) =>
+    t(
+        count === 1
+            ? "{{count}} entry needs a newer Pi Pocket."
+            : "{{count}} entries need a newer Pi Pocket.",
+        { count },
+    );
 const revocation = (entry, commit) => entry.revoked.find((each) => each.commit === commit)?.reason;
 
 /** Who a browser module or a route is for, in words. */
@@ -84,7 +90,10 @@ const declared = (declares, key) =>
 
         const [scope, name] = each.split(" ");
 
-        return `/${name} (${scope === "global" ? "owner" : "who can steer"})`;
+        return t("/{{command}} ({{scope}})", {
+            command: name,
+            scope: t(scope === "global" ? "owner" : "who can steer"),
+        });
     });
 
 const RISK =
@@ -171,14 +180,14 @@ export function Tile({ name, title, icon = null, large = false }) {
 /** How an installed extension or theme stands, in a word: revoked, on, or installed. */
 function RowState({ installed }) {
     if (installed.revoked !== null) {
-        return html`<span class="ext-state bad">Revoked</span>`;
+        return html`<span class="ext-state bad">${t("Revoked")}</span>`;
     }
 
     if (installed.enabled) {
-        return html`<span class="ext-state on"><span class="ext-dot"></span>On</span>`;
+        return html`<span class="ext-state on"><span class="ext-dot"></span>${t("On")}</span>`;
     }
 
-    return html`<span class="ext-state"><${Icon} name="check" size=${14} />Installed</span>`;
+    return html`<span class="ext-state"><${Icon} name="check" size=${14} />${t("Installed")}</span>`;
 }
 
 /** A gallery entry in a list: its mark, name, a line or two about it, and one quiet action or how it stands. */
@@ -187,7 +196,9 @@ function EntryRow({ entry, selected, onOpen, onChanged }) {
     const going = useRef(false);
     const installed = entry.installed ?? (entry.listed === false ? entry : null);
     const theme = isTheme(entry);
-    const meta = [theme && "Theme", entry.author?.name, entry.unlisted].filter(Boolean).join(" · ");
+    const meta = [theme && t("Theme"), entry.author?.name, entry.unlisted]
+        .filter(Boolean)
+        .join(" · ");
 
     const install = () => {
         if (going.current) {
@@ -218,14 +229,14 @@ function EntryRow({ entry, selected, onOpen, onChanged }) {
             ${
                 !installed
                     ? html`<button class="button small ext-get" disabled=${busy} onClick=${install}>
-                          ${busy ? "Installing…" : "Install"}
+                          ${busy ? t("Installing…") : t("Install")}
                       </button>`
                     : installed.update
                       ? html`<button
                             class="button small primary"
                             onClick=${() => openGallerySheet("gallery-update", entry.name)}
                         >
-                            Update
+                            ${t("Update")}
                         </button>`
                       : html`<${RowState} installed=${installed} />`
             }
@@ -286,7 +297,7 @@ function IndexAddress({ address, onChanged }) {
     if (!editing) {
         return html`<div class="setting wrap">
             <div class="grow small">
-                <div class="muted">Index</div>
+                <div class="muted">${t("Index")}</div>
                 <div class="mono gallery-address">${address}</div>
             </div>
             <button
@@ -296,7 +307,7 @@ function IndexAddress({ address, onChanged }) {
                     setEditing(true);
                 }}
             >
-                Change
+                ${t("Change")}
             </button>
         </div>`;
     }
@@ -309,7 +320,7 @@ function IndexAddress({ address, onChanged }) {
         }}
     >
         <label class="label" for="gallery-index">
-            Index: a GitHub repository (owner/name), or the https address of an index.json
+            ${t("Index: a GitHub repository (owner/name), or the https address of an index.json")}
         </label>
         <input
             id="gallery-index"
@@ -326,11 +337,11 @@ function IndexAddress({ address, onChanged }) {
                 fallback !== null &&
                 fallback !== address &&
                 html`<button type="button" class="button small ghost" disabled=${busy} onClick=${() => save("")}>
-                    Use the default (${fallback})
+                    ${t("Use the default ({{fallback}})", { fallback })}
                 </button>`
             }
-            <button type="button" class="button small" onClick=${() => setEditing(false)}>Cancel</button>
-            <button class="button small primary" disabled=${busy}>Save</button>
+            <button type="button" class="button small" onClick=${() => setEditing(false)}>${t("Cancel")}</button>
+            <button class="button small primary" disabled=${busy}>${t("Save")}</button>
         </div>
     </form>`;
 }
@@ -406,13 +417,13 @@ export function GallerySheet({
     </button>`;
 
     return html`<${Sheet}
-        title="Extensions"
+        title=${t("Extensions")}
         onClose=${closeSheet}
         wide=${true}
         className="extension-hub gallery"
     >
         <div class="ext-hub-bar">
-            <div class="ext-tabs" role="tablist" aria-label="Extensions">
+            <div class="ext-tabs" role="tablist" aria-label=${t("Extensions")}>
                 ${TABS.map(
                     ([value, label]) => html`<button
                         key=${value}
@@ -421,11 +432,11 @@ export function GallerySheet({
                         aria-selected=${tab === value}
                         onClick=${() => changeTab(value)}
                     >
-                        ${label}
+                        ${t(label)}
                         ${
                             value === "updates" &&
                             updates > 0 &&
-                            html`<span class="ext-count" aria-label=${`${updates} available`}>${updates}</span>`
+                            html`<span class="ext-count" aria-label=${t("{{count}} available", { count: updates })}>${updates}</span>`
                         }
                     </button>`,
                 )}
@@ -435,8 +446,8 @@ export function GallerySheet({
                     <${Icon} name="search" size=${16} />
                     <input
                         type="search"
-                        placeholder=${tab === "installed" ? "Search installed" : "Search extensions and themes"}
-                        aria-label="Search extensions and themes"
+                        placeholder=${t(tab === "installed" ? "Search installed" : "Search extensions and themes")}
+                        aria-label=${t("Search extensions and themes")}
                         value=${query}
                         onInput=${(event) => setQuery(event.currentTarget.value)}
                     />
@@ -445,8 +456,8 @@ export function GallerySheet({
                     tab !== "installed" &&
                     html`<button
                         class="button small ext-icon-button"
-                        aria-label="Refresh"
-                        title="Read the index again"
+                        aria-label=${t("Refresh")}
+                        title=${t("Read the index again")}
                         disabled=${loading}
                         onClick=${() => load(true)}
                     >
@@ -457,15 +468,15 @@ export function GallerySheet({
         </div>
         ${
             (tags.length > 1 || kinds.length > 0) &&
-            html`<div class="gallery-tags ext-filters" role="group" aria-label="Kinds and tags">
-                ${chip("all", "All", kind === null && tag === null, () => {
+            html`<div class="gallery-tags ext-filters" role="group" aria-label=${t("Kinds and tags")}>
+                ${chip("all", t("All"), kind === null && tag === null, () => {
                     setKind(null);
                     setTag(null);
                 })}
                 ${kinds.map((each) =>
                     chip(
                         `kind-${each}`,
-                        each === "theme" ? "Themes" : "Extensions",
+                        each === "theme" ? t("Themes") : t("Extensions"),
                         kind === each,
                         () => setKind(kind === each ? null : each),
                     ),
@@ -480,18 +491,18 @@ export function GallerySheet({
             <div class="extension-hub-list">
                 ${problem && html`<div class="error-box small">${problem}</div>`}
                 ${data?.error && html`<div class="error-box small">${data.error}</div>`}
-                ${!data && !problem && html`<${Loader} label="Reading the index" />`}
+                ${!data && !problem && html`<${Loader} label=${t("Reading the index")} />`}
                 ${
                     tab === "discover" &&
                     data &&
                     html`<p class="ext-assure">
                         <${Icon} name="shield" size=${15} />
-                        <span>Extensions install turned off. Nothing runs until you turn it on.</span>
+                        <span>${t("Extensions install turned off. Nothing runs until you turn it on.")}</span>
                     </p>`
                 }
                 ${
                     matches.length > 0 &&
-                    html`${tab === "installed" && html`<div class="group-title">From the gallery</div>`}
+                    html`${tab === "installed" && html`<div class="group-title">${t("From the gallery")}</div>`}
                         <div class="ext-list">
                             ${matches.map(
                                 (entry) => html`<${EntryRow}
@@ -512,10 +523,10 @@ export function GallerySheet({
                         ${
                             tab === "updates" && !needle
                                 ? html`<span class="ext-empty-mark"><${Icon} name="check" size=${20} /></span>
-                                      <span>Everything is up to date.</span>`
+                                      <span>${t("Everything is up to date.")}</span>`
                                 : needle || tag || kind
-                                  ? "Nothing matches. Try other words, or All."
-                                  : "The index has nothing for this Pi Pocket yet."
+                                  ? t("Nothing matches. Try other words, or All.")
+                                  : t("The index has nothing for this Pi Pocket yet.")
                         }
                     </div>`
                 }
@@ -532,15 +543,19 @@ export function GallerySheet({
                     tab === "discover" &&
                     data &&
                     html`<details class="gallery-technical">
-                        <summary>Where these come from</summary>
+                        <summary>${t("Where these come from")}</summary>
                         <${IndexAddress} address=${data.address} onChanged=${() => load(true)} />
                         <p class="muted small">
-                            ${data.fetchedAt ? `Read ${timeAgo(data.fetchedAt)}` : "Not read yet"}
+                            ${
+                                data.fetchedAt
+                                    ? t("Read {{time}}", { time: timeAgo(data.fetchedAt) })
+                                    : t("Not read yet")
+                            }
                         </p>
                         ${
                             hidden.incompatible > 0 &&
                             html`<p class="muted small">
-                                ${plural(hidden.incompatible, "entry")} need a newer Pi Pocket.
+                                ${incompatibleEntries(hidden.incompatible)}
                             </p>`
                         }
                         ${
@@ -556,7 +571,7 @@ export function GallerySheet({
                         ${
                             data.repoUrl &&
                             html`<${Out} class="button small" href=${data.repoUrl}>
-                                Submit yours <${Icon} name="external" size=${14} />
+                                ${t("Submit yours")} <${Icon} name="external" size=${14} />
                             <//>`
                         }
                     </details>`
@@ -572,7 +587,7 @@ export function GallerySheet({
                                     class="ext-back"
                                     onClick=${() => openSheet({ type: origin, tab })}
                                 >
-                                    <${Icon} name="back" size=${16} /> Back to ${TABS.find(([value]) => value === tab)[1]}
+                                    <${Icon} name="back" size=${16} /> ${t("Back to {{tab}}", { tab: t(TABS.find(([value]) => value === tab)[1]) })}
                                 </button>`
                             }
                             <${GalleryEntrySheet}
@@ -582,7 +597,7 @@ export function GallerySheet({
                                 embedded=${true}
                             />
                         `
-                        : html`<div class="extension-hub-empty">Choose one to see what it does.</div>`
+                        : html`<div class="extension-hub-empty">${t("Choose one to see what it does.")}</div>`
                 }
             </div>
         </div>
@@ -594,25 +609,29 @@ function Declares({ declares }) {
     return html`<dl class="pi-facts gallery-declares">
         ${GROUPS.map(
             ([key, label]) => html`<div key=${key}>
-                <dt>${label}</dt>
+                <dt>${t(label)}</dt>
                 ${
                     declared(declares, key).length > 0
                         ? html`<dd class="mono">${declared(declares, key).join(", ")}</dd>`
-                        : html`<dd class="muted">nothing</dd>`
+                        : html`<dd class="muted">${t("nothing")}</dd>`
                 }
             </div>`,
         )}
         <div>
-            <dt>Browser module</dt>
+            <dt>${t("Browser module")}</dt>
             ${
                 declares.client === null
-                    ? html`<dd class="muted">nothing</dd>`
-                    : html`<dd>for ${ACCESS_WORDS[declares.client] ?? declares.client}</dd>`
+                    ? html`<dd class="muted">${t("nothing")}</dd>`
+                    : html`<dd>${t("for {{access}}", {
+                          access: ACCESS_WORDS[declares.client]
+                              ? t(ACCESS_WORDS[declares.client])
+                              : declares.client,
+                      })}</dd>`
             }
         </div>
         <div>
-            <dt>Widest access</dt>
-            <dd>${ACCESS_WORDS[declares.access] ?? declares.access}</dd>
+            <dt>${t("Widest access")}</dt>
+            <dd>${ACCESS_WORDS[declares.access] ? t(ACCESS_WORDS[declares.access]) : declares.access}</dd>
         </div>
     </dl>`;
 }
@@ -625,7 +644,7 @@ function Declares({ declares }) {
 async function askForReview(name) {
     if (!planAvailable()) {
         throw new Error(
-            "The review runs in plan mode, which is off: turn Plan mode on in Extensions first.",
+            t("The review runs in plan mode, which is off: turn Plan mode on in Extensions first."),
         );
     }
 
@@ -638,7 +657,9 @@ async function askForReview(name) {
         navigate(id);
 
         throw new Error(
-            `Plan mode did not turn on (${error.message}), so the review was not sent.`,
+            t("Plan mode did not turn on ({{error}}), so the review was not sent.", {
+                error: error.message,
+            }),
         );
     }
 
@@ -647,7 +668,9 @@ async function askForReview(name) {
     navigate(id);
     notify(
         "info",
-        "Pi reviews it in plan mode: it reads the files, and plan mode keeps it from changing them.",
+        t(
+            "Pi reviews it in plan mode: it reads the files, and plan mode keeps it from changing them.",
+        ),
     );
 }
 
@@ -827,12 +850,12 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
     };
 
     if (!entry && !installed) {
-        return html`<${EntryFrame} title="Extension" embedded=${embedded}>
+        return html`<${EntryFrame} title=${t("Extension")} embedded=${embedded}>
             ${problem && html`<div class="error-box small">${problem}</div>`}
             ${
                 data === null
-                    ? !problem && html`<${Loader} label="Reading the index" />`
-                    : html`<p class="muted">The index does not list ${name}, and it is not installed.</p>`
+                    ? !problem && html`<${Loader} label=${t("Reading the index")} />`
+                    : html`<p class="muted">${t("The index does not list {{name}}, and it is not installed.", { name })}</p>`
             }
         <//>`;
     }
@@ -868,11 +891,11 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
     };
 
     const uninstall = () => {
-        if (
-            confirm(
-                `Remove ${title}?\n\n${installed.enabled ? "It is turned off first, then its" : "Its"} files are deleted from the extensions folder.`,
-            )
-        ) {
+        const effect = installed.enabled
+            ? t("It is turned off first, then its files are deleted from the extensions folder.")
+            : t("Its files are deleted from the extensions folder.");
+
+        if (confirm(t("Remove {{title}}?\n\n{{effect}}", { title, effect }))) {
             run(() => galleryApi(`uninstall/${encodeURIComponent(name)}`, {}));
         }
     };
@@ -883,10 +906,10 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
         disabled=${busy}
         onClick=${() => openGallerySheet("gallery-source", name)}
     >
-        View source
+        ${t("View source")}
     </button>`;
     const askPi = html`<button class="button small" disabled=${busy} onClick=${review}>
-        <${Icon} name="sparkle" size=${14} /> Ask Pi to review
+        <${Icon} name="sparkle" size=${14} /> ${t("Ask Pi to review")}
     </button>`;
 
     return html`<${EntryFrame} title=${title} embedded=${embedded}>
@@ -895,12 +918,12 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
             installed &&
             installed.revoked !== null &&
             html`<div class="error-box gallery-revoked" role="alert">
-                <strong>The gallery revoked this version.</strong> Its reason: ${installed.revoked}
+                <strong>${t("The gallery revoked this version.")}</strong> ${t("Its reason:")} ${installed.revoked}
                 ${
                     installed.enabled &&
                     html`<div class="sheet-actions">
                         <button class="button small primary" disabled=${busy} onClick=${() => toggle(false)}>
-                            Turn it off
+                            ${t("Turn it off")}
                         </button>
                     </div>`
                 }
@@ -909,7 +932,7 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
         ${
             offeredRevoked !== undefined &&
             html`<div class="error-box gallery-revoked" role="alert">
-                <strong>The gallery revoked this version.</strong> Its reason: ${offeredRevoked}
+                <strong>${t("The gallery revoked this version.")}</strong> ${t("Its reason:")} ${offeredRevoked}
             </div>`
         }
         <${EntryHead} name=${name} title=${title} entry=${entry} installed=${installed} />
@@ -919,11 +942,11 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
                 ? html`<div class="ext-on">
                       <div class="ext-on-text">
                           <span class="ext-dot"></span>
-                          <span><strong>On</strong> · it runs in every session</span>
+                          <span><strong>${t("On")}</strong> · ${t("it runs in every session")}</span>
                       </div>
                       <div class="ext-step-actions">
                           <button class="button small" disabled=${busy} onClick=${() => toggle(false)}>
-                              Turn off
+                              ${t("Turn off")}
                           </button>
                           <button
                               class="button small"
@@ -936,7 +959,7 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
                                       ),
                                   )}
                           >
-                              Reload
+                              ${t("Reload")}
                           </button>
                           ${source} ${askPi}
                       </div>
@@ -944,8 +967,8 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
                 : html`<${Steps}
                       steps=${[
                           {
-                              title: "Install",
-                              text: "It arrives turned off, so nothing runs yet.",
+                              title: t("Install"),
+                              text: t("It arrives turned off, so nothing runs yet."),
                               done: installed !== null,
                               now: installed === null,
                               actions:
@@ -959,17 +982,21 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
                                   </button>`,
                           },
                           {
-                              title: "Look it over",
+                              title: t("Look it over"),
                               text:
                                   installed === null
-                                      ? "Read its code now, or once it is installed, have Pi review it in plan mode, where Pi cannot change anything."
-                                      : "Read its code, or have Pi review it in plan mode, where Pi cannot change anything.",
+                                      ? t(
+                                            "Read its code now, or once it is installed, have Pi review it in plan mode, where Pi cannot change anything.",
+                                        )
+                                      : t(
+                                            "Read its code, or have Pi review it in plan mode, where Pi cannot change anything.",
+                                        ),
                               now: installed !== null,
                               actions: html`${source} ${installed && askPi}`,
                           },
                           {
                               title: "Turn it on",
-                              text: RISK,
+                              text: t(RISK),
                               actions:
                                   installed &&
                                   installed.revoked === null &&
@@ -992,7 +1019,7 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
                                             disabled=${busy}
                                             onClick=${() => setTrusting(true)}
                                         >
-                                            Turn on
+                                            ${t("Turn on")}
                                         </button>`),
                           },
                       ]}
@@ -1001,15 +1028,15 @@ export function GalleryEntrySheet({ name, listing, embedded = false }) {
         <${Changed} installed=${installed} />
         <${Adds} declares=${declares} />
         <details class="gallery-technical">
-            <summary>Technical details</summary>
+            <summary>${t("Technical details")}</summary>
             <${EntryFacts}
                 entry=${entry}
                 installed=${installed}
-                needs=${entry && `Pi Pocket ${entry.minPocket} or newer · extension API ${entry.pocketApi}`}
+                needs=${entry && t("Pi Pocket {{version}} or newer · extension API {{api}}", { version: entry.minPocket, api: entry.pocketApi })}
             />
             <${Files} files=${files} />
             <div class="group">
-                <div class="group-title">Everything it declares</div>
+                <div class="group-title">${t("Everything it declares")}</div>
                 <${Declares} declares=${declares} />
             </div>
         </details>
@@ -1050,7 +1077,7 @@ function EntryFacts({ entry, installed, needs }) {
         ${
             entry &&
             html`<div>
-                <dt>Author</dt>
+                <dt>${t("Author")}</dt>
                 <dd>
                     ${entry.author.name}
                     ${
@@ -1061,13 +1088,13 @@ function EntryFacts({ entry, installed, needs }) {
             </div>`
         }
         <div>
-            <dt>Version</dt>
+            <dt>${t("Version")}</dt>
             <dd>
-                ${version}${installed?.update ? html`<span class="warn"> · ${installed.update.version} available</span>` : ""}
+                ${version}${installed?.update ? html`<span class="warn"> · ${t("{{version}} available", { version: installed.update.version })}</span>` : ""}
             </dd>
         </div>
         <div>
-            <dt>Source</dt>
+            <dt>${t("Source")}</dt>
             <dd class="mono">
                 <${Out} href=${installed?.sourceUrl ?? entry.sourceUrl}>${repo} @ ${short(commit)}<//>
             </dd>
@@ -1075,14 +1102,14 @@ function EntryFacts({ entry, installed, needs }) {
         ${
             entry &&
             html`<div>
-                <dt>Needs</dt>
+                <dt>${t("Needs")}</dt>
                 <dd>${needs}</dd>
             </div>`
         }
         ${
             installed &&
             html`<div>
-                <dt>Installed</dt>
+                <dt>${t("Installed at")}</dt>
                 <dd>
                     ${timeAgo(installed.installedAt)}${installed.unlisted ? ` · ${installed.unlisted}` : ""}
                 </dd>
@@ -1107,7 +1134,10 @@ function ThemeEntry({ name, entry, installed, problem, busy, run, embedded }) {
     const uninstall = () => {
         if (
             confirm(
-                `Remove the theme ${title}?\n\nIts folder moves to themes/.removed/ in the data folder. Browsers that use it go back to Pocket.`,
+                t(
+                    "Remove the theme {{title}}?\n\nIts folder moves to themes/.removed/ in the data folder. Browsers that use it go back to Pocket.",
+                    { title },
+                ),
             )
         ) {
             run(async () => {
@@ -1125,7 +1155,7 @@ function ThemeEntry({ name, entry, installed, problem, busy, run, embedded }) {
         ${
             (installed?.revoked ?? offeredRevoked) &&
             html`<div class="error-box gallery-revoked" role="alert">
-                <strong>The gallery revoked this version.</strong> Its reason: ${installed?.revoked ?? offeredRevoked}
+                <strong>${t("The gallery revoked this version.")}</strong> ${t("Its reason:")} ${installed?.revoked ?? offeredRevoked}
             </div>`
         }
         <${EntryHead}
@@ -1139,7 +1169,7 @@ function ThemeEntry({ name, entry, installed, problem, busy, run, embedded }) {
         <${Steps}
             steps=${[
                 {
-                    title: "Install",
+                    title: t("Install"),
                     text: "It joins the list in Appearance. Nothing changes until someone chooses it.",
                     done: installed !== null,
                     now: installed === null,
@@ -1158,7 +1188,7 @@ function ThemeEntry({ name, entry, installed, problem, busy, run, embedded }) {
                         disabled=${busy}
                         onClick=${() => openGallerySheet("gallery-source", name)}
                     >
-                        View source
+                        ${t("View source")}
                     </button>`,
                 },
                 {
@@ -1176,18 +1206,18 @@ function ThemeEntry({ name, entry, installed, problem, busy, run, embedded }) {
                 },
             ]}
         />
-        <p class="ext-assure"><${Icon} name="shield" size=${15} /><span>${THEME_RISK}</span></p>
+        <p class="ext-assure"><${Icon} name="shield" size=${15} /><span>${t(THEME_RISK)}</span></p>
         ${
             installed?.problem &&
-            html`<div class="gallery-warn small">Appearance does not offer it as it is: ${installed.problem}</div>`
+            html`<div class="gallery-warn small">${t("Appearance does not offer it as it is: {{problem}}", { problem: installed.problem })}</div>`
         }
         <${Changed} installed=${installed} />
         <details class="gallery-technical">
-            <summary>Technical details</summary>
+            <summary>${t("Technical details")}</summary>
             <${EntryFacts}
                 entry=${entry}
                 installed=${installed}
-                needs=${entry && `Pi Pocket ${entry.minPocket} or newer · theme API ${entry.themeApi}`}
+                needs=${entry && t("Pi Pocket {{version}} or newer · theme API {{api}}", { version: entry.minPocket, api: entry.themeApi })}
             />
             <${Files} files=${files} />
         </details>
@@ -1211,17 +1241,17 @@ export function GallerySourceSheet({ name }) {
     useRoute(`source/${encodeURIComponent(name)}`, setData, setProblem);
 
     return html`<${Sheet}
-        title=${data ? `Source: ${data.title}` : "Source"}
+        title=${data ? t("Source: {{title}}", { title: data.title }) : t("Source")}
         onClose=${closeSheet}
         wide=${true}
         className="gallery extension-detail-sheet"
     >
         ${problem && html`<div class="error-box small">${problem}</div>`}
-        ${!data && !problem && html`<${Loader} label="Getting its files" />`}
+        ${!data && !problem && html`<${Loader} label=${t("Getting its files")} />`}
         ${
             data &&
             html`<p class="muted small">
-                ${data.from === "installed" ? "The files as they are in your extensions folder." : "Downloaded from the commit the index pins, and checked against its hashes. Nothing is installed."}
+                ${t(data.from === "installed" ? "The files as they are in your extensions folder." : "Downloaded from the commit the index pins, and checked against its hashes. Nothing is installed.")}
             </p>`
         }
         ${data?.files.map(
@@ -1231,12 +1261,12 @@ export function GallerySourceSheet({ name }) {
                     <span class="muted small">${formatBytes(file.size)}</span>
                     ${
                         file.missing
-                            ? html`<span class="pi-tag gallery-bad">missing</span>`
+                            ? html`<span class="pi-tag gallery-bad">${t("missing")}</span>`
                             : file.pinned
-                              ? html`<span class="pi-tag gallery-on" title="Matches the hash the index pins">✓ pinned</span>`
-                              : html`<span class="pi-tag behind" title="Not the file the index pins">changed</span>`
+                              ? html`<span class="pi-tag gallery-on" title=${t("Matches the hash the index pins")}>✓ ${t("pinned")}</span>`
+                              : html`<span class="pi-tag behind" title=${t("Not the file the index pins")}>${t("changed")}</span>`
                     }
-                    ${file.binary && html`<span class="pi-tag gallery-plain">binary</span>`}
+                    ${file.binary && html`<span class="pi-tag gallery-plain">${t("binary")}</span>`}
                 </div>
                 ${file.text !== null && html`<${Highlighted} class="gallery-code" text=${file.text} lang=${file.name} />`}
             </section>`,
@@ -1259,7 +1289,12 @@ function declarationChanges(before, after) {
         }
     }
 
-    const words = (client) => (client === null ? "none" : `for ${ACCESS_WORDS[client] ?? client}`);
+    const words = (client) =>
+        client === null
+            ? t("none")
+            : t("for {{access}}", {
+                  access: ACCESS_WORDS[client] ? t(ACCESS_WORDS[client]) : client,
+              });
 
     if (before.client !== after.client) {
         lines.push({
@@ -1272,8 +1307,8 @@ function declarationChanges(before, after) {
     if (before.access !== after.access) {
         lines.push({
             label: "Widest access",
-            from: ACCESS_WORDS[before.access] ?? before.access,
-            to: ACCESS_WORDS[after.access] ?? after.access,
+            from: ACCESS_WORDS[before.access] ? t(ACCESS_WORDS[before.access]) : before.access,
+            to: ACCESS_WORDS[after.access] ? t(ACCESS_WORDS[after.access]) : after.access,
         });
     }
 
@@ -1308,7 +1343,10 @@ export function GalleryUpdateSheet({ name }) {
         if (
             data.enabled &&
             !confirm(
-                `Apply the update to ${data.title}?\n\nIt is on, so the new code runs as soon as it is in place.`,
+                t(
+                    "Apply the update to {{title}}?\n\nIt is on, so the new code runs as soon as it is in place.",
+                    { title: data.title },
+                ),
             )
         ) {
             return;
@@ -1335,7 +1373,10 @@ export function GalleryUpdateSheet({ name }) {
             if (result.restart) {
                 notify(
                     "warning",
-                    `${data.title}'s helper files changed while it is on: restart the server (Menu → Restart server) to load them.`,
+                    t(
+                        "{{title}}'s helper files changed while it is on: restart the server (Menu → Restart server) to load them.",
+                        { title: data.title },
+                    ),
                 );
             }
 
@@ -1354,7 +1395,7 @@ export function GalleryUpdateSheet({ name }) {
 
     if (data === null) {
         return html`<${Sheet}
-            title="Update"
+            title=${t("Update")}
             onClose=${closeSheet}
             wide=${true}
             className="gallery extension-detail-sheet"
@@ -1362,7 +1403,7 @@ export function GalleryUpdateSheet({ name }) {
             ${
                 problem
                     ? html`<div class="error-box small">${problem}</div>`
-                    : html`<${Loader} label="Getting the new version" />`
+                    : html`<${Loader} label=${t("Getting the new version")} />`
             }
         <//>`;
     }
@@ -1371,18 +1412,18 @@ export function GalleryUpdateSheet({ name }) {
         data.declares === null ? [] : declarationChanges(data.declares.before, data.declares.after);
 
     return html`<${Sheet}
-        title=${`Update ${data.title}`}
+        title=${t("Update {{title}}", { title: data.title })}
         onClose=${closeSheet}
         wide=${true}
         className="gallery extension-detail-sheet"
     >
         <dl class="pi-facts">
             <div>
-                <dt>From</dt>
+                <dt>${t("From")}</dt>
                 <dd class="mono">${data.from.version} · ${short(data.from.commit)}</dd>
             </div>
             <div>
-                <dt>To</dt>
+                <dt>${t("To")}</dt>
                 <dd class="mono">
                     ${data.to.version} · <${Out} href=${data.sourceUrl}>${short(data.to.commit)}<//>
                 </dd>
@@ -1391,29 +1432,29 @@ export function GalleryUpdateSheet({ name }) {
         ${
             data.from.repo !== data.to.repo &&
             html`<div class="gallery-warn small" role="alert">
-                It now comes from another repository: <span class="mono">${data.from.repo}</span> → <span class="mono">${data.to.repo}</span>. Make sure you trust the new one.
+                ${t("It now comes from another repository: {{from}} → {{to}}. Make sure you trust the new one.", { from: data.from.repo, to: data.to.repo })}
             </div>`
         }
         ${
             data.edited.length > 0 &&
             html`<div class="gallery-warn small" role="alert">
-                Yours here, edited since it was installed or never part of it: <span class="mono">${data.edited.join(", ")}</span>. The diff is against your files, and the update replaces them.
+                ${t("Yours here, edited since it was installed or never part of it: {{files}}. The diff is against your files, and the update replaces them.", { files: data.edited.join(", ") })}
             </div>`
         }
         ${
             data.declares === null
                 ? html`<p class="muted small">
-                      It is checked as every theme is before it is in place. The version you have now goes to themes/.removed/ in the data folder.
+                      ${t("It is checked as every theme is before it is in place. The version you have now goes to themes/.removed/ in the data folder.")}
                   </p>`
                 : html`<div class="group">
-                      <div class="group-title">What it declares</div>
+                      <div class="group-title">${t("What it declares")}</div>
                       ${
                           changes.length === 0
-                              ? html`<p class="muted small">The same as before.</p>`
+                              ? html`<p class="muted small">${t("The same as before.")}</p>`
                               : html`<dl class="pi-facts gallery-declares">
                                     ${changes.map(
-                                        (change) => html`<div key=${change.label}>
-                                            <dt>${change.label}</dt>
+                                        (change) => html`<div key=${t(change.label)}>
+                                            <dt>${t(change.label)}</dt>
                                             <dd>
                                                 ${change.added?.length > 0 && html`<div class="mono gallery-added">+ ${change.added.join(", ")}</div>`}
                                                 ${change.removed?.length > 0 && html`<div class="mono gallery-removed">− ${change.removed.join(", ")}</div>`}
@@ -1426,12 +1467,12 @@ export function GalleryUpdateSheet({ name }) {
                   </div>`
         }
         <div class="group">
-            <div class="group-title">Files</div>
+            <div class="group-title">${t("Files")}</div>
             <div class="sheet-list gallery-files">
                 ${data.files.map(
                     (file) => html`<div class="gallery-file" key=${file.name}>
                         <span class="mono">${file.name}</span>
-                        <span class=${`small gallery-change ${file.change}`}>${file.change}</span>
+                        <span class=${`small gallery-change ${file.change}`}>${["added", "removed", "changed", "unchanged"].includes(file.change) ? t(file.change) : file.change}</span>
                     </div>`,
                 )}
             </div>
@@ -1439,10 +1480,10 @@ export function GalleryUpdateSheet({ name }) {
         ${data.diff && html`<${DiffBlock} text=${data.diff} />`}
         ${
             data.enabled &&
-            html`<p class="gallery-warn small">It is on: the new code runs as soon as it is in place.</p>`
+            html`<p class="gallery-warn small">${t("It is on: the new code runs as soon as it is in place.")}</p>`
         }
         <div class="gallery-actions">
-            <button class="button primary" disabled=${busy} onClick=${apply}>Apply update</button>
+            <button class="button primary" disabled=${busy} onClick=${apply}>${t("Apply update")}</button>
         </div>
     <//>`;
 }
@@ -1463,30 +1504,30 @@ function fieldProblems({ repo, commit, path, tags, github, name }) {
     return {
         repo:
             repo === ""
-                ? "Give the GitHub repository with its files."
+                ? t("Give the GitHub repository with its files.")
                 : rest.length > 0 ||
                     !OWNER.test(owner ?? "") ||
                     !REPO_NAME.test(repository ?? "") ||
                     repository === "." ||
                     repository === ".."
-                  ? "Write it as owner/name, such as tannermidd/pocket-clock."
+                  ? t("Write it as owner/name, such as tannermidd/pocket-clock.")
                   : null,
         commit:
             commit === ""
-                ? "Give the commit with its files."
+                ? t("Give the commit with its files.")
                 : /^[0-9a-f]{40}$/.test(commit)
                   ? null
-                  : "Write the full commit ID: 40 letters and digits, from a to f and 0 to 9.",
+                  : t("Write the full commit ID: 40 letters and digits, from a to f and 0 to 9."),
         path:
             parts.length > 4 || parts.some((part) => !PART.test(part))
-                ? "Write a folder of the repository, such as extension, four deep at most."
+                ? t("Write a folder of the repository, such as extension, four deep at most.")
                 : null,
         tags:
             tags.length > 10 || tags.some((tag) => !TAG.test(tag))
-                ? "Use up to 10 tags of lowercase letters, digits, and -."
+                ? t("Use up to 10 tags of lowercase letters, digits, and -.")
                 : null,
-        github: github === "" || OWNER.test(github) ? null : "Write your GitHub name only.",
-        name: name === "" || name.length > 60 ? "Give your name, 60 characters at most." : null,
+        github: github === "" || OWNER.test(github) ? null : t("Write your GitHub name only."),
+        name: name === "" || name.length > 60 ? t("Give your name, 60 characters at most.") : null,
     };
 }
 
@@ -1537,8 +1578,8 @@ export function GalleryShareSheet({ file, theme = false }) {
         : file;
 
     if (!data) {
-        return html`<${Sheet} title=${`Share ${shareName}`} onClose=${closeSheet} wide=${true} className="gallery">
-            ${problem ? html`<div class="error-box small">${problem}</div>` : html`<${Loader} label="Checking it" />`}
+        return html`<${Sheet} title=${t("Share {{name}}", { name: shareName })} onClose=${closeSheet} wide=${true} className="gallery">
+            ${problem ? html`<div class="error-box small">${problem}</div>` : html`<${Loader} label=${t("Checking it")} />`}
         <//>`;
     }
 
@@ -1572,27 +1613,27 @@ export function GalleryShareSheet({ file, theme = false }) {
     // What keeps the pull request closed, first to last: the drop-in itself, then what is still to fill in.
     const blocked =
         data.problems.length > 0
-            ? "Fix the problems above first."
+            ? t("Fix the problems above first.")
             : !data.declaresKnown
-              ? "Turn it on once, so what it declares is known, then look again."
+              ? t("Turn it on once, so what it declares is known, then look again.")
               : (Object.values(wrong).find((each) => each !== null) ?? null);
     const filled = data.newEntryPage && `${data.newEntryPage}&value=${encodeURIComponent(text)}`;
     const link = filled && filled.length <= LINK_LIMIT ? filled : data.newEntryPage;
 
-    return html`<${Sheet} title=${`Share ${shareName}`} onClose=${closeSheet} wide=${true} className="gallery">
+    return html`<${Sheet} title=${t("Share {{name}}", { name: shareName })} onClose=${closeSheet} wide=${true} className="gallery">
         <p class="muted small">
-            To share it, add its entry to the gallery's index with a pull request. Pi Pocket makes no GitHub calls: you put its files on GitHub and open the pull request yourself.
+            ${t("To share it, add its entry to the gallery's index with a pull request. Pi Pocket makes no GitHub calls: you put its files on GitHub and open the pull request yourself.")}
         </p>
         ${
             data.problems.length > 0
                 ? html`<div class="gallery-warn small" role="alert">
-                      <strong>Fix these first:</strong>
+                      <strong>${t("Fix these first:")}</strong>
                       <ul>
                           ${data.problems.map((each, index) => html`<li key=${index}>${each}</li>`)}
                       </ul>
                   </div>`
                 : html`<p class="ok small">
-                      <${Icon} name="check" size=${14} /> It stands on its own.
+                      <${Icon} name="check" size=${14} /> ${t("It stands on its own.")}
                   </p>`
         }
         ${
@@ -1602,9 +1643,9 @@ export function GalleryShareSheet({ file, theme = false }) {
             </ul>`
         }
         <div class="group">
-            <div class="group-title">1. Put its files on GitHub</div>
+            <div class="group-title">${t("1. Put its files on GitHub")}</div>
             <p class="small">
-                Make a public GitHub repository, and commit these files to it with the same names, at its top or in one folder:
+                ${t("Make a public GitHub repository, and commit these files to it with the same names, at its top or in one folder:")}
             </p>
             <div class="sheet-list gallery-files">
                 ${data.entry.files.map(
@@ -1616,11 +1657,11 @@ export function GalleryShareSheet({ file, theme = false }) {
             </div>
         </div>
         <div class="group">
-            <div class="group-title">2. Say where they are</div>
+            <div class="group-title">${t("2. Say where they are")}</div>
             <div class="gallery-form">
                 <${Field}
                     id="share-repo"
-                    label="Repository"
+                    label=${t("Repository")}
                     placeholder="owner/name"
                     value=${form.repo}
                     onInput=${set("repo")}
@@ -1628,17 +1669,17 @@ export function GalleryShareSheet({ file, theme = false }) {
                 />
                 <${Field}
                     id="share-commit"
-                    label="Commit"
-                    hint="The full ID of the commit with these files (git rev-parse HEAD)."
-                    placeholder="40 letters and digits"
+                    label=${t("Commit")}
+                    hint=${t("The full ID of the commit with these files (git rev-parse HEAD).")}
+                    placeholder=${t("40 letters and digits")}
                     value=${form.commit}
                     onInput=${set("commit")}
                     problem=${wrong.commit}
                 />
                 <${Field}
                     id="share-path"
-                    label="Folder (optional)"
-                    hint="Only when the files are not at the top of the repository."
+                    label=${t("Folder (optional)")}
+                    hint=${t("Only when the files are not at the top of the repository.")}
                     placeholder=${theme ? "theme" : "extension"}
                     value=${form.path}
                     onInput=${set("path")}
@@ -1646,8 +1687,8 @@ export function GalleryShareSheet({ file, theme = false }) {
                 />
                 <${Field}
                     id="share-tags"
-                    label="Tags"
-                    hint=${`A few words people search for, such as ${theme ? "dark, calm" : "usage, time"}.`}
+                    label=${t("Tags")}
+                    hint=${t(theme ? "A few words people search for, such as dark, calm." : "A few words people search for, such as usage, time.")}
                     placeholder=${theme ? "dark, minimal" : "usage, limits"}
                     value=${form.tags}
                     onInput=${set("tags")}
@@ -1655,7 +1696,7 @@ export function GalleryShareSheet({ file, theme = false }) {
                 />
                 <${Field}
                     id="share-name"
-                    label="Your name"
+                    label=${t("Your name")}
                     value=${form.name ?? data.entry.author.name}
                     onInput=${set("name")}
                     problem=${wrong.name}
@@ -1663,7 +1704,7 @@ export function GalleryShareSheet({ file, theme = false }) {
                 />
                 <${Field}
                     id="share-github"
-                    label="Your GitHub name (optional)"
+                    label=${t("Your GitHub name (optional)")}
                     placeholder="octocat"
                     value=${form.github}
                     onInput=${set("github")}
@@ -1674,14 +1715,16 @@ export function GalleryShareSheet({ file, theme = false }) {
         <div class="group">
             <div class="gallery-entry-head">
                 <div class="group-title">
-                    3. Its entry, <span class="mono">entries/${data.name}.json</span>
+                    ${t("3. Its entry, {{path}}", { path: `entries/${data.name}.json` })}
                 </div>
                 <button
                     class="button small"
                     onClick=${() =>
-                        attempt(() => copyText(text).then(() => notify("info", "Entry copied.")))}
+                        attempt(() =>
+                            copyText(text).then(() => notify("info", t("Entry copied."))),
+                        )}
                 >
-                    <${Icon} name="copy" size=${14} /> Copy
+                    <${Icon} name="copy" size=${14} /> ${t("Copy")}
                 </button>
             </div>
             <${Highlighted} class="gallery-code" text=${text} lang="json" />
@@ -1691,14 +1734,14 @@ export function GalleryShareSheet({ file, theme = false }) {
                 link &&
                 (blocked === null
                     ? html`<${Out} class="button primary" href=${link}>
-                          Open a pull request <${Icon} name="external" size=${14} />
+                          ${t("Open a pull request")} <${Icon} name="external" size=${14} />
                       <//>`
-                    : html`<button class="button primary" disabled=${true}>Open a pull request</button>`)
+                    : html`<button class="button primary" disabled=${true}>${t("Open a pull request")}</button>`)
             }
             ${
                 data.contributingUrl &&
                 html`<${Out} class="button" href=${data.contributingUrl}>
-                    How to submit <${Icon} name="external" size=${14} />
+                    ${t("How to submit")} <${Icon} name="external" size=${14} />
                 <//>`
             }
         </div>
@@ -1707,13 +1750,13 @@ export function GalleryShareSheet({ file, theme = false }) {
             blocked === null &&
             link !== filled &&
             html`<p class="muted small">
-                Its entry is too long for the link: copy it, and paste it on GitHub's page.
+                ${t("Its entry is too long for the link: copy it, and paste it on GitHub's page.")}
             </p>`
         }
         ${
             !data.repoUrl &&
             html`<p class="muted small">
-                This index does not say where to submit: ask whoever keeps it.
+                ${t("This index does not say where to submit: ask whoever keeps it.")}
             </p>`
         }
     <//>`;

@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 // Appearance: the theme and the colors, and how the app looks and moves.
 import { useEffect, useRef, useState } from "preact/hooks";
 import {
@@ -52,15 +53,19 @@ function ThemeCard({ id, desktop = false }) {
         <div class="tc-win"><i></i><i></i><i class="lit"></i></div>
     </div>`;
     const name = html`<div class="tc-name">
-        ${desktop ? `Desktop · ${palette.name}` : palette.name}
-        ${palette.pair ? html`<small>light and dark</small>` : palette.colors.mode === "light" && html`<small>light</small>`}
+        ${desktop ? t("Desktop · {{theme}}", { theme: palette.name }) : palette.name}
+        ${
+            palette.pair
+                ? html`<small>${t("light and dark")}</small>`
+                : palette.colors.mode === "light" && html`<small>${t("light")}</small>`
+        }
     </div>`;
 
     return html`<button
         class=${`theme-card ${on ? "on" : ""} ${desktop ? "theme-desktop" : ""}`}
         aria-pressed=${on}
         style=${vars}
-        title=${desktop ? "Follow the Omarchy theme of the machine Pi Pocket runs on" : palette.name}
+        title=${desktop ? t("Follow the Omarchy theme of the machine Pi Pocket runs on") : palette.name}
         onMouseEnter=${() => matchMedia("(hover: hover)").matches && preview(id)}
         onMouseLeave=${() => preview(null)}
         onFocus=${() => preview(id)}
@@ -73,7 +78,7 @@ function ThemeCard({ id, desktop = false }) {
                 ? html`<div class="tc-text">
                     ${name}
                     <div class="tc-note">
-                        Follows your desktop: change the Omarchy theme and Pi Pocket changes with it.
+                        ${t("Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.")}
                     </div>
                     <div class="tc-dots">
                         ${dots.map((dot) => html`<i style=${`background:var(${dot})`}></i>`)}
@@ -109,8 +114,8 @@ function LookCard({ id }) {
     >
         <span class="look-name">
             ${look.name}
-            ${look.builtIn && html`<small>built in</small>`}
-            ${look.colors && html`<small>own colors</small>`}
+            ${look.builtIn && html`<small>${t("built in")}</small>`}
+            ${look.colors && html`<small>${t("own colors")}</small>`}
         </span>
         ${look.description && html`<span class="look-detail">${look.description}</span>`}
         ${look.problem && html`<span class="look-problem">${look.problem}</span>`}
@@ -141,7 +146,7 @@ function listed(id) {
 
 /** Ask for a new theme's name, and make it from `from`: its id, or a palette's. */
 function Duplicate({ from, label, colors = false, onDone }) {
-    const [name, setName] = useState(`My ${label}`);
+    const [name, setName] = useState(t("My {{label}}", { label }));
     const [busy, setBusy] = useState(false);
     const field = useRef(null);
 
@@ -166,7 +171,12 @@ function Duplicate({ from, label, colors = false, onDone }) {
             await listed(made.id);
             notify(
                 "info",
-                `Made “${name}”: its folder is in the data folder's themes/. Edit with Pi changes it.`,
+                t(
+                    "Made “{{name}}”: its folder is in the data folder's themes/. Edit with Pi changes it.",
+                    {
+                        name,
+                    },
+                ),
             );
             onDone(made.id);
         }
@@ -176,12 +186,12 @@ function Duplicate({ from, label, colors = false, onDone }) {
         <input
             ref=${field}
             value=${name}
-            aria-label="The new theme's name"
+            aria-label=${t("The new theme's name")}
             maxlength="60"
             onInput=${(event) => setName(event.currentTarget.value)}
         />
-        <button class="button primary" disabled=${busy || name.trim() === ""}>Make</button>
-        <button class="button ghost" type="button" onClick=${() => onDone(null)}>Cancel</button>
+        <button class="button primary" disabled=${busy || name.trim() === ""}>${t("Make")}</button>
+        <button class="button ghost" type="button" onClick=${() => onDone(null)}>${t("Cancel")}</button>
     </form>`;
 }
 
@@ -204,7 +214,7 @@ function LookTools() {
     if (naming) {
         return html`<${Duplicate}
             from=${id}
-            label=${look?.name ?? "theme"}
+            label=${look?.name ?? t("theme")}
             onDone=${(made) => {
                 setNaming(false);
 
@@ -217,7 +227,10 @@ function LookTools() {
 
     const remove = () =>
         confirm(
-            `Remove the theme “${look.name}”?\n\nIts folder moves to themes/.removed/ in the data folder, so you can get it back from there.`,
+            t(
+                "Remove the theme “{{name}}”?\n\nIts folder moves to themes/.removed/ in the data folder, so you can get it back from there.",
+                { name: look.name },
+            ),
         ) &&
         attempt(async () => {
             await api(`themes/${encodeURIComponent(id)}`, undefined, { method: "DELETE" });
@@ -226,12 +239,12 @@ function LookTools() {
 
     return html`<div class="look-tools">
         <button class="button" disabled=${!look?.usable} onClick=${() => setNaming(true)}>
-            <${Icon} name="copy" size=${14} /> Duplicate
+            <${Icon} name="copy" size=${14} /> ${t("Duplicate")}
         </button>
         ${
             look && !look.builtIn
                 ? html`<button class="button" onClick=${() => attempt(() => editWithPi(id))}>
-                        <${Icon} name="sparkle" size=${14} /> Edit with Pi
+                        <${Icon} name="sparkle" size=${14} /> ${t("Edit with Pi")}
                     </button>
                     ${
                         galleryAvailable() &&
@@ -239,11 +252,11 @@ function LookTools() {
                             class="button"
                             onClick=${() => openSheet({ type: "gallery-share", id, theme: true })}
                         >
-                            Share…
+                            ${t("Share…")}
                         </button>`
                     }
-                    <button class="button ghost" onClick=${remove}>Remove</button>`
-                : html`<span class="muted small">Duplicate it to make a theme of your own.</span>`
+                    <button class="button ghost" onClick=${remove}>${t("Remove")}</button>`
+                : html`<span class="muted small">${t("Duplicate it to make a theme of your own.")}</span>`
         }
     </div>`;
 }
@@ -268,7 +281,7 @@ function TextSize({ size }) {
         setPrefs({ text: textSizeOf(value) });
     };
 
-    return html`<div class="text-size" role="group" aria-label="Text size">
+    return html`<div class="text-size" role="group" aria-label=${t("Text size")}>
         <div class="segmented">
             ${[13, 15, 17, 20].map(
                 (each) => html`<button
@@ -287,7 +300,7 @@ function TextSize({ size }) {
                 min=${MIN_TEXT}
                 max=${MAX_TEXT}
                 step=${STEP_TEXT}
-                aria-label="Text size in pixels"
+                aria-label=${t("Text size in pixels")}
                 value=${draft ?? size}
                 onInput=${(event) => {
                     const value = event.currentTarget.value;
@@ -372,31 +385,31 @@ function FontTools() {
               </label>`;
     };
 
-    return html`<section class="font-tools" aria-label=${`Fonts for ${look.name}`}>
-        <h4 class="font-title">Fonts for <em>${look.name}</em></h4>
-        ${menu("Text font", TEXT_FONTS, "sans")}
-        ${menu("Code font", CODE_FONTS, "mono")}
+    return html`<section class="font-tools" aria-label=${t("Fonts for {{theme}}", { theme: look.name })}>
+        <h4 class="font-title">${t("Fonts for")} <em>${look.name}</em></h4>
+        ${menu(t("Text font"), TEXT_FONTS, "sans")}
+        ${menu(t("Code font"), CODE_FONTS, "mono")}
         <div class="font-menu">
-            <span>Ligatures</span>
+            <span>${t("Ligatures")}</span>
             ${
                 look.builtIn
-                    ? html`<strong>${set.ligatures ? "On" : "Off"}</strong>`
+                    ? html`<strong>${set.ligatures ? t("On") : t("Off")}</strong>`
                     : html`<div>
                           <${Switch}
                               on=${set.ligatures}
-                              label="Ligatures"
+                              label=${t("Ligatures")}
                               onChange=${() => save({ ligatures: !set.ligatures })}
                           />
                           <button
                               class="button small ghost"
                               onClick=${() => save({ ligatures: null })}
                           >
-                              Theme's own
+                              ${t("Theme's own")}
                           </button>
                       </div>`
             }
         </div>
-        <div class="font-preview" role="group" aria-label="Font preview">
+        <div class="font-preview" role="group" aria-label=${t("Font preview")}>
             The quick brown fox jumps over the lazy dog. <em>Emphasis.</em>
             <code>const ok = (x) => x !== 42; <span class="hl-com">// a comment</span></code>
         </div>
@@ -418,10 +431,10 @@ function FontTools() {
                   </div>`
                 : html`<div class="font-duplicate">
                       <button class="button" onClick=${() => setNaming(true)}>
-                          <${Icon} name="copy" size=${14} /> Duplicate to change
+                          <${Icon} name="copy" size=${14} /> ${t("Duplicate to change")}
                       </button>
                       <span class="muted small">
-                          ${look.name} comes with the app: its fonts stay as they are.
+                          ${t("{{name}} comes with the app: its fonts stay as they are.", { name: look.name })}
                       </span>
                   </div>`)
         }
@@ -460,7 +473,10 @@ function ColorsTools() {
 
     const remove = () =>
         confirm(
-            `Remove the colors “${own.name}”?\n\nTheir folder moves to themes/.removed/ in the data folder, so you can get them back from there.`,
+            t(
+                "Remove the colors “{{name}}”?\n\nTheir folder moves to themes/.removed/ in the data folder, so you can get them back from there.",
+                { name: own.name },
+            ),
         ) &&
         attempt(async () => {
             await api(`themes/${encodeURIComponent(own.id)}`, undefined, { method: "DELETE" });
@@ -469,14 +485,14 @@ function ColorsTools() {
 
     return html`<div class="look-tools">
         <button class="button" onClick=${() => setNaming(true)}>
-            <${Icon} name="copy" size=${14} /> Duplicate colors
+            <${Icon} name="copy" size=${14} /> ${t("Duplicate colors")}
         </button>
         ${
             own &&
             html`<button class="button" onClick=${() => attempt(() => editWithPi(own.id))}>
-                    <${Icon} name="sparkle" size=${14} /> Edit with Pi
+                    <${Icon} name="sparkle" size=${14} /> ${t("Edit with Pi")}
                 </button>
-                <button class="button ghost" onClick=${remove}>Remove</button>`
+                <button class="button ghost" onClick=${remove}>${t("Remove")}</button>`
         }
     </div>`;
 }
@@ -498,34 +514,48 @@ function DefaultTools() {
     const same = current
         ? current.look === look && current.colors === colors
         : look === BASE_LOOK && p.theme === "desktop";
+
     // A theme with its own colors is named once: "My Lantern", not "My Lantern with My Lantern". The desktop's colors
     // are Tokyo Night where the server has no desktop.
-    const name = (look, colors) =>
-        colors.split("@")[0] === look
-            ? (lookInfo(look)?.name ?? look)
-            : `${lookInfo(look)?.name ?? look} with ${paletteOf(colors).desktop ? "the desktop's colors" : paletteOf(colors).name}`;
+    const name = (look, colors) => {
+        const lookName = lookInfo(look)?.name ?? look;
+        const colorName = paletteOf(colors).desktop
+            ? t("the desktop's colors")
+            : paletteOf(colors).name;
+
+        return colors.split("@")[0] === look
+            ? lookName
+            : t("{{look}} with {{colors}}", { look: lookName, colors: colorName });
+    };
+
     const set = (value) =>
         attempt(async () => {
             await api("themes/default", { default: value }, { method: "PUT" });
             notify(
                 "info",
-                value
-                    ? `Browsers that have not chosen start with ${name(value.look, value.colors)}.`
-                    : "Browsers that have not chosen start with Pocket.",
+                t("Browsers that have not chosen start with {{name}}.", {
+                    name: value ? name(value.look, value.colors) : "Pocket",
+                }),
             );
         });
 
     return html`<div class="look-tools">
         <span class="muted small grow">
-            ${current ? `For new browsers: ${name(current.look, current.colors)}.` : `New browsers start with ${name(BASE_LOOK, "desktop")}.`}
+            ${
+                current
+                    ? t("For new browsers: {{name}}.", { name: name(current.look, current.colors) })
+                    : t("New browsers start with {{name}}.", {
+                          name: name(BASE_LOOK, "desktop"),
+                      })
+            }
         </span>
         ${
             !same &&
             html`<button class="button" onClick=${() => set({ look, colors })}>
-                Use these for new browsers
+                ${t("Use these for new browsers")}
             </button>`
         }
-        ${current && html`<button class="button ghost" onClick=${() => set(null)}>Reset</button>`}
+        ${current && html`<button class="button ghost" onClick=${() => set(null)}>${t("Reset")}</button>`}
     </div>`;
 }
 
@@ -564,11 +594,11 @@ function SlotLayout({ slot }) {
     const changed = Object.keys(prefs().layout?.[slot] ?? {}).length > 0;
 
     return html`<div class="label slot-label">
-            <span>${SLOTS[slot].label}</span>
+            <span>${t(SLOTS[slot].label)}</span>
             ${
                 changed &&
                 html`<button class="button ghost small" onClick=${() => resetSlot(slot)}>
-                    Reset
+                    ${t("Reset")}
                 </button>`
             }
         </div>
@@ -576,20 +606,20 @@ function SlotLayout({ slot }) {
             ${list.map(({ item, hidden, hiddenBy }) => {
                 const at = movable.indexOf(item.id);
                 const detail = [
-                    item.module && `From ${item.module}`,
-                    hiddenBy && `Hidden by ${hiddenBy}`,
-                    item.fixed && "Always shown",
+                    item.module && t("From {{module}}", { module: item.module }),
+                    hiddenBy && t("Hidden by {{name}}", { name: hiddenBy }),
+                    item.fixed && t("Always shown"),
                 ]
                     .filter(Boolean)
                     .join(" · ");
 
-                return html`<${SettingRow} key=${item.id} title=${item.label} detail=${detail}>
+                return html`<${SettingRow} key=${item.id} title=${t(item.label)} detail=${detail}>
                     ${
                         !item.fixed &&
                         html`<div class="slot-moves">
                             <button
                                 class="icon-button"
-                                aria-label=${`Move ${item.label} earlier`}
+                                aria-label=${t("Move {{label}} earlier", { label: t(item.label) })}
                                 disabled=${at <= 0}
                                 onClick=${() => move(slot, item.id, -1)}
                             >
@@ -597,7 +627,7 @@ function SlotLayout({ slot }) {
                             </button>
                             <button
                                 class="icon-button"
-                                aria-label=${`Move ${item.label} later`}
+                                aria-label=${t("Move {{label}} later", { label: t(item.label) })}
                                 disabled=${at === movable.length - 1}
                                 onClick=${() => move(slot, item.id, 1)}
                             >
@@ -606,7 +636,7 @@ function SlotLayout({ slot }) {
                         </div>
                         <${Switch}
                             on=${!hidden}
-                            label=${`Show ${item.label}`}
+                            label=${t("Show {{label}}", { label: t(item.label) })}
                             onChange=${() => setShown(slot, item.id, hidden)}
                         />`
                     }
@@ -621,14 +651,14 @@ export function AppearanceSheet() {
 
     useEffect(() => () => preview(null), []);
 
-    return html`<${Sheet} title="Appearance" onClose=${closeSheet} wide=${true}>
-        <div class="label">Theme</div>
+    return html`<${Sheet} title=${t("Appearance")} onClose=${closeSheet} wide=${true}>
+        <div class="label">${t("Theme")}</div>
         <div class="look-grid">
             ${lookIds().map((id) => html`<${LookCard} key=${id} id=${id} />`)}
         </div>
         ${store.state.me?.role === "owner" && html`<${LookTools} />`}
         ${store.state.me?.role === "owner" && html`<${FontTools} />`}
-        <div class="label">Colors</div>
+        <div class="label">${t("Colors")}</div>
         <div class="theme-grid">
             ${desktop && html`<${ThemeCard} id="desktop" desktop=${true} />`}
             ${[...themeIds(), ...folderPaletteIds()].map(
@@ -640,53 +670,61 @@ export function AppearanceSheet() {
         ${
             !desktop &&
             html`<p class="muted small">
-                Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.
+                ${t("Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.")}
             </p>`
         }
-        <div class="label">Layout and motion</div>
+        <div class="label">${t("Layout and motion")}</div>
         <div class="sheet-list">
             <${SettingRow}
-                title="Tiled windows"
-                detail="Wide screens: the sidebar and the session as Hyprland windows, with gaps and the active border"
+                title=${t("Tiled windows")}
+                detail=${t("Wide screens: the sidebar and the session as Hyprland windows, with gaps and the active border")}
             >
                 <${Switch}
                     on=${p.tiling}
-                    label="Tiled windows"
+                    label=${t("Tiled windows")}
                     onChange=${() => setPrefs({ tiling: !p.tiling })}
                 />
             <//>
             <${SettingRow}
-                title="Peek tiles"
-                detail=${`Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar${touch ? "" : ", or Alt+P"}`}
+                title=${t("Peek tiles")}
+                detail=${
+                    touch
+                        ? t(
+                              "Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar",
+                          )
+                        : t(
+                              "Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar, or Alt+P",
+                          )
+                }
             >
                 <${Switch}
                     on=${p.peeks}
-                    label="Peek tiles"
+                    label=${t("Peek tiles")}
                     onChange=${() => setPrefs({ peeks: !p.peeks })}
                 />
             <//>
             ${
                 desktop?.wallpaper &&
                 html`<${SettingRow}
-                    title="Desktop wallpaper"
-                    detail="Your wallpaper in the gaps between windows, while following the desktop"
+                    title=${t("Desktop wallpaper")}
+                    detail=${t("Your wallpaper in the gaps between windows, while following the desktop")}
                 >
                     <${Switch}
                         on=${p.wallpaper}
                         disabled=${!p.tiling || p.theme !== "desktop"}
-                        label="Desktop wallpaper"
+                        label=${t("Desktop wallpaper")}
                         onChange=${() => setPrefs({ wallpaper: !p.wallpaper })}
                     />
                 <//>`
             }
             <${SettingRow}
-                title="Sidebar"
-                detail="Folded, it shows numbered sessions like workspaces"
+                title=${t("Sidebar")}
+                detail=${t("Folded, it shows numbered sessions like workspaces")}
             >
                 <div class="segmented">
                     ${[
-                        ["open", "Open"],
-                        ["rail", "Folded"],
+                        ["open", t("Open")],
+                        ["rail", t("Folded")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -700,8 +738,8 @@ export function AppearanceSheet() {
                 </div>
             <//>
             <${SettingRow}
-                title="Motion"
-                detail="Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph"
+                title=${t("Motion")}
+                detail=${t("Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph")}
             >
                 <div class="segmented">
                     ${[
@@ -722,20 +760,20 @@ export function AppearanceSheet() {
                 </div>
             <//>
             <${SettingRow}
-                title="Text size"
-                detail=${`The conversation's, in pixels: any from ${MIN_TEXT} to ${MAX_TEXT}`}
+                title=${t("Text size")}
+                detail=${t("The conversation's, in pixels: any from {{min}} to {{max}}", { min: MIN_TEXT, max: MAX_TEXT })}
             >
                 <${TextSize} size=${textSizeOf(p.text)} />
             <//>
             <${SettingRow}
-                title="Width"
-                detail="Wide screens: how much of the window the conversation and the message box take. Comfortable grows with the window"
+                title=${t("Width")}
+                detail=${t("Wide screens: how much of the window the conversation and the message box take. Comfortable grows with the window")}
             >
                 <div class="segmented">
                     ${[
-                        ["comfortable", "Comfortable"],
-                        ["wide", "Wide"],
-                        ["full", "Full"],
+                        ["comfortable", t("Comfortable")],
+                        ["wide", t("Wide")],
+                        ["full", t("Full")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -749,14 +787,14 @@ export function AppearanceSheet() {
                 </div>
             <//>
             <${SettingRow}
-                title="Density"
-                detail="Less room around messages, rows, and the message box, to fit more on a screen"
+                title=${t("Density")}
+                detail=${t("Less room around messages, rows, and the message box, to fit more on a screen")}
             >
                 <div class="segmented">
                     ${[
-                        ["comfortable", "Comfortable"],
-                        ["compact", "Compact"],
-                        ["tight", "Tight"],
+                        ["comfortable", t("Comfortable")],
+                        ["compact", t("Compact")],
+                        ["tight", t("Tight")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -770,28 +808,36 @@ export function AppearanceSheet() {
                 </div>
             <//>
         </div>
-        <div class="label">Conversation</div>
+        <div class="label">${t("Conversation")}</div>
         <div class="sheet-list">
             <${SettingRow}
-                title="Show thinking"
-                detail=${`Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one${touch ? "" : ". Also Alt+T"}`}
+                title=${t("Show thinking")}
+                detail=${
+                    touch
+                        ? t(
+                              "Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one",
+                          )
+                        : t(
+                              "Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one. Also Alt+T",
+                          )
+                }
             >
                 <${Switch}
                     on=${p.showThinking}
-                    label="Show thinking"
+                    label=${t("Show thinking")}
                     onChange=${() => setPrefs({ showThinking: !p.showThinking })}
                 />
             <//>
         </div>
-        <div class="label">Status line</div>
+        <div class="label">${t("Status line")}</div>
         <div class="sheet-list">
             <${SettingRow}
-                title="Reply speed"
-                detail="Under the message box: how fast the last answer came, in tokens a second, and how long its first token took"
+                title=${t("Reply speed")}
+                detail=${t("Under the message box: how fast the last answer came, in tokens a second, and how long its first token took")}
             >
                 <${Switch}
                     on=${p.speed}
-                    label="Reply speed"
+                    label=${t("Reply speed")}
                     onChange=${() => setPrefs({ speed: !p.speed })}
                 />
             <//>
@@ -803,7 +849,7 @@ export function AppearanceSheet() {
                 class="button ghost wide sheet-footer"
                 onClick=${() => openSheet({ type: "shortcuts" })}
             >
-                <${Icon} name="keyboard" size=${16} /> Keyboard shortcuts
+                <${Icon} name="keyboard" size=${16} /> ${t("Keyboard shortcuts")}
             </button>`
         }
     <//>`;

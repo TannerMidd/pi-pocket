@@ -2,6 +2,7 @@
 // as they are heard and stay once the browser settles on them; nothing is ever sent by itself. Chrome sends the audio
 // to Google's servers to be recognised; Safari on iOS has it too; Firefox has none, and there the mic does not show.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { t } from "./i18n.js";
 import { notify } from "./store.js";
 import { html, Icon } from "./ui.js";
 
@@ -270,7 +271,11 @@ export function useDictation(box, onText, { top = false } = {}) {
                     if (event.error !== "aborted") {
                         const level = event.error === "no-speech" ? "info" : "error";
 
-                        notify(level, ERRORS[event.error] ?? `Dictation stopped: ${event.error}.`);
+                        const message = Object.hasOwn(ERRORS, event.error)
+                            ? t(ERRORS[event.error])
+                            : t("Dictation stopped: {{error}}.", { error: event.error });
+
+                        notify(level, message);
                     }
                 };
 
@@ -286,7 +291,10 @@ export function useDictation(box, onText, { top = false } = {}) {
                 } catch (error) {
                     this.recognition = null;
                     current = null;
-                    notify("error", `Dictation did not start: ${error.message ?? error}`);
+                    notify(
+                        "error",
+                        t("Dictation did not start: {{error}}", { error: error.message ?? error }),
+                    );
                 }
             },
             toggle() {

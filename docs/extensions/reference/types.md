@@ -47,7 +47,7 @@ The types file imports types from Pi Durable, Pi AI, and Preact by package name.
 - [`Web`](web.md) and the types that it uses: `WebAccess`, `WebMethod`, `WebHandler`, and `WebRequest`.
 - [`Command`, `CommandContext`, and `CommandResult`](command-context.md).
 - [`Pocket`](pocket.md) and the types that it uses: `BrowserModule`, `Action`, the objects that you give (`RailSpec`, `MenuSpec`, `LauncherSpec`, `PageSpec`, `SheetSpec`, `ToolCallSpec`, `CallSummary`), `Added`, `PageProps`, `SheetProps`, and the props of the pieces.
-- `Module`, `Person`, `Role`, and `NoticeLevel`, on this page.
+- `Module`, `PocketExtension`, `PocketUiLocale`, `Person`, `Role`, and `NoticeLevel`, on this page.
 
 The types file does not have the internal members of the host. It does not have Pi Durable's own API either: import `defineExtension`, `defineTool`, and the rest from `@earendil-works/pi-durable`.
 
@@ -77,6 +77,36 @@ default(host: Host, web: Web): Extension | readonly Extension[] | void | Promise
 Since 0.1.0 · Stable
 
 Sets up the module. It gets the [host](host.md) and [`web`](web.md). It returns the module's extensions: one, a list, or nothing when the module only adds to the app. It can be async. Pi Pocket 0.14.0 added `web`, async setup, and modules that return nothing.
+
+The returned extension may also include `uiLocales`, a list of validated, data-only UI translation packs. They translate only explicit `t()` calls; missing entries remain English. Packs do not run browser code, add routes, or enable the module. This API is experimental until released; see [UI locale packs](../../extensions.md#ui-locale-packs-data-only).
+
+### `PocketExtension`
+
+```ts
+type PocketExtension = Extension & {
+    readonly uiLocales?: readonly PocketUiLocale[];
+};
+```
+
+Experimental · Not yet released
+
+Pi Pocket's extension shape, with optional locale data. It wraps an ordinary Pi Durable `Extension`.
+
+### `PocketUiLocale`
+
+```ts
+interface PocketUiLocale {
+    readonly locale: string;
+    readonly label: string;
+    readonly default?: boolean;
+    readonly strings: Readonly<Record<string, string>>;
+    readonly templates?: Readonly<Record<string, string>>;
+}
+```
+
+Experimental · Not yet released
+
+A canonical language tag and data-only dictionaries. `strings` holds exact source strings without parameters; `templates` holds exact source strings with named `{{placeholders}}`. The loader validates their shapes and enforces placeholder parity. Dynamic values are inserted without translation. See [UI locale packs](../../extensions.md#ui-locale-packs-data-only) for full semantics and limits.
 
 ### `pocketApi`
 

@@ -70,6 +70,23 @@ export interface Person {
  */
 export type NoticeLevel = "info" | "warning" | "error";
 
+/**
+ * A data-only UI locale pack. Only explicit UI translation calls use these keys; missing keys stay in English.
+ * @experimental Not yet released.
+ */
+export interface PocketUiLocale {
+    readonly locale: string;
+    readonly label: string;
+    readonly default?: boolean;
+    readonly strings: Readonly<Record<string, string>>;
+    readonly templates?: Readonly<Record<string, string>>;
+}
+
+/** A Pi Durable extension with optional UI locale data. @experimental Not yet released. */
+export type PocketExtension = Extension & {
+    readonly uiLocales?: readonly PocketUiLocale[];
+};
+
 // ─── The module ──────────────────────────────────────────────────────────────
 
 /**
@@ -84,7 +101,11 @@ export interface Module {
     default(
         host: Host,
         web: Web,
-    ): Extension | readonly Extension[] | void | Promise<Extension | readonly Extension[] | void>;
+    ):
+        | PocketExtension
+        | readonly PocketExtension[]
+        | void
+        | Promise<PocketExtension | readonly PocketExtension[] | void>;
     /**
      * The version of the extension API that the module needs. An older Pi Pocket does not set it up.
      * @since 0.14.0
@@ -185,7 +206,12 @@ export interface Host {
      * tabs show it.
      * @since 0.1.0
      */
-    notice(level: NoticeLevel, message: string, conversationId?: ConversationId): void;
+    notice(
+        level: NoticeLevel,
+        message: string,
+        conversationId?: ConversationId,
+        ui?: { key: string; params?: Record<string, string | number> },
+    ): void;
     /**
      * Why Pi cannot start work in a session when nobody asked for it (a spend limit), or undefined when it can.
      * @since 0.12.0

@@ -99,6 +99,41 @@ These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 - [examples/no-force-push.ts](examples/no-force-push.ts): a hook that stops some bash calls, and a prompt section that tells Pi so.
 - [examples/read-page.ts](examples/read-page.ts): a tool that reads a public web page with `host.fetchPublic`, and fences its text with `host.text`.
 - [examples/server-status.ts](examples/server-status.ts) with [examples/server-status.js](examples/server-status.js): a page on the rail, with a route that reads the machine's load and memory, and events that keep it live.
+- [examples/zh-cn-ui.ts](examples/zh-cn-ui.ts): a data-only Simplified Chinese UI locale pack.
+
+## UI locale packs (data only)
+
+A module may return optional `uiLocales` data with its ordinary Pi Durable extensions. Locale packs translate fixed Pocket UI text; they do not translate user-authored text, model output, provider names, or arbitrary HTML. The module itself is still ordinary server code: it runs with the server's rights, while its locale data is validated and sent as data, not as browser JavaScript.
+
+```typescript
+import { defineExtension } from "@earendil-works/pi-durable";
+
+export default function createUiLocale() {
+    return {
+        ...defineExtension({ name: "example-ui-locale" }),
+        uiLocales: [
+            {
+                locale: "zh-CN",
+                label: "简体中文",
+                default: true,
+                strings: { Files: "文件" },
+                templates: {
+                    "Back to sessions, {{count}} waiting for you":
+                        "返回会话列表，{{count}} 项待你处理",
+                },
+            },
+        ],
+    };
+}
+```
+
+- Use canonical BCP 47 tags and exact English source strings as keys. `strings` is for text without parameters; `templates` is for source text with named `{{placeholders}}`.
+- The browser translates only where its code explicitly calls `t("Files")` or `t("Back to sessions, {{count}} waiting for you", { count })`. A missing key stays English. A translated template must have the same placeholder names as its source; values are inserted as-is and are not translated again. This is not a page-wide translation pass.
+- The loader validates the locale data and rejects an invalid pack or a locale tag already registered by another enabled module. Limits may change; use canonical tags and do not rely on undocumented size or entry limits.
+- A pack marked `default: true` is preferred among packs that are already enabled; it does not turn a module on. Without an enabled pack, the UI uses English. There is no per-person language setting or saved locale choice.
+- Packs reach signed-in clients in `hello.server.uiLocales` and the authenticated `/api/me` response. There is no public dictionary endpoint. The locale data itself adds no route or external fetch.
+
+A module may also call `host.notice(level, message, conversationId, { key, params })` to give a notice an optional UI translation key and parameters. The original `message` remains in the server log and in the notice payload; the metadata is only for presentation.
 
 ## Rules that are easy to break
 

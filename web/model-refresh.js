@@ -1,5 +1,6 @@
 // One refresh action and its persistent feedback, shared by the menu, Providers, and the launcher.
 import { api, notify, store } from "./store.js";
+import { t } from "./i18n.js";
 import { html, Icon } from "./ui.js";
 
 /** Reloading shared model configuration and contacting providers is the owner's choice. */
@@ -13,33 +14,42 @@ export async function refreshModels() {
     }
 
     store.set({ modelRefresh: { loading: true, result: null, error: null } });
-    notify("info", "Refreshing models…");
+    notify("info", t("Refreshing models…"));
 
     try {
         const result = await api("models/refresh", {});
 
         store.set({ modelRefresh: { loading: false, result, error: null } });
-        notify(
-            result.errors.length > 0 ? "error" : "info",
-            `${completion(result)}${result.errors.length > 0 ? " Some providers could not refresh. See Providers for details." : ""}`,
-        );
+        const details =
+            result.errors.length > 0
+                ? ` ${t("Some providers could not refresh. See Providers for details.")}`
+                : "";
+
+        notify(result.errors.length > 0 ? "error" : "info", `${completion(result)}${details}`);
 
         return result;
     } catch (error) {
         const message = error.message ?? String(error);
 
         store.set({ modelRefresh: { loading: false, result: null, error: message } });
-        notify("error", `Could not refresh models: ${message}`);
+        notify("error", t("Could not refresh models: {{error}}", { error: message }));
     }
 }
 
 function completion({ added, removed, total, offline }) {
     const counts =
         added === 0 && removed === 0
-            ? `No model changes. ${total} models available.`
-            : `Models refreshed: ${added} added, ${removed} removed. ${total} models available.`;
+            ? t("No model changes. {{total}} models available.", { total })
+            : t(
+                  "Models refreshed: {{added}} added, {{removed}} removed. {{total}} models available.",
+                  {
+                      added,
+                      removed,
+                      total,
+                  },
+              );
 
-    return `${offline ? "Offline: reloaded cached models and configuration. " : ""}${counts}`;
+    return `${offline ? `${t("Offline: reloaded cached models and configuration.")} ` : ""}${counts}`;
 }
 
 /** The same loading state and last result survive closing or switching sheets in this tab. */
@@ -59,14 +69,15 @@ export function RefreshModels() {
             onClick=${refreshModels}
         >
             <${Icon} name="reload" size=${15} />
-            ${loading ? "Refreshing models…" : "Refresh models"}
+            ${loading ? t("Refreshing models…") : t("Refresh models")}
         </button>
         <div class="model-refresh-status small" role="status" aria-live="polite">
-            ${loading && html`<p class="muted">Checking configured providers…</p>`}
-            ${error && html`<p class="warn">Could not refresh models: ${error}</p>`}
+            ${loading && html`<p class="muted">${t("Checking configured providers…")}</p>`}
+            ${error && html`<p class="warn">${t("Could not refresh models: {{error}}", { error })}</p>`}
             ${result && html`<p class="muted">${completion(result)}</p>`}
             ${result?.errors.map(
-                ({ provider, message }) => html`<p class="warn">${provider}: ${message}</p>`,
+                ({ provider, message }) =>
+                    html`<p class="warn">${t("{{provider}}: {{message}}", { provider, message })}</p>`,
             )}
         </div>
     </div>`;

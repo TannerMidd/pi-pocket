@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // Pi Pocket web app. No build step: edit a file under web/ and every open browser reloads.
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -87,12 +88,12 @@ function ChangesButton() {
     const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     const lines = added > 0 || removed > 0;
     const count = files.length + (changes.more ?? 0);
-    const counted = `${count} ${count === 1 ? "file" : "files"}`;
+    const counted = t(count === 1 ? "{{count}} file" : "{{count}} files", { count });
 
     return html`<button
         class="changes-button"
-        title="Uncommitted changes in this session's folder"
-        aria-label=${`Changes: ${counted}${lines ? `, ${added} lines added and ${removed} removed` : ""}`}
+        title=${t("Uncommitted changes in this session's folder")}
+        aria-label=${lines ? t("Changes: {{counted}}, {{added}} lines added and {{removed}} removed", { counted, added, removed }) : t("Changes: {{counted}}", { counted })}
         onClick=${() => setFilesOpen(true, "changes")}
     >
         ${added > 0 && html`<span class="added">+${added}</span>`}
@@ -114,8 +115,8 @@ defineItem("topbar", {
             busy > 0 &&
             html`<button
                 class="icon-button"
-                aria-label=${`Subagents: ${busy} working`}
-                title="Subagents working"
+                aria-label=${t("Subagents: {{count}} working", { count: busy })}
+                title=${t("Subagents working")}
                 onClick=${openSubagents}
             >
                 <span class="pulse"></span>
@@ -157,8 +158,8 @@ defineItem("topbar", {
 
         return html`<button
             class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
-            aria-label="Artifacts"
-            title="Artifacts"
+            aria-label=${t("Artifacts")}
+            title=${t("Artifacts")}
             onClick=${() => openSheet({ type: "artifacts" })}
         >
             <${Icon} name="artifact" />
@@ -180,8 +181,8 @@ defineItem("topbar", {
     render: () =>
         html`<button
             class="icon-button"
-            aria-label="Menu"
-            title="Menu"
+            aria-label=${t("Menu")}
+            title=${t("Menu")}
             aria-haspopup="dialog"
             aria-expanded=${store.state.sheet?.type === "menu"}
             onClick=${() => openSheet({ type: "menu" })}
@@ -202,7 +203,7 @@ function Topbar() {
     const title =
         conversation?.title ??
         store.state.sessions.find((session) => session.id === store.state.conversationId)?.title ??
-        (store.state.missing ? "Not found" : "Loading…");
+        (store.state.missing ? t("Not found") : t("Loading…"));
     // Other sessions waiting for an approval, counted on the way back to them.
     const waiting = store.state.sessions.filter(
         (session) =>
@@ -214,8 +215,12 @@ function Topbar() {
     return html`<header class="topbar" data-part="topbar" ref=${edge}>
         <button
             class="icon-button badge-host topbar-back"
-            aria-label=${waiting > 0 ? `Back to sessions, ${waiting} waiting for you` : "Back to sessions"}
-            title="Sessions"
+            aria-label=${
+                waiting > 0
+                    ? t("Back to sessions, {{count}} waiting for you", { count: waiting })
+                    : t("Back to sessions")
+            }
+            title=${t("Sessions")}
             onClick=${toSessions}
         >
             <${Icon} name="back" size=${22} />
@@ -224,8 +229,8 @@ function Topbar() {
         <div class="title">
             <button
                 class="title-open"
-                aria-label=${`${title}${folder ? `, in ${folder}` : ""}: session menu`}
-                title=${cwd ? `${shortPath(cwd, server?.home)}\nSession menu` : "Session menu"}
+                aria-label=${folder ? t("{{title}}, in {{folder}}: session menu", { title, folder }) : t("{{title}}: session menu", { title })}
+                title=${cwd ? `${shortPath(cwd, server?.home)}\n${t("Session menu")}` : t("Session menu")}
                 disabled=${!conversation}
                 onClick=${() => openSheet({ type: "menu" })}
             ></button>
@@ -242,7 +247,7 @@ function Topbar() {
                 ${
                     conversation?.kind === "subagent"
                         ? html`<span class="title-folder title-parent">
-                              subagent of ${conversation.parent?.title ?? "?"}
+                              ${t("subagent of {{title}}", { title: conversation.parent?.title ?? "?" })}
                           </span>`
                         : html`${
                               folder &&
@@ -253,13 +258,13 @@ function Topbar() {
                               (branchAvailable()
                                   ? html`<button
                                         class="title-branch"
-                                        aria-label=${view.branch?.detached ? `No branch, at ${branch}: switch to one` : `Branch ${branch}: switch or make a branch`}
-                                        title=${view.branch?.detached ? "No branch: switch to one" : "Switch or make a branch"}
+                                        aria-label=${view.branch?.detached ? t("No branch, at {{branch}}: switch to one", { branch }) : t("Branch {{branch}}: switch or make a branch", { branch })}
+                                        title=${view.branch?.detached ? t("No branch: switch to one") : t("Switch or make a branch")}
                                         onClick=${() => openSheet({ type: "branch" })}
                                     >
                                         <${Icon} name="fork" size=${10} /><span class="title-branch-name">${branch}</span>
                                     </button>`
-                                  : html`<span class="title-branch" title="The git branch">
+                                  : html`<span class="title-branch" title=${t("The git branch")}>
                                         <${Icon} name="fork" size=${10} /><span class="title-branch-name">${branch}</span>
                                     </span>`)
                           }
@@ -310,7 +315,7 @@ function Notice({ notice, leaving }) {
         }}
     >
         <span class="notice-mark" aria-hidden="true"></span>
-        <span class="notice-text">${notice.message}</span>
+        <span class="notice-text">${notice.ui ? t(notice.ui.key, notice.ui.params) : notice.message}</span>
         <${Icon} name=${notice.action ? "chevron" : "close"} size=${14} />
     </button>`;
 }
@@ -471,7 +476,7 @@ function App() {
 
     if (state.me === undefined) {
         return html`<${Boot}
-            caption=${state.notices.some((notice) => notice.level === "error") ? "waiting for the server" : "starting"}
+            caption=${t(state.notices.some((notice) => notice.level === "error") ? "waiting for the server" : "starting")}
         />
         <${Notices} />`;
     }
@@ -849,7 +854,8 @@ function stopOnSecondEscape() {
     }
 
     escapedAt = Date.now();
-    const notice = (escapeNotice = notify("info", "Press Esc again to stop Pi."));
+    const ui = { key: "Press Esc again to stop Pi." };
+    const notice = (escapeNotice = notify("info", t(ui.key), undefined, ui));
 
     // Up only while a second press stops Pi.
     setTimeout(() => dismiss(notice), ESCAPE_TWICE_MS);
@@ -874,7 +880,7 @@ startSwipes((where) => {
     // The subagents board or an extension's page in the conversation's place (or the home screen's): right goes back,
     // as its × does.
     if (where === "board") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return { right: { path: iconPath("back"), label: t("Back"), run: goBack } };
     }
 
     if (conversationId === null || !view.conversation || missing) {
@@ -882,7 +888,7 @@ startSwipes((where) => {
     }
 
     if (where === "files") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return { right: { path: iconPath("back"), label: t("Back"), run: goBack } };
     }
 
     // Back to the list, or to the session before when that is where back goes.
@@ -891,11 +897,11 @@ startSwipes((where) => {
     return {
         right: {
             path: iconPath("back"),
-            label: toList ? "Sessions" : "Back",
+            label: toList ? t("Sessions") : t("Back"),
             run: () => (canGoBack() ? goBack() : toSessions()),
         },
         left: filesAvailable()
-            ? { path: iconPath("folder"), label: "Files", run: () => setFilesOpen(true) }
+            ? { path: iconPath("folder"), label: t("Files"), run: () => setFilesOpen(true) }
             : null,
         up: () => openSheet({ type: "places" }),
     };
@@ -946,7 +952,7 @@ if (shared !== null) {
         (share) =>
             share
                 ? store.set({ sheet: { type: "share", share } })
-                : notify("error", "What was shared did not arrive. Share it again."),
-        () => notify("error", "What was shared could not be read. Share it again."),
+                : notify("error", t("What was shared did not arrive. Share it again.")),
+        () => notify("error", t("What was shared could not be read. Share it again.")),
     );
 }

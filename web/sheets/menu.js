@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 // The menu: what can be done in this session and in the app.
 import { useLayoutEffect, useRef } from "preact/hooks";
 import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
@@ -43,8 +44,8 @@ function extensionsHint() {
     const { guard } = store.state;
 
     return [
-        safeMode() && "browser parts off here",
-        guard?.enabled ? "Lancet Guard on" : guard?.available ? "Lancet Guard off" : "",
+        safeMode() && t("browser parts off here"),
+        guard?.enabled ? t("Lancet Guard on") : guard?.available ? t("Lancet Guard off") : "",
     ]
         .filter(Boolean)
         .join(" · ");
@@ -204,7 +205,7 @@ PLACES.forEach(({ id, label, place }, index) =>
 );
 
 function PlacesGrid({ changes = null }) {
-    return html`<nav class="places" aria-label="Places">
+    return html`<nav class="places" aria-label=${t("Places")}>
         ${slotItems("places", { changes }).map(({ node }) => node)}
     </nav>`;
 }
@@ -217,12 +218,12 @@ export function PlacesSheet() {
     const conversation = store.state.view.conversation;
 
     return html`<${Sheet}
-        title=${conversation?.title ?? "Open"}
+        title=${conversation?.title ?? t("Open")}
         onClose=${closeSheet}
         className="places-sheet"
     >
         <${Places} />
-        ${item("Session menu", () => openSheet({ type: "menu", fromPlaces: true }), "rename, context, settings")}
+        ${item(t("Session menu"), () => openSheet({ type: "menu", fromPlaces: true }), t("rename, context, settings"))}
     <//>`;
 }
 
@@ -369,7 +370,7 @@ function trustHint() {
     }
 
     if (info.ask) {
-        return "not decided";
+        return t("not decided");
     }
 
     // No decision, and nothing waiting for one: there is nothing to say.
@@ -377,7 +378,7 @@ function trustHint() {
         return "";
     }
 
-    return info.trusted ? "trusted" : "not trusted";
+    return t(info.trusted ? "trusted" : "not trusted");
 }
 
 /** The menu; `places` is false when it opens from the places sheet, which just showed the tiles. */
@@ -392,175 +393,223 @@ export function MenuSheet({ places = true }) {
     const instructions = view.agent?.instructions;
     const memory = useMemory();
 
-    return html`<${MenuFrame} title=${conversation?.title ?? "Menu"}>
+    return html`<${MenuFrame} title=${conversation?.title ?? t("Menu")}>
         ${places && html`<${Places} />`}
         <div class="menu-session">
-            ${
-                conversation &&
-                collab() &&
-                canToggleTurns() &&
-                item(
-                    turns?.on ? "Turn off take turns" : "Take turns",
-                    () =>
-                        attempt(async () => {
-                            await actions.turns(turns?.on ? "off" : "on");
-                            closeSheet();
-                        }),
-                    turns?.on
-                        ? "anyone here can send to Pi again"
-                        : "one person drives Pi at a time",
-                )
-            }
-            ${session && steer && item("Rename", () => openSheet({ type: "rename" }))}
-            ${
-                session &&
-                item(
-                    isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
-                    () => {
-                        togglePin(conversation.id);
+        ${
+            conversation &&
+            collab() &&
+            canToggleTurns() &&
+            item(
+                turns?.on ? t("Turn off take turns") : t("Take turns"),
+                () =>
+                    attempt(async () => {
+                        await actions.turns(turns?.on ? "off" : "on");
                         closeSheet();
-                    },
-                    "this browser",
-                )
-            }
-            ${
-                session &&
-                item(
-                    "Mark unread",
-                    () => {
-                        setUnread(conversation.id, true);
-                        closeSheet();
-                        navigate(null);
-                    },
-                    "this browser; opening it again clears it",
-                )
-            }
-            ${
-                conversation?.worktree && steer
-                    ? item(
-                          "Worktree",
-                          () => openSheet({ type: "worktree" }),
-                          conversation.worktree.branch,
-                      )
-                    : conversation &&
-                      steer &&
-                      driving &&
-                      !scoped() &&
-                      item(
-                          "Working directory",
-                          () => openSheet({ type: "cwd", mode: "change" }),
-                          shortPath(view.agent?.cwd, server?.home),
-                      )
-            }
-            ${
-                conversation &&
-                browserAvailable() &&
-                store.state.browserOpen &&
-                item(
-                    "Close the browser",
-                    () => {
-                        setBrowserOpen(false);
-                        closeSheet();
-                    },
-                    store.state.browser?.open && displayUrl(store.state.browser.url),
-                )
-            }
-            ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
-            ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
-            ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
-            ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
-            ${conversation && memoryAvailable() && item("Memory", () => openSheet({ type: "memory" }), memoryHint(memory))}
-            ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), view.schedules.length === 0 ? "none" : `${view.schedules.length} coming`)}
-            ${
-                watchAvailable() &&
-                steer &&
-                view.watch?.status !== "watching" &&
-                item(
-                    "Watch pull request",
-                    () => {
-                        closeSheet();
-                        attempt(() => watchPr());
-                    },
-                    "fix CI, answer reviews",
-                )
-            }
-            ${
-                conversation &&
-                item("Copy link", () =>
-                    copyText(location.href).then(
-                        () => notify("info", "Link copied. Other signed-in devices can open it."),
-                        () => notify("error", "Could not copy."),
-                    ),
-                )
-            }
-            ${
-                conversation &&
-                html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download>
-                    <span>Export as Markdown</span>
-                    <span class="muted small">the whole history</span>
-                </a>`
-            }
-            ${
-                session &&
-                steer &&
-                item(conversation.archived ? "Unarchive" : "Archive", () => {
+                    }),
+                turns?.on
+                    ? t("anyone here can send to Pi again")
+                    : t("one person drives Pi at a time"),
+            )
+        }
+        ${session && steer && item(t("Rename"), () => openSheet({ type: "rename" }))}
+        ${
+            session &&
+            item(
+                isPinned(conversation.id) ? t("Unpin from the top") : t("Pin to the top"),
+                () => {
+                    togglePin(conversation.id);
                     closeSheet();
-                    setArchived([conversation.id], !conversation.archived);
-                })
-            }
+                },
+                t("this browser"),
+            )
+        }
+        ${
+            session &&
+            item(
+                t("Mark unread"),
+                () => {
+                    setUnread(conversation.id, true);
+                    closeSheet();
+                    navigate(null);
+                },
+                t("this browser; opening it again clears it"),
+            )
+        }
+        ${
+            conversation?.worktree && steer
+                ? item(
+                      t("Worktree"),
+                      () => openSheet({ type: "worktree" }),
+                      conversation.worktree.branch,
+                  )
+                : conversation &&
+                  steer &&
+                  driving &&
+                  !scoped() &&
+                  item(
+                      t("Working directory"),
+                      () => openSheet({ type: "cwd", mode: "change" }),
+                      shortPath(view.agent?.cwd, server?.home),
+                  )
+        }
+        ${
+            conversation &&
+            browserAvailable() &&
+            store.state.browserOpen &&
+            item(
+                t("Close the browser"),
+                () => {
+                    setBrowserOpen(false);
+                    closeSheet();
+                },
+                store.state.browser?.open && displayUrl(store.state.browser.url),
+            )
+        }
+        ${
+            conversation &&
+            trustAvailable() &&
+            item(t("Project trust"), () => openSheet({ type: "trust" }), trustHint())
+        }
+        ${
+            session &&
+            steer &&
+            driving &&
+            item(
+                t("Instructions for Pi"),
+                () => openSheet({ type: "instructions" }),
+                instructions ? t("on") : t("none"),
+            )
+        }
+        ${
+            conversation &&
+            steer &&
+            driving &&
+            item(
+                t("Compact context"),
+                () => openSheet({ type: "compact" }),
+                t("summarize older messages"),
+            )
+        }
+        ${
+            conversation &&
+            steer &&
+            driving &&
+            item(
+                t("New context"),
+                () => openSheet({ type: "reset" }),
+                t("Pi starts fresh; history stays"),
+            )
+        }
+        ${
+            conversation &&
+            memoryAvailable() &&
+            item(t("Memory"), () => openSheet({ type: "memory" }), memoryHint(memory))
+        }
+        ${
+            schedulesAvailable() &&
+            item(
+                t("Scheduled messages"),
+                () => openSheet({ type: "schedules" }),
+                view.schedules.length === 0
+                    ? t("none")
+                    : t("{{count}} coming", { count: view.schedules.length }),
+            )
+        }
+        ${
+            watchAvailable() &&
+            steer &&
+            view.watch?.status !== "watching" &&
+            item(
+                t("Watch pull request"),
+                () => {
+                    closeSheet();
+                    attempt(() => watchPr());
+                },
+                t("fix CI, answer reviews"),
+            )
+        }
+        ${
+            conversation &&
+            item(t("Copy link"), () =>
+                copyText(location.href).then(
+                    () => notify("info", t("Link copied. Other signed-in devices can open it.")),
+                    () => notify("error", t("Could not copy.")),
+                ),
+            )
+        }
+        ${
+            conversation &&
+            html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download>
+                <span>${t("Export as Markdown")}</span>
+                <span class="muted small">${t("the whole history")}</span>
+            </a>`
+        }
+        ${
+            session &&
+            steer &&
+            item(conversation.archived ? t("Unarchive") : t("Archive"), () => {
+                closeSheet();
+                setArchived([conversation.id], !conversation.archived);
+            })
+        }
         </div>
         ${
             view.subagents.length > 0 &&
             html`<div class="group">
-                <div class="group-title">Subagents</div>
+                <div class="group-title">${t("Subagents")}</div>
                 ${view.subagents.map((agent) =>
                     item(
                         html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
+
                         () => openSubagent(agent.conversationId),
-                        agent.busy ? "working" : "idle",
+                        t(agent.busy ? "working" : "idle"),
                     ),
                 )}
             </div>`
         }
         <div class="group">
-            <div class="group-title">App</div>
-            ${item("Appearance", () => openSheet({ type: "appearance" }), lookLabel())}
-            ${!touch && item("Keyboard shortcuts", () => openSheet({ type: "shortcuts" }), "?")}
+            <div class="group-title">${t("App")}</div>
+            ${item(t("Appearance"), () => openSheet({ type: "appearance" }), lookLabel())}
+            ${!touch && item(t("Keyboard shortcuts"), () => openSheet({ type: "shortcuts" }), "?")}
             ${
                 me?.role === "owner" &&
                 defaultsKept() &&
                 item(
-                    "Default model",
+                    t("Default model"),
                     () => openSheet({ type: "model", id: "default", forDefault: true }),
                     defaultLabel(server?.defaultModel, store.state.models) ||
-                        "project, last picked, then Pi global",
+                        t("project, last picked, then Pi global"),
                 )
             }
-            ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
-            ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
-            ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
-            ${item("Running now", () => openSheet({ type: "running" }), "everything Pi is doing")}
-            ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
-            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub, other services")}
-            ${me?.role === "owner" && item("Providers", () => openSheet({ type: "providers" }))}
-            ${modelRefreshAvailable() && item("Refresh models", refreshModels, store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers")}
+            ${item(t("Your name"), () => openSheet({ type: "name" }), me?.name)}
+            ${collab() ? item(t("People"), () => openSheet({ type: "people" }), me?.role === "viewer" ? t("you can view") : "") : item(t("Sign in another device"), () => openSheet({ type: "invite" }))}
+            ${collab() && item(t("Notifications"), () => openSheet({ type: "notifications" }), t("Pi finished, approvals, chat"))}
+            ${item(t("Running now"), () => openSheet({ type: "running" }), t("everything Pi is doing"))}
+            ${item(t("Spend"), () => openSheet({ type: "spend" }), me?.role === "owner" ? t("by person and session, limits") : t("yours"))}
+            ${triggersOn() && me?.role !== "viewer" && item(t("Webhooks and watches"), () => openSheet({ type: "hooks" }), t("GitHub, other services"))}
+            ${me?.role === "owner" && item(t("Providers"), () => openSheet({ type: "providers" }))}
+            ${modelRefreshAvailable() && item(t("Refresh models"), refreshModels, store.state.modelRefresh.loading ? t("refreshing…") : t("models.json and providers"))}
             ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}
-            ${item("Extensions", () => openSheet({ type: "extensions" }), extensionsHint())}
+            ${item(t("Extensions"), () => openSheet({ type: "extensions" }), extensionsHint())}
             ${
                 me?.role === "owner" &&
                 server?.supervised &&
                 item(
-                    "Restart server",
+                    t("Restart server"),
                     () =>
                         attempt(async () => {
                             await api("restart", {});
                             closeSheet();
-                            notify("info", "Restarting. Running work continues after the restart.");
+                            notify(
+                                "info",
+                                t("Restarting. Running work continues after the restart."),
+                            );
                         }),
-                    "running work resumes",
+                    t("running work resumes"),
                 )
             }
-            ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
+            ${item(html`<span class="menu-signout">${t("Sign out")}</span>`, signOut)}
         </div>
     <//>`;
 }

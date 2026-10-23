@@ -1,6 +1,7 @@
 // The Browser panel's state, for everything that opens it: whether it is open, and opening an address in it. The
 // panel itself is browser-panel.js.
 
+import { t } from "./i18n.js";
 import { api, attempt, closePeople, EXT_PANEL_KEY, notify, store } from "./store.js";
 
 const OPEN_KEY = "pocket.browser";
@@ -52,8 +53,10 @@ export function reportNavigation(result) {
         notify(
             "error",
             /CONNECTION_REFUSED/.test(result.error)
-                ? `Nothing answers at that address (${result.error}). Is the server running?`
-                : `Could not open it: ${result.error}`,
+                ? t("Nothing answers at that address ({{error}}). Is the server running?", {
+                      error: result.error,
+                  })
+                : `${t("Could not open it: ")}${result.error}`,
         );
     }
 }

@@ -197,12 +197,12 @@ Calls `listener` each time the owner changes a spend limit. It returns a functio
 ### `notice`
 
 ```ts
-notice(level: NoticeLevel, message: string, conversationId?: ConversationId): void;
+notice(level: NoticeLevel, message: string, conversationId?: ConversationId, ui?: { key: string; params?: Record<string, string | number> }): void;
 ```
 
 Since 0.1.0 · Stable
 
-Reports something to the server's log and to the app. `level` is `"info"`, `"warning"`, or `"error"`. With `conversationId`, only the tabs of that session show the notice. Pi Pocket 0.13.1 added `conversationId`.
+Reports something to the server's log and to the app. `level` is `"info"`, `"warning"`, or `"error"`. With `conversationId`, only the tabs of that session show the notice. The optional fourth argument adds a data-only UI translation key and parameters; the original message remains in logs and payloads. Pi Pocket 0.13.1 added `conversationId`; UI locale metadata is experimental.
 
 ### `text`
 

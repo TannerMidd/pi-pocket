@@ -3,6 +3,7 @@
 // Parsing is web/diff-parse.js.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { t } from "./i18n.js";
 import { useBack } from "./back.js";
 import { jumpToEntry } from "./chat.js";
 import { fingerprint, firstLine, hunkRows, markRanges, parseDiff } from "./diff-parse.js";
@@ -377,26 +378,26 @@ function GapRow({ left, columns, onShow, first, last }) {
             ${
                 all
                     ? html`<button type="button" onClick=${() => onShow("all")}>
-                          ${first ? "↑" : last ? "↓" : "↕"} Show ${left} hidden ${left === 1 ? "line" : "lines"}
+                          ${first ? "↑" : last ? "↓" : "↕"} ${t("Show {{count}} hidden lines", { count: left })}
                       </button>`
                     : html`${
                           !first &&
                           html`<button
                               type="button"
-                              title="Show more below the hunk above"
+                              title=${t("Show more below the hunk above")}
                               onClick=${() => onShow("top")}
                           >
                               ↓ ${EXPAND_STEP}
                           </button>`
                       }
                       <button type="button" onClick=${() => onShow("all")}>
-                          Show all ${left} hidden lines
+                          ${t("Show all {{count}} hidden lines", { count: left })}
                       </button>
                       ${
                           !last &&
                           html`<button
                               type="button"
-                              title="Show more above the hunk below"
+                              title=${t("Show more above the hunk below")}
                               onClick=${() => onShow("bottom")}
                           >
                               ↑ ${EXPAND_STEP}
@@ -529,7 +530,7 @@ function DiffFile({
 
             if (text === null && wanted) {
                 return html`<tr class="dv-gap">
-                    <td colspan=${columns}><span class="dv-reading">Reading the file…</span></td>
+                    <td colspan=${columns}><span class="dv-reading">${t("Reading the file…")}</span></td>
                 </tr>`;
             }
 
@@ -537,7 +538,7 @@ function DiffFile({
             if (gap.open) {
                 return html`<tr class="dv-gap">
                     <td colspan=${columns}>
-                        <button type="button" onClick=${() => show(index, "top")}>↓ Show more</button>
+                        <button type="button" onClick=${() => show(index, "top")}>↓ ${t("Show more")}</button>
                     </td>
                 </tr>`;
             }
@@ -605,17 +606,17 @@ function DiffFile({
     if (error) {
         body = html`<p class="dv-empty err">${error}</p>`;
     } else if (loading) {
-        body = html`<div class="dv-wait"><${Loader} label="Reading the diff" /></div>`;
+        body = html`<div class="dv-wait"><${Loader} label=${t("Reading the diff")} /></div>`;
     } else if (file.binary) {
-        body = html`<p class="dv-empty">A binary file: no lines to compare.</p>`;
+        body = html`<p class="dv-empty">${t("A binary file: no lines to compare.")}</p>`;
     } else if (file.hunks.length === 0) {
         body = html`<p class="dv-empty">
-            ${file.kind === "renamed" ? "Renamed, with no change to its text." : file.mode ? "Only its mode changed." : "No difference in text."}
+            ${t(file.kind === "renamed" ? "Renamed, with no change to its text." : file.mode ? "Only its mode changed." : "No difference in text.")}
         </p>`;
     } else if (!drawn) {
         body = html`<p class="dv-empty">
-            ${`A large diff: ${size.toLocaleString()} changed lines. `}
-            <button class="link" type="button" onClick=${() => setForce(true)}>Show it</button>
+            ${t("A large diff: {{count}} changed lines.", { count: size.toLocaleString() })}
+            <button class="link" type="button" onClick=${() => setForce(true)}>${t("Show it")}</button>
         </p>`;
     } else {
         body = html`<div class="dv-scroll">
@@ -623,14 +624,14 @@ function DiffFile({
             ${
                 file.truncated &&
                 html`<p class="dv-empty small">
-                    ${"The diff is too long to show whole: the rest is left out."}
+                    ${t("The diff is too long to show whole: the rest is left out.")}
                 </p>`
             }
             ${
                 canExpand &&
                 !matches &&
                 html`<p class="dv-empty small">
-                    ${fetched === false ? "This file is too big to show its other lines here." : "The file changed after this diff was read, so its other lines cannot be shown. Refresh to see them."}
+                    ${t(fetched === false ? "This file is too big to show its other lines here." : "The file changed after this diff was read, so its other lines cannot be shown. Refresh to see them.")}
                 </p>`
             }
         </div>`;
@@ -678,7 +679,7 @@ function FileHead({ file, tools, viewed, onViewed, open, onToggle, note }) {
                 class="dv-fold"
                 type="button"
                 aria-expanded=${open ? "true" : "false"}
-                aria-label=${open ? "Fold" : "Unfold"}
+                aria-label=${t(open ? "Fold" : "Unfold")}
                 onClick=${onToggle}
             >
                 <${Icon} name="chevron" size=${14} class=${`chev ${open ? "open" : ""}`} />
@@ -695,14 +696,14 @@ function FileHead({ file, tools, viewed, onViewed, open, onToggle, note }) {
         ${tools}
         ${
             onViewed &&
-            html`<label class=${`dv-viewed ${viewed ? "on" : ""}`} title="Mark as viewed (v)">
+            html`<label class=${`dv-viewed ${viewed ? "on" : ""}`} title=${t("Mark as viewed (v)")}>
                 <input
                     type="checkbox"
-                    aria-label="Viewed"
+                    aria-label=${t("Viewed")}
                     checked=${Boolean(viewed)}
                     onChange=${(event) => onViewed(event.currentTarget.checked)}
                 />
-                <span>Viewed</span>
+                <span>${t("Viewed")}</span>
             </label>`
         }
     </header>`;
@@ -739,7 +740,7 @@ const LAYOUTS = [
 
 /** Auto, unified, or split: the same on every diff of this device (`s` steps through them). */
 function LayoutSwitch() {
-    return html`<div class="dr-layout" role="group" aria-label="Diff layout" title="Layout (s)">
+    return html`<div class="dr-layout" role="group" aria-label=${t("Diff layout")} title=${t("Layout (s)")}>
         ${LAYOUTS.map(
             ([layout, label]) => html`<button
                 type="button"
@@ -747,7 +748,7 @@ function LayoutSwitch() {
                 aria-pressed=${diffPrefs.layout === layout ? "true" : "false"}
                 onClick=${() => setDiffPrefs({ layout })}
             >
-                ${label}
+                ${t(label)}
             </button>`,
         )}
     </div>`;
@@ -760,11 +761,11 @@ function WrapToggle() {
     return html`<button
         type="button"
         class=${`chip toggle ${wrap ? "on" : ""}`}
-        title="Wrap long lines (w)"
+        title=${t("Wrap long lines (w)")}
         aria-pressed=${wrap ? "true" : "false"}
         onClick=${() => setDiffPrefs({ wrap: !wrap })}
     >
-        Wrap
+        ${t("Wrap")}
     </button>`;
 }
 
@@ -1072,7 +1073,7 @@ function TreeNode({ node, depth, current, viewed, onPick }) {
         >
             <span class=${`change-kind ${file.kind}`}>${KIND_LETTERS[file.kind]}</span>
             <span class="dr-name">${file.path.split("/").pop()}</span>
-            ${file.byPi && html`<span class="dr-pi" title="Pi edited it">π</span>`}
+            ${file.byPi && html`<span class="dr-pi" title=${t("Pi edited it")}>π</span>`}
             <span class="dr-tail">${viewed(file) ? html`<${Icon} name="check" size=${13} />` : html`<${ChangeCounts} added=${file.added ?? 0} removed=${file.removed ?? 0} />`}</span>
         </button>`,
     )}`;
@@ -1184,8 +1185,8 @@ function ReviewFile({
                   notify(
                       "info",
                       fresh
-                          ? `Deleted ${file.path}.`
-                          : `${file.path} is as the last commit has it.`,
+                          ? t("Deleted {{path}}.", { path: file.path })
+                          : t("{{path}} is as the last commit has it.", { path: file.path }),
                   );
                   onChanged();
               })
@@ -1196,8 +1197,8 @@ function ReviewFile({
         html`<button
             class="icon-button dv-tool"
             type="button"
-            title="Open the file"
-            aria-label="Open the file"
+            title=${t("Open the file")}
+            aria-label=${t("Open the file")}
             onClick=${() => openFile(`${root}/${file.path}`)}
         >
             <${Icon} name="file" size=${16} />
@@ -1209,11 +1210,11 @@ function ReviewFile({
         html`<button
             class=${`icon-button dv-tool ${undoing ? "danger" : ""}`}
             type="button"
-            title=${undoing ? (fresh ? "Tap again to delete this new file" : "Tap again to throw these changes away") : fresh ? "Delete this new file" : "Undo the changes to this file"}
-            aria-label="Undo changes"
+            title=${t(undoing ? (fresh ? "Tap again to delete this new file" : "Tap again to throw these changes away") : fresh ? "Delete this new file" : "Undo the changes to this file")}
+            aria-label=${t("Undo changes")}
             onClick=${undo}
         >
-            ${undoing ? (fresh ? "Delete?" : "Undo?") : html`<${Icon} name="undo" size=${16} />`}
+            ${undoing ? t(fresh ? "Delete?" : "Undo?") : html`<${Icon} name="undo" size=${16} />`}
         </button>`
     }`;
 
@@ -1230,8 +1231,9 @@ function ReviewFile({
             onViewed=${(on) => onViewed(file.path, on ? (entry?.print ?? "?") : undefined)}
             open=${open && !viewed}
             onToggle=${onToggle}
-            note=${html`${file.byPi && html`<span class="chip dv-chip">Pi</span>`}${stale && html`<span class="chip dv-chip warn" title="It changed after you marked it viewed">changed</span>`}`}
+            note=${html`${file.byPi && html`<span class="chip dv-chip">Pi</span>`}${stale && html`<span class="chip dv-chip warn" title=${t("It changed after you marked it viewed")}>${t("changed")}</span>`}`}
         />
+
     </div>`;
 }
 
@@ -1430,7 +1432,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
             const next = nextLayout(diffPrefs.layout);
 
             setDiffPrefs({ layout: next });
-            notify("info", `Diffs: ${next}.`);
+            notify("info", `${t("Diffs: ")}${next}.`);
         } else if (key === "w") {
             setDiffPrefs({ wrap: !diffPrefs.wrap });
         } else {
@@ -1445,7 +1447,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
     }
 
     if (!changes) {
-        return html`<div class="dr" ref=${ref}><${Loader} label="Asking git" /></div>`;
+        return html`<div class="dr" ref=${ref}><${Loader} label=${t("Asking git")} /></div>`;
     }
 
     const all = changes.files;
@@ -1464,35 +1466,35 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                                   ? html`<button
                                         class="dr-branch"
                                         type="button"
-                                        title="Switch or make a branch"
+                                        title=${t("Switch or make a branch")}
                                         onClick=${() => openSheet({ type: "branch" })}
                                     >
                                         <${Icon} name="fork" size=${12} />
                                         ${changes.repo.branch}
                                     </button>`
-                                  : html`<span class="dr-branch" title="Branch">
+                                  : html`<span class="dr-branch" title=${t("Branch")}>
                                         <${Icon} name="fork" size=${12} />
                                         ${changes.repo.branch}
                                     </span>`)
                           }
                       </span>`
-                    : html`<span class="muted small">Not a git repository: only Pi's edits are listed.</span>`
+                    : html`<span class="muted small">${t("Not a git repository: only Pi's edits are listed.")}</span>`
             }
             ${
                 all.length > 0 &&
                 html`<span class="dr-stats">
-                    <strong>${files.length} ${files.length === 1 ? "file" : "files"}</strong>
+                    <strong>${files.length} ${t(files.length === 1 ? "file" : "files")}</strong>
                     <${ChangeCounts} added=${added} removed=${removed} />
                 </span>
-                <span class="dr-viewed">${seen} of ${files.length} viewed</span>`
+                <span class="dr-viewed">${t("{{seen}} of {{total}} viewed", { seen, total: files.length })}</span>`
             }
             <span class="dr-actions">
                 ${all.length > 0 && html`<${LayoutSwitch} />`}
                 <button
                     class="icon-button dv-tool"
                     type="button"
-                    title="Look again"
-                    aria-label="Refresh"
+                    title=${t("Look again")}
+                    aria-label=${t("Refresh")}
                     onClick=${refresh}
                 >
                     <${Icon} name="reload" size=${15} />
@@ -1505,7 +1507,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                 <input
                     class="dr-filter"
                     type="search"
-                    placeholder="Filter files"
+                    placeholder=${t("Filter files")}
                     value=${filter}
                     onInput=${(event) => setFilter(event.currentTarget.value)}
                     autocapitalize="off"
@@ -1518,10 +1520,10 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                         type="button"
                         class=${`chip toggle ${onlyPi ? "on" : ""}`}
                         aria-pressed=${onlyPi ? "true" : "false"}
-                        title="Only the files Pi edited"
+                        title=${t("Only the files Pi edited")}
                         onClick=${() => setOnlyPi(!onlyPi)}
                     >
-                        π only
+                        ${t("π only")}
                     </button>`
                 }
                 <${WrapToggle} />
@@ -1532,7 +1534,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                         class=${`chip toggle ${treeOpen ? "on" : ""}`}
                         onClick=${() => setTreeOpen(!treeOpen)}
                     >
-                        Files
+                        ${t("Files")}
                     </button>`
                 }
             </div>`
@@ -1542,7 +1544,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
             all.length === 0 &&
             html`<div class="dr-clean">
                 <${Icon} name="check" size=${22} />
-                <p>No uncommitted changes${changes.repo.branch ? ` on ${changes.repo.branch}` : ""}.</p>
+                <p>${t("No uncommitted changes{{branch}}.", { branch: changes.repo.branch ? ` ${t("on branch")} ${changes.repo.branch}` : "" })}</p>
             </div>`
         }
         ${
@@ -1550,7 +1552,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
             html`<div class="dr-main">
                 ${
                     (wide || treeOpen) &&
-                    html`<nav class="dr-tree" aria-label="Changed files">
+                    html`<nav class="dr-tree" aria-label=${t("Changed files")}>
                         <${TreeNode}
                             node=${tree}
                             depth=${0}
@@ -1558,7 +1560,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                             viewed=${isViewed}
                             onPick=${scrollTo}
                         />
-                        ${files.length === 0 && html`<p class="muted small">No file matches.</p>`}
+                        ${files.length === 0 && html`<p class="muted small">${t("No file matches.")}</p>`}
                     </nav>`
                 }
                 <div class="dr-files">
@@ -1604,7 +1606,7 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
                     ${
                         changes.more > 0 &&
                         html`<p class="muted small">
-                            And ${changes.more} more changed ${changes.more === 1 ? "file" : "files"}, not listed here.
+                            ${t(changes.more === 1 ? "And {{count}} more changed file, not listed here." : "And {{count}} more changed files, not listed here.", { count: changes.more })}
                         </p>`
                     }
                 </div>
@@ -1613,13 +1615,13 @@ export function DiffReview({ active = true, autoFocus = false, covering = false 
         ${
             changes.piOnly.length > 0 &&
             html`<div class="dr-pionly">
-                <div class="group-title">${changes.repo ? "Pi also edited (no uncommitted change)" : "Pi wrote or edited"}</div>
+                <div class="group-title">${t(changes.repo ? "Pi also edited (no uncommitted change)" : "Pi wrote or edited")}</div>
                 ${changes.piOnly.map(
                     (
                         each,
                     ) => html`<button type="button" class="list-item" onClick=${() => jumpToEntry(each.entryId)}>
                         <span class="mono">${shortPath(each.path, server?.home)}</span>
-                        <span class="muted small">show</span>
+                        <span class="muted small">${t("show")}</span>
                     </button>`,
                 )}
             </div>`

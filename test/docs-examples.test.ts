@@ -1,4 +1,4 @@
-// The documentation's example extensions work as drop-ins.
+// The documentation's example modules work when installed as owner-managed drop-ins.
 import {
     cleanUp,
     lastText,
@@ -92,7 +92,7 @@ after(async () => {
 /** What Pi's last answer in a session says. */
 const answer = async (id: Parameters<typeof say>[1]) => (await modelTexts(app, id)).at(-1) ?? "";
 
-test("the example extensions load as drop-ins, off until the owner turns them on, and work", async () => {
+test("the example modules load as drop-ins, off until the owner turns them on, and work", async () => {
     const listed = (await app.extensions(owner(app))).modules.filter(
         (module) => module.source === "drop-in",
     );
@@ -105,6 +105,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
             ["no-force-push.ts", false],
             ["read-page.ts", false],
             ["server-status.ts", false],
+            ["zh-cn-ui.ts", false],
         ],
     );
 
@@ -114,9 +115,14 @@ test("the example extensions load as drop-ins, off until the owner turns them on
         "no-force-push.ts",
         "read-page.ts",
         "server-status.ts",
+        "zh-cn-ui.ts",
     ]) {
         await app.setExtensionEnabled(owner(app), file, true);
     }
+
+    const locales = (await app.hello(owner(app))).server.uiLocales;
+
+    assert.equal(locales.find((locale) => locale.locale === "zh-CN")?.strings.Files, "文件");
 
     const id = await newSession(app);
 

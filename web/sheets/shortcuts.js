@@ -1,6 +1,7 @@
 // The keyboard shortcuts, as a list. The keys themselves are handled in app.js.
 import { boxKeyRows } from "../box-keys.js";
 import { closeSheet } from "../store.js";
+import { t } from "../i18n.js";
 import { html, Keys, Sheet } from "../ui.js";
 
 // Each row: its keys, and what they do. An "or" between keys means either one, and a "…" a run from one to the other.
@@ -68,7 +69,7 @@ function Chords({ keys }) {
         .split(" ")
         .map((key) =>
             key === "or" || key === "…"
-                ? html`<span class="muted">${key}</span>`
+                ? html`<span class="muted">${t(key)}</span>`
                 : html`<${Keys} keys=${key} />`,
         );
 }
@@ -78,24 +79,24 @@ export function ShortcutsSheet() {
     const keys = boxKeyRows();
     const groups = SHORTCUTS.flatMap((group) =>
         group[0] === "Message box" && keys.length > 0
-            ? [group, ["Message box: from extensions", keys]]
+            ? [group, [t("Message box: from extensions"), keys]]
             : [group],
     );
 
-    return html`<${Sheet} title="Keyboard shortcuts" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t("Keyboard shortcuts")} onClose=${closeSheet}>
         ${groups.map(
             ([title, rows]) => html`<div class="group" key=${title}>
-                <div class="group-title">${title}</div>
+                <div class="group-title">${t(title)}</div>
                 <dl class="shortcuts">
                     ${rows.map(
                         ([keys, text]) => html`<dt><${Chords} keys=${keys} /></dt>
-                        <dd>${text}</dd>`,
+                        <dd>${t(text)}</dd>`,
                     )}
                 </dl>
             </div>`,
         )}
         <p class="muted small">
-            In the launcher, start with <kbd>></kbd> for actions, <kbd>@</kbd> for sessions, or <kbd>#</kbd> for themes. Arrowing onto colors shows them; Enter keeps them.
+            ${t("In the launcher, start with > for actions, @ for sessions, or # for themes. Arrowing onto colors shows them; Enter keeps them.")}
         </p>
     <//>`;
 }

@@ -1,6 +1,7 @@
 // Artifacts and images, each in a viewer of its own; and sharing an artifact to anyone with a link.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useArtifactBridge } from "../artifact-bridge.js";
+import { t } from "../i18n.js";
 import { api, attempt, closeSheet, notify, openSheet, store } from "../store.js";
 import { modeOf, paletteOf, themeVars } from "../theme.js";
 import { copyText, formatBytes, formatWhen, html, Icon, Loader, Sheet, timeAgo } from "../ui.js";
@@ -30,11 +31,11 @@ export function ArtifactsSheet() {
         (a, b) => (b.versions.at(-1)?.createdAt ?? 0) - (a.versions.at(-1)?.createdAt ?? 0),
     );
 
-    return html`<${Sheet} title="Artifacts" onClose=${closeSheet} wide=${true}>
+    return html`<${Sheet} title=${t("Artifacts")} onClose=${closeSheet} wide=${true}>
         ${
             items.length === 0 &&
             html`<p class="muted">
-                No artifacts yet. Ask Pi to build something you can look at: a chart, a demo, a game.
+                ${t("No artifacts yet. Ask Pi to build something you can look at: a chart, a demo, a game.")}
             </p>`
         }
         <div class="artifact-grid">
@@ -87,15 +88,15 @@ export function ArtifactViewer({ id, version }) {
             <div class="viewer-title">
                 <strong>${artifact?.title ?? id}</strong>
                 <span class="muted small">
-                    ${artifact?.type ?? ""} · version ${shown}
-                    ${latest && shown !== latest ? html` · <button class="link" onClick=${() => setShown(latest)}>latest is v${latest}</button>` : ""}
+                    ${artifact?.type ?? ""} · ${t("version {{version}}", { version: shown })}
+                    ${latest && shown !== latest ? html` · <button class="link" onClick=${() => setShown(latest)}>${t("latest is v{{version}}", { version: latest })}</button>` : ""}
                 </span>
             </div>
             ${
                 artifact &&
                 artifact.versions.length > 1 &&
                 html`<select
-                    aria-label="Version"
+                    aria-label=${t("Version")}
                     value=${shown}
                     onChange=${(event) => setShown(Number(event.currentTarget.value))}
                 >
@@ -106,7 +107,7 @@ export function ArtifactViewer({ id, version }) {
                         )}
                 </select>`
             }
-            <button class="icon-button" title="Reload" onClick=${() => setNonce(nonce + 1)}>
+            <button class="icon-button" title=${t("Reload")} onClick=${() => setNonce(nonce + 1)}>
                 ↻
             </button>
             ${
@@ -114,14 +115,14 @@ export function ArtifactViewer({ id, version }) {
                 artifact &&
                 html`<button
                     class="button small"
-                    title="Publish it to anyone with a link"
+                    title=${t("Publish it to anyone with a link")}
                     onClick=${() => openSheet({ type: "artifact-share", id, version: shown })}
                 >
-                    Share
+                    ${t("Share")}
                 </button>`
             }
-            <a class="button small" href=${src} target="_blank" rel="noopener">Open tab</a>
-            <button class="icon-button" onClick=${closeSheet} aria-label="Close">
+            <a class="button small" href=${src} target="_blank" rel="noopener">${t("Open tab")}</a>
+            <button class="icon-button" onClick=${closeSheet} aria-label=${t("Close")}>
                 <${Icon} name="close" />
             </button>
         </header>
@@ -152,7 +153,7 @@ const shareAddress = (base, share) =>
 function ShareRow({ share, base, fresh, canEnd, onRevoke }) {
     const copy = () =>
         copyText(shareAddress(base, share)).then(
-            () => notify("info", "Link copied. Anyone with it can open the page."),
+            () => notify("info", t("Link copied. Anyone with it can open the page.")),
             () => notify("error", "Could not copy."),
         );
 
@@ -160,17 +161,17 @@ function ShareRow({ share, base, fresh, canEnd, onRevoke }) {
         <div class="hook-head">
             <strong class="grow">${share.title}</strong>
             <span class="muted small">
-                ${share.type}${share.version === null ? " · follows the newest version" : ` · version ${share.version}, pinned`}
+                ${share.type}${share.version === null ? t(" · follows the newest version") : ` · ${t("version {{version}}, pinned", { version: share.version })}`}
             </span>
         </div>
         <div class="mono small hook-address">${shareAddress(base, share)}</div>
         <div class="hook-actions">
             <span class="muted small grow">
-                ${share.expiresAt === null ? "stays until you end it" : `ends ${formatWhen(share.expiresAt)}`}
+                ${share.expiresAt === null ? t("stays until you end it") : t("ends {{when}}", { when: formatWhen(share.expiresAt) })}
             </span>
-            <button class="button small" onClick=${copy}>Copy link</button>
-            <a class="button small" href=${share.path} target="_blank" rel="noopener">Open</a>
-            ${canEnd && html`<button class="button small ghost" onClick=${onRevoke}>End</button>`}
+            <button class="button small" onClick=${copy}>${t("Copy link")}</button>
+            <a class="button small" href=${share.path} target="_blank" rel="noopener">${t("Open")}</a>
+            ${canEnd && html`<button class="button small ghost" onClick=${onRevoke}>${t("End")}</button>`}
         </div>
     </div>`;
 }
@@ -228,7 +229,11 @@ export function ArtifactShareSheet({ id, version }) {
     const revoke = (share) =>
         attempt(async () => {
             if (
-                !confirm(`End the link to ${share.title}? Anyone who has it can no longer open it.`)
+                !confirm(
+                    t("End the link to {{title}}? Anyone who has it can no longer open it.", {
+                        title: share.title,
+                    }),
+                )
             ) {
                 return;
             }
@@ -239,41 +244,40 @@ export function ArtifactShareSheet({ id, version }) {
         });
 
     return html`<${Sheet}
-        title=${`Share ${artifact?.title ?? id}`}
+        title=${t("Share {{title}}", { title: artifact?.title ?? id })}
         onClose=${() => openSheet({ type: "viewer", id, version })}
         wide=${true}
     >
         <p class="muted small">
-            A published page needs no sign-in: anyone with its address can open it. It is the artifact's own sandboxed
-            page, which still cannot reach this app or its cookies.
+            ${t("A published page needs no sign-in: anyone with its address can open it. It is the artifact's own sandboxed page, which still cannot reach this app or its cookies.")}
         </p>
         ${
             steer &&
             html`<div class="hook-form">
                 <div class="field">
-                    <div class="label">Shows</div>
+                    <div class="label">${t("Shows")}</div>
                     <div class="segmented">
                         <button
                             class=${pin ? "on" : ""}
                             aria-pressed=${pin}
                             onClick=${() => setPin(true)}
                         >
-                            Version ${version ?? artifact?.versions.at(-1)?.version ?? 1}
+                            ${t("Version {{version}}", { version: version ?? artifact?.versions.at(-1)?.version ?? 1 })}
                         </button>
                         <button
                             class=${pin ? "" : "on"}
                             aria-pressed=${!pin}
                             onClick=${() => setPin(false)}
                         >
-                            Newest
+                            ${t("Newest")}
                         </button>
                     </div>
                     <div class="muted small">
-                        ${pin ? "Stays at this version, whatever you publish after." : "Follows the artifact: every new version shows here too."}
+                        ${pin ? t("Stays at this version, whatever you publish after.") : t("Follows the artifact: every new version shows here too.")}
                     </div>
                 </div>
                 <div class="field">
-                    <div class="label">Lasts</div>
+                    <div class="label">${t("Lasts")}</div>
                     <div class="segmented">
                         ${SHARE_LIFE.map(
                             ([hours, label]) => html`<button
@@ -281,20 +285,20 @@ export function ArtifactShareSheet({ id, version }) {
                                 aria-pressed=${life === hours}
                                 onClick=${() => setLife(hours)}
                             >
-                                ${label}
+                                ${t(label)}
                             </button>`,
                         )}
                     </div>
                 </div>
                 <button class="button primary" disabled=${making} onClick=${make}>
-                    ${making ? "Publishing…" : "Publish link"}
+                    ${making ? t("Publishing…") : t("Publish link")}
                 </button>
             </div>`
         }
-        ${!list && html`<${Loader} label="Reading the links" />`}
+        ${!list && html`<${Loader} label=${t("Reading the links")} />`}
         ${
             list?.length === 0 &&
-            html`<p class="muted small">No link yet. A published page stays out of the app, and out of everything an invite to this session gave.</p>`
+            html`<p class="muted small">${t("No link yet. A published page stays out of the app, and out of everything an invite to this session gave.")}</p>`
         }
         ${list?.map((share) =>
             ShareRow({
@@ -305,7 +309,7 @@ export function ArtifactShareSheet({ id, version }) {
                 onRevoke: () => revoke(share),
             }),
         )}
-        ${base ? "" : html`<p class="muted small">Links start at ${location.origin}, so whoever opens one must be able to reach it: a tunnel's address works for anyone.</p>`}
+        ${base ? "" : html`<p class="muted small">${t("Links start at {{origin}}, so whoever opens one must be able to reach it: a tunnel's address works for anyone.", { origin: location.origin })}</p>`}
     <//>`;
 }
 
@@ -323,14 +327,14 @@ export function ImageViewer({ src, alt }) {
         class="lightbox"
         role="dialog"
         aria-modal="true"
-        aria-label=${alt || "Image"}
+        aria-label=${alt || t("Image")}
         onClick=${closeSheet}
     >
         <img src=${src} alt=${alt ?? ""} />
         <div class="lightbox-bar" onClick=${(event) => event.stopPropagation()}>
             <span class="lightbox-title">${alt ?? ""}</span>
-            <a class="button small" href=${src} target="_blank" rel="noopener">Open</a>
-            <button class="icon-button" onClick=${closeSheet} aria-label="Close">
+            <a class="button small" href=${src} target="_blank" rel="noopener">${t("Open")}</a>
+            <button class="icon-button" onClick=${closeSheet} aria-label=${t("Close")}>
                 <${Icon} name="close" />
             </button>
         </div>

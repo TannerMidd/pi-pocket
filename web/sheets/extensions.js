@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 // Extensions: the modules the owner can turn on and off, Lancet Guard, who may allow risky calls, and when PiP compacts
 // its context.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -18,20 +19,26 @@ function guardNote(module, guard) {
     if (!guard.enabled) {
         return {
             warn: true,
-            text: "Off in Pi's own settings (~/.pi/lancet-guard.json), so it does not run here either.",
+            text: t("Off in Pi's own settings ({{path}}), so it does not run here either.", {
+                path: "~/.pi/lancet-guard.json",
+            }),
         };
     }
 
     if (!module.enabled) {
         return {
             warn: true,
-            text: "Off in Pi Pocket: bash, write, and edit calls run unchecked here. Pi itself still uses it.",
+            text: t(
+                "Off in Pi Pocket: bash, write, and edit calls run unchecked here. Pi itself still uses it.",
+            ),
         };
     }
 
     return {
         warn: false,
-        text: "Checks bash, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        text: t(
+            "Checks bash, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        ),
     };
 }
 
@@ -73,15 +80,15 @@ function ApprovalRule({ owner }) {
 
     return html`<div class="setting">
         <div class="grow">
-            <div class="small">Approvals need someone else</div>
+            <div class="small">${t("Approvals need someone else")}</div>
             <div class="muted small">
-                A guest cannot allow a call that their own message led to. You always can.
+                ${t("A guest cannot allow a call that their own message led to. You always can.")}
             </div>
         </div>
         <${Switch}
             on=${others}
             disabled=${!owner}
-            label=${`Approvals need someone else: ${others ? "on" : "off"}`}
+            label=${t("Approvals need someone else: {{state}}", { state: t(others ? "on" : "off") })}
             onChange=${change}
         />
     </div>`;
@@ -97,18 +104,20 @@ function WebPart({ module }) {
 
     const here = browserModuleState(module.file.replace(/\.ts$/, ""));
     const parts = [
-        web.routes.length > 0 && `routes: ${web.routes.join(", ")}`,
-        web.commands?.length > 0 && `commands: ${web.commands.join(", ")}`,
-        web.client && `browser module for ${ACCESS_WORDS[web.client] ?? web.client}`,
-        here?.status === "loading" && "loading here",
-        here?.status === "off" && "off in this tab",
+        web.routes.length > 0 && t("routes: {{routes}}", { routes: web.routes.join(", ") }),
+        web.commands?.length > 0 &&
+            t("commands: {{commands}}", { commands: web.commands.join(", ") }),
+        web.client &&
+            t("browser module for {{word}}", { word: t(ACCESS_WORDS[web.client] ?? web.client) }),
+        here?.status === "loading" && t("loading here"),
+        here?.status === "off" && t("off in this tab"),
     ].filter(Boolean);
 
     return html`${parts.length > 0 && html`<div class="muted small mono">${parts.join(" · ")}</div>`}
     ${
         here?.status === "failed" &&
         html`<div class="error-box small">
-            In this browser: ${here.error}. An edit to it, or reloading the page, tries again.
+            ${t("In this browser: {{error}}. An edit to it, or reloading the page, tries again.", { error: here.error })}
         </div>`
     }`;
 }
@@ -123,8 +132,8 @@ function SafeMode() {
     }
 
     return html`<div class="setting wrap safe-mode">
-        <div class="grow small">Extensions' browser parts are off in this tab, and so is the theme.</div>
-        <button class="button" onClick=${leaveSafeMode}>Turn them back on</button>
+        <div class="grow small">${t("Extensions' browser parts are off in this tab, and so is the theme.")}</div>
+        <button class="button" onClick=${leaveSafeMode}>${t("Turn them back on")}</button>
     </div>`;
 }
 
@@ -143,7 +152,7 @@ function GalleryPart({ module, installed, busy, turnOff }) {
                 class="link small"
                 onClick=${() => openSheet({ type: "gallery-share", id: module.file })}
             >
-                Share…
+                ${t("Share…")}
             </button>
         </div>`;
     }
@@ -151,20 +160,20 @@ function GalleryPart({ module, installed, busy, turnOff }) {
     return html`${
         installed.revoked !== null &&
         html`<div class="error-box small">
-            The gallery revoked this version: ${installed.revoked}
+            ${t("The gallery revoked this version: {{reason}}", { reason: installed.revoked })}
             ${
                 module.enabled &&
                 html`<div class="sheet-actions">
                     <button class="button small primary" disabled=${busy} onClick=${turnOff}>
-                        Turn it off
+                        ${t("Turn it off")}
                     </button>
                 </div>`
             }
         </div>`
     }
     <div class="extension-gallery">
-        <span class="pi-tag gallery-plain">from the gallery · ${installed.version}</span>
-        ${installed.update && html`<span class="pi-tag behind">update available</span>`}
+        <span class="pi-tag gallery-plain">${t("from the gallery · {{version}}", { version: installed.version })}</span>
+        ${installed.update && html`<span class="pi-tag behind">${t("update available")}</span>`}
         <button
             class="link small"
             onClick=${() =>
@@ -175,7 +184,7 @@ function GalleryPart({ module, installed, busy, turnOff }) {
                     origin: store.state.sheet?.origin ?? "extensions",
                 })}
         >
-            Details
+            ${t("Details")}
         </button>
     </div>`;
 }
@@ -194,12 +203,12 @@ function PipCompactAt({ owner }) {
 
     return html`<div class="setting wrap">
         <div class="grow">
-            <div class="small">Compact PiP's context</div>
+            <div class="small">${t("Compact PiP's context")}</div>
             <div class="muted small">
-                Once PiP is idle above this, older messages become a short summary.
+                ${t("Once PiP is idle above this, older messages become a short summary.")}
             </div>
         </div>
-        <div class="segmented" role="group" aria-label="Compact PiP's context">
+        <div class="segmented" role="group" aria-label=${t("Compact PiP's context")}>
             ${PIP_COMPACT.map(
                 ([value, label]) => html`<button
                     class=${at === value ? "on" : ""}
@@ -207,7 +216,7 @@ function PipCompactAt({ owner }) {
                     disabled=${!owner}
                     onClick=${() => change(value)}
                 >
-                    ${label}
+                    ${t(label)}
                 </button>`,
             )}
         </div>
@@ -215,7 +224,7 @@ function PipCompactAt({ owner }) {
 }
 
 export function ExtensionsSheet() {
-    return html`<${Sheet} title="Extensions" onClose=${closeSheet} wide=${true}>
+    return html`<${Sheet} title=${t("Extensions")} onClose=${closeSheet} wide=${true}>
         <${ExtensionsContent} />
     <//>`;
 }
@@ -284,7 +293,9 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
             (error) =>
                 setProblem(
                     error.status === 404
-                        ? "Restart the server (menu → Restart server) to manage extensions from here."
+                        ? t(
+                              "Restart the server (menu → Restart server) to manage extensions from here.",
+                          )
                         : error.message,
                 ),
         );
@@ -399,19 +410,19 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                         <${Icon} name="down" size=${14} class="ext-row-chevron" />
                     </span>
                     ${module.summary && html`<span class="ext-row-desc">${summaryOf(module)}</span>`}
-                    ${module.error && html`<span class="ext-row-meta warn">Did not load</span>`}
-                    ${installed?.revoked && html`<span class="ext-row-meta warn">The gallery revoked this version</span>`}
-                    ${installed?.update && html`<span class="ext-row-meta accent">An update is ready</span>`}
+                    ${module.error && html`<span class="ext-row-meta warn">${t("Did not load")}</span>`}
+                    ${installed?.revoked && html`<span class="ext-row-meta warn">${t("The gallery revoked this version")}</span>`}
+                    ${installed?.update && html`<span class="ext-row-meta accent">${t("An update is ready")}</span>`}
                 </span>
             </button>
             <div class="ext-row-end">
                 ${
                     module.required
-                        ? html`<span class="ext-state">Always on</span>`
+                        ? html`<span class="ext-state">${t("Always on")}</span>`
                         : html`<${Switch}
                               on=${module.enabled}
                               disabled=${!owner || busy !== null}
-                              label=${`${module.title}: ${module.enabled ? "on" : "off"}`}
+                              label=${t("{{title}}: {{state}}", { title: module.title, state: t(module.enabled ? "on" : "off") })}
                               onChange=${(event) => toggle(module, event.currentTarget)}
                           />`
                 }
@@ -434,7 +445,7 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                 html`<div
                     class="guard-confirm ext-row-under"
                     role="alertdialog"
-                    aria-label="Turn off Lancet Guard?"
+                    aria-label=${t("Turn off Lancet Guard?")}
                     aria-describedby="guard-confirm-warning"
                     onKeyDown=${(event) => {
                         if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
@@ -444,14 +455,14 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                         }
                     }}
                 >
-                    <span id="guard-confirm-warning">bash, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.</span>
+                    <span id="guard-confirm-warning">${t("bash, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.")}</span>
                     <div class="sheet-actions">
                         <button
                             class="button small"
                             ref=${guardCancel}
                             onClick=${() => setConfirmGuard(false)}
                         >
-                            Keep it on
+                            ${t("Keep it on")}
                         </button>
                         <button
                             class="button small primary"
@@ -461,7 +472,7 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                                 change(module, "", { enabled: false });
                             }}
                         >
-                            Turn off
+                            ${t("Turn off")}
                         </button>
                     </div>
                 </div>`
@@ -469,10 +480,10 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
             ${
                 confirmOn === module.file &&
                 !module.enabled &&
-                html`<div class="ext-confirm ext-row-under" role="group" aria-label=${`Turn on ${module.title}?`}>
-                    <span>It runs inside the server with your rights, in every session. Turn it on only if you trust its code.</span>
+                html`<div class="ext-confirm ext-row-under" role="group" aria-label=${t("Turn on {{title}}?", { title: module.title })}>
+                    <span>${t("It runs inside the server with your rights, in every session. Turn it on only if you trust its code.")}</span>
                     <div class="sheet-actions">
-                        <button class="button small" onClick=${() => setConfirmOn(null)}>Not now</button>
+                        <button class="button small" onClick=${() => setConfirmOn(null)}>${t("Not now")}</button>
                         <button
                             class="button small primary"
                             disabled=${busy !== null}
@@ -481,7 +492,7 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                                 change(module, "", { enabled: true });
                             }}
                         >
-                            Turn on
+                            ${t("Turn on")}
                         </button>
                     </div>
                 </div>`
@@ -501,8 +512,8 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                         turnOff=${() => change(module, "", { enabled: false })}
                     />
                     <div class="muted small mono">
-                        ${module.source === "drop-in" ? `drop-in${module.path ? ` · ${shortPath(module.path, store.state.server?.home)}` : ""}` : module.file}
-                        ${tools.length > 0 ? ` · tools: ${tools.join(", ")}` : ""}
+                        ${module.source === "drop-in" ? `${t("drop-in")}${module.path ? ` · ${shortPath(module.path, store.state.server?.home)}` : ""}` : module.file}
+                        ${tools.length > 0 ? ` · ${t("tools: {{tools}}", { tools: tools.join(", ") })}` : ""}
                     </div>
                     ${
                         owner &&
@@ -513,7 +524,7 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                                 disabled=${busy !== null}
                                 onClick=${() => change(module, "/reload", {})}
                             >
-                                <${Icon} name="reload" size=${14} /> Reload
+                                <${Icon} name="reload" size=${14} /> ${t("Reload")}
                             </button>
                         </div>`
                     }
@@ -524,16 +535,16 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
 
     return html`<div class="extension-management">
         <p class="ext-intro">
-            Tools, checks, and app features. A change reaches every session at once and stays after restarts.${owner ? "" : " Only the owner can change them."}
+            ${t("Tools, checks, and app features. A change reaches every session at once and stays after restarts.")}${owner ? "" : ` ${t("Only the owner can change them.")}`}
         </p>
         <${SafeMode} />
         ${problem && html`<div class="error-box">${problem}</div>`}
-        ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
+        ${!data && !problem && html`<${Loader} label=${t("Loading extensions")} />`}
         ${
             data &&
             [
-                ["Built in", managed.filter((module) => module.source !== "drop-in")],
-                ["Yours", managed.filter((module) => module.source === "drop-in")],
+                [t("Built in"), managed.filter((module) => module.source !== "drop-in")],
+                [t("Yours"), managed.filter((module) => module.source === "drop-in")],
             ]
                 .filter(([, modules]) => modules.length > 0)
                 .map(
@@ -547,7 +558,7 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
             data &&
             needle &&
             managed.length === 0 &&
-            html`<p class="muted small">No built-in extensions or drop-ins match.</p>`
+            html`<p class="muted small">${t("No built-in extensions or drop-ins match.")}</p>`
         }
         ${
             owner &&
@@ -556,17 +567,17 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                     galleryInstalled === undefined &&
                     galleryAvailable() &&
                     html`<button class="link small" onClick=${() => openSheet({ type: "gallery" })}>
-                        <${Icon} name="search" size=${14} /> Find extensions
+                        <${Icon} name="search" size=${14} /> ${t("Find extensions")}
                     </button>`
                 }
                 ${
                     data?.dropIns &&
                     html`<span>
-                        Make your own: put a <span class="mono">.ts</span> module in <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. It stays off until you turn it on.
+                        ${t("Make your own: put a")} <span class="mono">.ts</span> ${t("module in")} <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. ${t("It stays off until you turn it on.")}
                     </span>`
                 }
                 <a class="link small" href=${GUIDE} target="_blank" rel="noopener noreferrer">
-                    How to write one <${Icon} name="external" size=${13} />
+                    ${t("How to write one")} <${Icon} name="external" size=${13} />
                 </a>
             </footer>`
         }

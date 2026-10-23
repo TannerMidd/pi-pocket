@@ -1,6 +1,7 @@
 // What a working subagent does this moment, from its peek: the call it waits on, the call it runs, or its words. The
 // subagents bar and the peek tiles both say it, for a row each.
 import { describeCall } from "./calls.js";
+import { t } from "./i18n.js";
 import { store } from "./store.js";
 
 /** What a working subagent does this moment: its peek's waiting call, running call, or words. */
@@ -8,7 +9,10 @@ export function nowDoing(agent, peek = store.state.peeks?.[agent.conversationId]
     const waiting = peek?.approvals?.[0];
 
     if (waiting) {
-        return `Waiting for approval: ${waiting.tool} ${waiting.subject}`.trim();
+        return t("Waiting for approval: {{tool}} {{subject}}", {
+            tool: waiting.tool,
+            subject: waiting.subject,
+        }).trim();
     }
 
     const last = (peek?.lines ?? []).at(-1);
@@ -28,5 +32,5 @@ export function nowDoing(agent, peek = store.state.peeks?.[agent.conversationId]
     }
 
     // Before its peek arrives, nothing is known but that it works.
-    return peek === undefined ? "Working…" : "Thinking…";
+    return t(peek === undefined ? "Working…" : "Thinking…");
 }

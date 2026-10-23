@@ -1,5 +1,6 @@
 // The wide home screen, shown beside the session list when no session is open.
 
+import { t } from "./i18n.js";
 import { folderColor } from "./avatar.js";
 import { useEffect, useRef } from "preact/hooks";
 import { sessionMark } from "./sessions.js";
@@ -66,11 +67,14 @@ export function Splash() {
         ["theme", lookLabel()],
         [
             "layout",
-            `${p.tiling ? "tiled windows" : "flat"}, sidebar ${p.sidebar === "rail" ? "folded" : "open"}`,
+            t("{{layout}}, sidebar {{sidebar}}", {
+                layout: t(p.tiling ? "tiled windows" : "flat"),
+                sidebar: t(p.sidebar === "rail" ? "folded" : "open"),
+            }),
         ],
         [
             "sessions",
-            `${sessions.filter((session) => !session.archived).length}${busy > 0 ? `, ${busy} running` : ""}`,
+            `${sessions.filter((session) => !session.archived).length}${busy > 0 ? `, ${t("{{count}} running", { count: busy })}` : ""}`,
         ],
         ["models", String(models.length)],
         ["folder", shortPath(server?.defaultCwd, server?.home) || "~"],
@@ -78,11 +82,11 @@ export function Splash() {
             "guard",
             guard?.enabled
                 ? guard.available === false
-                    ? "failed to load"
-                    : "Lancet Guard on"
-                : "off",
+                    ? t("failed to load")
+                    : t("Lancet Guard on")
+                : t("off"),
         ],
-        ["you", `${me?.name ?? "?"} (${me?.role ?? "?"})`],
+        ["you", `${me?.name ?? "?"} (${me?.role ? t(me.role) : "?"})`],
     ];
     const colors = [
         "--o-red",
@@ -110,7 +114,7 @@ export function Splash() {
                         data-part="home-fact"
                         style=${`--i:${line++}`}
                     >
-                        <dt>${key}</dt>
+                        <dt>${t(key)}</dt>
                         <dd>${value}</dd>
                     </dl>`,
                 )}
@@ -129,20 +133,20 @@ export function Splash() {
                     class="button primary"
                     onClick=${() => openSheet({ type: "cwd", mode: "new" })}
                 >
-                    <${Icon} name="plus" size=${16} /> New session <${Keys} keys="Alt N" />
+                    <${Icon} name="plus" size=${16} /> ${t("New session")} <${Keys} keys="Alt N" />
                 </button>`
             }
             <button class="button" onClick=${() => store.set({ launcher: true })}>
-                <${Icon} name="command" size=${16} /> Launcher <${Keys} keys="Mod K" />
+                <${Icon} name="command" size=${16} /> ${t("Launcher")} <${Keys} keys="Mod K" />
             </button>
             <button class="button" onClick=${() => openSheet({ type: "appearance" })}>
-                <${Icon} name="palette" size=${16} /> Appearance
+                <${Icon} name="palette" size=${16} /> ${t("Appearance")}
             </button>
         </div>
         ${
             recent.length > 0 &&
             html`<div class="splash-recent" data-part="home-recent">
-                <div class="splash-heading" data-part="home-heading">Jump back in</div>
+                <div class="splash-heading" data-part="home-heading">${t("Jump back in")}</div>
                 ${recent.map(
                     (session, index) => html`<button
                         class="splash-row"
@@ -156,9 +160,9 @@ export function Splash() {
                             style=${`--folder:${folderColor(session.cwd)}`}
                             aria-hidden="true"
                         ></span>
-                        <span class="splash-title">${session.title ?? "New session"}</span>
+                        <span class="splash-title">${session.title ?? t("New session")}</span>
                         <span class="splash-meta">
-                            ${session.waiting ? html`<span class="session-needs">${canSteer() ? "needs you" : "waiting"}</span>` : session.busy ? "working · " : ""}
+                            ${session.waiting ? html`<span class="session-needs">${canSteer() ? t("needs you") : t("waiting")}</span>` : session.busy ? `${t("working")} · ` : ""}
                             ${!session.waiting && timeAgo(session.updatedAt)}
                         </span>
                     </button>`,

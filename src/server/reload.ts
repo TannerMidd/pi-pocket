@@ -30,7 +30,13 @@ import { pathToFileURL } from "node:url";
 import type { Extension, Registry } from "@earendil-works/pi-durable";
 import { describe } from "./errors.ts";
 import { ExtensionWebs, OLDEST_POCKET_API, POCKET_API } from "./extension-web.ts";
-import type { ExtensionModule, PocketHost, WebAccess } from "./host.ts";
+import type {
+    ExtensionModule,
+    PocketExtension,
+    PocketHost,
+    PocketUiLocale,
+    WebAccess,
+} from "./host.ts";
 
 /**
  * How long a module may take to load (its import, and an async default export) before its load fails. At the server's
@@ -282,6 +288,262 @@ function keepLink(link: string, target: string, type: "dir" | "file" | "junction
     symlinkSync(target, link, type);
 }
 
+const MAX_UI_LOCALES = 16;
+const MAX_UI_ENTRIES = 5000;
+const MAX_UI_BYTES = 512 * 1024;
+const UI_LOCALE_FIELDS = new Set(["locale", "label", "default", "strings", "templates"]);
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+
+    return prototype === Object.prototype || prototype === null;
+}
+
+/** Read enumerable own data properties without invoking accessors. */
+function dataProperties(
+    value: Record<string, unknown>,
+    file: string,
+    field: string,
+    allowed?: ReadonlySet<string>,
+): Map<string, unknown> {
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const result = new Map<string, unknown>();
+
+    for (const key of Reflect.ownKeys(descriptors)) {
+        if (typeof key !== "string" || (allowed !== undefined && !allowed.has(key))) {
+            throw new Error(`${file} UI locale ${field} has an unknown field`);
+        }
+
+        const descriptor = descriptors[key]!;
+
+        if (!descriptor.enumerable || !("value" in descriptor)) {
+            throw new Error(
+                `${file} UI locale ${field} must contain only enumerable data properties`,
+            );
+        }
+
+        result.set(key, descriptor.value);
+    }
+
+    return result;
+}
+
+function checkedArray(value: unknown, file: string, field: string, limit: number): unknown[] {
+    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+        throw new Error(`${file} UI locale ${field} must be a plain array`);
+    }
+
+    const descriptors: Record<string, PropertyDescriptor> = Object.getOwnPropertyDescriptors(value);
+    const lengthDescriptor = descriptors.length;
+    const length = lengthDescriptor?.value;
+
+    if (
+        lengthDescriptor === undefined ||
+        !("value" in lengthDescriptor) ||
+        !Number.isSafeInteger(length) ||
+        length < 0 ||
+        length > limit
+    ) {
+        throw new Error(`${file} UI locale ${field} has too many entries`);
+    }
+
+    if (Reflect.ownKeys(descriptors).length !== length + 1) {
+        throw new Error(`${file} UI locale ${field} must be a dense array without extra fields`);
+    }
+
+    const result: unknown[] = [];
+
+    for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptors[String(index)];
+
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+            throw new Error(`${file} UI locale ${field} must be a dense array of data values`);
+        }
+
+        result.push(descriptor.value);
+    }
+
+    return result;
+}
+
+function checkedStrings(
+    value: unknown,
+    file: string,
+    field: string,
+): Readonly<Record<string, string>> {
+    if (!plainRecord(value)) {
+        throw new Error(`${file} UI locale ${field} must be a plain object of strings`);
+    }
+
+    const entries = dataProperties(value, file, field);
+
+    if (entries.size > MAX_UI_ENTRIES) {
+        throw new Error(`${file} UI locale ${field} has too many entries`);
+    }
+
+    const result: Record<string, string> = Object.create(null);
+    let bytes = 0;
+
+    for (const [key, text] of entries) {
+        if (typeof text !== "string") {
+            throw new Error(`${file} UI locale ${field} values must be plain strings`);
+        }
+
+        if (key.length === 0 || key.length > 1000 || text.length > 4000) {
+            throw new Error(`${file} UI locale ${field} contains an entry that is too long`);
+        }
+
+        bytes += Buffer.byteLength(key) + Buffer.byteLength(text);
+
+        if (bytes > MAX_UI_BYTES) {
+            throw new Error(`${file} UI locale ${field} is too large`);
+        }
+
+        result[key] = text;
+    }
+
+    return Object.freeze(result);
+}
+
+function normalizeUiLocales(
+    file: string,
+    extensions: readonly PocketExtension[],
+): PocketExtension[] {
+    const seen = new Set<string>();
+    let count = 0;
+
+    return extensions.map((extension) => {
+        const descriptor = Object.getOwnPropertyDescriptor(extension, "uiLocales");
+
+        if (descriptor === undefined) {
+            if ("uiLocales" in extension) {
+                throw new Error(`${file} uiLocales must be an own data property`);
+            }
+
+            return extension;
+        }
+
+        if (!descriptor.enumerable || !("value" in descriptor)) {
+            throw new Error(`${file} uiLocales must be an array of data-only locale packs`);
+        }
+
+        const rawLocales = checkedArray(descriptor.value, file, "uiLocales", MAX_UI_LOCALES);
+        const locales = rawLocales.map((raw: unknown) => {
+            if (!plainRecord(raw)) {
+                throw new Error(`${file} UI locale entries must be plain objects`);
+            }
+
+            const fields = dataProperties(raw, file, "entry", UI_LOCALE_FIELDS);
+            const locale = fields.get("locale");
+            const label = fields.get("label");
+            const preferred = fields.get("default");
+
+            if (typeof locale !== "string" || locale.length > 35) {
+                throw new Error(`${file} UI locale needs a valid BCP 47 language tag`);
+            }
+
+            let canonical: string;
+
+            try {
+                canonical = Intl.getCanonicalLocales(locale)[0] ?? "";
+            } catch {
+                canonical = "";
+            }
+
+            if (canonical === "" || canonical !== locale) {
+                throw new Error(
+                    `${file} UI locale ${locale} must be a canonical BCP 47 language tag`,
+                );
+            }
+
+            if (seen.has(locale)) {
+                throw new Error(`${file} registers the ${locale} UI locale more than once`);
+            }
+
+            seen.add(locale);
+            count += 1;
+
+            if (count > MAX_UI_LOCALES) {
+                throw new Error(`${file} registers too many UI locales`);
+            }
+
+            if (typeof label !== "string" || label.trim() === "" || label.length > 80) {
+                throw new Error(`${file} UI locale ${locale} needs a short label`);
+            }
+
+            if (fields.has("default") && typeof preferred !== "boolean") {
+                throw new Error(`${file} UI locale ${locale} default must be true or false`);
+            }
+
+            const strings = checkedStrings(fields.get("strings"), file, `${locale} strings`);
+            const templates = fields.has("templates")
+                ? checkedStrings(fields.get("templates"), file, `${locale} templates`)
+                : undefined;
+
+            for (const [source, translated] of Object.entries(templates ?? {})) {
+                const placeholders = (text: string) =>
+                    [
+                        ...new Set(
+                            [...text.matchAll(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g)].map(
+                                (match) => match[1],
+                            ),
+                        ),
+                    ].sort();
+
+                if (
+                    JSON.stringify(placeholders(source)) !==
+                    JSON.stringify(placeholders(translated))
+                ) {
+                    throw new Error(
+                        `${file} UI locale ${locale} template placeholders must match the source`,
+                    );
+                }
+            }
+
+            const serializedBytes = Buffer.byteLength(
+                JSON.stringify({
+                    locale,
+                    label,
+                    ...(fields.has("default") ? { default: preferred } : {}),
+                    strings,
+                    ...(templates === undefined ? {} : { templates }),
+                }),
+            );
+
+            if (serializedBytes > MAX_UI_BYTES) {
+                throw new Error(`${file} UI locale ${locale} is too large`);
+            }
+
+            return Object.freeze({
+                locale,
+                label,
+                ...(fields.has("default") ? { default: preferred as boolean } : {}),
+                strings,
+                ...(templates === undefined ? {} : { templates }),
+            });
+        });
+
+        const normalized = { ...extension, uiLocales: Object.freeze(locales) };
+
+        Object.defineProperty(normalized, "uiLocales", { writable: false, configurable: false });
+
+        return normalized;
+    });
+}
+
+type ExtensionLoaderOptions = {
+    webs?: ExtensionWebs;
+    notify?: (level: "info" | "warning" | "error", message: string) => void;
+    /** Refresh authenticated hello data after a watched module changes. */
+    refreshClients?: () => Promise<void>;
+    /** How long a load may take; tests make it short. */
+    loadLimitMs?: number;
+};
+
 export class ExtensionLoader {
     readonly #registry: Registry;
     readonly #host: PocketHost;
@@ -289,8 +551,9 @@ export class ExtensionLoader {
     readonly #dropIn: string | undefined;
     readonly #choice: (file: string) => boolean | undefined;
     readonly #webs: ExtensionWebs;
+    readonly #refreshClients: () => Promise<void>;
     /** Extension names each file installed, to uninstall the ones a new version no longer provides. */
-    readonly #installed = new Map<string, Extension[]>();
+    readonly #installed = new Map<string, PocketExtension[]>();
     readonly #errors = new Map<string, string>();
     readonly #timers = new Map<string, NodeJS.Timeout>();
     /** Drop-ins already reported for having a built-in module's name, so each is reported once. */
@@ -320,21 +583,19 @@ export class ExtensionLoader {
         host: PocketHost,
         folders: { builtIn: string; dropIn?: string },
         choice: (file: string) => boolean | undefined = () => undefined,
-        options: {
-            webs?: ExtensionWebs;
-            notify?: (level: "info" | "warning" | "error", message: string) => void;
-            /** How long a load may take; tests make it short. */
-            loadLimitMs?: number;
-        } = {},
+        options: ExtensionLoaderOptions | (() => Promise<void>) = {},
     ) {
+        const settings = typeof options === "function" ? { refreshClients: options } : options;
+
         this.#registry = registry;
         this.#host = host;
         this.#builtIn = folders.builtIn;
         this.#dropIn = folders.dropIn;
         this.#choice = choice;
-        this.#webs = options.webs ?? new ExtensionWebs();
-        this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
-        this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
+        this.#webs = settings.webs ?? new ExtensionWebs();
+        this.#notify = settings.notify ?? ((level, message) => host.notice(level, message));
+        this.#refreshClients = settings.refreshClients ?? (async () => {});
+        this.#loadLimitMs = settings.loadLimitMs ?? LOAD_LIMIT_MS;
     }
 
     /** Every module, built-in ones first in install order. A drop-in with a built-in's name is left out. */
@@ -547,7 +808,18 @@ export class ExtensionLoader {
         return [...this.#installed.values()].flat().map((extension) => extension.name);
     }
 
-    async #load(file: string, cacheBust: boolean, until?: number): Promise<Extension[]> {
+    /** The data-only locale packs registered by enabled modules, in deterministic preference order. */
+    uiLocales(): PocketUiLocale[] {
+        return [...this.#installed.values()]
+            .flatMap((extensions) => extensions.flatMap((extension) => extension.uiLocales ?? []))
+            .sort(
+                (a, b) =>
+                    Number(b.default === true) - Number(a.default === true) ||
+                    (a.locale < b.locale ? -1 : a.locale > b.locale ? 1 : 0),
+            );
+    }
+
+    async #load(file: string, cacheBust: boolean, until?: number): Promise<PocketExtension[]> {
         const module = this.#module(file);
 
         if (module === undefined) {
@@ -583,7 +855,7 @@ export class ExtensionLoader {
         generation: number,
         cacheBust: boolean,
         deadline: number,
-    ): Promise<Extension[]> {
+    ): Promise<PocketExtension[]> {
         const { file } = module;
         // A load waits for the module (its import, and an async default export), but not forever: one that never settles
         // would hold up the server's start, and every load after it.
@@ -631,9 +903,14 @@ export class ExtensionLoader {
 
             this.#stillLatest(file, generation);
 
-            const extensions = (
-                built === undefined || built === null ? [] : Array.isArray(built) ? built : [built]
-            ) as Extension[];
+            const extensions = normalizeUiLocales(
+                file,
+                (built === undefined || built === null
+                    ? []
+                    : Array.isArray(built)
+                      ? built
+                      : [built]) as PocketExtension[],
+            );
 
             // A default export that forgot to return its extensions would load as nothing at all.
             if (
@@ -661,6 +938,8 @@ export class ExtensionLoader {
             if (module.source === "drop-in") {
                 this.#checkNames(file, extensions);
             }
+
+            this.#checkUiLocaleNames(file, extensions);
 
             // A new array, so that one the module froze or keeps is not changed.
             const installed =
@@ -840,6 +1119,55 @@ export class ExtensionLoader {
         }
     }
 
+    #checkUiLocaleNames(file: string, extensions: readonly PocketExtension[]): void {
+        const owners = new Map<string, string>();
+        let count = 0;
+
+        for (const [other, installed] of this.#installed) {
+            if (other === file) {
+                continue;
+            }
+
+            for (const extension of installed) {
+                for (const locale of extension.uiLocales ?? []) {
+                    owners.set(locale.locale, other);
+                    count += 1;
+                }
+            }
+        }
+
+        for (const extension of extensions) {
+            for (const locale of extension.uiLocales ?? []) {
+                const other = owners.get(locale.locale);
+
+                if (other !== undefined) {
+                    throw new Error(
+                        `${other} already registers the ${locale.locale} UI locale: choose another locale`,
+                    );
+                }
+
+                count += 1;
+
+                if (count > MAX_UI_LOCALES) {
+                    throw new Error(
+                        `${file} would register too many UI locales (maximum ${MAX_UI_LOCALES})`,
+                    );
+                }
+
+                owners.set(locale.locale, file);
+            }
+        }
+    }
+
+    #notifyClients(): void {
+        void this.#refreshClients().catch((error: unknown) =>
+            this.#notify(
+                "warning",
+                `Could not refresh clients after an extension change: ${describe(error)}`,
+            ),
+        );
+    }
+
     /** Watch both folders and reload a module shortly after it changes. Keeps the old code when the new one fails. */
     watch(): void {
         this.#webs.watch();
@@ -908,6 +1236,7 @@ export class ExtensionLoader {
             this.#uninstall(file);
 
             if (installed) {
+                this.#notifyClients();
                 this.#notify(
                     "info",
                     directory === this.#dropIn
@@ -929,19 +1258,22 @@ export class ExtensionLoader {
         this.#reload(file).then(
             (extensions) => {
                 if (extensions !== undefined) {
+                    this.#notifyClients();
                     this.#notify(
                         "info",
                         `Reloaded ${file}: ${extensions.map((extension) => extension.name).join(", ") || "it adds to the app"}`,
                     );
                 }
             },
-            (error: unknown) =>
+            (error: unknown) => {
+                this.#notifyClients();
                 this.#notify(
                     "error",
                     loaded
                         ? `Kept the previous ${file}; the edited one failed to load: ${describe(error)}`
                         : `${file} failed to load: ${describe(error)}`,
-                ),
+                );
+            },
         );
     }
 

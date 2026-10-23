@@ -484,6 +484,7 @@ test("one tap serves one follow-up: no other event of the same tap gives it back
             listener({ isTrusted: true, key: "a", ...fields });
         }
     };
+
     const ask = (text: string) =>
         (window.parent as typeof parent).postMessage({ type: "pocket-follow-up", text }, "*");
 

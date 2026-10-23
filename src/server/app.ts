@@ -647,7 +647,8 @@ export class PocketApp {
             },
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
-            notice: (level, message, conversationId) => this.notice(level, message, conversationId),
+            notice: (level, message, conversationId, ui) =>
+                this.notice(level, message, conversationId, ui),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
@@ -684,8 +685,13 @@ export class PocketApp {
             host,
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
-            // What a module's load says can name the server's folders, or quote a provider: the owner's to read.
-            { webs: this.webs, notify: (level, message) => this.ownerNotice(level, message) },
+            {
+                // What a module's load says can name the server's folders, or quote a provider: the owner's to read.
+                webs: this.webs,
+                notify: (level, message) => this.ownerNotice(level, message),
+                // Locale packs travel only in authenticated hello data, so watched edits refresh that data too.
+                refreshClients: () => this.#refreshClients(),
+            },
         );
         await this.themes.load().catch((error: unknown) => {
             this.#log(`Themes could not be read: ${describe(error)}`);
@@ -1100,6 +1106,7 @@ export class PocketApp {
         level: "info" | "warning" | "error",
         message: string,
         conversationId?: ConversationId,
+        ui?: { key: string; params?: Record<string, string | number> },
     ): void {
         this.#log(`[${level}] ${message}`);
 
@@ -1114,7 +1121,7 @@ export class PocketApp {
                       this.canSee(client.user, conversationId);
 
             if (reaches) {
-                client.send("notice", { level, message });
+                client.send("notice", { level, message, ...(ui === undefined ? {} : { ui }) });
             }
         }
     }
@@ -1862,6 +1869,8 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                // Only validated translation data, for explicit UI strings; clients receive this through authenticated hello.
+                uiLocales: this.loader.uiLocales(),
                 // The browser modules this person's tabs load (`extension-ui.js`), each with the tools its module
                 // installs: the only ones whose calls it may describe (`pocket.toolCall`).
                 ui: this.#browserModules(user),
@@ -2600,6 +2609,13 @@ export class PocketApp {
         this.notice(
             enabled ? "info" : "warning",
             `${user.name} turned ${module.title} ${enabled ? "on" : "off"}.`,
+            undefined,
+            {
+                key: enabled
+                    ? "{{name}} turned {{extension}} on."
+                    : "{{name}} turned {{extension}} off.",
+                params: { name: user.name, extension: module.title },
+            },
         );
     }
 
@@ -2679,6 +2695,14 @@ export class PocketApp {
             rule === "others"
                 ? `${user.name} made approvals need someone other than who asked.`
                 : `${user.name} let anyone who can steer allow risky calls.`,
+            undefined,
+            {
+                key:
+                    rule === "others"
+                        ? "{{name}} made approvals need someone other than who asked."
+                        : "{{name}} let anyone who can steer allow risky calls.",
+                params: { name: user.name },
+            },
         );
     }
 

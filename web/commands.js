@@ -1,4 +1,5 @@
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
+import { t } from "./i18n.js";
 import { browserAvailable, openInBrowser, toggleBrowser } from "./browser.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { branchAvailable } from "./sheets/branch.js";
@@ -146,7 +147,7 @@ async function switchModel(arg) {
 
     if (found.length !== 1) {
         if (found.length === 0) {
-            notify("info", `No model matches “${arg}”.`);
+            notify("info", t("No model matches “{{query}}”.", { query: arg }));
         }
 
         return openSheet({ type: "model", query: found.length === 0 ? "" : arg });
@@ -166,8 +167,8 @@ async function setThinking(arg) {
     if (!levels.includes(level)) {
         throw new Error(
             levels.length > 1
-                ? `Thinking can be ${levels.join(", ")}.`
-                : `${modelLabel(agent())} does not think.`,
+                ? t("Thinking can be {{levels}}.", { levels: levels.join(", ") })
+                : t("{{model}} does not think.", { model: modelLabel(agent()) }),
         );
     }
 
@@ -199,10 +200,10 @@ async function copyLast() {
 
         await copyText(text);
 
-        return notify("info", "Copied Pi’s last reply.");
+        return notify("info", t("Copied Pi’s last reply."));
     }
 
-    notify("info", "Pi has not replied yet.");
+    notify("info", t("Pi has not replied yet."));
 }
 
 function showSession() {
@@ -217,7 +218,10 @@ function showSession() {
 
     if (window) {
         parts.push(
-            `context ${Math.round(((stats.contextTokens ?? 0) / window) * 100)}% of ${formatTokens(window)}`,
+            t("context {{percent}}% of {{tokens}}", {
+                percent: Math.round(((stats.contextTokens ?? 0) / window) * 100),
+                tokens: formatTokens(window),
+            }),
         );
     }
 
@@ -289,8 +293,10 @@ const COMMANDS = [
             notify(
                 "info",
                 on
-                    ? "Plan mode is on: Pi proposes a plan and changes nothing until you approve it."
-                    : "Plan mode is off.",
+                    ? t(
+                          "Plan mode is on: Pi proposes a plan and changes nothing until you approve it.",
+                      )
+                    : t("Plan mode is off."),
             );
         },
     },
@@ -307,7 +313,7 @@ const COMMANDS = [
 
             const added = await actions.schedule(arg);
 
-            notify("info", `Scheduled for ${formatWhen(added.next)}.`);
+            notify("info", t("Scheduled for {{when}}.", { when: formatWhen(added.next) }));
         },
     },
     {
@@ -325,8 +331,8 @@ const COMMANDS = [
             notify(
                 "info",
                 lesson.pending
-                    ? "Remembered. Pi uses it once the owner approves it."
-                    : "Remembered. Pi gets it from its next message.",
+                    ? t("Remembered. Pi uses it once the owner approves it.")
+                    : t("Remembered. Pi gets it from its next message."),
             );
         },
     },
@@ -337,11 +343,16 @@ const COMMANDS = [
         available: goalsAvailable,
         run: async (arg) => {
             if (arg === "") {
-                throw new Error("Say which command has to pass, such as /until npm test.");
+                throw new Error(t("Say which command has to pass, such as /until npm test."));
             }
 
             await actions.setGoal(arg);
-            notify("info", `Pi keeps going until ${arg} passes, checked after each answer.`);
+            notify(
+                "info",
+                t("Pi keeps going until {{command}} passes, checked after each answer.", {
+                    command: arg,
+                }),
+            );
         },
     },
     {
@@ -480,7 +491,7 @@ function setTheme(arg) {
 
     if (look) {
         chooseLook(look.id);
-        notify("info", `Theme: ${look.name}.`);
+        notify("info", t("Theme: {{theme}}.", { theme: look.name }));
 
         return;
     }
@@ -495,12 +506,20 @@ function setTheme(arg) {
         ];
 
         throw new Error(
-            `No theme or colors called “${arg}”. Try ${some.slice(0, -1).join(", ")}, or ${some.at(-1)}.`,
+            t("No theme or colors called “{{name}}”. Try {{themes}}.", {
+                name: arg,
+                themes: some.join(", "),
+            }),
         );
     }
 
     chooseTheme(palette.id);
-    notify("info", `Colors: ${palette.id === "desktop" ? "follow your desktop" : palette.name}.`);
+    notify(
+        "info",
+        palette.id === "desktop"
+            ? t("Colors: {{theme}}.", { theme: t("follow your desktop") })
+            : t("Colors: {{theme}}.", { theme: palette.name }),
+    );
 }
 
 /** Extensions' commands this person may run (`hello` lists them). A prompt template of the same name keeps it. */

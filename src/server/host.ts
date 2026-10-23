@@ -100,6 +100,25 @@ export interface ApprovalRequest {
 
 export type ApprovalAnswer = { allow: boolean; by: string };
 
+/** A data-only translation pack for explicit UI strings and safe placeholder templates. */
+export interface PocketUiLocale {
+    /** Canonical BCP 47 language tag, such as `zh-CN`. */
+    readonly locale: string;
+    /** Human-readable name shown by the host when listing available languages. */
+    readonly label: string;
+    /** Prefer this pack when more than one locale is enabled; ties go to the smallest locale tag. */
+    readonly default?: boolean;
+    /** Exact source UI strings mapped to their translations. */
+    readonly strings: Readonly<Record<string, string>>;
+    /** Exact source templates with `{{name}}` placeholders mapped to translated templates. */
+    readonly templates?: Readonly<Record<string, string>>;
+}
+
+/** A Pi Durable extension with optional data-only user-interface translations. */
+export type PocketExtension = Extension & {
+    readonly uiLocales?: readonly PocketUiLocale[];
+};
+
 /**
  * Tool calls waiting for a human. In memory on purpose: the guard hook runs before a call's intent is stored, so after
  * a restart the hook runs again and asks again, unless its memo already holds the answer.
@@ -282,6 +301,7 @@ export interface PocketHost {
         level: "info" | "warning" | "error",
         message: string,
         conversationId?: ConversationId,
+        ui?: { key: string; params?: Record<string, string | number> },
     ): void;
     /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
@@ -475,7 +495,11 @@ export type ExtensionModule = {
     default: (
         host: PocketHost,
         web: ExtensionWeb,
-    ) => Extension | readonly Extension[] | void | Promise<Extension | readonly Extension[] | void>;
+    ) =>
+        | PocketExtension
+        | readonly PocketExtension[]
+        | void
+        | Promise<PocketExtension | readonly PocketExtension[] | void>;
     /** The version of the extension API the module needs, when it says: a newer one than the app's is not loaded. */
     pocketApi?: unknown;
 };

@@ -32,7 +32,7 @@ A drop-in extension stays when Pi Pocket updates, and the owner can turn it off 
 ## The documents
 
 - [customizing.md](customizing.md): how to change how Pi works, without code.
-- [extensions.md](extensions.md): how to write extensions: tools, prompt sections, hooks, and pages, buttons, and routes in the app. It is an index: read it, then the guides in [extensions/](extensions/) that your task needs.
+- [extensions.md](extensions.md): how to write extensions: tools, prompt sections, hooks, UI locale packs, and pages, buttons, and routes in the app. It is an index: read it, then the guides in [extensions/](extensions/) that your task needs.
     - The members of `host`, `web`, and `pocket` are in [extensions/reference/](extensions/reference/host.md).
     - The exact types are in [types/pocket.d.ts](../types/pocket.d.ts).
     - Working examples are in [examples/](examples/).

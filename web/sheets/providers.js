@@ -1,6 +1,7 @@
 // Model providers: signing in and out, the models subagents may use, and the dialog a
 // sign-in uses to ask for a code or a key.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { t } from "../i18n.js";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 import { RefreshModels } from "../model-refresh.js";
@@ -42,8 +43,11 @@ function SubagentModels({ names }) {
     const chosen = rows.filter((row) => isOn(row.spec)).map((row) => row.model?.name ?? row.spec);
     const summary =
         chosen.length === 0
-            ? "None allowed: Pi never picks a model."
-            : `${chosen.length} allowed: ${chosen.join(", ")}`;
+            ? t("None allowed: Pi never picks a model.")
+            : t("{{count}} allowed: {{models}}", {
+                  count: chosen.length,
+                  models: chosen.join(", "),
+              });
     const needle = query.trim().toLowerCase();
     const groups = new Map();
 
@@ -85,9 +89,9 @@ function SubagentModels({ names }) {
     };
 
     return html`<div class="subagent-models">
-        <div class="label">Models for subagents</div>
+        <div class="label">${t("Models for subagents")}</div>
         <p class="muted small">
-            With none checked, subagents and linked sessions run on their session's model, and Pi cannot choose another. Check some, and they run only on those: on the session's model when it is checked, otherwise on a checked model that Pi chooses to suit the work. Pi cannot use any other.
+            ${t("With none checked, subagents and linked sessions run on their session's model, and Pi cannot choose another. Check some, and they run only on those: on the session's model when it is checked, otherwise on a checked model that Pi chooses to suit the work. Pi cannot use any other.")}
         </p>
         <p class="small subagent-models-chosen" title=${summary}>${summary}</p>
         ${
@@ -95,18 +99,18 @@ function SubagentModels({ names }) {
             html`<label class="search">
                 <${Icon} name="search" size=${16} />
                 <input
-                    placeholder="Find a model"
-                    aria-label="Find a model for subagents"
+                    placeholder=${t("Find a model")}
+                    aria-label=${t("Find a model for subagents")}
                     value=${query}
                     onInput=${(event) => setQuery(event.currentTarget.value)}
                 />
             </label>`
         }
-        <div class="subagent-models-list" role="group" aria-label="Models for subagents">
+        <div class="subagent-models-list" role="group" aria-label=${t("Models for subagents")}>
             ${
                 groups.size === 0 &&
                 html`<p class="muted small">
-                    ${rows.length === 0 ? "No models: sign in to a provider below." : "No model matches."}
+                    ${rows.length === 0 ? t("No models: sign in to a provider below.") : t("No model matches.")}
                 </p>`
             }
             ${[...groups].map(
@@ -126,9 +130,9 @@ function SubagentModels({ names }) {
                                     ${spec}
                                     ${
                                         !model
-                                            ? html` · <span class="warn">not signed in</span>`
+                                            ? html` · <span class="warn">${t("not signed in")}</span>`
                                             : model.signIn &&
-                                              html` · <span class="warn">needs sign-in</span>`
+                                              html` · <span class="warn">${t("needs sign-in")}</span>`
                                     }
                                 </span>
                             </span>
@@ -166,7 +170,9 @@ export function ProvidersSheet() {
 
     const logout = (provider) =>
         confirm(
-            `Log out of ${provider.name}? Pi uses the same sign-in, so it is signed out too.`,
+            t("Log out of {{provider}}? Pi uses the same sign-in, so it is signed out too.", {
+                provider: provider.name,
+            }),
         ) &&
         attempt(async () => {
             await api(`providers/${encodeURIComponent(provider.id)}/logout`, {});
@@ -201,12 +207,12 @@ export function ProvidersSheet() {
                 ${provider.name}
                 ${
                     provider.needsSignIn
-                        ? html` <span class="warn provider-needs">needs sign-in</span>`
+                        ? html` <span class="warn provider-needs">${t("needs sign-in")}</span>`
                         : provider.configured && html` <span class="ok">✓</span>`
                 }
             </div>
             <div class="muted small">
-                ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
+                ${provider.needsSignIn ? t("The sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them.") : provider.configured ? `${t("signed in")}${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : t("not configured")} · ${t("{{count}} models", { count: provider.models })}
             </div>
             ${
                 provider.needsSignIn &&
@@ -231,14 +237,14 @@ export function ProvidersSheet() {
                         class="button small"
                         onClick=${(event) => login(provider, "api_key", event.currentTarget)}
                     >
-                        API key
+                        ${t("API key")}
                     </button>`
                 }
                 ${
                     provider.configured &&
                     provider.source === "stored" &&
                     html`<button class="button small ghost" onClick=${() => logout(provider)}>
-                        Log out
+                        ${t("Log out")}
                     </button>`
                 }
             </div>`
@@ -246,17 +252,17 @@ export function ProvidersSheet() {
     </div>`;
 
     return html`<${Sheet}
-        title="Providers"
+        title=${t("Providers")}
         onClose=${closeSheet}
         className=${`providers-sheet ${owner ? "with-side" : ""}`}
     >
         <p class="muted small">
-            Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
+            ${t("Pi Pocket shares Pi's sign-ins")} (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : t("Only the owner can change them.")}
         </p>
         <div class="providers-layout">
             ${
                 owner &&
-                html`<aside class="providers-side" aria-label="Models">
+                html`<aside class="providers-side" aria-label=${t("Models")}>
                     <${RefreshModels} />
                     <${SubagentModels}
                         names=${Object.fromEntries(
@@ -270,25 +276,25 @@ export function ProvidersSheet() {
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
-                        placeholder="Search providers"
+                        placeholder=${t("Search providers")}
                         value=${query}
                         onInput=${(event) => setQuery(event.currentTarget.value)}
                     />
                 </label>
-                ${providers === null && html`<${Loader} label="Loading providers" />`}
+                ${providers === null && html`<${Loader} label=${t("Loading providers")} />`}
                 ${
                     providers !== null &&
                     list.length === 0 &&
                     needle !== "" &&
                     html`<div class="launcher-empty" role="status">
-                        <strong>No providers match “${query.trim()}”.</strong>
-                        <button class="button" onClick=${() => setQuery("")}>Clear search</button>
+                        <strong>${t("No providers match “{{query}}”.", { query: query.trim() })}</strong>
+                        <button class="button" onClick=${() => setQuery("")}>${t("Clear search")}</button>
                     </div>`
                 }
                 ${groups.map(
                     ([title, each]) => html`<section class="provider-group" key=${title}>
                         <h3 class="provider-group-head">
-                            ${title} <span class="muted">${each.length}</span>
+                            ${t(title)} <span class="muted">${each.length}</span>
                         </h3>
                         <div class="sheet-list">${each.map(row)}</div>
                     </section>`,
@@ -340,7 +346,7 @@ function AuthFrame({ title, onClose, inline, focusKey, children }) {
         ? html`<section class="auth-inline" aria-label=${title} tabindex="-1" ref=${ref}>
             <div class="auth-inline-head">
                 <strong>${title}</strong>
-                <button class="icon-button" aria-label="Close" onClick=${onClose}>
+                <button class="icon-button" aria-label=${t("Close")} onClick=${onClose}>
                     <${Icon} name="close" size=${16} />
                 </button>
             </div>
@@ -385,7 +391,7 @@ export function AuthDialog({ inline = false }) {
     const prompt = auth.prompt;
 
     return html`<${AuthFrame}
-        title=${`Sign in: ${auth.providerName}`}
+        title=${t("Sign in: {{provider}}", { provider: auth.providerName })}
         onClose=${close}
         inline=${inline}
         focusKey=${`${auth.flowId}:${prompt?.id ?? auth.events.length}`}
@@ -394,7 +400,7 @@ export function AuthDialog({ inline = false }) {
             if (event.type === "auth_url") {
                 return html`<div class="auth-event">
                     <a class="button primary wide" href=${event.url} target="_blank" rel="noopener">
-                        Open the sign-in page
+                        ${t("Open the sign-in page")}
                     </a>
                     ${event.instructions && html`<p class="muted small">${event.instructions}</p>`}
                 </div>`;
@@ -403,7 +409,7 @@ export function AuthDialog({ inline = false }) {
             if (event.type === "device_code") {
                 return html`<div class="auth-event">
                     <p>
-                        Enter this code at <a href=${event.verificationUri} target="_blank" rel="noopener">${event.verificationUri}</a>
+                        ${t("Enter this code at")} <a href=${event.verificationUri} target="_blank" rel="noopener">${event.verificationUri}</a>
                     </p>
                     <div class="code-big">${event.userCode}</div>
                 </div>`;
@@ -451,19 +457,19 @@ export function AuthDialog({ inline = false }) {
                             disabled=${prompt.type === "secret" && value.trim() === ""}
                             onClick=${() => answer({ value })}
                         >
-                            Continue
+                            ${t("Continue")}
                         </button>
                     </div>
                 </div>`)
         }
-        ${!prompt && !auth.done && html`<${Loader} label="Waiting for the provider" />`}
+        ${!prompt && !auth.done && html`<${Loader} label=${t("Waiting for the provider")} />`}
         ${
             auth.done &&
             !auth.done.ok &&
             html`<div class="error-box">
-                <p>${auth.done.details ? auth.done.error : "Sign-in did not finish. Try again."}</p>
+                <p>${auth.done.details ? auth.done.error : t("Sign-in did not finish. Try again.")}</p>
                 <details>
-                    <summary>Details</summary>
+                    <summary>${t("Details")}</summary>
                     <p>${auth.done.details ?? auth.done.error}</p>
                 </details>
                 <button
@@ -476,7 +482,7 @@ export function AuthDialog({ inline = false }) {
                             closeSignIn(auth.flowId);
                         })}
                 >
-                    Start again
+                    ${t("Start again")}
                 </button>
             </div>`
         }

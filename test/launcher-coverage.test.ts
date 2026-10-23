@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import ts from "typescript";
 
 const read = (path: string) => readFileSync(new URL(`../web/${path}`, import.meta.url), "utf8");
 const menu = read("sheets/menu.js");
@@ -16,16 +17,45 @@ test("the launcher opens every sheet the menu opens", () => {
     assert.deepEqual(missing, [], `the launcher has no action for: ${missing.join(", ")}`);
 });
 
+/** The names a menu row shows, through the `t()` wrapper a localized row uses. */
 test("the launcher has every row of the menu, by name", () => {
-    // `item("Name"`, and `item(cond ? "One" : "Other"` on the lines after it.
-    const names = [
-        ...[...menu.matchAll(/item\(\s*"([^"]+)"/g)].map((match) => match[1]),
-        ...[...menu.matchAll(/item\(\s*\n\s*[^"\n]*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/g)].flatMap(
-            (match) => [match[1], match[2]],
-        ),
-    ];
-    const missing = names.filter((name) => !launcher.includes(`"${name}`));
+    const names = new Set<string>();
 
-    assert.ok(names.includes("Webhooks and watches") && names.includes("Take turns"));
+    const collect = (node: ts.Node) => {
+        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+            names.add(node.text);
+        } else if (ts.isConditionalExpression(node)) {
+            collect(node.whenTrue);
+            collect(node.whenFalse);
+        } else if (
+            ts.isCallExpression(node) &&
+            ts.isIdentifier(node.expression) &&
+            node.expression.text === "t" &&
+            node.arguments[0]
+        ) {
+            collect(node.arguments[0]);
+        }
+    };
+
+    const source = ts.createSourceFile("menu.js", menu, ts.ScriptTarget.Latest, true);
+
+    const visit = (node: ts.Node) => {
+        if (
+            ts.isCallExpression(node) &&
+            ts.isIdentifier(node.expression) &&
+            node.expression.text === "item" &&
+            node.arguments[0]
+        ) {
+            collect(node.arguments[0]);
+        }
+
+        ts.forEachChild(node, visit);
+    };
+
+    visit(source);
+
+    const missing = [...names].filter((name) => !launcher.includes(`"${name}`));
+
+    assert.ok(names.has("Webhooks and watches") && names.has("Take turns"));
     assert.deepEqual(missing, [], `the launcher has no action named: ${missing.join(", ")}`);
 });
