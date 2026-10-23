@@ -2,7 +2,11 @@ node_modules/
 *.log
 .env
 .env.*
+!.env.example
 .DS_Store
 Thumbs.db
 result
 result-*
+
+# Folders docker-compose.yml mounts from the host; user data, never tracked.
+/data/

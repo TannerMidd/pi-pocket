@@ -15,7 +15,7 @@
  */
 import type { Context } from "@earendil-works/chord";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { Skill } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type {
     ConversationId,
     DocumentReader,
@@ -135,9 +135,17 @@ export interface Host {
      * Local metadata for an exact provider/modelId, without network or sign-in information.
      * @since 0.16.0
      */
-    modelInfo(
-        spec: string,
-    ): { model: ModelRef; name: string; thinkingLevels: ModelThinkingLevel[] } | undefined;
+    modelInfo(spec: string):
+        | {
+              model: ModelRef;
+              name: string;
+              thinkingLevels: ModelThinkingLevel[];
+              /** @since 0.20.0, tokens; 0 when unknown */
+              contextWindow?: number;
+              /** @since 0.20.0, dollars per million tokens; left out when unknown or free */
+              cost?: { input: number; output: number };
+          }
+        | undefined;
     /**
      * Pi's own folder, usually `~/.pi/agent`.
      * @since 0.1.0
@@ -170,6 +178,15 @@ export interface Host {
      * @since 0.13.1
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
+    /**
+     * Registers a model provider with Pi's model runtime, as a Pi extension does. `config` is Pi's own provider
+     * configuration, including the models it starts with and how it refreshes them. The last registration of a name
+     * wins. The return value removes it again and puts back the registration before it; pass it to `web.onDispose`. A
+     * removal of a registration that is not the last one changes nothing.
+     * @since 0.20.0
+     * @experimental
+     */
+    registerModelProvider(provider: string, config: ProviderConfig): () => void;
     /**
      * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.
@@ -217,6 +234,16 @@ export interface Host {
      */
     readonly text: SafeText;
     /**
+     * Fetches an address from outside (from Pi, a page, or a person) as `fetch` does, but refuses non-public ranges
+     * and current local interface addresses. It checks literal addresses, every DNS answer, and each redirect.
+     * Public addresses routed back into the network (NAT reflection or internal public ranges) are not detected.
+     * A refusal throws an `Error` with a `code`: `"POCKET_NOT_PUBLIC"`, `"POCKET_TOO_LARGE"`, or
+     * `"POCKET_REDIRECTS"`.
+     * @since 0.20.0
+     * @experimental
+     */
+    fetchPublic(url: string | URL, init?: PublicFetchInit): Promise<Response>;
+    /**
      * The thinking levels, lowest first, with the names that models and sessions use.
      * @since 0.14.0
      */
@@ -239,6 +266,28 @@ export interface SafeText {
      * @since 0.14.0
      */
     defang(text: string): string;
+}
+
+/**
+ * What `host.fetchPublic` takes besides the address: a part of `fetch`'s own init, and its limits.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface PublicFetchInit {
+    /** `GET` by default. */
+    method?: string;
+    headers?: Record<string, string> | [string, string][] | Headers;
+    /** Kept as it is, so a 307 or 308 redirect can send it again. */
+    body?: string | Uint8Array;
+    signal?: AbortSignal;
+    /** `"follow"` (default) checks each address it goes to; `"manual"` gives the redirect; `"error"` throws on one. */
+    redirect?: "follow" | "manual" | "error";
+    /** Redirects to follow at most: 5 by default, 20 at most. */
+    maxRedirects?: number;
+    /** The body's size at most, decoded, in bytes: 10 MiB by default. A larger body errors when it is read. */
+    maxBytes?: number;
+    /** The whole request at most, body included, in milliseconds: 30 s by default. */
+    timeoutMs?: number;
 }
 
 /**
@@ -428,6 +477,50 @@ export interface WebRequest {
      * @since 0.16.0
      */
     commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
+    /**
+     * The sessions that the person who asked can see now, as their session list shows them, archived ones too.
+     * @since 0.20.0
+     * @experimental
+     */
+    sessions(): readonly WebSession[];
+}
+
+/**
+ * A session in a person's session list, as `WebRequest.sessions` gives it.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface WebSession {
+    /**
+     * The session's id, a number as in its address (`/s/12`).
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly id: number;
+    /**
+     * Its title.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly title: string;
+    /**
+     * Its folder.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly cwd: string;
+    /**
+     * Whether it is archived.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly archived: boolean;
+    /**
+     * When it last moved up the list, in milliseconds since 1970.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly updatedAt: number;
 }
 
 /**
@@ -1015,6 +1108,363 @@ export type ReplyActionSpec = (
     };
 
 /**
+ * A session as the session list's extension points get it.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface SessionInfo {
+    /**
+     * The session's id, a number as in its address (`/s/12`).
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly id: number;
+    /**
+     * Its title.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly title: string;
+    /**
+     * Its folder.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly cwd: string;
+    /**
+     * Whether it is archived.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly archived: boolean;
+    /**
+     * When it last moved up the list, in milliseconds since 1970.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly updatedAt: number;
+}
+
+/**
+ * A chip under a session's title.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface SessionChip {
+    /**
+     * Its words, cut to 32 characters.
+     * @since 0.20.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Its tooltip. By default, its label.
+     * @since 0.20.0
+     * @experimental
+     */
+    title?: string;
+    /**
+     * What a tap on it does. Without it, the chip only shows, and a tap opens the session.
+     * @since 0.20.0
+     * @experimental
+     */
+    run?: () => unknown;
+}
+
+/**
+ * Chips under the titles of session rows. The list calls `chips` for each row each time it draws.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface SessionChipsSpec {
+    /**
+     * The chips' id in the module.
+     * @since 0.20.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * The chips for a session: up to 6 show. Keep it fast, and do not call `pocket` in it.
+     * @since 0.20.0
+     * @experimental
+     */
+    chips: (session: SessionInfo) => readonly SessionChip[];
+}
+
+/**
+ * An action on one or more sessions. `run` gets their ids; a sheet gets them as the prop `sessions`.
+ * @since 0.20.0
+ * @experimental
+ */
+export type SessionActionSpec = (
+    | { run: (sessions: readonly number[]) => unknown; sheet?: never }
+    | { sheet: string; run?: never }
+) & {
+    /**
+     * The action's id in the module.
+     * @since 0.20.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * The action's words, cut to 24 characters.
+     * @since 0.20.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Who it shows to: `"steer"` (by default), people who can steer, or `"view"`, viewers too.
+     * @since 0.20.0
+     * @experimental
+     */
+    access?: "steer" | "view";
+    /**
+     * The name of one of the app's icons. An action with an icon is also a button on rows, where a mouse hovers.
+     * @since 0.20.0
+     * @experimental
+     */
+    icon?: string;
+    /**
+     * An icon of your own: a stroked path in a 24 × 24 box.
+     * @since 0.20.0
+     * @experimental
+     */
+    iconPath?: string;
+};
+
+/**
+ * A filter button beside the session search. A tap does its one thing, such as open a sheet that sets `match`.
+ * @since 0.20.0
+ * @experimental
+ */
+export type SessionFilterSpec = Action & {
+    /**
+     * The button's id in the module.
+     * @since 0.20.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * The button's label.
+     * @since 0.20.0
+     * @experimental
+     */
+    title: string;
+    /**
+     * The name of one of the app's icons.
+     * @since 0.20.0
+     * @experimental
+     */
+    icon?: string;
+    /**
+     * An icon of your own: a stroked path in a 24 × 24 box.
+     * @since 0.20.0
+     * @experimental
+     */
+    iconPath?: string;
+    /**
+     * A short count or word on the button, such as how many choices are on.
+     * @since 0.20.0
+     * @experimental
+     */
+    badge?: number | string | null | false;
+    /**
+     * Whether the list keeps a session. While it is set, the filter is on and the button is lit; null turns it off.
+     * @since 0.20.0
+     * @experimental
+     */
+    match?: ((session: SessionInfo) => boolean) | null;
+    /**
+     * Runs when a person starts a session with New in the session list while the filter is on. It gets the new
+     * session's id, so that the module can make it meet the filter.
+     * @since 0.20.0
+     * @experimental
+     */
+    started?: (id: number) => unknown;
+};
+
+/**
+ * Words that find sessions. The session list's search and the launcher call `words` for each session as they search.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface SessionSearchSpec {
+    /**
+     * The words' id in the module.
+     * @since 0.20.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * The words for a session: up to 32. Keep it fast, and do not call `pocket` in it.
+     * @since 0.20.0
+     * @experimental
+     */
+    words: (session: SessionInfo) => readonly string[];
+}
+
+/**
+ * What `pocket.messages` reads.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface MessagesOptions {
+    /**
+     * The cursor a page gave, for the messages before it. Null or none: the newest.
+     * @since 0.20.0
+     * @experimental
+     */
+    before?: string | null;
+    /**
+     * How many messages, from 1 to 200. Default 50.
+     * @since 0.20.0
+     * @experimental
+     */
+    limit?: number;
+    /**
+     * Stops the read: the promise rejects with an AbortError.
+     * @since 0.20.0
+     * @experimental
+     */
+    signal?: AbortSignal;
+}
+
+/**
+ * A page of the people's messages in a session, oldest first.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface MessagePage {
+    /**
+     * The session the page is from: the one the tab showed when it was asked for.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly conversationId: number | null;
+    /**
+     * The messages, oldest first.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly messages: readonly MessageInfo[];
+    /**
+     * The cursor for the page before this one, or null at the start.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly before: string | null;
+}
+
+/**
+ * A person's message in a session.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface MessageInfo {
+    /**
+     * The message's id, for `pocket.reveal`. It names this message only, also after a reload.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly id: string;
+    /**
+     * What the person wrote, without attached files: up to 1,000 characters.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly text: string;
+    /**
+     * Whether `text` was cut.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly clipped: boolean;
+    /**
+     * Who wrote it, when known.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly by: { readonly id: string | null; readonly name: string | null };
+    /**
+     * When it was sent, in milliseconds since 1970 on the server's clock, when known.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly at: number | null;
+}
+
+/**
+ * A message box, as a key's `run` gets it: its text and selection when the key came, and `set`.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface ComposerBox {
+    /**
+     * Which box: the session's message box, or PiP's.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly where: "session" | "pip";
+    /**
+     * The box's text when the key came.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly text: string;
+    /**
+     * Where the selection starts: the caret, when nothing is selected.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly start: number;
+    /**
+     * Where the selection ends: `start`, when nothing is selected.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly end: number;
+    /**
+     * Writes new text, as typing does, so the draft is kept, and puts the caret at `start` (default: the end), or
+     * selects up to `end`.
+     * @since 0.20.0
+     * @experimental
+     */
+    set(text: string, start?: number, end?: number): void;
+}
+
+/**
+ * A key in the message boxes, the session's and PiP's. It comes before the box's own keys.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface ComposerKeySpec {
+    /**
+     * The key's id in the module.
+     * @since 0.20.0
+     * @experimental
+     */
+    id: string;
+    /**
+     * The key, such as `"Ctrl+W"`, `"Alt+Backspace"`, or `"Mod+Shift+K"`, or a list of up to 8.
+     * @since 0.20.0
+     * @experimental
+     */
+    keys: string | readonly string[];
+    /**
+     * What it does, for the Keyboard shortcuts sheet.
+     * @since 0.20.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Runs when the key is pressed in a box. Return `false` to let the key through; anything else takes it.
+     * @since 0.20.0
+     * @experimental
+     */
+    run: (box: ComposerBox) => unknown;
+}
+
+/**
  * A place in the app built from named items: `"topbar"` (the buttons after the session's title), `"status"` (the
  * status line under the message box), `"places"` (the tiles of the places and the menu), `"composer"` (the buttons on
  * the left of the message box's row), or `"reply"` (the actions under Pi's answers).
@@ -1310,6 +1760,24 @@ export interface Pocket {
      */
     openConversation(id: number | string): void;
     /**
+     * Hears which session the tab shows: the listener gets its id, or null, now and on each change. Returns how to stop.
+     * @since 0.20.0
+     * @experimental
+     */
+    onConversation(listener: (conversationId: number | null) => void): () => void;
+    /**
+     * Reads a page of the people's messages in the session the tab shows, oldest first.
+     * @since 0.20.0
+     * @experimental
+     */
+    messages(options?: MessagesOptions): Promise<MessagePage>;
+    /**
+     * Scrolls the transcript to a message, loading earlier entries first when needed. Resolves whether it shows.
+     * @since 0.20.0
+     * @experimental
+     */
+    reveal(id: string): Promise<boolean>;
+    /**
      * Calls one of the module's routes: a GET without `body`, a POST with it.
      * @since 0.14.0
      */
@@ -1383,6 +1851,36 @@ export interface Pocket {
      * @experimental
      */
     replyAction(spec: ReplyActionSpec): Added<ReplyActionSpec>;
+    /**
+     * Adds chips under the titles of rows in the session list.
+     * @since 0.20.0
+     * @experimental
+     */
+    sessionChips(spec: SessionChipsSpec): Added<SessionChipsSpec>;
+    /**
+     * Adds an action on sessions: in a row's sheet on a touch screen, and in the bar for selected sessions.
+     * @since 0.20.0
+     * @experimental
+     */
+    sessionAction(spec: SessionActionSpec): Added<SessionActionSpec>;
+    /**
+     * Adds a filter button beside the session search (the first 3 show). While its `match` is set, the list shows only what it keeps.
+     * @since 0.20.0
+     * @experimental
+     */
+    sessionFilter(spec: SessionFilterSpec): Added<SessionFilterSpec>;
+    /**
+     * Adds words that find sessions in the session list's search and the launcher.
+     * @since 0.20.0
+     * @experimental
+     */
+    sessionSearch(spec: SessionSearchSpec): Added<SessionSearchSpec>;
+    /**
+     * Adds a key in the message boxes, the session's and PiP's, before the box's own keys.
+     * @since 0.20.0
+     * @experimental
+     */
+    composerKey(spec: ComposerKeySpec): Added<ComposerKeySpec>;
     /**
      * Puts text into the message box, after what is there, for the person to send. It never sends.
      * @since 0.19.0

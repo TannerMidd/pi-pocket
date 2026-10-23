@@ -9,7 +9,7 @@ import { describe, HttpError } from "../errors.ts";
 import { exposedError, MAX_FILE_BYTES } from "../extension-web.ts";
 import { ExtensionRequest } from "../extension-request.ts";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import type { ConversationWebRequest } from "../host.ts";
+import type { ConversationWebRequest, WebSession } from "../host.ts";
 import { type ApiRequest, json, readChecked, readJson, send, SVG_CSP } from "./io.ts";
 
 /** A request to a module's route: `parts` is the path after `/api/x/`. */
@@ -123,6 +123,15 @@ export async function extensionRoute(
             context: scope.context,
             snapshot: scope.snapshot,
             commit: scope.commit,
+            // Read when the handler asks, as the person is then: a copy, so the handler cannot change the list.
+            sessions: (): WebSession[] =>
+                app.sessions(scope.current()).map((session) => ({
+                    id: session.id,
+                    title: session.title ?? "New session",
+                    cwd: session.cwd,
+                    archived: session.archived === true,
+                    updatedAt: session.updatedAt,
+                })),
             ...bound,
         };
 

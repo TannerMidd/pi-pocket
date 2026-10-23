@@ -39,6 +39,7 @@
  *   Files, commands, and find      file paths and mentions, `!` commands and notes, changes, the file viewer, find,
  *                                  messages sent before
  *   Syntax and rich markdown       code colors, and pages, images, and diffs drawn in replies
+ *   Fluid motion                   Appearance's Fluid: springs, staggered arrivals, morphing layout; last, to win
  */
 
 /* ─── Fonts, tokens, and the reset ───────────────────────────── */
@@ -54,6 +55,112 @@
     font-family: "Pocket Sans";
     src: url("/fonts/Geist.woff2") format("woff2");
     font-weight: 100 900;
+    font-display: swap;
+}
+
+/* Each font's own italic, which a browser downloads only when italic text shows (comments in code, emphasis). Fira
+   Code has none: the browser slants its upright letters. */
+@font-face {
+    font-family: "Pocket Mono";
+    src: url("/fonts/JetBrainsMono-Italic.woff2") format("woff2");
+    font-weight: 100 800;
+    font-style: italic;
+    font-display: swap;
+}
+
+/* More fonts for themes to name in --sans and --mono (docs/extensions/themes.md lists them). A browser downloads one only
+   when a theme uses it. */
+
+/* The Nerd Fonts icons alone (their Mono build: one cell wide), in the private use areas they fill. */
+@font-face {
+    font-family: "Pocket Nerd Symbols";
+    src: url("/fonts/NerdFontsSymbolsMono.woff2") format("woff2");
+    font-display: swap;
+    unicode-range: U+E000-F8FF, U+F0000-F1AF0;
+}
+
+@font-face {
+    font-family: "Pocket Fira Code";
+    src: url("/fonts/FiraCode-VF.woff2") format("woff2");
+    font-weight: 300 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket IBM Plex Mono";
+    src: url("/fonts/IBMPlexMono-Variable.woff2") format("woff2");
+    font-weight: 100 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket IBM Plex Mono";
+    src: url("/fonts/IBMPlexMono-Variable-Italic.woff2") format("woff2");
+    font-weight: 100 700;
+    font-style: italic;
+    font-display: swap;
+}
+
+/* Iosevka has no variable font: the weights the app uses, upright and italic. 800 shows as 700, 100 as 400. Each file
+   keeps every character but drops the optional letter variants (ss and cv features) the app never turns on, which
+   were three quarters of its size. */
+@font-face {
+    font-family: "Pocket Iosevka";
+    src: url("/fonts/Iosevka-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Iosevka";
+    src: url("/fonts/Iosevka-SemiBold.woff2") format("woff2");
+    font-weight: 600;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Iosevka";
+    src: url("/fonts/Iosevka-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Iosevka";
+    src: url("/fonts/Iosevka-Italic.woff2") format("woff2");
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Iosevka";
+    src: url("/fonts/Iosevka-SemiBoldItalic.woff2") format("woff2");
+    font-weight: 600;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Iosevka";
+    src: url("/fonts/Iosevka-BoldItalic.woff2") format("woff2");
+    font-weight: 700;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Inter";
+    src: url("/fonts/InterVariable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Pocket Inter";
+    src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: italic;
     font-display: swap;
 }
 
@@ -187,12 +294,41 @@
     --t-fade: 175ms; /* fadeIn */
     --t-border: 540ms; /* border */
     --t-hover: 140ms;
+    /* Fluid motion's own (Appearance → Motion → Fluid): a spring that settles with a 2% overshoot (damping 0.78), a
+     * glide that slows to rest without one, an exit that speeds away, and the step between staggered arrivals. */
+    --ease-spring: linear(
+        0,
+        0.005 1.3%,
+        0.037 3.7%,
+        0.109 6.8%,
+        0.222 10.5%,
+        0.362 14.6%,
+        0.514 19.2%,
+        0.66 24.3%,
+        0.785 29.6%,
+        0.882 35.4%,
+        0.95 41.4%,
+        0.992 47.8%,
+        1.013 54.4%,
+        1.02 61.4%,
+        1.019 68.6%,
+        1.014 76.1%,
+        1.009 83.8%,
+        1.005 91.8%,
+        1
+    );
+    --ease-glide: cubic-bezier(0.16, 1, 0.3, 1); /* easeOutExpo */
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+    --t-spring: 560ms;
+    --t-glide: 420ms;
+    --t-exit: 150ms;
+    --stagger: 24ms;
 
     /* Ligatures: none, as in a terminal. A theme may turn on a font's own (`contextual`, `normal`). */
     --ligatures: none;
     --mono:
-        "Pocket Mono", "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo,
-        Consolas, monospace;
+        "Pocket Mono", "Pocket Nerd Symbols", "JetBrains Mono", "JetBrainsMono Nerd Font",
+        ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --sans: "Pocket Sans", "Geist", ui-sans-serif, system-ui, sans-serif;
     color-scheme: dark;
 }
@@ -658,11 +794,11 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    :root:not([data-motion="full"]) .pulse,
-    :root:not([data-motion="full"]) .live-dot,
-    :root:not([data-motion="full"]) .agents-dot.working,
-    :root:not([data-motion="full"]) .session-working,
-    :root:not([data-motion="full"]) .session-placeholder span {
+    :root:not([data-motion="full"], [data-motion="fluid"]) .pulse,
+    :root:not([data-motion="full"], [data-motion="fluid"]) .live-dot,
+    :root:not([data-motion="full"], [data-motion="fluid"]) .agents-dot.working,
+    :root:not([data-motion="full"], [data-motion="fluid"]) .session-working,
+    :root:not([data-motion="full"], [data-motion="fluid"]) .session-placeholder span {
         animation: none !important;
     }
 }
@@ -2052,6 +2188,14 @@ kbd {
     animation: unroll var(--t-in) var(--ease-out);
 }
 
+/* Above a long group's newest steps: it shows the rest, from the rule's left. */
+.timeline-earlier {
+    display: block;
+    margin: 0 0 calc(4px * var(--space-y))
+        calc(var(--timeline-x) + var(--step-mark-size) / 2 + var(--step-gap));
+    padding: 4px 0;
+}
+
 .timeline::before {
     content: "";
     position: absolute;
@@ -2882,6 +3026,24 @@ pre.diff .del {
     color: var(--muted);
 }
 
+/* Tapped open, one's own message: a row of buttons under it to move it to Steer or Queue, or send it now. */
+.queued:has(> .queued-actions) {
+    flex-wrap: wrap;
+}
+
+.queued-actions {
+    flex-basis: 100%;
+    display: flex;
+    gap: 6px;
+    padding-bottom: 8px;
+}
+
+/* Interrupt, tapped once: the color of stopping the run. */
+.queued-actions .button.danger {
+    border-color: var(--err);
+    color: var(--err);
+}
+
 /* A thumb's room around the small mark. */
 @media (pointer: coarse) {
     .queued .queued-remove::after {
@@ -3031,6 +3193,8 @@ pre.diff .del {
     max-height: 40vh;
     font-size: 15px;
     line-height: 1.5;
+    /* As tall as what is written, to the most above; browsers without this measure it in script (`fitBox`). */
+    field-sizing: content;
 }
 
 /* Touch screens keep 16px, below which iOS zooms into the field. */
@@ -3379,7 +3543,7 @@ pre.diff .del {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    :root:not([data-motion="full"]) .mic-button.listening::after {
+    :root:not([data-motion="full"], [data-motion="fluid"]) .mic-button.listening::after {
         display: none;
     }
 }
@@ -4789,6 +4953,10 @@ pre.diff .del {
     .session-row.three-acts:hover .session-side {
         min-width: 86px;
     }
+    /* And an extension's action (`pocket.sessionAction` with an icon). */
+    .session-row.four-acts:hover .session-side {
+        min-width: 116px;
+    }
     /* Keyboard focus in the row shows them too, not the focus a click leaves on the open session's row. Kept apart
        from the rules above: a browser without :has() drops only these. */
     .session-row:has(:focus-visible) .session-act {
@@ -4805,6 +4973,9 @@ pre.diff .del {
     .session-row.three-acts:has(:focus-visible) .session-side {
         min-width: 86px;
     }
+    .session-row.four-acts:has(:focus-visible) .session-side {
+        min-width: 116px;
+    }
     /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
     :root.selecting .session-row .session-act {
         opacity: 0;
@@ -4812,6 +4983,127 @@ pre.diff .del {
     :root.selecting .session-row .session-side {
         opacity: 1;
         min-width: 0;
+    }
+}
+
+/*
+ * Extensions' chips under a row's title (`pocket.sessionChips`), such as tags. The row's button grows to hold them, so
+ * its fill and its click take the whole row; only the chips that do something take clicks of their own.
+ */
+.session-row.with-chips .session {
+    height: calc(24px + 12px * var(--space-y) + 20px);
+    padding-bottom: 20px;
+}
+
+.session-row.with-chips .session-actions {
+    top: calc(12px + 6px * var(--space-y));
+}
+
+.session-chips {
+    position: absolute;
+    left: calc(var(--linked-depth, 0) * 14px + 30px);
+    right: 10px;
+    bottom: calc(4px + 2px * var(--space-y));
+    display: flex;
+    gap: 4px;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.session-chip {
+    flex: none;
+    max-width: 100%;
+    height: 17px;
+    padding: 0 6px;
+    overflow: hidden;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-tag);
+    background: var(--card-2);
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 15px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+button.session-chip {
+    pointer-events: auto;
+    cursor: pointer;
+    transition:
+        color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    button.session-chip:hover {
+        color: var(--accent);
+        border-color: var(--accent-line);
+    }
+}
+
+/* A taller target for a finger, past the chip's own edges. */
+@media (pointer: coarse) {
+    button.session-chip {
+        position: relative;
+    }
+    button.session-chip::before {
+        content: "";
+        position: absolute;
+        inset: -6px -2px;
+    }
+}
+
+/* While taps select rows (after Select), a tap on a chip selects its row too. */
+.sessions.tap-selecting button.session-chip {
+    pointer-events: none;
+}
+
+/* A linked row's branch turns into its title's line, not the middle of the taller row. */
+.session-row.with-chips .session-branches > .elbow::after {
+    bottom: auto;
+    height: calc(13px + 6px * var(--space-y));
+}
+
+/* Extensions' filters beside the search (`pocket.sessionFilter`): lit while one narrows the list. */
+.search-filter {
+    position: relative;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--r-seg);
+    color: var(--muted);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .search-filter:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+}
+
+.search-filter.on {
+    color: var(--accent);
+}
+
+.search-filter.badge-host .badge {
+    top: -6px;
+    right: -7px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    font-size: 0.6rem;
+}
+
+@media (pointer: coarse) {
+    .search-filter::before {
+        content: "";
+        position: absolute;
+        inset: -9px -4px;
     }
 }
 
@@ -4840,6 +5132,7 @@ pre.diff .del {
     flex: none;
     margin-top: 6px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 5px;
     min-width: 0;
@@ -9065,6 +9358,112 @@ textarea.notes {
 .look-duplicate input {
     flex: 1;
     min-width: 160px;
+}
+
+/* The owner's fonts for the theme in use: a menu each for words and code, ligatures, and a preview in them. */
+.font-tools {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px 12px;
+    margin: 10px 0 4px;
+}
+
+.font-menu {
+    display: grid;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.font-menu .switch {
+    justify-self: start;
+}
+
+.font-menu strong {
+    padding: 6px 0;
+    font-weight: 500;
+    color: var(--text);
+    font-size: 14px;
+}
+
+.font-title,
+.font-duplicate {
+    grid-column: 1 / -1;
+}
+
+.font-title {
+    margin: 4px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.font-title em {
+    font-style: normal;
+    color: var(--accent);
+}
+
+.font-duplicate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.font-duplicate .look-duplicate {
+    flex: 1;
+    margin: 0;
+}
+
+.text-size {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.text-size-field {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.text-size-field input {
+    width: 4.5rem;
+    padding: 0.35rem 0.5rem;
+    text-align: right;
+    font-family: var(--mono);
+}
+
+@media (max-width: 480px) {
+    .setting-row:has(.text-size) {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .setting-row:has(.text-size) .setting-text {
+        flex-basis: 100%;
+    }
+}
+
+.font-preview {
+    grid-column: 1 / -1;
+    padding: 10px 12px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.font-preview code {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--mono);
+    white-space: pre;
+    overflow-x: auto;
 }
 
 /* ─── Sign in: the app's screen (the server's pages are under Notices) ─── */
@@ -16121,4 +16520,516 @@ pre.gallery-code {
 
 .gallery-change.changed {
     color: var(--warn);
+}
+
+/* ─── Fluid motion ─────────────────────────────────────────── */
+
+/*
+ * Appearance → Motion → Fluid: the same app, moving more. What floats over the page arrives on a spring and leaves
+ * quickly; what it holds follows a step behind; layout changes morph (theme.js, `morph`); a pressed control springs
+ * back. Only transform and opacity move, apart from a few small things (a notice's blur, the message box's glow), so a
+ * long session costs nothing more. Nothing waits before it can be used: arrivals take pointers from their first frame,
+ * and what leaves finishes inside the time the app keeps it (usePresence, ui.js). Last in the file, so it wins over
+ * the usual motion at the same specificity. Auto never picks it: it is chosen.
+ */
+:root[data-motion="fluid"] {
+    --ease-out: var(--ease-glide);
+}
+
+@supports not (animation-timing-function: linear(0, 1)) {
+    :root {
+        --ease-spring: var(--ease-glide);
+    }
+}
+
+@keyframes fluid-fade {
+    from {
+        opacity: 0;
+    }
+}
+
+@keyframes fluid-fade-out {
+    to {
+        opacity: 0;
+    }
+}
+
+/* What floats near the middle: up a little, and from 95%. The spring carries the size; the fade is quicker. */
+@keyframes fluid-float-in {
+    from {
+        transform: translateY(10px) scale(0.95);
+    }
+}
+
+@keyframes fluid-float-out {
+    to {
+        opacity: 0;
+        transform: translateY(4px) scale(0.97);
+    }
+}
+
+/* What a sheet, a menu, or a group holds: each part a step after the one before. */
+@keyframes fluid-rise {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+}
+
+@keyframes fluid-drop {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+}
+
+/* The scrim: a soft frost over the app as it dims. Its blur stays still; only its opacity moves, quickly, since what
+ * it holds fades with it. */
+:root[data-motion="fluid"] .overlay:not(.pop-overlay),
+:root[data-motion="fluid"] .launcher-overlay {
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    animation: fluid-fade var(--t-fade) var(--ease-glide);
+}
+
+:root[data-motion="fluid"] .leaving .overlay:not(.pop-overlay),
+:root[data-motion="fluid"] .leaving.launcher-overlay {
+    animation: fluid-fade-out var(--t-exit) var(--ease-exit) forwards;
+}
+
+/* Phones: a sheet glides up from the bottom edge. A spring would lift it off the edge, so it slows to rest. */
+:root[data-motion="fluid"] .sheet {
+    animation: sheet-up var(--t-glide) var(--ease-glide);
+}
+
+:root[data-motion="fluid"] .leaving .sheet {
+    animation: sheet-down 190ms var(--ease-exit) forwards;
+}
+
+/* What a sheet holds rises behind it, the first eight parts a step apart. */
+:root[data-motion="fluid"] .sheet-body > :nth-child(-n + 8),
+:root[data-motion="fluid"] .nav-menu .places > :nth-child(-n + 9) {
+    animation: fluid-rise var(--t-glide) var(--ease-glide) backwards;
+    animation-delay: calc(50ms + var(--fluid-i, 0) * var(--stagger));
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(2) {
+    --fluid-i: 1;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(3) {
+    --fluid-i: 2;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(4) {
+    --fluid-i: 3;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(5) {
+    --fluid-i: 4;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(6) {
+    --fluid-i: 5;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(7) {
+    --fluid-i: 6;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(8) {
+    --fluid-i: 7;
+}
+
+:root[data-motion="fluid"] :is(.sheet-body, .places) > :nth-child(9) {
+    --fluid-i: 8;
+}
+
+/* Wide screens: a sheet floats in on the spring, and the menu grows from its corner by the button. */
+@media (min-width: 700px) {
+    :root[data-motion="fluid"] .sheet {
+        animation:
+            fluid-fade var(--t-fade) var(--ease-glide),
+            fluid-float-in var(--t-spring) var(--ease-spring);
+    }
+    :root[data-motion="fluid"] .leaving .sheet {
+        animation: fluid-float-out var(--t-exit) var(--ease-exit) forwards;
+    }
+    :root[data-motion="fluid"] .nav-menu {
+        transform-origin: 85% 0;
+    }
+}
+
+/* The launcher: from just above, as if it dropped into place; its results follow. */
+:root[data-motion="fluid"] .launcher {
+    transform-origin: 50% 0;
+    animation:
+        fluid-fade var(--t-fade) var(--ease-glide),
+        fluid-float-in var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] .launcher-list {
+    animation: fluid-rise var(--t-glide) var(--ease-glide) 40ms backwards;
+}
+
+:root[data-motion="fluid"] .leaving .launcher {
+    animation: fluid-float-out 140ms var(--ease-exit) forwards;
+}
+
+/* Menus up from a control (the model, the branch): from the control's side. */
+:root[data-motion="fluid"] .pop-menu {
+    transform-origin: 30% 100%;
+    animation:
+        fluid-fade var(--t-fade) var(--ease-glide),
+        fluid-float-in var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] .pop-menu.down {
+    transform-origin: 30% 0;
+    animation:
+        fluid-fade var(--t-fade) var(--ease-glide),
+        pop-menu-down var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] .leaving .pop-menu,
+:root[data-motion="fluid"] .leaving .pop-menu.down {
+    animation: fluid-float-out var(--t-exit) var(--ease-exit) forwards;
+}
+
+/* The drawer glides in; the list in it follows a little behind, as if pulled. */
+:root[data-motion="fluid"] .drawer {
+    animation: drawer-in var(--t-glide) var(--ease-glide);
+}
+
+:root[data-motion="fluid"] .drawer .session-items {
+    animation: fluid-drawer-items var(--t-spring) var(--ease-glide) backwards;
+}
+
+@keyframes fluid-drawer-items {
+    from {
+        opacity: 0;
+        transform: translateX(-28px);
+    }
+}
+
+:root[data-motion="fluid"] .leaving .drawer {
+    animation: drawer-out 190ms var(--ease-exit) forwards;
+}
+
+/* Notices: down from the top edge, out of a soft blur, and back up into it. */
+:root[data-motion="fluid"] .notice {
+    animation:
+        fluid-fade var(--t-fade) var(--ease-glide),
+        fluid-toast-in var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] .notice.leaving {
+    animation: fluid-toast-out var(--t-exit) var(--ease-exit) forwards;
+}
+
+@keyframes fluid-toast-in {
+    from {
+        translate: 0 -14px;
+        scale: 0.94;
+        filter: blur(4px);
+    }
+    60% {
+        filter: blur(0);
+    }
+}
+
+@keyframes fluid-toast-out {
+    to {
+        opacity: 0;
+        translate: 0 -10px;
+        scale: 0.96;
+        filter: blur(3px);
+    }
+}
+
+/* A session opened: its conversation settles up into place. */
+:root[data-motion="fluid"] .transcript {
+    animation: fluid-rise var(--t-glide) var(--ease-glide);
+}
+
+/* A message sent lifts off from the message box below it, on the spring. */
+:root[data-motion="fluid"] .user-row.enter {
+    transform-origin: 100% 100%;
+    animation:
+        fluid-fade var(--t-fade) var(--ease-glide),
+        fluid-sent var(--t-spring) var(--ease-spring) backwards;
+}
+
+@keyframes fluid-sent {
+    from {
+        transform: translateY(28px) scale(0.96);
+    }
+}
+
+/* Pi's answer, what it did, and reports: quieter, a short rise. */
+:root[data-motion="fluid"] :is(.reply, .activity, .report).enter {
+    animation: fluid-rise var(--t-glide) var(--ease-glide) backwards;
+}
+
+/* While Pi answers, each new paragraph, list, or code block fades in; what is already there never moves. */
+:root[data-motion="fluid"] .md.streaming > .md-part {
+    animation: fluid-fade 320ms var(--ease-glide);
+}
+
+/* The caret breathes instead of blinking. */
+:root[data-motion="fluid"] .md.streaming > :last-child:not(.md-part)::after,
+:root[data-motion="fluid"] .md.streaming > .md-part:last-child > :last-child::after {
+    animation: fluid-caret 1.1s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes fluid-caret {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0.2;
+    }
+}
+
+/* A group of steps opening: it unrolls on the glide, and its first steps drop in one after another. */
+:root[data-motion="fluid"] :is(.timeline, .activity-thought, .step-body) {
+    animation: unroll var(--t-glide) var(--ease-glide);
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(-n + 10) {
+    animation: fluid-drop var(--t-glide) var(--ease-glide) backwards;
+    animation-delay: calc(30ms + var(--fluid-i, 0) * var(--stagger));
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(2) {
+    --fluid-i: 1;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(3) {
+    --fluid-i: 2;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(4) {
+    --fluid-i: 3;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(5) {
+    --fluid-i: 4;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(6) {
+    --fluid-i: 5;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(7) {
+    --fluid-i: 6;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(8) {
+    --fluid-i: 7;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(9) {
+    --fluid-i: 8;
+}
+
+:root[data-motion="fluid"] .timeline.unrolling > :nth-child(10) {
+    --fluid-i: 9;
+}
+
+/* Chevrons and the sliding tabs' thumb turn and slide on the spring. */
+:root[data-motion="fluid"] :is(.chev, .agents-chevron) {
+    transition: transform var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] .slide-x {
+    transition:
+        transform var(--t-spring) var(--ease-spring),
+        width var(--t-glide) var(--ease-glide);
+}
+
+/* Pressed, a control sinks at once; let go, it springs back. */
+:root[data-motion="fluid"] :is(.button, .icon-button) {
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out),
+        transform var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] :is(.stop-button, .send-button) {
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out),
+        transform var(--t-spring) var(--ease-spring);
+}
+
+:root[data-motion="fluid"] :is(.button, .icon-button):active {
+    transition-duration: var(--t-hover), var(--t-hover), var(--t-hover), 70ms;
+}
+
+:root[data-motion="fluid"] :is(.stop-button, .send-button):active {
+    transition-duration: var(--t-hover), var(--t-hover), 70ms;
+}
+
+/* Send lights up: its arrow pops in on the spring. */
+:root[data-motion="fluid"] .send-button.ready .icon {
+    animation: fluid-arrow var(--t-spring) var(--ease-spring);
+}
+
+@keyframes fluid-arrow {
+    from {
+        transform: translateY(5px) scale(0.6);
+        opacity: 0.4;
+    }
+}
+
+/* The message box: a soft ring of the accent grows around it while it has the focus. */
+:root[data-motion="fluid"] .composer {
+    transition:
+        border-color var(--t-border) var(--ease-glide),
+        box-shadow var(--t-border) var(--ease-glide);
+}
+
+:root[data-motion="fluid"] .composer:focus-within {
+    box-shadow:
+        var(--shadow),
+        0 0 0 4px color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+/* Panels beside the conversation, and screens pushed over it on phones: in on the spring or the glide. */
+:root[data-motion="fluid"] .layout > .people.window {
+    animation:
+        fluid-fade var(--t-fade) var(--ease-glide),
+        people-in var(--t-spring) var(--ease-spring) backwards;
+}
+
+:root[data-motion="fluid"] .layout > .people.window.leaving {
+    animation: people-out var(--t-exit) var(--ease-exit) forwards;
+}
+
+@media (max-width: 959px) {
+    :root[data-motion="fluid"][data-route="forward"] .pane > .scroller {
+        animation: route-forward var(--t-glide) var(--ease-glide);
+    }
+    :root[data-motion="fluid"][data-route="back"] .pane > .scroller,
+    :root[data-motion="fluid"][data-route="back"] .home-list {
+        animation: route-back var(--t-glide) var(--ease-glide);
+    }
+}
+
+@media (max-width: 1099px) {
+    :root[data-motion="fluid"] .layout > :is(.files-tile, .browser, .ext-panel).window {
+        animation: push-in var(--t-glide) var(--ease-glide);
+    }
+    :root[data-motion="fluid"] .layout > :is(.files-tile, .browser, .ext-panel).window.leaving {
+        animation: push-out 220ms var(--ease-exit) forwards;
+    }
+}
+
+/*
+ * Layout changes morph (theme.js, `morph`): folding the sidebar, Width, and tiling. The windows slide and resize as
+ * one; what they hold keeps its size, held to its window's top left (the sidebar) or top middle (the conversation), so
+ * no text stretches, and fades through: the old out quickly, then the new in. Notices keep their place above.
+ */
+:root.layout-vt .layout > .sidebar {
+    transition: none;
+    view-transition-name: fluid-sidebar;
+}
+
+:root.layout-vt .layout > .pane {
+    view-transition-name: fluid-pane;
+}
+
+:root.layout-vt .notices {
+    view-transition-name: fluid-notices;
+}
+
+:root.layout-vt::view-transition-group(*) {
+    animation-duration: var(--t-glide);
+    animation-timing-function: var(--ease-glide);
+}
+
+/* Each window keeps its ground while what it holds fades through. */
+:root.layout-vt::view-transition-group(fluid-sidebar) {
+    overflow: clip;
+    background: var(--panel);
+}
+
+:root.layout-vt::view-transition-group(fluid-pane) {
+    overflow: clip;
+    background: var(--bg);
+}
+
+:root.layout-vt[data-tiling="on"]::view-transition-group(fluid-sidebar),
+:root.layout-vt[data-tiling="on"]::view-transition-group(fluid-pane) {
+    border-radius: var(--r-window);
+}
+
+:root.layout-vt::view-transition-old(fluid-sidebar),
+:root.layout-vt::view-transition-new(fluid-sidebar) {
+    height: 100%;
+    object-fit: none;
+    object-position: 0 0;
+}
+
+:root.layout-vt::view-transition-old(fluid-pane),
+:root.layout-vt::view-transition-new(fluid-pane) {
+    height: 100%;
+    object-fit: none;
+    object-position: 50% 0;
+}
+
+:root.layout-vt::view-transition-old(*),
+:root.layout-vt::view-transition-new(*) {
+    animation-duration: var(--t-fade);
+    animation-timing-function: var(--ease-glide);
+}
+
+:root.layout-vt::view-transition-old(fluid-sidebar),
+:root.layout-vt::view-transition-old(fluid-pane) {
+    animation: fluid-fade-out 110ms var(--ease-exit) both;
+}
+
+:root.layout-vt::view-transition-new(fluid-sidebar),
+:root.layout-vt::view-transition-new(fluid-pane) {
+    animation: fluid-fade var(--t-glide) var(--ease-glide) 80ms both;
+}
+
+/* A page Pi showed in its reply: the card is a code block (`.code.rich`) between the words around it. */
+.inline-row {
+    min-width: 0;
+}
+
+.inline-row > .code {
+    margin: 0;
+}
+
+/* The artifact's name as it was written, with its version; its buttons never break over two lines. */
+.inline-artifact .code-lang {
+    text-transform: none;
+}
+
+.inline-artifact .rich-run,
+.inline-artifact .rich-tabs button,
+.inline-artifact .code-head .copy {
+    white-space: nowrap;
+}
+
+/* On a phone the bar has two lines: the name, then the buttons. */
+@media (max-width: 699px) {
+    .inline-artifact .code-head {
+        flex-wrap: wrap;
+        height: auto;
+        row-gap: 2px;
+        padding-block: 4px;
+    }
+
+    .inline-artifact .code-lang {
+        flex: 1 0 100%;
+    }
+
+    .inline-artifact .rich-tabs {
+        margin-left: 0;
+    }
 }

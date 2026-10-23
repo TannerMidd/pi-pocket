@@ -145,6 +145,7 @@ const DID = {
     ls: { verb: "listed", noun: "folder", by: "path" },
     browser: { verb: "used the browser" },
     artifact: { verb: "published", noun: "artifact", by: "id" },
+    artifact_inline: { verb: "published", noun: "artifact", by: "id" },
     // PiP's.
     sessions: { verb: "looked over sessions" },
     session_read: { verb: "read", noun: "session", by: "session" },
@@ -297,6 +298,9 @@ export function summarize(steps, thinking) {
     return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
+/** The tool whose pages show as cards in the reply (`src/server/extensions/artifacts.ts`). */
+export const INLINE_TOOL = "artifact_inline";
+
 /** Words worth showing: a model can send an empty or blank text block between its calls. */
 export const says = (block) => block.type === "text" && block.text.trim() !== "";
 
@@ -316,6 +320,8 @@ export function itemsOf(rows, partial, { prefix = "", from = null, talk = false 
     let anchor = from?.anchor ?? "top";
     let groups = from?.groups ?? 0;
     let replies = from?.replies ?? 0;
+    // Cards of calls with no id: keyed by place, as a provider that sends none leaves no other name.
+    let inlines = 0;
     // A group the rows before left open goes on here, under its name.
     let open = from?.open ?? null;
     let group = null;
@@ -339,7 +345,31 @@ export function itemsOf(rows, partial, { prefix = "", from = null, talk = false 
         entry.blocks.forEach((block, index) => {
             const growing = streaming && index === entry.blocks.length - 1;
 
-            if (block.type === "thinking" || block.type === "toolCall") {
+            // A page shown in the reply sits between the words around it, not folded into a group of steps.
+            if (block.type === "toolCall" && block.name === INLINE_TOOL) {
+                words = null;
+                close();
+                let key = `${prefix}i${block.id || `${anchor}:${inlines++}`}`;
+
+                // A provider can use an id twice: the second is named by its place, as a group's steps are.
+                if (items.some((item) => item.key === key)) {
+                    key = `${key}#${items.length}`;
+                }
+
+                items.push({
+                    type: "inline",
+                    key,
+                    anchors: anchored || speaks ? [] : [entry.id],
+                    step: {
+                        block,
+                        entry: streaming ? undefined : entry,
+                        streaming: growing,
+                        canRun: streaming || entry === asking,
+                    },
+                });
+                // Its words, when it has them, take the jump to this answer.
+                anchored ||= !speaks;
+            } else if (block.type === "thinking" || block.type === "toolCall") {
                 words = null;
 
                 if (group === null) {

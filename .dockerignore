@@ -1,0 +1,22 @@
+.git
+.github
+.gitignore
+.gitattributes
+
+node_modules
+npm-debug.log*
+*.log
+
+# Container data and external folders: never part of the build context.
+data
+extensions
+themes
+pi
+agents
+workspace
+
+.env
+.env.*
+.DS_Store
+result
+result-*

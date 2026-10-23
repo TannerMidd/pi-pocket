@@ -1,0 +1,150 @@
+/* Session tags' sheets: in the app's colors, with targets a thumb can hit. */
+.tags-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.tags-sheet p {
+    margin: 0;
+}
+
+.tags-input {
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+}
+
+.tags-choices {
+    display: flex;
+    flex-direction: column;
+    max-height: min(50vh, 360px);
+    overflow-y: auto;
+}
+
+.tags-choice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 4px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+}
+
+.tags-choice input {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
+}
+
+.tags-choice:last-child {
+    border-bottom: 0;
+}
+
+.tags-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tags-chips,
+.tags-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tags-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding-left: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-tag);
+    background: var(--card);
+    color: var(--text);
+    font-size: 13px;
+}
+
+.tags-chip > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tags-chip.struck > span {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.tags-chip-x {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    color: var(--muted);
+}
+
+.tags-add {
+    display: flex;
+    gap: 8px;
+}
+
+.tags-add .tags-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.tags-suggestion {
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px dashed var(--line);
+    border-radius: var(--r-tag);
+    color: var(--muted);
+    font-size: 13px;
+}
+
+@media (hover: hover) {
+    .tags-chip-x:hover {
+        color: var(--text);
+    }
+
+    .tags-suggestion:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+}
+
+.tags-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+@media (pointer: coarse) {
+    .tags-input,
+    .tags-chip-x,
+    .tags-suggestion {
+        min-height: 40px;
+    }
+
+    .tags-input {
+        font-size: 16px;
+    }
+
+    .tags-chip-x {
+        width: 36px;
+    }
+}

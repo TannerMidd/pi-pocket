@@ -25,8 +25,12 @@ import {
     setPrefs,
     themeDefault,
     themeIds,
+    textSizeOf,
     themeVars,
     varsStyle,
+    MAX_TEXT,
+    MIN_TEXT,
+    STEP_TEXT,
 } from "../theme.js";
 import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
@@ -258,6 +262,186 @@ function LookTools() {
 }
 
 /**
+ * The conversation's text size: a few usual sizes, and a field for any other, MIN_TEXT to MAX_TEXT in half pixels. The
+ * field takes a size once it is one (14 on the way to 145 shows at once); Enter or leaving it keeps it in range.
+ */
+function TextSize({ size }) {
+    const [draft, setDraft] = useState(null);
+
+    // A size set another way (a button, another tab) shows at once, over what was being typed; what is being typed
+    // stays while it means this size.
+    useEffect(() => {
+        if (draft !== null && textSizeOf(draft) !== size) {
+            setDraft(null);
+        }
+    }, [size]);
+
+    const commit = (value) => {
+        setDraft(null);
+        setPrefs({ text: textSizeOf(value) });
+    };
+
+    return html`<div class="text-size" role="group" aria-label=${t("Text size")}>
+        <div class="segmented">
+            ${[13, 15, 17, 20].map(
+                (each) => html`<button
+                    class=${size === each ? "on" : ""}
+                    aria-pressed=${size === each}
+                    onClick=${() => commit(each)}
+                >
+                    ${each}
+                </button>`,
+            )}
+        </div>
+        <label class="text-size-field">
+            <input
+                type="number"
+                inputmode="decimal"
+                min=${MIN_TEXT}
+                max=${MAX_TEXT}
+                step=${STEP_TEXT}
+                aria-label=${t("Text size in pixels")}
+                value=${draft ?? size}
+                onInput=${(event) => {
+                    const value = event.currentTarget.value;
+                    const number = Number(value);
+
+                    setDraft(value);
+
+                    if (value !== "" && number >= MIN_TEXT && number <= MAX_TEXT) {
+                        setPrefs({ text: textSizeOf(number) });
+                    }
+                }}
+                onChange=${(event) =>
+                    commit(event.currentTarget.value === "" ? size : event.currentTarget.value)}
+                onBlur=${() => setDraft(null)}
+                onKeyDown=${(event) => event.key === "Enter" && event.currentTarget.blur()}
+            />
+            <span>px</span>
+        </label>
+    </div>`;
+}
+
+/** The fonts Appearance sets in a theme (themes.ts THEME_FONTS): the family, and its name here. */
+const TEXT_FONTS = [
+    ["Pocket Sans", "Geist"],
+    ["Pocket Inter", "Inter"],
+    ["system-ui", "System Sans"],
+    ["Pocket Mono", "JetBrains Mono"],
+    ["Pocket Fira Code", "Fira Code"],
+    ["Pocket IBM Plex Mono", "IBM Plex Mono"],
+    ["Pocket Iosevka", "Iosevka"],
+    ["ui-monospace", "System Mono"],
+];
+const CODE_FONTS = TEXT_FONTS.slice(3);
+
+/** A font's name here, by the family a stylesheet names first; the app's own for none. */
+const fontName = (fonts, family) =>
+    (fonts.find(([each]) => each === family) ?? (family ? [family, family] : fonts[0]))[1];
+
+/**
+ * The fonts of the theme in use: for words, for code, and ligatures, with a preview. The owner sets them on a theme of
+ * their own, saved into it (its `fonts.css`), so everyone who uses it sees them; a theme that comes with the app shows
+ * its own, with a way to make a copy that can change.
+ */
+function FontTools() {
+    const [naming, setNaming] = useState(false);
+    const id = prefs().look ?? BASE_LOOK;
+    const look = lookInfo(id);
+
+    if (!look?.usable) {
+        return null;
+    }
+
+    const set = look.typography ?? { ligatures: false };
+    const own = set.own ?? {};
+    // Only what changed: the server keeps the rest as it was saved, and null goes back to the theme's own.
+    const save = (patch) =>
+        attempt(() => api(`themes/${encodeURIComponent(id)}/fonts`, patch, { method: "PUT" }));
+    // A family of the theme's own, not one of these, shows as itself, as "": choosing it goes back to it.
+    const custom = (fonts, key) =>
+        [set[key], own[key]].find((family) => family && !fonts.some(([each]) => each === family));
+
+    const menu = (label, fonts, key) => {
+        const theirs = custom(fonts, key);
+        const value = theirs !== undefined && set[key] === theirs ? "" : (set[key] ?? fonts[0][0]);
+
+        return look.builtIn
+            ? html`<div class="font-menu">
+                  <span>${label}</span>
+                  <strong>${fontName(fonts, set[key])}</strong>
+              </div>`
+            : html`<label class="font-menu">
+                  <span>${label}</span>
+                  <select
+                      value=${value}
+                      onChange=${(event) => save({ [key]: event.currentTarget.value || null })}
+                  >
+                      ${fonts.map(
+                          ([family, name]) => html`<option value=${family}>${name}</option>`,
+                      )}
+                      ${theirs && html`<option value="">${theirs}</option>`}
+                  </select>
+              </label>`;
+    };
+
+    return html`<section class="font-tools" aria-label=${t("Fonts for {{theme}}", { theme: look.name })}>
+        <h4 class="font-title">${t("Fonts for")} <em>${look.name}</em></h4>
+        ${menu(t("Text font"), TEXT_FONTS, "sans")}
+        ${menu(t("Code font"), CODE_FONTS, "mono")}
+        <div class="font-menu">
+            <span>${t("Ligatures")}</span>
+            ${
+                look.builtIn
+                    ? html`<strong>${set.ligatures ? t("On") : t("Off")}</strong>`
+                    : html`<div>
+                          <${Switch}
+                              on=${set.ligatures}
+                              label=${t("Ligatures")}
+                              onChange=${() => save({ ligatures: !set.ligatures })}
+                          />
+                          <button
+                              class="button small ghost"
+                              onClick=${() => save({ ligatures: null })}
+                          >
+                              ${t("Theme's own")}
+                          </button>
+                      </div>`
+            }
+        </div>
+        <div class="font-preview" role="group" aria-label=${t("Font preview")}>
+            The quick brown fox jumps over the lazy dog. <em>Emphasis.</em>
+            <code>const ok = (x) => x !== 42; <span class="hl-com">// a comment</span></code>
+        </div>
+        ${
+            look.builtIn &&
+            (naming
+                ? html`<div class="font-duplicate">
+                      <${Duplicate}
+                          from=${id}
+                          label=${look.name}
+                          onDone=${(made) => {
+                              setNaming(false);
+
+                              if (made) {
+                                  chooseLook(made);
+                              }
+                          }}
+                      />
+                  </div>`
+                : html`<div class="font-duplicate">
+                      <button class="button" onClick=${() => setNaming(true)}>
+                          <${Icon} name="copy" size=${14} /> ${t("Duplicate to change")}
+                      </button>
+                      <span class="muted small">
+                          ${t("{{name}} comes with the app: its fonts stay as they are.", { name: look.name })}
+                      </span>
+                  </div>`)
+        }
+    </section>`;
+}
+
+/**
  * The owner's tools for the colors in use: a copy of them as a theme folder of colors, and for colors of their own, Edit
  * with Pi and Remove.
  */
@@ -473,6 +657,7 @@ export function AppearanceSheet() {
             ${lookIds().map((id) => html`<${LookCard} key=${id} id=${id} />`)}
         </div>
         ${store.state.me?.role === "owner" && html`<${LookTools} />`}
+        ${store.state.me?.role === "owner" && html`<${FontTools} />`}
         <div class="label">${t("Colors")}</div>
         <div class="theme-grid">
             ${desktop && html`<${ThemeCard} id="desktop" desktop=${true} />`}
@@ -554,13 +739,14 @@ export function AppearanceSheet() {
             <//>
             <${SettingRow}
                 title=${t("Motion")}
-                detail=${t("Auto follows your system's reduced-motion setting")}
+                detail=${t("Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph")}
             >
                 <div class="segmented">
                     ${[
-                        ["auto", t("Auto")],
-                        ["full", t("Full")],
-                        ["reduced", t("Reduced")],
+                        ["auto", "Auto"],
+                        ["full", "Full"],
+                        ["fluid", "Fluid"],
+                        ["reduced", "Reduced"],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -573,18 +759,11 @@ export function AppearanceSheet() {
                     )}
                 </div>
             <//>
-            <${SettingRow} title=${t("Text size")}>
-                <div class="segmented">
-                    ${[13, 14, 15, 16, 17].map(
-                        (size) => html`<button
-                            class=${p.text === size ? "on" : ""}
-                            aria-pressed=${p.text === size}
-                            onClick=${() => setPrefs({ text: size })}
-                        >
-                            ${size}
-                        </button>`,
-                    )}
-                </div>
+            <${SettingRow}
+                title=${t("Text size")}
+                detail=${t("The conversation's, in pixels: any from {{min}} to {{max}}", { min: MIN_TEXT, max: MAX_TEXT })}
+            >
+                <${TextSize} size=${textSizeOf(p.text)} />
             <//>
             <${SettingRow}
                 title=${t("Width")}

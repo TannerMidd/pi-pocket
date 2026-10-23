@@ -15,10 +15,13 @@ import {
     useState,
 } from "preact/hooks";
 import { useBack } from "./back.js";
+import { parseKeys, setBoxKeys } from "./box-keys.js";
 import { describersChanged, setCallDescriber } from "./calls.js";
+import { jumpToEntry } from "./chat.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
     api,
+    canSteer,
     closePeople,
     closeSheet,
     EXT_PANEL_KEY,
@@ -43,6 +46,7 @@ import {
     Sheet,
     Spinner,
     Switch,
+    writtenText,
 } from "./ui.js";
 
 /**
@@ -65,11 +69,19 @@ const KINDS = [
     "topbar",
     "composerButton",
     "replyAction",
+    "sessionChips",
+    "sessionAction",
+    "sessionFilter",
+    "sessionSearch",
+    "composerKey",
 ];
 /** What a rail button, menu row, launcher action, or status item can open: one of the module's own. */
 const OPENS = ["page", "sheet", "panel"];
 /** The most text `pocket.insertText` puts into the message box at once. */
 const INSERT_MAX = 100_000;
+/** The most of a message's text `pocket.messages` gives, and the most messages in a page. */
+const MESSAGE_TEXT = 1000;
+const MESSAGES_MAX = 200;
 /** A status item's tones, as the line's own items show them. */
 const TONES = new Set(["warn", "error", "muted"]);
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
@@ -593,13 +605,45 @@ function check(kind, spec) {
         throw new Error(`${name}: an id is up to 64 letters, digits, and . _ : -`);
     }
 
+    // Chips on session rows and words for the session search are only a function the session list calls.
+    const reads = { sessionChips: "chips", sessionSearch: "words" }[kind];
+
+    if (reads !== undefined) {
+        if (typeof spec[reads] !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a ${reads} function`);
+        }
+
+        return;
+    }
+
     const text = (field) => {
         if (typeof spec[field] !== "string" || spec[field].trim() === "") {
             throw new Error(`${name} ${spec.id}: give it a ${field}`);
         }
     };
 
-    if (["rail", "page", "sheet", "panel", "topbar", "composerButton"].includes(kind)) {
+    // A key in the message boxes: only a run, which gets the box.
+    if (kind === "composerKey") {
+        text("label");
+
+        if (parseKeys(spec.keys) === null) {
+            throw new Error(
+                `${name} ${spec.id}: keys is a key such as "Ctrl+W" or "Alt+Backspace", or a list of up to 8`,
+            );
+        }
+
+        if (typeof spec.run !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a run function, which gets the box`);
+        }
+
+        return;
+    }
+
+    if (
+        ["rail", "page", "sheet", "panel", "topbar", "composerButton", "sessionFilter"].includes(
+            kind,
+        )
+    ) {
         text("title");
     } else if (kind === "status") {
         text("text");
@@ -681,6 +725,36 @@ function check(kind, spec) {
     // An action under an answer gets the answer: its run as an argument, its sheet as `reply`.
     if (kind === "replyAction" && spec.run === undefined && spec.sheet === undefined) {
         throw new Error(`${name} ${spec.id}: it does run or sheet, which get the answer`);
+    }
+
+    // An action on sessions gets their ids: its run as an argument, its sheet as `sessions`.
+    if (kind === "sessionAction" && spec.run === undefined && spec.sheet === undefined) {
+        throw new Error(`${name} ${spec.id}: it does run or sheet, which get the sessions`);
+    }
+
+    if (
+        kind === "sessionAction" &&
+        spec.access !== undefined &&
+        !["steer", "view"].includes(spec.access)
+    ) {
+        throw new Error(`${name} ${spec.id}: access is "steer" or "view"`);
+    }
+
+    if (
+        kind === "sessionFilter" &&
+        spec.started !== undefined &&
+        typeof spec.started !== "function"
+    ) {
+        throw new Error(`${name} ${spec.id}: started is a function`);
+    }
+
+    if (
+        kind === "sessionFilter" &&
+        spec.match !== undefined &&
+        spec.match !== null &&
+        typeof spec.match !== "function"
+    ) {
+        throw new Error(`${name} ${spec.id}: match is a function, or null while the filter is off`);
     }
 
     for (const field of OPENS) {
@@ -843,6 +917,125 @@ function pocketFor(record) {
 
             return store.state.conversationId;
         },
+        /**
+         * Hear which session the tab shows: `listener` gets its id (or null) now, and again each time it changes. Returns
+         * how to stop; it stops with this version of the module too.
+         */
+        onConversation(listener) {
+            tick(record);
+
+            if (typeof listener !== "function") {
+                throw new Error("pocket.onConversation: give it a function");
+            }
+
+            if (!live()) {
+                return () => {};
+            }
+
+            let shown = store.state.conversationId;
+
+            const hear = (id) => {
+                try {
+                    listener(id);
+                } catch (error) {
+                    console.error(`${record.title}: an onConversation listener failed`, error);
+                }
+            };
+
+            const stop = store.subscribe((state) => {
+                if (state.conversationId !== shown && liveRecord(record)) {
+                    shown = state.conversationId;
+                    hear(shown);
+                }
+            });
+
+            record.disposers.push(stop);
+            hear(shown);
+
+            return stop;
+        },
+        /**
+         * A page of the people's messages in the session the tab shows, oldest first: the newest `limit` (50 by default,
+         * up to 200), or those before the cursor `before` that a page gave. Its `before` is null at the start. Rejects
+         * with `status` 409 when the cursor is stale (the context changed), and with an AbortError when `signal` aborts.
+         */
+        async messages(options = {}) {
+            tick(record);
+
+            const { before = null, limit = 50, signal } = options ?? {};
+
+            if (before !== null && !(typeof before === "string" && /^[1-9]\d*$/.test(before))) {
+                throw new Error("pocket.messages: before is a cursor that a page gave, or null");
+            }
+
+            if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGES_MAX) {
+                throw new Error(
+                    `pocket.messages: limit is a whole number from 1 to ${MESSAGES_MAX}`,
+                );
+            }
+
+            const conversationId = store.state.conversationId;
+
+            if (!live() || conversationId === null) {
+                return Object.freeze({ conversationId, messages: [], before: null });
+            }
+
+            const query = new URLSearchParams({ limit: String(limit) });
+
+            if (before !== null) {
+                query.set("before", before);
+            }
+
+            const page = await api(`c/${conversationId}/messages?${query}`, undefined, { signal });
+            const { view, users, me } = store.state;
+            // Who wrote each: known only while the tab still shows that session.
+            const authors = view.conversation?.id === conversationId ? view.authors : undefined;
+
+            return Object.freeze({
+                conversationId,
+                before: page.before === null ? null : String(page.before),
+                messages: page.messages.map((entry) => {
+                    const text = writtenText(entry);
+                    const userId = authors?.[entry.id];
+                    const person = users.find((user) => user.id === userId);
+
+                    return Object.freeze({
+                        id: String(entry.id),
+                        text: text.slice(0, MESSAGE_TEXT),
+                        clipped: text.length > MESSAGE_TEXT,
+                        by: Object.freeze({
+                            id: userId ?? null,
+                            name:
+                                person?.name ??
+                                entry.from ??
+                                (userId === me?.id ? me?.name : null) ??
+                                null,
+                        }),
+                        at: entry.at ?? null,
+                    });
+                }),
+            });
+        },
+        /**
+         * Scroll the transcript of the session the tab shows to a message, loading earlier entries first when needed,
+         * and highlight it. Resolves true once it shows; false when it is not in this session's transcript, the session
+         * changed, or a newer reveal came first. A sheet that shows closes.
+         */
+        reveal(id) {
+            tick(record);
+
+            const entryId = typeof id === "string" && /^[1-9]\d*$/.test(id) ? Number(id) : id;
+
+            if (typeof entryId !== "number" || !Number.isSafeInteger(entryId) || entryId <= 0) {
+                throw new Error("pocket.reveal: give it the id of a message");
+            }
+
+            if (!live() || store.state.conversationId === null) {
+                return Promise.resolve(false);
+            }
+
+            return jumpToEntry(entryId, { quiet: true });
+        },
         /** Open through the app's normal navigation; the server checks access on connection. */
         openConversation: (id) => {
             tick(record);
@@ -901,6 +1094,11 @@ function pocketFor(record) {
         topbar: (spec) => add("topbar", spec),
         composerButton: (spec) => add("composerButton", spec),
         replyAction: (spec) => add("replyAction", spec),
+        sessionChips: (spec) => add("sessionChips", spec),
+        sessionAction: (spec) => add("sessionAction", spec),
+        sessionFilter: (spec) => add("sessionFilter", spec),
+        sessionSearch: (spec) => add("sessionSearch", spec),
+        composerKey: (spec) => add("composerKey", spec),
         /** Put text into the message box, after what is there, for the person to send: never sent by itself. */
         insertText(text, options) {
             tick(record);
@@ -1382,15 +1580,22 @@ function opened(record, spec) {
     );
 }
 
-function openExtensionSheet(module, id, props = {}) {
-    openSheet({ type: "ext", module, sheetId: id, id: `${module}:${id}`, props });
+/** Open a module's sheet. From the session list (`over`), over the drawer, which stays, as a held row's sheet does. */
+function openExtensionSheet(module, id, props = {}, over = false) {
+    const sheet = { type: "ext", module, sheetId: id, id: `${module}:${id}`, props };
+
+    if (over) {
+        store.set({ sheet });
+    } else {
+        openSheet(sheet);
+    }
 }
 
 /**
  * Do what a rail button, menu row, or launcher action says: open its page or sheet, or run its function. A function that
  * fails, at once or later (an async one), says so in a notice.
  */
-function activate(record, spec, input) {
+function activate(record, spec, input, over = false) {
     const failed = (error) => {
         console.error(`${record.title}: ${spec.id} failed`, error);
         noticeFrom(record, "error", `${record.title}: ${reason(error)}`);
@@ -1400,7 +1605,7 @@ function activate(record, spec, input) {
         if (spec.page !== undefined) {
             openPage(record.module, spec.page);
         } else if (spec.sheet !== undefined) {
-            openExtensionSheet(record.module, spec.sheet, input);
+            openExtensionSheet(record.module, spec.sheet, input, over);
         } else if (spec.panel !== undefined) {
             openExtPanel(record.module, spec.panel);
         } else if (spec.run !== undefined) {
@@ -1423,6 +1628,23 @@ function added(kind) {
         .sort((a, b) => at(a) - at(b))
         .flatMap((record) => [...record.adds[kind].values()].map((spec) => ({ record, spec })));
 }
+
+// The keys modules give the message boxes (`box-keys.js`), each run as its module: a failure says so in a notice.
+setBoxKeys(() =>
+    added("composerKey")
+        .filter(({ record }) => liveRecord(record))
+        .map(({ record, spec }) => ({
+            keys: parseKeys(spec.keys),
+            keysText: spec.keys,
+            label: spec.label,
+            module: record.title,
+            run: (box) => spec.run(box),
+            failed: (error) => {
+                console.error(`${record.title}: ${spec.id} failed`, error);
+                noticeFrom(record, "error", `${record.title}: ${reason(error)}`);
+            },
+        })),
+);
 
 /** An extension's icon: its own path, one of the app's by name, or a square of four when it gave none it knows. */
 const pathOf = (spec) => spec.iconPath ?? (iconPath(spec.icon ?? "") || iconPath("grid"));
@@ -1577,6 +1799,192 @@ export function extensionLauncherItems() {
         keywords: Array.isArray(spec.keywords) ? spec.keywords.join(" ") : "",
         run: () => activate(record, spec),
     }));
+}
+
+// ─── The session list ────────────────────────────────────────────────────────
+
+/** The most chips one module puts on a row, the longest a chip's text shows, and the most search words per session. */
+const CHIPS_MAX = 6;
+const CHIP_TEXT = 32;
+const WORDS_MAX = 32;
+const WORD_TEXT = 100;
+/** The most filter buttons the search field holds, and the longest an action's label shows. */
+const FILTERS_MAX = 3;
+const ACTION_TEXT = 24;
+
+/** What extensions see of a session: a frozen copy, made once for each version of the session the server sent. */
+const infos = new WeakMap();
+
+function sessionInfo(session) {
+    let info = infos.get(session);
+
+    if (info === undefined) {
+        info = Object.freeze({
+            id: session.id,
+            title: session.title ?? "New session",
+            cwd: session.cwd,
+            archived: Boolean(session.archived),
+            updatedAt: session.updatedAt,
+        });
+        infos.set(session, info);
+    }
+
+    return info;
+}
+
+/**
+ * Call a function a module gave the session list, as the list draws. One that throws stops its module, after this draw:
+ * the list draws without it.
+ */
+function drawCall(record, run, session, fallback, name) {
+    if (!liveRecord(record)) {
+        return fallback;
+    }
+
+    try {
+        const value = run(sessionInfo(session));
+
+        if (value && typeof value.then === "function") {
+            // These readers run during rendering. Consume a rejected promise too, before stopping the module.
+            Promise.resolve(value).catch(() => {});
+
+            throw new Error(`${name} must return its value directly, not a promise`);
+        }
+
+        return value;
+    } catch (error) {
+        queueMicrotask(() => liveRecord(record) && fail(record, error, "failed"));
+
+        return fallback;
+    }
+}
+
+/** Text cut to `max` characters as a reader sees them, with "…". */
+function cutText(text, max) {
+    const characters = firstCharacters(text.trim(), max + 1);
+
+    return characters.length > max
+        ? `${characters.slice(0, max - 1).join("")}…`
+        : characters.join("");
+}
+
+/** The chips that extensions put on a session's row: `{ key, label, title, run }`, `run` only for one that does something. */
+export function sessionChips(session) {
+    return added("sessionChips").flatMap(({ record, spec }) => {
+        const chips = drawCall(record, spec.chips, session, [], "sessionChips.chips");
+
+        if (!Array.isArray(chips)) {
+            return [];
+        }
+
+        return chips
+            .filter((chip) => typeof chip?.label === "string" && chip.label.trim() !== "")
+            .slice(0, CHIPS_MAX)
+            .map((chip, index) => ({
+                key: `${record.module}:${spec.id}:${index}`,
+                label: cutText(chip.label, CHIP_TEXT),
+                title: typeof chip.title === "string" ? chip.title : chip.label,
+                run:
+                    typeof chip.run === "function"
+                        ? () => activate(record, { id: spec.id, run: chip.run })
+                        : undefined,
+            }));
+    });
+}
+
+/** Words stay valid until the server replaces the session or an extension changes what it adds. */
+const cachedWords = new WeakMap();
+
+/** The words that extensions give a session for the session list's search and the launcher's, lowercased. */
+export function sessionWords(session) {
+    const revision = store.state.extensionsRev;
+    const cached = cachedWords.get(session);
+
+    if (cached?.revision === revision) {
+        return cached.words;
+    }
+
+    const words = added("sessionSearch").flatMap(({ record, spec }) => {
+        const words = drawCall(record, spec.words, session, [], "sessionSearch.words");
+
+        return Array.isArray(words)
+            ? words
+                  .filter((word) => typeof word === "string" && word.trim() !== "")
+                  .slice(0, WORDS_MAX)
+                  .map((word) => word.trim().slice(0, WORD_TEXT).toLowerCase())
+            : [];
+    });
+
+    cachedWords.set(session, { revision, words });
+
+    return words;
+}
+
+/** The actions extensions offer on sessions: `run(ids)` does the action on those sessions. */
+export function sessionActions() {
+    const steer = canSteer();
+
+    return added("sessionAction")
+        .filter(({ spec }) => steer || spec.access === "view")
+        .map(({ record, spec }) => ({
+            key: itemId(record, spec),
+            label: cutText(spec.label, ACTION_TEXT),
+            title: spec.label,
+            module: record.title,
+            // One with an icon is also a button on rows, where a mouse hovers (`sessions.js`).
+            iconPath: spec.icon !== undefined || spec.iconPath !== undefined ? pathOf(spec) : null,
+            run: (ids) => {
+                const sessions = Object.freeze([...ids]);
+
+                activate(record, spec, spec.sheet === undefined ? sessions : { sessions }, true);
+            },
+        }));
+}
+
+/**
+ * The filters extensions add beside the session search, the first few of them (the field keeps its room): a button
+ * each, `on` while its `match` narrows the list.
+ */
+export function sessionFilters() {
+    return added("sessionFilter")
+        .slice(0, FILTERS_MAX)
+        .map(({ record, spec }) => ({
+            key: itemId(record, spec),
+            title: spec.title,
+            iconPath: pathOf(spec),
+            badge: badgeFor(spec),
+            on: typeof spec.match === "function",
+            run: () => activate(record, spec, undefined, true),
+        }));
+}
+
+/**
+ * A person started a session with New in the session list: the filters that are on and have `started` get its id, so
+ * that it meets them (Session tags gives it the chosen tags). One that fails says so in a notice.
+ */
+export function sessionStarted(id) {
+    for (const { record, spec } of added("sessionFilter").slice(0, FILTERS_MAX)) {
+        if (typeof spec.match === "function" && typeof spec.started === "function") {
+            activate(record, { id: spec.id, run: spec.started }, id);
+        }
+    }
+}
+
+/** Whether every filter that is on keeps a session in the list; null while none is on. Only those with a button count. */
+export function sessionFilterTest() {
+    const on = added("sessionFilter")
+        .slice(0, FILTERS_MAX)
+        .filter(({ spec }) => typeof spec.match === "function");
+
+    if (on.length === 0) {
+        return null;
+    }
+
+    return (session) =>
+        on.every(
+            ({ record, spec }) =>
+                drawCall(record, spec.match, session, true, "sessionFilter.match") === true,
+        );
 }
 
 /** The longest a status item's text shows, in characters as a reader sees them: past it, cut with "…". */

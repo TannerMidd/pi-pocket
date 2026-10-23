@@ -508,13 +508,34 @@ function applyPipView(data) {
     store.set((state) => ({ pipView: mergeView(state.pipView, data) }));
 }
 
-/** A view after an update from the server: the full view, or what changed since the last one. */
+/**
+ * A view after an update from the server: the full view, or what changed since the last one. A full view of the same
+ * conversation, as after a reconnect, keeps the entries loaded before (`loadEarlier`): it brings only the newest.
+ */
 function mergeView(current, data) {
-    const base =
-        data.full || current.conversation?.id !== data.conversation.id ? emptyView() : current;
-    const entries = new Map(base.entries);
+    const same = current.conversation?.id === data.conversation.id;
+    const base = data.full || !same ? emptyView() : current;
+    const entries = new Map(data.full && same ? current.entries : base.entries);
+
+    // A light one held from before (the tab left before the whole one came) goes: past the newest rows, the server
+    // counts it as sent, so only `loadEarlier` brings it whole, and it asks for what is missing.
+    if (data.full && same) {
+        for (const [id, entry] of entries) {
+            if (entry.partial) {
+                entries.delete(id);
+            }
+        }
+    }
 
     for (const entry of data.entries) {
+        // A light one (`partial`) does not replace the whole one this tab has, as after a reconnect: it is sent whole
+        // again right after.
+        const had = entries.get(entry.id);
+
+        if (entry.partial && had !== undefined && !had.partial) {
+            continue;
+        }
+
         entries.set(entry.id, entry);
     }
 
@@ -704,10 +725,12 @@ const handlers = {
 
 /**
  * What this code understands of the server's updates, sent with each connection. 2: it keeps the queue when an update
- * leaves it out. 3: it takes the message being written as what changed (`mergeLive`). The server sends a tab below 3 the
- * whole message with each update, and one whose code names none (as a tab asleep through an update keeps) the queue too.
+ * leaves it out. 3: it takes the message being written as what changed (`mergeLive`). 4: a full view brings only the
+ * entries of the newest rows, and it loads earlier ones as it shows them (`loadEarlier`). 5: those entries come light
+ * (`partial`) at first, whole in the update after. The server sends a tab below 3 the whole message with each update,
+ * and one whose code names none (as a tab asleep through an update keeps) the queue too.
  */
-const PROTOCOL = 3;
+const PROTOCOL = 5;
 const TRANSPORT_KEY = "pocket.transport";
 const local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(location.hostname);
 /** After an event stream stalls on this address, poll for a day, then try the stream again: one slow start is not forever. */
@@ -1130,6 +1153,8 @@ export const actions = {
     turns: (action, to) => api(`c/${current()}/turns`, { action, ...(to ? { to } : {}) }),
     setAccess: (userId, patch) => api(`users/${encodeURIComponent(userId)}`, patch),
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
+    /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
+    move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
     configure: (change) => api(`c/${current()}/configure`, change),
     /** The owner's model and thinking level for new sessions, `{ provider, modelId, thinkingLevel }`; null clears it. */
     setDefaultModel: (choice) => api("settings", { defaultModel: choice }),
@@ -1172,8 +1197,104 @@ export const actions = {
     updateSession: (id, patch) => api(`sessions/${id}`, patch),
     upload: (file) => api(`c/${current()}/upload?name=${encodeURIComponent(file.name)}`, file),
     fullEntry: (entryId) => api(`c/${current()}/entry/${entryId}`),
+    /** Show a path in the server machine's file manager: the owner's only. */
+    reveal: (path) => api(`c/${current()}/reveal`, { path }),
     history: (before) => api(`c/${current()}/history?before=${before}`),
+    context: (before, query) => api(`c/${current()}/context?before=${before}&${query}`),
 };
+
+/**
+ * Where the entries this tab has begin in the session's order: a view brings only the newest (protocol 4), and earlier
+ * ones come as they are shown (`loadEarlier`). 0 when it has all of them.
+ */
+export function loadedFrom(view) {
+    let at = view.order.length;
+
+    while (at > 0 && view.entries.has(view.order[at - 1])) {
+        at--;
+    }
+
+    return at;
+}
+
+/**
+ * Whether the transcript can draw an entry: it is in the unbroken run of entries at the end of the order. An entry kept
+ * from before a gap (a reconnect after many new rows, or a compaction) is held but not drawn.
+ */
+export function isLoaded(view, entryId) {
+    const at = view.order.indexOf(entryId);
+
+    return at !== -1 && at >= loadedFrom(view);
+}
+
+/** One request for earlier entries at a time, per conversation: its promise, which later callers share. */
+let loading = null;
+
+/**
+ * Load entries of the active context before the ones this tab has: `rows` rows more (with their turn), back to the entry
+ * `from`, or all of them with neither. Resolves once they are in the view; a view of another conversation by then, or a
+ * new order without them (a compaction), takes nothing.
+ */
+export function loadEarlier({ rows, from } = {}) {
+    const { view } = store.state;
+    const conversationId = view.conversation?.id;
+    const start = loadedFrom(view);
+
+    if (conversationId === undefined || start === 0) {
+        return Promise.resolve();
+    }
+
+    if (from !== undefined && isLoaded(view, from)) {
+        return Promise.resolve();
+    }
+
+    if (loading?.conversationId === conversationId) {
+        // One under way may not reach far enough: then this one asks again for the rest.
+        return loading.promise.then(() => loadEarlier({ rows, from }));
+    }
+
+    const before = view.order[start];
+    const query = from !== undefined ? `from=${from}` : rows !== undefined ? `rows=${rows}` : "";
+    const promise = actions
+        .context(before, query)
+        .then((earlier) =>
+            store.set((state) => {
+                if (
+                    state.view.conversation?.id !== conversationId ||
+                    !state.view.order.includes(before)
+                ) {
+                    return {};
+                }
+
+                const keep = new Set(state.view.order);
+                const entries = new Map();
+
+                for (const entry of earlier) {
+                    if (keep.has(entry.id)) {
+                        entries.set(entry.id, entry);
+                    }
+                }
+
+                // What the tab has wins, except a light one (`partial`): the one loaded is whole.
+                for (const [id, entry] of state.view.entries) {
+                    if (!entry.partial || !entries.has(id)) {
+                        entries.set(id, entry);
+                    }
+                }
+
+                return { view: { ...state.view, entries } };
+            }),
+        )
+        .finally(() => {
+            if (loading?.promise === promise) {
+                loading = null;
+            }
+        });
+
+    loading = { conversationId, promise };
+
+    return promise;
+}
 
 /** Entries that show as transcript rows. Tool results show inside their call's card instead. */
 export const isRow = (entry) =>

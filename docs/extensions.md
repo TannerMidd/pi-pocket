@@ -97,6 +97,7 @@ These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 - [examples/my-words.ts](examples/my-words.ts): the module of [Your first extension](extensions/first-extension.md), a tool and a command.
 - [examples/clock.ts](examples/clock.ts): a tool, and a command (`/clock-zone`) that sets the time zone that it uses in a session.
 - [examples/no-force-push.ts](examples/no-force-push.ts): a hook that stops some bash calls, and a prompt section that tells Pi so.
+- [examples/read-page.ts](examples/read-page.ts): a tool that reads a public web page with `host.fetchPublic`, and fences its text with `host.text`.
 - [examples/server-status.ts](examples/server-status.ts) with [examples/server-status.js](examples/server-status.js): a page on the rail, with a route that reads the machine's load and memory, and events that keep it live.
 - [examples/zh-cn-ui.ts](examples/zh-cn-ui.ts): a data-only Simplified Chinese UI locale pack.
 

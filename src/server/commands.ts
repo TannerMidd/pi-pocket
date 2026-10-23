@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import { type Context, copyJson } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
     clampThinkingLevel,
@@ -23,12 +23,16 @@ import {
     type ConversationId,
     defineTask,
     type EntryId,
+    type InputEntry,
+    InboxDoc,
     LiveDoc,
     type ModelRef,
     type SettledSubmissionRecord,
     type SubmissionId,
     type Task,
+    type TaskId,
     type TaskRuntime,
+    type UserInput,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
@@ -60,7 +64,16 @@ import { snippet } from "./projection.ts";
 import { globalModelSettings, projectModelDefault } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor } from "./requests.ts";
-import { type Resend, resendContent, resendRequest, ResendTask, userContent } from "./resend.ts";
+import {
+    type Interrupt,
+    interruptTask,
+    type Requeue,
+    type Resend,
+    resendContent,
+    resendRequest,
+    ResendTask,
+    userContent,
+} from "./resend.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { wantsTitle, writeTitle } from "./titles.ts";
 import { describeMoment, describeRepeat, knownZone } from "./when.ts";
@@ -304,9 +317,23 @@ export class Commands {
      * says who dealt with the failure. A message left in the queue by a run that failed ends it, settling nothing.
      */
     readonly followTask: Task<Followed, { phase: "wait" }, null, object>;
+    /** A queued message moved to Interrupt (`moveQueued`): it stops the run it was made for, by that run's id. */
+    readonly interruptTask: Task<Interrupt, { phase: "send" }, null, object>;
 
     constructor(app: PocketApp) {
         this.#app = app;
+        this.interruptTask = interruptTask(async (run, context) => {
+            const harness = this.#app.harness;
+            const task = run as unknown as TaskId;
+            const record = await harness.getTask(task, context);
+
+            if (record === undefined || record.state.status === "terminal") {
+                return;
+            }
+
+            await harness.abortTask(task, context);
+            await harness.waitForTask(task, context);
+        });
         this.followTask = defineTask<Followed, { phase: "wait" }, null>({
             name: "pocket.follow-failure",
             version: 1,
@@ -1168,7 +1195,7 @@ export class Commands {
 
         app.requireSee(user, id);
         app.requireSteer(user);
-        const by = app.attribution.knownSubmitter(submissionId);
+        const by = await app.attribution.submitter(submissionId);
 
         if (by !== user.id) {
             await app.requireDriver(id, user);
@@ -1188,6 +1215,169 @@ export class Commands {
         }
 
         return result;
+    }
+
+    /**
+     * Move a queued message to Steer or Queue, or send it now as an Interrupt. Only its sender may, as with taking it
+     * back (`withdraw`): who else may move someone's message is left to the maintainers. Interrupt stops the run like
+     * the composer's Interrupt, but only this message goes now: the others in the queue, from everyone, stay queued
+     * in their order, with their senders and modes (Stop withdraws them; the stop here would, so the task queues them
+     * again). Subagents' reports it withdraws wait again for the courier. The message leaves the queue, and the others
+     * are noted in the task, in one commit.
+     */
+    async moveQueued(
+        id: ConversationId,
+        user: User,
+        submissionId: number,
+        mode: string,
+    ): Promise<void> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+
+        if (!Number.isInteger(submissionId) || submissionId <= 0) {
+            throw new HttpError(400, "Say which queued message to move.");
+        }
+
+        if (mode !== "steer" && mode !== "followUp" && mode !== "interrupt") {
+            throw new HttpError(400, "Move a message to steer, followUp, or interrupt.");
+        }
+
+        // Its sender moves it, as with taking it back: after a restart this process may not know the sender yet.
+        if ((await app.attribution.submitter(submissionId)) !== user.id) {
+            throw new HttpError(403, "Only its sender can move a queued message.");
+        }
+
+        // To the queue, it only waits longer. To Steer or Interrupt, it acts on the run now: that is the driver's turn,
+        // as sending is.
+        if (mode !== "followUp") {
+            await app.requireDriver(id, user);
+        }
+
+        // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
+        const requests = new Map<number, string | undefined>();
+        let moved: boolean | "again" = "again";
+
+        for (let attempt = 0; moved === "again"; attempt++) {
+            if (mode === "interrupt") {
+                const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+
+                for (const item of queued) {
+                    if (item.mode !== "write" && !requests.has(Number(item.id))) {
+                        const record = await (
+                            await app.harness.submission(item.id, context)
+                        )?.status(context);
+
+                        requests.set(Number(item.id), record?.requestId);
+                    }
+                }
+            }
+
+            moved = await app.harness.commit(async (tx) => {
+                const items = (await tx.doc(InboxDoc, id)).items;
+                const index = items.findIndex((entry) => Number(entry.id) === submissionId);
+                const item = items[index];
+
+                if (item === undefined || item.mode === "write") {
+                    return false;
+                }
+
+                if (mode !== "interrupt") {
+                    item.mode = mode;
+
+                    return true;
+                }
+
+                // Every table read comes before the commit's first table write.
+                const subagents = await tx.doc(SubagentsDoc, id);
+                const batch =
+                    subagents.sending === undefined
+                        ? undefined
+                        : await tx.submissionByRequest(id, subagents.sending.request);
+                const live = await tx.doc(LiveDoc, id);
+                const others: Requeue[] = [];
+                const stay: number[] = [];
+
+                for (const other of items) {
+                    // Writes stay in the queue by themselves; the reports go back to their courier when withdrawn.
+                    if (
+                        Number(other.id) === submissionId ||
+                        other.mode === "write" ||
+                        other.id === batch?.id
+                    ) {
+                        continue;
+                    }
+
+                    if (!requests.has(Number(other.id))) {
+                        // Queued since the requests were read.
+                        if (attempt >= 3) {
+                            throw new HttpError(409, "The queue is changing; try again.");
+                        }
+
+                        return "again";
+                    }
+
+                    const first = requests.get(Number(other.id));
+
+                    stay.push(Number(other.id));
+                    others.push({
+                        content: copyJson(other.content) as UserInput,
+                        mode: other.mode,
+                        // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
+                        requestId:
+                            first === undefined
+                                ? `interrupt-${submissionId}-${others.length}`
+                                : `${first.replace(/(~\d+)+$/, "")}~${submissionId}`,
+                        ...(other.entry === undefined
+                            ? {}
+                            : { entry: copyJson(other.entry) as InputEntry }),
+                    });
+                }
+
+                const content = copyJson(item.content) as UserInput;
+                const run = live.run === undefined ? undefined : Number(live.run.taskId);
+
+                // Taken out of the queue here, so the stop's withdrawal cannot reach them: the task puts them back.
+                for (let at = items.length - 1; at >= 0; at--) {
+                    const queued = Number(items[at]!.id);
+
+                    if (queued === submissionId || stay.includes(queued)) {
+                        items.splice(at, 1);
+                    }
+                }
+
+                tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
+
+                for (const taken of stay) {
+                    tx.settleSubmission(taken as unknown as SubmissionId, {
+                        status: "unanswered",
+                        reason: "aborted",
+                    });
+                }
+
+                await tx.createTask(
+                    this.interruptTask,
+                    {
+                        content,
+                        requestId: ownRequest(user.id, `interrupt-${submissionId}`),
+                        ...(run === undefined ? {} : { run }),
+                        others,
+                    },
+                    { ownership: { kind: "conversation" }, background: true, conversationId: id },
+                );
+
+                return true;
+            }, context);
+        }
+
+        if (!moved) {
+            throw new HttpError(409, "That message has already gone to Pi.");
+        }
+
+        if (mode === "interrupt") {
+            await app.collab.activity(id, user, "interrupted the run");
+        }
     }
 
     async configure(

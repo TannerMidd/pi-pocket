@@ -18,7 +18,8 @@ A linked session is an ordinary session. The session list shows it under the ses
 
 - `cwd` selects an existing working folder using the same path rules as the folder picker (including `~`). Prefer an absolute path. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. The child loads that folder's project context and tools; the source stays in its own folder. A missing path or a file is rejected before a session is created. Since 0.19.0: an older Pi Pocket ignores `cwd` and uses the source's folder, so a gallery entry that needs it sets `minPocket` to `0.19.0`.
 - Without `title`, the title is the first line of the message.
-- `model` is `provider/modelId`. It must be the source's model, or a model that the owner allows for subagents (Menu → Providers → Models for subagents). Without it, the session uses the source's model.
+- `model` is `provider/modelId`. While the owner's list (Menu → Providers → Models for subagents) is empty, it must be the source's model. Once the list has models, it must be one of them, and the source's own model counts only when it is listed. Without `model`, the session uses the source's model if the list is empty or has it. If the list does not have it, the call is refused with an error that names the allowed models: the caller must choose one (the error is a 400 for a human route).
+- `send` refuses a session that runs on a model off the list (a person changed it, or the owner changed the list), when the list is not empty. A message from a linked session to the session that started it is a reply, not work: it goes whatever model that session runs on.
 - `thinking` can be at most the source's level. Without it, the session uses the source's level. Pi Pocket lowers it to the highest level that the model has.
 - When a model cannot be used now, Pi Pocket refuses the call before it makes anything.
 

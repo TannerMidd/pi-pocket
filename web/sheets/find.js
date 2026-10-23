@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { t } from "../i18n.js";
 import { jumpToEntry } from "../chat.js";
-import { actions, closeSheet, isRow, store } from "../store.js";
+import { actions, closeSheet, isRow, loadEarlier, store } from "../store.js";
 import { html, Icon, Marked, plainText, Sheet, Spinner, writtenText } from "../ui.js";
 
 /** How many entries a page of earlier history has (`app.history` on the server), and how many pages find reads. */
@@ -79,17 +79,25 @@ export function FindSheet({ initial }) {
     // is searched) is here.
     const [earlier, setEarlier] = useState({ entries: [], done: false, all: true });
     const box = useRef(null);
-    const first = view.order.length > 0 ? view.entries.get(view.order[0]) : undefined;
 
     useEffect(() => box.current?.focus(), []);
     useEffect(() => {
-        if (!first || (first.kind !== "compaction" && first.kind !== "reset")) {
-            return setEarlier({ entries: [], done: true, all: true });
-        }
-
         let live = true;
 
         (async () => {
+            // The rest of the active context first: a view brings only its newest entries.
+            await loadEarlier();
+            const { view: now } = store.state;
+            const first = now.order.length > 0 ? now.entries.get(now.order[0]) : undefined;
+
+            if (!live) {
+                return;
+            }
+
+            if (!first || (first.kind !== "compaction" && first.kind !== "reset")) {
+                return setEarlier({ entries: [], done: true, all: true });
+            }
+
             let entries = [];
             let before = first.id;
 

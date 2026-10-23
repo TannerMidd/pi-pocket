@@ -15,6 +15,7 @@ import {
     getAgentDir,
     ModelRuntime,
     resolveModelScopeWithDiagnostics,
+    type ProviderConfig,
     SettingsManager,
     type Skill,
 } from "@earendil-works/pi-coding-agent";
@@ -85,6 +86,7 @@ import { Memory } from "./memory.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { pocketVersion } from "./versions.ts";
 import { configureHttp } from "./net.ts";
+import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
@@ -101,6 +103,7 @@ import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } f
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
 import { Schedules } from "./schedules.ts";
+import { Shares } from "./share.ts";
 import { Shell } from "./shell.ts";
 import {
     loadSessionSkills,
@@ -137,7 +140,7 @@ const BROWSER_EXTENSION = "pocket-browser";
 const PIP_FILE = "pip.ts";
 /** The extension module with the subagent tool, rebuilt when the models subagents may use change. */
 const SUBAGENTS_FILE = "subagents.ts";
-/** The most models the owner may allow subagents besides their session's own. */
+/** The most models the owner may allow subagents. */
 const MAX_SUBAGENT_MODELS = 50;
 
 /**
@@ -299,6 +302,8 @@ export class PocketApp {
     readonly memory = new Memory(this);
     /** Each person's favorite working folders, shared by their devices. */
     readonly folderFavorites = new FolderFavorites(this);
+    /** Artifacts published to anyone with their address (`share.ts`), which needs no sign-in. */
+    readonly shares = new Shares(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
     /** Theme folders: the app's look and layout, built in and the owner's (`themes.ts`). */
@@ -344,6 +349,11 @@ export class PocketApp {
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
     /** Request shapers from the extension modules the owner turned on (`host.shapeModelRequests`). */
     readonly #shapers: ModelRequestShaper[] = [];
+    /**
+     * Each provider's registrations by extension modules (`host.registerModelProvider`), newest last: the newest is in
+     * Pi's runtime, and removing it puts back the one before.
+     */
+    readonly #modelProviders = new Map<string, { token: symbol; config: ProviderConfig }[]>();
     readonly #home: string;
     /** The clock durable work runs by. */
     readonly now: () => number;
@@ -431,6 +441,92 @@ export class PocketApp {
     }
 
     /**
+     * A module's model provider goes into Pi's runtime in place of the one in force, and stays until its removal. Pi
+     * merges a registration into the one before, so the one before goes first: a new version starts from its own config
+     * alone. When Pi refuses the config, the one before comes back and the registration throws.
+     */
+    #registerModelProvider(provider: string, config: ProviderConfig): () => void {
+        const token = Symbol(provider);
+        const registrations = this.#modelProviders.get(provider) ?? [];
+        const previous = registrations.at(-1);
+
+        if (previous !== undefined) {
+            this.models.unregisterProvider(provider);
+        }
+
+        try {
+            this.models.registerProvider(provider, config);
+        } catch (error) {
+            if (previous !== undefined) {
+                this.models.registerProvider(provider, previous.config);
+            }
+
+            throw error;
+        }
+
+        // Only once Pi took it: a registration that failed has no removal, and must not stand in for the one before.
+        registrations.push({ token, config });
+        this.#modelProviders.set(provider, registrations);
+        this.#modelProviderChanged(provider);
+
+        return () => this.#removeModelProvider(provider, token);
+    }
+
+    /** A registration goes. When it was in force, the one before it (another module's, or an older version's) is back. */
+    #removeModelProvider(provider: string, token: symbol): void {
+        const registrations = this.#modelProviders.get(provider);
+        const index =
+            registrations?.findIndex((registration) => registration.token === token) ?? -1;
+
+        if (registrations === undefined || index < 0) {
+            return;
+        }
+
+        const inForce = index === registrations.length - 1;
+
+        registrations.splice(index, 1);
+
+        if (registrations.length === 0) {
+            this.#modelProviders.delete(provider);
+        }
+
+        if (!inForce) {
+            return;
+        }
+
+        this.models.unregisterProvider(provider);
+        const before = registrations.at(-1);
+
+        if (before !== undefined) {
+            try {
+                this.models.registerProvider(provider, before.config);
+            } catch (error) {
+                this.#log(`Model provider ${provider} could not be put back: ${describe(error)}`);
+            }
+        }
+
+        this.#modelProviderChanged(provider);
+    }
+
+    /** Pi refreshes a provider locally once it changes: tabs get the models it has then, and sessions their state. */
+    #modelProviderChanged(provider: string): void {
+        if (this.#closing !== undefined) {
+            return;
+        }
+
+        void this.models
+            .refresh({ allowNetwork: false, providers: [provider] })
+            .catch((error: unknown) => {
+                this.#log(`Model provider ${provider} not refreshed: ${describe(error)}`);
+            })
+            .finally(() => {
+                if (this.#closing === undefined) {
+                    this.providers.modelsChanged();
+                }
+            });
+    }
+
+    /**
      * Browser modules came, went, or changed: the tabs of the people they are for hear which to load, once for changes
      * that come together.
      */
@@ -511,6 +607,7 @@ export class PocketApp {
                 name: "pocket-core",
                 tasks: [
                     ResendTask,
+                    this.commands.interruptTask,
                     this.shell.task,
                     this.commands.followTask,
                     this.extensionCommands.task,
@@ -535,6 +632,8 @@ export class PocketApp {
             resolveModel: (spec) => resolveModel(this.models, spec, this.signInNeeded),
             subagentModels: () => this.config.subagentModels,
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
+            registerModelProvider: (provider, config) =>
+                this.#registerModelProvider(provider, config),
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);
 
@@ -546,6 +645,7 @@ export class PocketApp {
                     }
                 };
             },
+            fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             notice: (level, message, conversationId, ui) =>
                 this.notice(level, message, conversationId, ui),
@@ -1431,7 +1531,12 @@ export class PocketApp {
     /** Someone came, went, or changed: remember when they were last here and tell everyone. */
     #peopleChanged(userId?: string): void {
         if (userId !== undefined && this.config.userById(userId) !== undefined) {
-            this.config.updateUser(userId, { lastSeen: Date.now() });
+            // Only a timestamp: a full disk must not stop the server on every connect and close.
+            try {
+                this.config.updateUser(userId, { lastSeen: Date.now() });
+            } catch (error) {
+                this.#log(`last seen not saved: ${describe(error)}`);
+            }
         }
 
         for (const client of this.#clients) {
@@ -1793,7 +1898,7 @@ export class PocketApp {
                 defaultModel: this.config.defaultModel ?? null,
                 // The theme and colors of browsers that have not chosen their own, or null for the app's own.
                 themeDefault: this.config.themeDefault ?? null,
-                // The models Pi may start subagents on besides their session's own: the owner's to see and change.
+                // The models Pi may start subagents on: the owner's to see and change.
                 ...(user.role === "owner"
                     ? { subagentModels: [...this.config.subagentModels] }
                     : {}),
@@ -2269,7 +2374,11 @@ export class PocketApp {
 
     async artifactBody(id: ConversationId, artifact: string, version: number | undefined) {
         const index = await this.harness.snapshot(ArtifactsDoc, id, context);
-        const meta = index?.items[artifact] as ArtifactMeta | undefined;
+        // Its own entries only: `__proto__` and the like name no artifact.
+        const meta =
+            index !== undefined && Object.hasOwn(index.items, artifact)
+                ? (index.items[artifact] as ArtifactMeta)
+                : undefined;
 
         if (meta === undefined) {
             throw new HttpError(404, "No such artifact");
@@ -2767,7 +2876,7 @@ export class PocketApp {
         this.providers.needsSignIn(provider) !== undefined;
 
     /**
-     * The owner picks the models Pi may start subagents on besides their session's own (`provider/modelId`, models Pi
+     * The owner picks the models Pi may start subagents on (`provider/modelId`, models Pi
      * knows). Empty, the default: none, and the subagent tool offers Pi no choice of model at all. The tool is rebuilt
      * to match, so its description and parameters say what Pi may do. This replaces the whole list; the Providers sheet
      * changes one model at a time (`allowSubagentModel`).

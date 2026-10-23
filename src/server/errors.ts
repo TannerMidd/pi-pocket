@@ -9,6 +9,11 @@ export class HttpError extends Error {
     }
 }
 
+/** A refusal whose fix is the agent's: choose a model from the owner's list that suits the work. */
+export class ChooseModelError extends HttpError {
+    readonly choose = true;
+}
+
 /** A request field that must be text when present: a wrong type is a 400 for the client, not a TypeError and a 500. */
 export function optionalText(value: unknown, name: string): string | undefined {
     if (value === undefined || value === null) {

@@ -10,7 +10,7 @@ import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
-import { Highlighted } from "./rich.js";
+import { Highlighted, InlineArtifact } from "./rich.js";
 import {
     actions,
     attempt,
@@ -18,6 +18,8 @@ import {
     collab,
     discuss,
     isRow,
+    loadEarlier,
+    loadedFrom,
     navigate,
     notify,
     openSheet,
@@ -28,6 +30,7 @@ import { openSubagent, stateOf } from "./subagents.js";
 import { prefs } from "./theme.js";
 import {
     diffCounts,
+    INLINE_TOOL,
     itemsOf,
     lineCount,
     matchCount,
@@ -453,6 +456,9 @@ function Collapsible({ text, limit = 600 }) {
 
 // ─── What Pi did: its thinking and tool calls, a line each on a timeline ───────────────
 
+/** The tools that publish artifacts: `artifact_inline` also shows its page as a card in the reply. */
+const isArtifactCall = (name) => name === "artifact" || name === INLINE_TOOL;
+
 /** What a step's mark says, by how the call went; a call still running shows a spinner instead. */
 const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!" };
 
@@ -541,8 +547,9 @@ function outcome({ call, result, details, status }) {
         return { text: shortError(result?.text ?? ""), tone: "err" };
     }
 
-    // A call whose result is not stored yet has nothing to count.
-    if (status !== "done" || !result) {
+    // A call whose result is not stored yet has nothing to count, nor one whose input or output came light, as a session
+    // opens (`partial`): it is counted when it comes whole, an instant later.
+    if (status !== "done" || !result || result.partial || call.partial) {
         return null;
     }
 
@@ -620,6 +627,7 @@ function outcome({ call, result, details, status }) {
         }
 
         case "artifact":
+        case "artifact_inline":
             return details?.version !== undefined
                 ? { text: `v${details.version}`, tone: "" }
                 : null;
@@ -717,7 +725,9 @@ function callStatus({ result, slot, approval, decision, streaming, canRun, busy 
 function ThoughtStep({ block, streaming, reading }) {
     // With Show thinking on, a thought once written shows its words (the live line shows the one being written).
     const [chosen, setChosen] = useState(null);
-    const open = chosen ?? (reading && !streaming && Boolean(block.text?.trim()));
+    // One whose words have not come yet (`partial`, as a session opens) opens once they have, if it was asked to.
+    const open =
+        !block.partial && (chosen ?? (reading && !streaming && Boolean(block.text?.trim())));
 
     return html`<div
         class=${`step ${open ? "open" : ""}`}
@@ -887,7 +897,7 @@ function ToolStep({
             }
         }
 
-        if (call.name === "artifact" && (args.content || args.edits)) {
+        if (isArtifactCall(call.name) && (args.content || args.edits)) {
             parts.push(
                 html`<pre class="output">
                     ${args.content ?? JSON.stringify(args.edits, null, 2)}
@@ -911,6 +921,7 @@ function ToolStep({
                 "bash",
                 "subagent",
                 "artifact",
+                "artifact_inline",
                 "codemode",
                 "browser",
             ].includes(call.name)
@@ -942,7 +953,7 @@ function ToolStep({
         body = html`<div class="step-body" data-part="step-detail">${parts}</div>`;
     }
 
-    const artifact = call.name === "artifact" && details?.id ? details : null;
+    const artifact = isArtifactCall(call.name) && details?.id ? details : null;
     const artifactType = artifact
         ? view.artifacts.find((each) => each.id === artifact.id)?.type
         : undefined;
@@ -1076,6 +1087,12 @@ function ToolStep({
 /** Groups opened or closed by hand, per conversation and group, for as long as the page is open. */
 const openedGroups = new Map();
 /**
+ * An open group draws its newest steps, this many, and a button for the rest: a long run of Pi's alone can be hundreds of
+ * steps, which made opening its session freeze on a phone. Groups shown in full, by hand or by a jump, are kept here.
+ */
+const GROUP_STEPS = 24;
+const wholeGroups = new Map();
+/**
  * The answer a jump asked to see last (`jumpToEntry` in chat.js says so with a `pocket:reveal` event), and when: a group
  * that shows only after the jump moved the rows shown opens when it first draws. Groups already shown hear the event.
  */
@@ -1156,6 +1173,8 @@ function ActivityGroup({
     const id = `${conversationId}:${item.key}`;
     const [, redraw] = useState(0);
     const [fresh] = useState(() => settledFor !== null && settledFor === conversationId);
+    // When a click opened it: its first steps then drop in one after another (Fluid motion, style.css).
+    const unrolled = useRef(0);
 
     if (
         revealing.entryId !== null &&
@@ -1163,6 +1182,7 @@ function ActivityGroup({
         item.anchors.includes(revealing.entryId)
     ) {
         keep(openedGroups, id, true);
+        keep(wholeGroups, id, true);
     }
 
     const chosen = openedGroups.get(id);
@@ -1172,9 +1192,13 @@ function ActivityGroup({
     const lone = all.length === 1 && all[0].block.type === "thinking" ? all[0] : null;
     // Show thinking on: thoughts show their words once written.
     const reading = prefs().showThinking === true;
+    // A thought whose words have not come yet (`partial`, as a session opens) opens once they have.
     const open =
-        chosen ??
-        (lone ? reading && !lone.streaming && Boolean(lone.block.text?.trim()) : live || newest);
+        !lone?.block.partial &&
+        (chosen ??
+            (lone
+                ? reading && !lone.streaming && Boolean(lone.block.text?.trim())
+                : live || newest));
     // Calls that failed, said on the line too: folded, "edited 1" alone would read as done. A call someone denied did
     // not fail, nor a script stopped by a denial: its line says who denied it.
     const failed = all.filter((step) => {
@@ -1219,6 +1243,8 @@ function ActivityGroup({
     let thoughts = 0;
     // A jump to one of its answers (Find, a pin, Changes) opens it: `jumpToEntry` says which.
     const anchors = item.anchors.join();
+    // The steps not drawn yet, the oldest: each still names the steps after it (below), so keys stay as they were.
+    const hidden = wholeGroups.get(id) ? 0 : Math.max(0, item.steps.length - GROUP_STEPS);
 
     useEffect(() => {
         if (anchors === "") {
@@ -1228,6 +1254,7 @@ function ActivityGroup({
         const reveal = (event) => {
             if (item.anchors.includes(event.detail)) {
                 keep(openedGroups, id, true);
+                keep(wholeGroups, id, true);
                 redraw((n) => n + 1);
             }
         };
@@ -1250,6 +1277,7 @@ function ActivityGroup({
             data-part="activity-head"
             aria-expanded=${open}
             onClick=${() => {
+                unrolled.current = open ? 0 : performance.now();
                 keep(openedGroups, id, !open);
                 redraw((n) => n + 1);
             }}
@@ -1269,14 +1297,35 @@ function ActivityGroup({
         ${
             open &&
             !lone &&
-            html`<div class="timeline" data-part="timeline">
+            html`<div
+                class=${`timeline ${performance.now() - unrolled.current < 600 ? "unrolling" : ""}`}
+                data-part="timeline"
+            >
+                ${
+                    hidden > 0 &&
+                    html`<button
+                        class="link timeline-earlier"
+                        data-part="timeline-earlier"
+                        onClick=${() => {
+                            keep(wholeGroups, id, true);
+                            redraw((n) => n + 1);
+                        }}
+                    >
+                        ${hidden === 1 ? t("Show {{count}} earlier step", { count: hidden }) : t("Show {{count}} earlier steps", { count: hidden })}
+                    </button>`
+                }
                 ${item.steps.map(({ block, entry, streaming, canRun }, index) => {
                     // A call is named by its id, the same streamed and stored; a thought by the call before it. Not by
                     // place: earlier steps join the front when earlier messages show.
                     if (block.type === "thinking") {
-                        return html`<${Memo} key=${`t:${lastCall}:${thoughts++}`} deps=${[block, streaming, reading]}>
-                            <${ThoughtStep} block=${block} streaming=${streaming} reading=${reading} />
-                        <//>`;
+                        const key = `t:${lastCall}:${thoughts++}`;
+
+                        return (
+                            index >= hidden &&
+                            html`<${Memo} key=${key} deps=${[block, streaming, reading]}>
+                                <${ThoughtStep} block=${block} streaming=${streaming} reading=${reading} />
+                            <//>`
+                        );
                     }
 
                     const slot = slots.get(block.id);
@@ -1294,6 +1343,10 @@ function ActivityGroup({
                     keys.add(key);
                     lastCall = key;
                     thoughts = 0;
+
+                    if (index < hidden) {
+                        return null;
+                    }
 
                     return html`<${Memo}
                         key=${key}
@@ -1320,6 +1373,57 @@ function ActivityGroup({
                     <//>`;
                 })}
             </div>`
+        }
+    </div>`;
+}
+
+/**
+ * A page Pi showed in its reply (`artifact_inline`): its card once the call has published, between the words around
+ * it. Until then, and if the call failed, was denied, or stopped, its step as the timeline draws it, so the reason shows.
+ */
+function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
+    const { block, entry, canRun } = item.step;
+    const result = results.get(block.id);
+    const details = result?.details;
+    const slot = slots.get(block.id);
+    const approval =
+        slot?.taskId === undefined
+            ? undefined
+            : approvals.find((each) => each.taskId === slot.taskId);
+    const published =
+        result !== undefined &&
+        !result.isError &&
+        details?.inline === true &&
+        typeof details.id === "string" &&
+        Number.isInteger(details.version);
+
+    return html`<div class="inline-row">
+        ${item.anchors.map(
+            (entryId) => html`<span class="entry-anchor" id=${`entry-${entryId}`}></span>`,
+        )}
+        ${
+            published
+                ? html`<${InlineArtifact}
+                      conversationId=${conversationId}
+                      id=${details.id}
+                      title=${details.title ?? details.id}
+                      version=${details.version}
+                  />`
+                : html`<div class="activity open">
+                      <div class="timeline">
+                          <${ToolStep}
+                              call=${block}
+                              result=${result}
+                              slot=${slot}
+                              approval=${approval}
+                              entryId=${entry?.id}
+                              streaming=${entry === undefined}
+                              canRun=${canRun}
+                              busy=${busy}
+                              conversationId=${conversationId}
+                          />
+                      </div>
+                  </div>`
         }
     </div>`;
 }
@@ -1406,6 +1510,22 @@ function ApprovalCard({ approval }) {
 // person can hide and reorder in Appearance, with extensions' before More, which stays last. Each gets the answer
 // (`entry`, its `text`), whether it is pinned, and the reaction picker's state.
 defineItem("reply", {
+    id: "core:time",
+    label: "Message time",
+    order: 0,
+    render: ({ entry }) => {
+        if (!entry.at) {
+            return null;
+        }
+
+        const at = new Date(fromServer(entry.at));
+
+        return html`<time class="muted" dateTime=${at.toISOString()} title=${at.toLocaleString()}>
+            ${clock(entry.at)}
+        </time>`;
+    },
+});
+defineItem("reply", {
     id: "core:react",
     label: "React",
     order: 100,
@@ -1484,7 +1604,7 @@ defineItem("reply", {
         </button>`,
 });
 
-/** Under Pi's answers: reactions, and ways to talk about the answer with the people here. */
+/** Under Pi's answers: the message time, reactions, and ways to talk about it with the people here. */
 function AnswerActions({ entry }) {
     const { view, me, users, server } = store.state;
     const [picking, setPicking] = useState(false);
@@ -1883,7 +2003,7 @@ function callDeps(block, results, slots, approvals) {
         deps.push(approvals.find((each) => each.taskId === slot.taskId)?.id);
     }
 
-    if (block.name === "artifact") {
+    if (isArtifactCall(block.name)) {
         deps.push((view.artifacts ?? []).map((each) => `${each.id}:${each.type}`).join());
     }
 
@@ -1973,6 +2093,33 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
             <//>`;
         }
 
+        if (item.type === "inline") {
+            const { block, entry, streaming, canRun } = item.step;
+
+            return html`<${Memo}
+                key=${item.key}
+                deps=${[
+                    block,
+                    entry,
+                    streaming,
+                    canRun,
+                    busy,
+                    conversationId,
+                    item.anchors.join(),
+                    ...callDeps(block, results, slots, approvals),
+                ]}
+            >
+                <${InlineRow}
+                    item=${item}
+                    results=${results}
+                    slots=${slots}
+                    approvals=${approvals}
+                    busy=${busy}
+                    conversationId=${conversationId}
+                />
+            <//>`;
+        }
+
         // An answer with nothing to show (blank words): only where a jump to it lands.
         if (item.type === "mark") {
             return html`<span
@@ -1994,7 +2141,8 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
                 (busy && index === items.length - 1));
         const newest = !past && index > lastMessage;
         // When what came before it was stored: a group still streaming began about then, also before a reload.
-        const after = items[index - 1]?.entry?.at;
+        const before = items[index - 1];
+        const after = before?.entry?.at ?? before?.step?.entry?.at;
         const deps = [
             item.steps.length,
             item.before.length,
@@ -2379,18 +2527,23 @@ export function Transcript() {
     const { view, missing, history, transcriptFrom } = store.state;
     const scroller = useRef(null);
     const stick = useRef(true);
+    /** A jump to a message is under way: the reader has not scrolled or tapped since. */
+    const jumping = useRef(false);
     /** Distance from the bottom to restore after rows are added above, so the reader stays in place. */
     const keep = useRef(null);
     const counted = useRef(0);
     const [showJump, setShowJump] = useState(false);
 
-    // Keep the snapshot's rows stable across unrelated UI updates, including scrolling the thought reading area.
+    // Keep the snapshot's rows stable across unrelated UI updates, including scrolling the thought reading area. Only
+    // the entries this tab has, which are the newest: earlier ones load as "Show earlier messages" shows them.
+    const unloaded = useMemo(() => loadedFrom(view), [view.order, view.entries]);
     const entries = useMemo(
-        () => view.order.map((id) => view.entries.get(id)).filter(Boolean),
-        [view.order, view.entries],
+        () => view.order.slice(unloaded).map((id) => view.entries.get(id)),
+        [view.order, view.entries, unloaded],
     );
     const rows = entries.filter(isRow);
     const start = windowStart(rows, transcriptFrom);
+    const [fetching, setFetching] = useState(false);
 
     // The room the pane gives, for what may run wider than the column (a reply's code blocks and tables: style.css).
     useEffect(() => {
@@ -2523,6 +2676,34 @@ export function Transcript() {
         };
     }, [view.conversation?.id]);
 
+    // A jump to a message (`jumpToEntry`) leaves the bottom, until the reader scrolls or taps: its smooth scroll starts
+    // near the bottom, where `onScroll` would follow along again, and the next update (earlier rows that load for it)
+    // would take them back down.
+    useEffect(() => {
+        const away = () => {
+            jumping.current = true;
+            stick.current = false;
+            keep.current = null;
+        };
+
+        const back = () => (jumping.current = false);
+        const takes = ["wheel", "touchstart", "pointerdown", "keydown"];
+
+        document.addEventListener("pocket:reveal", away);
+
+        for (const name of takes) {
+            document.addEventListener(name, back, { capture: true, passive: true });
+        }
+
+        return () => {
+            document.removeEventListener("pocket:reveal", away);
+
+            for (const name of takes) {
+                document.removeEventListener(name, back, { capture: true });
+            }
+        };
+    }, []);
+
     // Images finish loading after the transcript renders and make it taller: stay at the bottom if we were there.
     useEffect(() => {
         const element = scroller.current;
@@ -2562,7 +2743,7 @@ export function Transcript() {
         const element = scroller.current;
         const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 60;
 
-        stick.current = atBottom;
+        stick.current = atBottom && !jumping.current;
 
         if (showJump === atBottom) {
             setShowJump(!atBottom);
@@ -2610,8 +2791,34 @@ export function Transcript() {
     };
 
     const showEarlier = () => {
-        keepPlace();
-        store.set({ transcriptFrom: rows[Math.max(0, start - TRANSCRIPT_ROWS)].id });
+        if (start >= TRANSCRIPT_ROWS || unloaded === 0) {
+            keepPlace();
+            store.set({ transcriptFrom: rows[Math.max(0, start - TRANSCRIPT_ROWS)].id });
+
+            return;
+        }
+
+        // Not here yet: load the rows to show (and as many more), then show them.
+        const id = conversation.id;
+
+        setFetching(true);
+        attempt(async () => {
+            await loadEarlier({ rows: 2 * TRANSCRIPT_ROWS });
+            const { view: now } = store.state;
+
+            if (now.conversation?.id !== id) {
+                return;
+            }
+
+            const loaded = now.order
+                .slice(loadedFrom(now))
+                .map((entryId) => now.entries.get(entryId))
+                .filter(isRow);
+            const at = loaded.findIndex((row) => row.id === rows[start]?.id);
+
+            keepPlace();
+            store.set({ transcriptFrom: loaded[Math.max(0, at - TRANSCRIPT_ROWS)]?.id ?? null });
+        }).finally(() => setFetching(false));
     };
 
     const results = new Map();
@@ -2650,9 +2857,11 @@ export function Transcript() {
                     </p>`)
             }
             ${
-                start > 0
+                start > 0 || unloaded > 0
                     ? html`<div class="divider">
-                        <button class="link" onClick=${showEarlier}>${t("Show earlier messages")}</button>
+                        <button class="link" disabled=${fetching} onClick=${showEarlier}>
+                            ${fetching ? html`<${Spinner} /> ${t("Loading earlier messages")}` : t("Show earlier messages")}
+                        </button>
                     </div>`
                     : first &&
                       (first.kind === "compaction" || first.kind === "reset") &&

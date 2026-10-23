@@ -81,12 +81,14 @@ modelInfo(spec: string): {
     model: ModelRef;
     name: string;
     thinkingLevels: ModelThinkingLevel[];
+    contextWindow?: number;
+    cost?: { input: number; output: number };
 } | undefined;
 ```
 
 Since 0.16.0 · Stable
 
-Local metadata for one exact `provider/modelId`, including a known model without configured auth. A bare id or unknown pair returns `undefined`. It does not contact a provider, report sign-in details, or list models. Use it to describe the source model or a model already chosen by the owner. It does not authorize its use; starts still check the current model policy and availability.
+Local metadata for one exact `provider/modelId`, including a known model without configured auth. Since 0.20.0 it can also give `contextWindow` (tokens) and `cost` (dollars per million input and output tokens); `cost` is left out when the catalog has no price (an unknown or free model), and `contextWindow` can be 0 when unknown, so check for both. A bare id or unknown pair returns `undefined`. It does not contact a provider, report sign-in details, or list models. Use it to describe the source model or a model already chosen by the owner. It does not authorize its use; starts still check the current model policy and availability.
 
 ### `subagentModels`
 
@@ -96,7 +98,7 @@ subagentModels(): readonly string[];
 
 Since 0.13.1 · Stable
 
-The models that the owner lets subagents use, as `provider/modelId`. A subagent can always use the model of its own session. The list is empty by default. The owner sets it in Menu → Providers → Models for subagents.
+The models that the owner lets subagents use, as `provider/modelId`. While the list is empty (the default), a subagent runs on the model of its own session. Once it has models, subagents and linked sessions run only on those: the model of the session when it is listed and none is named; when it is not listed, the caller must name a listed model. The owner sets it in Menu → Providers → Models for subagents.
 
 ### `modelProblem`
 
@@ -107,6 +109,32 @@ modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
 Since 0.13.1 · Stable
 
 Why Pi cannot use a model now, in words that Pi can tell a person. For example, Pi Pocket does not know the model, its provider is not signed in, or its sign-in expired. It is `undefined` when Pi can use the model. With `fresh: true`, it asks the provider about the sign-in again first.
+
+### `registerModelProvider`
+
+```ts
+registerModelProvider(provider: string, config: ProviderConfig): () => void;
+```
+
+Since 0.20.0 · Experimental
+
+Registers a model provider with Pi's model runtime, as a Pi extension does. `config` is Pi's own `ProviderConfig`: the provider's name, base URL, API key, API, headers, and models or `refreshModels` function. When Pi refuses the config, the call throws and changes nothing. Open tabs get the provider's models once Pi refreshed it locally.
+
+The return value removes the provider again. Give it to `web.onDispose`, or the provider stays after the module is edited or turned off:
+
+```ts
+web.onDispose(host.registerModelProvider("example", config));
+```
+
+The last registration of a name wins: Pi uses its config alone, not merged with the one before. Its removal puts back the registration before it, from another module or from an older version that is still in force. A removal of a registration that is not the last one changes nothing in Pi. So a version that a reload replaces can call its removal safely, and a new version that fails to load leaves the old version's provider in place.
+
+A name can be a built-in provider's, or one in Pi's `models.json`. The registration then changes that provider until its removal, and the API key the owner stored for it still applies. With another `baseUrl`, the owner's stored key goes to that address. Say so when you ask the owner to turn the module on.
+
+Two things to know about how Pi refreshes models.
+
+First, registration refreshes models locally only. A provider whose catalog comes from `refreshModels` alone shows no models until a network refresh, as with the app's **Refresh models** action. To look right away, ship a fallback list: a small static `models` with the provider's most common models. The network pass replaces it.
+
+Second, every refresh, even a local one, calls `refreshModels`. When `allowNetwork` is false, return the models you have: `stored?.models ?? []`, or another fallback list. Returning `[]` empties the provider in Pi until the next network pass, because an empty list still counts as the provider's answer.
 
 ### `shapeModelRequests`
 
@@ -206,6 +234,64 @@ Since 0.14.0 · Stable
 
 Keeps the lines of the text, but leaves no closing tag in it. Use it for text that you put between tags of your own.
 
+## Public web pages
+
+### `fetchPublic`
+
+```ts
+fetchPublic(url: string | URL, init?: PublicFetchInit): Promise<Response>;
+```
+
+Since 0.20.0 · Experimental
+
+Fetches an address that came from outside (from Pi, a page, or a person) as `fetch` does, but filters non-public ranges and this machine's interface addresses. Use it for each address that the module did not write itself: a tool that reads a page that Pi names, a crawl, or a link from a search result.
+
+- It takes only `http` and `https` addresses, with no user or password in them.
+- It refuses an IP address that is not public: loopback, private, link-local, shared (`100.64.0.0/10`), multicast, and the ranges set apart for documentation and later use. In IPv6, only global unicast addresses (`2000::/3`) are public, less the ranges set apart in it. An IPv4-mapped IPv6 address is checked as its IPv4 address.
+- It also refuses every IPv4 and IPv6 address on this machine's network interfaces, including public ones. It reads the interface list fresh for each address check. Equivalent IPv6 spellings and IPv4-mapped addresses receive the same check.
+- It resolves a name when it connects, and refuses the name when any of its addresses is in a non-public range or on a local interface. The connection goes only to an address that it checked. So a name that resolves to a public address first and to a private one later (DNS rebinding) cannot reach the private one.
+- It checks each redirect the same way. A 303, and a `POST` that a 301 or 302 sends on, become a `GET`. A redirect to another origin drops the `Authorization`, `Cookie`, and `Proxy-Authorization` headers.
+- It stops at a size, a time, and a number of redirects ([limits](limits.md#host)). Give `init` other values.
+- It uses its own connections, not the HTTP proxy in Pi's settings: a proxy resolves names itself, out of the check's reach. Behind a proxy that is the only way out, it cannot connect.
+
+The filter does not inspect routes. It cannot detect a public address that routes back into the network through NAT reflection or internally routed public ranges. Network controls must restrict those paths when needed.
+
+A refusal throws an `Error` with a `code`:
+
+- `"POCKET_NOT_PUBLIC"`: the URL is not allowed, or a literal, DNS answer, or redirect address is in a non-public range or on a local interface.
+- `"POCKET_TOO_LARGE"`: the body is larger than `maxBytes`. An uncompressed response whose `Content-Length` is larger is refused at once. Otherwise the error comes when you read the body, as it is decoded.
+- `"POCKET_REDIRECTS"`: more redirects than `maxRedirects`, or a redirect with `redirect: "error"`.
+
+Other failures, such as a name that does not resolve, reject as `fetch` does. The response's `url` is the address of the last redirect, and `redirected` says whether it followed one.
+
+The text of a page is text from outside: give it to Pi through [`text`](#text) ([Text from other places](../host.md#text-from-other-places)). [examples/read-page.ts](../../examples/read-page.ts) is a tool that uses both.
+
+#### `PublicFetchInit`
+
+```ts
+interface PublicFetchInit {
+    method?: string;
+    headers?: Record<string, string> | [string, string][] | Headers;
+    body?: string | Uint8Array;
+    signal?: AbortSignal;
+    redirect?: "follow" | "manual" | "error";
+    maxRedirects?: number;
+    maxBytes?: number;
+    timeoutMs?: number;
+}
+```
+
+Since 0.20.0 · Experimental
+
+What `fetchPublic` takes besides the address.
+
+- `method`, `headers`, and `signal`: as for `fetch`. `method` is `GET` by default.
+- `body`: a string or bytes, which a 307 or 308 redirect sends again.
+- `redirect`: `"follow"` (the default) follows redirects and checks each address. `"manual"` gives the redirect response. `"error"` throws on a redirect.
+- `maxRedirects`: the redirects to follow at most.
+- `maxBytes`: the size of the body at most, after it is decoded.
+- `timeoutMs`: the time for the whole request at most, the body included.
+
 ## Linked sessions
 
 ### `linkedSessions`
@@ -236,7 +322,7 @@ Makes a session linked to `source` and sends it `message` as its first message. 
 
 - The new session works in `cwd` when supplied, otherwise the folder of `source`. `cwd` must name an existing folder and uses the normal folder-picker path rules. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. `cwd` is since 0.19.0: an older Pi Pocket ignores it and uses the folder of `source`, so a gallery entry that needs it sets `minPocket` to `0.19.0`. It gets a copy of the agent settings of `source`, but not its history.
 - Without `title`, the title is the first line of `message`.
-- `model` is `provider/modelId`. It must be the model of `source`, or a model that the owner lets subagents use. Without it, the session uses the model of `source`.
+- `model` is `provider/modelId`. While the owner's list of models for subagents is empty, it must be the model of `source`. Once the list has models, it must be one of them. Without it, the session uses the model of `source` when the list is empty or has it. Otherwise `start` is refused with an error that names the allowed models.
 - `thinking` is a level no higher than the level of `source`. Without it, the session uses the level of `source`. Pi Pocket lowers it to the highest level that the model has.
 - When Pi cannot use the model now, `start` makes nothing and throws an error.
 

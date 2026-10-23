@@ -143,6 +143,8 @@ All public interfaces are stable, unless the docs mark them experimental or depr
 
 Since 0.19.0, these `pocket` members are experimental too: `panel`, `openPanel`, `closePanel`, `status`, `topbar`, `composerButton`, `replyAction`, `insertText`, `arrange`, and their types. The `core:` ids of the items in slots are public, with the same promise as the names of the theme surface.
 
+Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
+
 ### Deprecated
 
 See [Deprecation](#deprecation).

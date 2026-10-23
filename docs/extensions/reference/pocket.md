@@ -258,6 +258,71 @@ Since 0.16.0 · Stable
 
 Open a positive integer conversation id through normal app navigation. This closes the extension page and keeps normal Back behavior. Sheets close when changing conversations; call `pocket.closeSheet()` first to close your own sheet even when that conversation is already open. The server still checks access; an id grants no access. Invalid ids throw. Use a bound start's `session` or a human list item's `conversationId`, not a private app URL.
 
+### `onConversation`
+
+```ts
+onConversation(listener: (conversationId: number | null) => void): () => void;
+```
+
+Since 0.20.0 · Experimental
+
+Calls `listener` with the id of the session the tab shows, or null, at once, and again each time it changes: another session opens, the person goes to the list, or they lose access to it. Returns how to stop. It also stops when this version of the module goes. A listener that throws is logged, and the others go on.
+
+### `messages`
+
+```ts
+messages(options?: MessagesOptions): Promise<MessagePage>;
+```
+
+Since 0.20.0 · Experimental
+
+Reads a page of the people's messages in the session the tab shows, oldest first: Pi's answers, tool calls, and notes are not in it. With no `before`, it is the newest `limit` messages (50 by default, up to 200). The page's `before` is the cursor for the page before it, and null at the start. Read pages until `before` is null to have them all. The messages are those of the transcript: after a New context, the earlier ones are not in it.
+
+The server checks the person's access to the session for each page. A page is from the session that the tab showed when it was asked for (`conversationId`): compare it with the one shown now before you use it. It rejects with an error whose `status` is 409 when its cursor is stale, as after a compaction: read again from the newest. Abort it with `signal`. With no session open, or from a version of the module that is gone, the page is empty. See [`MessagesOptions`](#messagesoptions), [`MessagePage`](#messagepage), and [`MessageInfo`](#messageinfo).
+
+The text is what people wrote, and can hold anything they pasted. Keep it in memory only for as long as you show it, and show it as text, not HTML.
+
+### `reveal`
+
+```ts
+reveal(id: string): Promise<boolean>;
+```
+
+Since 0.20.0 · Experimental
+
+Scrolls the transcript of the session the tab shows to a message, and highlights it, as Find does. It loads earlier entries first when the transcript does not have them yet. A sheet that shows closes, so the transcript shows; the focus stays where it is, and with reduced motion on, it does not scroll smoothly. It resolves true once the message shows, and false when it cannot: it is not in this session's transcript, the session changed while it loaded, or a newer reveal (or a jump in the app) came first. Use the `id` of a [`MessageInfo`](#messageinfo). An id that is not a positive whole number throws.
+
+```js
+// An outline of the session's messages, in a sheet: each one jumps to its message.
+pocket.sheet({
+    id: "outline",
+    title: "Outline",
+    component() {
+        const [messages, setMessages] = pocket.useState(null);
+
+        pocket.useEffect(() => {
+            const stop = new AbortController();
+
+            pocket.messages({ limit: 200, signal: stop.signal }).then(
+                (page) => setMessages(page.messages),
+                () => setMessages([]),
+            );
+
+            return () => stop.abort();
+        }, []);
+
+        return messages === null
+            ? pocket.html`<${pocket.Loader} />`
+            : messages.map(
+                  (message) =>
+                      pocket.html`<button class="list-item" onClick=${() => pocket.reveal(message.id)}>
+                          ${message.text.split("\n")[0]}
+                      </button>`,
+              );
+    },
+});
+```
+
 ## Routes and events
 
 ### `api`
@@ -395,6 +460,73 @@ replyAction(spec: ReplyActionSpec): Added<ReplyActionSpec>;
 Since 0.19.0 · Experimental
 
 Adds an action under Pi's answers, before More. Its `run` gets the answer, or its sheet gets it as the prop `reply`. See [`ReplyActionSpec`](#replyactionspec) and [`Reply`](#reply). The actions show under each finished answer, as the app's own (Discuss, Pin, Copy) do.
+
+### `sessionChips`
+
+```ts
+sessionChips(spec: SessionChipsSpec): Added<SessionChipsSpec>;
+```
+
+Since 0.20.0 · Experimental
+
+Adds chips under the titles of rows in the session list, such as tags. The list calls `chips` for each row each time it draws. See [`SessionChipsSpec`](#sessionchipsspec) and [`SessionChip`](#sessionchip). A row with chips is taller. The space beside them opens the session, as the row does.
+
+### `sessionAction`
+
+```ts
+sessionAction(spec: SessionActionSpec): Added<SessionActionSpec>;
+```
+
+Since 0.20.0 · Experimental
+
+Adds an action on sessions. It shows in the sheet that a finger held on a row opens, and in the bar under the list while sessions are selected (Ctrl/⌘+click, or Select). Its `run` gets the ids of the sessions, or its sheet gets them as the prop `sessions`. See [`SessionActionSpec`](#sessionactionspec).
+
+### `sessionFilter`
+
+```ts
+sessionFilter(spec: SessionFilterSpec): Added<SessionFilterSpec>;
+```
+
+Since 0.20.0 · Experimental
+
+Adds a filter button in the session list's search field. The field keeps its room: the first 3 filters show, in the order that the server lists the modules, and only those filter the list. A tap does what the button does, such as open a sheet where a person chooses. A sheet opens over the drawer, which stays. While `match` is a function, the filter is on: the button is lit (`data-state="on"`), and the list shows only the sessions that `match` keeps, with every other filter that is on and the search. `update({ match: null })` turns it off. See [`SessionFilterSpec`](#sessionfilterspec).
+
+### `sessionSearch`
+
+```ts
+sessionSearch(spec: SessionSearchSpec): Added<SessionSearchSpec>;
+```
+
+Since 0.20.0 · Experimental
+
+Adds words that find sessions: the session list's search and the launcher match them after the title and the folder. A row that only a word matches shows the word after its title, and the launcher shows it in the result's details. See [`SessionSearchSpec`](#sessionsearchspec).
+
+### `composerKey`
+
+```ts
+composerKey(spec: ComposerKeySpec): Added<ComposerKeySpec>;
+```
+
+Since 0.20.0 · Experimental
+
+Adds a key in the message boxes: the session's and PiP's. It comes before the box's own keys, so it can take any of them, Enter too. While an input method composes text, keys go to it, not to modules. When two modules give the same key, the one earlier in the server's order of modules gets it. The Keyboard shortcuts sheet lists it with its `label`. Some keys never reach a page: in a browser tab, the browser keeps keys such as Ctrl+W, Ctrl+T, and Ctrl+N for itself. See [`ComposerKeySpec`](#composerkeyspec) and [`ComposerBox`](#composerbox).
+
+```js
+// Ctrl+W deletes the word before the caret, or the selection, as in a terminal.
+pocket.composerKey({
+    id: "delete-word",
+    keys: "Ctrl+W",
+    label: "Delete the word before the caret",
+    run(box) {
+        const start =
+            box.start === box.end
+                ? box.text.slice(0, box.start).replace(/\S+\s*$|\s+$/, "").length
+                : box.start;
+
+        box.set(box.text.slice(0, start) + box.text.slice(box.end), start);
+    },
+});
+```
 
 ### `insertText`
 
@@ -781,6 +913,201 @@ Since 0.19.0 · Experimental
 
 An action under Pi's answers: its `label`, an icon before it when you give one, and `run` or `sheet`. `run` gets the answer. The sheet gets it as the prop `reply`. When `run` throws or rejects, a notice says so.
 
+### `SessionInfo`
+
+```ts
+interface SessionInfo {
+    readonly id: number;
+    readonly title: string;
+    readonly cwd: string;
+    readonly archived: boolean;
+    readonly updatedAt: number;
+}
+```
+
+Since 0.20.0 · Experimental
+
+A session as the session list's extension points get it: its id, a number as in its address (`/s/12`), its title, its folder, whether it is archived, and when it last moved up the list, in milliseconds since 1970. It has the fields of [`WebSession`](web.md#websession), the server's view of the same session. It is a frozen copy.
+
+### `SessionChip`
+
+```ts
+interface SessionChip {
+    label: string;
+    title?: string;
+    run?: () => unknown;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `label`: its words. Past 32 characters, they are cut with "…".
+- `title`: its tooltip. By default, its label.
+- `run`: what a tap on it does, such as turn on a filter. A chip with `run` is a button. Without `run`, the chip only shows, and a tap on it opens the session.
+
+### `SessionChipsSpec`
+
+```ts
+interface SessionChipsSpec {
+    id: string;
+    chips: (session: SessionInfo) => readonly SessionChip[];
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `id`: the chips' id in the module.
+- `chips`: the chips for a session. Up to 6 show for each module. The list calls it for each row each time it draws, so keep it fast, and do not call `pocket` in it. Read what it needs from the module's own state. When that state changes, give `update` a new function, so the list draws again: `added.update({ chips: (session) => chipsOf(session) })`.
+
+A `chips` that throws stops its module in that browser, as a failed module stops.
+
+### `SessionActionSpec`
+
+```ts
+type SessionActionSpec = (
+    | { run: (sessions: readonly number[]) => unknown; sheet?: never }
+    | { sheet: string; run?: never }
+) & {
+    id: string;
+    label: string;
+    access?: "steer" | "view";
+    icon?: string;
+    iconPath?: string;
+};
+```
+
+Since 0.20.0 · Experimental
+
+An action on sessions: its `label` (past 24 characters, cut with "…"), and `run` or `sheet`. By default (`access: "steer"`), only people who can steer see it. Give `access: "view"` for an action that changes nothing, which viewers may use too.
+
+With `icon` or `iconPath`, the action is also a button on each row, beside archive, pin, and mark unread, where a mouse hovers or the keyboard focuses. Only the first such action gets a button: rows keep room for their titles. Touch screens use the row's sheet. `run` gets the ids of the sessions. The sheet gets them as the prop `sessions`. From the bar, they are the selected sessions that the list shows, and the selection then ends. From a row's sheet, it is that session. When `run` throws or rejects, a notice says so.
+
+### `SessionFilterSpec`
+
+```ts
+type SessionFilterSpec = Action & {
+    id: string;
+    title: string;
+    icon?: string;
+    iconPath?: string;
+    badge?: number | string | null | false;
+    match?: ((session: SessionInfo) => boolean) | null;
+    started?: (id: number) => unknown;
+};
+```
+
+Since 0.20.0 · Experimental
+
+A filter button. `title`, `icon`, `iconPath`, and `badge` are as for a rail button. It does one thing when tapped, as an [`Action`](#action) does.
+
+- `match`: whether the list keeps a session. Only `true` keeps it. While it is a function, the filter is on. Null or no `match` turns it off. The list calls it for each session each time it draws, so keep it fast, and do not call `pocket` in it. A `match` that throws stops its module in that browser, and the list then shows the sessions again.
+
+- `started`: runs when a person starts a session with **New** in the session list's head while the filter is on. It gets the new session's id, so the module can make the session meet the filter, as Session tags gives it the chosen tags. Other ways to start a session (the launcher, Alt+N, the rail) do not run it. When it throws or rejects, a notice says so.
+
+The filter is in each tab that loads the module, not saved for the person: a module that wants its choices to last keeps them itself.
+
+### `SessionSearchSpec`
+
+```ts
+interface SessionSearchSpec {
+    id: string;
+    words: (session: SessionInfo) => readonly string[];
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `id`: the words' id in the module.
+- `words`: the words for a session, up to 32, each up to 100 characters. The search lowercases them. It is called as people search, so keep it fast, and do not call `pocket` in it. Give `update` a new function when the words change.
+
+### `MessagesOptions`
+
+```ts
+interface MessagesOptions {
+    before?: string | null;
+    limit?: number;
+    signal?: AbortSignal;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `before`: the cursor that a page gave, for the messages before it. None or null: the newest.
+- `limit`: how many messages, from 1 to 200. 50 by default. Others throw.
+- `signal`: stops the read. The promise then rejects with an AbortError.
+
+### `MessagePage`
+
+```ts
+interface MessagePage {
+    readonly conversationId: number | null;
+    readonly messages: readonly MessageInfo[];
+    readonly before: string | null;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `conversationId`: the session that the tab showed when the page was asked for.
+- `messages`: the messages, oldest first.
+- `before`: the cursor for the page before this one, or null at the start.
+
+### `MessageInfo`
+
+```ts
+interface MessageInfo {
+    readonly id: string;
+    readonly text: string;
+    readonly clipped: boolean;
+    readonly by: { readonly id: string | null; readonly name: string | null };
+    readonly at: number | null;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `id`: the message's id, for `reveal`. Two messages with the same words have different ids, and an id names the same message after a reload, a restart, and a compaction. A fork's messages have ids of their own. Do not read meaning into it.
+- `text`: what the person wrote, without the files attached to it: up to 1,000 characters.
+- `clipped`: true when `text` was cut.
+- `by`: who wrote it: their id and name, when known. A message from before Pi Pocket kept authors has neither.
+- `at`: when it was sent, in milliseconds since 1970 on the server's clock, or null.
+
+### `ComposerKeySpec`
+
+```ts
+interface ComposerKeySpec {
+    id: string;
+    keys: string | readonly string[];
+    label: string;
+    run: (box: ComposerBox) => unknown;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `id`: the key's id in the module.
+- `keys`: the key, or a list of up to 8 ([limits](limits.md#the-session-list-and-message-boxes)). A key is modifiers and then a character or a named key, joined by `+`: `"Ctrl+W"`, `"Alt+Backspace"`, `"Mod+Shift+K"`. The modifiers are `Ctrl` (or `Control`), `Alt` (or `Option`), `Shift`, `Meta` (or `Cmd` or `Command`), and `Mod`, which is ⌘ on a Mac and Ctrl elsewhere. A key matches only with exactly its modifiers. The named keys are `Backspace`, `Delete` (or `Del`), `Enter` (or `Return`), `Tab`, `Escape` (or `Esc`), `Space`, the arrows (`ArrowUp` or `Up`, `ArrowDown` or `Down`, and so on), `Home`, `End`, `PageUp`, `PageDown`, `Insert`, and `F1` to `F12`. With Alt, a letter or a digit also matches by its place on the keyboard, because Option on a Mac types another character.
+- `label`: what it does, for the Keyboard shortcuts sheet.
+- `run`: runs when the key is pressed in a box, with the box. Return `false` to let the key through, to the box and then the browser. Anything else takes the key: the box does nothing more with it. An async `run` takes it. When `run` throws, the key goes through, and a notice says so, as when it rejects.
+
+### `ComposerBox`
+
+```ts
+interface ComposerBox {
+    readonly where: "session" | "pip";
+    readonly text: string;
+    readonly start: number;
+    readonly end: number;
+    set(text: string, start?: number, end?: number): void;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `where`: the session's message box, or PiP's.
+- `text`, `start`, `end`: the box's text and selection when the key came. With nothing selected, `start` and `end` are the caret.
+- `set`: writes new text, as typing does, so the box keeps it as its draft. It puts the caret at `start` (by default, the end of the text), or selects from `start` to `end`. Text past 1,000,000 characters throws.
+
 ### `SlotName`
 
 ```ts
@@ -819,7 +1146,9 @@ What shows comes in layers, the last one wins: each item's default place, then t
 | `status`   | `core:connection`, `core:here`, `core:speed`, `core:context`, `core:cache`, `core:spend`, `core:guard`                            | `core:connection`, `core:guard`                                                | after `core:cache`          |
 | `places`   | `core:files`, `core:changes`, `core:browser`, `core:artifacts`, `core:chat`, `core:find`, `core:branch`, `core:pip`, `core:peeks` | none                                                                           | last: a tile for each panel |
 | `composer` | `core:places`, `core:attach`, `core:model`, `core:plan`                                                                           | none (Send, Stop, the mic, and Steer, Queue and Interrupt are not in the slot) | after `core:plan`           |
-| `reply`    | `core:react`, `core:discuss`, `core:pin`, `core:copy`, `core:more`                                                                | `core:more`, last                                                              | before `core:more`          |
+| `reply`    | `core:time`, `core:react`, `core:discuss`, `core:pin`, `core:copy`, `core:more`                                                   | `core:more`, last                                                              | before `core:more`          |
+
+The `core:time` item shows a completed reply's stored message time. Appearance → Layout can hide or move it.
 
 An item that has nothing to show now shows nothing, wherever it is: Changes with no changes, the cache before the first answer, a quiet button.
 

@@ -182,5 +182,11 @@ export function fakeTab(id: ConversationId | undefined, user: User, protocol = 2
 
 /** Remove the temporary folder: call from `after`, once the app is closed. */
 export function cleanUp(): void {
-    rmSync(root, { recursive: true, force: true });
+    // A browser's helper processes can still write to its profile here for a moment after it closes: retry, and a
+    // folder that stays only warns, so a slow exit does not fail the file.
+    try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (error) {
+        console.warn(`Could not remove ${root}: ${(error as Error).message}`);
+    }
 }

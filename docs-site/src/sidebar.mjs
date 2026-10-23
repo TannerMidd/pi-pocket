@@ -65,6 +65,7 @@ export const SIDEBAR = [
         items: [
             ["docs/index.md", "Documentation map"],
             ["CONTRIBUTING.md", "Contributing"],
+            ["docs/docker.md", "Docker and Podman"],
             ["docs/self-editing.md", "Changing the code"],
             ["docs/map.md", "Project map"],
             ["docs/architecture.md", "Architecture"],

@@ -301,8 +301,16 @@ test(
             };
 
             assert.equal(state.open, true);
-            const frame = await request(viewer.token, `c/${id}/browser/frame?after=0`);
+            // The first frame comes a moment after the page opens: until then, the answer is 204.
+            let frame = await request(viewer.token, `c/${id}/browser/frame?after=0`);
 
+            await until(async () => {
+                if (frame.status === 204) {
+                    frame = await request(viewer.token, `c/${id}/browser/frame?after=0`);
+                }
+
+                return frame.status !== 204;
+            }, "the first frame");
             assert.equal(frame.status, 200);
             assert.equal(frame.headers.get("content-type"), "image/jpeg");
             assert.equal(

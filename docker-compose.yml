@@ -1,0 +1,83 @@
+# Pi Pocket in Docker or Podman.
+#
+#   cp .env.example .env       # optional: change ports and external folders
+#   docker compose up -d --build
+#   podman compose up -d --build
+#
+# The folders under ./data are yours: edit extensions and themes there, keep
+# Pi's sign-ins in ./data/pi, and put the projects Pi works on in ./data/workspace.
+# Set the variables in .env (or the shell) to use folders anywhere else on the host.
+#
+# Sign in at the link the launcher prints:
+#   docker compose logs pi-pocket | grep '/login?token='
+#   podman logs pi-pocket | grep '/login?token='
+# and change its address (the container's) to the host's, such as localhost.
+
+name: pi-pocket
+
+services:
+    pi-pocket:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+        image: pi-pocket:local
+        container_name: pi-pocket
+        restart: unless-stopped
+        stop_grace_period: 30s
+
+        ports:
+            - "${PI_POCKET_BIND:-0.0.0.0}:${PI_POCKET_PORT:-8787}:${PI_POCKET_PORT:-8787}"
+
+        environment:
+            HOME: /home/node
+            PI_POCKET_ACCESS: ${PI_POCKET_ACCESS:-lan}
+            PI_POCKET_PORT: ${PI_POCKET_PORT:-8787}
+            # Chromium runs without its sandbox inside a container; /dev/shm is small there.
+            PI_POCKET_BROWSER: /usr/bin/chromium
+            PI_POCKET_BROWSER_ARGS: ${PI_POCKET_BROWSER_ARGS:---no-sandbox --disable-dev-shm-usage}
+            # Uncomment to make Lancet Guard unavailable:
+            # PI_POCKET_GUARD: off
+            #
+            # Provider keys can go here instead of signing in from the app, for example:
+            # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+            # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+        volumes:
+            # Pi Pocket's database, people, settings, uploads, worktrees, and themes.
+            - ${PI_POCKET_DATA:-./data}:/data
+            # The owner's drop-in extensions, loaded from this external folder.
+            - ${PI_POCKET_EXTENSIONS:-./data/extensions}:/data/extensions
+            # The owner's themes, loaded from this external folder.
+            - ${PI_POCKET_THEMES:-./data/themes}:/data/themes
+            # Pi's own folder: auth.json, settings.json, AGENTS.md, skills, prompts,
+            # trust.json, and sessions. Keeping it here lets a fresh database reuse the
+            # same sign-ins, and lets a Pi CLI on the host share the folder.
+            - ${PI_POCKET_PI_DIR:-./data/pi}:/home/node/.pi
+            # Projects Pi works on. This is also where new sessions start.
+            - ${PI_POCKET_WORKSPACE:-./data/workspace}:/workspace
+
+        working_dir: /workspace
+
+        # Compose runs the container as root. Rootless Podman maps that to your own
+        # host user, which is what makes the bind-mounted folders writable. With
+        # Docker you can run as your user instead, if the folders are owned by it:
+        #
+        # user: "1000:1000"
+
+        # No process in the container gains privileges it did not start with (setuid,
+        # file capabilities). Pi's commands and the unsandboxed Chromium run with less.
+        security_opt:
+            - no-new-privileges:true
+
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "node",
+                    "-e",
+                    "fetch('http://127.0.0.1:'+(process.env.PI_POCKET_PORT||8787)+'/style.css').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+                ]
+            interval: 30s
+            timeout: 5s
+            start_period: 20s
+            retries: 3

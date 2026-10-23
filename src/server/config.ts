@@ -78,7 +78,7 @@ interface PocketConfig {
     /** The tokens of context above which PiP compacts itself once idle; 0: only as sessions do. Absent: the default. */
     pipCompactAt?: number;
     /**
-     * The models (`provider/modelId`) Pi may start subagents on besides their session's own, as the owner allowed them.
+     * The models (`provider/modelId`) Pi may start subagents on, as the owner allowed them.
      * Absent or empty: none, and subagents always run on their session's model.
      */
     subagentModels?: string[];
@@ -196,12 +196,17 @@ export class ConfigStore {
         this.save();
     }
 
-    /** The models Pi may start subagents on besides their session's own (`provider/modelId`); empty: none. */
+    /** The models Pi may start subagents on (`provider/modelId`); empty: none. */
     get subagentModels(): readonly string[] {
         const models = this.#config.subagentModels;
 
-        // Read from a file people may have edited: only strings count.
-        return Array.isArray(models) ? models.filter((each) => typeof each === "string") : [];
+        // Read from a file people may have edited: only provider/modelId strings count.
+        return Array.isArray(models)
+            ? models
+                  .filter((each) => typeof each === "string")
+                  .map((each) => each.trim())
+                  .filter((each) => each.indexOf("/") > 0)
+            : [];
     }
 
     set subagentModels(models: readonly string[]) {

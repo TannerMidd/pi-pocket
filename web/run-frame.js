@@ -1,6 +1,7 @@
 // HTML from a reply, run: in the server's sandboxed frame page (`/a/frame`), only once someone taps Run. The frame has
 // an opaque origin, as artifacts do: it can run scripts and reach the network, never the app or its cookies.
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useArtifactBridge } from "./artifact-bridge.js";
 import { html } from "./ui.js";
 
 /**
@@ -45,12 +46,23 @@ export function useFitHeight(initial, min, max) {
 }
 
 /**
- * A frame running `source`. The frame page says when it is ready; then it gets the HTML and reports its height, and the
- * frame fits it. Messages count only from this frame's own window, and a height only when it is a sane number.
+ * A frame running `source`, as the artifact `artifact` when it is one. The frame page says when it is ready; then it
+ * gets the HTML and reports its height, and the frame fits it. Messages count only from this frame's own window, and a
+ * height only when it is a sane number.
  */
-export function RunFrame({ source, title = "Preview" }) {
+export function RunFrame({
+    source,
+    title = "Preview",
+    from = "the page in Pi's reply",
+    artifact = null,
+}) {
     const ref = useRef(null);
     const [height, fitHeight, resetFit] = useFitHeight(240, MIN_HEIGHT, MAX_HEIGHT);
+
+    // It may offer a follow-up for the message box, as an artifact may; `from` names it there. It keeps state only as
+    // an artifact (`artifact`, its id): a reply's HTML has none. Its frame page opens the line to the app, and the HTML
+    // it writes in keeps it (`ARTIFACT_BRIDGE`, `src/server/http/artifacts.ts`).
+    useArtifactBridge(ref, { artifact, source: from });
 
     // Listening from the moment the frame is in the page, before it can load: it says it is ready only once.
     useLayoutEffect(() => {

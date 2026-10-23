@@ -644,7 +644,7 @@ addEventListener("keydown", (event) => {
     const mod = APPLE ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
     const key = event.key.toLowerCase();
 
-    if (!store.state.me) {
+    if (event.defaultPrevented || !store.state.me) {
         return;
     }
 

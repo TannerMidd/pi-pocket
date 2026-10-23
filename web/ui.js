@@ -644,11 +644,36 @@ export function openFile(path) {
     openSheet({ type: "file", id: target.path, line: target.line });
 }
 
-/** File paths in rendered markdown open in the viewer. */
+/**
+ * Whether a click or key asks to show a path in the file manager rather than the viewer: Ctrl (⌘ on a Mac) held, by the
+ * owner, whose machine the server runs on.
+ */
+export const revealAsked = (event) =>
+    (APPLE ? event.metaKey : event.ctrlKey) && store.state.me?.role === "owner";
+
+/** Show a file (or folder) of the session in the file manager of the machine the server runs on, selected. */
+export function revealFile(path) {
+    const match = /^(.*?):(\d+)(?:-\d+)?$/.exec(path);
+
+    actions.reveal(match ? match[1] : path).then(
+        () => notify("info", "Shown in the file manager on the server's machine."),
+        (error) => notify("error", error.message ?? String(error)),
+    );
+}
+
+/** File paths in rendered markdown open in the viewer, or with Ctrl (⌘) held, in the file manager. */
 document.addEventListener("click", (event) => {
     const target = event.target.closest?.(".md code[data-path], .md a[data-path]");
 
     if (!target) {
+        return;
+    }
+
+    if (revealAsked(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        revealFile(target.dataset.path);
+
         return;
     }
 
@@ -672,7 +697,12 @@ document.addEventListener("keydown", (event) => {
 
     if (target && (event.key === "Enter" || event.key === " ") && !event.repeat) {
         event.preventDefault();
-        openFile(target.dataset.path);
+
+        if (revealAsked(event)) {
+            revealFile(target.dataset.path);
+        } else {
+            openFile(target.dataset.path);
+        }
     }
 });
 
@@ -1276,6 +1306,9 @@ export function useSide(ref, of = (element) => element) {
     const [side, setSide] = useState("left");
     const look = useRef(null);
 
+    const watched = useRef(null);
+    const watcher = useRef(null);
+
     look.current = () => {
         const element = ref.current && of(ref.current);
         const box = element?.getBoundingClientRect();
@@ -1285,8 +1318,25 @@ export function useSide(ref, of = (element) => element) {
         }
     };
 
-    // After each draw (the element may have only now come), and when the window or the theme changes.
-    useLayoutEffect(() => look.current());
+    // Measured when the browser lays the element out anyway, before the frame is painted: as it comes, shows, or changes
+    // size (a ResizeObserver says so). Measured after each draw instead, it laid the whole page out early, and opening a
+    // session froze the longer for it on a phone.
+    useLayoutEffect(() => {
+        const element = ref.current && of(ref.current);
+
+        if (element === watched.current) {
+            return;
+        }
+
+        watched.current = element;
+        watcher.current ??= new ResizeObserver(() => look.current());
+        watcher.current.disconnect();
+
+        if (element) {
+            watcher.current.observe(element);
+        }
+    });
+    // And when the window or the theme changes, which can move it without resizing it.
     useLayoutEffect(() => {
         const again = () => look.current();
 
@@ -1296,6 +1346,7 @@ export function useSide(ref, of = (element) => element) {
         return () => {
             removeEventListener("resize", again);
             document.removeEventListener("pocket:theme", again);
+            watcher.current?.disconnect();
         };
     }, []);
 

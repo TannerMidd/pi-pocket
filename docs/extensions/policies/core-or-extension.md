@@ -89,6 +89,18 @@ Ask these questions in this order. The first "yes" gives the answer.
 - **Why:** the tokens and the parts must be the same for every theme (C5). The look is a preference (C6). The default theme stays the one that Pi Pocket ships.
 - The theme guide and the theme surface reference tell what a theme can change.
 
+### Session tags (#118, 0.20.0)
+
+- **Core:** the session list's extension points: chips on rows (`pocket.sessionChips`), words for the search and the launcher (`pocket.sessionSearch`), filters beside the search (`pocket.sessionFilter`), and actions on sessions (`pocket.sessionAction`). On the server, `request.sessions()` gives the sessions that a person can see, so a route checks ids with core's own rule.
+- **Built-in extension: Session tags** (`extensions/session-tags.ts` and `session-tags/`). Its document of tags, its routes, its chips, filter, and sheets. It is off by default. At run time it uses only `host` and `web`, as a drop-in does.
+- **Why:** pull request #118, by Jeroen Dee (@jeroendee), first put tags in core, on the session list's stored data. Tags are a way to organize work that only some people want (C6), so the workflow became an extension, and the mechanism a set of extension points that other modules can use (C7). Who can see a session stays in core (C1, C9).
+
+### Web access (#126, 0.20.0)
+
+- **Core: `host.fetchPublic`.** A fetch that reaches only the public internet: it checks the address of each connection and each redirect, so a name that changes its address (DNS rebinding) gets nowhere, and it stops at a size and a time.
+- **Gallery extension: web search.** Its providers, keys, routing, settings sheet, request counts, and tools. At run time it uses only `host`, `web`, and `pocket`, as a drop-in does.
+- **Why:** pull request #126 first put search, its settings, and its routes in core. Search providers are integrations with outside services that only some owners want (C6, C8, C12). The check that keeps a fetched address off this machine and its networks protects against an attack (C4), and each module that reads a page needs the same one (C5, C9), so it became an extension point. [examples/read-page.ts](../../examples/read-page.ts) is its first user (C15).
+
 ## Ask for a new extension point
 
 When the public API cannot do what you need, ask for an extension point. Do not keep a patch to core in a fork if you can stop.

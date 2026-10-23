@@ -31,7 +31,12 @@ import { SessionSheet } from "./sheets/session.js";
 import { ShortcutsSheet } from "./sheets/shortcuts.js";
 import { SpendSheet } from "./sheets/spend.js";
 import { TextSheet } from "./sheets/text.js";
-import { ArtifactsSheet, ArtifactViewer, ImageViewer } from "./sheets/viewers.js";
+import {
+    ArtifactsSheet,
+    ArtifactShareSheet,
+    ArtifactViewer,
+    ImageViewer,
+} from "./sheets/viewers.js";
 import { PiSessionSheet, PiSessionsSheet, piSessionsAvailable } from "./sheets/pi-sessions.js";
 import { WorktreeSheet } from "./sheets/worktree.js";
 import { TrustSheet } from "./trust.js";
@@ -194,7 +199,7 @@ function sheetBody(sheet) {
             body = view.conversation ? html`<${BranchPicker} />` : null;
             break;
         case "cwd":
-            body = html`<${CwdSheet} mode=${sheet.mode} />`;
+            body = html`<${CwdSheet} mode=${sheet.mode} fromList=${sheet.fromList === true} />`;
             break;
         case "artifacts":
             body = html`<${ArtifactsSheet} />`;
@@ -202,6 +207,11 @@ function sheetBody(sheet) {
         case "viewer":
             body = view.conversation
                 ? html`<${ArtifactViewer} id=${sheet.id} version=${sheet.version} />`
+                : null;
+            break;
+        case "artifact-share":
+            body = view.conversation
+                ? html`<${ArtifactShareSheet} id=${sheet.id} version=${sheet.version} />`
                 : null;
             break;
         case "providers":

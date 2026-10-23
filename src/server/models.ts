@@ -115,6 +115,11 @@ export function modelInfo(models: ModelRuntime, spec: string) {
               model: { provider: model.provider, modelId: model.id },
               name: model.name,
               thinkingLevels: capabilities(model).levels as ModelThinkingLevel[],
+              contextWindow: model.contextWindow,
+              // Dollars per million tokens; left out when the catalog has no price.
+              ...(model.cost.input > 0 || model.cost.output > 0
+                  ? { cost: { input: model.cost.input, output: model.cost.output } }
+                  : {}),
           };
 }
 

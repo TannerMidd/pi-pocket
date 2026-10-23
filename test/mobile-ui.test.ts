@@ -237,6 +237,147 @@ test("local Markdown file links use the viewer", real, async () => {
     );
 });
 
+test("completed replies show stored message times across providers", real, async () => {
+    await fresh();
+    await goTo(first);
+    await until(
+        () =>
+            inPage<boolean>(`
+                return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${first});
+            `),
+        "the session view",
+    );
+    const expected = await inPage<{ text: string; dateTime: string; title: string }[]>(`
+        const { store } = await import("/store.js");
+        const { fromServer } = await import("/seen.js");
+        const today = new Date().setHours(10, 30, 0, 0);
+        const earlier = new Date(2020, 0, 2, 10, 30).getTime();
+        const entries = [
+            { id: 900101, kind: "assistant", provider: "anthropic", stopReason: "stop", at: today,
+                blocks: [{ type: "text", text: "Today's answer." }] },
+            { id: 900102, kind: "assistant", provider: "openai", stopReason: "stop", at: earlier,
+                blocks: [{ type: "text", text: "An older answer." }] },
+            { id: 900103, kind: "assistant", provider: "google", stopReason: "stop",
+                blocks: [{ type: "text", text: "An answer without a timestamp." }] },
+            { id: 900104, kind: "assistant", provider: "anthropic", stopReason: "toolUse", at: today,
+                blocks: [{ type: "text", text: "An intermediate step." }] },
+            { id: 900105, kind: "assistant", provider: "custom", stopReason: "stop", at: today,
+                blocks: [
+                    { type: "text", text: "Before thinking." },
+                    { type: "thinking", text: "Thinking." },
+                    { type: "text", text: "After thinking." },
+                ] },
+        ];
+
+        store.set({ view: { ...store.state.view,
+            entries: new Map(entries.map(entry => [entry.id, entry])),
+            order: entries.map(entry => entry.id),
+        } });
+
+        return JSON.stringify([today, earlier, today].map((at, index) => {
+            const date = new Date(fromServer(at));
+            const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+            return {
+                text: index === 1
+                    ? date.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + time
+                    : time,
+                dateTime: date.toISOString(),
+                title: date.toLocaleString(),
+            };
+        }));
+    `);
+
+    for (const viewport of [VIEWPORTS.mobile, VIEWPORTS.desktop]) {
+        await page.setViewport(viewport);
+        await until(
+            () =>
+                inPage<boolean>(`
+                    return JSON.stringify(document.querySelectorAll(".reply").length === 6);
+                `),
+            "completed and intermediate replies rendered",
+        );
+        const shown = await inPage<typeof expected>(`
+            return JSON.stringify([...document.querySelectorAll(".reply time")].map(time => ({
+                text: time.textContent,
+                dateTime: time.dateTime,
+                title: time.title,
+            })));
+        `);
+
+        assert.deepEqual(shown, expected, "one timestamp per completed answer with a stored time");
+        assert.equal(
+            await inPage<boolean>(`
+                return JSON.stringify([...document.querySelectorAll(".reply time")].every(time => {
+                    const bounds = time.getBoundingClientRect();
+
+                    return bounds.width > 0 && bounds.right <= innerWidth && getComputedStyle(time).opacity === "1";
+                }));
+            `),
+            true,
+            "timestamps remain visible without hovering and fit the viewport",
+        );
+    }
+
+    await page.evaluate(`(await import("/store.js")).openSheet({ type: "appearance" })`);
+    await until(
+        () =>
+            inPage<boolean>(`
+                return JSON.stringify(document.querySelector('.slot-layout[data-slot="reply"]') !== null);
+            `),
+        "reply layout controls",
+    );
+
+    try {
+        assert.equal(
+            await inPage<boolean>(`
+                return JSON.stringify(document.querySelector('[aria-label="Show Message time"]') !== null);
+            `),
+            true,
+            "message time is a configurable reply-slot item",
+        );
+        await tap('[aria-label="Show Message time"]');
+        await until(
+            () =>
+                inPage<boolean>(`
+                    return JSON.stringify(document.querySelectorAll(".reply time").length === 0);
+                `),
+            "message times hidden without hiding the reply actions",
+        );
+        assert.equal(
+            await inPage<boolean>(`
+                return JSON.stringify(document.querySelector(".reply .reaction-host") !== null);
+            `),
+            true,
+        );
+        await tap('[aria-label="Show Message time"]');
+        await until(
+            () =>
+                inPage<boolean>(`
+                    return JSON.stringify(document.querySelectorAll(".reply time").length === 3);
+                `),
+            "message times restored",
+        );
+        await tap('[aria-label="Move Message time later"]');
+        await until(
+            () =>
+                inPage<boolean>(`
+                    const actions = document.querySelector(".answer-actions");
+
+                    return JSON.stringify(actions.firstElementChild.matches(".reaction-host") &&
+                        actions.children[1].tagName === "TIME" &&
+                        actions.lastElementChild.textContent.trim() === "More");
+                `),
+            "message time moved after React, with More still last",
+        );
+    } finally {
+        await page.evaluate(`
+            (await import("/slots.js")).resetSlot("reply");
+            (await import("/store.js")).closeSheet();
+        `);
+    }
+});
+
 test(
     "on a phone, an invite lasts as long as chosen, and the one it replaces ends",
     real,
@@ -341,6 +482,49 @@ async function compactedView(): Promise<void> {
         "earlier history available",
     );
 }
+
+test("a long open group draws its newest steps, and shows the rest when asked", real, async () => {
+    await fresh();
+    await goTo(first);
+    await until(
+        async () =>
+            await inPage<boolean>(`
+                return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${first});
+            `),
+        "the session view",
+    );
+    // A person's message, then a run of Pi's alone: 30 answers that each call a tool, and a result for each.
+    await page.evaluate(`
+        const { store } = await import("/store.js");
+        const entries = [{ id: 910000, kind: "user", text: "go", images: 0, at: Date.now() }];
+
+        for (let n = 1; n <= 30; n++) {
+            entries.push({ id: 910000 + n * 2, kind: "assistant", stopReason: "toolUse", at: Date.now(),
+                blocks: [{ type: "toolCall", id: "call" + n, name: "bash", args: { command: "echo " + n } }] });
+            entries.push({ id: 910001 + n * 2, kind: "toolResult", callId: "call" + n, text: String(n), at: Date.now() });
+        }
+
+        store.set({ view: { ...store.state.view,
+            entries: new Map(entries.map((entry) => [entry.id, entry])),
+            order: entries.map((entry) => entry.id),
+        } });
+    `);
+    const timeline = () =>
+        inPage<{ steps: number; earlier: string | null }>(`
+            const timeline = document.querySelector(".transcript .activity.open .timeline");
+
+            return JSON.stringify({
+                steps: timeline?.querySelectorAll(":scope > :not(.timeline-earlier)").length ?? 0,
+                earlier: timeline?.querySelector(".timeline-earlier")?.textContent.trim() ?? null,
+            });
+        `);
+
+    await until(async () => (await timeline()).steps > 0, "the open group");
+    assert.deepEqual(await timeline(), { steps: 24, earlier: "Show 6 earlier steps" });
+    await tap(".transcript .timeline-earlier");
+    await until(async () => (await timeline()).steps === 30, "all 30 steps");
+    assert.equal((await timeline()).earlier, null);
+});
 
 test("earlier history does not repeat a message kept after compaction", real, async () => {
     await compactedView();

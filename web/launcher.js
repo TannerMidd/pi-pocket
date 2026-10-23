@@ -5,26 +5,36 @@ import { t } from "./i18n.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { folderColor } from "./avatar.js";
-import { planAvailable, schedulesAvailable } from "./commands.js";
-import { extensionLauncherItems } from "./extension-ui.js";
+import {
+    planAvailable,
+    schedulesAvailable,
+    triggersOn,
+    watchAvailable,
+    watchPr,
+} from "./commands.js";
+import { extensionLauncherItems, sessionWords } from "./extension-ui.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { togglePeeks } from "./peeks.js";
 import { modelRefreshAvailable, refreshModels } from "./model-refresh.js";
 import { openPip, pipAvailable } from "./pip.js";
-import { setArchived } from "./sessions.js";
+import { setArchived, toggleBoard } from "./sessions.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { recentLabels } from "./sheets/folder.js";
 import { galleryAvailable } from "./sheets/gallery.js";
+import { memoryAvailable } from "./sheets/memory.js";
 import { piSessionsAvailable } from "./sheets/pi-sessions.js";
 import {
     actions,
     attempt,
+    api,
     canSteer,
+    canToggleTurns,
     collab,
     navigate,
     notify,
     openSheet,
     scoped,
+    setUnread,
     signOut,
     store,
     workspaceOrder,
@@ -33,6 +43,7 @@ import {
     BASE_LOOK,
     chooseLook,
     folderPaletteIds,
+    isPinned,
     lookIds,
     paletteOf,
     prefs,
@@ -40,8 +51,10 @@ import {
     setPrefs,
     themeIds,
     themeVars,
+    togglePin,
     varsStyle,
 } from "./theme.js";
+import { trustAvailable } from "./trust.js";
 import { APPLE, copyText, html, Icon, Keys, Marked, scrimPress, shortPath, timeAgo } from "./ui.js";
 
 /** How far a letter that does not begin a word may be from the one before it, in a match that is not contiguous. */
@@ -105,6 +118,8 @@ function actionItems() {
     const conversation = conversationId !== null ? view.conversation : null;
     const session = conversation?.kind === "session";
     const steer = canSteer();
+    // While take turns is on, the session's settings are the driver's (as in the menu).
+    const driving = !view.turns?.on || view.turns.driver === me?.id;
     const canStart = steer && !scoped();
     // The folder a session starts in "here": the one the open session works in. Issue #96, reported by @poncardasm.
     const here = view.agent?.cwd ?? conversation?.cwd ?? null;
@@ -163,7 +178,7 @@ function actionItems() {
         },
         {
             label: t(prefs().peeks ? "Hide peek tiles" : "Show peek tiles"),
-            detail: t("other sessions' live work beside this one"),
+            detail: t("Peeks: other sessions' live work beside this one"),
             icon: "tiles",
             keys: "Alt P",
             run: togglePeeks,
@@ -239,6 +254,24 @@ function actionItems() {
                 icon: "chat",
                 run: () => openSheet({ type: "chat" }),
             },
+        conversation && {
+            label: "Find in this session",
+            detail: "messages, by words",
+            keywords: "search",
+            icon: "search",
+            keys: "Mod F",
+            run: () => openSheet({ type: "find" }),
+        },
+        conversation &&
+            collab() &&
+            canToggleTurns() && {
+                label: view.turns?.on ? "Turn off take turns" : "Take turns",
+                detail: view.turns?.on
+                    ? "anyone here can send to Pi again"
+                    : "one person drives Pi at a time",
+                icon: "users",
+                run: () => attempt(() => actions.turns(view.turns?.on ? "off" : "on")),
+            },
         session &&
             steer && {
                 label: t("Rename session"),
@@ -253,6 +286,101 @@ function actionItems() {
                 icon: "shield",
                 run: () => attempt(() => actions.setPlan(!view.plan?.on)),
             },
+        session && {
+            label: isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
+            detail: "this browser",
+            icon: "pin",
+            run: () => togglePin(conversation.id),
+        },
+        session && {
+            label: "Mark unread",
+            detail: "this browser; opening it again clears it",
+            icon: "chat",
+            run: () => {
+                setUnread(conversation.id, true);
+                navigate(null);
+            },
+        },
+        conversation?.worktree && steer
+            ? {
+                  label: "Worktree",
+                  detail: conversation.worktree.branch,
+                  keywords: "git branch",
+                  icon: "fork",
+                  run: () => openSheet({ type: "worktree" }),
+              }
+            : conversation &&
+              steer &&
+              driving &&
+              !scoped() && {
+                  label: "Working directory",
+                  detail: shortPath(view.agent?.cwd, server?.home),
+                  keywords: "folder cwd",
+                  icon: "folder",
+                  run: () => openSheet({ type: "cwd", mode: "change" }),
+              },
+        conversation &&
+            trustAvailable() && {
+                label: "Project trust",
+                detail: "the project's own skills and model settings",
+                icon: "shield",
+                run: () => openSheet({ type: "trust" }),
+            },
+        session &&
+            steer &&
+            driving && {
+                label: "Instructions for Pi",
+                detail: view.agent?.instructions ? "on" : "none",
+                keywords: "prompt system",
+                icon: "sparkle",
+                run: () => openSheet({ type: "instructions" }),
+            },
+        conversation &&
+            steer &&
+            driving && {
+                label: "Compact context",
+                detail: "summarize older messages",
+                icon: "sparkle",
+                run: () => openSheet({ type: "compact" }),
+            },
+        conversation &&
+            steer &&
+            driving && {
+                label: "New context",
+                detail: "Pi starts fresh; history stays",
+                keywords: "reset clear",
+                icon: "reload",
+                run: () => openSheet({ type: "reset" }),
+            },
+        conversation &&
+            memoryAvailable() && {
+                label: "Memory",
+                detail: "lessons Pi keeps across sessions",
+                icon: "sparkle",
+                run: () => openSheet({ type: "memory" }),
+            },
+        watchAvailable() &&
+            steer &&
+            view.watch?.status !== "watching" && {
+                label: "Watch pull request",
+                detail: "fix CI, answer reviews",
+                keywords: "github pr",
+                icon: "fork",
+                run: () => attempt(() => watchPr()),
+            },
+        conversation && {
+            label: "Export as Markdown",
+            detail: "the whole history",
+            keywords: "download",
+            icon: "external",
+            run: () => {
+                const link = document.createElement("a");
+
+                link.href = `/api/c/${conversation.id}/export`;
+                link.download = "";
+                link.click();
+            },
+        },
         schedulesAvailable() && {
             label: t("Scheduled messages"),
             icon: "pulse",
@@ -287,6 +415,26 @@ function actionItems() {
             icon: "pulse",
             run: () => openSheet({ type: "running" }),
         },
+        {
+            label: store.state.board ? "Close the subagents board" : "Subagents",
+            detail: "subagents in every session",
+            icon: "fork",
+            run: toggleBoard,
+        },
+        collab() && {
+            label: "Notifications",
+            detail: "Pi finished, approvals, chat",
+            icon: "pulse",
+            run: () => openSheet({ type: "notifications" }),
+        },
+        triggersOn() &&
+            me?.role !== "viewer" && {
+                label: "Webhooks and watches",
+                detail: "GitHub, other services",
+                keywords: "hooks triggers watch pull request",
+                icon: "external",
+                run: () => openSheet({ type: "hooks" }),
+            },
         me?.role === "owner" && {
             label: t("Providers"),
             detail: t("sign in to model providers"),
@@ -333,6 +481,17 @@ function actionItems() {
             icon: "users",
             run: () => openSheet({ type: "name" }),
         },
+        me?.role === "owner" &&
+            server?.supervised && {
+                label: t("Restart server"),
+                detail: t("running work resumes"),
+                icon: "reload",
+                run: () =>
+                    attempt(async () => {
+                        await api("restart", {});
+                        notify("info", t("Restarting. Running work continues after the restart."));
+                    }),
+            },
         { label: t("Sign out"), detail: t("this browser"), icon: "logout", run: signOut },
         // What extensions' browser modules added (`extension-ui.js`).
         ...extensionLauncherItems(),
@@ -369,6 +528,8 @@ function sessionItems() {
 
     return [...order, ...archived].map((session) => {
         const number = numbers.get(session.id) ?? -1;
+        // Words extensions give it (`pocket.sessionSearch`), such as tags: matched after the title and folder.
+        const words = sessionWords(session);
 
         return {
             kind: "session",
@@ -383,7 +544,8 @@ function sessionItems() {
                 ]
                     .filter(Boolean)
                     .join(" · ") || timeAgo(session.updatedAt),
-            text: `${session.title ?? "New session"} ${shortPath(session.cwd, server?.home)}`,
+            text: `${session.title ?? "New session"} ${shortPath(session.cwd, server?.home)}${words.length > 0 ? ` ${words.join(" ")}` : ""}`,
+            words,
             keys: number >= 0 && number < 9 ? `Alt ${number + 1}` : undefined,
             rank: session.archived ? -20 : -number * 0.01,
             run: () => navigate(session.id),
@@ -513,7 +675,7 @@ export function Launcher({ leaving, returnTo }) {
                 match.hits.length > 0 && hits.length === 0 && detailHits.length === 0
                     ? item.kind === "theme"
                         ? t("Theme name or ID match")
-                        : t("Keyword match")
+                        : (item.words?.find((word) => word.includes(needle)) ?? t("Keyword match"))
                     : null;
 
             scored.push({

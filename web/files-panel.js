@@ -10,7 +10,16 @@ import { DiffReview, KIND_LETTERS, reloadChanges, useChanges, useWidth } from ".
 import { loadFiles, suggestFiles } from "./files.js";
 import { FileView } from "./sheets/file.js";
 import { actions, canSteer, closePeople, EXT_PANEL_KEY, panelsBeside, store } from "./store.js";
-import { html, Icon, Loader, Marked, shortPath, usePresence } from "./ui.js";
+import {
+    html,
+    Icon,
+    Loader,
+    Marked,
+    revealAsked,
+    revealFile,
+    shortPath,
+    usePresence,
+} from "./ui.js";
 
 const OPEN_KEY = "pocket.files";
 const TAB_KEY = "pocket.filesTab";
@@ -173,7 +182,12 @@ function TreeFolder({ path, depth, ctx }) {
                 style=${`--depth:${depth}`}
                 data-path=${full}
                 title=${entry.name}
-                onClick=${() => (entry.dir ? ctx.toggle(full) : ctx.pick(full))}
+                onClick=${(event) =>
+                    revealAsked(event)
+                        ? revealFile(full)
+                        : entry.dir
+                          ? ctx.toggle(full)
+                          : ctx.pick(full)}
             >
                 ${
                     entry.dir
@@ -214,7 +228,10 @@ function Matches({ query, root, onPick }) {
                 class="ft-row match"
                 role="option"
                 data-path=${`${root}/${entry.path.replace(/\/$/, "")}`}
-                onClick=${(event) => onPick(event.currentTarget.dataset.path, entry.dir)}
+                onClick=${(event) =>
+                    revealAsked(event)
+                        ? revealFile(event.currentTarget.dataset.path)
+                        : onPick(event.currentTarget.dataset.path, entry.dir)}
             >
                 <${Icon} name=${entry.dir ? "folder" : "file"} size=${14} />
                 <span class="ft-name"><${Marked} text=${entry.name} hits=${entry.nameHits} /></span>
@@ -415,7 +432,9 @@ function FilesTab({ changes, covering }) {
         const at = rows.indexOf(document.activeElement);
         const row = rows[at];
 
+        // Alt with an arrow stays the app's: Alt+↑/↓ switches sessions.
         if (
+            event.altKey ||
             !["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
         ) {
             return;
@@ -540,7 +559,7 @@ function FilesTab({ changes, covering }) {
                         if (event.key === "Escape" && query !== "") {
                             event.stopPropagation();
                             setQuery("");
-                        } else if (event.key === "ArrowDown") {
+                        } else if (event.key === "ArrowDown" && !event.altKey) {
                             event.preventDefault();
                             ref.current?.querySelector(".ft-tree .ft-row[data-path]")?.focus();
                         }

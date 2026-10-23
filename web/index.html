@@ -58,7 +58,8 @@
                                 );
                             });
                             var own = (look.fonts || []).filter(function (url) {
-                                return /^\/themes\/[a-z0-9][a-z0-9-]{1,47}\/[A-Za-z0-9_-]{12}\/([A-Za-z0-9_-][A-Za-z0-9._-]*\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*\.woff2$/.test(
+                                // Its own fonts, or the app's that it names (/fonts/…).
+                                return /^(\/themes\/[a-z0-9][a-z0-9-]{1,47}\/[A-Za-z0-9_-]{12}\/([A-Za-z0-9_-][A-Za-z0-9._-]*\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*|\/fonts\/[A-Za-z0-9_-]+)\.woff2$/.test(
                                     url,
                                 );
                             });

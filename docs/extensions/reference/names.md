@@ -7,7 +7,7 @@ The rules for the names that a module gives. These are the names of its file, ex
 To install an extension with the name of an installed extension replaces that extension. A tool with the name of another tool replaces it in all sessions. Thus Pi Pocket refuses a drop-in that would take a name that Pi Pocket keeps, or a name that another module has. Menu → Extensions says why.
 
 - **Extension names that Pi Pocket keeps:** `coding-tools`, and all names that start with `pocket-`, such as `pocket-core`, `pocket-prompt`, and `pocket-guard`. This is true also when that built-in module is off.
-- **Built-in tools:** `read`, `write`, `edit`, `bash`, `artifact`, `browser`, `subagent`, `team`, `schedule`, `codemode`, and `memory`. PiP's tools: `sessions`, `session_read`, `session_start`, `session_send`, `session_follow`, `session_stop`, `session_archive`, `session_schedule`, `approvals`, `repo_watch`, and `session_watch_pr`. The triggers' tool: `watch_pr`.
+- **Built-in tools:** `read`, `write`, `edit`, `bash`, `artifact`, `artifact_inline`, `browser`, `subagent`, `team`, `schedule`, `codemode`, and `memory`. PiP's tools: `sessions`, `session_read`, `session_start`, `session_send`, `session_follow`, `session_stop`, `session_archive`, `session_schedule`, `approvals`, `repo_watch`, and `session_watch_pr`. The triggers' tool: `watch_pr`.
 - **Names that another module has:** the first module to install an extension or tool keeps its name.
 
 Give each extension and tool a name of your own, with a prefix: `example-clock`, `acme_lookup`. To change how a built-in tool works, do not replace it. Wrap it (`wrapTool` in Pi Durable's README), or check its calls with a hook.

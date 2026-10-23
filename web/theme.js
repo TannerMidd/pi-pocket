@@ -15,6 +15,22 @@ const FALLBACK = "tokyo-night";
 /** The app's own look, which every theme builds on: it loads no stylesheet. */
 export const BASE_LOOK = "pocket";
 
+/** The conversation's text size in pixels: anything from MIN_TEXT to MAX_TEXT, in steps of STEP_TEXT. */
+export const MIN_TEXT = 10;
+export const MAX_TEXT = 32;
+export const STEP_TEXT = 0.5;
+
+/** A text size someone typed or saved, kept in range and on a step; the default for one that is not a number. */
+export function textSizeOf(value) {
+    const size = Number(value);
+
+    if (value === null || value === "" || !Number.isFinite(size)) {
+        return 15;
+    }
+
+    return Math.min(MAX_TEXT, Math.max(MIN_TEXT, Math.round(size / STEP_TEXT) * STEP_TEXT));
+}
+
 const DEFAULTS = {
     /**
      * The colors: "desktop" follows the Omarchy theme of the machine Pi Pocket runs on; otherwise a key of THEMES, or the
@@ -27,9 +43,12 @@ const DEFAULTS = {
     tiling: true,
     /** The desktop's wallpaper in the gaps, when following the desktop. */
     wallpaper: false,
-    /** "auto" follows the system's reduced-motion setting. */
+    /**
+     * "auto" follows the system's reduced-motion setting; "full" is the app's usual motion, "reduced" none, and "fluid"
+     * the most: springs, staggered entrances, and layout changes that morph (`motionLevel`).
+     */
     motion: "auto",
-    /** The conversation's text in pixels, 13 to 17; the rest of the app keeps its own sizes. */
+    /** The conversation's text in pixels, MIN_TEXT to MAX_TEXT; the rest of the app keeps its own sizes. */
     text: 15,
     /** How much room the spacing takes: "comfortable", "compact", or "tight". Font sizes stay. */
     density: "comfortable",
@@ -154,7 +173,58 @@ store.set({
 
 export const prefs = () => store.state.appearance;
 
+/** The settings that move the windows: with Fluid motion, changing one morphs the layout (`morph`). */
+const MORPHS = new Set(["sidebar", "width", "tiling"]);
+let morphing = false;
+let morphs = 0;
+
+/**
+ * Make `change` a view transition in which the windows slide and resize into their new places (style.css,
+ * `layout-vt`), and say whether it did: only with Fluid motion, in a browser that has view transitions, on a page in
+ * view, with nothing over the windows. The change itself comes a frame later, once the old layout is captured.
+ */
+function morph(change) {
+    if (
+        morphing ||
+        motionLevel() !== "fluid" ||
+        typeof document.startViewTransition !== "function" ||
+        document.visibilityState !== "visible" ||
+        // The windows would draw over a sheet or the launcher while they move: with one open, change at once.
+        document.querySelector(".overlay, .launcher-overlay")
+    ) {
+        return false;
+    }
+
+    const root = document.documentElement;
+    // A second change while one runs skips the first; only the newest one takes the class off when it ends.
+    const mine = ++morphs;
+
+    root.classList.add("layout-vt");
+    const run = document.startViewTransition(async () => {
+        morphing = true;
+
+        try {
+            change();
+        } finally {
+            morphing = false;
+        }
+
+        // The store renders in a microtask; let it finish before the new layout is captured.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    settleTransition(run, () => mine === morphs && root.classList.remove("layout-vt"));
+
+    return true;
+}
+
 export function setPrefs(patch) {
+    const moved = Object.keys(patch).some((key) => MORPHS.has(key) && patch[key] !== prefs()[key]);
+
+    if (moved && morph(() => setPrefs(patch))) {
+        return;
+    }
+
     own = { ...own, ...patch };
 
     // Choosing the theme or the colors makes them this browser's own: the owner's default no longer moves them.
@@ -458,11 +528,18 @@ function setPalette(vars) {
 
 export const modeOf = (palette) => (palette.colors.mode === "light" ? "light" : "dark");
 
-const reducedMotion = () => {
+/** The motion on the page, from Appearance's choice: "reduced", "full", or "fluid" (chosen only, never by Auto). */
+export function motionLevel() {
     const motion = prefs().motion;
 
-    return motion === "reduced" || (motion === "auto" && reduceQuery.matches);
-};
+    if (motion === "reduced" || (motion === "auto" && reduceQuery.matches)) {
+        return "reduced";
+    }
+
+    return motion === "fluid" ? "fluid" : "full";
+}
+
+const reducedMotion = () => motionLevel() === "reduced";
 
 /** Put the current look on the page: variables, mode, and the switches style.css reads from data attributes. */
 export function apply() {
@@ -493,7 +570,7 @@ export function apply() {
     // Width other than Comfortable is the person's choice, inline over the theme's; Comfortable leaves it to the theme.
     const width = WIDTHS[p.width];
     const inline = {
-        "--text-size": `${p.text}px`,
+        "--text-size": `${textSizeOf(p.text)}px`,
         "--sidebar-w": sidebarWidth(p),
         ...(wallpaper === null ? {} : { "--wallpaper": wallpaper }),
         ...(width ?? {}),
@@ -518,7 +595,7 @@ export function apply() {
         theme: sheets === null ? (cached.attrs?.theme ?? BASE_LOOK) : (lookOf()?.id ?? BASE_LOOK),
         colors: palette?.id ?? cached.attrs?.colors ?? p.theme,
         tiling: p.tiling ? "on" : "off",
-        motion: reducedMotion() ? "reduced" : "full",
+        motion: motionLevel(),
         rail: p.sidebar === "rail" ? "on" : "off",
         density: p.density,
         width: WIDTHS[p.width] ? p.width : "comfortable",
@@ -594,7 +671,14 @@ function transition(change, at) {
         await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    run.finished.finally(() => mine === transitions && root.classList.remove("theme-vt"));
+    settleTransition(run, () => mine === transitions && root.classList.remove("theme-vt"));
+}
+
+/** A rapid change can skip a transition: handle each promise, and clean up even when it was skipped. */
+function settleTransition(run, clean) {
+    run.ready.catch(() => {});
+    run.updateCallbackDone.catch(() => {});
+    run.finished.then(clean, clean);
 }
 
 /** Switch theme, with the reveal starting from where the person clicked. */

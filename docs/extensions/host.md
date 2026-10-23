@@ -13,6 +13,17 @@ Text from a web page, an issue, or a file that a person did not write can try to
 - `host.text.quoted(text, max)` gives one line in quotes that the text cannot close. It removes invisible characters and tags, and cuts the line to `max` characters, or to a [default length](reference/limits.md#host).
 - `host.text.defang(text)` keeps the lines, but leaves no closing tag in them. Use it for text that you put between tags of your own.
 
+## Addresses from outside
+
+A tool that reads a page that Pi names, or follows a link from a search result, fetches an address that someone else chose. That address can name this machine, the local network, or a cloud's metadata address. Fetch it with `host.fetchPublic(url, init)`, not `fetch`: it reaches only the public internet, checks the address of each connection and each redirect, and stops at a size and a time. Then fence the page's text with `host.text` before Pi reads it. See [`fetchPublic`](reference/host.md#fetchpublic), and [examples/read-page.ts](../examples/read-page.ts).
+
+```typescript
+const response = await host.fetchPublic(args.url, { maxBytes: 2_000_000 });
+const page = await response.text();
+```
+
+`fetchPublic` came in 0.20.0, and is experimental. A module for older servers checks that it is there first ([Check for new members](#check-for-new-members)).
+
 ## Check for new members
 
 Pi Pocket loads a module again while the server runs, but the host changes only when the server restarts. So a module can run on a server whose host does not have a member yet.
@@ -27,9 +38,11 @@ A module that calls a member that is not there fails when it first uses it, in e
 
 ## Model requests
 
-`host.shapeModelRequests(shape)` lets a module shape what every model call sends, after Pi and the caller built the request. Return a replacement payload, or nothing to keep it. The effect lasts until you call the returned function, so pass that to `host.onDispose`.
+`host.shapeModelRequests(shape)` lets a module shape what every model call sends, after Pi and the caller built the request. Return a replacement payload, or nothing to keep it. The effect lasts until you call the returned function, so pass that to `web.onDispose`.
 
 A shaper can change what a provider bills, or how it answers. Tell the owner that before you ask them to turn the module on.
+
+`host.registerModelProvider(provider, config)` adds a model provider to Pi, or changes one, with Pi's own provider config. Pass the returned function to `web.onDispose`, so the provider goes with the module. The last registration of a name wins, and a registration with a built-in provider's name and another `baseUrl` sends the owner's stored key there. See [`registerModelProvider`](reference/host.md#registermodelprovider).
 
 ## Types
 

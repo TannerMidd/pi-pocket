@@ -9,6 +9,7 @@ import { HtmlPreview } from "../rich.js";
 import { RunFrame } from "../run-frame.js";
 import { actions, canSteer, closeSheet, insertIntoComposer, notify, store } from "../store.js";
 import {
+    APPLE,
     copyText,
     fileUrl,
     formatBytes,
@@ -18,6 +19,7 @@ import {
     Loader,
     Markdown,
     openFile,
+    revealFile,
     Sheet,
 } from "../ui.js";
 
@@ -168,7 +170,11 @@ export function FileView({ path, line, onOpen = openFile, onLoad }) {
             page &&
             html`${
                 running
-                    ? html`<${RunFrame} source=${file.text} title=${name} />`
+                    ? html`<${RunFrame}
+                          source=${file.text}
+                          title=${name}
+                          from=${`the file “${name}”`}
+                      />`
                     : html`<${HtmlPreview} source=${file.text} title=${name} />`
             }
             <p class="muted small file-note">
@@ -268,6 +274,21 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
             onClick=${() => insertIntoComposer(`${mentionText(shown)} `, [], { inline: true })}
         >
             @ ${t("Mention")}
+        </button>`
+    }
+    ${
+        // For the owner at the server's machine, with a mouse: show it in that machine's file manager.
+        // Ctrl+click (⌘+click) on a path does the same.
+        file &&
+        store.state.me?.role === "owner" &&
+        matchMedia("(pointer: fine)").matches &&
+        html`<button
+            class="icon-button"
+            title=${t("Show in the file manager ({{modifier}}+click a path)", { modifier: APPLE ? "⌘" : "Ctrl" })}
+            aria-label=${t("Show in the file manager")}
+            onClick=${() => revealFile(file.path)}
+        >
+            <${Icon} name="folder" size=${16} />
         </button>`
     }`;
 }

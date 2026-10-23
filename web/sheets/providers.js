@@ -1,4 +1,4 @@
-// Model providers: signing in and out, the models subagents may use besides their session's own, and the dialog a
+// Model providers: signing in and out, the models subagents may use, and the dialog a
 // sign-in uses to ask for a code or a key.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { t } from "../i18n.js";
@@ -13,9 +13,10 @@ const MODEL_SEARCH_AT = 8;
 let saving = Promise.resolve();
 
 /**
- * The owner's choice of the models Pi may start subagents on besides their session's own: every model, by provider,
- * each checked or not on its own. None, the default: subagents always run on their session's model, and Pi is offered
- * no model to pick. A tap sends that one model's change, not the whole list, so quick taps and other tabs keep theirs.
+ * The owner's choice of the models Pi may start subagents and linked sessions on: every model, by provider, each
+ * checked or not on its own. None, the default: they run on their session's model, and Pi is offered no model to pick.
+ * Some: only those, their session's model too only when it is checked. A tap sends that one model's change, not the
+ * whole list, so quick taps and other tabs keep theirs.
  * `names`: providers' names by id, once the sheet has them.
  */
 function SubagentModels({ names }) {
@@ -90,7 +91,7 @@ function SubagentModels({ names }) {
     return html`<div class="subagent-models">
         <div class="label">${t("Models for subagents")}</div>
         <p class="muted small">
-            ${t("Subagents and linked sessions run on their session's model, the one people picked. Pi cannot choose another model unless you allow it here.")}
+            ${t("With none checked, subagents and linked sessions run on their session's model, and Pi cannot choose another. Check some, and they run only on those: on the session's model when it is checked, otherwise on a checked model that Pi chooses to suit the work. Pi cannot use any other.")}
         </p>
         <p class="small subagent-models-chosen" title=${summary}>${summary}</p>
         ${

@@ -51,6 +51,8 @@ import {
     type ClientEntry,
     type ClientLive,
     type ClientLiveUpdate,
+    firstEntries,
+    lightEntry,
     liveMessageDelta,
     PEEK_LINES,
     type PeekLine,
@@ -58,6 +60,7 @@ import {
     projectEntry,
     projectLive,
     projectStats,
+    turnStart,
 } from "./projection.ts";
 import { describeRepeat } from "./when.ts";
 
@@ -119,6 +122,9 @@ export type PeekSummary = {
     }[];
 };
 
+/** How much of a message's text `userMessages` sends: enough to show, and to cut where the browser wants. */
+const USER_MESSAGE_TEXT = 4000;
+
 /** One browser tab's event stream. */
 export interface Client {
     readonly id: string;
@@ -137,8 +143,9 @@ export interface Client {
     sentFields?: Map<string, string>;
     /**
      * What the tab's code understands of updates (`PROTOCOL` in `web/store.js`): 2 keeps the queue an update leaves out;
-     * 3 also takes the live message as what changed (`liveMessageDelta`). A tab below 3 gets the whole live message with
-     * each update; older code, which names none, also gets the queue.
+     * 3 also takes the live message as what changed (`liveMessageDelta`); 4 also takes a full view with only the newest
+     * entries (`firstEntries`); 5 also takes them light at first (`lightEntry`), whole in the update after. A tab below
+     * 3 gets the whole live message with each update; older code, which names none, also gets the queue.
      */
     readonly protocol?: number;
     /** The blocks of the live message this tab has, for protocol 3: undefined when it has none. */
@@ -510,7 +517,13 @@ export class Room {
         return projected;
     }
 
-    /** Send this client what changed since its last update, or everything with `full`. */
+    /**
+     * Send this client what changed since its last update, or everything with `full`. A tab of protocol 4 gets the
+     * whole order but, in full, only the entries of the newest rows (`firstEntries`): it asks for earlier ones
+     * (`entriesBefore`) as it shows them. A long session's every entry, in one event, made opening it slow. A tab of
+     * protocol 5 gets those entries light (`lightEntry`), so the rows show at once, and whole in an update right after:
+     * what shows only when a step is opened was most of what it waited for.
+     */
     push(client: Client, full: boolean): void {
         const view = this.#view?.value;
 
@@ -527,22 +540,44 @@ export class Room {
             client.liveBlocks = undefined;
         }
 
+        const projected = this.#projectedEntries(view.entries);
+        const order = projected.map((entry) => entry.id);
+        const from = full && (client.protocol ?? 1) >= 4 ? firstEntries(projected) : 0;
+        const light = full && (client.protocol ?? 1) >= 5;
         const entries: ClientEntry[] = [];
-        const order: number[] = [];
+        let partial = false;
 
-        for (const entry of view.entries) {
-            const projected = this.#entry(entry);
-
-            if (projected === null) {
-                continue;
+        projected.forEach((entry, index) => {
+            if (client.sentEntries.has(entry.id)) {
+                return;
             }
 
-            order.push(projected.id);
+            // One before the newest rows is the tab's to ask for: it is not sent with a later update either.
+            if (index < from) {
+                client.sentEntries.add(entry.id);
 
-            if (!client.sentEntries.has(projected.id)) {
-                client.sentEntries.add(projected.id);
-                entries.push(projected);
+                return;
             }
+
+            const lighter = light ? lightEntry(entry) : null;
+
+            // A light one is not counted as sent: the next update brings it whole.
+            if (lighter === null) {
+                client.sentEntries.add(entry.id);
+            } else {
+                partial = true;
+            }
+
+            entries.push(lighter ?? entry);
+        });
+
+        // That update goes at once, after the rest of what a tab gets as it opens the session (`PocketApp.attach`).
+        if (partial) {
+            setImmediate(() => {
+                if (this.clients.has(client)) {
+                    this.push(client, false);
+                }
+            });
         }
 
         const orderKey = order.join(",");
@@ -661,6 +696,89 @@ export class Room {
             approvals: this.#app.approvals.forConversation(this.id),
             ...fields,
         });
+    }
+
+    /** The active context's entries as tabs get them, oldest first; the ones tabs do not show are left out. */
+    #projectedEntries(records: readonly EntryRecord[]): ClientEntry[] {
+        const out: ClientEntry[] = [];
+
+        for (const record of records) {
+            const projected = this.#entry(record);
+
+            if (projected !== null) {
+                out.push(projected);
+            }
+        }
+
+        return out;
+    }
+
+    /**
+     * The active context's entries before `before` (an entry id in it), oldest first: from entry `from`, or those of
+     * `rows` rows, with the turn the first is in (`turnStart`); all of them with neither. None when `before` (or `from`)
+     * is not in it, as after a compaction: the tab's next update has the new order.
+     */
+    entriesBefore(
+        before: number,
+        { rows, from }: { rows?: number; from?: number } = {},
+    ): ClientEntry[] {
+        const view = this.#view?.value;
+
+        if (view === undefined) {
+            return [];
+        }
+
+        const projected = this.#projectedEntries(view.entries);
+        const end = projected.findIndex((entry) => entry.id === before);
+
+        if (end === -1) {
+            return [];
+        }
+
+        const earlier = projected.slice(0, end);
+
+        if (from !== undefined) {
+            const start = earlier.findIndex((entry) => entry.id === from);
+
+            return start === -1 ? [] : earlier.slice(turnStart(earlier, start));
+        }
+
+        return rows === undefined ? earlier : earlier.slice(firstEntries(earlier, rows));
+    }
+
+    /**
+     * The people's messages in the active context, for extensions (`pocket.messages`): a page of up to `limit`, oldest
+     * first, from before the message `before` (or the newest), with the cursor of the page before it, or null at the
+     * start. Each text is cut at `USER_MESSAGE_TEXT` characters. Null when `before` is not a message in the context
+     * now, as after a compaction, so a stale cursor is not taken for the start.
+     */
+    userMessages(
+        before: number | undefined,
+        limit: number,
+    ): { messages: ClientEntry[]; before: number | null } | null {
+        const view = this.#view?.value;
+        const all = (view === undefined ? [] : this.#projectedEntries(view.entries)).filter(
+            (entry) => entry.kind === "user",
+        );
+        const end =
+            before === undefined ? all.length : all.findIndex((entry) => entry.id === before);
+
+        if (end === -1) {
+            return null;
+        }
+
+        const start = Math.max(0, end - limit);
+
+        return {
+            messages: all
+                .slice(start, end)
+                .map((entry) =>
+                    entry.kind === "user" && entry.text.length > USER_MESSAGE_TEXT
+                        ? { ...entry, text: entry.text.slice(0, USER_MESSAGE_TEXT) }
+                        : entry,
+                ),
+            before: start === 0 ? null : all[start]!.id,
+        };
     }
 
     /** The live run as tabs get it, projected once for each state of it. */

@@ -7,7 +7,7 @@ import { t } from "./i18n.js";
 import { DiffBlock } from "./diff.js";
 import { highlight, langOf } from "./highlight.js";
 import { RunFrame, useFitHeight } from "./run-frame.js";
-import { notify } from "./store.js";
+import { notify, openSheet } from "./store.js";
 import { COLOR_LIMIT, copyText, html, setRichBlock } from "./ui.js";
 
 // ─── A page, previewed ──────────────────────────────────────────────────────────────
@@ -106,13 +106,21 @@ export function HtmlPreview({ source, title = "Preview" }) {
             range.getBoundingClientRect().bottom,
             ...[...body.children].map((each) => each.getBoundingClientRect().bottom),
         );
-        const content =
-            bottom +
-            shown.documentElement.scrollTop +
+        const fills = body.getBoundingClientRect().height >= frame.clientHeight - 1;
+        const tail =
             parseFloat(style.paddingBottom) +
             parseFloat(style.borderBottomWidth) +
             parseFloat(style.marginBottom);
-        const fills = body.getBoundingClientRect().height >= frame.clientHeight - 1;
+        // The body's own height counts too, unless it is only as tall as its frame: the line box under an inline image
+        // or SVG reaches a few pixels below the last box.
+        const content = Math.max(
+            bottom + shown.documentElement.scrollTop + tail,
+            fills
+                ? 0
+                : body.getBoundingClientRect().bottom +
+                      shown.documentElement.scrollTop +
+                      parseFloat(style.marginBottom),
+        );
 
         fitHeight(content + (frame.offsetHeight - frame.clientHeight), fills);
     };
@@ -163,9 +171,11 @@ function SvgImage({ source }) {
 /**
  * A code block that shows more than code: what it draws (a page, an image, a diff) with its code a tab away. While
  * the reply is still being written it shows the code, as the page or diff is not whole yet. A page's scripts run only
- * on a tap of Run, in the artifacts' sandbox.
+ * on a tap of Run, in the artifacts' sandbox. `artifact` (`{ id, title, version }`) makes it an artifact's card in the
+ * reply (`InlineArtifact`): named by the artifact and its version, with a button for the viewer, and its page, once run,
+ * gets the artifact's saved state as the viewer gives it.
  */
-function RichBlock({ kind, lang, source, streaming }) {
+function RichBlock({ kind, lang, source, streaming, artifact = null }) {
     const [view, setView] = useState("shown");
     const [running, setRunning] = useState(false);
     const code = streaming || view === "code";
@@ -193,7 +203,11 @@ function RichBlock({ kind, lang, source, streaming }) {
                 : html`<pre><code dangerouslySetInnerHTML=${{ __html: colored }}></code></pre>`;
     } else if (kind === "html") {
         body = running
-            ? html`<${RunFrame} source=${source} />`
+            ? html`<${RunFrame}
+                  source=${source}
+                  artifact=${artifact?.id ?? null}
+                  from=${artifact ? `the artifact “${artifact.title}”` : undefined}
+              />`
             : html`<${HtmlPreview} source=${source} />`;
     } else if (kind === "svg") {
         body = html`<${SvgImage} source=${source} />`;
@@ -201,9 +215,11 @@ function RichBlock({ kind, lang, source, streaming }) {
         body = html`<${DiffBlock} text=${source} />`;
     }
 
-    return html`<div class=${`code rich ${kind}`}>
+    return html`<div class=${`code rich ${kind} ${artifact ? "inline-artifact" : ""}`}>
         <div class="code-head">
-            <span class="code-lang">${lang || kind}</span>
+            <span class="code-lang">
+                ${artifact ? `${artifact.title} · v${artifact.version}` : lang || kind}
+            </span>
             ${
                 !streaming &&
                 html`<span class="rich-tabs" role="tablist">
@@ -240,13 +256,137 @@ function RichBlock({ kind, lang, source, streaming }) {
                     ${running ? "■ Stop" : "▶ Run"}
                 </button>`
             }
-            <button type="button" class="copy" onClick=${copy}>${t("Copy")}</button>
+            ${
+                artifact &&
+                html`<button
+                    type="button"
+                    class="copy"
+                    title=${t("Open it in the artifact viewer, at this version")}
+                    onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: artifact.version })}
+                >
+                    ${t("Open")}
+                </button>`
+            }
+            <button type="button" class="copy" onClick=${copy}>Copy</button>
         </div>
         ${body}
     </div>`;
 }
 
 setRichBlock(RichBlock);
+
+// ─── An artifact in the reply ───────────────────────────────────────────────────────
+
+/**
+ * The pages fetched for cards, by address: a version never changes, so one is fetched once. Least recently used first
+ * out, so a long session does not hold every page: each is `{ page, text }`, the text once it came.
+ */
+const pages = new Map();
+const PAGES_KEPT = 20;
+const addressOf = (conversationId, id, version) =>
+    `/a/${conversationId}/${encodeURIComponent(id)}/${version}`;
+
+/** The entry for an address, now the most recently used, or undefined. */
+function recent(address) {
+    const entry = pages.get(address);
+
+    if (entry !== undefined) {
+        pages.delete(address);
+        pages.set(address, entry);
+    }
+
+    return entry;
+}
+
+function pageOf(conversationId, id, version) {
+    const address = addressOf(conversationId, id, version);
+    let entry = recent(address);
+
+    if (entry === undefined) {
+        entry = { page: null, text: null };
+        entry.page = fetch(address, { credentials: "same-origin" }).then((response) => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            return response.text();
+        });
+        pages.set(address, entry);
+
+        const mine = entry;
+
+        // Into the entry, which may be gone by then (evicted): nothing is put back in the map.
+        mine.page.then(
+            (text) => {
+                mine.text = text;
+            },
+            // A page that did not come may on the next try.
+            () => {
+                if (pages.get(address) === mine) {
+                    pages.delete(address);
+                }
+            },
+        );
+
+        if (pages.size > PAGES_KEPT) {
+            pages.delete(pages.keys().next().value);
+        }
+    }
+
+    return entry.page;
+}
+
+/**
+ * What `artifact_inline` published, as a card in the reply: the version its call made, with Preview/Code, Run/Stop, and
+ * the viewer a tap away. The page comes from the artifact's own address, as the viewer's does, so whoever may see the
+ * session may see the card; later versions never change it. Until it comes the card says so.
+ */
+export function InlineArtifact({ conversationId, id, title, version }) {
+    const [page, setPage] = useState({
+        source: recent(addressOf(conversationId, id, version))?.text ?? null,
+        failed: false,
+    });
+
+    useEffect(() => {
+        let current = true;
+
+        setPage({
+            source: recent(addressOf(conversationId, id, version))?.text ?? null,
+            failed: false,
+        });
+        pageOf(conversationId, id, version).then(
+            (source) => current && setPage({ source, failed: false }),
+            () => current && setPage({ source: null, failed: true }),
+        );
+
+        return () => {
+            current = false;
+        };
+    }, [conversationId, id, version]);
+
+    const artifact = { id, title, version };
+
+    if (page.source !== null) {
+        return html`<${RichBlock} kind="html" source=${page.source} artifact=${artifact} />`;
+    }
+
+    return html`<div class="code rich html inline-artifact">
+        <div class="code-head">
+            <span class="code-lang">${title} · v${version}</span>
+            <span class="grow"></span>
+            <button
+                type="button"
+                class="copy"
+                onClick=${() => openSheet({ type: "viewer", id, version })}
+            >
+                Open
+            </button>
+        </div>
+        <p class="muted small rich-note">
+            ${page.failed ? "This version could not be loaded." : "Loading…"}
+        </p>
+    </div>`;
+}
 
 // ─── Code elsewhere ────────────────────────────────────────────────────────────────────
 

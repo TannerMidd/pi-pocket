@@ -26,6 +26,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 [Using the host](../host.md)
 
 - **`host.text.quoted`:** cuts the line to 120 characters when you give no `max`.
+- **`host.fetchPublic`:** by default, 5 redirects, a body of 10 MiB after it is decoded, and 30 s for the whole request. `maxRedirects` can be 20 at most. `maxBytes` can be any size from 0. `timeoutMs` can be from 1 ms to 2,147,483,647 ms.
 
 ## Linked sessions
 
@@ -55,6 +56,29 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Text on a rail button:** past 24 characters, it is cut to 23 characters and "…". A panel's badge is the same.
 - **Text of a status item:** past 40 characters, `text` and `short` are cut to 39 characters and "…".
 - **Swipe back on a page:** on touch screens up to 699 px wide.
+
+## The session list and message boxes
+
+[Browser modules](../browser-modules.md#the-session-list), [The pocket reference](pocket.md)
+
+- **Keys of one `composerKey`:** a list of 8 at most.
+- **`ComposerBox.set`:** a text of 1,000,000 characters at most. A longer one throws.
+- **Chips under one row:** 6 at most for each module.
+- **A chip's `label`:** past 32 characters, it is cut to 31 characters and "…".
+- **Words of one session for `sessionSearch`:** 32 at most, of 100 characters each at most.
+- **Filters:** 3 show in the search field, and only those 3 filter the list.
+- **A session action's `label`:** past 24 characters, it is cut to 23 characters and "…".
+- **`pocket.messages`:** a page of 1 to 200 messages, 50 by default. Others throw.
+- **A message's `text`:** 1,000 characters at most. `clipped` tells when it was cut.
+
+## Artifacts
+
+[Artifacts](../../features.md)
+
+- **Saved state of an artifact (`pocket-state-set`):** 16 KB of JSON at most for one value. A schema is 1 to 64 letters, digits, and `. _ : -`.
+- **Saves:** 20 in 10 s for one person and one artifact. Past that, the save fails.
+- **Saved values of a session:** 300 at most, for all its artifacts and people together.
+- **Shares of a session:** 100 at most at once. A share lasts 1 day, 7 days, or 30 days, or until it is ended (`hours` left out).
 
 ## Tool calls
 

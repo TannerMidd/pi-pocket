@@ -21,15 +21,17 @@ import type { StreamTiming } from "./timing.ts";
 /** Shortest first-to-last-token window, in ms, that reads as a genuine stream rather than one buffered flush. */
 const MIN_STREAM_WINDOW_MS = 250;
 
+/** `partial`: the first part of a view has it without its words, or with its input cut short (`lightEntry`). */
 export type ClientBlock =
     | { type: "text"; text: string }
-    | { type: "thinking"; text: string; redacted?: boolean }
+    | { type: "thinking"; text: string; redacted?: boolean; partial?: boolean }
     | {
           type: "toolCall";
           id: string;
           name: string;
           args: Record<string, unknown>;
           clipped?: Record<string, number>;
+          partial?: boolean;
       };
 
 /** `at`: when the message was made, by the server's clock (milliseconds), where the message says. */
@@ -52,6 +54,7 @@ export type ClientEntry =
           model?: string;
           provider?: string;
           at?: number;
+          partial?: boolean;
       }
     | {
           id: number;
@@ -65,6 +68,7 @@ export type ClientEntry =
           clipped?: number;
           /** Image parts in the result; browsers load them from `/api/c/:id/image/:entry/:index`. */
           images?: number;
+          partial?: boolean;
       }
     | { id: number; kind: "compaction"; summary: string }
     | { id: number; kind: "reset"; text?: string }
@@ -73,6 +77,162 @@ export type ClientEntry =
     | { id: number; kind: "note"; text: string; name: string }
     | { id: number; kind: "fromPi"; title: string; file: string }
     | { id: number; kind: "other"; entryKind: string };
+
+/** Entry kinds that show as transcript rows: a tool's result shows in its call's card. As `isRow` in `web/store.js`. */
+const ROW_KINDS = new Set([
+    "user",
+    "assistant",
+    "compaction",
+    "reset",
+    "shell",
+    "command",
+    "note",
+    "fromPi",
+]);
+
+/** Rows a tab of protocol 4 gets the entries of when it opens a session: those it draws (`TRANSCRIPT_ROWS`), and PiP's. */
+export const FIRST_ROWS = 80;
+
+/**
+ * Where the turn the entry at `index` is in begins: the row before the answers that run up to it. A tab works out from
+ * those rows what was open there (`rowsBefore` in `web/turns.js`), so it gets them with what follows. At most
+ * `FIRST_ROWS` rows back: a run of Pi's alone can be thousands of answers.
+ */
+export function turnStart(entries: readonly ClientEntry[], index: number): number {
+    let start = index;
+    let rows = 0;
+
+    for (let at = index - 1; at >= 0 && rows <= FIRST_ROWS; at--) {
+        const entry = entries[at]!;
+
+        if (!ROW_KINDS.has(entry.kind)) {
+            continue;
+        }
+
+        start = at;
+        rows++;
+
+        if (entry.kind !== "assistant") {
+            break;
+        }
+    }
+
+    return start;
+}
+
+/**
+ * The index of the first entry a tab needs to draw the newest `rows` rows: from the row that many back, with the turn it
+ * is in, and every tool result after it.
+ */
+export function firstEntries(entries: readonly ClientEntry[], rows = FIRST_ROWS): number {
+    let seen = 0;
+
+    for (let at = entries.length - 1; at >= 0; at--) {
+        if (ROW_KINDS.has(entries[at]!.kind) && ++seen === rows) {
+            return turnStart(entries, at);
+        }
+    }
+
+    return 0;
+}
+
+/** Characters of a tool's input or output that the first part of a view keeps (`lightEntry`). */
+const PREVIEW = 300;
+/** Details, as JSON, that the first part keeps whole: a call's line reads small ones (an artifact's version). */
+const DETAILS_PREVIEW = 1000;
+const lightEntries = new WeakMap<ClientEntry, ClientEntry | null>();
+
+/**
+ * An entry for the first part of a view (`Room.push`), marked `partial`: without what shows only when a step is opened,
+ * which is most of a session's weight (a thought's words, a tool's long input and output, large details). Null when it
+ * has none of that. The whole entry follows in the next update, at once. A failed call's result stays whole: a group's
+ * line reads it.
+ */
+export function lightEntry(entry: ClientEntry): ClientEntry | null {
+    let light = lightEntries.get(entry);
+
+    if (light === undefined) {
+        light = lighten(entry);
+        lightEntries.set(entry, light);
+    }
+
+    return light;
+}
+
+function lighten(entry: ClientEntry): ClientEntry | null {
+    if (entry.kind === "assistant") {
+        let partial = false;
+        const blocks = entry.blocks.map((block): ClientBlock => {
+            if (block.type === "thinking" && block.text !== "") {
+                partial = true;
+
+                return { ...block, text: "", partial: true };
+            }
+
+            if (block.type === "toolCall") {
+                const args = shorten(block.args) as Record<string, unknown>;
+
+                if (args !== block.args) {
+                    partial = true;
+
+                    return { ...block, args, partial: true };
+                }
+            }
+
+            return block;
+        });
+
+        return partial ? { ...entry, blocks, partial: true } : null;
+    }
+
+    if (entry.kind === "toolResult" && !entry.isError) {
+        const long = entry.text.length > PREVIEW;
+        const heavy =
+            entry.details !== undefined && JSON.stringify(entry.details).length > DETAILS_PREVIEW;
+
+        if (!long && !heavy) {
+            return null;
+        }
+
+        const { details, ...rest } = entry;
+
+        return {
+            ...rest,
+            text: long ? entry.text.slice(0, PREVIEW) : entry.text,
+            ...(heavy || details === undefined ? {} : { details }),
+            partial: true,
+        };
+    }
+
+    return null;
+}
+
+/** A value with each string longer than `PREVIEW` cut to it, however deep; the same value when none is. */
+function shorten(value: unknown): unknown {
+    if (typeof value === "string") {
+        return value.length > PREVIEW ? value.slice(0, PREVIEW) : value;
+    }
+
+    if (typeof value !== "object" || value === null) {
+        return value;
+    }
+
+    let changed = false;
+
+    const each = (item: unknown) => {
+        const short = shorten(item);
+
+        changed ||= short !== item;
+
+        return short;
+    };
+
+    const out = Array.isArray(value)
+        ? value.map(each)
+        : Object.fromEntries(Object.entries(value).map(([key, item]) => [key, each(item)]));
+
+    return changed ? out : value;
+}
 
 export type ClientToolSlot = {
     callId: string;

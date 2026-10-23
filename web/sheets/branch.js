@@ -252,7 +252,14 @@ export function BranchPicker() {
             return;
         }
 
-        const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+        // Alt+↑/↓ stays the app's: it switches sessions.
+        const step = event.altKey
+            ? 0
+            : event.key === "ArrowDown"
+              ? 1
+              : event.key === "ArrowUp"
+                ? -1
+                : 0;
 
         if (step !== 0) {
             event.preventDefault();

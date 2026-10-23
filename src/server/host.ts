@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
-import type { Skill } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type {
     ConversationId,
@@ -21,6 +21,7 @@ import type { PipCompaction } from "./pip-compact.ts";
 import type { Schedules } from "./schedules.ts";
 import type { RepoWatches } from "./repo-watches.ts";
 import type { Watches } from "./watches.ts";
+import type { FetchPublic } from "./public-fetch.ts";
 
 /** A session linked to another, as `host.linkedSessions.list` gives it to the session that asks. */
 export interface LinkedSession {
@@ -245,9 +246,15 @@ export interface PocketHost {
     /** The running server's Pi Pocket package version, not the extension API level. */
     readonly pocketVersion: string;
     /** Local metadata for an exact provider/modelId; no sign-in check or network request. */
-    modelInfo(
-        spec: string,
-    ): { model: ModelRef; name: string; thinkingLevels: ModelThinkingLevel[] } | undefined;
+    modelInfo(spec: string):
+        | {
+              model: ModelRef;
+              name: string;
+              thinkingLevels: ModelThinkingLevel[];
+              contextWindow?: number;
+              cost?: { input: number; output: number };
+          }
+        | undefined;
     /** Pi's configured extra skill paths, from its settings. */
     skillPaths(): string[];
     /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
@@ -258,7 +265,7 @@ export interface PocketHost {
      */
     resolveModel(spec: string): ModelRef;
     /**
-     * The models Pi may start subagents on besides their session's own, as the owner allowed them (`provider/modelId`).
+     * The models Pi may start subagents on, as the owner allowed them (`provider/modelId`).
      * Empty, the default: none.
      */
     subagentModels(): readonly string[];
@@ -268,11 +275,25 @@ export interface PocketHost {
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
     /**
+     * Register a model provider with Pi's model runtime, as a Pi extension does: `config` is Pi's own provider
+     * configuration, including the models it starts with and how it refreshes them. The last registration of a name
+     * wins. Returns how to remove it again, which puts back the registration before it; a removal of a registration
+     * that is not the last one changes nothing.
+     */
+    registerModelProvider(provider: string, config: ProviderConfig): () => void;
+    /**
      * Shape the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. Returns how to stop shaping. Only the modules
      * the owner turned on shape requests.
      */
     shapeModelRequests(shape: ModelRequestShaper): () => void;
+    /**
+     * Fetch for an address from outside (a model, a page, a person): it reaches only public internet addresses, checked
+     * where each connection is made and at each redirect (`public-fetch.ts`).
+     *
+     * @experimental In 0.20: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    readonly fetchPublic: FetchPublic;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
     /** Report something odd to the log and the connected clients: with `conversationId`, to that session's tabs only. */
@@ -388,6 +409,17 @@ export interface WebRequest {
     readonly context: Context;
     /** Change the module's documents; refused for viewers and after this request ends. */
     commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
+    /** The sessions the person who asked can see now, as their session list shows them (archived ones too). */
+    sessions(): readonly WebSession[];
+}
+
+/** A session in a person's session list, as `WebRequest.sessions` gives it. */
+export interface WebSession {
+    readonly id: number;
+    readonly title: string;
+    readonly cwd: string;
+    readonly archived: boolean;
+    readonly updatedAt: number;
 }
 
 /** A route request whose named path parameter resolved to a visible conversation. */

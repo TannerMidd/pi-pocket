@@ -63,6 +63,7 @@ const ORDER = [
     "pip.ts",
     "triggers.ts",
     "gallery.ts",
+    "session-tags.ts",
 ];
 
 /** The built-in modules' names (their files' without `.ts`): a drop-in with one of them is never loaded. */
@@ -72,7 +73,12 @@ export const BUILT_IN_MODULES: ReadonlySet<string> = new Set(
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
 /** Built-in modules that stay off until the owner turns them on. Drop-ins all do. */
-const OFF_BY_DEFAULT = new Set(["guard.ts", "agent-teams.ts", "anthropic-subscription.ts"]);
+const OFF_BY_DEFAULT = new Set([
+    "guard.ts",
+    "agent-teams.ts",
+    "anthropic-subscription.ts",
+    "session-tags.ts",
+]);
 const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
     "artifacts.ts": "Artifacts",
@@ -89,6 +95,7 @@ const TITLES: Record<string, string> = {
     "pip.ts": "PiP",
     "triggers.ts": "Triggers",
     "gallery.ts": "Extension gallery",
+    "session-tags.ts": "Session tags",
 };
 
 /**
@@ -105,6 +112,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "edit",
     "bash",
     "artifact",
+    "artifact_inline",
     "browser",
     "subagent",
     "team",

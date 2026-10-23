@@ -215,9 +215,30 @@ export class Attribution {
         }
     }
 
-    /** Who queued a message, when known without a lookup. */
-    knownSubmitter(submissionId: number): string | undefined {
-        return this.#submitters.get(submissionId);
+    /**
+     * Who queued a message, looked up in Pi Durable's record when this process has not seen it (after a restart).
+     * Undefined for a message that is nobody's, or that is gone.
+     */
+    async submitter(submissionId: number): Promise<string | undefined> {
+        const known = this.#submitters.get(submissionId);
+
+        if (known !== undefined) {
+            return known;
+        }
+
+        const submission = await this.#app.harness.submission(
+            submissionId as unknown as SubmissionId,
+            context,
+        );
+        const person = requestPerson((await submission?.status(context))?.requestId);
+
+        if (person?.wrote !== true) {
+            return undefined;
+        }
+
+        this.#submitters.set(submissionId, person.userId);
+
+        return person.userId;
     }
 
     /** Who queued a message: `{ by }` when known. Unknown ones (from before a restart) are looked up once. */

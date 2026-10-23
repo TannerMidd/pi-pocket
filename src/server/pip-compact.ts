@@ -82,6 +82,7 @@ const OWN_TOOLS = new Set([
     "schedule",
     "memory",
     "artifact",
+    "artifact_inline",
 ]);
 
 /**

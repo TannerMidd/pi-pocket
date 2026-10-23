@@ -25,13 +25,14 @@ web.route("GET", "items/:id", ({ params }) => {
 
 ## The request
 
-`handle(request)` gets `{ method, params, query, body, user, signal, snapshot, context, commit }`:
+`handle(request)` gets `{ method, params, query, body, user, signal, snapshot, context, commit, sessions }`:
 
 - `params`: the `:name` parts of the path.
 - `query`: the query string, as `URLSearchParams`. For example, `pocket.api("usage?days=7")` sends `days`.
 - `body`: the JSON object that the browser sent. It is empty for `GET` and `DELETE`.
 - `user`: who asked, as `{ id, name, role }`.
 - `signal`: aborted when the browser stops waiting. Normal handler return does not abort this signal.
+- Since 0.20.0 (experimental), `sessions()`: the sessions that this person can see now, as their session list shows them (`{ id, title, cwd, archived, updatedAt }`). Check the session ids that a browser sends against it, and leave out data about sessions that the person cannot see.
 - Since 0.16.0, `snapshot` and `context` read fresh module documents. Unlike `signal`, `context.abortSignal` is cancelled on disconnect or handler return, ending the new document and linked-session capabilities. `commit(change)` writes them atomically and returns the callback's answer. It refuses viewers, and callbacks that finish after the request ends roll back. Await writes before returning; do not keep request capabilities in timers. Follow the `x.<module>.…` document naming rule. These are not APIs for changing core documents.
 
 What the handler returns goes back as JSON. `undefined` goes back as `{}`.

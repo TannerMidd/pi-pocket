@@ -1,6 +1,6 @@
 # Browser modules
 
-A browser module is JavaScript that the app loads in the tabs of the people that it is for. It adds rail buttons, pages, sheets, panels, status-line items, menu rows, and launcher actions to the app. It gets `pocket`, the app's API for extensions. The members of `pocket` are in [the pocket reference](reference/pocket.md).
+A browser module is JavaScript that the app loads in the tabs of the people that it is for. It adds rail buttons, pages, sheets, panels, status-line items, menu rows, launcher actions, and chips, filters, and actions in the session list to the app. It gets `pocket`, the app's API for extensions. The members of `pocket` are in [the pocket reference](reference/pocket.md).
 
 ## Add a browser module
 
@@ -125,7 +125,24 @@ These, and slots, came in 0.19.0, and are experimental: they can change in a min
 
 **`composerButton({ id, title, icon or iconPath, … })`** adds a button on the left of the message box's row. **`insertText(text)`** puts text into the message box for the person to send: a prompt template, a snippet, a screenshot's description. It never sends.
 
+**`composerKey({ id, keys, label, run(box) })`** adds a key in the message boxes, the session's and PiP's: Ctrl+W to delete a word, Alt+Backspace, keys of an editor you are used to. It comes before the box's own keys. `run` gets the box's `text`, its selection (`start`, `end`), and `set(text, caret)`, which edits the box as typing does. It came in 0.20.0, and is experimental. A browser tab never gets some keys, such as Ctrl+W, which closes the tab: they reach the page only in an installed app's window, if at all.
+
+**`onConversation(listener)`**, **`messages({ before, limit, signal })`**, and **`reveal(id)`** let a module follow the session the tab shows, read its people's messages a page at a time, and scroll the transcript to one: an outline of a long session, a list of its questions. The app loads earlier history for `reveal`, and the server checks access for each page. They came in 0.20.0, and are experimental.
+
 **`replyAction({ id, label, run(reply) or sheet })`** adds an action under Pi's answers, before More: "Send to Linear", "Read aloud". `run` gets the answer as `{ id, text, conversationId }`, and a sheet gets it as the prop `reply`.
+
+## The session list
+
+These came in 0.20.0, and are experimental. Check that they are there (`typeof pocket.sessionChips === "function"`) to work with an older app too. Session tags, a built-in module (`src/server/extensions/session-tags.ts`), uses all four.
+
+- **`sessionChips({ id, chips(session) })`** puts chips under the titles of rows: `chips` gives `[{ label, title, run }]` for a session. A chip with `run` is a button. A row with chips is taller, and the space beside them opens the session.
+- **`sessionSearch({ id, words(session) })`** gives words that the session list's search and the launcher match, after the title and the folder. A row that only a word matches shows the word.
+- **`sessionFilter({ id, title, icon or iconPath, badge, match, … })`** adds a button in the search field, which does one thing, as a rail button does. The first 3 show. While `match` is a function, the button is lit, and the list shows only the sessions that every filter that is on keeps. `update({ match: null })` turns it off. Its `started(id)` runs when a person starts a session with New in the list's head while it is on.
+- **`sessionAction({ id, label, run(ids) or sheet, access })`** adds an action on sessions: in the sheet that a finger held on a row opens, and in the bar while sessions are selected. `run` gets the session ids; a sheet gets them as the prop `sessions`. Only people who can steer see it, unless `access` is `"view"`. The first action with an `icon` or an `iconPath` is also a button on rows, where a mouse hovers.
+
+`chips`, `words`, and `match` get a [`SessionInfo`](reference/pocket.md#sessioninfo), `{ id, title, cwd, archived, updatedAt }`. They must answer at once, not with a promise: one that returns a promise stops its module in that browser, as a throw does, and a filter that failed hides no session. The list calls them each time it draws (`words` again only when the session or the module's contributions change), so keep them fast, read the module's own state in them, and do not call `pocket` in them. When that state changes, give `update` a new function: the same function draws nothing again ([Redraws](#redraws)). One that throws stops its module in that browser.
+
+On the server, `request.sessions()` in a route gives the sessions that the person can see ([Routes](routes.md#the-request)). Check ids against it before you change data about them.
 
 ## Slots and layout
 
@@ -144,7 +161,7 @@ To show data from a service on your network, read it in a route on the server ([
 
 - Each thing that a module adds has an `id` of its own: letters, digits, `.`, `_`, `:`, and `-`, that starts with a letter or a digit, up to a [length](reference/limits.md#names).
 - To add a thing with the same `id` again replaces it.
-- Each `rail`, `menu`, `launcher`, `page`, `sheet`, `panel`, `status`, `topbar`, `composerButton`, and `replyAction` returns `{ update(patch), remove() }`. `update` takes an object.
+- Each `rail`, `menu`, `launcher`, `page`, `sheet`, `panel`, `status`, `topbar`, `composerButton`, `replyAction`, `sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch` returns `{ update(patch), remove() }`. `update` takes an object.
 
 ## Redraws
 

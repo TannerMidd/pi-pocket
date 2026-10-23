@@ -4,7 +4,14 @@ import { t } from "./i18n.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar, folderColor, initials } from "./avatar.js";
 import { goHome, useBack } from "./back.js";
-import { ExtensionRailButtons } from "./extension-ui.js";
+import {
+    ExtensionRailButtons,
+    sessionActions,
+    sessionChips,
+    sessionFilters,
+    sessionFilterTest,
+    sessionWords,
+} from "./extension-ui.js";
 import { useDragToClose } from "./gestures.js";
 import { PeeksRailButton } from "./peeks.js";
 import { PipRailButton } from "./pip.js";
@@ -327,6 +334,7 @@ function SessionRow({
     folders,
     onPick,
     onSelect,
+    hoverAction,
 }) {
     const { conversationId, server, me } = store.state;
     const pinned = isPinned(session.id);
@@ -358,6 +366,14 @@ function SessionRow({
         hit = at > 0 ? `…/${parts.slice(at).join("/")}` : hit;
     }
 
+    // Or a word an extension gave it, such as a tag.
+    if (needle && hit === undefined && !title.toLowerCase().includes(needle)) {
+        hit = sessionWords(session).find((word) => word.includes(needle));
+    }
+
+    // What extensions show on the row, under its title.
+    const chips = sessionChips(session);
+
     const counts = session.subagents ?? {};
     const live = (counts.working ?? 0) + (counts.waiting ?? 0);
     const failed = failing(counts);
@@ -368,10 +384,11 @@ function SessionRow({
     // Finished since this browser last looked: its result is unread, so its title reads bold.
     const unseen = finishedUnseen(session);
     // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
-    const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2);
+    // And the first extension action with an icon (`pocket.sessionAction`).
+    const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0);
 
     return html`<div
-        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${["no-acts", "one-act", "", "three-acts"][acts]}`}
+        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
         data-part="session-row"
         data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
@@ -460,7 +477,43 @@ function SessionRow({
                 }
             </span>
         </button>
+        ${
+            chips.length > 0 &&
+            html`<span class="session-chips" data-part="session-chips">
+                ${chips.map((chip) =>
+                    chip.run
+                        ? html`<button
+                            key=${chip.key}
+                            class="session-chip"
+                            data-part="session-chip"
+                            title=${chip.title}
+                            onClick=${chip.run}
+                        >
+                            ${chip.label}
+                        </button>`
+                        : html`<span
+                            key=${chip.key}
+                            class="session-chip"
+                            data-part="session-chip"
+                            title=${chip.title}
+                        >
+                            ${chip.label}
+                        </span>`,
+                )}
+            </span>`
+        }
         <span class="session-actions">
+            ${
+                hoverAction &&
+                html`<button
+                    class="session-act session-ext-act"
+                    title=${hoverAction.title}
+                    aria-label=${hoverAction.title}
+                    onClick=${() => hoverAction.run([session.id])}
+                >
+                    <${Icon} path=${hoverAction.iconPath} size=${14} />
+                </button>`
+            }
             ${
                 canSteer() &&
                 html`<button
@@ -626,13 +679,16 @@ function AllSessions({ compact = false }) {
         }
     };
 
+    // Extensions' filters that are on (`pocket.sessionFilter`): a session shows only when each keeps it.
+    const kept = sessionFilterTest();
     const shown = sessions.filter(
         (session) =>
             Boolean(session.archived) === archived &&
             (needle === "" ||
-                `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, server?.home)} ${session.model ?? ""}`
+                `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, server?.home)} ${session.model ?? ""} ${sessionWords(session).join(" ")}`
                     .toLowerCase()
-                    .includes(needle)),
+                    .includes(needle)) &&
+            (kept === null || kept(session)),
     );
     const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
     const groups = groupsOf(forest.roots, { tab, needle, home: server?.home, pinned }).map(
@@ -1012,9 +1068,15 @@ function AllSessions({ compact = false }) {
 
     const tabBar = useSlide(tabs, "button.on", "x");
     const count = sessions.filter((session) => !session.archived).length;
+    const filters = sessionFilters();
+    const extActions = sessionActions();
+    const hoverAction = extActions.find((action) => action.iconPath !== null);
     let index = 0;
 
-    return html`<div class=${`sessions ${compact ? "compact" : ""}`} data-part="session-list">
+    return html`<div
+        class=${`sessions ${compact ? "compact" : ""} ${tapping ? "tap-selecting" : ""}`}
+        data-part="session-list"
+    >
         <div class="sessions-head">
             <span class="sessions-name" data-part="session-list-title">${t("Sessions")}</span>
             <span class="sessions-count">${sessionsLoaded ? count : ""}</span>
@@ -1023,7 +1085,7 @@ function AllSessions({ compact = false }) {
                 html`<button
                     class="new-button"
                     title=${t("New session (Alt+N)")}
-                    onClick=${() => openSheet({ type: "cwd", mode: "new" })}
+                    onClick=${() => openSheet({ type: "cwd", mode: "new", fromList: true })}
                 >
                     <${Icon} name="plus" size=${14} />
                     ${t("New")}
@@ -1079,6 +1141,23 @@ function AllSessions({ compact = false }) {
                             <${Icon} name="command" size=${14} />
                         </button>`
             }
+            ${filters.map(
+                (filter) => html`<button
+                    key=${filter.key}
+                    class=${`search-filter badge-host ${filter.on ? "on" : ""}`}
+                    data-part="session-filter"
+                    data-state=${filter.on ? "on" : "off"}
+                    title=${filter.title}
+                    aria-label=${[filter.title, filter.badge, filter.on ? "on" : ""].filter(Boolean).join(", ")}
+                    onClick=${(event) => {
+                        event.preventDefault();
+                        filter.run();
+                    }}
+                >
+                    <${Icon} path=${filter.iconPath} size=${14} />
+                    ${filter.badge !== "" && html`<span class="badge">${filter.badge}</span>`}
+                </button>`,
+            )}
         </label>
         <div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
             ${tabsList.map(
@@ -1103,7 +1182,7 @@ function AllSessions({ compact = false }) {
                 sessionsLoaded &&
                 shown.length === 0 &&
                 html`<div class="sessions-empty">
-                    ${t(archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New.")}
+                    ${kept !== null && !needle ? t("No sessions match the filters.") : archived ? t("No archived sessions.") : needle ? t("No matches.") : t("No sessions yet. Start one with New.")}
                 </div>`
             }
             ${groups.map((group) => {
@@ -1167,6 +1246,7 @@ function AllSessions({ compact = false }) {
                                         folders=${tab === "folders" && needle === ""}
                                         onPick=${pick}
                                         onSelect=${select}
+                                        hoverAction=${hoverAction}
                                     />`,
                             )}
                         </div>
@@ -1193,6 +1273,19 @@ function AllSessions({ compact = false }) {
                         ${t(allPinned ? "Unpin" : "Pin")}
                     </button>`
                 }
+                ${extActions.map(
+                    (action) => html`<button
+                        key=${action.key}
+                        class="button"
+                        title=${`${action.title} (${action.module})`}
+                        onClick=${() => {
+                            clearSelection();
+                            action.run(chosen);
+                        }}
+                    >
+                        ${action.label}
+                    </button>`,
+                )}
                 <button
                     class="select-clear"
                     title=${t("Clear the selection (Esc)")}

@@ -5,6 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { t } from "./i18n.js";
 import { useBack } from "./back.js";
+import { boxKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
 import { usePipResize } from "./pip-window.js";
@@ -504,6 +505,14 @@ function Item({ item, last, busy, conversationId }) {
         return line && html`<div class="pip-event"><span>${line}</span></div>`;
     }
 
+    // A page it showed in a reply (`artifact_inline`): in this panel, a line like its other work.
+    if (item.type === "inline") {
+        return html`<div class="pip-steps">
+            <span class="pip-tick"><${Icon} name="check" size=${10} /></span>
+            <span>${summarize([item.step], false)}</span>
+        </div>`;
+    }
+
     if (item.type === "activity") {
         const thinking =
             item.steps.at(-1)?.streaming && item.steps.at(-1).block.type === "thinking";
@@ -768,6 +777,18 @@ function Composer({ id, busy }) {
                 onInput=${(event) => change(event.currentTarget.value)}
                 onPaste=${onPaste}
                 onKeyDown=${(event) => {
+                    // A module's key (`pocket.composerKey`) comes first, as in the session's box.
+                    const keyed = keyBox(event.currentTarget, "pip", (value, start, end) => {
+                        change(value);
+                        requestAnimationFrame(() => ref.current?.setSelectionRange(start, end));
+                    });
+
+                    if (boxKey(event, keyed)) {
+                        event.preventDefault();
+
+                        return;
+                    }
+
                     if (
                         event.key === "Enter" &&
                         !event.shiftKey &&

@@ -10,7 +10,7 @@ type Block =
 type Entry = { id?: number; kind: string; blocks?: Block[]; stopReason?: string; text?: string };
 type Step = { block: Block; entry?: Entry; streaming: boolean; canRun: boolean };
 type Item = {
-    type: "row" | "activity" | "reply" | "mark";
+    type: "row" | "activity" | "reply" | "mark" | "inline";
     key: string | number;
     entry?: Entry;
     steps?: Step[];
@@ -18,6 +18,7 @@ type Item = {
     anchors?: number[];
     anchor?: boolean;
     end?: boolean;
+    step?: Step;
 };
 type Items = Item[] & { state: unknown };
 type Turns = {
@@ -52,6 +53,7 @@ const shape = (items: Items) =>
             ? `${item.key}[${item.steps!.length}${item.before?.length ? `+${item.before.length}` : ""}]`
             : item.key,
     );
+const INLINE = "artifact_inline";
 
 test("Pi's calls across answers fold into one group, and words end it", () => {
     const rows = [
@@ -93,4 +95,52 @@ test("only the newest answer that asked for tools has calls that can still run",
             .flatMap((item) => item.steps!.map((step) => step.canRun)),
         [false, false, true],
     );
+});
+
+test("an artifact_inline call is its own item between the words and the steps around it", () => {
+    const rows = [
+        user(1),
+        answer(2, [call("a", "grep"), said("Here:"), call("page", INLINE), call("b", "read")]),
+        answer(3, [said("Try it.")], "stop"),
+    ];
+    const items = turns.itemsOf(rows, null);
+
+    assert.deepEqual(
+        items.map((item) => item.type),
+        ["row", "activity", "reply", "inline", "activity", "reply"],
+    );
+    assert.equal(items[3]!.key, "ipage", "named by its call, as a streamed one is");
+    assert.equal(items[3]!.step!.entry, rows[1], "its entry, for a stored call");
+    assert.equal(items[3]!.step!.canRun, false);
+    // Streaming, the same call keeps its key.
+    const writing = turns.itemsOf(rows.slice(0, 1), {
+        kind: "assistant",
+        blocks: [said("Here:"), call("page", INLINE)],
+    });
+
+    assert.equal(writing.at(-1)!.key, "ipage");
+    assert.equal(writing.at(-1)!.step!.entry, undefined);
+});
+
+test("a jump to an answer lands on its words, or on its card when it has none", () => {
+    const talking = turns.itemsOf(
+        [user(1), answer(2, [call("p", INLINE), said("Hi")], "stop")],
+        null,
+    );
+    const silent = turns.itemsOf([user(1), answer(2, [call("p", INLINE)])], null);
+
+    assert.deepEqual(talking[1]!.anchors, [], "the words take it");
+    assert.equal(talking[2]!.anchor, true);
+    assert.deepEqual(silent[1]!.anchors, [2]);
+});
+
+test("two inline calls with one id get keys of their own", () => {
+    const items = turns.itemsOf(
+        [user(1), answer(2, [call("same", INLINE), call("same", INLINE)])],
+        null,
+    );
+    const keys = items.filter((item) => item.type === "inline").map((item) => item.key);
+
+    assert.equal(keys.length, 2);
+    assert.equal(new Set(keys).size, 2);
 });

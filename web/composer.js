@@ -3,6 +3,7 @@ import { t } from "./i18n.js";
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar } from "./avatar.js";
+import { boxKey, keyBox } from "./box-keys.js";
 import { chatUnread, TypingLine } from "./chat.js";
 import {
     loadTemplates,
@@ -122,8 +123,25 @@ const queuedReports = (item) => item.reports ?? null;
 const SEND_MODES = [
     ["steer", "Steer", "Pi reads it now, between steps"],
     ["followUp", "Queue", "Pi reads it when this run ends"],
-    ["interrupt", "Interrupt", "Stops the run right now (also its tool call), then sends it"],
+    [
+        "interrupt",
+        "Interrupt",
+        "Stops the run right now (also its tool call) and clears the queue, then sends it",
+    ],
 ];
+
+/** What a send mode does, for a queued message's buttons. */
+const modeHint = (mode) => SEND_MODES.find(([value]) => value === mode)[2];
+
+/** What Interrupt does to a message waiting in the queue: the others there stay, unlike the composer's Interrupt. */
+const QUEUED_INTERRUPT_HINT =
+    "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued";
+
+/**
+ * Whether a queued message's Interrupt asks first: the first tap reads "Interrupt?", a second within 4 s sends it.
+ * Set to false to send it on the first tap.
+ */
+const CONFIRM_INTERRUPT = true;
 
 /** What kind of message waits for Pi: a steer, one queued for after its answer, a note, or subagents' reports. */
 function queuedMode(item) {
@@ -369,6 +387,8 @@ export function Composer() {
     const [sendMode, setSendMode] = useState("steer");
     // The queued message tapped open, wrapped: one line each until then. The queue holds only a message's start.
     const [reading, setReading] = useState(null);
+    // The queued message whose Interrupt was tapped once (`CONFIRM_INTERRUPT`).
+    const [interrupting, setInterrupting] = useState(null);
     const [sending, setSending] = useState(false);
     // Slash command suggestions: the highlighted one, and whether Escape hid the list.
     const [pick, setPick] = useState(0);
@@ -396,7 +416,9 @@ export function Composer() {
 
         return (element) => {
             box.current = element;
-            fitBox(element);
+            // A frame later, not now: measuring in the middle of a render lays the whole page out early, and again for
+            // the frame, which on a phone made opening a session freeze longer. Still before the frame is painted.
+            requestAnimationFrame(() => fitBox(element));
             observer.disconnect();
             width = -1;
 
@@ -428,6 +450,16 @@ export function Composer() {
             setSendMode((mode) => (mode === "interrupt" ? "steer" : mode));
         }
     }, [busy]);
+    // A queued message's Interrupt asks for a second tap for a few seconds only, as Undo in a diff does.
+    useEffect(() => {
+        if (interrupting === null) {
+            return;
+        }
+
+        const timer = setTimeout(() => setInterrupting(null), 4000);
+
+        return () => clearTimeout(timer);
+    }, [interrupting]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -498,8 +530,15 @@ export function Composer() {
 
         fit();
         addEventListener("resize", fit);
+        // A theme's font wraps the text another way, once its stylesheets or the font itself have loaded.
+        document.addEventListener("pocket:theme", fit);
+        document.fonts?.addEventListener("loadingdone", fit);
 
-        return () => removeEventListener("resize", fit);
+        return () => {
+            removeEventListener("resize", fit);
+            document.removeEventListener("pocket:theme", fit);
+            document.fonts?.removeEventListener("loadingdone", fit);
+        };
     }, [text]);
 
     const update = (value, at = value.length) => {
@@ -814,6 +853,18 @@ export function Composer() {
     };
 
     const onKey = (event) => {
+        // A module's key (`pocket.composerKey`) comes first: it may take any key, the box's own too.
+        const keyed = keyBox(event.currentTarget, "session", (value, start, end) => {
+            update(value, start);
+            requestAnimationFrame(() => box.current?.setSelectionRange(start, end));
+        });
+
+        if (boxKey(event, keyed)) {
+            event.preventDefault();
+
+            return;
+        }
+
         if (
             event.ctrlKey &&
             !event.metaKey &&
@@ -1108,6 +1159,51 @@ export function Composer() {
                                 >
                                     <${Icon} name="close" size=${13} />
                                 </button>`
+                            }
+                            ${
+                                // Tapped open, one's own message: move it, or send it now. Only its sender can.
+                                reading === item.id &&
+                                item.by !== undefined &&
+                                item.by === me?.id &&
+                                canSteer() &&
+                                !blocked &&
+                                (item.mode === "steer" || item.mode === "followUp") &&
+                                html`<div class="queued-actions">
+                                    <button
+                                        class="button small"
+                                        title=${modeHint(item.mode === "steer" ? "followUp" : "steer")}
+                                        onClick=${() =>
+                                            attempt(() =>
+                                                actions.move(
+                                                    item.id,
+                                                    item.mode === "steer" ? "followUp" : "steer",
+                                                ),
+                                            )}
+                                    >
+                                        ${item.mode === "steer" ? "Move to queue" : "Steer now"}
+                                    </button>
+                                    <button
+                                        class=${`button small ${interrupting === item.id ? "danger" : ""}`}
+                                        title=${
+                                            interrupting === item.id
+                                                ? "Tap again to stop the run and send this now. The other queued messages stay queued"
+                                                : QUEUED_INTERRUPT_HINT
+                                        }
+                                        onClick=${() => {
+                                            if (CONFIRM_INTERRUPT && interrupting !== item.id) {
+                                                setInterrupting(item.id);
+
+                                                return;
+                                            }
+
+                                            // A third quick tap must not send it again.
+                                            setInterrupting(null);
+                                            void attempt(() => actions.move(item.id, "interrupt"));
+                                        }}
+                                    >
+                                        ${interrupting === item.id ? "Interrupt?" : "Interrupt"}
+                                    </button>
+                                </div>`
                             }
                         </div>`,
                     )}
@@ -1494,12 +1590,15 @@ defineItem("composer", {
         </button>`,
 });
 
+/** The browser sizes the message box to its text itself (`field-sizing` in style.css): nothing to measure. */
+const SIZES_ITSELF = globalThis.CSS?.supports?.("field-sizing", "content") ?? false;
+
 /**
  * The message box grows with what is written, to 40% of the screen; its least height (two lines, or one on a short
- * screen) is the stylesheet's, and changes with the screen.
+ * screen) is the stylesheet's, and changes with the screen. Browsers without `field-sizing` measure it here.
  */
 function fitBox(element) {
-    if (!element) {
+    if (!element || SIZES_ITSELF || !element.isConnected) {
         return;
     }
 
@@ -1620,13 +1719,20 @@ function useStatusFit(ref) {
             frame = requestAnimationFrame(() => fitStatus(line, true));
         });
 
+        // Fitted again once a font loads, and when a theme (with fonts of its own) has: its text measures another width.
+        const again = () => !gone && fitStatus(line, true);
+
         observer.observe(line);
-        document.fonts?.ready.then(() => !gone && fitStatus(line, true));
+        document.fonts?.ready.then(again);
+        document.fonts?.addEventListener("loadingdone", again);
+        document.addEventListener("pocket:theme", again);
 
         return () => {
             gone = true;
             cancelAnimationFrame(frame);
             observer.disconnect();
+            document.fonts?.removeEventListener("loadingdone", again);
+            document.removeEventListener("pocket:theme", again);
         };
     }, []);
 }

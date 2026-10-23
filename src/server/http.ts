@@ -13,6 +13,7 @@ import { extensionFile } from "./http/extension-routes.ts";
 import { hookRoute } from "./http/hook-routes.ts";
 import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
+import { publicArtifact } from "./http/public.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
 
@@ -44,6 +45,14 @@ export function createHandler(options: HttpOptions) {
             // Webhooks: posts from other services, let in by the hook's secret, not by a sign-in.
             if (parts[0] === "hook" && parts[1] !== undefined) {
                 return await hookRoute(app, request, response, parts[1], parts[2]);
+            }
+
+            // An artifact published to anyone with its address: the token is the whole of the access, no sign-in.
+            // Exactly `/pub/<token>`: nothing under it is a page.
+            if (parts[0] === "pub") {
+                const token = parts.length === 2 ? parts[1] : undefined;
+
+                return await publicArtifact(app, request, response, token, url.searchParams);
             }
 
             if (parts[0] === "a") {

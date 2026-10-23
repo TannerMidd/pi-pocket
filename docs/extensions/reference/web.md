@@ -160,6 +160,7 @@ interface WebRequest {
     readonly snapshot: DocumentReader["snapshot"];
     readonly context: Context;
     commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
+    sessions(): readonly WebSession[];
 }
 ```
 
@@ -176,6 +177,23 @@ What a handler gets.
 - Since 0.16.0, `snapshot` reads fresh committed documents with `context`. Its `context.abortSignal` is cancelled on disconnect or handler return, independently of the older `signal`. `commit` changes the module's own documents atomically and returns the callback's answer. Follow the `x.<module>.…` naming rule. Viewers cannot commit, even through a GET open to `view`.
 - Document operations recheck the current person. Retaining a request, its context, or a callback does not extend its lifetime: commits after disconnect or handler return are refused, and an unfinished callback rolls back. Await all writes before returning. These APIs are for module documents, not core's internal documents or a way to start model work.
 - An unbound catalog save has no source plan, turn, or spend checks. A bound commit also requires the source's current steering and turn rights.
+- Since 0.20.0 (experimental), `sessions()` gives the sessions that the person who asked can see now, as their session list shows them, archived ones too. See [`WebSession`](#websession). Use it to check the ids that a browser sends, and to keep data about sessions from people who cannot see them. Each call reads the list again.
+
+### `WebSession`
+
+```ts
+interface WebSession {
+    readonly id: number;
+    readonly title: string;
+    readonly cwd: string;
+    readonly archived: boolean;
+    readonly updatedAt: number;
+}
+```
+
+Since 0.20.0 · Experimental
+
+A session in a person's session list: its id, a number as in its address (`/s/12`), its title, its folder, whether it is archived, and when it last moved up the list, in milliseconds since 1970. It has no subagents, and no PiP's conversation.
 
 ### `ConversationWebRequest`
 

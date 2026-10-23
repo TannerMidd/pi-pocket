@@ -228,6 +228,61 @@ test(
     },
 );
 
+test("Peeks finds the action by its feature name", real, async () => {
+    await home();
+    await open();
+    await search("Peeks");
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify([...document.querySelectorAll('.launcher-item')].some((row) => /peek tiles/i.test(row.textContent)))`,
+        ),
+        true,
+    );
+    await page.press("Escape");
+    await closed();
+});
+
+test(
+    "rapid Fluid layout changes handle skipped transitions and stop the sidebar's own transition",
+    real,
+    async () => {
+        await home(VIEWPORTS.desktop, true);
+        const result = await inPage<{ errors: string[]; durations: string[]; active: boolean }>(`
+        const { setPrefs, prefs, chooseTheme } = await import('/theme.js');
+        const originalTheme = prefs().theme;
+        const errors = [];
+        const durations = [];
+        const rejected = (event) => errors.push(String(event.reason));
+        addEventListener('unhandledrejection', rejected);
+        setPrefs({ motion: 'fluid' });
+        const observer = new MutationObserver(() => {
+            if (document.documentElement.classList.contains('layout-vt')) {
+                durations.push(getComputedStyle(document.querySelector('.sidebar')).transitionDuration);
+            }
+        });
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        for (let i = 0; i < 12; i++) {
+            setPrefs({ sidebar: prefs().sidebar === 'rail' ? 'open' : 'rail' });
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        chooseTheme('nord');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        chooseTheme('catppuccin');
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        observer.disconnect();
+        removeEventListener('unhandledrejection', rejected);
+        const active = document.documentElement.matches('.layout-vt, .theme-vt');
+        setPrefs({ motion: 'auto', sidebar: 'open', theme: originalTheme });
+        return JSON.stringify({ errors, durations, active });
+    `);
+
+        assert.deepEqual(result.errors, []);
+        assert.ok(result.durations.length > 0, "the layout morphed");
+        assert.ok(result.durations.every((duration) => duration === "0s"));
+        assert.equal(result.active, false, "the morph class was removed");
+    },
+);
+
 // Last: it starts a session, and home() counts them. PR #92 by @elithecho.
 test(
     "a favorite folder shows while the launcher is open and starts a session there",

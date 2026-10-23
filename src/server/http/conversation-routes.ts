@@ -4,9 +4,11 @@ import { createWriteStream, rmSync } from "node:fs";
 import { basename, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { readState, writeState } from "../artifact-state.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
+import { reveal } from "../reveal.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
 
@@ -157,6 +159,14 @@ export async function conversationRoutes(
         return json(response, 200, {
             result: await app.commands.withdraw(id, user, Number(body.submissionId)),
         });
+    }
+
+    if (third === "move" && method === "POST") {
+        const body = await readJson<{ submissionId?: number; mode?: string }>(request);
+
+        await app.commands.moveQueued(id, user, Number(body.submissionId), String(body.mode));
+
+        return json(response, 200, { ok: true });
     }
 
     if (third === "configure" && method === "POST") {
@@ -366,6 +376,25 @@ export async function conversationRoutes(
         });
     }
 
+    // Show a path in the file manager of the machine the server runs on: the owner's, at that machine (`reveal.ts`).
+    if (third === "reveal" && method === "POST") {
+        app.requireSee(user, id);
+
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner opens the server's file manager");
+        }
+
+        const body = await readJson<{ path?: unknown }>(request);
+
+        if (typeof body.path !== "string" || body.path.trim() === "") {
+            throw new HttpError(400, "path is required");
+        }
+
+        await reveal(app.workspace.conversationPath(id, body.path));
+
+        return json(response, 200, { ok: true });
+    }
+
     if (third === "file" && method === "GET") {
         const requested = url.searchParams.get("path") ?? "";
 
@@ -405,6 +434,44 @@ export async function conversationRoutes(
             await app.workspace.changeDiff(id, user, url.searchParams.get("path") ?? ""),
             "text/plain; charset=utf-8",
         );
+    }
+
+    // What an artifact's page saved for this person (`artifact-state.ts`): anyone who sees the session keeps their own.
+    if (third === "artifact-state" && fourth !== undefined && parts.length === 4) {
+        if (method === "GET") {
+            return json(
+                response,
+                200,
+                await readState(app, id, user, fourth, url.searchParams.get("schema")),
+            );
+        }
+
+        if (method === "POST") {
+            return json(
+                response,
+                200,
+                await writeState(app, id, user, fourth, await readJson(request)),
+            );
+        }
+    }
+
+    // An artifact published to anyone with its address: the shares of this session, and ending one.
+    if (third === "shares" && fourth === undefined && method === "GET") {
+        // The address others reach this server by, as webhooks give it: a tunnel's, when one is up.
+        return json(response, 200, {
+            shares: await app.shares.list(id, user),
+            base: app.access?.url ?? null,
+        });
+    }
+
+    if (third === "shares" && fourth === undefined && method === "POST") {
+        return json(response, 200, await app.shares.create(id, user, await readJson(request)));
+    }
+
+    if (third === "shares" && fourth !== undefined && method === "POST") {
+        await app.shares.revoke(user, id, fourth);
+
+        return json(response, 200, { ok: true });
     }
 
     // The folder's files for `@` mentions. A browser that has the newest list says so with `since` and gets only
@@ -496,6 +563,69 @@ export async function conversationRoutes(
                 Number(url.searchParams.get("before") ?? Number.MAX_SAFE_INTEGER),
             ),
         );
+    }
+
+    // Earlier entries of the active context, for a tab that got only the newest with its view (protocol 4).
+    if (third === "context" && method === "GET") {
+        const number = (name: string) => {
+            const value = url.searchParams.get(name);
+
+            return value === null ? undefined : Number(value);
+        };
+
+        const before = number("before");
+        const rows = number("rows");
+        const from = number("from");
+
+        if (
+            before === undefined ||
+            ![before, rows ?? 1, from ?? 1].every(
+                (value) => Number.isSafeInteger(value) && value > 0,
+            )
+        ) {
+            throw new HttpError(
+                400,
+                "before (an entry id), and rows or from, if given, must be positive whole numbers",
+            );
+        }
+
+        const room = await app.room(id);
+
+        try {
+            return json(response, 200, room.entriesBefore(before, { rows, from }));
+        } finally {
+            app.releaseRoom(room);
+        }
+    }
+
+    // The people's messages, a page at a time, for extensions' outlines (`pocket.messages`).
+    if (third === "messages" && method === "GET") {
+        const before = url.searchParams.get("before");
+        const limit = Number(url.searchParams.get("limit") ?? 50);
+
+        if (
+            (before !== null && !(Number.isSafeInteger(Number(before)) && Number(before) > 0)) ||
+            !(Number.isSafeInteger(limit) && limit > 0 && limit <= 200)
+        ) {
+            throw new HttpError(
+                400,
+                "before is an entry id, and limit a whole number from 1 to 200, if given",
+            );
+        }
+
+        const room = await app.room(id);
+
+        try {
+            const page = room.userMessages(before === null ? undefined : Number(before), limit);
+
+            if (page === null) {
+                throw new HttpError(409, "That page is gone: the session's context changed.");
+            }
+
+            return json(response, 200, page);
+        } finally {
+            app.releaseRoom(room);
+        }
     }
 
     if (third === "upload" && method === "POST") {

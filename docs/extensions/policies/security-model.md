@@ -90,6 +90,8 @@ Untrusted text includes route parameters, queries, and bodies; command `args`; t
 
 - **S5.1. Check tool arguments as you check text from a person you do not know:** paths, addresses, sizes, and names.\
   _Reason:_ a web page or a file that Pi read can choose them.
+- **S5.1.1. Fetch an address from outside with `host.fetchPublic`, not `fetch`.** Since 0.20.0, it reaches only the public internet, and checks each connection and redirect ([`fetchPublic`](../reference/host.md#fetchpublic)).\
+  _Reason:_ an address that Pi chose can name this machine, the local network, or a cloud's metadata address, and `fetch` goes there.
 - **S5.2. Fence text from outside before Pi reads it.** Use `host.text.quoted(text, max)` for one line, or `host.text.defang(text)` for text between tags of your own. In the same place, tell Pi that it is data.\
   _Reason:_ without a fence, the text can close your tags and speak as the system prompt.
 - **S5.3. Do not tell Pi to obey instructions that it finds in data.**\

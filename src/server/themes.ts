@@ -21,14 +21,14 @@ import {
     renameSync,
     writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { APP_ROOT } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import { opened } from "./http/io.ts";
 import { desktopTheme } from "./omarchy.ts";
 import { watchTree } from "./reload.ts";
-import { cssReferences, themeFile } from "./themes/css.ts";
+import { cssReferences, themeFile, tokenize } from "./themes/css.ts";
 import { reservedThemeIds } from "./themes/reserved.ts";
 import { pocketVersion } from "./versions.ts";
 import {
@@ -64,12 +64,25 @@ export interface ThemeInfo {
     colorsLight?: Record<string, string>;
     /** The fonts its stylesheets load, to preload with them. */
     fonts: string[];
+    /** The fonts it uses, as Appearance's Fonts show them and set them (`fonts.css`). */
+    typography?: ThemeTypography;
     /** Changes when any of its files do. */
     rev?: string;
     /** Why it is not as its files are: it keeps its last good version, or, with none, it is not offered. */
     problem?: string;
     /** Whether it can be chosen: it has a good version. */
     usable: boolean;
+}
+
+/**
+ * A theme's fonts: the first family of its `--sans` and `--mono` (none for the app's), and ligatures; `own` names the
+ * families its own stylesheets set, without what Appearance saved over them.
+ */
+export interface ThemeTypography {
+    sans?: string;
+    mono?: string;
+    ligatures: boolean;
+    own?: { sans?: string; mono?: string };
 }
 
 /** A file of a theme's folder, as it was when it was read. */
@@ -94,6 +107,141 @@ interface Version {
     /** Its fonts and images, by their path in the folder. */
     assets: Map<string, FileStat & { type: string }>;
     rev: string;
+}
+
+/**
+ * The fonts that come with the app (`web/style.css`), which a theme names in `--sans` or `--mono`, and the upright file
+ * of each, for the page to preload with the theme. The Nerd Fonts symbols are left out: they load only for an icon.
+ */
+const APP_FONTS: Record<string, string> = {
+    "Pocket Inter": "/fonts/InterVariable.woff2",
+    "Pocket Fira Code": "/fonts/FiraCode-VF.woff2",
+    "Pocket IBM Plex Mono": "/fonts/IBMPlexMono-Variable.woff2",
+    "Pocket Iosevka": "/fonts/Iosevka-Regular.woff2",
+};
+
+/**
+ * The fonts Appearance offers a theme, for words and for code: the app's own two, APP_FONTS, and the device's own, by
+ * the CSS generic family each starts with (`system-ui`, `ui-monospace`), which is how a stylesheet names them.
+ */
+export const THEME_FONTS = {
+    sans: [
+        "Pocket Sans",
+        "Pocket Inter",
+        "system-ui",
+        "Pocket Mono",
+        "Pocket Fira Code",
+        "Pocket IBM Plex Mono",
+        "Pocket Iosevka",
+        "ui-monospace",
+    ],
+    mono: [
+        "Pocket Mono",
+        "Pocket Fira Code",
+        "Pocket IBM Plex Mono",
+        "Pocket Iosevka",
+        "ui-monospace",
+    ],
+};
+
+/** The whole list a font of THEME_FONTS is written as: each falls back to the device's own of its kind. */
+function fontStack(family: string, kind: "sans" | "mono"): string {
+    const monospace = family === "ui-monospace" || THEME_FONTS.mono.includes(family);
+    const named = family.startsWith("Pocket ") ? `"${family}"` : family;
+
+    if (!monospace) {
+        return `${named}, ${family === "system-ui" ? "" : "system-ui, "}ui-sans-serif, sans-serif`;
+    }
+
+    // Code keeps the Nerd Fonts icons after its font, for the ones prompts and tools print.
+    const icons = kind === "mono" ? `"Pocket Nerd Symbols", ` : "";
+
+    return family === "ui-monospace"
+        ? `ui-monospace, ${icons}SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace`
+        : `${named}, ${icons}ui-monospace, monospace`;
+}
+
+/** What CSS sets for fonts: the first family of the last `--sans` and `--mono`, and whether ligatures are on. */
+function cssFonts(text: string): { sans?: string; mono?: string; ligatures?: boolean } {
+    const css = text.replace(/\/\*[\s\S]*?\*\//g, "");
+
+    // The last value set: a name in quotes, or a keyword (`system-ui`), not a function (`var(…)`).
+    const last = (name: string) =>
+        [
+            ...css.matchAll(
+                new RegExp(
+                    `(?<![\\w-])--${name}\\s*:\\s*(?:"([^"]+)"|'([^']+)'|([a-z][a-z-]*)(?![\\w(-]))`,
+                    "g",
+                ),
+            ),
+        ]
+            .map((found) => found[1] ?? found[2] ?? found[3])
+            .at(-1);
+
+    const sans = last("sans");
+    const mono = last("mono");
+    const ligatures = last("ligatures");
+
+    return {
+        ...(sans === undefined ? {} : { sans }),
+        ...(mono === undefined ? {} : { mono }),
+        ...(ligatures === undefined ? {} : { ligatures: /^(contextual|normal)$/.test(ligatures) }),
+    };
+}
+
+/**
+ * The fonts a theme uses (Appearance's Fonts): what its `fonts.css` sets, which wins (its values are `!important`), else
+ * what its own stylesheets set; and, as `own`, what they alone set, so that the menus can go back to a family of its own.
+ */
+function typography(sheets: Map<string, string>): ThemeTypography {
+    const own = cssFonts(
+        [...sheets]
+            .filter(([path]) => path !== "fonts.css")
+            .map(([, text]) => text)
+            .join("\n"),
+    );
+    const saved = cssFonts(sheets.get("fonts.css") ?? "");
+    const sans = saved.sans ?? own.sans;
+    const mono = saved.mono ?? own.mono;
+    const theirs = {
+        ...(own.sans === undefined ? {} : { sans: own.sans }),
+        ...(own.mono === undefined ? {} : { mono: own.mono }),
+    };
+
+    return {
+        ...(sans === undefined ? {} : { sans }),
+        ...(mono === undefined ? {} : { mono }),
+        ligatures: saved.ligatures ?? own.ligatures ?? false,
+        ...(Object.keys(theirs).length === 0 ? {} : { own: theirs }),
+    };
+}
+
+/** Whether a theme's file is a plain file, or not there; a link or a folder in its place is refused, not followed. */
+function plainFile(file: string): boolean {
+    let stats;
+
+    try {
+        stats = lstatSync(file);
+    } catch {
+        return false;
+    }
+
+    if (!stats.isFile()) {
+        throw new HttpError(
+            409,
+            `${file} is not a plain file (a link or a folder): change the theme's fonts by hand`,
+        );
+    }
+
+    return true;
+}
+
+/** Write a file of a theme's folder in one step, through a hidden file renamed over it: never through a link. */
+function writeThemeFile(file: string, text: string): void {
+    const temp = join(dirname(file), `.${basename(file)}.${process.pid}.${Date.now()}.tmp`);
+
+    writeFileSync(temp, text, { flag: "wx" });
+    renameSync(temp, file);
 }
 
 /** A theme's file's address: its path in the folder, each part escaped, under the theme's id and version. */
@@ -257,6 +405,9 @@ export class Themes {
                 ...(good?.colors === undefined ? {} : { colors: good.colors }),
                 ...(good?.colorsLight === undefined ? {} : { colorsLight: good.colorsLight }),
                 fonts: good === undefined || id === BASE_THEME ? [] : this.#fonts(good),
+                ...(good === undefined || id === BASE_THEME
+                    ? {}
+                    : { typography: typography(good.css) }),
                 ...(good === undefined ? {} : { rev: good.rev }),
                 // What is wrong can name the server's folders: the owner's to read, as extensions' load errors are.
                 ...(problem === undefined || !owner ? {} : { problem }),
@@ -412,6 +563,113 @@ export class Themes {
         return id;
     }
 
+    /**
+     * Change the fonts and ligatures of one of the owner's themes (Appearance), in its `fonts.css`, which its `theme.css`
+     * imports. Each that is given replaces what was saved: a family of THEME_FONTS, or null for the theme's own; one that
+     * is not given stays as it was saved.
+     */
+    setFonts(id: string, fonts: { sans?: unknown; mono?: unknown; ligatures?: unknown }): void {
+        const good = this.#good.get(id);
+
+        if (!this.#owned(id) || good === undefined) {
+            throw new HttpError(
+                404,
+                "Only your own themes can be changed: duplicate this one first",
+            );
+        }
+
+        // What was saved before, as far as it is one of the app's fonts: a family changed by hand to another is dropped.
+        const saved = cssFonts(good.css.get("fonts.css") ?? "");
+
+        // A family given, null for the theme's own, or, when none is given, the one saved.
+        const family = (value: unknown, which: "sans" | "mono"): string | null => {
+            if (value === undefined) {
+                const before = saved[which];
+
+                return before !== undefined && THEME_FONTS[which].includes(before) ? before : null;
+            }
+
+            if (value === null) {
+                return null;
+            }
+
+            if (typeof value !== "string" || !THEME_FONTS[which].includes(value)) {
+                throw new HttpError(
+                    400,
+                    `Not one of the app's fonts for ${which === "sans" ? "words" : "code"}`,
+                );
+            }
+
+            return value;
+        };
+
+        if (![undefined, null, true, false].includes(fonts.ligatures as never)) {
+            throw new HttpError(400, "Ligatures are on (true) or off (false)");
+        }
+
+        const sans = family(fonts.sans, "sans");
+        const mono = family(fonts.mono, "mono");
+        const ligatures =
+            fonts.ligatures === undefined ? saved.ligatures : (fonts.ligatures as boolean | null);
+        const rules = [
+            ...(sans === null ? [] : [`    --sans: ${fontStack(sans, "sans")} !important;`]),
+            ...(mono === null ? [] : [`    --mono: ${fontStack(mono, "mono")} !important;`]),
+            ...(typeof ligatures === "boolean"
+                ? [`    --ligatures: ${ligatures ? "contextual" : "none"} !important;`]
+                : []),
+        ];
+        const dir = join(this.dir, id);
+        const main = join(dir, "theme.css");
+        const manifest = join(dir, "theme.json");
+        const sheet = join(dir, "fonts.css");
+
+        // Only into the theme's own folder: none of its files that are written may be a link out of it.
+        if (!lstatSync(dir).isDirectory()) {
+            throw new HttpError(409, `${dir} is not a folder (a link to one is not changed)`);
+        }
+
+        const hasCss = plainFile(main);
+        const hasManifest = plainFile(manifest);
+
+        plainFile(sheet);
+
+        let css = "";
+
+        if (hasCss) {
+            const fd = openSync(
+                main,
+                constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+            );
+
+            try {
+                css = readFileSync(fd, "utf8");
+            } finally {
+                closeSync(fd);
+            }
+        } else if (!hasManifest) {
+            // A theme of colors alone gets a stylesheet now, which needs a theme.json: its name as it is listed.
+            const name = this.list().find((each) => each.id === id)?.name ?? id;
+
+            writeThemeFile(manifest, `${JSON.stringify({ themeApi: 1, name }, null, 4)}\n`);
+        }
+
+        writeThemeFile(
+            sheet,
+            `/* Set in Appearance (Fonts), over the theme's own: changes here are overwritten there. */\n:root {\n${rules.join("\n")}\n}\n`,
+        );
+
+        // `@import` must come first in a stylesheet (after an `@charset`), so a theme that has none of it starts with it.
+        if (
+            !/@import\s+(url\()?\s*["']?fonts\.css["']?/.test(css.replace(/\/\*[\s\S]*?\*\//g, ""))
+        ) {
+            const charset = /^\uFEFF?@charset\s+"[^"]*";\s*/.exec(css)?.[0] ?? "";
+
+            writeThemeFile(main, `${charset}@import "fonts.css";\n${css.slice(charset.length)}`);
+        }
+
+        this.#scan(true);
+    }
+
     /** Take one of the owner's themes away: into `themes/.removed/`, which is not listed, so nothing is lost. */
     remove(id: string): void {
         if (!this.#owned(id)) {
@@ -463,11 +721,23 @@ export class Themes {
         }
     }
 
-    /** The fonts a theme's stylesheets load. */
+    /** The fonts a theme's stylesheets load: its own, and the upright file of each of the app's that it names. */
     #fonts(version: Version): string[] {
-        return [...version.assets]
-            .filter(([, asset]) => asset.type === "font/woff2")
-            .map(([path]) => themeAddress(version.id, version.rev, path));
+        // Its strings, as CSS reads them (comments skipped, escapes resolved): a family it names is one of them.
+        const named = new Set(
+            [...version.css.values()].flatMap((text) =>
+                tokenize(text).flatMap((token) => (token.type === "string" ? [token.value] : [])),
+            ),
+        );
+
+        return [
+            ...[...version.assets]
+                .filter(([, asset]) => asset.type === "font/woff2")
+                .map(([path]) => themeAddress(version.id, version.rev, path)),
+            ...Object.entries(APP_FONTS)
+                .filter(([family]) => named.has(family))
+                .map(([, file]) => file),
+        ];
     }
 
     /** The stylesheet of a theme: its `theme.css`, which imports the rest; none for colors alone. */

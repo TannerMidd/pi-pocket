@@ -121,6 +121,13 @@ export const TOKENS = [
     "--t-fade",
     "--t-border",
     "--t-hover",
+    "--ease-spring",
+    "--ease-glide",
+    "--ease-exit",
+    "--t-spring",
+    "--t-glide",
+    "--t-exit",
+    "--stagger",
 ];
 
 export const PARTS = [
@@ -135,6 +142,7 @@ export const PARTS = [
     "session-list",
     "session-list-title",
     "session-search",
+    "session-filter",
     "session-tabs",
     "segment-thumb",
     "session-group",
@@ -145,6 +153,8 @@ export const PARTS = [
     "session-button",
     "session-mark",
     "session-branches",
+    "session-chips",
+    "session-chip",
     "home",
     "home-logo",
     "home-facts",
@@ -176,6 +186,7 @@ export const PARTS = [
     "activity-head",
     "activity-chevron",
     "timeline",
+    "timeline-earlier",
     "thinking",
     "tool-call",
     "step-head",
