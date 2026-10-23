@@ -19,3 +19,4 @@ Thank you for your help. This page tells how to send a change.
 
 - Open a pull request with a short title, and a brief note: what changed, why, and what you tested.
 - Maintainers merge with a merge commit, so your commits keep your name.
+- A release pull request's description is the release notes: [docs/release-notes.md](docs/release-notes.md) tells how to write them.
