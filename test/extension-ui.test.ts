@@ -3,6 +3,8 @@
 import {
     type App,
     cleanUp,
+    context,
+    lastText,
     newSession,
     openApp,
     owner,
@@ -16,7 +18,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
@@ -54,6 +57,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     Loader: true,
     Markdown: true,
     Switch: true,
+    Conversation: true,
     me: true,
     conversationId: true,
     openConversation: true,
@@ -247,7 +251,18 @@ before(async () => {
         );
     }
 
-    app = await openApp(scriptedModel());
+    app = await openApp(
+        scriptedModel((request) => {
+            const last = lastText(request as never);
+
+            return last.role === "user" && last.text === "embed tool check"
+                ? fauxAssistantMessage(
+                      [fauxToolCall("bash", { command: "printf embed-tool-ok" })],
+                      { stopReason: "toolUse" },
+                  )
+                : fauxAssistantMessage([fauxText(`echo: ${last.text}`)]);
+        }),
+    );
 
     // Broken is turned on in its own test: its notice would cover the top bar's buttons in the others.
     for (const file of ["meter.ts", "shared.ts"]) {
@@ -255,9 +270,37 @@ before(async () => {
     }
 
     session = await newSession(app);
-    server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
-    );
+    const handler = createHandler({
+        app,
+        listen: { host: "127.0.0.1", port: 0 },
+        restart: () => {},
+    });
+
+    server = createServer((request, response) => {
+        // A test-only document keeps a normal app document and 2 SDK embeds alive independently.
+        // Reloading the normal document must not unmount either SDK embed.
+        if (request.url?.startsWith("/paste-isolation-harness?")) {
+            const id = Number(
+                new URL(request.url, "http://test").searchParams.get("conversationId"),
+            );
+
+            assert.ok(Number.isSafeInteger(id) && id > 0);
+            response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            response.end(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+                <script type="importmap">{"imports":{"preact":"/vendor/preact.mjs","preact/hooks":"/vendor/preact-hooks.mjs","htm":"/vendor/htm.mjs","marked":"/vendor/marked.mjs","dompurify":"/vendor/purify.mjs"}}</script>
+                <iframe id="main-document" src="/s/${id}" style="width:100%;height:300px"></iframe>
+                <div id="sdk-embeds" style="height:500px;display:flex"></div>
+                <script type="module">
+                    import { h, render } from "preact";
+                    import { Conversation } from "/conversation-embed.js";
+                    render(h("div", { style: "display:contents" }, h(Conversation, {conversationId:${id}}), h(Conversation, {conversationId:${id}})), document.querySelector("#sdk-embeds"));
+                </script>`);
+
+            return;
+        }
+
+        return handler(request, response);
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
@@ -604,6 +647,373 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     );
 });
 
+test(
+    "Conversation embeds isolate streams, drafts, tools, approvals, and parent selection",
+    real,
+    async () => {
+        const first = await newSession(app);
+        const second = await newSession(app);
+
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(rail("Meter")), "the SDK");
+        await withMeter(`
+        pocket.page({ id: "embeds", title: "Embeds", component: () => html\`<div style="height:700px;display:flex">
+            <\${pocket.Conversation} conversationId=\${${first}} draft="embed tool check" onClose=\${() => { globalThis.embedClosed = (globalThis.embedClosed ?? 0) + 1; }} />
+            <\${pocket.Conversation} conversationId=\${${second}} draft="second draft" />
+        </div>\` });
+        pocket.openPage("embeds"); return "null";
+    `);
+        const frames = (script: string) =>
+            inPage<any>(
+                `const frames = [...document.querySelectorAll(".ext-page iframe")]; ${script}`,
+            );
+
+        await until(
+            async () =>
+                await frames(
+                    `return JSON.stringify(frames.length === 2 && frames.every(f => f.contentDocument?.querySelector(".composer textarea")));`,
+                ),
+            "two native composers",
+        );
+        await until(
+            async () =>
+                await frames(
+                    `return JSON.stringify(frames[0].contentDocument.querySelector("textarea").value === "embed tool check" && frames[1].contentDocument.querySelector("textarea").value === "second draft");`,
+                ),
+            "drafts inserted without sending",
+        );
+        assert.deepEqual(
+            await frames(
+                `return JSON.stringify(frames.map(f => !!f.contentDocument.querySelector(".sidebar, .ext-page, .pip")));`,
+            ),
+            [false, false],
+        );
+        assert.equal(
+            await inPage(
+                `return JSON.stringify((await import("/store.js")).store.state.conversationId);`,
+            ),
+            session,
+        );
+        assert.equal(
+            await frames(
+                `return JSON.stringify(frames[0].contentDocument.body.textContent.includes("echo:"));`,
+            ),
+            false,
+        );
+        await frames(
+            `frames[0].contentDocument.querySelector('[aria-label="Send"]').click(); return "null";`,
+        );
+        await until(
+            async () =>
+                await frames(
+                    `return JSON.stringify(frames[0].contentDocument.body.textContent.includes("embed-tool-ok"));`,
+                ),
+            "native send and real tool result",
+        );
+        assert.equal(
+            await frames(
+                `return JSON.stringify(frames[1].contentDocument.querySelector("textarea").value);`,
+            ),
+            "second draft",
+        );
+        await frames(
+            `globalThis.embedDocument = frames[1].contentDocument; const box = frames[1].contentDocument.querySelector('textarea'); box.value = 'human edited draft'; box.dispatchEvent(new frames[1].contentWindow.Event('input', { bubbles: true })); return "null";`,
+        );
+
+        for (let index = 0; index < 3; index++) {
+            await withMeter(`pocket.notify("info", "parent redraw"); return "null";`);
+            await sleep(100);
+        }
+
+        assert.equal(
+            await frames(
+                `return JSON.stringify(frames[1].contentDocument === globalThis.embedDocument && frames[1].contentDocument.querySelector('textarea').value === 'human edited draft');`,
+            ),
+            true,
+        );
+        const answer = app.approvals.request(
+            {
+                id: "embed-approval",
+                conversationId: first,
+                taskId: 999 as unknown as TaskId,
+                tool: "bash",
+                subject: "printf approval",
+                reason: "test approval",
+                createdAt: Date.now(),
+            },
+            context,
+        );
+
+        await until(
+            async () =>
+                await frames(
+                    `return JSON.stringify([...frames[0].contentDocument.querySelectorAll("button")].some(b => b.textContent.trim() === "Allow"));`,
+                ),
+            "native approval",
+        );
+        await frames(
+            `[...frames[0].contentDocument.querySelectorAll("button")].find(b => b.textContent.trim() === "Allow").click(); return "null";`,
+        );
+        assert.equal((await answer).allow, true);
+        assert.equal(
+            await inPage(
+                `return JSON.stringify((await import("/store.js")).store.state.conversationId);`,
+            ),
+            session,
+        );
+        await frames(
+            `frames[0].contentDocument.querySelector('.model-chip').click(); return "null";`,
+        );
+        await until(
+            async () =>
+                await frames(
+                    `return JSON.stringify(!!frames[0].contentDocument.querySelector('[role="dialog"]'));`,
+                ),
+            "native sheet",
+        );
+        await sleep(500);
+        await frames(
+            `frames[0].contentWindow.dispatchEvent(new frames[0].contentWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return "null";`,
+        );
+        await sleep(500);
+        assert.equal(await inPage(`return JSON.stringify(globalThis.embedClosed ?? 0);`), 0);
+        await frames(
+            `frames[0].contentWindow.dispatchEvent(new frames[0].contentWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return "null";`,
+        );
+        await until(
+            async () => await inPage(`return JSON.stringify(globalThis.embedClosed === 1);`),
+            "Escape close callback",
+        );
+        await frames(
+            `window.postMessage({ type: 'pocket:conversation:close', channel: new URL(frames[0].src).searchParams.get('embedChannel'), conversationId: ${first} }, location.origin); return "null";`,
+        );
+        await sleep(50);
+        assert.equal(await inPage(`return JSON.stringify(globalThis.embedClosed);`), 1);
+        await withMeter(`pocket.closePage(); return "null";`);
+        await until(async () => !(await has(".ext-page iframe")), "unmounted frames");
+    },
+);
+
+test("same-conversation long pastes stay private to each embedded composer", real, async () => {
+    const id = await newSession(app);
+    const mainPaste = "main-paste-" + "M".repeat(2100);
+    const firstPaste = "first-paste-" + "F".repeat(2100);
+    const secondPaste = "second-paste-" + "S".repeat(2100);
+
+    await page.navigate(`${base}/s/${id}`);
+    await until(
+        async () =>
+            await inPage<boolean>(
+                `const { store } = await import('/store.js'); return JSON.stringify(store.state.conversationId === ${id} && store.state.view.conversation?.id === ${id} && !!document.querySelector('.composer textarea'));`,
+            ),
+        "main conversation composer",
+    );
+    const paste = async (frame: number | null, value: string) =>
+        inPage(`
+        const doc = ${frame === null ? "document" : `document.querySelectorAll('#paste-test-host iframe')[${frame}].contentDocument`};
+        const transfer = new doc.defaultView.DataTransfer();
+        transfer.setData('text/plain', ${JSON.stringify(value)});
+        doc.querySelector('.composer textarea').dispatchEvent(new doc.defaultView.ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+        return "null";
+    `);
+    const state = () =>
+        inPage<{ main: string; first?: string; second?: string; stored: string | null }>(`
+        const frames = [...document.querySelectorAll('#paste-test-host iframe')];
+        return JSON.stringify({ main: document.querySelector('.composer textarea').value, first: frames[0]?.contentDocument?.querySelector('.composer textarea')?.value, second: frames[1]?.contentDocument?.querySelector('.composer textarea')?.value, stored: localStorage.getItem('pocket.pastes.${id}') });
+    `);
+    const mount = () =>
+        withMeter(`
+        const { render } = await import('preact');
+        const host = document.createElement('div');
+        host.id = 'paste-test-host';
+        host.style = 'position:fixed;inset:0;display:flex;z-index:100';
+        document.body.append(host);
+        render(html\`<div style="display:contents">
+            <\${pocket.Conversation} conversationId=\${${id}} />
+            <\${pocket.Conversation} conversationId=\${${id}} />
+        </div>\`, host);
+        return "null";
+    `);
+
+    await paste(null, mainPaste);
+    await until(
+        async () => (await state()).main.startsWith("[Pasted text #1"),
+        "main paste placeholder",
+    );
+    const saved = await state();
+
+    assert.deepEqual(JSON.parse(saved.stored!), { 1: mainPaste });
+    await mount();
+    await until(
+        async () => (await state()).first === "" && (await state()).second === "",
+        "fresh private drafts",
+    );
+    await paste(0, firstPaste);
+    await paste(1, secondPaste);
+    await until(
+        async () =>
+            (await state()).first?.startsWith("[Pasted text #1") === true &&
+            (await state()).second?.startsWith("[Pasted text #1") === true,
+        "private paste numbering",
+    );
+    assert.equal((await state()).stored, saved.stored);
+    await inPage(
+        `document.querySelectorAll('#paste-test-host iframe')[0].contentDocument.querySelector('[aria-label="Send"]').click(); return "null";`,
+    );
+    await until(async () => (await state()).first === "", "first embed sent");
+    const afterFirst = await state();
+
+    assert.equal(afterFirst.main, saved.main);
+    assert.equal(afterFirst.stored, saved.stored);
+    assert.equal(afterFirst.second?.startsWith("[Pasted text #1"), true);
+    await until(
+        async () =>
+            await inPage(
+                `return JSON.stringify(document.body.textContent.includes(${JSON.stringify(firstPaste)}));`,
+            ),
+        "expanded first paste in native transcript",
+    );
+    await inPage(
+        `document.querySelectorAll('#paste-test-host iframe')[1].contentDocument.querySelector('[aria-label="Send"]').click(); return "null";`,
+    );
+    await until(async () => (await state()).second === "", "second embed sent");
+    await until(
+        async () =>
+            await inPage(
+                `return JSON.stringify(document.body.textContent.includes(${JSON.stringify(secondPaste)}));`,
+            ),
+        "second paste retained its own payload",
+    );
+    assert.equal((await state()).stored, saved.stored);
+    await page.reload();
+    await until(() => has(".composer textarea"), "main reloaded");
+    assert.equal((await state()).main, saved.main);
+    assert.equal((await state()).stored, saved.stored);
+    await mount();
+    await until(
+        async () => (await state()).first === "" && (await state()).second === "",
+        "fresh embeds never import main draft",
+    );
+    await paste(1, secondPaste);
+    await until(
+        async () => (await state()).second?.startsWith("[Pasted text #1") === true,
+        "fresh embed never imports main paste map",
+    );
+    assert.equal((await state()).stored, saved.stored);
+    await inPage(
+        `const host = document.querySelector('#paste-test-host'); const { render } = await import('preact'); render(null, host); host.remove(); document.querySelector('[aria-label="Send"]').click(); return "null";`,
+    );
+    await until(
+        async () =>
+            await inPage(
+                `return JSON.stringify(document.body.textContent.includes(${JSON.stringify(mainPaste)}));`,
+            ),
+        "main paste still expands after reload",
+    );
+});
+
+test(
+    "a main document reload preserves both same-conversation embedded paste payloads",
+    real,
+    async () => {
+        const id = await newSession(app);
+        const payloads = ["MAIN-", "EMBED-ONE-", "EMBED-TWO-"].map(
+            (label) => label + "p".repeat(2100),
+        );
+        const run = <T>(script: string) =>
+            inPage<T>(
+                `const frames = [document.querySelector('#main-document'), ...document.querySelectorAll('#sdk-embeds iframe')]; ${script}`,
+            );
+        const paste = (index: number) =>
+            run(`
+        const doc = frames[${index}].contentDocument;
+        const transfer = new doc.defaultView.DataTransfer();
+        transfer.setData('text/plain', ${JSON.stringify(payloads[index])});
+        doc.querySelector('.composer textarea').dispatchEvent(new doc.defaultView.ClipboardEvent('paste', {clipboardData: transfer, bubbles:true, cancelable:true}));
+        return "null";
+    `);
+        const texts = () =>
+            run<string[]>(
+                `return JSON.stringify(frames.map(f => f?.contentDocument?.querySelector('.composer textarea')?.value));`,
+            );
+        const stored = () =>
+            run<string | null>(
+                `return JSON.stringify(localStorage.getItem('pocket.pastes.${id}'));`,
+            );
+
+        await page.navigate(`${base}/paste-isolation-harness?conversationId=${id}`);
+        await until(
+            async () =>
+                (await texts()).length === 3 && (await texts()).every((value) => value === ""),
+            "3 independent native composers",
+        );
+        await paste(0);
+        await until(
+            async () => (await texts())[0]!.startsWith("[Pasted text #1"),
+            "main long paste",
+        );
+        const saved = await stored();
+
+        for (const index of [1, 2]) {
+            await paste(index);
+            await until(
+                async () => (await texts())[index]!.startsWith("[Pasted text #1"),
+                "private embed long paste",
+            );
+        }
+
+        assert.equal(await stored(), saved);
+        const before = await texts();
+
+        await run(
+            `globalThis.otherEmbeddedDocument = frames[2].contentDocument; frames[1].contentDocument.querySelector('[aria-label="Send"]').click(); return "null";`,
+        );
+        await until(async () => (await texts())[1] === "", "1 embed send");
+        assert.equal((await texts())[0], before[0]);
+        assert.equal((await texts())[2], before[2]);
+        assert.equal(await stored(), saved);
+        await run(
+            `globalThis.oldMainDocument = frames[0].contentDocument; frames[0].contentWindow.location.reload(); return "null";`,
+        );
+        await until(
+            async () =>
+                await run<boolean>(
+                    `return JSON.stringify(frames[0].contentDocument !== globalThis.oldMainDocument && frames[0].contentDocument?.querySelector('.composer textarea')?.value === ${JSON.stringify(before[0])});`,
+                ),
+            "main draft restored after document reload",
+        );
+        assert.equal((await texts())[2], before[2]);
+        assert.equal(
+            await run(
+                `return JSON.stringify(frames[2].contentDocument === globalThis.otherEmbeddedDocument);`,
+            ),
+            true,
+        );
+        assert.equal(await stored(), saved);
+        await run(
+            `frames[2].contentDocument.querySelector('[aria-label="Send"]').click(); return "null";`,
+        );
+        await until(
+            async () =>
+                await run<boolean>(
+                    `return JSON.stringify(frames[0].contentDocument.body.textContent.includes(${JSON.stringify(payloads[2])}));`,
+                ),
+            "other embed payload survived main reload",
+        );
+        assert.equal(await stored(), saved);
+        await run(
+            `frames[0].contentDocument.querySelector('[aria-label="Send"]').click(); return "null";`,
+        );
+        await until(
+            async () =>
+                await run<boolean>(
+                    `return JSON.stringify(frames[0].contentDocument.body.textContent.includes(${JSON.stringify(payloads[0])}));`,
+                ),
+            "main payload survived embed sends and main reload",
+        );
+    },
+);
+
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(rail("Meter")), "the meter's rail button");
@@ -616,4 +1026,42 @@ test("turning the module off takes away its button and closes its page", real, a
         "the page and button gone",
     );
     assert.equal(await has(rail("Shared")), true);
+});
+
+test("native embeds preserve guest, viewer, and scoped access checks", real, async () => {
+    const visible = await newSession(app);
+    const hidden = await newSession(app);
+    const guest = app.config.addUser("Embed Guest", "guest", [String(visible)]);
+    const viewer = app.config.addUser("Embed Viewer", "viewer", [String(visible)]);
+
+    try {
+        await page.navigate(
+            `${base}/login?token=${encodeURIComponent(guest.token)}&next=${encodeURIComponent(`/s/${visible}?pocketEmbed=1`)}`,
+        );
+        await until(() => has('form button[type="submit"]'), "guest account switch");
+        await page.click({ selector: 'form button[type="submit"]' });
+        await until(() => has(".conversation-embed .composer textarea"), "guest composer");
+        assert.equal(await has(".sidebar"), false);
+        await page.navigate(`${base}/s/${hidden}?pocketEmbed=1`);
+        await until(() => has(".conversation-embed .error-box"), "scoped access error");
+        assert.equal(await has(".composer textarea"), false);
+        await page.navigate(
+            `${base}/login?token=${encodeURIComponent(viewer.token)}&next=${encodeURIComponent(`/s/${visible}?pocketEmbed=1`)}`,
+        );
+        await until(() => has('form button[type="submit"]'), "viewer account switch");
+        await page.click({ selector: 'form button[type="submit"]' });
+        await until(() => has('.conversation-embed [data-part="composer"]'), "viewer conversation");
+        assert.equal(await has(".composer textarea"), false);
+        assert.equal(await has('[aria-label="Send"]'), false);
+        await page.navigate(`${base}/s/999999999?pocketEmbed=1`);
+        await until(() => has(".error-box"), "missing conversation error");
+    } finally {
+        app.config.removeUser(guest.user.id);
+        app.config.removeUser(viewer.user.id);
+        await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+
+        if (await has('form button[type="submit"]')) {
+            await page.click({ selector: 'form button[type="submit"]' });
+        }
+    }
 });

@@ -2,6 +2,7 @@
 import { onRoute, pushRoute } from "./back.js";
 import { sessionForest } from "./session-tree.js";
 import { liveMessage } from "./live.js";
+import { conversationEmbed, embeddedConversationId } from "./conversation-embed-context.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
 export function uid() {
@@ -35,9 +36,12 @@ function unreadOf() {
     }
 }
 
-const TAB = sessionStorage.getItem(TAB_KEY) ?? uid();
+// Frames share sessionStorage with the parent, but must never share its server client.
+const TAB = conversationEmbed ? uid() : (sessionStorage.getItem(TAB_KEY) ?? uid());
 
-sessionStorage.setItem(TAB_KEY, TAB);
+if (!conversationEmbed) {
+    sessionStorage.setItem(TAB_KEY, TAB);
+}
 
 const emptyView = () => ({
     conversation: null,
@@ -974,6 +978,12 @@ export function closeSignIn(flowId) {
 }
 
 export function navigate(conversationId, { replace = false, sheet = null } = {}) {
+    if (conversationEmbed && conversationId !== embeddedConversationId) {
+        notify("info", "This view stays in its embedded conversation.");
+
+        return;
+    }
+
     const path = conversationId === null ? "/" : `/s/${conversationId}`;
 
     if (location.pathname !== path || store.state.conversationId !== conversationId) {
@@ -1013,7 +1023,7 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
 
 // Back or forward to another route. Back that only closes a layer (a sheet, a panel) is back.js's.
 onRoute(() => {
-    const id = routeConversation();
+    const id = conversationEmbed ? embeddedConversationId : routeConversation();
 
     if (id !== store.state.conversationId) {
         opened(id);
@@ -1328,9 +1338,20 @@ export function closeSheet() {
 }
 
 // Per-conversation composer drafts survive reloads, including the automatic ones after a live edit.
+const embedDrafts = new Map();
+
 export const drafts = {
-    get: (id) => localStorage.getItem(`pocket.draft.${id ?? "home"}`) ?? "",
+    get: (id) =>
+        conversationEmbed
+            ? (embedDrafts.get(id) ?? "")
+            : (localStorage.getItem(`pocket.draft.${id ?? "home"}`) ?? ""),
     set: (id, text) => {
+        if (conversationEmbed) {
+            embedDrafts.set(id, text);
+
+            return;
+        }
+
         if (text) {
             localStorage.setItem(`pocket.draft.${id ?? "home"}`, text);
         } else {

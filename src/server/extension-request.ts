@@ -7,7 +7,7 @@ import type { User } from "./config.ts";
 import { TurnsDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { mayUse } from "./extension-web.ts";
-import type { WebAccess, WebRequest } from "./host.ts";
+import type { ConversationSummary, RequestConversations, WebAccess, WebRequest } from "./host.ts";
 
 /** Internal only: no extension can select an actor through the public host. */
 export interface RequestActor {
@@ -103,6 +103,62 @@ export class ExtensionRequest implements RequestActor {
 
         return user;
     }
+
+    readonly conversations: RequestConversations = Object.freeze({
+        list: async (options?: { rootsOnly?: boolean; includeArchived?: boolean }) => {
+            const actor = this.current();
+            const result: ConversationSummary[] = [];
+
+            // The core catalogue excludes PiP and subagents, and already applies scoped-person filtering.
+            // Copy only public metadata: never return catalogue objects or hidden source relationships.
+            for (const session of this.#app.sessions(actor)) {
+                const id = session.id as unknown as ConversationId;
+
+                if (!this.#app.canSee(actor, id) || session.pip !== undefined) {
+                    continue;
+                }
+
+                if (!options?.includeArchived && session.archived === true) {
+                    continue;
+                }
+
+                if (
+                    options?.rootsOnly &&
+                    (session.linkedFrom !== undefined ||
+                        session.linkedOrigin === true ||
+                        this.#app.rootOf(id) !== id)
+                ) {
+                    continue;
+                }
+
+                const origin = session.linkedFrom?.id;
+                const originId = origin as unknown as ConversationId;
+                const originMeta =
+                    origin === undefined ? undefined : this.#app.sessionMeta(originId);
+                const visibleOrigin =
+                    originMeta !== undefined &&
+                    originMeta.pip === undefined &&
+                    this.#app.canSee(actor, originId);
+
+                result.push({
+                    conversationId: session.id,
+                    title: session.title ?? "New session",
+                    cwd: session.cwd,
+                    busy: session.busy,
+                    archived: session.archived === true,
+                    ...(visibleOrigin
+                        ? { linkedFrom: origin }
+                        : origin !== undefined || session.linkedOrigin === true
+                          ? { linkedOrigin: true as const }
+                          : {}),
+                });
+            }
+
+            this.current();
+
+            return result;
+        },
+    });
 
     readonly snapshot: DocumentReader["snapshot"] = (async (...args: unknown[]) => {
         this.current();

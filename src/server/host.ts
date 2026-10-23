@@ -351,6 +351,26 @@ export type WebAccess = "owner" | "steer" | "view";
 
 export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** Minimal authorized catalogue metadata; never includes source entries or private core fields. */
+export interface ConversationSummary {
+    conversationId: number;
+    title: string;
+    cwd: string;
+    busy: boolean;
+    archived: boolean;
+    linkedFrom?: number;
+    linkedOrigin?: true;
+    parentId?: number;
+}
+
+/** Read-only, authenticated, request-lifetime conversation discovery. */
+export interface RequestConversations {
+    list(options?: {
+        rootsOnly?: boolean;
+        includeArchived?: boolean;
+    }): Promise<ConversationSummary[]>;
+}
+
 /** A request to a module's route, as its handler gets it. */
 export interface WebRequest {
     readonly method: WebMethod;
@@ -366,6 +386,8 @@ export interface WebRequest {
     /** Fresh committed document reads. Use the request's context. */
     readonly snapshot: DocumentReader["snapshot"];
     readonly context: Context;
+    /** Experimental since unreleased 0.20.0: read-only conversation catalogue for this person. */
+    readonly conversations: RequestConversations;
     /** Change the module's documents; refused for viewers and after this request ends. */
     commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
 }

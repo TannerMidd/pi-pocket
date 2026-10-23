@@ -1,3 +1,5 @@
+@import url("./conversation-embed.css");
+
 /*
  * Pi Pocket's theme: soft tiles over an Omarchy palette. The palette is the Omarchy theme's colors.toml (theme.js sets
  * the --o-* variables, from a bundled theme or the desktop's own); everything else mixes from it the way omarchy-shell

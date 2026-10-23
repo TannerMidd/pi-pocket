@@ -56,6 +56,10 @@ A Pi Pocket before 0.14.0 knows neither `pocketApi` nor `web`. There, a module t
 
 A gallery entry gives `pocketApi` and `minPocket`: the API version and the oldest Pi Pocket that the extension needs. The gallery hides an entry that needs a newer API or a newer Pi Pocket. See [Gallery entry](gallery-entry.md#pocketapi).
 
+## Unreleased additions
+
+Planned for 0.20.0: experimental `WebRequest.conversations.list` and `pocket.Conversation`. They are additive and do not change API version 2. They are not present in released 0.19.0. Feature-detect each capability; do not use `pocketApi = 2` as its availability check.
+
 ## When each part came
 
 Each member in the reference has its own Since line. These parts came together:

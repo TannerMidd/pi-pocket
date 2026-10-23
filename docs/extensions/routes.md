@@ -36,6 +36,10 @@ web.route("GET", "items/:id", ({ params }) => {
 
 What the handler returns goes back as JSON. `undefined` goes back as `{}`.
 
+## List visible conversations
+
+Experimental in unreleased 0.20.0, `request.conversations.list({ rootsOnly: true })` provides minimal authorized catalogue metadata from an ordinary GET route. No source binding, model work, spend permission, or turn is needed. Archived sessions are excluded by default; use `includeArchived: true` to include them. The capability ends on disconnect or handler return and checks current access on every call. Existing route access rules are unchanged. See [`RequestConversations`](reference/web.md#requestconversations). Feature-detect it on 0.19.0 and older servers.
+
 ## Bind a source conversation
 
 Since 0.16.0, use a distinct capability for routes that start work from a conversation:

@@ -1,6 +1,7 @@
 // The message box: send, steer or queue while busy, attach files, mention files with @, run commands with !, recall
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { conversationEmbed } from "./conversation-embed-context.js";
 import { Avatar } from "./avatar.js";
 import { chatUnread, TypingLine } from "./chat.js";
 import {
@@ -86,9 +87,15 @@ const MENTIONS_FILE = /(?:^|[\s([{])@(?:"[^"\n]+"|[^\s"]*[./][^\s"]*)/;
 const INLINE_KEY = "pocket.inlineFiles";
 
 const pasteKey = (id) => `pocket.pastes.${id ?? "home"}`;
+// Native embeds have private in-memory text drafts. Their paste payloads must have the same lifetime and scope.
+const embedPastes = new Map();
 
-/** Each conversation's pastes by number, kept with its draft so a reload keeps them. */
+/** Each conversation's pastes by number, kept with its draft; only the main document persists them. */
 function loadPastes(id) {
+    if (conversationEmbed) {
+        return embedPastes.get(id) ?? {};
+    }
+
     try {
         return JSON.parse(localStorage.getItem(pasteKey(id)) ?? "{}");
     } catch {
@@ -97,6 +104,16 @@ function loadPastes(id) {
 }
 
 function savePastes(id, pastes) {
+    if (conversationEmbed) {
+        if (Object.keys(pastes).length === 0) {
+            embedPastes.delete(id);
+        } else {
+            embedPastes.set(id, pastes);
+        }
+
+        return;
+    }
+
     try {
         if (Object.keys(pastes).length === 0) {
             localStorage.removeItem(pasteKey(id));

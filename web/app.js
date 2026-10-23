@@ -7,6 +7,11 @@ import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, setBrowserOpen, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
 import { Composer, openingByAlt } from "./composer.js";
+import {
+    conversationEmbed,
+    embeddedConversationId,
+    embedChannel,
+} from "./conversation-embed-context.js";
 import { useChanges } from "./diff.js";
 import {
     FilesButton,
@@ -47,6 +52,7 @@ import {
     dismiss,
     filesShown,
     holdNotice,
+    insertIntoComposer,
     navigate,
     notify,
     openSheet,
@@ -477,7 +483,26 @@ function App() {
     }
 
     if (state.me === null) {
-        return html`<${SignIn} /><${Notices} />`;
+        return conversationEmbed
+            ? html`<div class="error-box" role="alert">Sign in to Pi Pocket in the main window, then reopen this conversation.</div>`
+            : html`<${SignIn} /><${Notices} />`;
+    }
+
+    if (conversationEmbed) {
+        return html`<div class="layout conversation-embed" data-part="app">
+            <div class="pane window" data-part="pane">
+                <header class="topbar"><strong>${state.view.conversation?.title ?? "Conversation"}</strong></header>
+                ${
+                    state.missing
+                        ? html`<div class="error-box" role="alert">${state.missing}</div>`
+                        : state.view.conversation
+                          ? html`<${Transcript} key=${state.conversationId} /><${Composer} key=${state.conversationId} />`
+                          : html`<div role="status">Loading conversation…</div>`
+                }
+            </div>
+            <${Sheets} />
+            <${Notices} />
+        </div>`;
     }
 
     const inConversation = state.conversationId !== null;
@@ -628,6 +653,28 @@ function step(by) {
 
 addEventListener("keydown", (event) => {
     if (event.isComposing) {
+        return;
+    }
+
+    if (conversationEmbed) {
+        // Native sheets own Escape first. A bare Escape requests closure only through the SDK channel.
+        if (
+            event.key === "Escape" &&
+            !event.defaultPrevented &&
+            !store.state.sheet &&
+            !(history.state?.pocket?.layers > 0)
+        ) {
+            event.preventDefault();
+            parent.postMessage(
+                {
+                    type: "pocket:conversation:close",
+                    channel: embedChannel,
+                    conversationId: embeddedConversationId,
+                },
+                location.origin,
+            );
+        }
+
         return;
     }
 
@@ -861,14 +908,65 @@ addEventListener("keyup", (event) => event.key === "Alt" && altUp());
 addEventListener("blur", altUp);
 
 // The whole tree re-renders from the store; Preact's diff keeps that cheap. Batched per microtask.
+if (conversationEmbed) {
+    document.documentElement.dataset.conversationEmbed = "";
+    store.set({
+        browserOpen: false,
+        filesOpen: false,
+        peopleOpen: false,
+        pipOpen: false,
+        extPanel: null,
+    });
+    let ready = false;
+
+    store.subscribe((state) => {
+        if (!ready && (state.me === null || state.missing || state.view.conversation)) {
+            ready = true;
+            parent.postMessage(
+                {
+                    type: "pocket:conversation:ready",
+                    channel: embedChannel,
+                    conversationId: embeddedConversationId,
+                },
+                location.origin,
+            );
+        }
+    });
+    addEventListener("message", (event) => {
+        if (
+            event.origin !== location.origin ||
+            event.source !== parent ||
+            event.data?.type !== "pocket:conversation:draft" ||
+            event.data.channel !== embedChannel ||
+            event.data.conversationId !== embeddedConversationId ||
+            typeof event.data.draft !== "string" ||
+            event.data.draft.length > 100000 ||
+            !store.state.view.conversation ||
+            !canSteer()
+        ) {
+            return;
+        }
+
+        insertIntoComposer(event.data.draft);
+    });
+}
+
 startTheme();
 // Where the session list is not beside the conversation, a conversation opened straight away gets it under it, so back
 // goes to the list rather than out of the app.
-startHistory({ home: !wide() });
-startEdgeBack();
+startHistory({ home: !conversationEmbed && !wide() });
+
+if (!conversationEmbed) {
+    startEdgeBack();
+}
+
 // One hand on a phone: on the conversation, swipe right to go back and left for the Files tile; swipe up from the
 // message box for the places.
 startSwipes((where) => {
+    if (conversationEmbed) {
+        return {};
+    }
+
     const { conversationId, view, missing } = store.state;
 
     // The subagents board or an extension's page in the conversation's place (or the home screen's): right goes back,
@@ -934,8 +1032,11 @@ if (new URLSearchParams(location.search).has("pip")) {
 }
 
 // The worker shows notifications and receives what other apps share; it needs a secure page (https or localhost).
-registerWorker();
-store.subscribe(updateBadge);
+if (!conversationEmbed) {
+    registerWorker();
+    store.subscribe(updateBadge);
+}
+
 start();
 // Something shared from another app: the service worker kept it, and redirected here to choose where it goes.
 const shared = new URLSearchParams(location.search).get("share");

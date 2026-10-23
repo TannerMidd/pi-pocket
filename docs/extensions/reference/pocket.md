@@ -216,6 +216,16 @@ Since 0.14.0 · Stable
 
 Shows Markdown. It cleans the HTML that it makes, as the app does for Pi's replies. See [`MarkdownProps`](#markdownprops).
 
+### `Conversation`
+
+```ts
+readonly Conversation: FunctionComponent<ConversationProps>;
+```
+
+Since 0.20.0 · Experimental
+
+Unreleased; not available in installed Pi Pocket 0.19.0. Embeds the native conversation view using normal server authorization. It does not grant access to a conversation. `draft` pre-fills text; it never sends a message automatically. Feature-detect `pocket.Conversation` before using it on older servers. See [`ConversationProps`](#conversationprops).
+
 ### `Switch`
 
 ```ts
@@ -933,6 +943,24 @@ interface LoaderProps {
 Since 0.14.0 · Stable
 
 The props of `Loader` and `Spinner`. `label` says what loads, in words.
+
+### `ConversationProps`
+
+```ts
+interface ConversationProps {
+    conversationId: number;
+    draft?: string;
+    title?: string;
+    onClose?: () => void;
+}
+```
+
+Since 0.20.0 · Experimental
+
+- `conversationId`: the conversation to show, subject to normal authorization.
+- `draft`: optional text for the message box, never an automatic send.
+- `title`: optional title for the view.
+- `onClose`: optional callback when Escape closes the embedded view, after its own sheets close.
 
 ### `MarkdownProps`
 

@@ -121,6 +121,7 @@ export async function extensionRoute(
             user: { id: current.id, name: current.name, role: current.role },
             signal: clientCancelled.signal,
             context: scope.context,
+            conversations: scope.conversations,
             snapshot: scope.snapshot,
             commit: scope.commit,
             ...bound,

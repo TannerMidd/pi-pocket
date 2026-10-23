@@ -159,6 +159,7 @@ interface WebRequest {
     readonly signal: AbortSignal;
     readonly snapshot: DocumentReader["snapshot"];
     readonly context: Context;
+    readonly conversations: RequestConversations;
     commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
 }
 ```
@@ -176,6 +177,50 @@ What a handler gets.
 - Since 0.16.0, `snapshot` reads fresh committed documents with `context`. Its `context.abortSignal` is cancelled on disconnect or handler return, independently of the older `signal`. `commit` changes the module's own documents atomically and returns the callback's answer. Follow the `x.<module>.…` naming rule. Viewers cannot commit, even through a GET open to `view`.
 - Document operations recheck the current person. Retaining a request, its context, or a callback does not extend its lifetime: commits after disconnect or handler return are refused, and an unfinished callback rolls back. Await all writes before returning. These APIs are for module documents, not core's internal documents or a way to start model work.
 - An unbound catalog save has no source plan, turn, or spend checks. A bound commit also requires the source's current steering and turn rights.
+
+### `RequestConversations`
+
+```ts
+interface RequestConversations {
+    list(options?: {
+        rootsOnly?: boolean;
+        includeArchived?: boolean;
+    }): Promise<ConversationSummary[]>;
+}
+```
+
+Since 0.20.0 · Experimental
+
+Unreleased; not available in installed Pi Pocket 0.19.0. `request.conversations.list()` reads the core session catalogue as the authenticated person. It does not require a source conversation, steering, a turn, a model, or spend permission. Use it from an ordinary GET route with appropriate `access`. It creates no model work and writes no durable state. It is also available on bound requests.
+
+- Both options default to `false`. Archived sessions are omitted unless `includeArchived` is true.
+- `rootsOnly` excludes linked children, even when their origin is hidden, and excludes subagents. The current core catalogue never lists subagents, even without this option.
+- Each call checks the current person, route access, and fresh conversation visibility. Revocation applies to retained capabilities too. Scoped people still cannot reach extension routes; this capability does not broaden route policy.
+- Disconnect or handler return ends the capability. Await the list before returning. No actor override or private host is exposed.
+- Feature-detect `typeof request.conversations?.list === "function"` on older servers. API version 2 alone does not imply this addition exists.
+
+### `ConversationSummary`
+
+```ts
+interface ConversationSummary {
+    conversationId: number;
+    title: string;
+    cwd: string;
+    busy: boolean;
+    archived: boolean;
+    linkedFrom?: number;
+    linkedOrigin?: true;
+    parentId?: number;
+}
+```
+
+Since 0.20.0 · Experimental
+
+Minimal catalogue metadata, in core catalogue order (newest updated first). No messages, source turns, model settings, authors, budget, source entries, or private core fields are returned. PiP conversations are always excluded.
+
+- `conversationId`, `title`, `cwd`, `busy`, and `archived` describe the visible conversation. Missing titles use `"New session"`; missing archive flags become `false`.
+- `linkedFrom` is a numeric origin id only when that origin is visible and is not PiP. Otherwise a linked child has `linkedOrigin: true`, without the origin id.
+- `parentId` is optional for a visible parent relationship. The current session catalogue has no subagents and does not emit this field. Fork origins are not parent relationships and are not exposed.
 
 ### `ConversationWebRequest`
 

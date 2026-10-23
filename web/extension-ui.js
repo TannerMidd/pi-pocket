@@ -15,6 +15,8 @@ import {
     useState,
 } from "preact/hooks";
 import { useBack } from "./back.js";
+import { Conversation } from "./conversation-embed.js";
+import { conversationEmbed } from "./conversation-embed-context.js";
 import { describersChanged, setCallDescriber } from "./calls.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
@@ -365,7 +367,9 @@ export function onExtensionsGone(listener) {
 /** Load what the server lists, and unload what it no longer does or lists at a new address (a new version). */
 function sync(list, known = true) {
     order = list.map((each) => each.module);
-    const wanted = new Map(safeMode() ? [] : list.map((each) => [each.module, each]));
+    const wanted = new Map(
+        safeMode() || conversationEmbed ? [] : list.map((each) => [each.module, each]),
+    );
 
     for (const record of [...modules.values()]) {
         const entry = wanted.get(record.module);
@@ -806,6 +810,7 @@ function pocketFor(record) {
     const folder = () => new URL(".", new URL(record.url, location.href));
 
     return Object.freeze({
+        Conversation,
         version: POCKET_API,
         get pocketVersion() {
             return store.state.server?.pocketVersion;

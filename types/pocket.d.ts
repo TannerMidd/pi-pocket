@@ -353,6 +353,34 @@ export type WebAccess = "owner" | "steer" | "view";
 export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
+ * Minimal metadata for a conversation visible to the requesting person.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface ConversationSummary {
+    conversationId: number;
+    title: string;
+    cwd: string;
+    busy: boolean;
+    archived: boolean;
+    linkedFrom?: number;
+    linkedOrigin?: true;
+    parentId?: number;
+}
+
+/**
+ * Read-only conversation discovery, bound to the current person and request lifetime.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface RequestConversations {
+    list(options?: {
+        rootsOnly?: boolean;
+        includeArchived?: boolean;
+    }): Promise<ConversationSummary[]>;
+}
+
+/**
  * A request to a route, as its handler gets it.
  * @since 0.14.0
  */
@@ -397,6 +425,12 @@ export interface WebRequest {
      * @since 0.16.0
      */
     readonly context: Context;
+    /**
+     * Read-only authorized catalogue; unavailable after disconnect or handler return.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly conversations: RequestConversations;
     /**
      * Changes the module's documents atomically. Refused for viewers and after this request ends.
      * @since 0.16.0
@@ -1130,6 +1164,18 @@ export interface LoaderProps {
 }
 
 /**
+ * The props of the native `pocket.Conversation` view.
+ * @since 0.20.0
+ * @experimental
+ */
+export interface ConversationProps {
+    conversationId: number;
+    draft?: string;
+    title?: string;
+    onClose?: () => void;
+}
+
+/**
  * The props of `pocket.Markdown`.
  * @since 0.14.0
  */
@@ -1263,6 +1309,12 @@ export interface Pocket {
      * @since 0.14.0
      */
     readonly Markdown: FunctionComponent<MarkdownProps>;
+    /**
+     * The native conversation view. Uses normal server authorization and never sends a draft automatically.
+     * @since 0.20.0
+     * @experimental
+     */
+    readonly Conversation: FunctionComponent<ConversationProps>;
     /**
      * The app's on and off switch.
      * @since 0.14.0

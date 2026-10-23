@@ -1093,11 +1093,38 @@ export class PocketApp {
             return;
         }
 
+        const id = client.conversationId;
+
+        // Opening a room can wait for storage. A revocation can keep this client connected for app-wide events,
+        // so membership alone is not authority to join the room that was selected before the wait.
+        const mayAttach = (): boolean => {
+            if (!this.#clients.has(client) || client.conversationId !== id) {
+                return false;
+            }
+
+            const actor = this.config.userById(client.user.id);
+
+            if (actor === undefined) {
+                client.send("closing", {});
+                this.detach(client);
+                client.close?.();
+
+                return false;
+            }
+
+            if (!this.canSee(actor, id)) {
+                this.#evict(client, "This session is no longer shared with you.");
+
+                return false;
+            }
+
+            return true;
+        };
+
         try {
-            const id = client.conversationId;
             const room = await this.room(id);
 
-            if (!this.#clients.has(client)) {
+            if (!mayAttach()) {
                 this.releaseRoom(room);
 
                 return;
@@ -1123,10 +1150,13 @@ export class PocketApp {
             room.pushPresence();
             this.#scheduleSessions();
         } catch (error) {
-            client.send("missing", {
-                conversationId: client.conversationId,
-                message: describe(error),
-            });
+            // A late room error must not reach a detached, revoked, or differently selected conversation either.
+            if (mayAttach()) {
+                client.send("missing", {
+                    conversationId: id,
+                    message: describe(error),
+                });
+            }
         }
     }
 

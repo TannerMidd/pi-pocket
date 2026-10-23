@@ -5,6 +5,8 @@ import type {
     CommandContext as RealCommandContext,
     CommandResult as RealCommandResult,
     ConversationWebRequest as RealConversationWebRequest,
+    ConversationSummary as RealConversationSummary,
+    RequestConversations as RealRequestConversations,
     HumanLinkedSession as RealHumanLinkedSession,
     HumanLinkedSessions as RealHumanLinkedSessions,
     ExtensionCommand,
@@ -19,6 +21,8 @@ import type {
     CommandContext,
     CommandResult,
     ConversationWebRequest,
+    ConversationSummary,
+    RequestConversations,
     HumanLinkedSession,
     HumanLinkedSessions,
     Host,
@@ -64,6 +68,10 @@ export const contextMembers = (
 ): never => member;
 
 // Methods compare their parameters both ways, so the shapes they take are checked here on their own.
+export const summary = (real: RealConversationSummary): ConversationSummary => real;
+export const summaryBack = (types: ConversationSummary): RealConversationSummary => types;
+export const discovery = (real: RealRequestConversations): RequestConversations => real;
+export const discoveryBack = (types: RequestConversations): RealRequestConversations => types;
 export const request = (real: RealWebRequest): WebRequest => real;
 export const requestBack = (types: WebRequest): RealWebRequest => types;
 export const conversationRequest = (real: RealConversationWebRequest): ConversationWebRequest =>

@@ -108,6 +108,10 @@ import { defineDoc } from "@earendil-works/pi-durable";
 const Catalog = defineDoc({ kind: "x.workspace.catalog", version: 1, scope: "session", initial: () => ({ saved: 0 }) });
 export default function(host, web) {
     globalThis.workspaceHost = host;
+    web.route("GET", "conversations", async req => {
+        globalThis.workspaceRequest = req;
+        return req.conversations.list({ rootsOnly: req.query.get("rootsOnly") === "true" });
+    }, { access: "view" });
     web.route("GET", "catalog", async req => {
         globalThis.workspaceRequest = req;
         return await req.snapshot(Catalog, req.context) ?? { saved: 0 };
@@ -498,6 +502,24 @@ test("a file is served only when what was opened is the file that was checked", 
     }
 });
 
+test("ordinary GET routes expose authorized read-only conversation discovery", async () => {
+    const id = await newSession(app);
+
+    for (const who of ["owner", "Gale", "Vic"]) {
+        const answer = await call(who, "/api/x/workspace/conversations?rootsOnly=true");
+
+        assert.equal(answer.status, 200);
+        assert.ok(
+            (answer.data as { conversationId: number }[]).some(
+                (row) => row.conversationId === Number(id),
+            ),
+        );
+        await assert.rejects(seen.workspaceRequest!.conversations.list(), /ended/);
+    }
+
+    assert.equal((await call("Sid", "/api/x/workspace/conversations")).status, 404);
+});
+
 test("route documents are fresh, non-viewer writes that end with their request", async () => {
     assert.equal(
         (await call("owner", "/api/x/workspace/catalog", { method: "POST", body: {} })).status,
@@ -508,6 +530,7 @@ test("route documents are fresh, non-viewer writes that end with their request",
 
     assert.equal(captured.context.abortSignal?.aborted, true);
     assert.equal(captured.signal.aborted, false, "normal completion keeps the legacy signal live");
+    await assert.rejects(captured.conversations.list(), /ended/);
     await assert.rejects(
         captured.commit(async (tx) => {
             (await tx.doc(Catalog)).saved++;
@@ -542,6 +565,7 @@ test("route documents are fresh, non-viewer writes that end with their request",
     await waiting;
     await until(() => seen.workspaceRequest!.signal.aborted, "request cancellation");
     assert.equal(seen.workspaceRequest!.context.abortSignal?.aborted, true);
+    await assert.rejects(seen.workspaceRequest!.conversations.list(), /ended/);
     await assert.rejects(
         seen.workspaceRequest!.commit(() => {}),
         /ended/,
