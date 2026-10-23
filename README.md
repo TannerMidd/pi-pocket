@@ -79,7 +79,7 @@ The full tour is in [docs/features.md](docs/features.md).
 
 ## Standalone extensions
 
-[Ponytail](https://github.com/piromagnus/pi-pocket-ponytail) adds minimal-code modes, a session-menu selector, and verification reminders without Ponytail-specific core code. Its [installation and update guide](https://github.com/piromagnus/pi-pocket-ponytail#updates) explains how to keep the installed drop-in in sync with its `main` branch. Its [compatibility checks](https://github.com/piromagnus/pi-pocket-ponytail/actions/workflows/compatibility.yml) test it against Pi Pocket’s `main` every week and on demand.
+[Ponytail](https://github.com/piromagnus/pi-pocket-ponytail) adds minimal-code modes, a session-menu selector, and verification reminders without Ponytail-specific core code. Its [installation and update guide](https://github.com/piromagnus/pi-pocket-ponytail#updates) explains how to keep the installed drop-in in sync with its `main` branch.
 
 ## Remote access
 
