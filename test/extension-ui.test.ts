@@ -791,6 +791,11 @@ test(
         assert.equal(await inPage(`return JSON.stringify(globalThis.embedClosed);`), 1);
         await withMeter(`pocket.closePage(); return "null";`);
         await until(async () => !(await has(".ext-page iframe")), "unmounted frames");
+        // Removing the page schedules an asynchronous history traversal. Finish it before the next test navigates.
+        await until(
+            () => inPage<boolean>(`return JSON.stringify(history.state?.pocket?.layers === 0);`),
+            "embedded page history removed",
+        );
     },
 );
 
@@ -1026,6 +1031,11 @@ test("turning the module off takes away its button and closes its page", real, a
         "the page and button gone",
     );
     assert.equal(await has(rail("Shared")), true);
+    // The page disappears before back.js removes its history entry; do not race the next document's navigation.
+    await until(
+        () => inPage<boolean>(`return JSON.stringify(history.state?.pocket?.layers === 0);`),
+        "disabled extension page history removed",
+    );
 });
 
 test("native embeds preserve guest, viewer, and scoped access checks", real, async () => {
