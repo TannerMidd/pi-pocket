@@ -684,6 +684,10 @@ function check(kind, spec) {
         throw new Error(`${name} ${spec.id}: keywords are a list of words`);
     }
 
+    if (kind === "menu" && spec.group !== undefined && !["app", "session"].includes(spec.group)) {
+        throw new Error(`${name} ${spec.id}: group is "app" or "session"`);
+    }
+
     if (spec.before !== undefined && spec.after !== undefined) {
         throw new Error(`${name} ${spec.id}: give before or after, not both`);
     }
@@ -1773,20 +1777,22 @@ export function ExtensionRailButtons() {
 const closeOf = (spec) => (spec.page !== undefined ? closePage() : closeExtPanel());
 
 /** The menu's rows that extensions added: `{ key, label, hint, run }`, run closing the menu first. */
-export function extensionMenuItems() {
-    return added("menu").map(({ record, spec }) => ({
-        key: `${record.module}:${spec.id}`,
-        label: spec.label,
-        hint: spec.hint ?? "",
-        run: () => {
-            // A page or panel shows under the menu, which closes; a sheet takes the menu's place.
-            if (spec.sheet === undefined) {
-                closeSheet();
-            }
+export function extensionMenuItems(group = "app") {
+    return added("menu")
+        .filter(({ spec }) => (spec.group ?? "app") === group)
+        .map(({ record, spec }) => ({
+            key: `${record.module}:${spec.id}`,
+            label: spec.label,
+            hint: spec.hint ?? "",
+            run: () => {
+                // A page or panel shows under the menu, which closes; a sheet takes the menu's place.
+                if (spec.sheet === undefined) {
+                    closeSheet();
+                }
 
-            activate(record, spec);
-        },
-    }));
+                activate(record, spec);
+            },
+        }));
 }
 
 /** The launcher's actions that extensions added, as launcher items. */

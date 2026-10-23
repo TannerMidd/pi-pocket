@@ -466,6 +466,7 @@ export function MenuSheet({ places = true }) {
                 )
             }
             ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
+            ${session && extensionMenuItems("session").map((each) => item(each.label, each.run, each.hint))}
             ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
             ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
             ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}

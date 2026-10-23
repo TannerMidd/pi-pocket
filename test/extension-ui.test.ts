@@ -361,6 +361,67 @@ test(
 );
 
 test(
+    "menu rows use App and Session groups, update and remove, and reject invalid groups",
+    real,
+    async () => {
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(".composer"), "the session");
+        const invalid = await withMeter<string>(
+            `try { pocket.menu({ id: "invalid-group", label: "Invalid", group: "other", run() {} }); return JSON.stringify("accepted"); } catch (error) { return JSON.stringify(error.message); }`,
+        );
+
+        assert.match(invalid, /group is "app" or "session"/);
+        await withMeter(
+            `globalThis.appMenu = pocket.menu({ id: "app-row", label: "App row", hint: "default", run: () => { globalThis.menuRan = "app"; } }); globalThis.sessionMenu = pocket.menu({ id: "session-row", label: "Session row", group: "session", run: () => { globalThis.menuRan = "session"; } }); return "null";`,
+        );
+
+        const openMenu = () =>
+            inPage(`(await import("/store.js")).openSheet({ type: "menu" }); return "null";`);
+        const menuLabels = () =>
+            inPage<string[]>(
+                `return JSON.stringify([...document.querySelectorAll(".sheet .list-item")].map((each) => each.textContent.trim()))`,
+            );
+        const hasLabel = async (label: string) =>
+            (await menuLabels()).some((each) => each.startsWith(label));
+
+        await inPage(`(await import("/store.js")).navigate(null); return "null";`);
+        await until(async () => !(await has(".composer")), "the session closes");
+        await openMenu();
+        await until(() => hasLabel("App row"), "the default App row without a session");
+        assert.equal(await hasLabel("Session row"), false, "a Session row needs a session");
+        await inPage(`(await import("/store.js")).closeSheet(); return "null";`);
+
+        await inPage(`(await import("/store.js")).navigate(${session}); return "null";`);
+        await until(() => has(".composer"), "the session opens");
+        await openMenu();
+        await until(
+            async () => (await hasLabel("App row")) && (await hasLabel("Session row")),
+            "both menu groups",
+        );
+        await inPage(
+            `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.trim().startsWith("Session row")).click(); return "null";`,
+        );
+        await until(
+            async () =>
+                (await inPage<string>(`return JSON.stringify(globalThis.menuRan ?? "")`)) ===
+                "session",
+            "the Session row action",
+        );
+
+        await withMeter(
+            `globalThis.sessionMenu.update({ label: "Session updated", hint: "changed" }); return "null";`,
+        );
+        await openMenu();
+        await until(() => hasLabel("Session updated"), "the updated Session row");
+        assert.equal(await hasLabel("Session row"), false);
+        await withMeter(`globalThis.sessionMenu.remove(); return "null";`);
+        await until(async () => !(await hasLabel("Session updated")), "the removed Session row");
+        assert.equal(await hasLabel("App row"), true, "the App row remains");
+        await withMeter(`globalThis.appMenu.remove(); return "null";`);
+    },
+);
+
+test(
     "an action under Pi's answer gets the answer, and puts text into the message box",
     real,
     async () => {

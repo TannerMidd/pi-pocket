@@ -731,7 +731,7 @@ export type RailSpec = Action & {
 };
 
 /**
- * A row in the menu's App group.
+ * A row in the menu's App or Session group.
  * @since 0.14.0
  */
 export type MenuSpec = Action & {
@@ -750,6 +750,12 @@ export type MenuSpec = Action & {
      * @since 0.14.0
      */
     hint?: string;
+    /**
+     * The menu group. Defaults to "app"; "session" shows only in a session.
+     * Experimental: older apps ignore this field and use the App group.
+     * @since 0.21.0
+     */
+    group?: "app" | "session";
 };
 
 /**

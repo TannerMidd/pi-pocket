@@ -73,7 +73,7 @@ When you save a file that the folder serves, the browser module gets a new addre
 - **`rail({ id, title, icon or iconPath, badge, … })`** adds a button on the rail, after the app's own tools. It shows in the sidebar, in the drawer, and on a phone's home screen. The buttons of modules take a [limited height](reference/limits.md#browser-modules), and scroll past that.
     - `icon` is the name of one of the app's icons: `pulse`, `grid`, `globe`, `key`, `chat`, `folder`, `search`, and more. An unknown name shows `grid`. `iconPath` is a 24×24 stroked SVG path of your own.
     - `badge` is a short count or word on the button. `0`, `NaN`, `-Infinity`, `""`, `"0"`, `null`, and `false` show no badge, as the app's own counts hide at 0. A large count, and `Infinity`, show as a capped count. Other numbers, negative or with decimals, show as they are. Long text is cut, with "…", in the button's label too, without cutting a character in two. The [limits](reference/limits.md#browser-modules) give the sizes.
-- **`menu({ id, label, hint, … })`** adds a row to the menu's App group.
+- **`menu({ id, label, hint, group, … })`** adds a row to the menu's App group by default. Set `group: "session"` to show it only in a session. This field is experimental since 0.21.0; older apps ignore it and use the App group.
 - **`launcher({ id, label, detail, icon or iconPath, keywords, … })`** adds an action to the launcher (Ctrl+K or ⌘+K).
 
 Each of these does one thing when a person uses it:
@@ -84,6 +84,8 @@ Each of these does one thing when a person uses it:
 - `run: () => …` runs a function.
 
 The buttons, rows, and actions of modules show in the order that the server lists the modules. An edit keeps a module's place.
+
+App menu rows show in the menu without a session. Session menu rows show only in a session, in its menu. Both groups use the same row action and update rules.
 
 ## Pages and sheets
 
