@@ -1,0 +1,38 @@
+# Pi Pocket as a systemd template unit. The instance name is the access mode; see docs/systemd.md.
+
+[Unit]
+Description=Pi Pocket (%i access)
+Documentation=https://github.com/TannerMidd/pi-pocket/blob/main/docs/systemd.md
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=pi-pocket
+Group=pi-pocket
+
+Environment=POCKET_HOME=/opt/pi-pocket
+Environment=HOME=/var/lib/pi-pocket
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/pi-pocket.env
+
+WorkingDirectory=/srv/pi-pocket
+
+# %i is the access mode: local, lan, cloudflare, tailscale, or tailscale-serve.
+ExecStart=/usr/bin/env node ${POCKET_HOME}/bin/pi-pocket.js --access %i --port 8787 --data /var/lib/pi-pocket --cwd /srv/pi-pocket
+
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=20
+
+StateDirectory=pi-pocket
+StateDirectoryMode=0700
+UMask=0077
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
