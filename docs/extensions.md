@@ -103,6 +103,10 @@ These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 - [examples/read-page.ts](examples/read-page.ts): a tool that reads a public web page with `host.fetchPublic`, and fences its text with `host.text`.
 - [examples/server-status.ts](examples/server-status.ts) with [examples/server-status.js](examples/server-status.js): a page on the rail, with a route that reads the machine's load and memory, and events that keep it live.
 
+## Execution environments for workspaces
+
+Modules can register an execution provider for a workspace URI scheme such as `ssh`. See [Execution environments for workspaces](extensions/workspaces.md) and the experimental [`host.registerWorkspaceProvider`](extensions/reference/host.md#registerworkspaceprovider) API.
+
 ## Rules that are easy to break
 
 - **Nothing two times.** A restart can run a hook or a safe tool again. Some work must occur one time only: a message that you send, money that you spend, a line that you add to a file. Put it behind `api.memo`, or behind a key that lets a second run find the first.

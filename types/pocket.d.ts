@@ -24,6 +24,7 @@ import type {
     TaskId,
     Tx,
 } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { ComponentType, Fragment, FunctionComponent, h, VNode } from "preact";
 import type {
     useCallback,
@@ -100,6 +101,18 @@ export interface Module {
  * It changes only when the server restarts.
  * @since 0.1.0
  */
+/**
+ * An execution provider for one workspace URI scheme.
+ * @since 0.23.0
+ * @experimental
+ */
+export interface WorkspaceProvider {
+    /** @experimental @since 0.23.0 */
+    env(cwd: string): ExecutionEnv;
+    /** @experimental @since 0.23.0 */
+    resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+}
+
 export interface Host {
     /**
      * Pi Pocket's data folder.
@@ -167,6 +180,12 @@ export interface Host {
      * @experimental
      */
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
+    /**
+     * Registers an execution provider for a workspace URI scheme.
+     * @since 0.23.0
+     * @experimental
+     */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
     /**
      * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.
@@ -906,6 +925,12 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * @since 0.14.0
  */
 export interface WebRequest {
+    /**
+     * Creates a session from an owner-only route.
+     * @since 0.23.0
+     * @experimental
+     */
+    createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     /**
      * The request's method.
      * @since 0.14.0

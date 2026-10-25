@@ -71,6 +71,10 @@ export async function createWorktree(
     folder: string,
     label: string,
 ): Promise<{ worktree: Worktree; cwd: string; skipped: string[] }> {
+    if (/^(?![a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(cwd)) {
+        throw new HttpError(400, "Remote workspaces do not support worktrees.");
+    }
+
     const root = await repositoryOf(cwd);
 
     if (root === undefined) {

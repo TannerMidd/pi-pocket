@@ -42,6 +42,7 @@ These members are public:
 - `notice(level, message, id?)`
 - `resolveModel(spec)`, `subagentModels()`, `modelProblem(ref, fresh?)`, `modelInfo(spec)` (exact local metadata, since 0.16.0)
 - `requesterOf(conversationId)`
+- `registerWorkspaceProvider(scheme, provider)` and `WorkspaceProvider` (experimental, since 0.23.0: [Execution environments for workspaces](../workspaces.md))
 - `skillPaths()`, `skills(cwd)`
 - `heldBack(conversationId)`, `onLimitsChanged(listener)`
 - `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental))
@@ -60,7 +61,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `api`, `module`, `route`, `conversationRoute` (since 0.16.0), `client`, `command`, `send`, `error`, and `onDispose`.
 - `provide`, `use`, `onService`, `settings`, `setting`, and `onSettings` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md)).
 - `publicPage` and `links` (experimental, since 0.22.0): pages at `/l/<token>` for anyone with a module's link, what a page handler gets (`PublicPageRequest`), and what its answer does ([Public pages](../public-pages.md)).
-- What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`), and what its answer does.
+- What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`), and what its answer does. `createSession` is experimental since 0.23.0.
 - A conversation-bound request's `conversation` metadata and human `linkedSessions.start` / `list`, with their authenticated-actor, receipt, and admission checks (since 0.16.0).
 - The route paths, the methods, the `access` values (`owner`, `steer`, `view`), and the `X-Pocket` header that every call to a route must have.
 
@@ -156,6 +157,8 @@ All public interfaces are stable, unless the docs mark them experimental or depr
 `host.linkedSessions` remains experimental in 0.16.0. The human-bound `linkedSessions` on a conversation route is a separate stable interface, added in 0.16.0. Other public members are stable unless marked otherwise.
 
 Since 0.19.0, these `pocket` members are experimental too: `panel`, `openPanel`, `closePanel`, `status`, `topbar`, `composerButton`, `replyAction`, `insertText`, `arrange`, and their types. The `core:` ids of the items in slots are public, with the same promise as the names of the theme surface.
+
+Since 0.23.0, `host.registerWorkspaceProvider`, `WorkspaceProvider`, and `WebRequest.createSession` are experimental: [Execution environments for workspaces](../workspaces.md).
 
 Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `host.ask`, `hide`, `commandEnv`, and `browser`; `host.on`; `web.provide`, `use`, `onService`, `settings`, `setting`, and `onSettings`; `pocket.settings` and `onSettings`; and their types. So are the `browser` tool's `action` and target arguments, for hooks.
 

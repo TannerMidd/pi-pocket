@@ -27,6 +27,7 @@ import type { FetchPublic } from "./public-fetch.ts";
 import type { BrowserControl } from "./browser/page.ts";
 import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
@@ -316,6 +317,11 @@ export type CommandInfo = Omit<ExtensionCommand, "handler"> & { id: string; name
 export type ModelRequestShaper = (payload: unknown, model: Model<Api>) => unknown | undefined;
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
+export interface WorkspaceProvider {
+    env(cwd: string): ExecutionEnv;
+    resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+}
+
 export interface PocketHost {
     readonly guard: LancetGuard;
     readonly approvals: Approvals;
@@ -359,6 +365,8 @@ export interface PocketHost {
      * that is not the last one changes nothing.
      */
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
+    /** @experimental @since 0.23.0 */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
     /**
      * Shape the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. Returns how to stop shaping. Only the modules
@@ -516,6 +524,8 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** A request to a module's route, as its handler gets it. */
 export interface WebRequest {
+    /** @experimental @since 0.23.0 */
+    createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     readonly method: WebMethod;
     /** The path's `:name` parts, by name. */
     readonly params: Readonly<Record<string, string>>;

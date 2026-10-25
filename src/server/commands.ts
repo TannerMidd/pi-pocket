@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { type Context, copyJson } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import {
     clampThinkingLevel,
     type ImageContent,
@@ -380,7 +380,11 @@ export class Commands {
     async createSession(
         user: User,
         request: { cwd?: string; title?: string; worktree?: unknown },
-        { projectDefaults = true }: { projectDefaults?: boolean } = {},
+        {
+            projectDefaults = true,
+            resolvedCwd,
+            signal,
+        }: { projectDefaults?: boolean; resolvedCwd?: string; signal?: AbortSignal } = {},
     ): Promise<{ id: ConversationId }> {
         const app = this.#app;
 
@@ -392,9 +396,16 @@ export class Commands {
 
         const given = optionalText(request.title, "title");
         const title = (given === undefined ? undefined : oneLine(given)) || undefined;
-        const folder = app.workspace.checkDirectory(
-            optionalText(request.cwd, "cwd") ?? app.defaultCwd,
-        );
+        const requested = optionalText(request.cwd, "cwd") ?? app.defaultCwd;
+        const remote = app.workspaceScheme(requested) !== undefined;
+
+        if (remote && request.worktree === true) {
+            throw new HttpError(400, "Remote workspaces do not support worktrees.");
+        }
+
+        const folder = resolvedCwd ?? (await app.resolveCwd(requested, signal));
+
+        signal?.throwIfAborted();
         const now = Date.now();
 
         return this.#inPlace(
@@ -403,7 +414,10 @@ export class Commands {
             title ?? basename(folder),
             async ({ cwd, worktree }) => {
                 // An internal caller about to apply a person's explicit model keeps its previous starting pair.
-                const initial = this.#defaultModel(undefined, projectDefaults ? cwd : undefined);
+                const initial = this.#defaultModel(
+                    undefined,
+                    projectDefaults && !remote ? cwd : undefined,
+                );
                 const conversation = await app.harness.createConversation(
                     {
                         ownership: { kind: "ownerless" },
@@ -417,6 +431,25 @@ export class Commands {
                         init: async (tx, id) => {
                             const sessions = await tx.doc(SessionsDoc);
 
+                            signal?.throwIfAborted();
+                            const current = app.config.userById(user.id);
+
+                            if (current === undefined) {
+                                throw new HttpError(
+                                    403,
+                                    "You no longer have access to start sessions.",
+                                );
+                            }
+
+                            app.requireSteer(current);
+
+                            if (current.sessions !== undefined) {
+                                throw new HttpError(
+                                    403,
+                                    "You were invited to one session and cannot start new ones.",
+                                );
+                            }
+
                             sessions.items[String(id)] = {
                                 cwd,
                                 createdAt: now,
@@ -427,7 +460,7 @@ export class Commands {
                             };
                         },
                     },
-                    context,
+                    signal === undefined ? context : withAbortSignal(signal, context),
                 );
 
                 return { id: conversation.id };
@@ -521,6 +554,11 @@ export class Commands {
 
         app.requireSee(user, id);
         await app.requireDriver(id, user);
+
+        if (app.workspaceScheme(app.cwdOf(id)) !== undefined) {
+            throw new HttpError(400, "Remote workspaces do not support worktrees.");
+        }
+
         const worktree = app.sessionMeta(id)?.worktree;
 
         if (worktree === undefined) {
