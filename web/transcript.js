@@ -67,6 +67,10 @@ const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
 /** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
 const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed))/;
 
+/** A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced. */
+const BACKGROUND = /^\[background\] Task (\S+) (.+?) after ([^.\n]+)\.\nCommand: (.*)\n([\s\S]*)$/;
+const BACKGROUND_OUTPUT = /<background-output>\n([\s\S]*?)\n<\/background-output>/;
+
 /** How a scheduled message starts (see src/server/schedules.ts). */
 const SCHEDULED = "[scheduled] ";
 
@@ -229,6 +233,24 @@ function Report({ report, view, fresh }) {
     </div>`;
 }
 
+/** A background task that ended, as a card for people: its id and outcome, its command, and its output folded away. */
+function BackgroundReport({ match }) {
+    const [, id, outcome, took, command, rest] = match;
+    const output = BACKGROUND_OUTPUT.exec(rest)?.[1];
+
+    return html`<div class="report background-report">
+        <div class="report-head">
+            <span class="report-name">${id}</span> ${outcome} · ${took}
+        </div>
+        ${command !== undefined && html`<div class="muted small mono">${command}</div>`}
+        ${
+            output === undefined
+                ? html`<div class="muted small">It printed nothing.</div>`
+                : html`<${Collapsible} text=${output} />`
+        }
+    </div>`;
+}
+
 /** A span of time: "18s", "2m 04s", "1h 02m". */
 function span(ms) {
     const seconds = Math.max(0, Math.round(ms / 1000));
@@ -289,6 +311,14 @@ function UserEntry({ entry, view, users }) {
             : html`<div class="report-group">
                   ${reports.map((report) => html`<${Report} report=${report} view=${view} fresh=${fresh} />`)}
               </div>`;
+    }
+
+    // A background task's message: nobody typed it, so a person writing "[background]" themselves keeps it theirs.
+    const background =
+        entry.from === undefined && !view.authors?.[entry.id] ? BACKGROUND.exec(entry.text) : null;
+
+    if (background) {
+        return html`<${BackgroundReport} match=${background} />`;
     }
 
     const check = GOAL_CHECK.exec(entry.text);
