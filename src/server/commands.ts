@@ -61,6 +61,7 @@ import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
+import { contextTokens, tokensSinceCompaction } from "./pip-compact.ts";
 import { globalModelSettings, projectModelDefault } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor } from "./requests.ts";
@@ -307,6 +308,11 @@ async function followed(
         await looking;
     }
 }
+
+/** A session idle this long has lost its prompt cache (Anthropic's longest): its next message compacts it first. */
+const IDLE_COMPACT_MS = 60 * 60 * 1000;
+/** Context below this many tokens is not worth a summary. */
+const IDLE_COMPACT_TOKENS = 20_000;
 
 export class Commands {
     readonly #app: PocketApp;
@@ -764,6 +770,7 @@ export class Commands {
         }
 
         app.spend.check(user, id);
+        await this.#compactAfterPause(id, user);
 
         const lines = attachments.map(
             (file) =>
@@ -2265,6 +2272,44 @@ export class Commands {
         await app.collab.activity(id, user, `forked “${title}” from this session${where}`, false);
 
         return forked.id;
+    }
+
+    /**
+     * A session that sat idle for over an hour has lost its prompt cache: sending the whole context again costs full
+     * price, so it is summarized first, as Claude Code offers. Only a person's message to a session of their own (not
+     * PiP's or a subagent's), with enough context to be worth a summary. A summary that fails never stops the message.
+     */
+    async #compactAfterPause(id: ConversationId, user: User): Promise<void> {
+        const app = this.#app;
+        const meta = app.sessionMeta(id);
+
+        if (
+            meta === undefined ||
+            app.now() - meta.updatedAt < IDLE_COMPACT_MS ||
+            app.isBusy(id) ||
+            app.pip.ownerOf(id) !== undefined ||
+            app.parentOf(id) !== undefined
+        ) {
+            return;
+        }
+
+        try {
+            const conversation = await app.conversation(id);
+            const view = await conversation.context(context);
+
+            if (
+                contextTokens(view) < IDLE_COMPACT_TOKENS ||
+                tokensSinceCompaction(view) < IDLE_COMPACT_TOKENS / 2
+            ) {
+                return;
+            }
+
+            app.notice("info", "Idle for over an hour: compacting the context first…", id);
+            await app.collab.activity(id, user, "compacted the context after an hour idle", false);
+            await app.harness.waitForTask(await conversation.compact(undefined, context), context);
+        } catch (error) {
+            app.log(`compaction after a pause skipped: ${describe(error)}`);
+        }
     }
 
     async compact(id: ConversationId, user: User, instructions: string | undefined): Promise<void> {
