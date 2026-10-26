@@ -253,6 +253,8 @@ const COMPACT_OVER = [
     [60000, "60k"],
     [100000, "100k"],
     [200000, "200k"],
+    [500000, "500k"],
+    [1000000, "1M"],
 ];
 
 /** The owner's choice of when Pi compacts a session's context, from Pi's own settings. */
@@ -266,26 +268,37 @@ function Compaction() {
 
     const change = (patch) => attempt(() => api("settings", { compaction: patch }));
 
-    const row = (label, values, field) => {
+    const line = (label, values, current, onPick, hint) => html`<div class="compact-row">
+        <span class="small">${label}</span>
+        <div class="segmented" role="group" aria-label=${label}>
+            ${values.map(
+                ([value, text]) => html`<button
+                    class=${current === value ? "on" : ""}
+                    aria-pressed=${current === value}
+                    onClick=${() => onPick(value)}
+                >
+                    ${text}
+                </button>`,
+            )}
+        </div>
+        <span class="muted compact-hint">${hint}</span>
+    </div>`;
+
+    const row = (label, values, field, hint) => {
         const current = policy[field];
         const choices = values.some(([value]) => value === current)
             ? values
-            : [...values, [current, `${Math.round(current / 1000)}k`]].sort((a, b) => a[0] - b[0]);
+            : [
+                  ...values,
+                  [
+                      current,
+                      current >= 1000000
+                          ? `${current / 1000000}M`
+                          : `${Math.round(current / 1000)}k`,
+                  ],
+              ].sort((a, b) => a[0] - b[0]);
 
-        return html`<div>
-            <div class="muted small">${label}</div>
-            <div class="segmented" role="group" aria-label=${label}>
-                ${choices.map(
-                    ([value, text]) => html`<button
-                        class=${current === value ? "on" : ""}
-                        aria-pressed=${current === value}
-                        onClick=${() => change({ [field]: value })}
-                    >
-                        ${text}
-                    </button>`,
-                )}
-            </div>
-        </div>`;
+        return line(label, choices, current, (value) => change({ [field]: value }), hint);
     };
 
     const fromFull = policy.trigger !== "over";
@@ -293,61 +306,61 @@ function Compaction() {
         ? `When a session's context comes within ${policy.reserveTokens} tokens of full, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A bigger reserve compacts earlier; a bigger kept part summarizes less. From full also applies to Pi in the terminal.`
         : `When a session's context goes over ${policy.overTokens} tokens, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A smaller number compacts earlier. This choice is for Pi Pocket sessions; Pi in the terminal still uses how far from full.`;
 
-    return html`<div class="limit-wait">
-        <div class="small">Compact context</div>
-        <p class="muted small">${copy}</p>
-        <div class="segmented" role="group" aria-label="Compaction on or off">
-            ${[
+    return html`<div class="limit-wait compact-settings" title=${copy}>
+        ${row("Compaction size", COMPACT_KEEP, "keepRecentTokens", "How much of the newest context stays as it is when anything compacts, manual or automatic. Bigger summarizes less.")}
+        ${line(
+            "Automatic compaction",
+            [
                 [true, "On"],
                 [false, "Off"],
-            ].map(
-                ([value, text]) => html`<button
-                    class=${policy.enabled === value ? "on" : ""}
-                    aria-pressed=${policy.enabled === value}
-                    onClick=${() => change({ enabled: value })}
-                >
-                    ${text}
-                </button>`,
-            )}
-        </div>
-        <div class="muted small">Also compact after a pause, before the next message</div>
-        <div class="segmented" role="group" aria-label="Compact after a pause">
-            ${[
+            ],
+            policy.enabled,
+            (value) => change({ enabled: value }),
+            "Summarize older messages by itself when the context gets long. Off: only the manual compact command does it, and nothing below applies.",
+        )}
+        ${
+            policy.enabled &&
+            html`
+        ${line(
+            "After a pause",
+            [
                 [0, "Off"],
                 [1, "1h"],
                 [2, "2h"],
                 [5, "5h"],
                 [12, "12h"],
-            ].map(
-                ([value, text]) => html`<button
-                    class=${policy.idleHours === value ? "on" : ""}
-                    aria-pressed=${policy.idleHours === value}
-                    onClick=${() => change({ idleHours: value })}
-                >
-                    ${text}
-                </button>`,
-            )}
-        </div>
-        <div class="segmented" role="group" aria-label="When to compact">
-            ${[
+            ],
+            policy.idleHours,
+            (value) => change({ idleHours: value }),
+            "Also compact before the next message after this much idle time, when the cache is cold.",
+        )}
+        ${line(
+            "Start",
+            [
                 ["fromFull", "From full"],
                 ["over", "Once over"],
-            ].map(
-                ([value, text]) => html`<button
-                    class=${(policy.trigger ?? "fromFull") === value ? "on" : ""}
-                    aria-pressed=${(policy.trigger ?? "fromFull") === value}
-                    onClick=${() => change({ trigger: value })}
-                >
-                    ${text}
-                </button>`,
-            )}
-        </div>
+            ],
+            policy.trigger ?? "fromFull",
+            (value) => change({ trigger: value }),
+            "From full: near the model's limit (Pi in the terminal too). Once over: at a token count, Pocket only.",
+        )}
         ${
             fromFull
-                ? row("Start this far from full", COMPACT_RESERVE, "reserveTokens")
-                : row("Once context exceeds", COMPACT_OVER, "overTokens")
+                ? row(
+                      "Reserve",
+                      COMPACT_RESERVE,
+                      "reserveTokens",
+                      "Tokens kept free before the window is full. Bigger compacts earlier.",
+                  )
+                : row(
+                      "Over",
+                      COMPACT_OVER,
+                      "overTokens",
+                      "Compact once the context passes this. Smaller compacts earlier.",
+                  )
         }
-        ${row("Keep this much recent", COMPACT_KEEP, "keepRecentTokens")}
+        `
+        }
     </div>`;
 }
 

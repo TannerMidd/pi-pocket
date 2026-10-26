@@ -110,7 +110,7 @@ export const COMPACT_IDLE_CHOICES: readonly number[] = [0, 1, 2, 5, 12];
 export type CompactionTrigger = "fromFull" | "over";
 
 /** Absolute tokens of context at which `"over"` starts compaction, until the owner says otherwise. */
-export const DEFAULT_COMPACTION_OVER_TOKENS = 100_000;
+export const DEFAULT_COMPACTION_OVER_TOKENS = 200_000;
 
 /** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
 export type ApprovalRule = "anyone" | "others";

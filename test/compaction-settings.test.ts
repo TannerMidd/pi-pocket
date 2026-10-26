@@ -35,7 +35,7 @@ test("the owner sets the thresholds: they reach Pi's settings file, and the hell
     // The switch was not named, so it stays as it was.
     assert.equal(policy.enabled, before?.enabled ?? true);
     assert.equal(policy.trigger, "fromFull");
-    assert.equal(policy.overTokens, 100000);
+    assert.equal(policy.overTokens, 200000);
     assert.deepEqual((await app.hello(owner(app))).server.compaction, policy);
 
     const stored = settingsFile();

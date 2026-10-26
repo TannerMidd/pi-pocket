@@ -1,4 +1,4 @@
-// The owner's Compact context controls in the Providers sheet: on, off, from-full vs over, and the token presets.
+// The owner's Automatic compaction controls in the Providers sheet: on, off, from-full vs over, and the token presets.
 import { type App, cleanUp, openApp, root, until } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -77,19 +77,19 @@ async function openProviders(token: string): Promise<void> {
 }
 
 test(
-    "the owner turns Compact context off and picks a reserve in the Providers sheet",
+    "the owner turns Automatic compaction off and picks a reserve in the Providers sheet",
     real,
     async () => {
         await page.setViewport(VIEWPORTS.mobile);
         await openProviders(app.config.ownerToken);
         await see(
-            `return JSON.stringify([...document.querySelectorAll(".limit-wait .small")].some((el) => el.textContent === "Compact context"))`,
-            "Compact context",
+            `return JSON.stringify([...document.querySelectorAll(".limit-wait .small")].some((el) => el.textContent === "Automatic compaction"))`,
+            "Automatic compaction",
         );
 
         await page.evaluate(`
             const row = [...document.querySelectorAll(".limit-wait")].find((el) =>
-                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Compact context"),
+                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Automatic compaction"),
             );
             const press = (text) =>
                 [...row.querySelectorAll("button")].find((el) => el.textContent.trim() === text).click();
@@ -104,7 +104,7 @@ test(
         const on = JSON.parse(
             await page.evaluate(`
                 const row = [...document.querySelectorAll(".limit-wait")].find((el) =>
-                    [...el.querySelectorAll(".small")].some((label) => label.textContent === "Compact context"),
+                    [...el.querySelectorAll(".small")].some((label) => label.textContent === "Automatic compaction"),
                 );
                 const pressed = [...row.querySelectorAll("[aria-pressed=true]")].map((el) => el.textContent.trim());
 
@@ -113,14 +113,26 @@ test(
         ) as string[];
 
         assert.ok(on.includes("Off"));
-        assert.ok(on.includes("32k"));
-        assert.ok(on.includes("From full"));
+        assert.equal(on.length, 2, "off keeps only the compaction size beside it");
+        await page.evaluate(`
+            const row = [...document.querySelectorAll(".limit-wait")].find((el) =>
+                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Automatic compaction"),
+            );
+
+            [...row.querySelectorAll("button")].find((el) => el.textContent.trim() === "On").click();
+            return "true";
+        `);
+        await until(() => app.compactionSettings()?.enabled === true, "compaction on again");
+        await see(
+            `return JSON.stringify([...document.querySelectorAll(".limit-wait [aria-pressed=true]")].some((el) => el.textContent.trim() === "32k"))`,
+            "32k kept after off and on",
+        );
         assert.equal(app.settings.getCompactionSettings().reserveTokens, 32768);
-        assert.equal(app.settings.getCompactionSettings().enabled, false);
+        assert.equal(app.settings.getCompactionSettings().enabled, true);
 
         await page.evaluate(`
             const row = [...document.querySelectorAll(".limit-wait")].find((el) =>
-                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Compact context"),
+                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Automatic compaction"),
             );
             const press = (text) =>
                 [...row.querySelectorAll("button")].find((el) => el.textContent.trim() === text).click();
@@ -135,7 +147,7 @@ test(
         );
         await page.evaluate(`
             const row = [...document.querySelectorAll(".limit-wait")].find((el) =>
-                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Compact context"),
+                [...el.querySelectorAll(".small")].some((label) => label.textContent === "Automatic compaction"),
             );
 
             [...row.querySelectorAll("button")].find((el) => el.textContent.trim() === "60k").click();
@@ -146,7 +158,7 @@ test(
         const over = JSON.parse(
             await page.evaluate(`
                 const row = [...document.querySelectorAll(".limit-wait")].find((el) =>
-                    [...el.querySelectorAll(".small")].some((label) => label.textContent === "Compact context"),
+                    [...el.querySelectorAll(".small")].some((label) => label.textContent === "Automatic compaction"),
                 );
                 const pressed = [...row.querySelectorAll("[aria-pressed=true]")].map((el) => el.textContent.trim());
 
@@ -158,6 +170,6 @@ test(
         assert.ok(over.includes("60k"));
         assert.equal(app.compactionSettings()?.trigger, "over");
         assert.equal(app.settings.getCompactionSettings().reserveTokens, 32768);
-        assert.equal(app.settings.getCompactionSettings().enabled, false);
+        assert.equal(app.settings.getCompactionSettings().enabled, true);
     },
 );

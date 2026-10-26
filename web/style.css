@@ -17579,3 +17579,27 @@ pre.gallery-code {
 .run-settings .limit-wait {
     margin-bottom: 0;
 }
+
+/* Compaction settings: fields sit side by side when the pane is wide enough. */
+.compact-settings {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px 14px;
+}
+
+.compact-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+}
+
+.compact-hint {
+    font-size: 11.5px;
+    line-height: 1.3;
+}
+
+.compact-settings .segmented button {
+    min-height: 24px;
+    padding: 2px 9px;
+}
