@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 import { RefreshModels } from "../model-refresh.js";
+import { favoriteModels, setModelFavorite } from "../model-favorites.js";
 
 /** Models past this many get a box to find them by. */
 const MODEL_SEARCH_AT = 8;
@@ -24,6 +25,9 @@ function SubagentModels({ names }) {
     // What this tab asked for and has no answer to yet, by model: shown at once.
     const [asked, setAsked] = useState({});
     const [query, setQuery] = useState("");
+    const [filter, setFilter] = useState("all");
+    const favoritesOnly = filter === "favorites";
+    const favorites = new Set(favoriteModels());
 
     // A server that does not keep the choice sends none.
     if (!Array.isArray(allowed)) {
@@ -51,7 +55,10 @@ function SubagentModels({ names }) {
         const provider = row.spec.slice(0, row.spec.indexOf("/"));
         const words = `${row.spec} ${row.model?.name ?? ""} ${names[provider] ?? ""}`;
 
-        if (needle === "" || words.toLowerCase().includes(needle)) {
+        if (
+            (filter === "all" || (favoritesOnly ? favorites.has(row.spec) : isOn(row.spec))) &&
+            (needle === "" || words.toLowerCase().includes(needle))
+        ) {
             groups.set(provider, [...(groups.get(provider) ?? []), row]);
         }
     }
@@ -85,11 +92,31 @@ function SubagentModels({ names }) {
     };
 
     return html`<div class="subagent-models">
-        <div class="label">Models for subagents</div>
+        <div class="subagent-models-heading">
+            <div class="label">Models</div>
+            <span class="small subagent-models-chosen" title=${summary} aria-live="polite">
+                ${chosen.length} for subagents
+            </span>
+        </div>
         <p class="muted small">
-            With none checked, subagents and linked sessions run on their session's model, and Pi cannot choose another. Check some, and they run only on those: on the session's model when it is checked, otherwise on a checked model that Pi chooses to suit the work. Pi cannot use any other.
+            <strong>Checkbox:</strong> models subagents and linked sessions may use. With none checked, they use the
+            session's model. <strong>Star:</strong> only a shortcut in your model picker; it changes no permission.
         </p>
-        <p class="small subagent-models-chosen" title=${summary}>${summary}</p>
+        <div class="segmented model-filters" role="group" aria-label="Filter models">
+            ${[
+                ["all", "All models", null],
+                ["allowed", "Allowed", "check"],
+                ["favorites", "Favorites", "star"],
+            ].map(
+                ([value, label, icon]) => html`<button
+                    class=${filter === value ? "on" : ""}
+                    aria-pressed=${filter === value}
+                    onClick=${() => setFilter(value)}
+                >
+                    ${icon && html`<${Icon} name=${icon} size=${15} />`} ${label}
+                </button>`,
+            )}
+        </div>
         ${
             (rows.length > MODEL_SEARCH_AT || query !== "") &&
             html`<label class="search">
@@ -102,37 +129,65 @@ function SubagentModels({ names }) {
                 />
             </label>`
         }
+        <div class="subagent-models-legend" aria-hidden="true">
+            <span><${Icon} name="check" size=${13} />${" "}Allowed for subagents</span>
+            <span>Favorite${" "}<${Icon} name="star" size=${13} /></span>
+        </div>
         <div class="subagent-models-list" role="group" aria-label="Models for subagents">
             ${
                 groups.size === 0 &&
                 html`<p class="muted small">
-                    ${rows.length === 0 ? "No models: sign in to a provider below." : "No model matches."}
+                    ${rows.length === 0 ? "No models: sign in to a provider first." : needle === "" && filter !== "all" ? (favoritesOnly ? "Star models in All models to add favorites." : "No model is allowed yet: check some in All models.") : "No model matches."}
                 </p>`
             }
             ${[...groups].map(
                 ([provider, list]) => html`<div key=${provider}>
                     <div class="subagent-models-head">${names[provider] ?? provider}</div>
                     ${list.map(
-                        ({ spec, model }) => html`<label class="subagent-model" key=${spec}>
-                            <input
-                                type="checkbox"
-                                value=${spec}
-                                checked=${isOn(spec)}
-                                onChange=${(event) => toggle(spec, event.currentTarget.checked)}
-                            />
-                            <span>
-                                ${model?.name ?? spec.slice(spec.indexOf("/") + 1)}
-                                <span class="muted small">
-                                    ${spec}
-                                    ${
-                                        !model
-                                            ? html` · <span class="warn">not signed in</span>`
-                                            : model.signIn &&
-                                              html` · <span class="warn">needs sign-in</span>`
-                                    }
+                        ({ spec, model }) => html`<div class="subagent-model" key=${spec}>
+                            <label class="subagent-model-choice">
+                                <input
+                                    type="checkbox"
+                                    value=${spec}
+                                    checked=${isOn(spec)}
+                                    onChange=${(event) => toggle(spec, event.currentTarget.checked)}
+                                />
+                                <span>
+                                    ${model?.name ?? spec.slice(spec.indexOf("/") + 1)}
+                                    <span class="muted small">
+                                        ${spec}
+                                        ${
+                                            !model
+                                                ? html` · <span class="warn">not signed in</span>`
+                                                : model.signIn &&
+                                                  html` · <span class="warn">needs sign-in</span>`
+                                        }
+                                    </span>
                                 </span>
-                            </span>
-                        </label>`,
+                            </label>
+                            <button
+                                class="icon-button model-favorite"
+                                aria-label=${`Favorite ${model?.name ?? spec} (model picker shortcut)`}
+                                aria-pressed=${favorites.has(spec)}
+                                title=${favorites.has(spec) ? "Remove from model picker favorites" : "Add to model picker favorites (does not allow it for subagents)"}
+                                onClick=${(event) => {
+                                    if (favoritesOnly) {
+                                        event.currentTarget
+                                            .closest(".subagent-models")
+                                            .querySelector(
+                                                '.model-filters button[aria-pressed="true"]',
+                                            )
+                                            .focus();
+                                    }
+
+                                    return attempt(() =>
+                                        setModelFavorite(spec, !favorites.has(spec)),
+                                    );
+                                }}
+                            >
+                                <${Icon} name="star" size=${18} />
+                            </button>
+                        </div>`,
                     )}
                 </div>`,
             )}
@@ -177,6 +232,166 @@ function LimitWait() {
                 </button>`,
             )}
         </div>
+    </div>`;
+}
+
+/** How far from full the context is when Pi summarizes it: the reserve, and the recent part kept as it is. */
+const COMPACT_RESERVE = [
+    [8192, "8k"],
+    [16384, "16k"],
+    [32768, "32k"],
+    [65536, "64k"],
+];
+const COMPACT_KEEP = [
+    [8000, "8k"],
+    [14000, "14k"],
+    [20000, "20k"],
+    [40000, "40k"],
+];
+const COMPACT_OVER = [
+    [40000, "40k"],
+    [60000, "60k"],
+    [100000, "100k"],
+    [200000, "200k"],
+    [500000, "500k"],
+    [1000000, "1M"],
+];
+
+/** The owner's choice of when Pi compacts a session's context, from Pi's own settings. */
+function Compaction() {
+    const policy = store.state.server?.compaction;
+
+    // A server that does not know the policy, or Pi settings it refuses, sends none.
+    if (!policy || typeof policy !== "object") {
+        return null;
+    }
+
+    const change = (patch) => attempt(() => api("settings", { compaction: patch }));
+
+    const line = (label, values, current, onPick, hint) => html`<div class="compact-row">
+        <span class="small">${label}</span>
+        <div class="segmented" role="group" aria-label=${label}>
+            ${values.map(
+                ([value, text]) => html`<button
+                    class=${current === value ? "on" : ""}
+                    aria-pressed=${current === value}
+                    onClick=${() => onPick(value)}
+                >
+                    ${text}
+                </button>`,
+            )}
+        </div>
+        <span class="muted compact-hint">${hint}</span>
+    </div>`;
+
+    const row = (label, values, field, hint) => {
+        const current = policy[field];
+        const choices = values.some(([value]) => value === current)
+            ? values
+            : [
+                  ...values,
+                  [
+                      current,
+                      current >= 1000000
+                          ? `${current / 1000000}M`
+                          : `${Math.round(current / 1000)}k`,
+                  ],
+              ].sort((a, b) => a[0] - b[0]);
+
+        return line(label, choices, current, (value) => change({ [field]: value }), hint);
+    };
+
+    const fromFull = policy.trigger !== "over";
+    const copy = fromFull
+        ? `When a session's context comes within ${policy.reserveTokens} tokens of full, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A bigger reserve compacts earlier; a bigger kept part summarizes less. From full also applies to Pi in the terminal.`
+        : `When a session's context goes over ${policy.overTokens} tokens, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A smaller number compacts earlier. This choice is for Pi Pocket sessions; Pi in the terminal still uses how far from full.`;
+
+    return html`<div class="limit-wait compact-settings" title=${copy}>
+        ${row("Compaction size", COMPACT_KEEP, "keepRecentTokens", "How much of the newest context stays as it is when anything compacts, manual or automatic. Bigger summarizes less.")}
+        ${line(
+            "Automatic compaction",
+            [
+                [true, "On"],
+                [false, "Off"],
+            ],
+            policy.enabled,
+            (value) => change({ enabled: value }),
+            "Summarize older messages by itself when the context gets long. Off: only the manual compact command does it, and nothing below applies.",
+        )}
+        ${
+            policy.enabled &&
+            html`
+        ${line(
+            "After a pause",
+            [
+                [0, "Off"],
+                [1, "1h"],
+                [2, "2h"],
+                [5, "5h"],
+                [12, "12h"],
+            ],
+            policy.idleHours,
+            (value) => change({ idleHours: value }),
+            "Also compact before the next message after this much idle time, when the cache is cold.",
+        )}
+        ${line(
+            "Start",
+            [
+                ["fromFull", "From full"],
+                ["over", "Once over"],
+            ],
+            policy.trigger ?? "fromFull",
+            (value) => change({ trigger: value }),
+            "From full: near the model's limit (Pi in the terminal too). Once over: at a token count, Pocket only.",
+        )}
+        ${
+            fromFull
+                ? row(
+                      "Reserve",
+                      COMPACT_RESERVE,
+                      "reserveTokens",
+                      "Tokens kept free before the window is full. Bigger compacts earlier.",
+                  )
+                : row(
+                      "Over",
+                      COMPACT_OVER,
+                      "overTokens",
+                      "Compact once the context passes this. Smaller compacts earlier.",
+                  )
+        }
+        `
+        }
+    </div>`;
+}
+
+/** The two run settings in one block, a tab each: how a run waits for a limit, and when a context is compacted. */
+function RunSettings() {
+    const server = store.state.server;
+    const tabs = [
+        ["compaction", "Compaction", typeof server?.compaction === "object" && server.compaction],
+        ["limit", "Usage limit", typeof server?.limitWaitHours === "number"],
+    ].filter(([, , there]) => there);
+    const [tab, setTab] = useState("compaction");
+    const shown = tabs.some(([id]) => id === tab) ? tab : tabs[0]?.[0];
+
+    if (tabs.length === 0) {
+        return null;
+    }
+
+    return html`<div class="run-settings">
+        <div class="segmented" role="tablist" aria-label="Run settings">
+            ${tabs.map(
+                ([id, label]) => html`<button
+                    role="tab"
+                    class=${shown === id ? "on" : ""}
+                    aria-selected=${shown === id}
+                    onClick=${() => setTab(id)}
+                >
+                    ${label}
+                </button>`,
+            )}
+        </div>
+        ${shown === "limit" ? html`<${LimitWait} />` : html`<${Compaction} />`}
     </div>`;
 }
 
@@ -297,8 +512,6 @@ export function ProvidersSheet() {
             ${
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
-                    <${RefreshModels} />
-                    <${LimitWait} />
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
@@ -308,6 +521,7 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
+                ${owner && html`<${RefreshModels} /><${RunSettings} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input

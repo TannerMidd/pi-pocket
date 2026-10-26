@@ -84,6 +84,15 @@ interface PocketConfig {
     subagentModels?: string[];
     /** The most hours a run waits for a model's limit to clear (`limit-gate.ts`); 0: it does not wait. Absent: 6. */
     limitWaitHours?: number;
+    /** Hours a session sits idle before its next message compacts it first; absent: 1; 0: never. */
+    compactIdleHours?: number;
+    /**
+     * How sessions auto-compact: `"over"` starts once context exceeds `compactionOverTokens`; absent or `"fromFull"`
+     * uses Pi's reserve from the model window. Older Pi Pocket ignores it.
+     */
+    compactionTrigger?: CompactionTrigger;
+    /** Absolute tokens of context at which `"over"` starts compaction. Absent: 100000. Older Pi Pocket ignores it. */
+    compactionOverTokens?: number;
     /**
      * The owner's values for the settings extension modules declare (`web.settings`), by module and setting name. A
      * setting with no value here has its default. Since 0.22.0; an older Pi Pocket ignores it.
@@ -93,6 +102,15 @@ interface PocketConfig {
 
 /** The hours a run waits for a model's limit to clear, until the owner says otherwise. */
 export const DEFAULT_LIMIT_WAIT_HOURS = 6;
+
+/** How sessions auto-compact: from the model window, or once context exceeds a token count. */
+/** The idle hours the owner may choose (0: off). */
+export const COMPACT_IDLE_CHOICES: readonly number[] = [0, 1, 2, 5, 12];
+
+export type CompactionTrigger = "fromFull" | "over";
+
+/** Absolute tokens of context at which `"over"` starts compaction, until the owner says otherwise. */
+export const DEFAULT_COMPACTION_OVER_TOKENS = 200_000;
 
 /** Who may allow a risky tool call: anyone who can steer, or (for guests) only someone other than who asked. */
 export type ApprovalRule = "anyone" | "others";
@@ -267,6 +285,57 @@ export class ConfigStore {
             delete this.#config.limitWaitHours;
         } else {
             this.#config.limitWaitHours = Math.min(Math.max(hours, 0), 24);
+        }
+
+        this.save();
+    }
+
+    /** Hours of idleness after which a person's next message compacts the session first (`commands.ts`); 0: never. */
+    get compactIdleHours(): number {
+        const hours = this.#config.compactIdleHours;
+
+        return typeof hours === "number" && COMPACT_IDLE_CHOICES.includes(hours) ? hours : 1;
+    }
+
+    set compactIdleHours(hours: number) {
+        if (hours === 1) {
+            delete this.#config.compactIdleHours;
+        } else {
+            this.#config.compactIdleHours = hours;
+        }
+
+        this.save();
+    }
+
+    /** How sessions auto-compact: from the model window, unless the owner chose an absolute token count. */
+    get compactionTrigger(): CompactionTrigger {
+        return this.#config.compactionTrigger === "over" ? "over" : "fromFull";
+    }
+
+    set compactionTrigger(trigger: CompactionTrigger) {
+        if (trigger === "fromFull") {
+            delete this.#config.compactionTrigger;
+        } else {
+            this.#config.compactionTrigger = trigger;
+        }
+
+        this.save();
+    }
+
+    /** Absolute tokens of context at which `"over"` starts compaction. */
+    get compactionOverTokens(): number {
+        const tokens = this.#config.compactionOverTokens;
+
+        return typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens >= 0
+            ? tokens
+            : DEFAULT_COMPACTION_OVER_TOKENS;
+    }
+
+    set compactionOverTokens(tokens: number) {
+        if (tokens === DEFAULT_COMPACTION_OVER_TOKENS) {
+            delete this.#config.compactionOverTokens;
+        } else {
+            this.#config.compactionOverTokens = tokens;
         }
 
         this.save();
