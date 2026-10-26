@@ -309,10 +309,11 @@ async function followed(
     }
 }
 
-/** A session idle this long has lost its prompt cache (Anthropic's longest): its next message compacts it first. */
-const IDLE_COMPACT_MS = 60 * 60 * 1000;
-/** Context below this many tokens is not worth a summary. */
-const IDLE_COMPACT_TOKENS = 20_000;
+const HOUR_MS = 60 * 60 * 1000;
+/** Pi's own default for the recent part it keeps when it compacts, if its settings cannot be read. */
+const DEFAULT_KEEP_TOKENS = 20_000;
+/** A summary is worth its request only with this much more than the kept part. */
+const SUMMARY_MARGIN_TOKENS = 4096;
 
 export class Commands {
     readonly #app: PocketApp;
@@ -2275,17 +2276,21 @@ export class Commands {
     }
 
     /**
-     * A session that sat idle for over an hour has lost its prompt cache: sending the whole context again costs full
+     * A session idle for the owner's chosen time (an hour by default) has lost its prompt cache: sending the whole context again costs full
      * price, so it is summarized first, as Claude Code offers. Only a person's message to a session of their own (not
      * PiP's or a subagent's), with enough context to be worth a summary. A summary that fails never stops the message.
      */
     async #compactAfterPause(id: ConversationId, user: User): Promise<void> {
         const app = this.#app;
         const meta = app.sessionMeta(id);
+        const idleHours = app.config.compactIdleHours;
+        const policy = app.compactionSettings();
 
         if (
             meta === undefined ||
-            app.now() - meta.updatedAt < IDLE_COMPACT_MS ||
+            idleHours === 0 ||
+            policy?.enabled === false ||
+            app.now() - meta.updatedAt < idleHours * HOUR_MS ||
             app.isBusy(id) ||
             app.pip.ownerOf(id) !== undefined ||
             app.parentOf(id) !== undefined
@@ -2297,15 +2302,18 @@ export class Commands {
             const conversation = await app.conversation(id);
             const view = await conversation.context(context);
 
+            // Worth a summary only with more than the part Pi keeps as it is (the owner's setting in Providers).
+            const worth = (policy?.keepRecentTokens ?? DEFAULT_KEEP_TOKENS) + SUMMARY_MARGIN_TOKENS;
+
             if (
-                contextTokens(view) < IDLE_COMPACT_TOKENS ||
-                tokensSinceCompaction(view) < IDLE_COMPACT_TOKENS / 2
+                contextTokens(view) < worth ||
+                tokensSinceCompaction(view) < SUMMARY_MARGIN_TOKENS
             ) {
                 return;
             }
 
-            app.notice("info", "Idle for over an hour: compacting the context first…", id);
-            await app.collab.activity(id, user, "compacted the context after an hour idle", false);
+            app.notice("info", "Idle for a while: compacting the context first…", id);
+            await app.collab.activity(id, user, "compacted the context after a pause", false);
             await app.harness.waitForTask(await conversation.compact(undefined, context), context);
         } catch (error) {
             app.log(`compaction after a pause skipped: ${describe(error)}`);

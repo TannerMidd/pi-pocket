@@ -46,3 +46,24 @@ test("a small context is left as it is", async () => {
     await say(app, id, "hello again");
     assert.equal(await head(id), before);
 });
+
+test("the owner's idle hours decide; Off, or compaction off, never compacts first", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "x".repeat(80_000));
+    // Past Pi's own compaction of a big first message.
+    await say(app, id, "settle");
+    app.config.compactIdleHours = 5;
+    clock += 2 * 60 * 60 * 1000;
+
+    const before = await head(id);
+
+    await say(app, id, "two hours, limit five");
+    assert.equal(await head(id), before, "two idle hours are no pause when five are chosen");
+
+    app.config.compactIdleHours = 0;
+    clock += 13 * 60 * 60 * 1000;
+    await say(app, id, "a long night");
+    assert.equal(await head(id), before, "Off never compacts first");
+    app.config.compactIdleHours = 1;
+});

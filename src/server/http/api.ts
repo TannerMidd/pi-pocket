@@ -590,6 +590,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
         if (first === "settings" && method === "POST") {
             const body = await readJson<{
                 approvalRule?: unknown;
+                compaction?: unknown;
                 defaultModel?: unknown;
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
@@ -600,6 +601,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
             if (
                 [
                     body.approvalRule,
+                    body.compaction,
                     body.defaultModel,
                     body.pipCompactAt,
                     body.subagentModels,
@@ -621,6 +623,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             // How long a run waits for a provider's limit to clear: the owner's (checked in `app.ts`).
             if (body.limitWaitHours !== undefined) {
                 await app.setLimitWaitHours(user, body.limitWaitHours);
+            }
+
+            // Pi's compaction policy: the owner's (checked in `app.ts`).
+            if (body.compaction !== undefined) {
+                await app.setCompaction(user, body.compaction);
             }
 
             if (body.approvalRule !== undefined) {

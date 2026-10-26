@@ -235,6 +235,153 @@ function LimitWait() {
     </div>`;
 }
 
+/** How far from full the context is when Pi summarizes it: the reserve, and the recent part kept as it is. */
+const COMPACT_RESERVE = [
+    [8192, "8k"],
+    [16384, "16k"],
+    [32768, "32k"],
+    [65536, "64k"],
+];
+const COMPACT_KEEP = [
+    [8000, "8k"],
+    [14000, "14k"],
+    [20000, "20k"],
+    [40000, "40k"],
+];
+const COMPACT_OVER = [
+    [40000, "40k"],
+    [60000, "60k"],
+    [100000, "100k"],
+    [200000, "200k"],
+];
+
+/** The owner's choice of when Pi compacts a session's context, from Pi's own settings. */
+function Compaction() {
+    const policy = store.state.server?.compaction;
+
+    // A server that does not know the policy, or Pi settings it refuses, sends none.
+    if (!policy || typeof policy !== "object") {
+        return null;
+    }
+
+    const change = (patch) => attempt(() => api("settings", { compaction: patch }));
+
+    const row = (label, values, field) => {
+        const current = policy[field];
+        const choices = values.some(([value]) => value === current)
+            ? values
+            : [...values, [current, `${Math.round(current / 1000)}k`]].sort((a, b) => a[0] - b[0]);
+
+        return html`<div>
+            <div class="muted small">${label}</div>
+            <div class="segmented" role="group" aria-label=${label}>
+                ${choices.map(
+                    ([value, text]) => html`<button
+                        class=${current === value ? "on" : ""}
+                        aria-pressed=${current === value}
+                        onClick=${() => change({ [field]: value })}
+                    >
+                        ${text}
+                    </button>`,
+                )}
+            </div>
+        </div>`;
+    };
+
+    const fromFull = policy.trigger !== "over";
+    const copy = fromFull
+        ? `When a session's context comes within ${policy.reserveTokens} tokens of full, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A bigger reserve compacts earlier; a bigger kept part summarizes less. From full also applies to Pi in the terminal.`
+        : `When a session's context goes over ${policy.overTokens} tokens, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A smaller number compacts earlier. This choice is for Pi Pocket sessions; Pi in the terminal still uses how far from full.`;
+
+    return html`<div class="limit-wait">
+        <div class="small">Compact context</div>
+        <p class="muted small">${copy}</p>
+        <div class="segmented" role="group" aria-label="Compaction on or off">
+            ${[
+                [true, "On"],
+                [false, "Off"],
+            ].map(
+                ([value, text]) => html`<button
+                    class=${policy.enabled === value ? "on" : ""}
+                    aria-pressed=${policy.enabled === value}
+                    onClick=${() => change({ enabled: value })}
+                >
+                    ${text}
+                </button>`,
+            )}
+        </div>
+        <div class="muted small">Also compact after a pause, before the next message</div>
+        <div class="segmented" role="group" aria-label="Compact after a pause">
+            ${[
+                [0, "Off"],
+                [1, "1h"],
+                [2, "2h"],
+                [5, "5h"],
+                [12, "12h"],
+            ].map(
+                ([value, text]) => html`<button
+                    class=${policy.idleHours === value ? "on" : ""}
+                    aria-pressed=${policy.idleHours === value}
+                    onClick=${() => change({ idleHours: value })}
+                >
+                    ${text}
+                </button>`,
+            )}
+        </div>
+        <div class="segmented" role="group" aria-label="When to compact">
+            ${[
+                ["fromFull", "From full"],
+                ["over", "Once over"],
+            ].map(
+                ([value, text]) => html`<button
+                    class=${(policy.trigger ?? "fromFull") === value ? "on" : ""}
+                    aria-pressed=${(policy.trigger ?? "fromFull") === value}
+                    onClick=${() => change({ trigger: value })}
+                >
+                    ${text}
+                </button>`,
+            )}
+        </div>
+        ${
+            fromFull
+                ? row("Start this far from full", COMPACT_RESERVE, "reserveTokens")
+                : row("Once context exceeds", COMPACT_OVER, "overTokens")
+        }
+        ${row("Keep this much recent", COMPACT_KEEP, "keepRecentTokens")}
+    </div>`;
+}
+
+/** The two run settings in one block, a tab each: how a run waits for a limit, and when a context is compacted. */
+function RunSettings() {
+    const server = store.state.server;
+    const tabs = [
+        ["compaction", "Compaction", typeof server?.compaction === "object" && server.compaction],
+        ["limit", "Usage limit", typeof server?.limitWaitHours === "number"],
+    ].filter(([, , there]) => there);
+    const [tab, setTab] = useState("compaction");
+    const shown = tabs.some(([id]) => id === tab) ? tab : tabs[0]?.[0];
+
+    if (tabs.length === 0) {
+        return null;
+    }
+
+    return html`<div class="run-settings">
+        <div class="segmented" role="tablist" aria-label="Run settings">
+            ${tabs.map(
+                ([id, label]) => html`<button
+                    role="tab"
+                    class=${shown === id ? "on" : ""}
+                    aria-selected=${shown === id}
+                    onClick=${() => setTab(id)}
+                >
+                    ${label}
+                </button>`,
+            )}
+        </div>
+        ${shown === "limit" ? html`<${LimitWait} />` : html`<${Compaction} />`}
+    </div>`;
+}
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -361,7 +508,7 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
-                ${owner && html`<${RefreshModels} /><${LimitWait} />`}
+                ${owner && html`<${RefreshModels} /><${RunSettings} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input

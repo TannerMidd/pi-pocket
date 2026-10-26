@@ -17563,3 +17563,19 @@ pre.gallery-code {
         margin-left: 0;
     }
 }
+
+/* Compaction and usage limit share one block, a tab each. */
+.run-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block: 0.5rem;
+}
+
+.run-settings > .segmented {
+    align-self: flex-start;
+}
+
+.run-settings .limit-wait {
+    margin-bottom: 0;
+}
