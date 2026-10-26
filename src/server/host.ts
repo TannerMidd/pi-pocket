@@ -316,12 +316,13 @@ export type CommandInfo = Omit<ExtensionCommand, "handler"> & { id: string; name
  */
 export type ModelRequestShaper = (payload: unknown, model: Model<Api>) => unknown | undefined;
 
-/** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
+/** An execution environment provider for a workspace URI scheme. */
 export interface WorkspaceProvider {
     env(cwd: string): ExecutionEnv;
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
 }
 
+/** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
 export interface PocketHost {
     readonly guard: LancetGuard;
     readonly approvals: Approvals;
@@ -440,6 +441,8 @@ export interface PocketHost {
      * @experimental In 0.14: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     readonly linkedSessions: LinkedSessionsApi;
+    /** The conversation's current working folder or workspace URI. */
+    cwdOf(conversationId: ConversationId): string;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */

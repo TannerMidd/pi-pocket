@@ -40,6 +40,16 @@ Since 0.1.0 · Stable
 
 Pi's own folder, usually `~/.pi/agent`. Pi keeps its sign-ins, models, settings, skills, and prompt templates there.
 
+### `cwdOf`
+
+```ts
+cwdOf(conversationId: ConversationId): string;
+```
+
+Since 0.24.0 · Stable
+
+The conversation's current working folder, or its canonical workspace URI for a remote session. It reads the current agent state, so a module must not cache it across folder changes.
+
 ## Skills
 
 ### `skillPaths`

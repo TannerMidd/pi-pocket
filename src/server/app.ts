@@ -762,6 +762,7 @@ export class PocketApp {
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
+            cwdOf: (conversationId) => this.cwdOf(conversationId),
             schedules: this.schedules,
             background: this.background,
             goals: this.goals,

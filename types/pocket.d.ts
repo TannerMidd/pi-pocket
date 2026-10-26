@@ -97,11 +97,6 @@ export interface Module {
 // ─── The host ────────────────────────────────────────────────────────────────
 
 /**
- * What the app gives a module: the first argument of its default export. The host stays the same while modules reload.
- * It changes only when the server restarts.
- * @since 0.1.0
- */
-/**
  * An execution provider for one workspace URI scheme.
  * @since 0.23.0
  * @experimental
@@ -113,6 +108,11 @@ export interface WorkspaceProvider {
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
 }
 
+/**
+ * What the app gives a module: the first argument of its default export. The host stays the same while modules reload.
+ * It changes only when the server restarts.
+ * @since 0.1.0
+ */
 export interface Host {
     /**
      * Pi Pocket's data folder.
@@ -200,6 +200,11 @@ export interface Host {
      * @since 0.3.0
      */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /**
+     * The conversation's current working folder or workspace URI.
+     * @since 0.24.0
+     */
+    cwdOf(conversationId: ConversationId): string;
     /**
      * Listens to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and runs that start and end. Returns how to stop: pass it to `web.onDispose`. PiP's conversations send none.
      * @since 0.22.0

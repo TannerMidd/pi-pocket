@@ -18,7 +18,7 @@ import {
 import { resizeImage } from "@earendil-works/pi-coding-agent";
 import {
     type AgentChange,
-    AgentDoc,
+    configure as configureAgent,
     type ConversationCreateOptions,
     type ConversationId,
     defineTask,
@@ -35,6 +35,7 @@ import {
     type UserInput,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import type { RequestActor } from "./extension-request.ts";
 import type { User } from "./config.ts";
 import {
     AuthorsDoc,
@@ -382,13 +383,20 @@ export class Commands {
         request: { cwd?: string; title?: string; worktree?: unknown },
         {
             projectDefaults = true,
+            actor,
             resolvedCwd,
             signal,
-        }: { projectDefaults?: boolean; resolvedCwd?: string; signal?: AbortSignal } = {},
+        }: {
+            projectDefaults?: boolean;
+            actor?: RequestActor;
+            resolvedCwd?: string;
+            signal?: AbortSignal;
+        } = {},
     ): Promise<{ id: ConversationId }> {
         const app = this.#app;
 
         app.requireSteer(user);
+        actor?.current();
 
         if (user.sessions !== undefined) {
             throw new HttpError(403, "You were invited to one session and cannot start new ones.");
@@ -397,15 +405,18 @@ export class Commands {
         const given = optionalText(request.title, "title");
         const title = (given === undefined ? undefined : oneLine(given)) || undefined;
         const requested = optionalText(request.cwd, "cwd") ?? app.defaultCwd;
+        const lifetime = signal ?? actor?.context.abortSignal;
         const remote = app.workspaceScheme(requested) !== undefined;
 
         if (remote && request.worktree === true) {
             throw new HttpError(400, "Remote workspaces do not support worktrees.");
         }
 
-        const folder = resolvedCwd ?? (await app.resolveCwd(requested, signal));
+        const folder = resolvedCwd ?? (await app.resolveCwd(requested, lifetime));
 
-        signal?.throwIfAborted();
+        lifetime?.throwIfAborted();
+        actor?.current();
+
         const now = Date.now();
 
         return this.#inPlace(
@@ -431,8 +442,11 @@ export class Commands {
                         init: async (tx, id) => {
                             const sessions = await tx.doc(SessionsDoc);
 
-                            signal?.throwIfAborted();
-                            const current = app.config.userById(user.id);
+                            lifetime?.throwIfAborted();
+                            const current =
+                                actor === undefined
+                                    ? app.config.userById(user.id)
+                                    : await actor.authorize(tx, true);
 
                             if (current === undefined) {
                                 throw new HttpError(
@@ -450,6 +464,7 @@ export class Commands {
                                 );
                             }
 
+                            user = current;
                             sessions.items[String(id)] = {
                                 cwd,
                                 createdAt: now,
@@ -460,7 +475,8 @@ export class Commands {
                             };
                         },
                     },
-                    signal === undefined ? context : withAbortSignal(signal, context),
+                    actor?.context ??
+                        (lifetime === undefined ? context : withAbortSignal(lifetime, context)),
                 );
 
                 return { id: conversation.id };
@@ -554,12 +570,11 @@ export class Commands {
 
         app.requireSee(user, id);
         await app.requireDriver(id, user);
+        const worktree = app.sessionMeta(id)?.worktree;
 
         if (app.workspaceScheme(app.cwdOf(id)) !== undefined) {
             throw new HttpError(400, "Remote workspaces do not support worktrees.");
         }
-
-        const worktree = app.sessionMeta(id)?.worktree;
 
         if (worktree === undefined) {
             throw new HttpError(404, "This session has no worktree");
@@ -777,6 +792,7 @@ export class Commands {
 
         const conversation = await app.conversation(id);
         const typed = request.text.trim();
+
         // `/skill:name request` sends the skill with the request; `/name arguments`, Pi's prompt template of that name.
         const expanded = typed.startsWith("/skill:")
             ? (expandSkillCommand(typed, app.skillCommands(id)) ?? typed)
@@ -1502,9 +1518,11 @@ export class Commands {
             cwd?: string;
             pipPanel?: boolean;
         },
+        { signal }: { signal?: AbortSignal } = {},
     ): Promise<void> {
         const app = this.#app;
 
+        signal?.throwIfAborted();
         app.requireSee(user, id);
         await app.requireDriver(id, user);
 
@@ -1533,7 +1551,7 @@ export class Commands {
             );
         }
 
-        const conversation = await app.conversation(id);
+        await app.conversation(id);
         const current = await app.agentState(id);
         const ref = request.model ?? current?.model;
         const model =
@@ -1551,7 +1569,33 @@ export class Commands {
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
         const cwd =
-            request.cwd === undefined ? undefined : app.workspace.checkDirectory(request.cwd);
+            request.cwd === undefined ? undefined : await app.resolveCwd(request.cwd, signal);
+
+        signal?.throwIfAborted();
+
+        const authorize = async () => {
+            signal?.throwIfAborted();
+            const currentUser = app.config.userById(user.id);
+
+            if (currentUser === undefined) {
+                throw new HttpError(403, "You no longer have access to this session.");
+            }
+
+            app.requireSee(currentUser, id);
+            await app.requireDriver(id, currentUser);
+            signal?.throwIfAborted();
+
+            if (request.cwd !== undefined && currentUser.sessions !== undefined) {
+                throw new HttpError(
+                    403,
+                    "You were invited to one session and cannot move it to another folder.",
+                );
+            }
+
+            return currentUser;
+        };
+
+        const runContext = signal === undefined ? context : withAbortSignal(signal, context);
 
         const change = {
             ...(request.model === undefined
@@ -1561,30 +1605,34 @@ export class Commands {
             ...(cwd === undefined ? {} : { cwd }),
         };
 
-        if (request.pipPanel === true) {
-            // Check and save together: a turn may have started while the picker was open.
-            await app.harness.commit(async (tx) => {
+        user = await authorize();
+
+        await app.harness.commit(async (tx) => {
+            if (request.pipPanel === true) {
+                // Check and save together: a turn may have started while the picker was open.
                 const live = await tx.doc(LiveDoc, id);
 
                 if (live.run !== undefined || (live.compactions?.length ?? 0) > 0) {
                     throw new HttpError(409, "PiP is working. Change its model when it is idle.");
                 }
+            }
 
-                Object.assign(await tx.doc(AgentDoc, id), change);
-            }, context);
-        } else {
-            await conversation.configure(change, context);
-        }
+            signal?.throwIfAborted();
+            await configureAgent(tx, id, change);
 
-        if (cwd !== undefined && app.sessionMeta(id) !== undefined) {
-            await app.harness.commit(async (tx) => {
+            if (cwd !== undefined && app.sessionMeta(id) !== undefined) {
+                signal?.throwIfAborted();
                 const meta = (await tx.doc(SessionsDoc)).items[String(id)];
 
                 if (meta !== undefined) {
                     meta.cwd = cwd;
                 }
-            }, context);
-        }
+            }
+        }, runContext);
+
+        user = await authorize();
+
+        signal?.throwIfAborted();
 
         if (ref !== undefined && request.pipPanel !== true) {
             app.config.lastModel = { provider: ref.provider, modelId: ref.modelId, thinkingLevel };
@@ -1612,6 +1660,7 @@ export class Commands {
         }
 
         if (changes.length > 0) {
+            user = await authorize();
             await app.collab.activity(id, user, changes.join(" and "));
         }
     }

@@ -129,6 +129,19 @@ export function createApi(options: HttpOptions, auth: Auth) {
         parts: string[],
     ): Promise<void> => {
         const method = request.method ?? "GET";
+        const lifetime = new AbortController();
+
+        response.once("close", () => {
+            if (!response.writableFinished) {
+                lifetime.abort(new HttpError(409, "The request has ended."));
+            }
+        });
+        request.once("aborted", () => lifetime.abort(new HttpError(409, "The request has ended.")));
+
+        if (response.destroyed || request.aborted) {
+            lifetime.abort(new HttpError(409, "The request has ended."));
+        }
+
         const user = requireUser(request);
 
         noteTunnel(request, user);
@@ -138,7 +151,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         const [first, second, third, fourth] = parts;
-        const route: ApiRequest = { app, request, response, url, user };
+        const route: ApiRequest = { app, request, response, url, user, signal: lifetime.signal };
 
         if (first === "events" && method === "GET") {
             return events(request, response, url, user);
@@ -487,7 +500,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 request,
             );
 
-            return json(response, 200, await app.commands.createSession(user, body));
+            return json(
+                response,
+                200,
+                await app.commands.createSession(user, body, { signal: route.signal }),
+            );
         }
 
         if (first === "sessions" && second !== undefined && method === "POST") {

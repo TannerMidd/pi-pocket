@@ -54,7 +54,7 @@ export class ExtensionRequest implements RequestActor {
         return this.#app.commands.createSession(
             user,
             { cwd, ...(request.title === undefined ? {} : { title: request.title }) },
-            { resolvedCwd: cwd, signal: this.signal },
+            { actor: this, resolvedCwd: cwd },
         );
     }
 

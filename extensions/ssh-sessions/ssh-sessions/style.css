@@ -1,0 +1,45 @@
+.ssh-sessions {
+    width: 100%;
+    max-width: 40rem;
+    padding: 1rem;
+    margin: 0 auto;
+}
+.ssh-sessions form {
+    display: grid;
+    gap: 0.75rem;
+}
+.ssh-sessions select,
+.ssh-sessions input:not([type="checkbox"]) {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.6rem;
+    color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+    font: inherit;
+}
+.ssh-sessions .button {
+    min-height: 44px;
+}
+.ssh-host-key {
+    margin-top: 1.5rem;
+}
+.ssh-host-key pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.8rem;
+}
+.ssh-confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 44px;
+    margin: 0.75rem 0;
+}
+.ssh-confirm input {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
