@@ -38,6 +38,26 @@ export class ExtensionRequest implements RequestActor {
         return this.#stopped.signal;
     }
 
+    async createSession(request: { cwd: string; title?: string }): Promise<{ id: number }> {
+        if (this.#access !== "owner" || this.current().role !== "owner") {
+            throw new HttpError(403, "Only the owner can start an app-wide session here.");
+        }
+
+        if (typeof request?.cwd !== "string" || request.cwd.trim() === "") {
+            throw new HttpError(400, "A workspace URI or folder path is required.");
+        }
+
+        await this.#app.harness.commit((tx) => this.authorize(tx, true), this.context);
+        const cwd = await this.#app.resolveCwd(request.cwd, this.signal);
+        const user = await this.#app.harness.commit((tx) => this.authorize(tx, true), this.context);
+
+        return this.#app.commands.createSession(
+            user,
+            { cwd, ...(request.title === undefined ? {} : { title: request.title }) },
+            { actor: this, resolvedCwd: cwd },
+        );
+    }
+
     close = (): void => {
         this.#stopped.abort(new HttpError(409, "This extension request has ended."));
     };

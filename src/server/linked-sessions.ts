@@ -541,7 +541,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             const selected = this.#selection(agent, request, true);
 
             approved = {
-                cwd: this.#directory(source, agent, request.cwd),
+                cwd: await this.#directory(source, agent, request.cwd),
                 model: selected.model,
                 thinkingLevel: selected.thinking,
             };
@@ -549,7 +549,7 @@ export class LinkedSessions implements LinkedSessionsApi {
 
         const session =
             previous?.conversationId === undefined
-                ? await this.#create(source, user, { ...request, title }, token, actor)
+                ? await this.#create(source, user, { ...request, title }, token, actor, approved)
                 : (previous.conversationId as unknown as ConversationId);
         const address = await this.#address(source, Number(session), actor);
 
@@ -570,7 +570,7 @@ export class LinkedSessions implements LinkedSessionsApi {
     }
 
     /** Use the normal folder-picker validation for an explicit working directory. */
-    #directory(source: ConversationId, agent: AgentState, cwd?: string): string {
+    async #directory(source: ConversationId, agent: AgentState, cwd?: string): Promise<string> {
         // A blank field (an empty form input) is no folder, not the home folder.
         if (cwd === undefined || (typeof cwd === "string" && cwd.trim() === "")) {
             return agent.cwd ?? this.#app.cwdOf(source);
@@ -580,7 +580,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             throw new HttpError(400, "The working directory must be a folder path.");
         }
 
-        return this.#app.workspace.checkDirectory(cwd);
+        return await this.#app.resolveCwd(cwd);
     }
 
     /** Refuse a model the owner does not allow: with a list, the asker's fix is to choose from it. */
@@ -665,6 +665,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         request: { title: string; model?: string; thinking?: string; cwd?: string },
         token: string,
         actor?: RequestActor,
+        approved?: StartSettings,
     ): Promise<ConversationId> {
         const app = this.#app;
         const title = request.title;
@@ -691,7 +692,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             throw new HttpError(400, `The model ${spec} cannot be used now: ${problem}.`);
         }
 
-        const cwd = this.#directory(source, agent, request.cwd);
+        const cwd = approved?.cwd ?? (await this.#directory(source, agent, request.cwd));
         const now = Date.now();
 
         return app.harness.commit(async (tx) => {

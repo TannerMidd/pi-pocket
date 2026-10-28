@@ -24,6 +24,7 @@ import type {
     TaskId,
     Tx,
 } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { ComponentType, Fragment, FunctionComponent, h, VNode } from "preact";
 import type {
     useCallback,
@@ -94,6 +95,18 @@ export interface Module {
 }
 
 // ─── The host ────────────────────────────────────────────────────────────────
+
+/**
+ * An execution provider for one workspace URI scheme.
+ * @since 0.23.0
+ * @experimental
+ */
+export interface WorkspaceProvider {
+    /** @experimental @since 0.23.0 */
+    env(cwd: string): ExecutionEnv;
+    /** @experimental @since 0.23.0 */
+    resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+}
 
 /**
  * What the app gives a module: the first argument of its default export. The host stays the same while modules reload.
@@ -168,6 +181,12 @@ export interface Host {
      */
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
     /**
+     * Registers an execution provider for a workspace URI scheme.
+     * @since 0.23.0
+     * @experimental
+     */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
+    /**
      * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.
      * @since 0.18.0
@@ -181,6 +200,11 @@ export interface Host {
      * @since 0.3.0
      */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /**
+     * The conversation's current working folder or workspace URI.
+     * @since 0.24.0
+     */
+    cwdOf(conversationId: ConversationId): string;
     /**
      * Listens to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and runs that start and end. Returns how to stop: pass it to `web.onDispose`. PiP's conversations send none.
      * @since 0.22.0
@@ -906,6 +930,12 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * @since 0.14.0
  */
 export interface WebRequest {
+    /**
+     * Creates a session from an owner-only route.
+     * @since 0.23.0
+     * @experimental
+     */
+    createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     /**
      * The request's method.
      * @since 0.14.0

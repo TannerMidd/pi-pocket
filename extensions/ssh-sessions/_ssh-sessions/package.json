@@ -1,0 +1,8 @@
+{
+    "name": "pierre-ssh-sessions-runtime",
+    "private": true,
+    "type": "module",
+    "dependencies": {
+        "@earendil-works/pi-env": "1.3.0"
+    }
+}

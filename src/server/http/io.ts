@@ -27,6 +27,7 @@ export interface ApiRequest {
     readonly response: ServerResponse;
     readonly url: URL;
     readonly user: User;
+    readonly signal: AbortSignal;
 }
 
 /** An answer, compressed when it is text the browser takes compressed and large enough to gain from it. */

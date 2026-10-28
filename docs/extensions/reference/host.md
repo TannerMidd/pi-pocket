@@ -40,6 +40,16 @@ Since 0.1.0 · Stable
 
 Pi's own folder, usually `~/.pi/agent`. Pi keeps its sign-ins, models, settings, skills, and prompt templates there.
 
+### `cwdOf`
+
+```ts
+cwdOf(conversationId: ConversationId): string;
+```
+
+Since 0.24.0 · Stable
+
+The conversation's current working folder, or its canonical workspace URI for a remote session. It reads the current agent state, so a module must not cache it across folder changes.
+
 ## Skills
 
 ### `skillPaths`
@@ -161,6 +171,18 @@ Since 0.14.0 · Stable
 The thinking levels, lowest first. They have the names that models and sessions use.
 
 ## People and limits
+
+### `registerWorkspaceProvider`
+
+```ts
+registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
+```
+
+Since 0.23.0 · Experimental
+
+Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd` returns the canonical address. It must keep the same scheme. Pi Pocket stores that address and refuses to use the local machine when no provider is active. The returned disposer removes only its own registration. See [Execution environments for workspaces](../workspaces.md).
+
+`WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. Pi Pocket passes an abort signal while it resolves a requested workspace.
 
 ### `requesterOf`
 

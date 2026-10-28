@@ -48,6 +48,7 @@ import { Alerts } from "./alerts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
+import type { WorkspaceProvider } from "./host.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
@@ -362,7 +363,11 @@ export class PocketApp {
     #websAll = false;
     readonly #clients = new Set<Client>();
     readonly #rooms = new Map<ConversationId, Promise<Room>>();
-    readonly #envs = new Map<string, NodeExecutionEnv>();
+    readonly #envs = new Map<string, ExecutionEnv>();
+    readonly #workspaceProviders = new Map<
+        string,
+        { token: symbol; provider: WorkspaceProvider }[]
+    >();
     readonly #busy = new Set<ConversationId>();
     /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
     readonly #endedAt = new Map<ConversationId, number>();
@@ -770,6 +775,8 @@ export class PocketApp {
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
             registerModelProvider: (provider, config) =>
                 this.#registerModelProvider(provider, config),
+            registerWorkspaceProvider: (scheme, provider) =>
+                this.registerWorkspaceProvider(scheme, provider),
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);
 
@@ -798,6 +805,7 @@ export class PocketApp {
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
+            cwdOf: (conversationId) => this.cwdOf(conversationId),
             schedules: this.schedules,
             background: this.background,
             goals: this.goals,
@@ -1335,6 +1343,71 @@ export class PocketApp {
     }
 
     /** Where a conversation's commands run: its folder on this machine. */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void {
+        if (
+            !/^[a-z][a-z0-9+.-]*$/i.test(scheme) ||
+            typeof provider?.env !== "function" ||
+            typeof provider?.resolveCwd !== "function"
+        ) {
+            throw new Error("Invalid workspace provider registration");
+        }
+
+        const key = scheme.toLowerCase();
+        const token = Symbol(key);
+        const registrations = this.#workspaceProviders.get(key) ?? [];
+
+        registrations.push({ token, provider });
+        this.#workspaceProviders.set(key, registrations);
+
+        return () => {
+            const live = this.#workspaceProviders.get(key);
+            const index = live?.findIndex((entry) => entry.token === token) ?? -1;
+
+            if (index >= 0) {
+                live!.splice(index, 1);
+
+                if (live!.length === 0) {
+                    this.#workspaceProviders.delete(key);
+                }
+            }
+        };
+    }
+
+    workspaceScheme(cwd: string): string | undefined {
+        return /^(?![a-z]:[\\/])([a-z][a-z0-9+.-]*):/i.exec(cwd)?.[1]?.toLowerCase();
+    }
+
+    async resolveCwd(cwd: string, signal?: AbortSignal): Promise<string> {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme === undefined) {
+            return this.workspace.checkDirectory(cwd);
+        }
+
+        const registration = this.#workspaceProviders.get(scheme)?.at(-1);
+
+        if (registration === undefined) {
+            throw new Error(`No workspace provider is registered for URI scheme ${scheme}`);
+        }
+
+        signal?.throwIfAborted();
+        const canonical = await registration.provider.resolveCwd(cwd, signal);
+
+        if (this.#workspaceProviders.get(scheme)?.at(-1)?.token !== registration.token) {
+            throw new Error(
+                `Workspace provider ${scheme} changed while resolving the workspace URI`,
+            );
+        }
+
+        signal?.throwIfAborted();
+
+        if (typeof canonical !== "string" || this.workspaceScheme(canonical) !== scheme) {
+            throw new Error(`Workspace provider ${scheme} returned an invalid canonical URI`);
+        }
+
+        return canonical;
+    }
+
     envFor(id: ConversationId): ExecutionEnv {
         return this.#wrapped(id, this.cwdOf(id));
     }
@@ -1344,7 +1417,19 @@ export class PocketApp {
         return wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden);
     }
 
-    #env(cwd: string): NodeExecutionEnv {
+    #env(cwd: string): ExecutionEnv {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme !== undefined) {
+            const provider = this.#workspaceProviders.get(scheme)?.at(-1)?.provider;
+
+            if (provider === undefined) {
+                throw new Error(`No workspace provider is registered for URI scheme ${scheme}`);
+            }
+
+            return provider.env(cwd);
+        }
+
         let env = this.#envs.get(cwd);
 
         if (env === undefined) {
@@ -2862,6 +2947,10 @@ export class PocketApp {
 
     /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
     skills(cwd: string): Skill[] {
+        if (this.workspaceScheme(cwd) !== undefined) {
+            return [];
+        }
+
         return loadSessionSkills(cwd, this.#skillSources());
     }
 
@@ -2874,7 +2963,13 @@ export class PocketApp {
             throw new HttpError(403, "Only the owner decides which projects Pi trusts.");
         }
 
-        return readProjectTrust(this.cwdOf(id), this.#skillSources());
+        const cwd = this.cwdOf(id);
+
+        if (this.workspaceScheme(cwd) !== undefined) {
+            throw new HttpError(400, "Project trust is not available for remote workspaces.");
+        }
+
+        return readProjectTrust(cwd, this.#skillSources());
     }
 
     /** The owner's answer to "trust this project?", saved where Pi's CLI keeps its own, as its `/trust` does. */
