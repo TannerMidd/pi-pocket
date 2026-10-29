@@ -1,5 +1,6 @@
 // Phone notifications: this device subscribes to the server's pushes, and each person picks what they hear about.
 import { useEffect, useState } from "preact/hooks";
+import { callHost, hostCan } from "./host.js";
 import { api, attempt, closeSheet, notify, sessionUnread } from "./store.js";
 import { html, Loader, Sheet, Switch } from "./ui.js";
 
@@ -24,9 +25,14 @@ let badged = null;
 /** What the count was worked out from: it changes only with these, while streaming updates the store many times a second. */
 let countedFrom = null;
 
-/** The home-screen icon counts the sessions that need you: a call waits for approval, or the chat has news. */
+/**
+ * The home-screen icon counts the sessions that need you: a call waits for approval, or the chat has news. A desktop
+ * app with a badge of its own (`web/host.js`) shows it on its icon and tray instead.
+ */
 export function updateBadge(state) {
-    if (!("setAppBadge" in navigator) || !state.me) {
+    const desktop = hostCan("badge");
+
+    if ((!desktop && !("setAppBadge" in navigator)) || !state.me) {
         return;
     }
 
@@ -56,6 +62,13 @@ export function updateBadge(state) {
     }
 
     badged = count;
+
+    if (desktop) {
+        callHost("setBadge", count);
+
+        return;
+    }
+
     (count === 0 ? navigator.clearAppBadge() : navigator.setAppBadge(count)).catch(() => {});
 }
 

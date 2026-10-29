@@ -49,6 +49,15 @@ export type PushMessage = {
     approval?: { id: string; allow: boolean };
 };
 export type Urgency = "very-low" | "low" | "normal" | "high";
+/**
+ * A notification as a desktop app gets it over its live connection (`desktop-notify`, `PocketApp.notifyDesktops`):
+ * the push message, its urgency, and for an approval the whole call and whether this person may allow it, so that the
+ * app decides how much of it to show and whether to offer Allow (docs/desktop.md).
+ */
+export type DesktopMessage = PushMessage & {
+    urgency: Urgency;
+    approval?: { id: string; allow: boolean; may: boolean; call: string };
+};
 
 const DEFAULT_SUBJECT = "mailto:pi-pocket@example.com";
 const DEFAULT_RECORD_SIZE = 4096;

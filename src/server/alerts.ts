@@ -1,6 +1,7 @@
 /**
  * Push notifications: who hears about what, and when. Pi finished, Pi needs approval, mentions, and chat messages go
- * to the people who take part in a session, unless they are looking at it or turned that kind off.
+ * to the people who take part in a session, unless they are looking at it or turned that kind off. Each goes through
+ * Web Push to their subscribed devices, and over the live connection to their desktop apps (`notifyDesktops`).
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -9,7 +10,7 @@ import { AuthorsDoc, ChatDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
 import { entryText, projectEntry, snippet } from "./projection.ts";
 import { span, type WaitView } from "./limit-gate.ts";
-import type { PushMessage, PushPrefs } from "./push.ts";
+import { DEFAULT_PREFS, type DesktopMessage, type PushMessage, type PushPrefs } from "./push.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -33,27 +34,44 @@ export class Alerts {
         this.#app = app;
     }
 
-    /** Push to one person about a conversation, unless they cannot see it, turned that kind off, or are looking at it. */
+    /**
+     * Push to one person about a conversation, unless they cannot see it, turned that kind off, or are looking at it.
+     * `call` is an approval's whole call, for desktop apps, which show it as their settings say.
+     */
     async push(
         userId: string,
         id: ConversationId,
         kind: keyof PushPrefs,
         message: PushMessage,
         urgency: "normal" | "high" = "normal",
+        call?: { text: string; may: boolean },
     ): Promise<void> {
         const app = this.#app;
         const store = app.pushStore;
         const user = app.config.userById(userId);
 
-        if (store === undefined || user === undefined || !app.canSee(user, id)) {
+        if (user === undefined || !app.canSee(user, id)) {
             return;
         }
 
-        if (
-            !store.prefs(userId)[kind] ||
-            app.watching(userId, id) ||
-            store.subscriptions(userId).length === 0
-        ) {
+        if (!(store?.prefs(userId) ?? DEFAULT_PREFS)[kind] || app.watching(userId, id)) {
+            return;
+        }
+
+        const { approval, ...rest } = message;
+        const desktop: DesktopMessage = { ...rest, urgency };
+
+        if (approval !== undefined) {
+            desktop.approval = {
+                ...approval,
+                may: call?.may ?? approval.allow,
+                call: call?.text ?? message.body,
+            };
+        }
+
+        app.notifyDesktops(userId, desktop);
+
+        if (store === undefined || store.subscriptions(userId).length === 0) {
             return;
         }
 
@@ -71,7 +89,7 @@ export class Alerts {
         clearTimeout(this.#doneTimers.get(id));
         this.#doneTimers.delete(id);
 
-        if (busy || this.#app.sessionMeta(id) === undefined || this.#app.pushStore === undefined) {
+        if (busy || this.#app.sessionMeta(id) === undefined || this.#quiet()) {
             return;
         }
 
@@ -145,7 +163,7 @@ export class Alerts {
         const id = conversationId as unknown as ConversationId;
         const root = app.rootOf(id);
 
-        if (app.pushStore === undefined || app.sessionMeta(root) === undefined) {
+        if (this.#quiet() || app.sessionMeta(root) === undefined) {
             return;
         }
 
@@ -180,7 +198,7 @@ export class Alerts {
 
         this.#approvalIds = new Set(pending.map((approval) => approval.id));
 
-        if (app.pushStore === undefined) {
+        if (this.#quiet()) {
             return;
         }
 
@@ -229,21 +247,27 @@ export class Alerts {
                         continue;
                     }
 
+                    const may = app.cannotAllow(user, approval) === undefined;
                     const message: PushMessage = {
                         title: `Pi needs approval · ${title}`,
                         body: snippet(call, 400),
                         url: `/s/${String(approval.conversationId)}`,
                         tag: `approval-${approval.id}`,
-                        approval: {
-                            id: approval.id,
-                            allow: shown && app.cannotAllow(user, approval) === undefined,
-                        },
+                        approval: { id: approval.id, allow: shown && may },
                     };
 
-                    void this.push(userId, approval.conversationId, "approval", message, "high");
+                    void this.push(userId, approval.conversationId, "approval", message, "high", {
+                        text: call,
+                        may,
+                    });
                 }
             })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
         }
+    }
+
+    /** Nobody can get a notification: push is off on this server, and no desktop app is connected. */
+    #quiet(): boolean {
+        return this.#app.pushStore === undefined && !this.#app.hasDesktops();
     }
 
     /** People who take part in a session: whoever started it, wrote to Pi, or chatted there. */

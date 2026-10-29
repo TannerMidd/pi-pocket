@@ -112,7 +112,7 @@ import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
-import { PushStore } from "./push.ts";
+import { type DesktopMessage, PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
@@ -1943,6 +1943,40 @@ export class PocketApp {
     #online(userId: string): boolean {
         for (const client of this.#clients) {
             if (client.user.id === userId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Send a notification to this person's desktop apps, over their live connections: Web Push cannot reach them. Each
+     * connected one gets it; the app shows one per tag. Returns how many got it.
+     */
+    notifyDesktops(userId: string, message: DesktopMessage): number {
+        // Web Push clips; a desktop app takes the same, and the whole call for an approval.
+        message = {
+            ...message,
+            title: message.title.slice(0, 200),
+            body: message.body.slice(0, 1000),
+        };
+        let sent = 0;
+
+        for (const client of this.#clients) {
+            if (client.user.id === userId && client.desktop === true) {
+                client.send("desktop-notify", message);
+                sent += 1;
+            }
+        }
+
+        return sent;
+    }
+
+    /** Whether any desktop app that shows notifications is connected now. */
+    hasDesktops(): boolean {
+        for (const client of this.#clients) {
+            if (client.desktop === true) {
                 return true;
             }
         }

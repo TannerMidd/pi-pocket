@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { AgentTile } from "./agent-tile.js";
 import { folderColor } from "./avatar.js";
 import { describeCall } from "./calls.js";
+import { onPageVisibility, pageVisible } from "./host.js";
 import { finishedUnseen, markSeen, seenSince } from "./seen.js";
 import {
     actions,
@@ -42,7 +43,7 @@ const RETRY_MS = [1000, 3000, 10_000];
 
 PEEK_WIDE.addEventListener("change", () => store.set({}));
 
-const hidden = () => document.visibilityState === "hidden";
+const hidden = () => !pageVisible();
 
 store.set({ peeks: {} });
 
@@ -291,7 +292,7 @@ store.subscribe((state) => {
     }
 });
 
-document.addEventListener("visibilitychange", () => {
+onPageVisibility(() => {
     settle(hidden() ? 0 : SETTLE_MS);
 });
 

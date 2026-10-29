@@ -20,6 +20,9 @@ import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
 
+/** The version of the desktop host bridge the web app speaks (`web/host.js`). */
+const DESKTOP_BRIDGE = 1;
+
 export function createHandler(options: HttpOptions) {
     const { app } = options;
     const auth = new Auth(app.config);
@@ -40,6 +43,12 @@ export function createHandler(options: HttpOptions) {
             const parts = path.split("/").filter((part) => part !== "");
 
             response.setHeader("x-content-type-options", "nosniff");
+
+            // What a desktop app around Pi Pocket asks before it signs in: that this is Pi Pocket, and which version of
+            // the host bridge its page speaks (`web/host.js`, docs/desktop.md). No version of Pi Pocket, ever.
+            if (path === "/api/pocket/info" && request.method === "GET") {
+                return json(response, 200, { name: "pi-pocket", bridge: DESKTOP_BRIDGE });
+            }
 
             if (parts[0] === "api") {
                 return await api(request, response, url, parts.slice(1));

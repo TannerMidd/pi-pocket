@@ -63,6 +63,7 @@ function newClient(url: URL, user: User, send: Client["send"]): Client {
         conversationId: raw === null || raw === "" ? undefined : conversationId(raw),
         // What the tab's code understands of updates: none named is older code.
         protocol: Number(url.searchParams.get("p")) || 1,
+        ...(url.searchParams.get("host") === "notify" ? { desktop: true } : {}),
         sentEntries: new Set(),
         orderKey: "",
         ...(have === undefined ? {} : { have }),

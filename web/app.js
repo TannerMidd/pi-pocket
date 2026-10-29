@@ -19,6 +19,7 @@ import { ExtensionPage, ExtensionPanel, extPanelShown } from "./extension-ui.js"
 import { startEdgeBack, startSwipes, useDragToClose } from "./gestures.js";
 import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
+import "./desktop.js";
 import { registerWorker, updateBadge } from "./notify.js";
 import {
     PEEK_WIDE,
