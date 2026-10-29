@@ -164,19 +164,47 @@ export function nodeFor(category: Category, text: string, colorText?: string): O
 
 // --- The draft -----------------------------------------------------------------------------------------------------
 
-/** Nested objects from flat tokens. A token that is also a group (`color.primary` and `color.primary.foreground`) becomes `….default`. */
+/** How much of one step ran: `until` is when it must end, `read` counts the entries it placed, and `stopped` says the time
+ * ended it early. */
+export interface Progress {
+    until: number;
+    read: number;
+    stopped: boolean;
+}
+
+/**
+ * Nested objects from flat tokens. A token that is also a group (`color.primary` and `color.primary.foreground`) becomes
+ * `….default`. Past `progress.until` the rest of the entries are left out.
+ */
 export function assemble(
     entries: { path: string[]; node: Obj }[],
     renamed: Map<string, string>,
+    progress?: Progress,
 ): Obj {
     const paths = new Set(entries.map((entry) => entry.path.join(".")));
+    // The names that hold another name, indexed once: asking every path for every entry is quadratic, and 40 000 variables took
+    // 27 seconds that way.
+    const groups = new Set<string>();
+
+    for (const path of paths) {
+        for (let at = path.indexOf("."); at > 0; at = path.indexOf(".", at + 1)) {
+            groups.add(path.slice(0, at));
+        }
+    }
+
     const root: Obj = {};
 
     for (const entry of entries) {
+        if (progress !== undefined && Date.now() >= progress.until) {
+            progress.stopped = true;
+
+            break;
+        }
+
         const name = entry.path.join(".");
         let path = entry.path;
 
-        if ([...paths].some((other) => other.startsWith(`${name}.`))) {
+        if (groups.has(name)) {
             path = [...entry.path, paths.has(`${name}.default`) ? "base" : "default"];
             renamed.set(name, path.join("."));
         }
@@ -189,6 +217,10 @@ export function assemble(
         }
 
         node[path.at(-1)!] = entry.node;
+
+        if (progress !== undefined) {
+            progress.read += 1;
+        }
     }
 
     return root;

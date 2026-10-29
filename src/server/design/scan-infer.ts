@@ -55,6 +55,9 @@ export function infer(facts: Facts, folder: string): Inferred {
     };
     const meta = { $extensions: { "com.pi-pocket": { name: folder } } };
 
+    // What each Figma `.fig` file gave, or why it could not be read: the report says so, before the roles it guessed.
+    result.sources.push(...facts.figs);
+
     // A project that already keeps tokens in a token file: use them.
     finishImports(facts.imported);
 

@@ -87,6 +87,8 @@ export const LIMITS = {
     totalBytes: 8_000_000,
     /** Characters kept of a value in the report. */
     valueChars: 200,
+    /** Figma `.fig` files read: each one is decoded, so only a few. */
+    figs: 4,
 } as const;
 
 /** How likely a file is to hold the design, for ordering: higher is read first. */
@@ -99,6 +101,9 @@ export function priority(rel: string): number {
         score += 40;
     } else if (extension === ".json") {
         score += 45;
+    } else if (extension === ".fig") {
+        // A Figma file is the design itself, before any stylesheet that a person wrote from it.
+        score += 50;
     } else if (/^\.(?:[cm]?[jt]s)$/.test(extension)) {
         score += 20;
     } else if (/^\.(?:html?|vue|svelte|astro|mdx)$/.test(extension)) {
@@ -151,6 +156,10 @@ export function priority(rel: string): number {
 
 /** Whether a file is worth reading at all. */
 function wanted(rel: string, name: string): boolean {
+    if (/\.fig$/i.test(name)) {
+        return true;
+    }
+
     if (!STYLE.test(name)) {
         return TOKEN_JSON.test(rel) && name.endsWith(".json");
     }

@@ -85,7 +85,7 @@ export function importTokens(into: Imported, file: string, source: string): void
 }
 
 /** A group of the default tree that a later source adds to (a path that is there stays as it is). */
-function addTo(target: Obj, source: Obj): void {
+export function addTo(target: Obj, source: Obj): void {
     for (const [key, value] of Object.entries(source)) {
         const have = target[key];
 

@@ -178,6 +178,8 @@ export interface Facts {
     channels: Map<string, string>;
     /** Tokens already written in a DTCG, Style Dictionary, or Tokens Studio file. */
     imported: Imported;
+    /** What each Figma `.fig` file gave the scan, one line for each, or why it could not be read (untrusted text). */
+    figs: string[];
 }
 
 export function newFacts(): Facts {
@@ -233,6 +235,7 @@ export function newFacts(): Facts {
             notes: [],
             done: false,
         },
+        figs: [],
     };
 }
 
