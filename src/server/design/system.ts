@@ -28,12 +28,21 @@ import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
 import { boundedText } from "./tokens-base.ts";
 import { checkTokensBlock, scanProject, scanReport, scanRoot } from "./scan.ts";
+import type { Draft } from "./scan-scales.ts";
 import { DtcgTree, valueOrToken } from "./system-schema.ts";
 import type { DesignSystem, SystemChange } from "./system-types.ts";
 import { readDesignFile } from "./tokens-io.ts";
 import {
+    planResync,
+    resyncChange,
+    resyncReport,
+    scanPathLabel,
+    type ResyncPlan,
+} from "./tokens-resync.ts";
+import {
     defaultModeName,
     loadDesignSystem,
+    loadDesignSystemWithRaw,
     problemLine,
     systemSummary,
     writeDesignSystem,
@@ -211,6 +220,7 @@ const ACTIONS = [
     "read",
     "scan",
     "init",
+    "resync",
     "set",
     "component",
     "guidelines",
@@ -221,13 +231,14 @@ const ACTIONS = [
 /** Which actions take each parameter. A call that gives a parameter to another action is refused. */
 const PARAMETER_ACTIONS: Record<string, readonly string[]> = {
     file: ["read"],
-    path: ["scan", "init"],
+    path: ["scan", "init", "resync"],
     fromScan: ["init"],
     tokens: ["init"],
     modes: ["init"],
     name: ["init"],
     description: ["init"],
     replace: ["init"],
+    apply: ["resync"],
     changes: ["set", "init"],
     remove: ["set"],
     slug: ["component"],
@@ -279,18 +290,36 @@ function checkParameters(action: string, args: Record<string, unknown>): void {
     }
 }
 
+/**
+ * The plan of a resync for a scan's draft, and the system as the folder has it now. It reads `.pi/design/` again because
+ * the scan runs in between and the folder can change while it does: an edit made in that time is in the plan, so a write
+ * keeps it instead of writing the scan's token over it.
+ */
+export function resyncPlan(cwd: string, draft: Draft): { system: DesignSystem; plan: ResyncPlan } {
+    const loaded = loadDesignSystemWithRaw(cwd);
+
+    if (loaded === undefined || loaded.system.tokens.length === 0) {
+        throw new Error(
+            "The design system changed while the scan ran: .pi/design/ is gone or has no tokens now, so resync has nothing to keep. Run resync again.",
+        );
+    }
+
+    return { system: loaded.system, plan: planResync(loaded.system, draft, loaded.raw) };
+}
+
 /** The `design_system` tool. */
 export function designSystemTool(): ToolRegistration {
     return defineTool({
         name: "design_system",
         description: [
             `The project's design system, kept in .pi/design/: DTCG design tokens (tokens.json), modes such as dark (tokens.dark.json), component specimens (components/<name>.html), and guidelines.md. It compiles to dist/tokens.css (CSS variables), dist/tailwind.css (Tailwind v4 @theme), tokens.<mode>.resolved.json (DTCG, one per mode; the main JSON), tokens.studio.json (Tokens Studio), names.md (each token with its variables and Tailwind utilities), tokens.resolved.json (a compact summary), and components.css. A design links it with <link rel="stylesheet" href="ds/tokens.css"> and uses only var(--…) values.`,
-            "Actions: read (a summary, or one file with file), scan (draft tokens from the project's style files; saves nothing), init (save the first tokens: your DTCG object, or fromScan), set (add, change, or remove single tokens), component (add, replace, or drop a specimen), guidelines (replace guidelines.md), validate (check; writes nothing), compile (rewrite dist/). Every change is checked first, and nothing is written when it adds an error. A parameter belongs to certain actions; a call that gives one to another action is refused with the action it fits.",
+            "Actions: read (a summary, or one file with file), scan (draft tokens from the project's style files; saves nothing), init (save the first tokens: your DTCG object, or fromScan), resync (bring a saved system up to date with the code: it adds the tokens the code defines and the system lacks, keeps everything people wrote, and lists the rest; apply writes it), set (add, change, or remove single tokens), component (add, replace, or drop a specimen), guidelines (replace guidelines.md), validate (check; writes nothing), compile (rewrite dist/). Every change is checked first, and nothing is written when it adds an error; a disk error partway through saving can leave the files before it saved. When the code changed and a system exists, use resync, not init replace. A parameter belongs to certain actions; a call that gives one to another action is refused with the action it fits.",
             [
                 "Example calls, one for each action:",
                 '- read: {"action":"read"} (summary) or {"action":"read","file":"dist/tokens.css"}',
                 '- scan: {"action":"scan"} or {"action":"scan","path":"src"} (draft only; the end of its report has the next call)',
                 '- init: {"action":"init","fromScan":true} or {"action":"init","name":"Harbor","tokens":{…},"modes":{"dark":{…}}}',
+                '- resync: {"action":"resync"} (a dry run: the report only) or {"action":"resync","apply":true} (add what the code defines and the system lacks)',
                 '- set: {"action":"set","changes":[{"token":"color.accent.default","value":"#7aa2f7","mode":"dark"}],"remove":[{"token":"color.old"}]}',
                 '- component: {"action":"component","slug":"button","content":"<script type=\\"application/json\\" id=\\"pocket-component\\">…"} or {"action":"component","slug":"button","drop":true}',
                 '- guidelines: {"action":"guidelines","content":"# Voice\\n…"}',
@@ -307,6 +336,7 @@ export function designSystemTool(): ToolRegistration {
                     Type.Literal("write"),
                     Type.Literal("scan"),
                     Type.Literal("init"),
+                    Type.Literal("resync"),
                     Type.Literal("set"),
                     Type.Literal("validate"),
                     Type.Literal("compile"),
@@ -370,6 +400,14 @@ export function designSystemTool(): ToolRegistration {
                     description: used(
                         "replace",
                         "Replace a design system that exists. Without it, init refuses, so a system is never lost by mistake.",
+                    ),
+                }),
+            ),
+            apply: Type.Optional(
+                Type.Boolean({
+                    description: used(
+                        "apply",
+                        "Write the change. Without it, resync reports and saves nothing.",
                     ),
                 }),
             ),
@@ -502,7 +540,7 @@ export function designSystemTool(): ToolRegistration {
 
                     if (existing && args.replace !== true) {
                         throw new Error(
-                            "A design system already exists in .pi/design/. Change it with set, component, or guidelines; or pass replace: true to start over (the old tokens are overwritten).",
+                            "A design system already exists in .pi/design/. Change it with set, component, or guidelines, or with resync when the code changed; or pass replace: true to start over (the old tokens are overwritten).",
                         );
                     }
 
@@ -546,6 +584,74 @@ export function designSystemTool(): ToolRegistration {
                     });
 
                     return text(afterWrite(system, "Saved the design system."));
+                }
+
+                case "resync": {
+                    const system = loadDesignSystem(cwd);
+
+                    if (system === undefined) {
+                        throw new Error(
+                            "There is no design system to resync (.pi/design/ is absent). Make one with scan, then init with fromScan: true; resync updates a system that exists.",
+                        );
+                    }
+
+                    if (system.tokens.length === 0) {
+                        const broken = system.problems.find(
+                            (problem) =>
+                                problem.level === "error" && problem.file === "tokens.json",
+                        );
+
+                        throw new Error(
+                            broken === undefined
+                                ? "The design system has no tokens yet, so resync has nothing to keep. Save one with init (fromScan: true saves what the code defines now); after that, resync keeps it up to date."
+                                : `tokens.json cannot be read (${problemLine(broken)}), so resync has nothing to keep. Fix the file, or save a new system with init.`,
+                        );
+                    }
+
+                    const scan = await scanProject(scanRoot(cwd, args.path));
+                    // The scan runs between the two loads, and the folder can change while it does: resyncPlan reads
+                    // the system again, so an edit made in that time is in the plan and the write keeps it.
+                    const { system: current, plan } = resyncPlan(cwd, scan.draft);
+                    const path = scanPathLabel(args.path);
+                    const report = resyncReport({
+                        name: current.name,
+                        path,
+                        files: scan.files.length,
+                        saved: args.apply === true,
+                        plan,
+                    });
+
+                    if (args.apply !== true) {
+                        const call = JSON.stringify({
+                            action: "resync",
+                            apply: true,
+                            ...(args.path === undefined ? {} : { path: args.path }),
+                        });
+
+                        return text(
+                            `${report}\n\nNothing was saved. ${plan.added.length === 0 ? `There is nothing to add; call design_system ${call} to record the scan's source in tokens.json.` : `Call design_system ${call} to add ${plan.added.length} token${plan.added.length === 1 ? "" : "s"}; nothing else changes.`}`,
+                        );
+                    }
+
+                    // A scan of the wrong folder would stamp provenance over a system it cannot see.
+                    if (scan.files.length === 0) {
+                        throw new Error(
+                            `The scan found no style files in ${path}, so resync cannot see the code's tokens. Point path at the folder with the project's styles.`,
+                        );
+                    }
+
+                    const written = writeDesignSystem(
+                        cwd,
+                        resyncChange(plan, {
+                            path,
+                            scannedAt: new Date().toISOString(),
+                            tokens: plan.scanned,
+                        }),
+                    );
+
+                    return text(
+                        `${report}\n\n${afterWrite(written, plan.added.length === 0 ? "Saved the design system: no token was added; the scan's source is recorded in tokens.json." : `Saved the design system: added ${plan.added.length} token${plan.added.length === 1 ? "" : "s"}, and nothing else changed.`)}`,
+                    );
                 }
 
                 case "set": {

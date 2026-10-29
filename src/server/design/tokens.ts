@@ -23,6 +23,7 @@ import {
     extensionOf,
     isObject,
     type Obj,
+    type RawSystem,
 } from "./tokens-base.ts";
 import { buildSystem, inferType } from "./tokens-model.ts";
 
@@ -51,11 +52,22 @@ export function problemLine(problem: SystemProblem): string {
     );
 }
 
-/** Loads the project's design system, or undefined when `.pi/design/` is absent. Writes nothing. */
-export function loadDesignSystem(cwd: string): DesignSystem | undefined {
+/**
+ * Loads the project's design system with the files it was read from, or undefined when `.pi/design/` is absent. The
+ * raw trees hold every token path the files declare, the ones the engine drops because they do not resolve included.
+ * Writes nothing.
+ */
+export function loadDesignSystemWithRaw(
+    cwd: string,
+): { system: DesignSystem; raw: RawSystem } | undefined {
     const folder = readFolder(cwd);
 
-    return folder === undefined ? undefined : buildSystem(folder.raw);
+    return folder === undefined ? undefined : { system: buildSystem(folder.raw), raw: folder.raw };
+}
+
+/** Loads the project's design system, or undefined when `.pi/design/` is absent. Writes nothing. */
+export function loadDesignSystem(cwd: string): DesignSystem | undefined {
+    return loadDesignSystemWithRaw(cwd)?.system;
 }
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
@@ -316,16 +328,32 @@ function applyChange(
         clearProblems(file);
     }
 
-    if (change.name !== undefined || change.description !== undefined) {
+    if (
+        change.name !== undefined ||
+        change.description !== undefined ||
+        change.source !== undefined
+    ) {
         guard("tokens.json");
 
         const top = root();
 
-        if (change.name !== undefined) {
+        if (change.name !== undefined || change.source !== undefined) {
             const extensions = isObject(top.$extensions) ? top.$extensions : {};
             const ext = isObject(extensions[EXT]) ? extensions[EXT] : {};
 
-            ext.name = change.name.trim().slice(0, 80);
+            if (change.name !== undefined) {
+                ext.name = change.name.trim().slice(0, 80);
+            }
+
+            if (change.source !== undefined) {
+                // The provenance of a resync; the rest of the block (the name, the mode, the format) stays.
+                ext.source = {
+                    path: change.source.path.slice(0, 200),
+                    scannedAt: change.source.scannedAt.slice(0, 40),
+                    tokens: change.source.tokens,
+                };
+            }
+
             extensions[EXT] = ext;
             top.$extensions = extensions;
         }

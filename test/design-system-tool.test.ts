@@ -55,6 +55,7 @@ test("the schema offers every action, with a description for each field", () => 
         "write",
         "scan",
         "init",
+        "resync",
         "set",
         "validate",
         "compile",
@@ -95,7 +96,7 @@ test("the schema is one object, and the description gives one short example call
 
     assert.deepEqual(
         shown.map((line) => /^- ([a-z]+):/.exec(line)![1]),
-        ["read", "scan", "init", "set", "component", "guidelines", "validate", "compile"],
+        ["read", "scan", "init", "resync", "set", "component", "guidelines", "validate", "compile"],
         "one line for each action, write left out",
     );
 
@@ -498,6 +499,7 @@ test("each parameter's description says which actions use it, and the tool refus
         "read",
         "scan",
         "init",
+        "resync",
         "set",
         "component",
         "guidelines",
@@ -513,6 +515,7 @@ test("each parameter's description says which actions use it, and the tool refus
         name: "N",
         description: "D",
         replace: true,
+        apply: false,
         changes: [],
         remove: [],
         slug: "button",

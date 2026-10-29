@@ -176,6 +176,12 @@ export interface SystemChange {
     /** Component files, by slug; `null` removes one. */
     components?: Record<string, string | null>;
     guidelines?: string;
+    /**
+     * Where the code's tokens came from (a resync), kept on the root of `tokens.json` as
+     * `$extensions["com.pi-pocket"].source`: the folder that was scanned, when, and how many tokens it found. The rest of
+     * the block stays as it is.
+     */
+    source?: { path: string; scannedAt: string; tokens: number };
 }
 
 /** The rules that `checkDesign` applies. */

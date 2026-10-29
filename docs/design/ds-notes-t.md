@@ -301,3 +301,42 @@ I wrote my own projects for each class, in several forms, and checked the Sass o
     - A scale that is present twice (a Sass map `brand-ramp` and the `--brand-50`…`--brand-900` that a loop makes from it) is one palette family: the shorter name.
 4. **Ant Design** (`scan-facts-antd.ts`). The `token` of a `ThemeConfig` (a file of its own, a `ConfigProvider theme={{…}}`, an array of algorithms): `colorBgLayout` is the page, `colorBgContainer` a surface, `colorText`, `colorTextSecondary`, `colorBorder`, `colorPrimary` (accent), `colorError`, `colorWarning`, `colorSuccess`, the other `color*` seeds as palette colors, `fontFamily`, `fontSize` and its sizes and headings, `borderRadius` and its sizes, `lineHeight`, `boxShadow`, `motionDuration*`, and `sizeUnit` as the spacing base. An object whose algorithm is `darkAlgorithm` (without `defaultAlgorithm`), or whose name or file says dark, is the dark mode; `...shared` and `...lightTheme.token` spread the objects the file declares. The tokens of one component (`components: { Button: { colorPrimary, borderRadius } }`) are left out. Only a file that uses Ant Design (`antd`, `ThemeConfig`, `ConfigProvider`, an algorithm) is read. Quiet text a little under 3:1 on its page (a gray, `#8c8c8c`) keeps its role when its name says muted (before, any contrast under 3:1 cost 45 points).
     - Weak spots: Ant Design's algorithm is not run, so a dark mode is only what a file says (an object with `darkAlgorithm` and no token for a color has the light one, and a switch at run time makes one mode); Panda `textStyles`, `layerStyles`, and recipes are not read; a Style Dictionary config that builds its `source` in code, or a template over two names (`${brand}/${theme}`), is not read; the cross-file spread (`...lightTheme.token`) is not followed, so a dark file has only its own overrides; Sass `meta.load-css`, `@use … as` with a URL, `.sass` files (indented) with `@use ... with` are not covered by the Dart Sass checks (the indented form is converted to braces first); `Run` (`scan-sass-run.ts`, the statements of one stylesheet) is still 1,000 lines.
+
+## Round 6: resync, a second scan over a system that exists
+
+`design_system resync` (`tokens-resync.ts`) brings a saved system up to date with code that changed, without `init
+replace`. `planResync` builds the scan's draft as a `DesignSystem` (`buildSystem`), and compares token paths with the
+system's, mode by mode:
+
+- **A path the system has is kept**: its value, `$type`, `$description`, `$extensions`, and its references. Its value is
+  compared with the scan's `hex` (a color) or its `literal` (every other type, references followed), and listed when the
+  two differ. The list shows the system's value and the code's. The paths are the ones the files declare (`tokens.json`
+  and the mode files, as `loadDesignSystemWithRaw` reads them), so a token that the engine drops because it fails in a mode
+  is kept too, instead of being written over by the scan's token. A mode that the code lacks holds the code's default
+  value, and that is what the system's mode is compared with.
+- **A path the scan has and the system lacks is added**: the scan's whole token node (its value, description, contrast
+  extension, and tailwind name), with `$type` and `$extensions["com.pi-pocket"].tier` made explicit, since the group
+  that held the tier may not exist in the system. Its values in the system's other modes come from the scan's mode
+  files; a value that equals the default's writes no override.
+- **A token the system resolved and the scan dropped is listed**, never deleted. A new path whose parent is a token of
+  the system is listed as not added (the write would throw).
+- Guidelines and components are never written. A mode the code has and the system lacks is named in the report: resync
+  adds no mode.
+
+`apply` writes through one `writeDesignSystem` call, so the checks run first and an added error writes nothing. That write
+is not a transaction: `writeFiles` puts the files in one at a time, so an I/O error partway through leaves the files
+before it written (the tool description says so). `apply` also reads `.pi/design/` a second time, after the scan
+(`resyncPlan`), because the scan runs in between and the folder can change while it does: an edit made then is in the
+plan, so the write keeps it. The provenance is the new optional `SystemChange.source`, written as
+`$extensions["com.pi-pocket"].source` = `{ path, scannedAt, tokens }` on the root of `tokens.json`; the rest of that
+block (the name, the mode, the format, the reset) stays. The engine never reads `source`, so the validator ignores it and
+load → write → load is unchanged.
+`resyncReport` puts the counts first, then up to 40 lines for each list (added, differ, not in the code, not added),
+then one "Not synced" note, all fenced as `<scan_data>` like the scan's report.
+
+Weak spots: a system whose default mode differs from the scan's (a light system, now a dark-first project) takes the
+scan's value for the system's default from the scan's mode file of that name, and the scan's default value when the code
+has no such mode (one call each, then the lists show the rest); the token keeps the scan's own `$description` and
+`$extensions`, and only its value is swapped. Only the modes the system already has receive values. A write is not a
+transaction: an I/O error partway through can leave some of the files written.
+Tests are in `test/design-resync.test.ts` (15).

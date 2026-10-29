@@ -125,6 +125,7 @@ const USE = `The project has a design system, so a design is on-system or it is 
 - In <head> link <link rel="stylesheet" href="ds/tokens.css"> and, when the design uses components, <link rel="stylesheet" href="ds/components.css"> (ds/tailwind.css is for Tailwind). The app attaches whichever of ds/tokens.css, ds/tailwind.css, and ds/components.css a page links; never copy token values into the page.
 - Every color, font, size, space, radius, shadow, and duration is var(--token) from the summary, never a literal. design_preview reports a value that is not a token with the nearest token to use. When the system lacks a value, use the nearest token and say so in your reply.
 - Change the system only when the person asks: design_system set (changes, remove; mode "dark" for a mode), component (slug, content; drop), guidelines (content). Then run validate and fix every error it lists. The tokens.css that designs link is rewritten by every change.
+- When the code changed and a system exists, run design_system resync without apply (a dry run) first: show the person the report, then run it with apply true only after they agree. It adds the tokens the code now defines and keeps the ones people wrote; init replace starts over.
 - Use roles (--color-bg-surface), not primitives.
 - Reuse components: read a component's markup with design_system read and file "components/<slug>.html", copy its markup and classes, and show each state the design needs.
 - Modes: data-theme="<mode>" on the root selects one. Check each mode with design_preview colorScheme.
