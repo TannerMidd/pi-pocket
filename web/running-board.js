@@ -374,10 +374,7 @@ export function RunningBoard() {
                 <div class="board-sub">
                     ${
                         board
-                            ? html`<b>${board.sessions.length}</b> at work${" · "}<b>${active}</b>
-                                  running${" · "}<b>${schedules.length}</b> scheduled${
-                                      next && html`${" · "}next <b>${span(next.next - now)}</b>`
-                                  }`
+                            ? html`<b>${board.sessions.length}</b> at work · <b>${active}</b> running · <b>${schedules.length}</b> scheduled${next && html` · next <b>${span(next.next - now)}</b>`}`
                             : "Looking"
                     }
                 </div>
