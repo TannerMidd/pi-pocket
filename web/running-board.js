@@ -169,14 +169,38 @@ function useMatches(query) {
 let lastBoard = null;
 let ahead = null;
 
+/** The timeline's width when it last showed: 0 until it has been measured once. */
+let lastWidth = 0;
+
 /** Ask for the board now, ahead of opening it (a pointer down on its button); the board takes this answer. */
 export function prefetchRunning() {
     if (ahead === null) {
-        ahead = api("running/board").finally(() => setTimeout(() => (ahead = null), 1000));
+        ahead = api("running/board")
+            .then((data) => (lastBoard = data))
+            .finally(() => setTimeout(() => (ahead = null), 1000));
     }
 
     return ahead;
 }
+
+// Asked once the page is idle after it loads and someone is signed in, so the first press shows a board at once, not
+// "Looking". Until then it waits, and tries again.
+const idle = globalThis.requestIdleCallback ?? ((run) => setTimeout(run, 1000));
+
+function warm(tries = 0) {
+    idle(
+        () => {
+            if (store.state.me) {
+                prefetchRunning().catch(() => undefined);
+            } else if (tries < 30) {
+                setTimeout(() => warm(tries + 1), 1000);
+            }
+        },
+        { timeout: 5000 },
+    );
+}
+
+warm();
 
 /** The board's data, asked for again every `EVERY_MS` while it shows; `reload` asks now, after an action. */
 function useBoard() {
@@ -588,21 +612,24 @@ function Timeline({
     onRow,
 }) {
     const scroller = useRef(null);
-    const [width, setWidth] = useState(0);
+    // The width it had when last shown: the first draw uses it rather than measuring, which would make the browser lay
+    // the whole board out at once, then draw it again. The observer says when it differs, after the browser's layout.
+    const [width, setWidth] = useState(lastWidth);
     const [tip, setTip] = useState(null);
     const r = RANGES[range];
 
-    useLayoutEffect(() => {
+    useEffect(() => {
         const box = scroller.current;
 
         if (!box) {
             return;
         }
 
-        const measure = () => setWidth(box.clientWidth);
-        const watch = new ResizeObserver(measure);
+        const watch = new ResizeObserver(([entry]) => {
+            lastWidth = Math.round(entry.contentRect.width);
+            setWidth(lastWidth);
+        });
 
-        measure();
         watch.observe(box);
 
         return () => watch.disconnect();
@@ -618,7 +645,7 @@ function Timeline({
         const box = scroller.current;
 
         if (box && width > 0) {
-            box.scrollLeft = Math.max(0, x(now) - box.clientWidth * PAST);
+            box.scrollLeft = Math.max(0, x(now) - width * PAST);
         }
     }, [range, width > 0]);
 
