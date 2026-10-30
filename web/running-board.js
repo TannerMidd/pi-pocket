@@ -23,6 +23,9 @@ const RANGES = {
     week: { label: "7d", span: 7 * DAY, step: DAY, hourPx: 4.2 },
 };
 
+/** How far into the past a run's bar takes the pointer: a run that just began has a bar a pin's width wide. */
+const REACH = 24;
+
 /** How much of the timeline is the past: where work started, and what just went out. */
 const PAST = 0.14;
 
@@ -680,15 +683,46 @@ function Timeline({
         const run = each.run;
 
         if (run && run.tasks.length > 0) {
-            const start = Math.min(...run.tasks.map((task) => task.since ?? now));
+            const prompt = run.prompt;
+            // A busy session's run began with its last message: that time outlasts a server restart, which the tasks'
+            // own first-seen times do not.
+            const start = Math.min(
+                ...run.tasks.map((task) => task.since ?? now),
+                run.busy && prompt?.at ? prompt.at : now,
+            );
             const from = Math.max(0, x(start));
 
-            marks.push(html`<span
+            const show = (event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                const who = prompt?.from ? `${prompt.from} · ` : "";
+                const sent = prompt?.at ? `sent ${relative(prompt.at, now)} · ` : "";
+
+                setTip({
+                    text: prompt?.text ?? "No message found",
+                    when: `${who}${sent}at work for ${elapsed(now - start)}`,
+                    x: Math.min(
+                        box.right - 20,
+                        Math.max(box.left, (event.clientX ?? box.left) - 20),
+                    ),
+                    y: box.bottom,
+                    long: true,
+                });
+            };
+
+            // The bar is thin; a lane-tall area over it takes the pointer, and a tap on a phone, where nothing hovers.
+            marks.push(html`<button
                 key="run"
-                class=${`rb-runbar ${run.tasks.some((task) => task.status === "running") ? "busy" : ""} ${run.approvals > 0 ? "waiting" : ""}`}
-                style=${`left:${from}px;width:${Math.max(6, x(now) - from)}px`}
-                title=${`At work for ${elapsed(now - start)}`}
-            ></span>`);
+                class="rb-runhit"
+                style=${`left:${Math.max(0, from - REACH)}px;width:${x(now) - Math.max(0, from - REACH)}px;--bar-from:${from - Math.max(0, from - REACH)}px`}
+                aria-label=${`At work for ${elapsed(now - start)}${prompt ? `. Last message: ${prompt.text}` : ""}`}
+                onPointerEnter=${(event) => event.pointerType === "mouse" && show(event)}
+                onPointerLeave=${(event) => event.pointerType === "mouse" && setTip(null)}
+                onClick=${(event) => (tip?.long ? setTip(null) : show(event))}
+            >
+                <span
+                    class=${`rb-runbar ${run.tasks.some((task) => task.status === "running") ? "busy" : ""} ${run.approvals > 0 ? "waiting" : ""}`}
+                ></span>
+            </button>`);
         }
 
         // A label for a lane's first pin, where there is room for it before the next.
@@ -822,7 +856,11 @@ function Timeline({
         </div>
         ${
             tip &&
-            html`<div class="rb-tip" role="tooltip" style=${`left:${Math.min(innerWidth - 270, Math.max(8, tip.x - 20))}px;top:${tip.y + 8}px`}>
+            html`<div
+                class=${`rb-tip ${tip.long ? "long" : ""}`}
+                role="tooltip"
+                style=${`left:${Math.min(innerWidth - (tip.long ? 370 : 270), Math.max(8, tip.x - 20))}px;top:${tip.y + 8}px`}
+            >
                 <b>${tip.text}</b>${tip.when}
             </div>`
         }

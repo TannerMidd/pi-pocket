@@ -10192,6 +10192,29 @@ textarea.notes {
     pointer-events: none;
 }
 
+/* The area over a lane's bar that takes the pointer, as tall as the lane; the bar is drawn in it, left to right. */
+.rb-runhit {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    padding: 0;
+    border-radius: 0;
+    cursor: help;
+}
+
+.rb-runhit .rb-runbar {
+    left: var(--bar-from, 0);
+    right: 0;
+    min-width: 6px;
+}
+
+@media (hover: hover) {
+    .rb-runhit:hover .rb-runbar {
+        filter: brightness(1.5);
+    }
+}
+
 .rb-runbar.busy {
     background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ok) 50%, transparent));
 }
@@ -10296,6 +10319,22 @@ textarea.notes {
     margin-bottom: 2px;
     font-weight: 500;
     color: var(--text);
+}
+
+/* A message a session works on: wider, its lines kept, and cut at a readable height. */
+.rb-tip.long {
+    max-width: min(360px, calc(100vw - 16px));
+}
+
+.rb-tip.long b {
+    display: -webkit-box;
+    max-height: 14lh;
+    margin-bottom: 6px;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 14;
 }
 
 /* The filters, as the subagents board's legend. */
@@ -10856,7 +10895,8 @@ textarea.notes {
     }
 
     .rb-lane .rb-pin,
-    .rb-lane .rb-runbar {
+    .rb-lane > .rb-runbar,
+    .rb-runhit .rb-runbar {
         top: 28px;
     }
 

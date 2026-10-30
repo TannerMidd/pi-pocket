@@ -86,7 +86,7 @@ test("running now lists a session's run and its tool call, scheduled messages, a
     await app.commands.cancelSchedule(quiet, owner(app), scheduled.id);
 });
 
-test("the running board lists every schedule a person may see, with its next times, and when each task was first seen", async () => {
+test("the running board lists every schedule a person may see, with its next times, when each task was first seen, and the message a run works on", async () => {
     const busy = await newSession(app);
     const quiet = await newSession(app);
     const hidden = await newSession(app);
@@ -129,6 +129,7 @@ test("the running board lists every schedule a person may see, with its next tim
 
     assert.equal(typeof working.spent, "number");
     assert.ok(working.tasks.every((task) => typeof task.since === "number"));
+    assert.equal(working.prompt?.text, "wait a bit", "the message its run works on");
 
     const scoped = app.config.addUser("Kim", "guest", [String(quiet)]).user;
     const theirs = await runningBoard(app, scoped);

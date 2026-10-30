@@ -6,6 +6,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type ConversationId, LiveDoc, type TaskGraphNode } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
+import { projectEntry } from "./projection.ts";
 import { FollowsDoc, RepoWatchesDoc, ScheduleDoc, SubagentsDoc, WatchDoc } from "./docs.ts";
 import { COMMAND_TASK } from "./extension-commands.ts";
 import { describeMoment, describeRepeat, nextRepeat, type Repeat } from "./when.ts";
@@ -45,7 +46,17 @@ export type BoardSession = RunningSession & {
     spent: number;
     /** The oldest call waiting for approval there, as the session list shows it. */
     approval?: { tool: string; subject: string; since: number };
+    /** The last message sent to it, which its run works on: who sent it, when, and its text, cut at `PROMPT_CHARS`. */
+    prompt?: BoardPrompt;
 };
+
+export type BoardPrompt = { text: string; from?: string; at?: number };
+
+/** How much of the last message the board sends: enough to read, not a whole pasted file. */
+const PROMPT_CHARS = 2000;
+
+/** How many of a session's newest entries the board looks through for its last message: a long run's tool calls. */
+const PROMPT_SCAN = 400;
 
 /** A scheduled message on the board, with what its sheet shows and the times it goes out next. */
 export type BoardSchedule = {
@@ -322,6 +333,63 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
  */
 const upcomingKept = new Map<string, { key: string; times: number[] }>();
 
+/** Each session's last message, kept while its newest entry stays the same: a run adds entries, and the board asks often. */
+const promptKept = new Map<number, { newest: number; prompt: BoardPrompt | undefined }>();
+
+/** The last message sent to a session: the newest person's (or a schedule's) entry, looked for from the newest back. */
+async function lastPrompt(app: PocketApp, id: ConversationId): Promise<BoardPrompt | undefined> {
+    const conversation = await app.harness.conversation(id, context);
+
+    if (conversation === undefined) {
+        return undefined;
+    }
+
+    let page = await conversation.entries({}, 32, undefined, context);
+    const newest = Number(page.items[0]?.id ?? 0);
+    const kept = promptKept.get(Number(id));
+
+    if (kept?.newest === newest) {
+        return kept.prompt;
+    }
+
+    let prompt: BoardPrompt | undefined;
+    let seen = 0;
+
+    for (;;) {
+        for (const entry of page.items) {
+            if (entry.kind !== "pi.user") {
+                continue;
+            }
+
+            const shown = projectEntry(entry);
+
+            if (shown?.kind === "user") {
+                prompt = {
+                    text:
+                        shown.text.length > PROMPT_CHARS
+                            ? `${shown.text.slice(0, PROMPT_CHARS - 1)}…`
+                            : shown.text,
+                    ...(shown.from === undefined ? {} : { from: shown.from }),
+                    ...(shown.at === undefined ? {} : { at: shown.at }),
+                };
+                break;
+            }
+        }
+
+        seen += page.items.length;
+
+        if (prompt !== undefined || page.next === undefined || seen >= PROMPT_SCAN) {
+            break;
+        }
+
+        page = await conversation.entries({}, 64, page.next, context);
+    }
+
+    promptKept.set(Number(id), { newest, prompt });
+
+    return prompt;
+}
+
 /** A repeat's next times after `next`, up to `UPCOMING` of them within `UPCOMING_MS`. */
 function upcomingOf(id: string, next: number, every: Repeat | undefined, zone: string): number[] {
     if (every === undefined) {
@@ -380,11 +448,25 @@ export async function runningBoard(app: PocketApp, user: User): Promise<RunningB
         }
     }
 
-    const sessions: BoardSession[] = running.map((session) => {
+    // Sessions no longer at work keep no last message.
+    for (const id of promptKept.keys()) {
+        if (!running.some((session) => session.id === id)) {
+            promptKept.delete(id);
+        }
+    }
+
+    const prompts = await Promise.all(
+        running.map((session) =>
+            lastPrompt(app, session.id as unknown as ConversationId).catch(() => undefined),
+        ),
+    );
+
+    const sessions: BoardSession[] = running.map((session, index) => {
         const meta = listed.get(session.id);
         const id = session.id as unknown as ConversationId;
         const pip = app.sessionMeta(id)?.pip !== undefined;
         const approval = oldest.get(session.id);
+        const prompt = prompts[index];
 
         return {
             ...session,
@@ -393,6 +475,7 @@ export async function runningBoard(app: PocketApp, user: User): Promise<RunningB
             ...(meta?.model === undefined ? {} : { model: meta.model }),
             spent: app.spend.sessionSpent(id),
             ...(approval === undefined ? {} : { approval }),
+            ...(prompt === undefined ? {} : { prompt }),
         };
     });
 
