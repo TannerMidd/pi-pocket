@@ -24,7 +24,6 @@ import { MessageSheet } from "./sheets/message.js";
 import { ModelPicker } from "./sheets/model.js";
 import { InviteSheet, MyPhoto, PeopleSheet } from "./sheets/people.js";
 import { AuthDialog, ProvidersSheet } from "./sheets/providers.js";
-import { RunningSheet } from "./sheets/running.js";
 import { HooksSheet } from "./sheets/hooks.js";
 import { SchedulesSheet } from "./sheets/schedules.js";
 import { SessionSheet } from "./sheets/session.js";
@@ -329,9 +328,6 @@ function sheetBody(sheet) {
             break;
         case "spend":
             body = html`<${SpendSheet} />`;
-            break;
-        case "running":
-            body = html`<${RunningSheet} />`;
             break;
         case "background":
             body = view.conversation

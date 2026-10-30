@@ -204,6 +204,11 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `browser-panel`      | The Browser panel                                                         |
 | `pip`                | PiP's panel                                                               |
 | `subagents-board`    | The subagents board                                                       |
+| `running-board`      | The Running now board                                                     |
+| `running-timeline`   | Its Coming up timeline                                                    |
+| `running-needs`      | Its Needs you list                                                        |
+| `running-next`       | Its Next up list                                                          |
+| `running-schedule`   | The schedule selected on it                                               |
 | `extension-page`     | An extension's page, with `data-module` naming its module                 |
 | `extension-panel`    | An extension's panel, with `data-module` naming its module (since 0.19.0) |
 | `diff`               | A diff, in a tool call, a reply, or the review                            |

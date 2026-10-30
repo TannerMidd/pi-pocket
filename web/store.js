@@ -165,7 +165,10 @@ export const store = {
         trust: null,
         /** The conversation whose subagents bar shows a row for each subagent (`subagents.js`); null for none. */
         subagentsOpen: null,
-        /** The subagents board shows in the conversation's place (`subagents-board.js`). */
+        /**
+         * What shows in the conversation's place: `"subagents"`, the subagents board (`subagents-board.js`), or
+         * `"running"`, the Running now board (`running-board.js`); false for neither.
+         */
         board: false,
         /** Every subagent in every session, while the board shows; null until the server's first list arrives. */
         boardAgents: null,
@@ -1554,7 +1557,7 @@ const handlers = {
     // A theme folder came, went, or changed (`theme.js` loads its new version).
     themes: (themeList) => setChanged({ themeList: kept(store.state.themeList, themeList) }),
     // Every subagent in every session, while this tab shows the subagents board (`subagents-board.js`).
-    subagents: (agents) => store.state.board && store.set({ boardAgents: agents }),
+    subagents: (agents) => store.state.board === "subagents" && store.set({ boardAgents: agents }),
     view: applyView,
     // A switch on this connection went through (`switchTo`): what comes of a session after it is the new one's.
     switched: (data) => {
@@ -2386,6 +2389,11 @@ export function peopleDocked(state = store.state) {
  * takes the Browser panel's place: both beside the conversation leave it too narrow.
  */
 function sheetChange(sheet, state) {
+    // Running now was a sheet; it is a board in the conversation's place now, wherever an old caller asks for it.
+    if (sheet?.type === "running") {
+        return { sheet: null, board: "running", boardAgents: null, page: null };
+    }
+
     if (sheet?.type !== "chat" || !PEOPLE_DOCK.matches) {
         return { sheet };
     }
@@ -2515,6 +2523,11 @@ store.subscribe((state) => {
 
 export function closeSheet() {
     store.set({ sheet: null });
+}
+
+/** Show the Running now board in the conversation's place (`running-board.js`), over whatever sheet was open. */
+export function openRunning() {
+    store.set({ board: "running", boardAgents: null, drawer: false, page: null, sheet: null });
 }
 
 // Per-conversation composer drafts survive reloads, including the automatic ones after a live edit.

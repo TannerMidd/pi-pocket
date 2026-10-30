@@ -8,7 +8,7 @@ import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { FollowsDoc, RepoWatchesDoc, ScheduleDoc, SubagentsDoc, WatchDoc } from "./docs.ts";
 import { COMMAND_TASK } from "./extension-commands.ts";
-import { describeMoment } from "./when.ts";
+import { describeMoment, describeRepeat, nextRepeat, type Repeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -25,6 +25,8 @@ export type RunningTask = {
     subagent?: string;
     /** For a scheduled message: the schedule, to cancel it. */
     scheduleId?: string;
+    /** When this server first saw the task at work: its start, or the server's, for one that ran on across a restart. */
+    since?: number;
 };
 
 export type RunningSession = {
@@ -34,6 +36,74 @@ export type RunningSession = {
     approvals: number;
     tasks: RunningTask[];
 };
+
+/** A session on the Running now board: what is at work there, with what the board says about the session. */
+export type BoardSession = RunningSession & {
+    cwd?: string;
+    model?: string;
+    /** What Pi spent in it, its subagents included. */
+    spent: number;
+    /** The oldest call waiting for approval there, as the session list shows it. */
+    approval?: { tool: string; subject: string; since: number };
+};
+
+/** A scheduled message on the board, with what its sheet shows and the times it goes out next. */
+export type BoardSchedule = {
+    id: string;
+    /** The session it goes to. */
+    session: number;
+    sessionTitle: string;
+    text: string;
+    next: number;
+    every?: Repeat;
+    /** Its repeat in words: "every 2 hours", "weekdays at 08:00"; absent for one that goes out once. */
+    repeat?: string;
+    zone: string;
+    /** Who set it; absent when Pi did. */
+    by?: string;
+    /** For one Pi set up: whom Pi worked for then. */
+    requestedBy?: string;
+    createdAt: number;
+    runs: number;
+    /** The next times it goes out, the first being `next`: up to `UPCOMING`, within `UPCOMING_MS`. */
+    upcoming: number[];
+    /** Why it would not go out now (a spend limit, or nobody left to steer), when it would not. */
+    held?: string;
+};
+
+export type RunningBoard = {
+    sessions: BoardSession[];
+    schedules: BoardSchedule[];
+    now: number;
+};
+
+/** How many of a repeat's next times the board gets, and how far ahead it looks for them. */
+const UPCOMING = 24;
+const UPCOMING_MS = 8 * 24 * 60 * 60_000;
+
+/**
+ * When this server first saw each live task: the task graph keeps no start time, so the board's elapsed times count
+ * from here. Tasks that ended are dropped on the next read.
+ */
+const firstSeen = new Map<string, number>();
+
+function seenSince(nodes: TaskGraphNode[], now: number): Map<string, number> {
+    const live = new Set(nodes.map((node) => String(node.id)));
+
+    for (const id of firstSeen.keys()) {
+        if (!live.has(id)) {
+            firstSeen.delete(id);
+        }
+    }
+
+    for (const id of live) {
+        if (!firstSeen.has(id)) {
+            firstSeen.set(id, now);
+        }
+    }
+
+    return firstSeen;
+}
 
 /** The live tasks, as one read of the task graph. */
 async function liveTasks(app: PocketApp): Promise<TaskGraphNode[]> {
@@ -201,7 +271,10 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
         return entry;
     };
 
-    for (const node of await liveTasks(app)) {
+    const nodes = await liveTasks(app);
+    const since = seenSince(nodes, Date.now());
+
+    for (const node of nodes) {
         // A subagent's anchor stays for as long as the subagent does, doing nothing: its work shows on its own.
         if (node.kind === "pocket.subagent-anchor" || !app.canSee(user, node.conversationId)) {
             continue;
@@ -226,6 +299,7 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
             kind: node.kind,
             status: node.state.status,
             conversationId: Number(node.conversationId),
+            since: since.get(String(node.id)) ?? Date.now(),
             ...(subagent === undefined ? {} : { subagent }),
             ...description,
         });
@@ -240,4 +314,110 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
     return [...sessions.values()].sort(
         (a, b) => Number(b.busy) - Number(a.busy) || b.tasks.length - a.tasks.length,
     );
+}
+
+/** A repeat's next times after `next`, up to `UPCOMING` of them within `UPCOMING_MS`. */
+function upcomingOf(next: number, every: Repeat | undefined, zone: string): number[] {
+    const times = [next];
+
+    if (every === undefined) {
+        return times;
+    }
+
+    let at = next;
+
+    while (times.length < UPCOMING) {
+        at = nextRepeat(every, at, zone);
+
+        if (at - next > UPCOMING_MS) {
+            break;
+        }
+
+        times.push(at);
+    }
+
+    return times;
+}
+
+/**
+ * The Running now board: the sessions at work, with their folder, model, spend, and the call they wait on, and every
+ * scheduled message this person may see, soonest first, with its next times and whether it is held.
+ */
+export async function runningBoard(app: PocketApp, user: User): Promise<RunningBoard> {
+    const running = await runningNow(app, user);
+    const listed = new Map(app.sessions(user).map((session) => [session.id, session]));
+    const oldest = new Map<number, { tool: string; subject: string; since: number }>();
+
+    for (const approval of app.approvals.all()) {
+        if (!app.canSee(user, approval.conversationId)) {
+            continue;
+        }
+
+        const root = Number(app.rootOf(approval.conversationId));
+        const kept = oldest.get(root);
+
+        if (kept === undefined || approval.createdAt < kept.since) {
+            oldest.set(root, {
+                tool: approval.tool,
+                subject: approval.subject.slice(0, 200),
+                since: approval.createdAt,
+            });
+        }
+    }
+
+    const sessions: BoardSession[] = running.map((session) => {
+        const meta = listed.get(session.id);
+        const id = session.id as unknown as ConversationId;
+        const pip = app.sessionMeta(id)?.pip !== undefined;
+        const approval = oldest.get(session.id);
+
+        return {
+            ...session,
+            ...(pip ? { title: "PiP" } : {}),
+            ...(meta?.cwd === undefined ? {} : { cwd: meta.cwd }),
+            ...(meta?.model === undefined ? {} : { model: meta.model }),
+            spent: app.spend.sessionSpent(id),
+            ...(approval === undefined ? {} : { approval }),
+        };
+    });
+
+    const schedules: BoardSchedule[] = [];
+
+    for (const [key, meta] of Object.entries(app.sessionCatalogue())) {
+        const id = Number(key) as unknown as ConversationId;
+
+        if (!app.canSee(user, id)) {
+            continue;
+        }
+
+        const title = meta.pip === undefined ? (meta.title ?? "New session") : "PiP";
+
+        for (const schedule of await app.schedules.list(id)) {
+            const held = app.schedules.held(id, schedule);
+
+            schedules.push({
+                id: schedule.id,
+                session: Number(id),
+                sessionTitle: title,
+                text: schedule.text,
+                next: schedule.next,
+                ...(schedule.every === undefined
+                    ? {}
+                    : { every: schedule.every, repeat: describeRepeat(schedule.every) }),
+                zone: schedule.zone,
+                ...(schedule.by === undefined ? {} : { by: schedule.by }),
+                ...(schedule.requestedBy === undefined
+                    ? {}
+                    : { requestedBy: schedule.requestedBy }),
+                createdAt: schedule.createdAt,
+                runs: schedule.runs,
+                upcoming: upcomingOf(schedule.next, schedule.every, schedule.zone),
+                ...(held === undefined ? {} : { held }),
+            });
+        }
+    }
+
+    schedules.sort((a, b) => a.next - b.next);
+
+    return { sessions, schedules, now: Date.now() };
 }

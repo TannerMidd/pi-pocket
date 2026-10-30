@@ -2332,13 +2332,16 @@ export function subagentTotals(sessions = store.state.sessions) {
     return totals;
 }
 
-/** Open the subagents board in the conversation's place, or close it. */
-export const toggleBoard = () =>
+/** Open a board in the conversation's place (`"subagents"` or `"running"`), or close it when it already shows. */
+export const toggleBoard = (which = "subagents") =>
     store.set((state) =>
-        state.board
+        state.board === which
             ? { board: false, boardAgents: null }
-            : { board: true, drawer: false, page: null },
+            : { board: which, boardAgents: null, drawer: false, page: null, sheet: null },
     );
+
+/** Open the Running now board, or close it. */
+export const toggleRunning = () => toggleBoard("running");
 
 /** The folded sidebar's sessions, numbered like Waybar's workspaces. */
 function RailTiles() {
@@ -2467,20 +2470,21 @@ function Rail({ foldable = false, folded = false }) {
         ${foldable && html`<${PeeksRailButton} />`}
         <${PipRailButton} />
         <button
-            class=${`rail-button rail-running ${busy > 0 ? "lit" : ""}`}
+            class=${`rail-button rail-running ${busy > 0 ? "lit" : ""} ${board === "running" ? "open" : ""}`}
             data-part="rail-button"
-            data-state=${railState(false, busy > 0)}
+            data-state=${railState(board === "running", busy > 0)}
             title="Running now"
             aria-label=${busy > 0 ? `Running now, ${busy}` : "Running now"}
-            onClick=${() => openSheet({ type: "running" })}
+            aria-pressed=${board === "running"}
+            onClick=${toggleRunning}
         >
             <${Icon} name="pulse" size=${19} />
             ${busy > 0 && html`<span class="rail-count">${busy}</span>`}
         </button>
         <button
-            class=${`rail-button rail-agents ${live > 0 ? "lit" : ""} ${board ? "open" : ""}`}
+            class=${`rail-button rail-agents ${live > 0 ? "lit" : ""} ${board === "subagents" ? "open" : ""}`}
             data-part="rail-button"
-            data-state=${railState(board, live > 0)}
+            data-state=${railState(board === "subagents", live > 0)}
             title="Subagents in every session"
             aria-label=${[
                 "Subagents",
@@ -2490,8 +2494,8 @@ function Rail({ foldable = false, folded = false }) {
             ]
                 .filter(Boolean)
                 .join(", ")}
-            aria-pressed=${board}
-            onClick=${toggleBoard}
+            aria-pressed=${board === "subagents"}
+            onClick=${() => toggleBoard("subagents")}
         >
             <${Icon} name="fork" size=${19} />
             ${live > 0 && html`<span class="rail-count">${live}</span>`}
