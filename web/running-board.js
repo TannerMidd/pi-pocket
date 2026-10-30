@@ -40,6 +40,27 @@ const STOPPABLE = {
 
 const pad = (n) => String(n).padStart(2, "0");
 
+/**
+ * A date formatter, made once for each locale and set of options: making one costs far more than using it, and the
+ * board's timeline formats a time for each of its marks.
+ */
+const formatters = new Map();
+
+/** This browser's time zone. */
+const HERE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function formatter(locale, options) {
+    const key = `${locale ?? ""} ${JSON.stringify(options)}`;
+    let format = formatters.get(key);
+
+    if (format === undefined) {
+        format = new Intl.DateTimeFormat(locale, options);
+        formatters.set(key, format);
+    }
+
+    return format;
+}
+
 /** "41s", "2m 14s", "1h 05m", "3d 4h". */
 function elapsed(ms) {
     const s = Math.max(0, Math.floor(ms / 1000));
@@ -82,14 +103,14 @@ const relative = (at, now) => (at >= now ? `in ${span(at - now)}` : `${span(now 
 function clock(at, zone, now, { day = "auto" } = {}) {
     const options = { timeZone: zone, hourCycle: "h23", hour: "2-digit", minute: "2-digit" };
     const sameDay =
-        new Intl.DateTimeFormat("en-CA", { timeZone: zone, dateStyle: "short" }).format(at) ===
-        new Intl.DateTimeFormat("en-CA", { timeZone: zone, dateStyle: "short" }).format(now);
+        formatter("en-CA", { timeZone: zone, dateStyle: "short" }).format(at) ===
+        formatter("en-CA", { timeZone: zone, dateStyle: "short" }).format(now);
 
     if (day === "never" || (day === "auto" && sameDay)) {
-        return new Intl.DateTimeFormat("en-GB", options).format(at);
+        return formatter("en-GB", options).format(at);
     }
 
-    return new Intl.DateTimeFormat("en-GB", {
+    return formatter("en-GB", {
         ...options,
         ...(at - now < 6 * DAY ? { weekday: "short" } : { day: "numeric", month: "short" }),
     })
@@ -99,12 +120,12 @@ function clock(at, zone, now, { day = "auto" } = {}) {
 
 /** The time zone's short name, when it is not this browser's: "UTC", "CET". */
 function zoneName(zone, at) {
-    if (zone === Intl.DateTimeFormat().resolvedOptions().timeZone) {
+    if (zone === HERE) {
         return "";
     }
 
     return (
-        new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "short" })
+        formatter("en-US", { timeZone: zone, timeZoneName: "short" })
             .formatToParts(at)
             .find((part) => part.type === "timeZoneName")?.value ?? zone
     );
@@ -141,17 +162,35 @@ function useMatches(query) {
     return matches;
 }
 
+/**
+ * The last board this page got, and one asked for ahead: the board shows the last one at once while it asks again,
+ * and a press on its button asks before the click lands.
+ */
+let lastBoard = null;
+let ahead = null;
+
+/** Ask for the board now, ahead of opening it (a pointer down on its button); the board takes this answer. */
+export function prefetchRunning() {
+    if (ahead === null) {
+        ahead = api("running/board").finally(() => setTimeout(() => (ahead = null), 1000));
+    }
+
+    return ahead;
+}
+
 /** The board's data, asked for again every `EVERY_MS` while it shows; `reload` asks now, after an action. */
 function useBoard() {
-    const [board, setBoard] = useState(null);
+    const [board, setBoard] = useState(lastBoard);
     const [error, setError] = useState(null);
     const asked = useRef(0);
 
-    const load = () => {
+    const load = (first = false) => {
         const n = ++asked.current;
 
-        return api("running/board").then(
+        return (first && ahead !== null ? ahead : api("running/board")).then(
             (data) => {
+                lastBoard = data;
+
                 if (n === asked.current) {
                     setBoard(data);
                     setError(null);
@@ -162,7 +201,7 @@ function useBoard() {
     };
 
     useEffect(() => {
-        load();
+        load(true);
         const timer = setInterval(load, EVERY_MS);
 
         return () => clearInterval(timer);
@@ -598,11 +637,11 @@ function Timeline({
             day: midnight,
             label:
                 midnight || range === "week"
-                    ? new Intl.DateTimeFormat(undefined, {
+                    ? formatter(undefined, {
                           weekday: "short",
                           ...(range === "week" ? { day: "numeric" } : {}),
                       }).format(local)
-                    : new Intl.DateTimeFormat("en-GB", {
+                    : formatter("en-GB", {
                           hour: "2-digit",
                           minute: "2-digit",
                       }).format(local),
@@ -748,7 +787,7 @@ function Timeline({
                         </div>`,
                     )}
                     <div class="rb-now" style=${`left:${x(now)}px`}>
-                        <span>${new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(now)}</span>
+                        <span>${formatter("en-GB", { hour: "2-digit", minute: "2-digit" }).format(now)}</span>
                     </div>
                     ${lanes.length === 0 && html`<div class="rb-tl-empty">Nothing to show here.</div>`}
                 </div>

@@ -35,6 +35,7 @@ import {
     foldsNow,
     toggleFoldedLinked,
 } from "./store.js";
+import { prefetchRunning } from "./running-board.js";
 import { dismiss as dismissSubagent } from "./subagents.js";
 import { finishedUnseen, fromServer, markSeen, restoreSeen, seenSnapshot } from "./seen.js";
 import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
@@ -2476,6 +2477,7 @@ function Rail({ foldable = false, folded = false }) {
             title="Running now"
             aria-label=${busy > 0 ? `Running now, ${busy}` : "Running now"}
             aria-pressed=${board === "running"}
+            onPointerDown=${() => board !== "running" && prefetchRunning()}
             onClick=${toggleRunning}
         >
             <${Icon} name="pulse" size=${19} />

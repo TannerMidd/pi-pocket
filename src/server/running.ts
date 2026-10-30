@@ -316,13 +316,26 @@ export async function runningNow(app: PocketApp, user: User): Promise<RunningSes
     );
 }
 
-/** A repeat's next times after `next`, up to `UPCOMING` of them within `UPCOMING_MS`. */
-function upcomingOf(next: number, every: Repeat | undefined, zone: string): number[] {
-    const times = [next];
+/**
+ * A schedule's next times, kept until it goes out (its `next` moves), changes, or ends: the board asks every 2 seconds,
+ * and a clock repeat's times cost a time zone lookup each.
+ */
+const upcomingKept = new Map<string, { key: string; times: number[] }>();
 
+/** A repeat's next times after `next`, up to `UPCOMING` of them within `UPCOMING_MS`. */
+function upcomingOf(id: string, next: number, every: Repeat | undefined, zone: string): number[] {
     if (every === undefined) {
-        return times;
+        return [next];
     }
+
+    const key = `${next} ${zone} ${JSON.stringify(every)}`;
+    const kept = upcomingKept.get(id);
+
+    if (kept?.key === key) {
+        return kept.times;
+    }
+
+    const times = [next];
 
     let at = next;
 
@@ -335,6 +348,8 @@ function upcomingOf(next: number, every: Repeat | undefined, zone: string): numb
 
         times.push(at);
     }
+
+    upcomingKept.set(id, { key, times });
 
     return times;
 }
@@ -411,13 +426,24 @@ export async function runningBoard(app: PocketApp, user: User): Promise<RunningB
                     : { requestedBy: schedule.requestedBy }),
                 createdAt: schedule.createdAt,
                 runs: schedule.runs,
-                upcoming: upcomingOf(schedule.next, schedule.every, schedule.zone),
+                upcoming: upcomingOf(schedule.id, schedule.next, schedule.every, schedule.zone),
                 ...(held === undefined ? {} : { held }),
             });
         }
     }
 
     schedules.sort((a, b) => a.next - b.next);
+
+    // Schedules that ended (and those this person cannot see) keep no times: the next board makes them again.
+    if (upcomingKept.size > schedules.length * 2 + 64) {
+        const live = new Set(schedules.map((each) => each.id));
+
+        for (const id of upcomingKept.keys()) {
+            if (!live.has(id)) {
+                upcomingKept.delete(id);
+            }
+        }
+    }
 
     return { sessions, schedules, now: Date.now() };
 }
