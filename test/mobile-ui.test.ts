@@ -12,7 +12,7 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -1197,3 +1197,36 @@ test(
         assert.equal(requests.after, 2, "Refresh asks for the diff again");
     },
 );
+
+test("an attachment line with a note still shows the file's chip", real, async () => {
+    const id = await newSession(app);
+
+    await app.commands.configure(id, owner(app), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+    const original = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
+    const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+
+    writeFileSync(path, original);
+    await say(app, id, "look at this", [
+        { path, name: "photo.heic", mime: "image/heic", size: original.length },
+    ]);
+
+    await fresh();
+    await goTo(id);
+    await until(
+        async () =>
+            (
+                await inPage<string>(
+                    `return JSON.stringify(document.querySelector(".thumbs .chip")?.textContent ?? "")`,
+                )
+            ).includes("photo.heic"),
+        "the HEIC file's chip",
+    );
+    const chip = await inPage<string>(
+        `return JSON.stringify(document.querySelector(".thumbs .chip")?.textContent ?? "")`,
+    );
+
+    assert.match(chip, /photo\.heic/);
+    assert.doesNotMatch(chip, /Image:/);
+});

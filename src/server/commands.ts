@@ -15,7 +15,7 @@ import {
     type ModelThinkingLevel,
     type TextContent,
 } from "@earendil-works/pi-ai";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
+import { formatDimensionNote, resizeImage } from "@earendil-works/pi-coding-agent";
 import {
     type AgentChange,
     AgentDoc,
@@ -117,6 +117,8 @@ const IMAGE_TYPES = new Set([
 /** Photos that models and browsers cannot read: they go to the model as JPEG. */
 const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
 const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
+/** A type as the note names it: `image/jpeg` is JPEG. */
+const formatName = (mimeType: string): string => (mimeType.split("/")[1] ?? mimeType).toUpperCase();
 /** How many `@` mentioned files go along with a message, and how much of them. */
 const MAX_MENTIONED = 10;
 const MAX_MENTIONED_FILE = 100_000;
@@ -179,12 +181,15 @@ function entryIdOf(value: unknown): number {
     return id;
 }
 
+/** An image for the model, and the note for its attachment line when the model gets something else. */
+type ModelImage = { part: ImageContent; note?: string };
+
 /**
  * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
  * a conversation holds many, and then every request fails until they leave its context. A HEIC or HEIF photo is
  * converted to JPEG first, which models can read.
  */
-async function modelImage(path: string, mimeType: string): Promise<ImageContent> {
+async function modelImage(path: string, mimeType: string): Promise<ModelImage> {
     let bytes: Uint8Array = readFileSync(path);
     let type = mimeType;
 
@@ -201,7 +206,22 @@ async function modelImage(path: string, mimeType: string): Promise<ImageContent>
         throw new Error("it could not be made small enough for the model");
     }
 
-    return { type: "image", mimeType: image.mimeType, data: image.data };
+    const notes: string[] = [];
+
+    if (image.mimeType !== mimeType) {
+        notes.push(`[Image: shown to you as ${formatName(image.mimeType)}.]`);
+    }
+
+    const dimensions = formatDimensionNote(image);
+
+    if (dimensions !== undefined) {
+        notes.push(dimensions);
+    }
+
+    return {
+        part: { type: "image", mimeType: image.mimeType, data: image.data },
+        note: notes.length === 0 ? undefined : notes.join(" "),
+    };
 }
 
 /** A request's model, when it names one, must name a provider and a model id. */
@@ -788,10 +808,29 @@ export class Commands {
 
         app.spend.check(user, id);
 
-        const lines = attachments.map(
-            (file) =>
-                `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`,
-        );
+        // The images the model gets, by the attachment they came from: their notes go into the lines below.
+        const inline = new Map<number, ModelImage>();
+
+        if (model.input.includes("image")) {
+            for (const [index, file] of attachments.entries()) {
+                if (!IMAGE_TYPES.has(file.mime) || file.size > MAX_INLINE_IMAGE) {
+                    continue;
+                }
+
+                try {
+                    inline.set(index, await modelImage(file.path, file.mime));
+                } catch (error) {
+                    app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
+                }
+            }
+        }
+
+        const lines = attachments.map((file, index) => {
+            const line = `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`;
+            const note = inline.get(index)?.note;
+
+            return note === undefined ? line : `${line} ${note}`;
+        });
         // The heading whole, with files alone too: what reads the message splits it there.
         const written =
             lines.length === 0 ? text : `${text}${ATTACHMENTS_HEADING}${lines.join("\n")}`;
@@ -811,20 +850,8 @@ export class Commands {
             ),
         ];
 
-        for (const file of attachments) {
-            if (
-                !model.input.includes("image") ||
-                !IMAGE_TYPES.has(file.mime) ||
-                file.size > MAX_INLINE_IMAGE
-            ) {
-                continue;
-            }
-
-            try {
-                parts.push(await modelImage(file.path, file.mime));
-            } catch (error) {
-                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
-            }
+        for (const image of inline.values()) {
+            parts.push(image.part);
         }
 
         const content = parts.length === 1 ? body : parts;
@@ -1091,7 +1118,7 @@ export class Commands {
 
                 if (mime !== undefined) {
                     if (images && statSync(file).size <= MAX_INLINE_IMAGE) {
-                        parts.push(await modelImage(file, mime));
+                        parts.push((await modelImage(file, mime)).part);
                     }
 
                     continue;

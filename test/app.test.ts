@@ -449,7 +449,7 @@ test("a big pasted image goes to the model at most 2000 pixels a side", async ()
     assert.equal(image.data.readUInt32BE(20), 2000, "its height, from the PNG header");
 });
 
-/** A tiny HEIC or HEIF photo from libheif's test corpus (`fuzzing/data/corpus`): 64 or 32 pixels a side. */
+/** A file from `test/fixtures`. */
 function photo(name: string): Buffer {
     return readFileSync(new URL(`./fixtures/${name}`, import.meta.url));
 }
@@ -485,6 +485,57 @@ test("a HEIC or HEIF photo reaches the model as a JPEG, and the original stays",
         assert.equal(image.mimeType, "image/jpeg", `${each.mime} goes to the model as JPEG`);
         assert.equal(image.data.subarray(0, 3).toString("hex"), "ffd8ff", "JPEG bytes");
         assert.deepEqual(readFileSync(path), original, "the original stays in uploads");
+    }
+});
+
+test("an attachment line says when the model gets a resized or reformatted image", async () => {
+    const id = await newSession();
+
+    await app.commands.configure(id, owner(), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+
+    // `photo-large.heic` is a 3024x4032 photo from drewnoakes/metadata-extractor-images (free to use).
+    // The JPEGs are generated noise: `photo-large.jpg` is 2100x2100, `photo-small.jpg` is 64x64.
+    for (const each of [
+        { name: "photo-large.heic", mime: "image/heic" },
+        { name: "photo-large.jpg", mime: "image/jpeg" },
+        { name: "photo-small.jpg", mime: "image/jpeg" },
+    ]) {
+        const original = photo(each.name);
+        const path = join(app.workspace.uploadDirectory(id), each.name);
+
+        writeFileSync(path, original);
+        await say(id, `look at ${each.name}`, [
+            { path, name: each.name, mime: each.mime, size: original.length },
+        ]);
+
+        const history = await app.transcripts.history(id, Number.MAX_SAFE_INTEGER);
+        const user = history.findLast((entry) => entry.kind === "user")!;
+        const line = user.text.split("\n").find((each) => each.startsWith("- "))!;
+        const image = (await app.transcripts.entryImage(id, user.id, 0))!;
+
+        assert.equal(
+            image.mimeType,
+            each.name === "photo-large.heic" ? "image/png" : "image/jpeg",
+            `${each.name} goes to the model in the format the note gives`,
+        );
+
+        if (each.name === "photo-large.heic") {
+            assert.match(line, /\[Image: shown to you as PNG\.\]/);
+            assert.match(
+                line,
+                /\[Image: original 3024x4032, displayed at 1500x2000\. Multiply coordinates by 2\.02 to map to original image\.\]/,
+            );
+        } else if (each.name === "photo-large.jpg") {
+            assert.doesNotMatch(line, /shown to you as/);
+            assert.match(
+                line,
+                /\[Image: original 2100x2100, displayed at 2000x2000\. Multiply coordinates by 1\.05 to map to original image\.\]/,
+            );
+        } else {
+            assert.equal(line, `- ${path} (photo-small.jpg, image/jpeg, ${original.length} bytes)`);
+        }
     }
 });
 
