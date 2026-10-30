@@ -909,18 +909,21 @@ function Row({
                 }
                 ${held && html`<span class="rb-badge warn">Held</span>`}
                 ${!run && html`<span class="rb-badge">Idle</span>`}
+                ${
+                    steer &&
+                    run?.busy &&
+                    html`<button
+                        class="rb-stop"
+                        title="Stop the run"
+                        aria-label=${`Stop the run in ${row.title}`}
+                        onClick=${() => onStopRun(row.id)}
+                    >
+                        <${Icon} name="stop" size=${10} />
+                        <span>Stop</span>
+                    </button>`
+                }
             </span>
             </span>
-            ${
-                steer &&
-                run?.busy &&
-                html`<div class="rb-who-act">
-                    <button class="rb-stop" title="Stop the run" onClick=${() => onStopRun(row.id)}>
-                        <${Icon} name="stop" size=${12} />
-                        <span>Stop run</span>
-                    </button>
-                </div>`
-            }
         </div>
         <div class=${`rb-cell ${!working && scheduled ? "empty" : ""}`} role="cell">
             <span class="rb-cell-label">Now</span>

@@ -10386,7 +10386,7 @@ textarea.notes {
 .rb-thead,
 .rb-row {
     display: grid;
-    grid-template-columns: minmax(150px, 18%) minmax(0, 1.25fr) minmax(0, 1fr);
+    grid-template-columns: minmax(190px, 22%) minmax(0, 1.25fr) minmax(0, 1fr);
 }
 
 .rb-thead {
@@ -10453,28 +10453,33 @@ textarea.notes {
     }
 }
 
+/* Where it works, its badges, and Stop, on one line under the title, wrapping where the column is narrow. */
 .rb-who-meta {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
     min-width: 0;
 }
 
-.rb-who-meta,
-.rb-who-act {
+.rb-who-meta {
     padding-left: 16px;
 }
 
 .rb-who-path {
+    max-width: 100%;
     font: 11px var(--mono);
     color: var(--muted);
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .rb-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    align-items: center;
+    gap: 4px 6px;
 }
 
 .rb-badge {
@@ -10511,22 +10516,37 @@ textarea.notes {
     color: var(--warn);
 }
 
-.rb-who-act {
-    margin-top: 2px;
-}
-
+/* Stop sits with the badges, a pill of their size; its tap area reaches past its edges, as a thumb needs. */
 .rb-stop {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    min-height: 28px;
-    padding: 0 10px;
+    gap: 5px;
+    height: 20px;
+    padding: 0 8px;
     border: 1px solid var(--err-line);
-    border-radius: var(--r-row);
+    border-radius: var(--r-pill);
     background: var(--err-soft);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
+    line-height: 1;
     color: var(--err);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.rb-stop::after {
+    content: "";
+    position: absolute;
+    inset: -8px -4px;
+}
+
+@media (hover: hover) {
+    .rb-stop:hover {
+        background: var(--err);
+        color: var(--bg);
+    }
 }
 
 .rb-cell-label {
@@ -10974,40 +10994,10 @@ textarea.notes {
         border-top: 1px solid var(--hair);
     }
 
-    /* The head: the title with Stop at its end, then where it works and its badges on one line. */
+    /* The head: the title, then where it works, its badges, and Stop on one line. */
     .rb-row > .rb-who {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 6px 10px;
+        gap: 6px;
         background: var(--card);
-    }
-
-    .rb-who-title {
-        grid-column: 1;
-    }
-
-    .rb-who-meta {
-        grid-column: 1;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 4px 8px;
-    }
-
-    .rb-who-path {
-        overflow-wrap: normal;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
-    }
-
-    .rb-who-act {
-        grid-column: 2;
-        grid-row: 1 / span 2;
-        margin: 0;
-        padding: 0;
     }
 
     .rb-row > .rb-cell {
@@ -11049,10 +11039,15 @@ textarea.notes {
     }
 
     .rb-x,
-    .rb-x-space,
-    .rb-stop {
+    .rb-x-space {
         min-width: 36px;
         min-height: 36px;
+    }
+
+    .rb-stop {
+        height: 24px;
+        padding: 0 10px;
+        font-size: 12px;
     }
 
     .rb-bar {
