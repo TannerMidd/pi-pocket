@@ -16,7 +16,14 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    realpathSync,
+    unlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { after, before, mock, test } from "node:test";
@@ -440,6 +447,45 @@ test("a big pasted image goes to the model at most 2000 pixels a side", async ()
 
     assert.equal(image.mimeType, "image/png");
     assert.equal(image.data.readUInt32BE(20), 2000, "its height, from the PNG header");
+});
+
+/** A tiny HEIC or HEIF photo from libheif's test corpus (`fuzzing/data/corpus`): 64 or 32 pixels a side. */
+function photo(name: string): Buffer {
+    return readFileSync(new URL(`./fixtures/${name}`, import.meta.url));
+}
+
+test("a HEIC or HEIF photo reaches the model as a JPEG, and the original stays", async () => {
+    const id = await newSession();
+
+    await app.commands.configure(id, owner(), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+
+    const photos = [
+        { name: "photo.heic", fixture: "photo.heic", mime: "image/heic" },
+        { name: "photo.heif", fixture: "photo.heif", mime: "image/heif" },
+        { name: "burst.heic", fixture: "photo.heic", mime: "image/heic-sequence" },
+    ];
+
+    for (const each of photos) {
+        const original = photo(each.fixture);
+        const path = join(app.workspace.uploadDirectory(id), each.name);
+
+        writeFileSync(path, original);
+        await say(id, `look at ${each.name}`, [
+            { path, name: each.name, mime: each.mime, size: original.length },
+        ]);
+
+        const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
+        const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
+        const entries = await conversation.entries({}, 256, undefined, BACKGROUND_CONTEXT);
+        const user = entries.items.findLast((entry) => entry.kind === "pi.user")!;
+        const image = (await app.transcripts.entryImage(id, user.id as unknown as number, 0))!;
+
+        assert.equal(image.mimeType, "image/jpeg", `${each.mime} goes to the model as JPEG`);
+        assert.equal(image.data.subarray(0, 3).toString("hex"), "ffd8ff", "JPEG bytes");
+        assert.deepEqual(readFileSync(path), original, "the original stays in uploads");
+    }
 });
 
 test("long polling delivers the stream's events, resends until acknowledged, and waits for new ones", async () => {

@@ -39,6 +39,8 @@ export const TYPES: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
     ".woff2": "font/woff2",
     ".pdf": "application/pdf",
     ".txt": "text/plain; charset=utf-8",

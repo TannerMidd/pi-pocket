@@ -105,7 +105,17 @@ export interface SubmitRequest {
 }
 
 /** Attached images that also go to the model itself, when it takes images. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const IMAGE_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+]);
+/** Photos that models and browsers cannot read: they go to the model as JPEG. */
+const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
 const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
 /** How many `@` mentioned files go along with a message, and how much of them. */
 const MAX_MENTIONED = 10;
@@ -117,6 +127,8 @@ const IMAGE_MIME: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
 };
 const MAX_TITLE = 120;
 /** A title as stored: one line, so it cannot pass for more lines where it is quoted (PiP's lists, reports). */
@@ -169,10 +181,21 @@ function entryIdOf(value: unknown): number {
 
 /**
  * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
- * a conversation holds many, and then every request fails until they leave its context.
+ * a conversation holds many, and then every request fails until they leave its context. A HEIC or HEIF photo is
+ * converted to JPEG first, which models can read.
  */
 async function modelImage(path: string, mimeType: string): Promise<ImageContent> {
-    const image = await resizeImage(readFileSync(path), mimeType);
+    let bytes: Uint8Array = readFileSync(path);
+    let type = mimeType;
+
+    if (HEIC_TYPES.has(mimeType)) {
+        const { default: convert } = await import("heic-convert");
+
+        bytes = await convert({ buffer: bytes, format: "JPEG", quality: 0.92 });
+        type = "image/jpeg";
+    }
+
+    const image = await resizeImage(bytes, type);
 
     if (image === null) {
         throw new Error("it could not be made small enough for the model");
