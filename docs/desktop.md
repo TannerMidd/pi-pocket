@@ -79,6 +79,18 @@ The app chooses how much of an approval to show and whether to offer **Allow**, 
 - `{ type: "open", url }`: open this, such as a notification or a tray item that was clicked. Only addresses of the server's own origin open.
 - `{ type: "approve", id, allow }`: the person answered an approval in a notification. The page answers it with its own sign-in.
 
+## The window's buttons
+
+An app that hides its title bar, and shows Pi Pocket up to its window's top edge with the window's own buttons over it (close, minimize, zoom), tells the page where they are through the web's standard for it, the Window Controls Overlay (`navigator.windowControlsOverlay`). An installed web app with `"display_override": ["window-controls-overlay"]` does the same. The bridge is not needed for it.
+
+`web/window-controls.js` makes room only under the buttons, and only as much as they take; the rest of the layout keeps its whole height:
+
+- A bar under them (the session tabs, the conversation's top bar, a panel's, a viewer's) keeps what it holds beside them, and the window can be dragged by it.
+- A window without one (the sidebar on wide screens, an extension's page) starts below them. Tiled, its margin moves it, so the tiles' gap stays above it.
+- A strip beside the buttons, as wide as the windows that moved down, moves the window too. What floats over the app (sheets, the launcher, viewers, PiP) takes clicks there.
+
+On `<html>`, `data-window-controls` is `left` (macOS), `right` (Windows, Linux), or `none`, and `--controls-h` is how far down the buttons reach. What makes room has `data-under-controls`, `bar` or `push`, and `--controls-room`. The page sets `data-window-controls` before its first paint, so an app can tell that it makes its own room. For a page without it (an older Pi Pocket, a sign-in page), Pi Pocket GUI instead sets a top safe-area inset as tall as the buttons, which Pi Pocket's bars have long kept clear of on phones.
+
 ## Security
 
 The bridge is only as safe as the app that offers it. An app must:

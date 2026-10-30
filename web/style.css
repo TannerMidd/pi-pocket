@@ -1067,6 +1067,62 @@ kbd {
     display: none;
 }
 
+/*
+ * The window's own buttons over the page, in a desktop app or an installed app with its title bar hidden
+ * (`window-controls.js`): only what is under them makes room. A bar keeps its contents beside them, and the window can
+ * be dragged by it; a window without one starts below them, tiled by its margin (the tiles' gap stays above it), else
+ * by its padding, in its own color. Inline, so the app's own room (`--controls-room`) wins over a theme's padding.
+ */
+[data-under-controls="bar"] {
+    app-region: drag;
+}
+
+:root[data-window-controls="left"] [data-under-controls="bar"] {
+    padding-left: var(--controls-room) !important;
+}
+
+:root[data-window-controls="right"] [data-under-controls="bar"] {
+    padding-right: var(--controls-room) !important;
+}
+
+/* What is in a bar takes clicks and keys; the bar's empty room moves the window. */
+[data-under-controls="bar"] :is(button, a, input, select, textarea, [role="button"], [tabindex]) {
+    app-region: no-drag;
+}
+
+[data-under-controls="push"] {
+    padding-top: var(--controls-room) !important;
+}
+
+:root[data-tiling="on"] .layout > [data-under-controls="push"] {
+    padding-top: 0 !important;
+    margin-top: var(--controls-room);
+    height: auto;
+}
+
+/* The strip beside the buttons, over what starts below them: to move the window by. Under every layer of the app. */
+.window-drag {
+    position: fixed;
+    top: 0;
+    width: var(--drag-w);
+    height: var(--controls-h);
+    app-region: drag;
+    pointer-events: none;
+}
+
+:root[data-window-controls="left"] .window-drag {
+    left: 0;
+}
+
+:root[data-window-controls="right"] .window-drag {
+    right: 0;
+}
+
+/* Something over the app (a sheet's scrim, the launcher, a viewer, PiP) takes clicks under the strip too. */
+:is(.overlay, .launcher-overlay, .viewer, .lightbox, .pip-panel, .notices, .sheet-host > *) {
+    app-region: no-drag;
+}
+
 /* ─── Top bar ──────────────────────────────────────────────── */
 
 /*
