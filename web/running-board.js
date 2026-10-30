@@ -332,6 +332,10 @@ export function RunningBoard() {
             entry(schedule.session, schedule.sessionTitle).schedules.push(schedule);
         }
 
+        for (const each of byId.values()) {
+            each.cwd = cwds.get(each.id);
+        }
+
         return [...byId.values()].sort(
             (a, b) =>
                 (b.run?.approvals ?? 0) - (a.run?.approvals ?? 0) ||
@@ -339,7 +343,7 @@ export function RunningBoard() {
                 (b.run?.tasks.length ?? 0) - (a.run?.tasks.length ?? 0) ||
                 (a.schedules[0]?.next ?? Infinity) - (b.schedules[0]?.next ?? Infinity),
         );
-    }, [board]);
+    }, [board, cwds]);
 
     const needle = query.trim().toLowerCase();
     const matches = (each) =>
@@ -351,7 +355,11 @@ export function RunningBoard() {
     const schedules = board?.schedules ?? [];
     const chosen = schedules.find((each) => each.id === selected) ?? null;
     const colorOf = (id) =>
-        folderColor(board?.sessions.find((s) => s.id === id)?.cwd ?? cwds.get(id));
+        folderColor(
+            board?.sessions.find((s) => s.id === id)?.cwd ??
+                schedules.find((s) => s.session === id && s.sessionCwd)?.sessionCwd ??
+                cwds.get(id),
+        );
 
     const open = (id) => {
         closeRunning();
@@ -891,6 +899,8 @@ function Row({
     const held = row.schedules.some((each) => each.held);
     // On a phone an empty side gives its room to the other: a card says only what is there.
     const working = (run?.tasks.length ?? 0) > 0;
+    // Its folder from its run, or, idle, from its schedules or the session list.
+    const cwd = run?.cwd ?? row.schedules.find((each) => each.sessionCwd)?.sessionCwd ?? row.cwd;
     const scheduled = row.schedules.length > 0;
 
     return html`<div class=${`rb-row ${lit ? "on" : ""}`} role="row" data-row=${row.id}>
@@ -900,7 +910,7 @@ function Row({
                 <span class="rb-ellipsis">${row.title}</span>
             </button>
             <span class="rb-who-meta">
-            ${run?.cwd && html`<span class="rb-who-path">${shortPath(run.cwd)}</span>`}
+            ${cwd && html`<span class="rb-who-path" title=${cwd}>${shortPath(cwd)}</span>`}
             <span class="rb-badges">
                 ${run?.busy && html`<span class="rb-badge ok"><i></i>Busy</span>`}
                 ${

@@ -64,6 +64,8 @@ export type BoardSchedule = {
     /** The session it goes to. */
     session: number;
     sessionTitle: string;
+    /** The session's folder, for a session the board shows without a run. */
+    sessionCwd?: string;
     text: string;
     next: number;
     every?: Repeat;
@@ -497,6 +499,7 @@ export async function runningBoard(app: PocketApp, user: User): Promise<RunningB
                 id: schedule.id,
                 session: Number(id),
                 sessionTitle: title,
+                ...(meta.cwd === undefined ? {} : { sessionCwd: meta.cwd }),
                 text: schedule.text,
                 next: schedule.next,
                 ...(schedule.every === undefined
