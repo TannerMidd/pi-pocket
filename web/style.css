@@ -10414,8 +10414,14 @@ textarea.notes {
     }
 }
 
-.rb-who-path,
-.rb-badges,
+.rb-who-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.rb-who-meta,
 .rb-who-act {
     padding-left: 16px;
 }
@@ -10471,6 +10477,9 @@ textarea.notes {
 }
 
 .rb-stop {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     min-height: 28px;
     padding: 0 10px;
     border: 1px solid var(--err-line);
@@ -10564,6 +10573,14 @@ textarea.notes {
         background: var(--err-soft);
         color: var(--err);
     }
+}
+
+.rb-more {
+    min-height: 30px;
+    padding: 0 0 0 22px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
 }
 
 .rb-foot {
@@ -10814,8 +10831,53 @@ textarea.notes {
         margin: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
     }
 
+    /* "Coming up" and the range share the first line; what goes out next takes the whole second. */
+    .rb-tl-head h3 {
+        flex: 1;
+    }
+
+    .rb-tl-head .grow {
+        display: none;
+    }
+
+    .rb-tl-next {
+        order: 3;
+        flex-basis: 100%;
+    }
+
     .rb-tl-grid {
-        grid-template-columns: 40px minmax(0, 1fr);
+        grid-template-columns: 28px minmax(0, 1fr);
+    }
+
+    /* Each lane says whose it is: the session's name above its marks, held at the timeline's left as it pans. */
+    .rb-lane-label,
+    .rb-lane {
+        height: 40px;
+    }
+
+    .rb-lane .rb-pin,
+    .rb-lane .rb-runbar {
+        top: 28px;
+    }
+
+    .rb-lane-name {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        display: block;
+        width: max-content;
+        max-width: calc(100vw - 90px);
+        margin-top: 2px;
+        padding: 0 6px;
+        border-radius: 0 4px 4px 0;
+        background: var(--card);
+        font-size: 11px;
+        line-height: 15px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
     }
 
     .rb-lane-label {
@@ -10872,8 +10934,68 @@ textarea.notes {
         border-top: 1px solid var(--hair);
     }
 
+    /* The head: the title with Stop at its end, then where it works and its badges on one line. */
     .rb-row > .rb-who {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 6px 10px;
         background: var(--card);
+    }
+
+    .rb-who-title {
+        grid-column: 1;
+    }
+
+    .rb-who-meta {
+        grid-column: 1;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 8px;
+    }
+
+    .rb-who-path {
+        overflow-wrap: normal;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+
+    .rb-who-act {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        margin: 0;
+        padding: 0;
+    }
+
+    .rb-row > .rb-cell {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+
+    .rb-row > .rb-cell.empty {
+        display: none;
+    }
+
+    /* A task's line keeps its words: the spinner says it runs, so only a wait keeps its tag, and the time is narrow. */
+    .rb-task {
+        gap: 6px;
+        min-height: 36px;
+    }
+
+    .rb-status.running {
+        display: none;
+    }
+
+    .rb-elapsed {
+        min-width: 0;
+    }
+
+    .rb-x-space {
+        width: 0;
+        min-width: 0;
     }
 
     .rb-cell-label {

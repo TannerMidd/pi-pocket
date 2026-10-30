@@ -453,6 +453,7 @@ export function RunningBoard() {
                                                 row=${each}
                                                 now=${now}
                                                 steer=${steer}
+                                                phone=${phone}
                                                 color=${colorOf(each.id)}
                                                 lit=${row === each.id}
                                                 selected=${selected}
@@ -742,6 +743,7 @@ function Timeline({
                         (
                             lane,
                         ) => html`<div key=${lane.id} class=${`rb-lane ${row === lane.id ? "on" : ""}`}>
+                            ${phone && html`<span class="rb-lane-name">${lane.title}</span>`}
                             ${lane.marks}
                         </div>`,
                     )}
@@ -761,9 +763,31 @@ function Timeline({
     </section>`;
 }
 
-function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask, onStopRun }) {
+/** How many of a session's tasks a phone's card shows before "more". */
+const FOLDED = 5;
+
+function Row({
+    row,
+    now,
+    steer,
+    phone,
+    color,
+    lit,
+    selected,
+    onOpen,
+    onPick,
+    onStopTask,
+    onStopRun,
+}) {
     const run = row.run;
+    const [unfolded, setUnfolded] = useState(false);
+    const tasks = run?.tasks ?? [];
+    const shownTasks =
+        phone && !unfolded && tasks.length > FOLDED + 1 ? tasks.slice(0, FOLDED) : tasks;
     const held = row.schedules.some((each) => each.held);
+    // On a phone an empty side gives its room to the other: a card says only what is there.
+    const working = (run?.tasks.length ?? 0) > 0;
+    const scheduled = row.schedules.length > 0;
 
     return html`<div class=${`rb-row ${lit ? "on" : ""}`} role="row" data-row=${row.id}>
         <div class="rb-who" role="cell">
@@ -771,6 +795,7 @@ function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask
                 <span class="folder-mark" style=${`--folder:${color}`}></span>
                 <span class="rb-ellipsis">${row.title}</span>
             </button>
+            <span class="rb-who-meta">
             ${run?.cwd && html`<span class="rb-who-path">${shortPath(run.cwd)}</span>`}
             <span class="rb-badges">
                 ${run?.busy && html`<span class="rb-badge ok"><i></i>Busy</span>`}
@@ -781,19 +806,23 @@ function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask
                 ${held && html`<span class="rb-badge warn">Held</span>`}
                 ${!run && html`<span class="rb-badge">Idle</span>`}
             </span>
+            </span>
             ${
                 steer &&
                 run?.busy &&
                 html`<div class="rb-who-act">
-                    <button class="rb-stop" onClick=${() => onStopRun(row.id)}>Stop run</button>
+                    <button class="rb-stop" title="Stop the run" onClick=${() => onStopRun(row.id)}>
+                        <${Icon} name="stop" size=${12} />
+                        <span>Stop run</span>
+                    </button>
                 </div>`
             }
         </div>
-        <div class="rb-cell" role="cell">
+        <div class=${`rb-cell ${!working && scheduled ? "empty" : ""}`} role="cell">
             <span class="rb-cell-label">Now</span>
             ${
                 run && run.tasks.length > 0
-                    ? html`${run.tasks.map((task) => {
+                    ? html`${shownTasks.map((task) => {
                           const waiting =
                               task.status === "waiting" &&
                               run.approvals > 0 &&
@@ -812,7 +841,9 @@ function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask
                               <span class="rb-task-label">
                                   ${task.subagent && html`<span class="rb-agent">${task.subagent}</span> `}${task.label}
                               </span>
-                              <span class=${`rb-status ${task.status === "running" ? "ok" : waiting ? "warn" : ""}`}>
+                              <span
+                                  class=${`rb-status ${task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
+                              >
                                   ${task.status}
                               </span>
                               <span class="rb-elapsed">${task.since ? elapsed(now - task.since) : ""}</span>
@@ -831,6 +862,12 @@ function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask
                           </div>`;
                       })}
                       ${
+                          shownTasks.length < tasks.length &&
+                          html`<button class="rb-more" onClick=${() => setUnfolded(true)}>
+                              +${tasks.length - shownTasks.length} more
+                          </button>`
+                      }
+                      ${
                           (run.model || run.spent > 0) &&
                           html`<div class="rb-foot">
                               ${run.model && html`<span>${run.model}</span>`}
@@ -840,7 +877,7 @@ function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask
                     : html`<div class="rb-idle">Nothing running</div>`
             }
         </div>
-        <div class="rb-cell" role="cell">
+        <div class=${`rb-cell ${!scheduled && working ? "empty" : ""}`} role="cell">
             <span class="rb-cell-label">Schedule</span>
             ${
                 row.schedules.length > 0
