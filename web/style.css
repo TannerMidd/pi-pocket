@@ -10311,19 +10311,19 @@ textarea.notes {
     background: var(--muted);
 }
 
-.rb-mark.running {
+.rb-mark-running {
     background: var(--ok);
 }
 
-.rb-mark.scheduled {
+.rb-mark-scheduled {
     background: var(--accent);
 }
 
-.rb-mark.approval {
+.rb-mark-approval {
     background: var(--warn);
 }
 
-.rb-mark.held {
+.rb-mark-held {
     border-radius: 50%;
     background: var(--warn);
 }
@@ -10347,7 +10347,7 @@ textarea.notes {
 .rb-thead,
 .rb-row {
     display: grid;
-    grid-template-columns: minmax(150px, 20%) minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-columns: minmax(150px, 18%) minmax(0, 1.25fr) minmax(0, 1fr);
 }
 
 .rb-thead {
@@ -10652,7 +10652,7 @@ textarea.notes {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    width: 320px;
+    width: 300px;
 }
 
 .rb-panel {
@@ -10792,8 +10792,8 @@ textarea.notes {
     padding: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
 }
 
-/* Narrower than a sidebar and a wide matrix: what needs you and what is next go above the matrix, side by side. */
-@media (max-width: 1279px) and (min-width: 700px) {
+/* Narrower than a sidebar and a wide matrix: what needs you and what is next go under the matrix, side by side. */
+@media (max-width: 1439px) and (min-width: 700px) {
     .rb-body {
         flex-direction: column;
         align-items: stretch;
@@ -10801,7 +10801,6 @@ textarea.notes {
 
     .rb-side {
         position: static;
-        order: -1;
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         align-items: start;
@@ -10829,7 +10828,7 @@ textarea.notes {
         display: none;
     }
 
-    .rb-filters {
+    .board-legend.rb-filters {
         flex-wrap: nowrap;
         overflow-x: auto;
         padding: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));

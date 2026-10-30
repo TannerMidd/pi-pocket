@@ -254,7 +254,12 @@ export function RunningBoard() {
         };
 
         for (const run of board.sessions) {
-            entry(run.id, run.title).run = run;
+            // A scheduled message's task only sleeps until its time: the Schedule column shows it.
+            const tasks = run.tasks.filter((task) => task.kind !== "pocket.schedule");
+
+            if (tasks.length > 0 || run.busy || run.approvals > 0) {
+                entry(run.id, run.title).run = { ...run, tasks };
+            }
         }
 
         for (const schedule of board.schedules) {
@@ -369,10 +374,9 @@ export function RunningBoard() {
                 <div class="board-sub">
                     ${
                         board
-                            ? html`<b>${board.sessions.length}</b> at work ·
-                                  <b>${active}</b> running ·
-                                  <b>${schedules.length}</b> scheduled${
-                                      next && html` · next <b>${span(next.next - now)}</b>`
+                            ? html`<b>${board.sessions.length}</b> at work${" · "}<b>${active}</b>
+                                  running${" · "}<b>${schedules.length}</b> scheduled${
+                                      next && html`${" · "}next <b>${span(next.next - now)}</b>`
                                   }`
                             : "Looking"
                     }
@@ -424,7 +428,7 @@ export function RunningBoard() {
                                   aria-pressed=${filter === each.key}
                                   onClick=${() => setFilter(filter === each.key ? "all" : each.key)}
                               >
-                                  ${each.key !== "all" && html`<span class=${`rb-mark ${each.key}`}></span>`}
+                                  ${each.key !== "all" && html`<span class=${`rb-mark rb-mark-${each.key}`}></span>`}
                                   ${each.label}
                                   <span class="board-filter-count">${rows.filter(each.keep).length}</span>
                               </button>`,
@@ -850,8 +854,12 @@ function Row({ row, now, steer, color, lit, selected, onOpen, onPick, onStopTask
                               onClick=${() => onPick(schedule.id)}
                           >
                               <span class="rb-sched-text">${schedule.text}</span>
-                              <span class="rb-sched-time">
-                                  ${schedule.held ? "Held" : clock(schedule.next, schedule.zone, now)}
+                              <span class="rb-sched-time" title=${schedule.zone}>
+                                  ${
+                                      schedule.held
+                                          ? "Held"
+                                          : `${clock(schedule.next, schedule.zone, now)}${zoneName(schedule.zone, schedule.next) ? ` ${zoneName(schedule.zone, schedule.next)}` : ""}`
+                                  }
                               </span>
                               <span class="rb-sched-rule rb-ellipsis">
                                   ${schedule.repeat ? `↻ ${schedule.repeat}` : "once"}
