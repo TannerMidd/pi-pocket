@@ -340,7 +340,7 @@ export function HooksSheet() {
         ${
             list &&
             html`<p class="muted small">
-                Ask PiP to watch a repository, such as “watch acme/api: when CI fails on main, fix it”. It needs no address.
+                Ask PiP to watch a repository, such as “watch acme/api: when CI fails on main, fix it”, or “watch gitlab.com/group/project: when a pipeline fails, fix it”. It needs no address. A GitLab project needs a checkout on this machine first.
             </p>
             <p class="muted small">
                 ${list.base ? "" : `Services post to ${location.origin}, so they must be able to reach it: a tunnel's address works for GitHub. `}For GitHub: the repository's Settings → Webhooks → Add webhook; paste the address as the Payload URL and the secret as the Secret, choose application/json, and pick the events.

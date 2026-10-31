@@ -498,11 +498,14 @@ export default function createPip(host: PocketHost) {
     const repoWatch = defineTool({
         name: "repo_watch",
         description:
-            "Watch one of your person's GitHub repositories (gh must be able to push to it) and get a message, with the instructions you give, when something happens there: new issues, new pull requests, CI failing on a branch, releases, or @pi in a comment. Looks every few minutes. Actions: add (repo, events, instructions; optional label, assigned, branch, to), list, remove (id).",
+            "Watch one of your person's repositories, on GitHub or GitLab, and get a message, with the instructions you give, when something happens there: new issues, new pull requests, CI failing on a branch, releases, or @pi in a comment. The account must be able to push to it: gh for GitHub, GITLAB_TOKEN for GitLab. A GitLab project needs a checkout on this machine, because glab reads the project from the folder's remote. Looks every few minutes. Actions: add (repo, events, instructions; optional label, assigned, branch, to), list, remove (id).",
         parameters: Type.Object({
             action: Type.Union([Type.Literal("add"), Type.Literal("list"), Type.Literal("remove")]),
             repo: Type.Optional(
-                Type.String({ description: "add: owner/name, or the repository's address" }),
+                Type.String({
+                    description:
+                        "add: owner/name for github.com, host/owner/name for GitLab, or the repository's address",
+                }),
             ),
             events: Type.Optional(
                 Type.Array(Type.Union(EVENTS.map((event) => Type.Literal(event))), {
@@ -525,7 +528,7 @@ export default function createPip(host: PocketHost) {
             assigned: Type.Optional(
                 Type.Boolean({
                     description:
-                        "add: only issues and pull requests assigned to your person's GitHub account (mentions of @pi still come from any of them)",
+                        "add: only issues and pull requests assigned to your person's account, on GitHub or GitLab (mentions of @pi still come from any of them)",
                 }),
             ),
             branch: Type.Optional(
