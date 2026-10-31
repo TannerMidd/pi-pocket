@@ -542,7 +542,7 @@ export function MenuSheet({ places = true }) {
             ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
             ${item("Running now", () => openSheet({ type: "running" }), "everything Pi is doing")}
             ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
-            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub, other services")}
+            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub or GitLab, other services")}
             ${me?.role === "owner" && item("Providers", () => openSheet({ type: "providers" }))}
             ${modelRefreshAvailable() && item("Refresh models", refreshModels, store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers")}
             ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}

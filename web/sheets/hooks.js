@@ -217,6 +217,9 @@ export function HooksSheet() {
 
     return html`<${Sheet} title="Webhooks and watches" onClose=${closeSheet} wide=${true}>
         <p class="muted small">
+            A watch looks at a repository on GitHub or GitLab every few minutes: new issues, pull requests, CI failing, releases, or @pi in a comment.
+        </p>
+        <p class="muted small">
             Other services (GitHub, a deploy, a monitor) post to a webhook's address, and each post becomes a message to Pi in a session, or to PiP: your instructions, then what came.
         </p>
         ${
@@ -277,7 +280,7 @@ export function HooksSheet() {
                         From anyone: issues, PRs, and comments by people outside the repository too
                     </label>
                     <div class="muted small">
-                        ${anyone ? "Strangers' words reach Pi too, fenced as data." : "Off: posts about issues, PRs, and comments by people who cannot write to the repository are dropped (a 202 says so), and their words in other posts are left out. GitHub is asked who can write: gh must be able to push there."}
+                        ${anyone ? "Strangers' words reach Pi too, fenced as data." : "Off: posts about issues, PRs, and comments by people who cannot write to the repository are dropped (a 202 says so), and their words in other posts are left out. The service is asked who can write, and must be able to push there: gh for GitHub, GITLAB_TOKEN for GitLab."}
                     </div>`
                 }
                 ${
