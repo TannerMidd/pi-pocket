@@ -181,11 +181,13 @@ test("--host is where the server listens, whatever the access mode", () => {
     assert.equal(listenHost("custom", undefined), "127.0.0.1");
 });
 
-test("stale cleanup covers the port this run uses and the one the last run saved", () => {
-    // A killed run on --port 9000 left its mount pointing at 9000, so the next start on 8787 has to look for both.
-    assert.deepEqual(staleServePorts("local", 9000, 8787), [9000, 8787]);
-    assert.deepEqual(staleServePorts("local", undefined, 8787), [8787]);
-    assert.deepEqual(staleServePorts("lan", 8787, 8787), [8787]);
+test("stale cleanup covers only a mount this launcher made, whatever port this run uses", () => {
+    // A killed run on --port 9000 left its mount, and its receipt, pointing at 9000.
+    assert.deepEqual(staleServePorts("local", 9000), [9000]);
+    assert.deepEqual(staleServePorts("lan", 8787), [8787]);
+    assert.deepEqual(staleServePorts("custom", 8787), [8787]);
+    // No receipt: a mount at this run's port is the owner's own `tailscale serve`, as 0.27's docs suggested.
+    assert.deepEqual(staleServePorts("local", undefined), []);
     // In serve mode, prepareServe() made or adopted the mount for this run's port: nothing is stale.
-    assert.deepEqual(staleServePorts("tailscale-serve", 9000, 8787), []);
+    assert.deepEqual(staleServePorts("tailscale-serve", 9000), []);
 });

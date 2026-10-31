@@ -42,6 +42,10 @@ export type PortState =
 
 export interface ServeEvents {
     problem(line: string): void;
+    /** Persist ownership before a new mount can outlive this process. */
+    mountAttempt?(): void;
+    /** Forget ownership only after the mount is absent or its removal succeeds. */
+    mountRemoved?(): void;
 }
 
 export type ServeResult =
@@ -332,9 +336,10 @@ export class TailscaleServe {
         // `#published` follows what this run is responsible for. A mount command that timed out may still have been
         // applied by tailscaled, and nothing else can tell us whether it was, so an attempt counts before it runs. An
         // adopted mount is not this run's to remove: quitting leaves it where it is.
-        this.#published = !adopted;
-
         if (!adopted) {
+            this.#events.mountAttempt?.();
+            this.#published = true;
+
             // --set-path=/ keeps the mount to this one path, so removing it later cannot take another mount with it.
             const mounted = this.#run(
                 ["serve", "--bg", `--https=${SERVE_PORT}`, "--set-path=/", proxy],
@@ -383,6 +388,8 @@ export class TailscaleServe {
         const mount = now.ok ? mountAt(now.config, this.#dnsName, SERVE_PORT) : undefined;
 
         if (mount !== undefined && !sameLocalTarget(mount.Proxy, this.#port)) {
+            this.#events.mountRemoved?.();
+
             return;
         }
 
@@ -395,6 +402,8 @@ export class TailscaleServe {
             this.#events.problem(
                 `${removed.message} The tailnet may still point here; the next start takes the mount down or reuses it.`,
             );
+        } else {
+            this.#events.mountRemoved?.();
         }
     }
 
@@ -445,6 +454,8 @@ export function removeStaleServe(
 
         // Only a `/` of ours is ours to remove: the scoped `off` cannot take another mount or another path with it.
         if (mount === undefined || !ports.some((port) => sameLocalTarget(mount.Proxy, port))) {
+            events?.mountRemoved?.();
+
             return false;
         }
 
@@ -460,6 +471,8 @@ export function removeStaleServe(
 
             return false;
         }
+
+        events?.mountRemoved?.();
 
         return true;
     } catch (error) {

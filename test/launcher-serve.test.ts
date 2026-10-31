@@ -2,10 +2,23 @@
 // served, who already holds 443, and the address to open. The mount itself is exercised against a fake tailscale that a
 // test writes into a temp dir: no real tailscale is run and nothing here touches the network.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+    copyFileSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
     certificateProblem,
     parseTailscaleVersion,
@@ -998,5 +1011,162 @@ test("a mount left on a port this run no longer uses is still cleared", async (t
         ]);
     } finally {
         fake.restore();
+    }
+});
+
+test("a new mount records ownership before its CLI command and clears it after stop", () => {
+    const fake = fakeTailscale();
+    const lifecycle: string[] = [];
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, {
+            problem() {},
+            mountAttempt() {
+                assert.equal(
+                    fake.calls().some((line) => line.startsWith("serve --bg")),
+                    false,
+                );
+                lifecycle.push("recorded");
+            },
+            mountRemoved() {
+                lifecycle.push("removed");
+            },
+        });
+
+        assert.equal(serve.start().ok, true);
+        assert.deepEqual(lifecycle, ["recorded"]);
+        serve.stop();
+        assert.deepEqual(lifecycle, ["recorded", "removed"]);
+    } finally {
+        fake.restore();
+    }
+});
+
+test("an adopted mount neither records nor clears ownership", () => {
+    const fake = fakeTailscale({ serve: mounted() });
+    const lifecycle: string[] = [];
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, {
+            problem() {},
+            mountAttempt() {
+                lifecycle.push("recorded");
+            },
+            mountRemoved() {
+                lifecycle.push("removed");
+            },
+        });
+
+        assert.equal(serve.start().ok, true);
+        serve.stop();
+        assert.deepEqual(lifecycle, []);
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a failed cleanup preserves ownership for a later retry", () => {
+    const fake = fakeTailscale({
+        serve: mounted(),
+        offFailure: { status: 1, error: "serve config denied" },
+    });
+    let forgotten = false;
+
+    try {
+        assert.equal(
+            removeStaleServe(fake.binary, [LOCAL_PORT], {
+                problem() {},
+                mountRemoved() {
+                    forgotten = true;
+                },
+            }),
+            false,
+        );
+        assert.equal(forgotten, false);
+    } finally {
+        fake.restore();
+    }
+});
+
+/**
+ * The launcher itself, copied beside a stub server that only says it is ready, started in `local` mode on `port` with
+ * the fake tailscale on its PATH. It runs until the stub starts, which is after the stale mount cleanup, then quits.
+ */
+async function launchLocal(data: string, port: number): Promise<void> {
+    const repo = fileURLToPath(new URL("..", import.meta.url));
+    const root = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-"));
+    const started = join(root, "started");
+
+    try {
+        mkdirSync(join(root, "src", "launcher"), { recursive: true });
+        mkdirSync(join(root, "src", "server"));
+
+        for (const file of readdirSync(join(repo, "src", "launcher"))) {
+            copyFileSync(join(repo, "src", "launcher", file), join(root, "src", "launcher", file));
+        }
+
+        for (const file of ["lock.ts", "update-state.ts"]) {
+            copyFileSync(join(repo, "src", "server", file), join(root, "src", "server", file));
+        }
+
+        symlinkSync(join(repo, "node_modules"), join(root, "node_modules"));
+        writeFileSync(
+            join(root, "src", "server", "main.ts"),
+            `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(started)}, "");
+process.send?.({ type: "ready" });
+process.on("disconnect", () => process.exit(0));
+setInterval(() => {}, 60_000);
+`,
+        );
+
+        const launcher = spawn(
+            process.execPath,
+            [
+                join(root, "src", "launcher", "main.ts"),
+                ...["--access", "local", "--port", String(port), "--data", data, "--cwd", root],
+            ],
+            { stdio: "ignore", env: { ...process.env, NO_COLOR: "1" } },
+        );
+        const exited = once(launcher, "exit");
+
+        for (let waited = 0; !existsSync(started); waited += 50) {
+            assert.ok(waited < 15_000, "the launcher did not start its server");
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+
+        launcher.kill("SIGTERM");
+        await exited;
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+}
+
+test("a local start leaves the owner's own mount at its port alone, and takes down one it made", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // 0.27's docs had owners run `tailscale serve` in front of `--access local` themselves.
+    const fake = fakeTailscale({ serve: mounted() });
+    const data = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-data-"));
+
+    try {
+        await launchLocal(data, LOCAL_PORT);
+        assert.equal(
+            fake.calls().some((line) => line.endsWith(" off")),
+            false,
+        );
+
+        // A run that made its mount and was killed left a receipt: the next start takes that mount down.
+        writeFileSync(join(data, "serve-mount.json"), `${JSON.stringify({ port: LOCAL_PORT })}\n`);
+        await launchLocal(data, LOCAL_PORT);
+        assert.ok(fake.calls().includes("serve --https=443 --set-path=/ off"));
+        assert.equal(existsSync(join(data, "serve-mount.json")), false);
+    } finally {
+        fake.restore();
+        rmSync(data, { recursive: true, force: true });
     }
 });
