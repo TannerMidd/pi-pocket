@@ -234,9 +234,9 @@ function useBoard() {
             })
             .then(
                 (data) => {
-                    lastBoard = data;
-
+                    // A late answer to an ask that a newer one passed is dropped, here and for the next opening.
                     if (n === asked.current) {
+                        lastBoard = data;
                         setBoard(data);
                         setError(null);
                     }
