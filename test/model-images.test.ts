@@ -21,10 +21,11 @@ test("an image prepared at upload is the one a message sends, without making it 
         prepareModelImage(path, "image/png", PNG.length);
         const first = modelImage(path, "image/png");
 
+        assert.equal((await first).mimeType, "image/png");
         // The file is gone: only the prepared image can answer.
         rmSync(path);
         assert.equal(modelImage(path, "image/png"), first);
-        assert.equal((await first).mimeType, "image/png");
+        assert.equal(await modelImage(path, "image/png"), await first);
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
