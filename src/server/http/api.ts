@@ -23,7 +23,7 @@ import type { User } from "../config.ts";
 import { MAX_AVATAR, readAvatar } from "../avatars.ts";
 import { HttpError } from "../errors.ts";
 import { desktopTheme, wallpaperFile } from "../omarchy.ts";
-import { runningNow } from "../running.ts";
+import { runningBoard, runningNow } from "../running.ts";
 import { serveImage } from "./assets.ts";
 import { browserRoutes } from "./browser-routes.ts";
 import { conversationRoutes } from "./conversation-routes.ts";
@@ -509,6 +509,10 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             return serveImage(request, response, file);
+        }
+
+        if (first === "running" && second === "board" && method === "GET") {
+            return json(response, 200, await runningBoard(app, user));
         }
 
         if (first === "running" && method === "GET") {

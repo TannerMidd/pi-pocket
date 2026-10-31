@@ -638,7 +638,7 @@ function AgentRows({ agents, compact }) {
                 title="See them all on the subagents board"
                 onClick=${() =>
                     store.set({
-                        board: true,
+                        board: "subagents",
                         drawer: false,
                         page: null,
                         boardFocus: more[0].conversationId,
