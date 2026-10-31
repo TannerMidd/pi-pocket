@@ -414,3 +414,137 @@ test("a session that started others shows what counts against its limit: theirs 
 
     assert.equal(row?.spent, 0.75);
 });
+
+const stop = (id: ConversationId, to: string, key: string = crypto.randomUUID()) =>
+    app.linkedSessions.stop(id, { to }, key);
+const archive = (
+    id: ConversationId,
+    to: string,
+    archived?: boolean,
+    key: string = crypto.randomUUID(),
+) => app.linkedSessions.archive(id, { to, ...(archived === undefined ? {} : { archived }) }, key);
+
+test("stop ends a linked session's run and does nothing when it is idle", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1 && !app.isBusy(target), "the first answer");
+    assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
+    assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
+
+    // A shell that waits keeps the run going, so stop has a run to end.
+    const hanging = scriptedModel((request) => {
+        const { text } = lastText(request as never);
+
+        if (text.includes("WAIT_HERE")) {
+            return fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 30" })], {
+                stopReason: "toolUse",
+            });
+        }
+
+        return fauxAssistantMessage([fauxText("Done.")]);
+    });
+    const isolated = await openApp(hanging, join(root, "stop-data"));
+
+    try {
+        const origin = await newSession(isolated);
+
+        await say(isolated, origin, "hello");
+        const { session, address: to } = await isolated.linkedSessions.start(
+            origin,
+            { message: "WAIT_HERE" },
+            "hang",
+        );
+
+        await until(() => isolated.isBusy(session), "the run to start");
+        assert.deepEqual(await isolated.linkedSessions.stop(origin, { to }, "stop-once"), {
+            busy: true,
+        });
+        await until(() => !isolated.isBusy(session), "the run to stop");
+        // The same key stops nothing again, and still says the first call found it working.
+        assert.deepEqual(await isolated.linkedSessions.stop(origin, { to }, "stop-once"), {
+            busy: true,
+        });
+        assert.equal(isolated.isBusy(session), false);
+    } finally {
+        await isolated.close();
+    }
+});
+
+test("archive hides a linked session and a repeat does not bring it back", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1, "the first message");
+    const first = await archive(id, address, undefined, "archive-once");
+
+    assert.deepEqual(first, { archived: true, repeating: 0 });
+    assert.equal(app.sessionMeta(target)?.archived, true);
+    assert.equal(
+        (await app.linkedSessions.list(id)).find((each) => each.address === address)?.archived,
+        true,
+    );
+    // Someone brings it back. The repeated key still returns the first result and leaves it back.
+    await app.commands.updateSession(target, owner(app), { archived: false });
+    assert.deepEqual(await archive(id, address, undefined, "archive-once"), first);
+    assert.equal(app.sessionMeta(target)?.archived, false);
+
+    assert.deepEqual(await archive(id, address, false, "unarchive"), {
+        archived: false,
+        repeating: 0,
+    });
+    await archive(id, address, true, "hide");
+    assert.deepEqual(await archive(id, address, false, "show"), { archived: false, repeating: 0 });
+    assert.equal(app.sessionMeta(target)?.archived, false);
+});
+
+test("a linked session cannot stop or archive a session outside its team", async () => {
+    const id = await source();
+    const other = await source();
+    const { session: target, address } = await start(id);
+    const stranger = await start(other);
+
+    await until(async () => (await sent(target)) === 1, "the first message");
+    const [child] = await app.linkedSessions.list(id);
+
+    // The address belongs to the source. The linked session does not have it, and neither does another team.
+    await assert.rejects(stop(target, address), /No linked session has that address/);
+    await assert.rejects(archive(target, address), /No linked session has that address/);
+    await assert.rejects(stop(other, child!.address), /No linked session has that address/);
+    await assert.rejects(archive(other, child!.address), /No linked session has that address/);
+    await assert.rejects(stop(id, stranger.address), /No linked session has that address/);
+    await assert.rejects(archive(id, stranger.address), /No linked session has that address/);
+    assert.notEqual(app.sessionMeta(target)?.archived, true);
+    assert.notEqual(app.sessionMeta(stranger.session)?.archived, true);
+    assert.notEqual(app.sessionMeta(other)?.archived, true);
+});
+
+test("stop and archive are refused in plan mode, past a spend limit, or without the turn", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1 && !app.isBusy(target), "the first answer");
+
+    const refused = async (why: RegExp) => {
+        await assert.rejects(stop(id, address), why);
+        await assert.rejects(archive(id, address), why);
+        assert.notEqual(app.sessionMeta(target)?.archived, true);
+    };
+
+    await app.commands.setPlan(id, owner(app), true);
+    await refused(/plan mode/);
+    await app.commands.setPlan(id, owner(app), false);
+
+    await app.spend.setSessionBudget(owner(app), id, 0.01);
+    await recordCost(app, id, 0.02);
+    await until(() => app.spend.sessionSpent(id) === 0.02, "the spend");
+    await refused(/spend limit/);
+    await app.spend.setSessionBudget(owner(app), id, null);
+
+    const driver = app.config.addUser("Stop driver", "guest").user;
+
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, id), { on: true, driver: driver.id, asks: [] });
+    }, context);
+    await refused(/driving/);
+});

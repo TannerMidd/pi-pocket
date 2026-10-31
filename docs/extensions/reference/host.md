@@ -391,7 +391,7 @@ readonly linkedSessions: LinkedSessions;
 
 Since 0.14.0 · Experimental
 
-Lets a tool start sessions from the session that it runs in, and send messages between them, as Agent Teams does. A linked session is an ordinary session. [Starting and messaging sessions](../linked-sessions.md) tells you how they work, what they cannot do, and how to call them.
+Lets a tool start sessions from the session that it runs in, send messages between them, and stop or archive one, as Agent Teams does. A team or orchestration extension uses the same calls. A linked session is an ordinary session. [Starting and messaging sessions](../linked-sessions.md) tells you how they work, what they cannot do, and how to call them.
 
 Each call acts as the person that Pi works for in `source`, and that person's checks apply. Give each call a `key` that stays the same when the call runs again, such as `${api.taskId}:${api.callId}`. A second call with the same `key` does nothing again: it returns what the first call returned.
 
@@ -430,6 +430,34 @@ Since 0.14.0 · Experimental
 Sends `message` to the linked session at the address `to`. Without `steer`, the message is a follow-up. With `steer: true`, the session gets it at its next pause. `send` returns when the session takes the message, not when it answers.
 
 The session that gets the message reads it between tags. Words before it say that the agent of another session wrote it, and that it is a request, not a person's order. They also give the address to reply to.
+
+#### `linkedSessions.stop`
+
+```ts
+stop(
+    source: ConversationId,
+    request: { to: string },
+    key: string,
+): Promise<{ busy: boolean }>;
+```
+
+Since 0.28.0 · Experimental
+
+Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When the session is idle, this changes nothing. `busy` is true when it was working. It needs the same access as `send`, and it reaches only a session of this team. An older Pi Pocket has no `stop`: check for it, and set `minPocket` to `0.28.0` when you need it.
+
+#### `linkedSessions.archive`
+
+```ts
+archive(
+    source: ConversationId,
+    request: { to: string; archived?: boolean },
+    key: string,
+): Promise<{ archived: boolean; repeating: number }>;
+```
+
+Since 0.28.0 · Experimental
+
+Archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives. `archived` in the result says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them. It needs the same access as `send`. An older Pi Pocket has no `archive`.
 
 #### `linkedSessions.list`
 

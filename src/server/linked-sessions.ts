@@ -59,7 +59,8 @@ function tooLong(message: string): void {
     }
 }
 
-type CallRecord = { conversationId?: number; by?: string; at: number };
+type CallOutcome = { busy: boolean } | { archived: boolean; repeating: number };
+type CallRecord = { conversationId?: number; by?: string; at: number; result?: CallOutcome };
 
 /** The record of call `token` in `calls`, made when there is none, the oldest pruned to make room. */
 function recordOf(
@@ -849,6 +850,116 @@ export class LinkedSessions implements LinkedSessionsApi {
                 record.by ??= user.id;
             }, context),
         );
+    }
+
+    /**
+     * Stop the run of the linked session at address `to`. The same checks as `send`: the person Pi works for, and a
+     * session of this team. A repeat with the same `key` stops nothing again, and returns whether it was working then.
+     */
+    async stop(
+        source: ConversationId,
+        request: { to: string },
+        key: string,
+    ): Promise<{ busy: boolean }> {
+        const app = this.#app;
+        const { id, user, token, repeat } = await this.#addressed(source, request.to, key);
+
+        if (repeat !== undefined && "busy" in repeat) {
+            return repeat;
+        }
+
+        await this.#maySend(source, user);
+        const busy = app.isBusy(id);
+
+        await app.commands.abort(id, user);
+        await this.#remember(source, token, id, user, { busy });
+
+        return { busy };
+    }
+
+    /**
+     * Archive the linked session at address `to`, or bring it back. The same checks as `send`. A repeat with the same
+     * `key` changes nothing again, and returns the state the first call left.
+     */
+    async archive(
+        source: ConversationId,
+        request: { to: string; archived?: boolean },
+        key: string,
+    ): Promise<{ archived: boolean; repeating: number }> {
+        const app = this.#app;
+        const { id, user, token, repeat } = await this.#addressed(source, request.to, key);
+        const archived = request.archived !== false;
+
+        if (repeat !== undefined && "archived" in repeat) {
+            return repeat;
+        }
+
+        await this.#maySend(source, user);
+        const { repeating } = await app.commands.updateSession(id, user, { archived });
+        const result = { archived: app.sessionMeta(id)?.archived === true, repeating };
+
+        await this.#remember(source, token, id, user, result);
+
+        return result;
+    }
+
+    /**
+     * The linked session at address `to`, as `send` finds it: the person Pi works for, a session of this team, and
+     * whether this `key` already acted on it.
+     */
+    async #addressed(source: ConversationId, to: string, key: string) {
+        const app = this.#app;
+        const peers =
+            (await app.harness.snapshot(LinkedSessionPeersDoc, source, context))?.peers ?? {};
+        const target = Object.hasOwn(peers, to) ? peers[to] : undefined;
+
+        if (target === undefined || target === Number(source)) {
+            throw new HttpError(404, "No linked session has that address here.");
+        }
+
+        const token = callKey(source, key);
+        const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
+            ?.items[token];
+        const user = this.#person(source, previous?.by);
+
+        app.requireSteer(user);
+
+        if (!this.#family(source, user).some((each) => each.id === target)) {
+            throw new HttpError(
+                404,
+                "That session is not linked here, or not shared with the person Pi works for.",
+            );
+        }
+
+        return {
+            id: target as unknown as ConversationId,
+            user,
+            token,
+            repeat: previous?.conversationId === target ? previous.result : undefined,
+        };
+    }
+
+    /** Remember that `token` acted on `target`, and what it returned, so a repeat finds both. */
+    async #remember(
+        source: ConversationId,
+        token: string,
+        target: ConversationId,
+        user: User,
+        result: CallOutcome,
+    ): Promise<void> {
+        const app = this.#app;
+
+        await app.harness.commit(async (tx) => {
+            const record = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now());
+
+            if (record.conversationId !== undefined && record.conversationId !== Number(target)) {
+                throw new HttpError(409, "This call already refers to another linked session.");
+            }
+
+            record.conversationId = Number(target);
+            record.by ??= user.id;
+            record.result = result;
+        }, context);
     }
 
     /**

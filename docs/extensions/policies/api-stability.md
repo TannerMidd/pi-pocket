@@ -45,7 +45,7 @@ These members are public:
 - `roleOf(personId)` (experimental, since 0.27.0)
 - `skillPaths()`, `skills(cwd)`
 - `heldBack(conversationId)`, `onLimitsChanged(listener)`
-- `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental))
+- `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental)); `stop`, `archive` (experimental, since 0.28.0)
 - `text`: `quoted`, `defang`
 - `thinkingLevels`
 - `fetchPublic(url, init)` (experimental, since 0.20.0)
