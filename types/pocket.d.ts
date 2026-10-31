@@ -1059,6 +1059,41 @@ export interface WebSession {
 }
 
 /**
+ * Committed usage counters, not estimates of the next request.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface UsageTotals {
+    /** Stored assistant responses; excludes requests with no response entry. */
+    readonly requests: number;
+    /** Uncached input tokens reported by providers. */
+    readonly input: number;
+    /** Input tokens read from a prompt cache. */
+    readonly cacheRead: number;
+    /** Input tokens written to a prompt cache. */
+    readonly cacheWrite: number;
+    /** Output tokens, including reasoning when the provider includes it. */
+    readonly output: number;
+    /** Reported reasoning tokens; absent when none were reported. Do not add to output. */
+    readonly reasoning?: number;
+    /** Estimated cost in US dollars, as core records it. */
+    readonly cost: number;
+    /** Input + cacheRead + cacheWrite of the newest stored assistant response. */
+    readonly lastPrompt: number;
+}
+
+/**
+ * Own usage and sums for visible conversations started from the source, at any depth.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface ConversationUsage {
+    readonly own: UsageTotals;
+    /** Excludes the source. lastPrompt sums each child's lastPrompt; count includes unused children. */
+    readonly children: UsageTotals & { readonly count: number };
+}
+
+/**
  * A request whose named path parameter resolved to an authorized conversation.
  * @since 0.16.0
  */
@@ -1079,6 +1114,13 @@ export interface ConversationWebRequest extends WebRequest {
      * @since 0.16.0
      */
     readonly linkedSessions: HumanLinkedSessions;
+    /**
+     * Read committed usage for the bound source (or a visible conversation id) and its visible descendants.
+     * Ends with this request. No text, entries, or session ids are returned.
+     * @since 0.28.0
+     * @experimental
+     */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**

@@ -579,6 +579,24 @@ export interface WebSession {
     readonly updatedAt: number;
 }
 
+/** Committed usage counters. Experimental, since 0.28.0. */
+export interface UsageTotals {
+    requests: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+    reasoning?: number;
+    cost: number;
+    lastPrompt: number;
+}
+
+/** A source's own usage and the sum for its visible descendants. Experimental, since 0.28.0. */
+export interface ConversationUsage {
+    readonly own: Readonly<UsageTotals>;
+    readonly children: Readonly<UsageTotals> & { readonly count: number };
+}
+
 /** A route request whose named path parameter resolved to a visible conversation. */
 export interface ConversationWebRequest extends WebRequest {
     readonly conversation: {
@@ -589,6 +607,8 @@ export interface ConversationWebRequest extends WebRequest {
         readonly thinkingLevel: ModelThinkingLevel;
     };
     readonly linkedSessions: HumanLinkedSessions;
+    /** Read the source's usage and visible descendants. Experimental, since 0.28.0. */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**
