@@ -22,7 +22,7 @@ import type { ConversationUsage, ConversationWebRequest } from "../src/server/ho
 
 let app: App;
 let server: Server;
-const base = "http://127.0.0.2:9521/api/x/usage";
+let base = "";
 const seen = globalThis as unknown as {
     usageRequest?: ConversationWebRequest;
     usageGate?: Promise<void>;
@@ -57,9 +57,10 @@ export default (_host, web) => {
     app = await openApp(scriptedModel(), data);
     await app.setExtensionEnabled(owner(app), "usage.ts", true);
     server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.2", port: 9521 }, restart: () => {} }),
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
-    await new Promise<void>((resolve) => server.listen(9521, "127.0.0.2", resolve));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/usage`;
 });
 
 after(async () => {
@@ -330,4 +331,30 @@ test("usage rechecks access after awaited reads and expires with the route", asy
 
     await read(source);
     await assert.rejects(seen.usageRequest!.conversationUsage(), /request has ended/);
+});
+
+test("a failed request with no usage keeps the prompt before it, and a new response counts on the next read", async () => {
+    const id = await newSession(app);
+
+    await response(id, 10);
+    assert.equal((await read(id)).own.lastPrompt, 60);
+    // A request that failed before the provider answered: an assistant entry with no usage.
+    await response(id, 0);
+    assert.deepEqual(
+        { requests: (await read(id)).own.requests, lastPrompt: (await read(id)).own.lastPrompt },
+        { requests: 2, lastPrompt: 60 },
+    );
+    await response(id, 20);
+    assert.deepEqual(
+        { requests: (await read(id)).own.requests, lastPrompt: (await read(id)).own.lastPrompt },
+        { requests: 3, lastPrompt: 120 },
+    );
+});
+
+test("a subagent started after a read counts on the next one", async () => {
+    const source = await newSession(app);
+
+    assert.equal((await read(source)).children.count, 0);
+    await response(await child(source), 5);
+    assert.equal((await read(source)).children.count, 1);
 });
