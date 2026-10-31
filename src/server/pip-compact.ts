@@ -86,6 +86,7 @@ const OWN_TOOLS = new Set([
     "schedule",
     "memory",
     "artifact",
+    // Not a tool since 0.28.0: PiP's earlier notes still hold its results.
     "artifact_inline",
 ]);
 

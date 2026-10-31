@@ -120,6 +120,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "edit",
     "bash",
     "artifact",
+    // Not a tool since 0.28.0, but kept: old sessions hold its calls, and a drop-in must not take the name (`legacyInline`).
     "artifact_inline",
     "browser",
     "subagent",

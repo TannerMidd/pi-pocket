@@ -178,6 +178,16 @@ test("only PiP has PiP's tools, and PiP has none that change files or run comman
 
     assert.ok(sessionTools.includes("bash"));
     assert.ok(!sessionTools.includes("sessions"), "a session has no PiP tools");
+    // PiP's panel draws no cards: its artifact tool has no inline, a session's has.
+    const inlineOf = async (conversation: ConversationId) =>
+        (
+            (await (await app.conversation(conversation)).agent(context)).tools.find(
+                (each) => each.name === "artifact",
+            )?.parameters as unknown as { properties: Record<string, unknown> }
+        ).properties.inline;
+
+    assert.equal(await inlineOf(id), undefined);
+    assert.notEqual(await inlineOf(session), undefined);
     assert.ok(
         !(await (await app.conversation(session)).agent(context)).extensions.some(
             (extension) => extension.name === PIP_EXTENSION,
