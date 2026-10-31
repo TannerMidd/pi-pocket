@@ -786,10 +786,9 @@ function Timeline({
     return html`<section class="rb-timeline" data-part="running-timeline" aria-label="Schedule timeline">
         <div class="rb-tl-head">
             <h3>Coming up</h3>
-            <span class="rb-tl-next">
-                ${next ? html`Next: <b>${next.text}</b> · ${relative(next.next, now)}` : "Nothing scheduled"}
+            <span class="rb-tl-next" title=${next ? `Next: ${next.text}` : ""}>
+                ${next ? next.text : "Nothing scheduled"}
             </span>
-            <span class="grow"></span>
             ${
                 !phone &&
                 html`<span class="rb-legend" aria-hidden="true">

@@ -9987,9 +9987,9 @@ textarea.notes {
     overflow: hidden;
 }
 
+/* One line: the title, what goes out next (as much as fits), the legend, and the range. */
 .rb-tl-head {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: 6px 12px;
     padding: 8px 10px 8px 14px;
@@ -9997,6 +9997,7 @@ textarea.notes {
 }
 
 .rb-tl-head h3 {
+    flex: none;
     margin: 0;
     font-size: 13px;
     font-weight: 600;
@@ -10004,6 +10005,7 @@ textarea.notes {
 }
 
 .rb-tl-next {
+    flex: 1;
     min-width: 0;
     font-size: 12px;
     color: var(--muted);
@@ -10012,12 +10014,8 @@ textarea.notes {
     text-overflow: ellipsis;
 }
 
-.rb-tl-next b {
-    font-weight: 500;
-    color: var(--text);
-}
-
 .rb-legend {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -10046,6 +10044,7 @@ textarea.notes {
 }
 
 .rb-range {
+    flex: none;
     align-self: center;
 }
 
@@ -10888,20 +10887,6 @@ textarea.notes {
 @media (max-width: 699px) {
     .rb-timeline {
         margin: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
-    }
-
-    /* "Coming up" and the range share the first line; what goes out next takes the whole second. */
-    .rb-tl-head h3 {
-        flex: 1;
-    }
-
-    .rb-tl-head .grow {
-        display: none;
-    }
-
-    .rb-tl-next {
-        order: 3;
-        flex-basis: 100%;
     }
 
     .rb-tl-grid {
