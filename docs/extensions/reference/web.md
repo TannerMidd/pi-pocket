@@ -365,16 +365,16 @@ interface UsageTotals {
 
 Since 0.28.0 · Experimental
 
-- `requests`: the number of stored assistant responses owned by this conversation, including error or aborted responses. It counts responses, not provider retries. Requests with no assistant entry, such as compaction attempts and cache-keeper warm requests, are not counted.
+- `requests`: the number of stored assistant responses owned by this conversation, including error or aborted responses. Pi's own retry after an error stores a response of its own, so it counts. Requests with no assistant entry, such as compaction attempts and cache-keeper warm requests, are not counted.
 - `input`: reported uncached input tokens, summed across requests.
 - `cacheRead`: reported input tokens read from a prompt cache.
 - `cacheWrite`: reported input tokens written to a prompt cache, including any 1-hour subset. That subset is not added twice.
 - `output`: reported output tokens, including any separately reported reasoning tokens.
 - `reasoning`: the sum of separately reported reasoning tokens. It is absent when none were reported, and can be 0 when a provider reports 0. Do not add it to `output`.
 - `cost`: estimated US dollars from core's usage ledger, not a provider invoice. It includes model and tool usage, as core's spend does.
-- `lastPrompt`: `input + cacheRead + cacheWrite` of the newest stored assistant response, by entry id. It is 0 without a response. It measures the last request, not the next request's context after a reset or compaction.
+- `lastPrompt`: `input + cacheRead + cacheWrite` of the newest stored assistant response that reports any of them, by entry id: a failed request with no usage leaves the one before. It is 0 without such a response. It measures the last request, not the next request's context after a reset or compaction.
 
-Token and cost totals come from core's `pi.usage` ledger. They include compaction and auxiliary requests recorded there, even when those requests have no response entry. Tool-reported usage counts too. A fork starts its own ledger; inherited responses do not count toward `requests` or `lastPrompt`. Old responses still count after a compaction or reset. A number that a provider does not report contributes 0; reasoning stays absent until one provider reports it. A conversation with no usage returns zeros and no reasoning field. Results are independent copies; changing a result changes no stored data.
+Token and cost totals come from core's `pi.usage` ledger. They include compaction and auxiliary requests recorded there, even when those requests have no response entry. Tool-reported usage counts too. A fork starts its own ledger; inherited responses do not count toward `requests` or `lastPrompt`. Old responses still count after a compaction or reset. A number that a provider does not report contributes 0; reasoning stays absent until one provider reports it. A conversation with no usage returns zeros and no reasoning field. Results are independent copies; changing a result changes no stored data. A call reads only the entries that came since the last call for the same conversation, so a module can ask often.
 
 ### `ConversationUsage`
 
