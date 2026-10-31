@@ -11,6 +11,10 @@ import { html, Icon, Spinner } from "./ui.js";
 
 /** How often the board asks again while it shows. */
 const EVERY_MS = 2000;
+/** How long an ask may go unanswered before the board asks again anyway. */
+const STALE_MS = 15_000;
+/** How many times of a repeat the server lists at most (`UPCOMING` in `src/server/running.ts`). */
+const LISTED = 24;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -215,16 +219,18 @@ function useBoard() {
     const [board, setBoard] = useState(lastBoard);
     const [error, setError] = useState(null);
     const asked = useRef(0);
-    const busy = useRef(false);
+    // When the answer on its way was asked for: one that never comes stops holding the next after `STALE_MS`.
+    const busy = useRef(0);
+    const waiting = () => Date.now() - busy.current < STALE_MS;
 
     const load = (first = false) => {
         const n = ++asked.current;
 
-        busy.current = true;
+        busy.current = Date.now();
 
         return (first && ahead !== null ? ahead : api("running/board"))
             .finally(() => {
-                busy.current = false;
+                busy.current = 0;
             })
             .then(
                 (data) => {
@@ -243,11 +249,11 @@ function useBoard() {
         load(true);
         // Not while the tab is hidden, and not over an answer still on its way.
         const timer = setInterval(() => {
-            if (!document.hidden && !busy.current) {
+            if (!document.hidden && !waiting()) {
                 load();
             }
         }, EVERY_MS);
-        const shown = () => !document.hidden && !busy.current && load();
+        const shown = () => !document.hidden && !waiting() && load();
 
         document.addEventListener("visibilitychange", shown);
 
@@ -770,10 +776,10 @@ function Timeline({
         let labelled = phone;
 
         for (const schedule of each.schedules) {
-            // The server lists a repeat's next 24 times at most: past the last one, a dashed line says it goes on.
+            // The server lists a repeat's next `LISTED` times at most: past the last one, a dashed line says it goes on.
             const last = schedule.upcoming[schedule.upcoming.length - 1];
 
-            if (schedule.every && schedule.upcoming.length >= 24 && last < t1) {
+            if (schedule.every && schedule.upcoming.length >= LISTED && last < t1) {
                 marks.push(html`<span
                     key=${`${schedule.id}-tail`}
                     class=${`rb-pin-tail ${schedule.held ? "held" : ""}`}
