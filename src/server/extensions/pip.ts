@@ -1,8 +1,9 @@
 /**
- * PiP, the owner's assistant over every screen: it finds out what sessions are doing, starts and messages them, stops
- * and archives them, schedules messages, follows runs until they end, watches the owner's GitHub repositories and pull
- * requests and acts on what happens there, and can deny (never allow) calls waiting for approval. Only PiP's own
- * conversation selects this extension; while it is off, PiP is hidden and its follows wait.
+ * PiP, the owner's assistant over every screen: it finds out what sessions are doing, starts and
+ * messages them, stops and archives them, schedules messages, follows runs until they end, watches
+ * the owner's GitHub or GitLab repositories and pull requests and acts on what happens there, and
+ * can deny (never allow) calls waiting for approval. Only PiP's own conversation selects this
+ * extension; while it is off, PiP is hidden and its follows wait.
  */
 import { Type } from "@earendil-works/pi-ai";
 import {
