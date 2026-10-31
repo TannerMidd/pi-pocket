@@ -6,7 +6,7 @@
 <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="14"/></filter>
 </defs>
 <rect width="512" height="512" fill="url(#bg)"/>
-<g stroke="url(#g)" opacity="0"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="44"><path d="M134 188H378M196 188C196 260 190 330 168 384M312 188C312 270 312 330 322 366C330 388 350 392 372 380"/></g></g>
-<g stroke="url(#o)"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="44"><path d="M134 188H378M196 188C196 260 190 330 168 384M312 188C312 270 312 330 322 366C330 388 350 392 372 380"/></g></g>
-<path d="M96 440H416" stroke="#c9ccd6" stroke-width="12" stroke-linecap="round" stroke-dasharray="2 22"/>
+<g stroke="url(#g)" opacity="0"><g transform="translate(0 -29)"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="44"><path d="M134 188H378M196 188C196 260 190 330 168 384M312 188C312 270 312 330 322 366C330 388 350 392 372 380"/></g></g></g>
+<g stroke="url(#o)"><g transform="translate(0 -29)"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="44"><path d="M134 188H378M196 188C196 260 190 330 168 384M312 188C312 270 312 330 322 366C330 388 350 392 372 380"/></g></g></g>
+
 </svg>
