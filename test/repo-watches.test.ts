@@ -703,12 +703,16 @@ async function fakeGlab(args: string[]): Promise<string> {
         });
     }
 
-    const member = /^projects\/:fullpath\/members\/all\/:user$/.exec(path);
+    const members = /^projects\/:fullpath\/members\/all\?query=(.*)$/.exec(path);
 
-    if (member !== null) {
-        const user = args.find((arg) => arg.startsWith("user="))?.slice(5) ?? "";
+    if (members !== null) {
+        const asked = decodeURIComponent(members[1] ?? "");
+        // A search, as GitLab answers one: it can match part of a name, so the answer holds several.
+        const found = [...gitlab.members]
+            .filter(([user]) => user.includes(asked))
+            .map(([username, access_level]) => ({ username, access_level }));
 
-        return JSON.stringify({ access_level: gitlab.members.get(user) ?? 0 });
+        return paged(found);
     }
 
     if (path.includes("/issues?")) {
