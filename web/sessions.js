@@ -652,7 +652,20 @@ export function sessionMark(session) {
         session,
         (counts.working ?? 0) + (counts.waiting ?? 0) > 0,
         isUnread(session.id),
+        undefined,
+        teamOf(store.state.sessions).has(session.id),
     );
+}
+
+/** `linkedAtWork` of the list, worked out again only when the list changes. */
+let teamFor = { sessions: null, team: new Set() };
+
+function teamOf(sessions) {
+    if (teamFor.sessions !== sessions) {
+        teamFor = { sessions, team: linkedAtWork(sessions) };
+    }
+
+    return teamFor.team;
 }
 
 /**
@@ -1215,7 +1228,7 @@ const listKept = { query: "", scroll: 0 };
 
 function AllSessions({ compact = false }) {
     const { sessions, sessionsLoaded, server, pinned } = store.state;
-    const team = useMemo(() => linkedAtWork(sessions), [sessions]);
+    const team = teamOf(sessions);
     const canStart = canSteer() && !scoped();
     const [query, setQueryState] = useState(() => (compact ? "" : listKept.query));
     const [tab, setTabState] = useState(() => tabOf(prefs().group));

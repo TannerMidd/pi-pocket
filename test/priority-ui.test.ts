@@ -371,6 +371,16 @@ test(
         }));
     `);
         await present(rowIn("working", parent), "the parent in Working");
+        // The home screen's Jump back in draws its square the same way.
+        assert.equal(
+            await inPage<string>(`
+            const { store } = await import("/store.js");
+            const { sessionMark } = await import("/sessions.js");
+
+            return JSON.stringify(sessionMark(store.state.sessions.find((each) => each.id === ${Number(parent)})).shape);
+        `),
+            "working",
+        );
         assert.equal(
             await inPage<string | null>(
                 `return JSON.stringify(document.querySelector(${JSON.stringify(rowIn("working", parent))}).dataset.state ?? null)`,
