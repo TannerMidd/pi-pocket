@@ -23,6 +23,14 @@ Pi's `configuration.md` gives the full list of names, with `AGENTS.override.md`.
 
 Keep the files short and true. They go with each request, and a rule that Pi cannot obey is worse than no rule.
 
+## PiP's instructions
+
+PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP, such as the language of its answers, in `pip.md` in Pi Pocket's data folder: `~/.pi-pocket/pip.md`, or the folder that `PI_POCKET_DIR` names (since 0.28.0).
+
+- PiP gets the file with each message. When the file changes, the next message has the new text.
+- Only PiP reads it: sessions, subagents, and Pi's terminal app do not.
+- A session that PiP messages still answers PiP in Simplified Technical English. PiP answers you as the file says.
+
 ## Skills: procedures that Pi follows on request
 
 A skill is a folder with a `SKILL.md`: a name and a description at the top, and the steps below. Its name and description go into the system prompt. Pi reads the rest when a task matches it, or when a person sends `/skill:name what to do`.

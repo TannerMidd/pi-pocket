@@ -4,6 +4,8 @@
  * requests and acts on what happens there, and can deny (never allow) calls waiting for approval. Only PiP's own
  * conversation selects this extension; while it is off, PiP is hidden and its follows wait.
  */
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import {
     CompactionTask,
@@ -23,6 +25,44 @@ import { endedText } from "../watches.ts";
 import { describeMoment, describeRepeat, WHEN_HELP } from "../when.ts";
 
 const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
+
+/**
+ * The owner's standing instructions for PiP, from `pip.md` in the data folder, read again when the file changes;
+ * undefined when there are none. PiP has no project, so it reads no AGENTS.md.
+ */
+function ownerInstructions(host: PocketHost): () => string | undefined {
+    const file = join(host.dataDir, "pip.md");
+    let seen: { key: string; text: string | undefined } | undefined;
+
+    return () => {
+        let key: string;
+
+        try {
+            const stat = statSync(file);
+
+            key = `${stat.mtimeMs}:${stat.size}`;
+        } catch {
+            return undefined;
+        }
+
+        if (seen?.key !== key) {
+            let text: string | undefined;
+
+            try {
+                text = readFileSync(file, "utf8").trim() || undefined;
+            } catch (error) {
+                host.notice("warning", `Could not read ${file}: ${String(error)}`);
+            }
+
+            seen = { key, text };
+        }
+
+        return seen.text === undefined
+            ? undefined
+            : `Your person's standing instructions for you, from ${file}:\n\n${seen.text}`;
+    };
+}
+
 /** What a repository watch can look for (`repo-watches.ts`). */
 const EVENTS: readonly RepoEvent[] = ["issues", "pulls", "ci", "releases", "mentions"];
 
@@ -135,6 +175,7 @@ function scheduleLine(item: Schedule): string {
 
 export default function createPip(host: PocketHost) {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const instructions = ownerInstructions(host);
 
     // A session's state after a tool acted on it, so PiP sees what it did; nothing on a server older than that.
     const now = async (api: { conversationId: ConversationId }, session: number) => {
@@ -725,6 +766,7 @@ export default function createPip(host: PocketHost) {
             ),
             section("pip_rules", () => RULES),
             section("pip_github", () => (github ? GITHUB : undefined)),
+            section("pip_instructions", () => instructions()),
             section("pip_environment", (input) => {
                 // The date only, so the prompt stays cache-friendly through the day.
                 const today = new Date().toLocaleDateString("en-CA", { timeZone: zone });
