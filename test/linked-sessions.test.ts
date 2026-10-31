@@ -432,14 +432,12 @@ test("stop ends a linked session's run and does nothing when it is idle", async 
     assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
     assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
 
-    // A shell that waits keeps the run going, so stop has a run to end.
+    // A long answer keeps the run going, so stop has a run to end. About 5 s at 2000 tokens a second.
     const hanging = scriptedModel((request) => {
         const { text } = lastText(request as never);
 
-        if (text.includes("WAIT_HERE")) {
-            return fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 30" })], {
-                stopReason: "toolUse",
-            });
+        if (text.includes("STREAM_A_WHILE")) {
+            return fauxAssistantMessage([fauxText("word ".repeat(8000))]);
         }
 
         return fauxAssistantMessage([fauxText("Done.")]);
@@ -452,7 +450,7 @@ test("stop ends a linked session's run and does nothing when it is idle", async 
         await say(isolated, origin, "hello");
         const { session, address: to } = await isolated.linkedSessions.start(
             origin,
-            { message: "WAIT_HERE" },
+            { message: "STREAM_A_WHILE" },
             "hang",
         );
 
@@ -547,4 +545,25 @@ test("stop and archive are refused in plan mode, past a spend limit, or without 
         Object.assign(await tx.doc(TurnsDoc, id), { on: true, driver: driver.id, asks: [] });
     }, context);
     await refused(/driving/);
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, id), { on: false, driver: undefined, asks: [] });
+    }, context);
+
+    // The source is free, but someone else holds the wheel in the linked session: stop and archive wait, as send does.
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, target), { on: true, driver: driver.id, asks: [] });
+    }, context);
+    await refused(/driving/);
+});
+
+test("a key that already acted on one linked session is refused for another before anything changes", async () => {
+    const id = await source();
+    const first = await start(id);
+    const second = await start(id);
+
+    await archive(id, first.address, true, "one-key");
+    await assert.rejects(archive(id, second.address, true, "one-key"), /another linked session/);
+    await assert.rejects(stop(id, second.address, "one-key"), /another linked session/);
+    assert.notEqual(app.sessionMeta(second.session)?.archived, true);
+    assert.equal(app.sessionMeta(first.session)?.archived, true);
 });

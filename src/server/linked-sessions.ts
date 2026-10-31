@@ -854,7 +854,8 @@ export class LinkedSessions implements LinkedSessionsApi {
 
     /**
      * Stop the run of the linked session at address `to`. The same checks as `send`: the person Pi works for, and a
-     * session of this team. A repeat with the same `key` stops nothing again, and returns whether it was working then.
+     * session of this team, including the turn and the spend limit there. A repeat with the same `key` stops nothing
+     * again, and returns whether it was working then.
      */
     async stop(
         source: ConversationId,
@@ -868,11 +869,20 @@ export class LinkedSessions implements LinkedSessionsApi {
             return repeat;
         }
 
-        await this.#maySend(source, user);
+        await this.#mayAct(source, id, user);
+        // The receipt is stored with the busy state before the run stops. A crash or a repeat then finds it and stops
+        // nothing else, and a key for another session is refused here.
         const busy = app.isBusy(id);
+        const claimed = await this.#claim(source, token, id, user, { busy });
 
+        if ("busy" in claimed) {
+            return { busy: claimed.busy };
+        }
+
+        // The stop a person gets, then awaited, so the caller sees the run stopped. The receipt above already says
+        // whether this run was working, so a repeat stops nothing later.
         await app.commands.abort(id, user);
-        await this.#remember(source, token, id, user, { busy });
+        await (await app.conversation(id)).abort(context);
 
         return { busy };
     }
@@ -894,13 +904,65 @@ export class LinkedSessions implements LinkedSessionsApi {
             return repeat;
         }
 
-        await this.#maySend(source, user);
-        const { repeating } = await app.commands.updateSession(id, user, { archived });
-        const result = { archived: app.sessionMeta(id)?.archived === true, repeating };
+        await this.#mayAct(source, id, user);
+        const repeating = archived
+            ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+            : 0;
 
-        await this.#remember(source, token, id, user, result);
+        // The archive and its receipt are one commit: a crash leaves neither, and a key for another session is refused
+        // before this one changes. The activity line follows, as it does for a person's own archive.
+        const { result, changed } = await app.harness.commit(async (tx) => {
+            const record = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now());
+
+            if (record.conversationId !== undefined && record.conversationId !== Number(id)) {
+                throw new HttpError(409, "This call already refers to another linked session.");
+            }
+
+            if (record.result !== undefined && "archived" in record.result) {
+                return {
+                    result: {
+                        archived: record.result.archived,
+                        repeating: record.result.repeating,
+                    },
+                    changed: false,
+                };
+            }
+
+            const sessions = await tx.doc(SessionsDoc);
+            const meta = sessions.items[String(id)];
+
+            if (meta === undefined) {
+                throw new HttpError(404, "Not a session");
+            }
+
+            const before = meta.archived === true;
+
+            meta.archived = archived;
+            record.conversationId = Number(id);
+            record.by ??= user.id;
+            record.result = { archived, repeating };
+
+            return { result: { archived, repeating }, changed: archived !== before };
+        }, context);
+
+        if (changed) {
+            await app.collab.activity(
+                id,
+                user,
+                archived ? "archived the session" : "brought the session back from the archive",
+            );
+        }
 
         return result;
+    }
+
+    /** The checks `send` makes before a message goes: the source, then the turn and the spend limit in the target. */
+    async #mayAct(source: ConversationId, target: ConversationId, user: User): Promise<void> {
+        const app = this.#app;
+
+        await this.#maySend(source, user);
+        await app.requireDriver(target, user);
+        app.spend.check(user, target);
     }
 
     /**
@@ -931,6 +993,11 @@ export class LinkedSessions implements LinkedSessionsApi {
             );
         }
 
+        // A key that already acted on another session is refused before this one changes.
+        if (previous?.conversationId !== undefined && previous.conversationId !== target) {
+            throw new HttpError(409, "This call already refers to another linked session.");
+        }
+
         return {
             id: target as unknown as ConversationId,
             user,
@@ -939,26 +1006,36 @@ export class LinkedSessions implements LinkedSessionsApi {
         };
     }
 
-    /** Remember that `token` acted on `target`, and what it returned, so a repeat finds both. */
-    async #remember(
+    /**
+     * Take `token` for `target` before the action, when the action itself cannot share the receipt's commit. A repeat
+     * that already has a result returns it. A key for another session is refused, and two calls at once cannot both
+     * take it.
+     */
+    async #claim(
         source: ConversationId,
         token: string,
         target: ConversationId,
         user: User,
         result: CallOutcome,
-    ): Promise<void> {
+    ): Promise<CallOutcome> {
         const app = this.#app;
 
-        await app.harness.commit(async (tx) => {
+        return app.harness.commit(async (tx) => {
             const record = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now());
 
             if (record.conversationId !== undefined && record.conversationId !== Number(target)) {
                 throw new HttpError(409, "This call already refers to another linked session.");
             }
 
+            if (record.result !== undefined) {
+                return record.result;
+            }
+
             record.conversationId = Number(target);
             record.by ??= user.id;
             record.result = result;
+
+            return result;
         }, context);
     }
 
