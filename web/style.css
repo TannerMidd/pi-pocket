@@ -18441,6 +18441,12 @@ textarea.notes {
     align-items: center;
 }
 
+@media (max-width: 699px) {
+    .hook-status {
+        flex-basis: 100%;
+    }
+}
+
 .hook-text {
     font-size: 0.85rem;
     white-space: pre-wrap;
