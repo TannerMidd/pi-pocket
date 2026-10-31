@@ -359,6 +359,13 @@ async function lastPrompt(app: PocketApp, id: ConversationId): Promise<BoardProm
 
     for (;;) {
         for (const entry of page.items) {
+            // The entries up to the newest one seen last time held no newer message: it is still the one, however long
+            // the run has gone on.
+            if (kept?.prompt !== undefined && Number(entry.id) <= kept.newest) {
+                prompt = kept.prompt;
+                break;
+            }
+
             if (entry.kind !== "pi.user") {
                 continue;
             }
@@ -482,11 +489,17 @@ export async function runningBoard(app: PocketApp, user: User): Promise<RunningB
     });
 
     const schedules: BoardSchedule[] = [];
+    // Every schedule is a live `pocket.schedule` task in its session: only those sessions are read.
+    const scheduled = new Set(
+        (await liveTasks(app))
+            .filter((node) => node.kind === "pocket.schedule")
+            .map((node) => String(node.conversationId)),
+    );
 
     for (const [key, meta] of Object.entries(app.sessionCatalogue())) {
         const id = Number(key) as unknown as ConversationId;
 
-        if (!app.canSee(user, id)) {
+        if (!scheduled.has(key) || !app.canSee(user, id)) {
             continue;
         }
 
