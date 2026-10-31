@@ -105,13 +105,14 @@ What a session gets:
 - `python3`, `python3-venv`, and `build-essential`, so `uv venv` works and a package without a wheel can still compile. `UV_PYTHON_DOWNLOADS=0` is set for the session, so a `uv python install` download is not available: it lives in the container's writable layer and a recreate erases it.
 - `uv` and `uvx` in `/usr/local/bin`, and `/opt/uv-bin` (the folder `UV_TOOL_BIN_DIR` names) at the start of PATH. Both folders are on the image, so the PATH comes from the image and no compose variable sets it.
 - `/opt/uv-bin` is writable by every uid, so a tool that the host's uid installs with `uv tool install ruff` lands on PATH in the same container.
+- `kubectl` in `/usr/local/bin`, placed by architecture as `glab` is. It is pinned to `v1.32.5`, the cluster's version, because a client may only be one minor ahead of or behind its server. It needs no cluster at build time. A kubeconfig in `~/.kube` is on the home bind mount, so contexts and logins survive a recreate.
 
 A project venv works as usual. `UV_PROJECT_ENVIRONMENT=.venv` puts it at the project folder, and `.venv` is the name uv and every editor expect by default, so `uv run` and `uv sync` find it without a PATH entry. Scripts in a venv are not reachable by name from outside it: use `uv run` in the project folder, or activate the venv with `source .venv/bin/activate`.
 
 Check that a running container has them:
 
 ```bash
-docker compose exec pi-pocket sh -c 'python3 --version && uv --version'
+docker compose exec pi-pocket sh -c 'python3 --version && uv --version && kubectl version --client'
 ```
 
 ## Security

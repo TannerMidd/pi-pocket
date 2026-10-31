@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# Pi Pocket with Python: the stock image (docker/Dockerfile) plus python3, uv, and
-# Obsidian with its CLI.
+# Pi Pocket with Python: the stock image (docker/Dockerfile) plus python3, uv,
+# kubectl, and Obsidian with its CLI.
 #
 #   docker build -f docker/tools.dockerfile -t pi-pocket:tools .
 #
@@ -118,6 +118,7 @@ FROM app AS development
 ARG UV_VERSION=0.13.5
 ARG GLAB_VERSION=1.124.0
 ARG OBSIDIAN_VERSION=1.14.5
+ARG KUBECTL_VERSION=1.32.5
 
 USER root
 
@@ -138,6 +139,25 @@ RUN set -eux; \
     rm -rf /tmp/glab.tar.gz /tmp/bin; \
     GLAB_CONFIG_DIR=/tmp/glab-check /usr/local/bin/glab --version; \
     rm -rf /tmp/glab-check
+
+# kubectl talks to a cluster that is elsewhere: it needs no cluster at build time, and
+# `--version` only prints the client's. The version matches the cluster's (v1.32.5), so
+# client and server speak the same API: kubectl may only be one minor ahead of or behind
+# its server. A kubeconfig in ~/.kube is on the home bind mount, so `kubectl config
+# use-context` and its logins survive a recreate. The binary is placed by architecture,
+# as cloudflared is above; dl.k8s.io serves it without an archive.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) kubectl_arch=amd64 ;; \
+        arm64) kubectl_arch=arm64 ;; \
+        *) echo "kubectl has no release for $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 3 -o /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl"; \
+    chmod 0755 /usr/local/bin/kubectl; \
+    HOME=/tmp/kubectl-check /usr/local/bin/kubectl version --client; \
+    rm -rf /tmp/kubectl-check
 
 # The stock image has no python at all. Debian's python is enough for uv: uv reads
 # the interpreter of a venv from its pyvenv.cfg, whatever version wrote it.
