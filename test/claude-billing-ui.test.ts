@@ -54,6 +54,14 @@ test(
             "false",
         );
 
+        // Its row says so first, where a cut-off line still shows it.
+        assert.match(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(toggle)}).closest(".ext-row").querySelector(".ext-row-desc").textContent)`,
+            ),
+            /^At your own risk, as Anthropic's terms and its help pages disagree on it/,
+        );
+
         // Turning it on asks first, with what Anthropic's terms say.
         await page.click({ selector: toggle });
         await see(`document.querySelector(".ext-confirm") !== null`, "the question");

@@ -588,7 +588,7 @@ export function ExtensionsContent({
                     ${module.source === "drop-in" && html`<span class="ext-row-by mono">${module.file}</span>`}
                     <${Icon} name="down" size=${14} class="ext-row-chevron" />
                 </span>
-                ${module.summary && html`<span class="ext-row-desc">${summaryOf(module)}</span>`}
+                ${module.summary && html`<span class="ext-row-desc" title=${summaryOf(module)}>${summaryOf(module)}</span>`}
                 ${module.error && html`<span class="ext-row-meta warn">Did not load</span>`}
                 ${installed?.revoked && html`<span class="ext-row-meta warn">The gallery revoked this version</span>`}
                 ${installed?.update && html`<span class="ext-row-meta accent">An update is ready</span>`}
