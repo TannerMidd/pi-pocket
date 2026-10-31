@@ -299,7 +299,7 @@ export function HooksSheet() {
                             )}
                         </div>
                         <div class="muted small">
-                            ${target === "pip" ? "PiP decides what to do: start a session, message one, or tell you." : `Pi in “${here?.title}” gets each post.`}
+                            ${target === "pip" ? "PiP decides what to do: start a session, message one, or tell you." : "Each post becomes a message to Pi in this session, your instructions first."}
                         </div>
                     </div>`
                 }
