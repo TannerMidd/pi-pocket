@@ -47,3 +47,16 @@ The script `scripts/sync-upstream.sh` brings the upstream commits into the fork 
 6. Stops on a merge conflict, names the files, and says how to resolve them or stop the merge.
 
 Settings for the script, as environment values: `UPSTREAM_REMOTE` (default `upstream`), `UPSTREAM_URL`, `UPSTREAM_BRANCH` (default `main`), `BASE_BRANCH` (default `main`), and `MAX_SUBJECTS` (default 20; 0 lists every incoming subject).
+
+## Scheduled sync
+
+A scheduled run does steps 1 to 4 for a person, without a person at the keyboard. It uses the main checkout, `/home/node/Repos/pi-pocket`, on branch `main`, and it does not use a worktree.
+
+The scheduled agent does these steps:
+
+1. Runs `scripts/sync-upstream.sh` in the main checkout. The checkout must have no local changes: the script stops if it has changes, and it stops if Git has no `user.name` and `user.email`.
+2. Resolves the conflicts that the merge reports in branch `sync/upstream-<date>`. It runs `git add <file>` and `git commit --no-edit`.
+3. Runs the checks: `npm run check`, `npm run lint`, and `npm test`. It commits the fixes on the branch.
+4. Pushes the branch to `origin`, and opens a pull request into `main` with `gh pr create`.
+
+A person merges the pull request. The scheduled run never merges into `main`, and it never pushes `main`.
