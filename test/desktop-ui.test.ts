@@ -360,3 +360,78 @@ test(
         );
     },
 );
+
+test(
+    "with window controls, every window's top bar moves the window by its empty room, and what is in it takes clicks",
+    real,
+    async () => {
+        await page.evaluate(`
+        localStorage.setItem("pocket.appearance", JSON.stringify({ sessionTabs: false, sidebar: "open", tiling: true }));
+    `);
+        await page.navigate(`${base}/s/${session}`);
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".topbar") !== null && document.querySelector(".sessions-head") !== null)`,
+                ),
+            "the top bar and the sidebar",
+        );
+
+        const regions = `
+            const region = (selector) => getComputedStyle(document.querySelector(selector)).appRegion;
+            return JSON.stringify({
+                topbar: region(".topbar"),
+                sessions: region(".sessions-head"),
+                title: region(".topbar > .title"),
+                titleFits: document.querySelector(".topbar > .title").getBoundingClientRect().right <
+                    [...document.querySelectorAll(".topbar > .icon-button")]
+                        .filter((each) => each.getBoundingClientRect().width > 0)[0].getBoundingClientRect().left - 12,
+                button: region(".sessions-head .new-button"),
+                search: region(".search input"),
+            });
+        `;
+
+        // In a browser tab there is no window to move: nothing is a drag region.
+        const tab = await inPage<Record<string, string | boolean>>(regions);
+
+        assert.equal(tab.topbar, "none");
+        assert.equal(tab.sessions, "none");
+
+        for (const side of ["right", "left"] as const) {
+            await page.evaluate(`
+            overlayTest.visible = true;
+            overlayTest.side = ${JSON.stringify(side)};
+            overlayTest.height = 32;
+            overlayTest.dispatchEvent(new Event("geometrychange"));
+        `);
+            await until(
+                () =>
+                    inPage<boolean>(
+                        `return JSON.stringify(document.documentElement.dataset.windowControls === ${JSON.stringify(side)})`,
+                    ),
+                `${side} window controls`,
+            );
+
+            assert.deepEqual(await inPage(regions), {
+                topbar: "drag",
+                sessions: "drag",
+                title: "no-drag",
+                titleFits: true,
+                button: "no-drag",
+                search: "no-drag",
+            });
+        }
+
+        await page.evaluate(`
+        overlayTest.visible = false;
+        overlayTest.dispatchEvent(new Event("geometrychange"));
+    `);
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(getComputedStyle(document.querySelector(".topbar")).appRegion === "none")`,
+                ),
+            "no drag regions without window controls",
+        );
+    },
+);

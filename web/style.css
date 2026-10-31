@@ -1077,6 +1077,37 @@ kbd {
     app-region: drag;
 }
 
+/*
+ * With the window's buttons over the page, the page is the window's title bar: every window's top bar moves the window
+ * by its empty room, as a title bar does, not only the bar under the buttons. The sidebar's is its list's head.
+ */
+:root:is([data-window-controls="left"], [data-window-controls="right"])
+    :is(
+        .tabstrip,
+        .topbar,
+        .viewer-head,
+        .lightbox-bar,
+        .board-head,
+        .files-bar,
+        .ext-panel-bar,
+        .browser-bar,
+        .people-head,
+        .sessions-head
+    ) {
+    app-region: drag;
+}
+
+/*
+ * The session's title takes only its text's width, so the top bar's room beside it moves the window too. The title
+ * opens its menu: its button lies over its text, and a desktop app reads drag regions in the page's order, so the
+ * text after the button would take it back for dragging. The whole title is not for dragging.
+ */
+:root:is([data-window-controls="left"], [data-window-controls="right"]) .topbar > .title {
+    flex: 0 1 auto;
+    margin-right: auto;
+    app-region: no-drag;
+}
+
 :root[data-window-controls="left"] [data-under-controls="bar"] {
     padding-left: var(--controls-room) !important;
 }
@@ -1086,7 +1117,19 @@ kbd {
 }
 
 /* What is in a bar takes clicks and keys; the bar's empty room moves the window. */
-[data-under-controls="bar"] :is(button, a, input, select, textarea, [role="button"], [tabindex]) {
+:root:is([data-window-controls="left"], [data-window-controls="right"])
+    :is(
+        button,
+        a,
+        input,
+        select,
+        textarea,
+        label,
+        summary,
+        [role="button"],
+        [tabindex],
+        [contenteditable]
+    ) {
     app-region: no-drag;
 }
 
