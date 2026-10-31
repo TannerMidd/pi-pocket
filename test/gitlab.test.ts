@@ -1,10 +1,9 @@
 /**
- * GitLab, as far as it can be checked without the service: reading what `glab` prints, and knowing
- * before a watch is set up that the environment cannot reach GitLab at all.
+ * GitLab, as far as it can be checked without the service: reading what `glab` prints.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gitlabReady, parsePages } from "../src/server/gitlab.ts";
+import { parsePages } from "../src/server/gitlab.ts";
 
 test("each page glab prints is read, and its items joined", () => {
     // `glab api --paginate` prints one array for each page, back to back, with nothing between them:
@@ -31,29 +30,4 @@ test("a bracket or a quote inside a string does not end the page", () => {
     assert.equal(items.length, 2);
     assert.equal(items[0]?.body, item.body);
     assert.equal(items[1]?.body, "second");
-});
-
-test("a GitHub token in GITLAB_TOKEN is named, not left to a bare 401", () => {
-    const saved = process.env.GITLAB_TOKEN;
-
-    try {
-        process.env.GITLAB_TOKEN = "github_pat_11AIQ7J2A0OuQmJLmoqJF8_x";
-
-        const ready = gitlabReady();
-
-        assert.equal(ready.ready, false);
-        assert.match(ready.why ?? "", /holds a GitHub token/);
-
-        process.env.GITLAB_TOKEN = "";
-        assert.match(gitlabReady().why ?? "", /GITLAB_TOKEN is not set/);
-
-        process.env.GITLAB_TOKEN = "glpat-LpERxxxxxxxxxxxx";
-        assert.equal(gitlabReady().ready, true);
-    } finally {
-        if (saved === undefined) {
-            delete process.env.GITLAB_TOKEN;
-        } else {
-            process.env.GITLAB_TOKEN = saved;
-        }
-    }
 });

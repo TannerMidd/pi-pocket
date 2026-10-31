@@ -74,21 +74,10 @@ export const runGlab: Glab = (args, cwd, timeoutMs = GLAB_TIMEOUT_MS) =>
 
 /** Whether the environment can reach GitLab: a token, and the command. */
 export function gitlabReady(): { ready: boolean; why?: string } {
-    const token = (process.env.GITLAB_TOKEN ?? "").trim();
-
-    if (token === "") {
+    if ((process.env.GITLAB_TOKEN ?? "").trim() === "") {
         return {
             ready: false,
             why: "GITLAB_TOKEN is not set, so glab has no token: set it in the environment.",
-        };
-    }
-
-    // A GitHub token here is a mix-up in the environment, and GitLab answers it with a bare 401 that
-    // says nothing about why. Name it instead: a watch set up with one would fail at every look.
-    if (/^(github_pat_|ghp_|gho_|ghs_)/.test(token)) {
-        return {
-            ready: false,
-            why: "GITLAB_TOKEN holds a GitHub token, not a GitLab one: GitLab needs a token that begins with glpat-.",
         };
     }
 
