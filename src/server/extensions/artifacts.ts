@@ -638,6 +638,10 @@ export function legacyInline(messages: readonly Message[]): readonly Message[] |
 
 const LEGACY_INLINE = "artifact_inline";
 
+/** What the artifact tool says it does where no reply draws a card. */
+const VIEWER_ONLY =
+    "Publish an HTML page, Markdown document, or SVG image that the user opens in the app's artifact viewer. The same id publishes a new version. Give exactly one of content, edits, or path (up to 2,000,000 bytes).";
+
 /** The artifact tool without `inline`, for a session whose panel draws no cards (PiP's). */
 export function withoutInline(tool: ToolRegistration): ToolRegistration {
     const { inline: _inline, ...properties } = (
@@ -646,6 +650,7 @@ export function withoutInline(tool: ToolRegistration): ToolRegistration {
 
     return {
         ...tool,
+        description: VIEWER_ONLY,
         parameters: Type.Object(properties as never),
         execute: (args, api, context) =>
             tool.execute({ ...(args as object), inline: undefined } as never, api, context),

@@ -202,6 +202,8 @@ test("the module has one tool, with inline in its schema once, and the guide say
 
     assert.doesNotMatch(without, /inline/);
     assert.match(without, /Use the artifact tool/);
+    // Nor does its description offer a card it cannot draw.
+    assert.doesNotMatch(tool.description, /inline|card/);
 });
 
 test("the tool list sends the schema once: no second tool, and about 1,400 characters fewer", () => {
