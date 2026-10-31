@@ -51,7 +51,7 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
-import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
+import { APP_ROOT, COMPACT_IDLE_CHOICES, ConfigStore, modulesWith, type User } from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
@@ -2276,6 +2276,8 @@ export class PocketApp {
                 pipCompactAt: this.pipCompaction.compactAt,
                 // The most hours a run waits for a provider's limit to clear; 0: it does not wait (`limit-gate.ts`).
                 limitWaitHours: this.config.limitWaitHours,
+                // Hours of idleness after which a person's next message compacts the session first.
+                compactIdleHours: this.config.compactIdleHours,
             },
             // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
             folderFavorites: await this.folderFavorites.list(user),
@@ -3214,6 +3216,29 @@ export class PocketApp {
             this.limits.reconsider();
         }
 
+        await this.#refreshClients();
+    }
+
+    /**
+     * How many hours of idleness before a session's next message compacts it first (0: off).
+     */
+    async setCompactIdleHours(user: User, hours: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (typeof hours !== "number" || !COMPACT_IDLE_CHOICES.includes(hours)) {
+            throw new HttpError(
+                400,
+                `compactIdleHours must be one of ${COMPACT_IDLE_CHOICES.join(", ")}`,
+            );
+        }
+
+        if (hours === this.config.compactIdleHours) {
+            return;
+        }
+
+        this.config.compactIdleHours = hours;
         await this.#refreshClients();
     }
 

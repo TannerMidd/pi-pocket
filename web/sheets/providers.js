@@ -180,6 +180,75 @@ function LimitWait() {
     </div>`;
 }
 
+/** How long a session sits idle before its next message compacts the context first. */
+const COMPACT_IDLE = [
+    [0, "Off"],
+    [1, "1h"],
+    [2, "2h"],
+    [5, "5h"],
+    [12, "12h"],
+];
+
+/** The owner's choice of when Pi compacts an idle session's context. */
+function IdleCompaction() {
+    const hours = store.state.server?.compactIdleHours;
+
+    if (typeof hours !== "number") {
+        return null;
+    }
+
+    const change = (value) => attempt(() => api("settings", { compactIdleHours: value }));
+
+    return html`<div class="limit-wait">
+        <div class="small">Compact after a pause</div>
+        <p class="muted small">
+            A session that sat idle for a while has lost its prompt cache: its next message compacts older context first.
+        </p>
+        <div class="segmented" role="group" aria-label="Compact after a pause">
+            ${COMPACT_IDLE.map(
+                ([value, label]) => html`<button
+                    class=${hours === value ? "on" : ""}
+                    aria-pressed=${hours === value}
+                    onClick=${() => change(value)}
+                >
+                    ${label}
+                </button>`,
+            )}
+        </div>
+    </div>`;
+}
+
+/** The two run settings in one block, a tab each: how a run waits for a limit, and when an idle context is compacted. */
+function RunSettings() {
+    const server = store.state.server;
+    const tabs = [
+        ["idleCompact", "Compaction", typeof server?.compactIdleHours === "number"],
+        ["limit", "Usage limit", typeof server?.limitWaitHours === "number"],
+    ].filter(([, , there]) => there);
+    const [tab, setTab] = useState("idleCompact");
+    const shown = tabs.some(([id]) => id === tab) ? tab : tabs[0]?.[0];
+
+    if (tabs.length === 0) {
+        return null;
+    }
+
+    return html`<div class="run-settings">
+        <div class="segmented" role="tablist" aria-label="Run settings">
+            ${tabs.map(
+                ([id, label]) => html`<button
+                    role="tab"
+                    class=${shown === id ? "on" : ""}
+                    aria-selected=${shown === id}
+                    onClick=${() => setTab(id)}
+                >
+                    ${label}
+                </button>`,
+            )}
+        </div>
+        ${shown === "limit" ? html`<${LimitWait} />` : html`<${IdleCompaction} />`}
+    </div>`;
+}
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -298,7 +367,7 @@ export function ProvidersSheet() {
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
                     <${RefreshModels} />
-                    <${LimitWait} />
+                    <${RunSettings} />
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
