@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
+    DEFAULT_COMPACTION_SETTINGS,
     getAgentDir,
     ModelRuntime,
     resolveModelScopeWithDiagnostics,
@@ -32,6 +33,7 @@ import {
     ToolTask,
     Harness,
     type HarnessSettings,
+    type CompactionSettings,
     LiveDoc,
     type LiveState,
     ProviderDoc,
@@ -51,7 +53,13 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
-import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
+import {
+    APP_ROOT,
+    type CompactionTrigger,
+    ConfigStore,
+    modulesWith,
+    type User,
+} from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
@@ -160,6 +168,115 @@ const PIP_FILE = "pip.ts";
 const SUBAGENTS_FILE = "subagents.ts";
 /** The hours a run may wait for a provider's limit, as the owner may choose them (0: not at all). */
 const LIMIT_WAIT_CHOICES = [0, 1, 6, 12, 24];
+
+/** Pi's compaction policy as the Providers sheet shows it. */
+type CompactionPolicy = {
+    enabled: boolean;
+    reserveTokens: number;
+    keepRecentTokens: number;
+    trigger: CompactionTrigger;
+    overTokens: number;
+};
+
+/** A catalog model, enough to turn an absolute token count into Durable's reserve from the window. */
+export type CompactionModel = {
+    provider: string;
+    id: string;
+    contextWindow?: number;
+};
+
+/**
+ * Durable's blocking threshold is `contextWindow - reserveTokens`. An "over Y" trigger is that reserve per model.
+ * A missing or too-small window keeps the from-full reserve, so compaction still has a backstop.
+ */
+export function reserveFromOver(window: number, overTokens: number, fallback: number): number {
+    if (!(window > 0) || window <= overTokens) {
+        return fallback;
+    }
+
+    return window - overTokens;
+}
+
+/** Per-model reserves for Durable when compacting once context exceeds `overTokens`. */
+export function overModelOverrides(
+    models: readonly CompactionModel[],
+    overTokens: number,
+    fallback: number,
+    modelFallbacks: Record<string, { reserveTokens?: number }> = {},
+): Record<string, { reserveTokens: number }> {
+    const overrides: Record<string, { reserveTokens: number }> = {};
+
+    for (const model of models) {
+        const window = model.contextWindow;
+
+        if (typeof window !== "number" || !(window > 0)) {
+            continue;
+        }
+
+        const name = `${model.provider}/${model.id}`;
+
+        overrides[name] = {
+            reserveTokens: reserveFromOver(
+                window,
+                overTokens,
+                modelFallbacks[name]?.reserveTokens ?? fallback,
+            ),
+        };
+    }
+
+    return overrides;
+}
+
+/** What sessions pass Durable: Pi's settings, with per-model reserves when compacting over a token count. */
+export function harnessCompaction(
+    policy:
+        | {
+              enabled?: boolean;
+              reserveTokens?: number;
+              keepRecentTokens?: number;
+              modelOverrides?: Record<
+                  string,
+                  { reserveTokens?: number; keepRecentTokens?: number }
+              >;
+          }
+        | undefined,
+    trigger: CompactionTrigger,
+    overTokens: number,
+    models: readonly CompactionModel[],
+): CompactionSettings {
+    if (policy === undefined) {
+        return {};
+    }
+
+    if (trigger !== "over") {
+        return policy;
+    }
+
+    const modelOverrides: Record<string, Partial<CompactionSettings>> = { ...policy.modelOverrides };
+
+    for (const [name, override] of Object.entries(
+        overModelOverrides(
+            models,
+            overTokens,
+            policy.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,
+            policy.modelOverrides,
+        ),
+    )) {
+        modelOverrides[name] = { ...modelOverrides[name], ...override };
+    }
+
+    return { ...policy, modelOverrides };
+}
+
+/**
+ * Pi's SettingsManager has a public switch for compaction, but no setters for its token fields. Those members are
+ * what `setCompactionEnabled` uses to write `~/.pi/agent/settings.json`; they are private on the type, not at runtime.
+ */
+type CompactionStore = {
+    globalSettings: { compaction?: Record<string, unknown> };
+    markModified: (field: string, nestedKey: string) => void;
+    save: () => void;
+};
 /** The most models the owner may allow subagents. */
 const MAX_SUBAGENT_MODELS = 50;
 
@@ -1297,6 +1414,7 @@ export class PocketApp {
     }
 
     #harnessSettings(): HarnessSettings {
+        const app = this;
         const settings = this.settings;
 
         const safe = <T>(read: () => T): T | undefined => {
@@ -1326,7 +1444,13 @@ export class PocketApp {
                 return stream();
             },
             get compaction() {
-                return safe(compaction) ?? {};
+                // "Over Y" is Pocket-only: convert per model here, and never write those reserves into Pi's settings.
+                return harnessCompaction(
+                    safe(compaction),
+                    app.config.compactionTrigger,
+                    app.config.compactionOverTokens,
+                    safe(() => app.models.getAvailableSnapshot()) ?? [],
+                );
             },
             get retry() {
                 return safe(() => settings.getRetrySettings()) ?? {};
@@ -2276,6 +2400,9 @@ export class PocketApp {
                 pipCompactAt: this.pipCompaction.compactAt,
                 // The most hours a run waits for a provider's limit to clear; 0: it does not wait (`limit-gate.ts`).
                 limitWaitHours: this.config.limitWaitHours,
+                // Pi's compaction policy, from Pi's own settings file; the owner's to see and change. An unreadable
+                // policy (a settings file Pi refuses) sends none, and the sheet keeps out of the way.
+                ...(user.role === "owner" ? { compaction: this.compactionSettings() } : {}),
             },
             // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
             folderFavorites: await this.folderFavorites.list(user),
@@ -3320,6 +3447,110 @@ export class PocketApp {
             this.config.themeDefault = { look, colors };
         }
 
+        await this.#refreshClients();
+    }
+
+    /**
+     * Pi's compaction policy, as the Providers sheet shows it: when a session's context is summarized. Read from Pi's
+     * own settings file; `undefined` when Pi refuses its settings, so the sheet stays out of the way.
+     */
+    compactionSettings(): CompactionPolicy | undefined {
+        try {
+            return {
+                ...this.settings.getCompactionSettings(),
+                trigger: this.config.compactionTrigger,
+                overTokens: this.config.compactionOverTokens,
+            };
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
+     * The owner sets Pi's compaction policy: written to Pi's own settings file (`~/.pi/agent/settings.json`), and read
+     * live by every session, also the ones that run. One field at a time or several: the rest stay as they are.
+     */
+    async setCompaction(user: User, change: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (change === null || typeof change !== "object" || Array.isArray(change)) {
+            throw new HttpError(400, "compaction must be an object");
+        }
+
+        const { enabled, reserveTokens, keepRecentTokens, trigger, overTokens } =
+            change as Record<string, unknown>;
+
+        const token = (name: string, value: unknown): number => {
+            if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+                throw new HttpError(
+                    400,
+                    `compaction.${name} must be a whole number of tokens, 0 or more`,
+                );
+            }
+
+            return value;
+        };
+
+        if (enabled !== undefined && typeof enabled !== "boolean") {
+            throw new HttpError(400, "compaction.enabled must be true or false");
+        }
+
+        if (trigger !== undefined && trigger !== "fromFull" && trigger !== "over") {
+            throw new HttpError(400, 'compaction.trigger must be "fromFull" or "over"');
+        }
+
+        const wanted = {
+            ...(reserveTokens === undefined
+                ? {}
+                : { reserveTokens: token("reserveTokens", reserveTokens) }),
+            ...(keepRecentTokens === undefined
+                ? {}
+                : { keepRecentTokens: token("keepRecentTokens", keepRecentTokens) }),
+        };
+        const wantedOver = overTokens === undefined ? undefined : token("overTokens", overTokens);
+
+        if (
+            enabled === undefined &&
+            wanted.reserveTokens === undefined &&
+            wanted.keepRecentTokens === undefined &&
+            trigger === undefined &&
+            wantedOver === undefined
+        ) {
+            throw new HttpError(
+                400,
+                "Say what to change: enabled, reserveTokens, keepRecentTokens, trigger, or overTokens",
+            );
+        }
+
+        if (enabled !== undefined) {
+            this.settings.setCompactionEnabled(enabled);
+        }
+
+        // Token fields have no public setter: write them the same way the switch does, then wait for the file.
+        if (wanted.reserveTokens !== undefined || wanted.keepRecentTokens !== undefined) {
+            const store = this.settings as unknown as CompactionStore;
+
+            store.globalSettings.compaction ??= {};
+
+            for (const [name, value] of Object.entries(wanted)) {
+                store.globalSettings.compaction[name] = value;
+                store.markModified("compaction", name);
+            }
+
+            store.save();
+        }
+
+        if (trigger !== undefined) {
+            this.config.compactionTrigger = trigger === "over" ? "over" : "fromFull";
+        }
+
+        if (wantedOver !== undefined) {
+            this.config.compactionOverTokens = wantedOver;
+        }
+
+        await this.settings.flush();
         await this.#refreshClients();
     }
 

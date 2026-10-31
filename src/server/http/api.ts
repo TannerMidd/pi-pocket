@@ -594,6 +594,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
                 limitWaitHours?: unknown;
+                compaction?: unknown;
             }>(request);
 
             // One at a time: a second that fails must not leave the first changed.
@@ -604,6 +605,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                     body.pipCompactAt,
                     body.subagentModels,
                     body.limitWaitHours,
+                    body.compaction,
                 ].filter((value) => value !== undefined).length > 1
             ) {
                 throw new HttpError(400, "Change one setting at a time.");
@@ -621,6 +623,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             // How long a run waits for a provider's limit to clear: the owner's (checked in `app.ts`).
             if (body.limitWaitHours !== undefined) {
                 await app.setLimitWaitHours(user, body.limitWaitHours);
+            }
+
+            // Pi's compaction policy: the owner's (checked in `app.ts`).
+            if (body.compaction !== undefined) {
+                await app.setCompaction(user, body.compaction);
             }
 
             if (body.approvalRule !== undefined) {

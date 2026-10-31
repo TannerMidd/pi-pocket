@@ -65,7 +65,9 @@ Instructions, skills, and `AGENTS.md` cannot change this. Tell the person where 
 
 ### When a model's context is compacted
 
-Pi Pocket compacts a session's context with Pi's settings in `~/.pi/agent/settings.json`: `compaction.reserveTokens` (the room kept free: Pi waits for a compaction above the model's context window minus it, and one starts in the background about 32,000 tokens before that) and `compaction.keepRecentTokens`. Since 0.25.0, `compaction.modelOverrides` gives one model its own values, keyed by `provider/modelId`, for example to compact a model with a large window much earlier:
+The owner sets compaction in Menu → **Providers**, under the **Compaction** tab: whether sessions compact automatically, how much recent context to keep, and whether compaction starts from full (Pi's own reserve threshold) or once context exceeds an absolute token count (Pocket sessions only).
+
+Pi Pocket compacts a session's context with Pi's settings in `~/.pi/agent/settings.json`: `compaction.reserveTokens` (the room kept free: Pi waits for a compaction above the model's context window minus it, and one starts in the background about 32,000 tokens before that) and `compaction.keepRecentTokens`. When once-over is chosen, Pi Pocket converts the token count into per-model reserve thresholds for sessions without changing Pi's global reserve. Since 0.25.0, `compaction.modelOverrides` gives one model its own values, keyed by `provider/modelId`, for example to compact a model with a large window much earlier:
 
 ```json
 {
