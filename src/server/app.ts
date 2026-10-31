@@ -2475,6 +2475,11 @@ export class PocketApp {
         return this.#busy.has(id);
     }
 
+    /** Whether a conversation is currently compacting. */
+    isCompacting(id: ConversationId): boolean {
+        return this.#compacting.has(id);
+    }
+
     /** The conversations with a run going. */
     busyConversations(): ConversationId[] {
         return [...this.#busy];

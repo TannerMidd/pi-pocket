@@ -867,11 +867,14 @@ export class Commands {
         );
         let known = app.pip.ownerOf(id) === undefined && existing !== undefined;
 
-        // Interrupt: stop the run now, rather than waiting for its tool round or turn to end. Like Stop, this withdraws
-        // what waits in the queue. Only a person's own message interrupts, never one sent for them (`via`).
+        // Interrupt: stop the run or active compaction now, rather than waiting for its tool round or turn to end.
+        // Like Stop, this withdraws what waits in the queue. Only a person's own message interrupts, never one sent
+        // for them (`via`).
         // A retried request finds its first submission: it must not stop the run that the first one started. (Two POSTs
         // of one request at the same moment can both find none and both stop the run: a rare race, left as it is.)
-        if (request.mode === "interrupt" && via === undefined && app.isBusy(id) && !known) {
+        const busy = app.isBusy(id) || app.isCompacting(id) || this.#activeCompaction.has(id);
+
+        if (request.mode === "interrupt" && via === undefined && busy && !known) {
             await this.#discardReports(id);
             await conversation.abort(context);
             await app.collab.activity(id, user, "interrupted the run");
