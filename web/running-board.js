@@ -180,6 +180,19 @@ function useMatches(query) {
  */
 let lastBoard = null;
 let ahead = null;
+/**
+ * Every ask for the board is numbered, and `lastBoard` keeps the answer to the newest one: a late answer to an older
+ * one, from a board closed since or from the ask ahead, is dropped.
+ */
+let asks = 0;
+let kept = 0;
+
+function keep(ask, data) {
+    if (ask > kept) {
+        kept = ask;
+        lastBoard = data;
+    }
+}
 
 /** The timeline's width when it last showed: 0 until it has been measured once. */
 let lastWidth = 0;
@@ -187,8 +200,14 @@ let lastWidth = 0;
 /** Ask for the board now, ahead of opening it (a pointer down on its button); the board takes this answer. */
 export function prefetchRunning() {
     if (ahead === null) {
+        const ask = ++asks;
+
         ahead = api("running/board")
-            .then((data) => (lastBoard = data))
+            .then((data) => {
+                keep(ask, data);
+
+                return data;
+            })
             .finally(() => setTimeout(() => (ahead = null), 1000));
     }
 
@@ -225,18 +244,23 @@ function useBoard() {
 
     const load = (first = false) => {
         const n = ++asked.current;
+        // The answer ahead keeps itself; an ask of its own is numbered here.
+        const ask = first && ahead !== null ? undefined : ++asks;
 
         busy.current = Date.now();
 
-        return (first && ahead !== null ? ahead : api("running/board"))
+        return (ask === undefined ? ahead : api("running/board"))
             .finally(() => {
                 busy.current = 0;
             })
             .then(
                 (data) => {
-                    // A late answer to an ask that a newer one passed is dropped, here and for the next opening.
+                    if (ask !== undefined) {
+                        keep(ask, data);
+                    }
+
+                    // A late answer to an ask that a newer one of this board passed is not shown.
                     if (n === asked.current) {
-                        lastBoard = data;
                         setBoard(data);
                         setError(null);
                     }
