@@ -234,6 +234,12 @@ function actionItems() {
             icon: "artifact",
             run: () => openSheet({ type: "artifacts" }),
         },
+        {
+            label: "All artifacts",
+            detail: "every session, with its current version",
+            icon: "artifact",
+            run: () => openSheet({ type: "all-artifacts" }),
+        },
         conversation &&
             filesAvailable() && {
                 label:

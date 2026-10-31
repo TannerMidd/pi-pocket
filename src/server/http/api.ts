@@ -543,6 +543,10 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, app.sessions(user));
         }
 
+        if (first === "artifacts" && second === undefined && method === "GET") {
+            return json(response, 200, await app.artifactOverview(user));
+        }
+
         // Pi's sessions from the terminal, which the owner can continue here.
         if (first === "pi-sessions" && second === undefined && method === "GET") {
             return json(

@@ -19266,3 +19266,56 @@ pre.gallery-code {
     gap: 0.5rem;
     padding: 0 0 1rem;
 }
+
+/* All artifacts: a row for each, in the session's own group (it shares `.running`'s frame), with its current version. */
+.overview-session {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.overview-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    border-top: 1px solid var(--hair);
+    text-align: left;
+    color: var(--faint);
+}
+
+@media (hover: hover) {
+    .overview-row:hover {
+        background: var(--card);
+    }
+}
+
+.overview-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.overview-title {
+    color: var(--text);
+    font-size: 13.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.overview-version {
+    flex: none;
+    padding: 2px 9px;
+    border-radius: var(--r-pill);
+    background: var(--accent-soft, var(--card));
+    color: var(--accent);
+    font: 12px var(--mono);
+}
