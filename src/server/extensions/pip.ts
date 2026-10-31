@@ -14,10 +14,13 @@ import {
     defineTool,
     hook,
     section,
+    type ToolRegistration,
+    wrapTool,
 } from "@earendil-works/pi-durable";
 import type { PrWatch, RepoEvent, Schedule } from "../docs.ts";
 import { quoted } from "../fence.ts";
 import type { PocketHost } from "../host.ts";
+import { withoutInline } from "./artifacts.ts";
 import { ago, PIP_EXTENSION, PIP_NAME, REPORT_HEAD, SESSION_CLOSE, SESSION_OPEN } from "../pip.ts";
 import { snippet } from "../projection.ts";
 import type { RepoWatchView } from "../repo-watches.ts";
@@ -747,6 +750,7 @@ export default function createPip(host: PocketHost) {
             approvals,
             ...(github ? [repoWatch, watchPr] : []),
         ],
+        wraps: [wrapTool({ name: "artifact" } as ToolRegistration, withoutInline)],
         // PiP's summaries are its own: written with what came from outside left out (`pip-compact.ts`).
         hooks: [
             hook(CompactionTask, {
