@@ -436,7 +436,13 @@ export class LinkedSessions implements LinkedSessionsApi {
             return {
                 address: addresses.get(each.id)!,
                 ...(shared
-                    ? { title: each.title, cwd: each.cwd, busy: each.busy, archived: each.archived }
+                    ? {
+                          title: each.title,
+                          cwd: each.cwd,
+                          busy: each.busy,
+                          archived: each.archived,
+                          ...(each.failed === undefined ? {} : { failed: each.failed }),
+                      }
                     : {}),
             };
         });
@@ -472,6 +478,7 @@ export class LinkedSessions implements LinkedSessionsApi {
                 cwd: each.cwd,
                 busy: each.busy,
                 archived: each.archived === true,
+                failed: each.failure,
             }));
     }
 

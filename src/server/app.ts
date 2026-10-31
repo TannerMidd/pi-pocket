@@ -68,6 +68,7 @@ import {
     DecisionsDoc,
     FolderFavoritesDoc,
     MemoryDoc,
+    RunFailureDoc,
     type SessionMeta,
     SessionsDoc,
     SpendDoc,
@@ -179,6 +180,20 @@ const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
 
 /** The session list goes to every tab on each change: these bound what it carries. */
 const FAILURE_TEXT = 120;
+
+/** The short failure line the session list and extensions share, or none when the run did not fail. */
+function failureText(
+    status: string,
+    reason: string | undefined,
+    detail: unknown,
+): string | undefined {
+    if (status !== "unanswered" || reason === undefined || !FAILED_RUN.has(reason)) {
+        return undefined;
+    }
+
+    return whyUnanswered(reason, detail).slice(0, FAILURE_TEXT);
+}
+
 const ASK_SUBJECT = 200;
 const ASK_REASON = 200;
 const FAILED_AGENTS = 5;
@@ -1023,6 +1038,14 @@ export class PocketApp {
                     this.#busy.add(id);
                 }
 
+                if (this.#sessions[String(id)] !== undefined) {
+                    const failure = (await this.harness.snapshot(RunFailureDoc, id, context))?.text;
+
+                    if (failure !== undefined && live?.run === undefined) {
+                        this.#failed.set(id, failure);
+                    }
+                }
+
                 // A compaction that resumes asks the model too: it may wait for a limit.
                 if ((live?.compactions?.length ?? 0) > 0) {
                     this.#compacting.add(id);
@@ -1061,6 +1084,23 @@ export class PocketApp {
     #committed(publication: CommitPublication): void {
         let sessionsChanged = false;
         let alreadyPaid = false;
+        // How each run in this commit stopped, read before the live document ends it: both land here, in either order.
+        const failedNow = new Map<ConversationId, string>();
+        const abortedNow = new Set<ConversationId>();
+
+        for (const change of publication.changes) {
+            if (change.type !== "submission") {
+                continue;
+            }
+
+            const text = failureText(change.value.status, change.value.reason, change.value.detail);
+
+            if (text !== undefined) {
+                failedNow.set(change.value.conversationId, text);
+            } else if (change.value.status === "unanswered" && change.value.reason === "aborted") {
+                abortedNow.add(change.value.conversationId);
+            }
+        }
 
         // Auxiliary requests pay their captured person in the same commit as usage, in either document order.
         // A commit with both documents must pay every usage change. Normal spend counts never change UsageDoc.
@@ -1104,7 +1144,7 @@ export class PocketApp {
 
         for (const change of publication.changes) {
             if (change.type === "document") {
-                if (this.#documentCommitted(change)) {
+                if (this.#documentCommitted(change, failedNow, abortedNow)) {
                     sessionsChanged = true;
                 }
             } else if (change.type === "submission") {
@@ -1124,19 +1164,16 @@ export class PocketApp {
                 }
 
                 // Its run failed: the commit that settles it ends the run too, so the list hears of both at once.
+                // The line is stored too, so the next process still knows; a new run clears that record.
+                const text = failedNow.get(change.value.conversationId);
+
                 if (
-                    change.value.status === "unanswered" &&
-                    FAILED_RUN.has(change.value.reason) &&
+                    text !== undefined &&
                     this.#sessions[String(change.value.conversationId)] !== undefined &&
                     !this.#failed.has(change.value.conversationId)
                 ) {
-                    this.#failed.set(
-                        change.value.conversationId,
-                        whyUnanswered(change.value.reason, change.value.detail).slice(
-                            0,
-                            FAILURE_TEXT,
-                        ),
-                    );
+                    this.#failed.set(change.value.conversationId, text);
+                    this.#storeRunFailure(change.value.conversationId, text);
                     sessionsChanged = true;
                 }
             }
@@ -1168,7 +1205,11 @@ export class PocketApp {
     }
 
     /** A document changed: the views that show it update. True when the session list changed too. */
-    #documentCommitted(change: Extract<DocumentCommitChange, { type: "document" }>): boolean {
+    #documentCommitted(
+        change: Extract<DocumentCommitChange, { type: "document" }>,
+        failedNow: ReadonlyMap<ConversationId, string>,
+        abortedNow: ReadonlySet<ConversationId>,
+    ): boolean {
         const kind = change.record.kind;
         const id = change.conversationId;
         let sessionsChanged = false;
@@ -1196,12 +1237,21 @@ export class PocketApp {
 
             if (busy !== this.#busy.has(id)) {
                 const session = Number(this.rootOf(id));
+                const failure = busy ? undefined : (failedNow.get(id) ?? this.#failed.get(id));
+                const outcome =
+                    failure !== undefined ? "failed" : abortedNow.has(id) ? "aborted" : "done";
 
                 // For extensions (`host.on`): PiP's runs are its person's alone.
                 if (this.#sessions[String(session)]?.pip === undefined) {
                     this.events.emit(busy ? "run.started" : "run.ended", {
                         conversationId: Number(id),
                         session,
+                        ...(busy
+                            ? {}
+                            : {
+                                  outcome,
+                                  ...(failure === undefined ? {} : { failure }),
+                              }),
                     });
                 }
 
@@ -1209,6 +1259,7 @@ export class PocketApp {
                     this.#busy.add(id);
                     // A new run starts over: whether it fails is its own to say.
                     this.#failed.delete(id);
+                    this.#storeRunFailure(id, undefined);
 
                     if (this.#sessions[String(id)] !== undefined) {
                         this.#movedUp(id, Date.now());
@@ -2632,6 +2683,27 @@ export class PocketApp {
     /** When a session's last run ended, since this server started. */
     endedAt(id: ConversationId): number | undefined {
         return this.#endedAt.get(id);
+    }
+
+    /** Keep or clear a session's failure line, so the next process still knows. A listener may not commit. */
+    #storeRunFailure(id: ConversationId, text: string | undefined): void {
+        if (this.#sessions[String(id)] === undefined) {
+            return;
+        }
+
+        setImmediate(() => {
+            this.harness
+                .commit(async (tx) => {
+                    const record = await tx.doc(RunFailureDoc, id);
+
+                    if (text === undefined) {
+                        delete record.text;
+                    } else {
+                        record.text = text;
+                    }
+                }, context)
+                .catch((error: unknown) => this.log(`run failure not stored: ${describe(error)}`));
+        });
     }
 
     async conversationTitle(id: ConversationId): Promise<string> {

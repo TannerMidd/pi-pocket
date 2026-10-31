@@ -49,7 +49,7 @@ Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0
 `list(source)` gives the sessions linked to the source, at any distance, that the person whom Pi works for can see.
 
 - Each one has an `address` of the source's own, so no session's id goes into the source's transcript.
-- Each one has its title, folder, and state only when all the people who see the source also see it.
+- Each one has its title, folder, and state only when all the people who see the source also see it. Since 0.28.0 that state includes `failed`: why its last run gave up, the same short line the session list shows, and only while that failure stands. A later run clears it. A run that was stopped is not a failure.
 
 Addresses belong to the session that has them. A fork starts with none, so it leaves the team: the addresses in the history that it copied do not work there.
 
