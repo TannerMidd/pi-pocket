@@ -870,13 +870,17 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         await this.#mayAct(source, id, user);
-        // The receipt is stored with the busy state before the run stops. A crash or a repeat then finds it and stops
-        // nothing else, and a key for another session is refused here.
+        // The receipt is stored with the busy state before the run stops. `fresh` says this call took the key: a
+        // repeat finds the stored result and stops nothing else. A key for another session is refused here.
         const busy = app.isBusy(id);
         const claimed = await this.#claim(source, token, id, user, { busy });
 
-        if ("busy" in claimed) {
-            return { busy: claimed.busy };
+        if (!claimed.fresh) {
+            if (!("busy" in claimed.result)) {
+                throw new HttpError(409, "This call already did something else.");
+            }
+
+            return { busy: claimed.result.busy };
         }
 
         // The stop a person gets, then awaited, so the caller sees the run stopped. The receipt above already says
@@ -1017,7 +1021,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         target: ConversationId,
         user: User,
         result: CallOutcome,
-    ): Promise<CallOutcome> {
+    ): Promise<{ fresh: boolean; result: CallOutcome }> {
         const app = this.#app;
 
         return app.harness.commit(async (tx) => {
@@ -1028,14 +1032,14 @@ export class LinkedSessions implements LinkedSessionsApi {
             }
 
             if (record.result !== undefined) {
-                return record.result;
+                return { fresh: false, result: structuredClone(record.result) };
             }
 
             record.conversationId = Number(target);
             record.by ??= user.id;
             record.result = result;
 
-            return result;
+            return { fresh: true, result };
         }, context);
     }
 

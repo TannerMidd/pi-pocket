@@ -432,12 +432,12 @@ test("stop ends a linked session's run and does nothing when it is idle", async 
     assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
     assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
 
-    // A long answer keeps the run going, so stop has a run to end. About 5 s at 2000 tokens a second.
+    // Far longer than the wait below: stop has to end the run, because it does not finish by itself.
     const hanging = scriptedModel((request) => {
         const { text } = lastText(request as never);
 
         if (text.includes("STREAM_A_WHILE")) {
-            return fauxAssistantMessage([fauxText("word ".repeat(8000))]);
+            return fauxAssistantMessage([fauxText("word ".repeat(80_000))]);
         }
 
         return fauxAssistantMessage([fauxText("Done.")]);
@@ -455,10 +455,16 @@ test("stop ends a linked session's run and does nothing when it is idle", async 
         );
 
         await until(() => isolated.isBusy(session), "the run to start");
+        const started = Date.now();
+
         assert.deepEqual(await isolated.linkedSessions.stop(origin, { to }, "stop-once"), {
             busy: true,
         });
         await until(() => !isolated.isBusy(session), "the run to stop");
+        assert.ok(
+            Date.now() - started < 8_000,
+            "the run stopped, rather than streaming to its end",
+        );
         // The same key stops nothing again, and still says the first call found it working.
         assert.deepEqual(await isolated.linkedSessions.stop(origin, { to }, "stop-once"), {
             busy: true,
