@@ -56,6 +56,9 @@ export const PAGES = {
         "WebRequest",
         "WebSession",
         "ConversationWebRequest",
+        "ConversationWebRequest.conversationUsage",
+        "UsageTotals",
+        "ConversationUsage",
         "HumanLinkedSessions",
         "HumanLinkedSession",
         "WebMethod",
@@ -157,6 +160,14 @@ function expected(source) {
         }
 
         owners.set(name, headings);
+
+        if (ts.isInterfaceDeclaration(statement)) {
+            for (const member of statement.members) {
+                const key = `${name}.${member.name?.getText(file)}`;
+
+                owners.set(key, new Map([[key, meta(member)]]));
+            }
+        }
     }
 
     return owners;

@@ -64,6 +64,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `presentEntry` (experimental, since 0.28.0), with `PresentEntry`: how an input this module sends shows in the transcript. The model still reads that message in full ([Adding to the app](../app.md)).
 - What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`), and what its answer does.
 - A conversation-bound request's `conversation` metadata and human `linkedSessions.start` / `list`, with their authenticated-actor, receipt, and admission checks (since 0.16.0).
+- `ConversationWebRequest.conversationUsage`, with `UsageTotals` and `ConversationUsage` (experimental, since 0.28.0): read-only usage for a visible conversation and its visible descendants.
 - The route paths, the methods, the `access` values (`owner`, `steer`, `view`), and the `X-Pocket` header that every call to a route must have.
 
 ### 5. A command's `ctx` and result
