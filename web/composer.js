@@ -99,6 +99,43 @@ function loadPastes(id) {
     }
 }
 
+const attachedKey = (id) => `pocket.attached.${id ?? "home"}`;
+
+/**
+ * Each conversation's uploaded files, kept with its draft: the browser drops a tab in the background, or reloads it after
+ * an update, and the files must still be there. A file still uploading is not kept: its upload ends with the page.
+ */
+function loadAttached(id) {
+    try {
+        const list = JSON.parse(localStorage.getItem(attachedKey(id)) ?? "[]");
+
+        return list.map((attachment) => ({
+            key: uid(),
+            name: attachment.name,
+            size: attachment.size,
+            state: "done",
+            preview: attachment.mime?.startsWith("image/") ? fileUrl(attachment.path) : null,
+            attachment,
+        }));
+    } catch {
+        return [];
+    }
+}
+
+function saveAttached(id, files) {
+    const list = files.filter((file) => file.state === "done").map((file) => file.attachment);
+
+    try {
+        if (list.length === 0) {
+            localStorage.removeItem(attachedKey(id));
+        } else {
+            localStorage.setItem(attachedKey(id), JSON.stringify(list));
+        }
+    } catch {
+        // No room: the files stay attached until the page goes.
+    }
+}
+
 function savePastes(id, pastes) {
     try {
         if (Object.keys(pastes).length === 0) {
@@ -388,7 +425,7 @@ export function Composer() {
     const { view, conversationId } = store.state;
     const historyScope = { person: store.state.me?.id, conversation: conversationId };
     const [text, setText] = useState(() => drafts.get(conversationId));
-    const [files, setFiles] = useState([]);
+    const [files, setFiles] = useState(() => loadAttached(conversationId));
     // How a message goes while Pi works: "steer", "followUp" (Queue), or "interrupt" (stop the run, then send).
     const [sendMode, setSendMode] = useState("steer");
     // The queued message tapped open, wrapped: one line each until then. The queue holds only a message's start.
@@ -467,6 +504,7 @@ export function Composer() {
 
         return () => clearTimeout(timer);
     }, [interrupting]);
+    useEffect(() => saveAttached(conversationId, files), [files]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -783,9 +821,8 @@ export function Composer() {
         }
 
         setSending(true);
-        const attachments = files
-            .filter((file) => file.state === "done")
-            .map((file) => file.attachment);
+        const going = files.filter((file) => file.state === "done");
+        const attachments = going.map((file) => file.attachment);
         const ok = await attempt(() =>
             actions.submit(
                 withQuote(store.state.replyQuote, full),
@@ -811,8 +848,9 @@ export function Composer() {
 
             sent(full);
             store.set({ replyQuote: null });
-            forget(files);
-            setFiles([]);
+            // Files pasted while it went stay for the next message.
+            forget(going);
+            setFiles((current) => current.filter((file) => !going.includes(file)));
 
             if (!coarse) {
                 box.current?.focus();
@@ -1449,8 +1487,9 @@ export function Composer() {
                     </div>`
                 }
                 <div
-                    class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""}`}
+                    class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""} ${sending ? "sending" : ""}`}
                     data-part="message-box"
+                    aria-busy=${sending ? "true" : undefined}
                     onClick=${(event) => {
                         // The box is one target: a tap on its edge, around the files sent along, between its buttons,
                         // or on Send with nothing to send (a disabled button takes no taps), goes to the text.
@@ -1516,6 +1555,7 @@ export function Composer() {
                         ref=${setBox}
                         rows="1"
                         value=${text}
+                        readonly=${sending}
                         placeholder=${placeholder}
                         onInput=${(event) => {
                             setBrowsing(null);

@@ -10,6 +10,7 @@ import { outcome } from "../background.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
+import { prepareModelImage } from "../model-images.ts";
 import { reveal } from "../reveal.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
@@ -816,6 +817,9 @@ export async function conversationRoutes(
             mime: mime.split(";")[0]!.trim(),
             size,
         };
+
+        // Made ready for the model while the person still writes: their message then goes at once.
+        prepareModelImage(file, attachment.mime, size);
 
         return json(response, 200, attachment);
     }
