@@ -99,13 +99,32 @@ function loadPastes(id) {
     }
 }
 
-const attachedKey = (id) => `pocket.attached.${id ?? "home"}`;
+const attachedKey = (id) => `pocket.attached.${store.state.me?.id}.${id ?? "home"}`;
+let attachmentsStopped = false;
+
+addEventListener("pocket:signedOut", () => {
+    attachmentsStopped = true;
+
+    try {
+        for (const key of Object.keys(localStorage)) {
+            if (key.startsWith("pocket.attached.")) {
+                localStorage.removeItem(key);
+            }
+        }
+    } catch {
+        // Storage can be unavailable.
+    }
+});
 
 /**
  * Each conversation's uploaded files, kept with its draft: the browser drops a tab in the background, or reloads it after
  * an update, and the files must still be there. A file still uploading is not kept: its upload ends with the page.
  */
 function loadAttached(id) {
+    if (attachmentsStopped || !store.state.me?.id) {
+        return [];
+    }
+
     try {
         const list = JSON.parse(localStorage.getItem(attachedKey(id)) ?? "[]");
 
@@ -123,6 +142,10 @@ function loadAttached(id) {
 }
 
 function saveAttached(id, files) {
+    if (attachmentsStopped || !store.state.me?.id) {
+        return;
+    }
+
     const list = files.filter((file) => file.state === "done").map((file) => file.attachment);
 
     try {
@@ -505,6 +528,13 @@ export function Composer() {
         return () => clearTimeout(timer);
     }, [interrupting]);
     useEffect(() => saveAttached(conversationId, files), [files]);
+    useEffect(() => {
+        const clear = () => setFiles([]);
+
+        addEventListener("pocket:signedOut", clear);
+
+        return () => removeEventListener("pocket:signedOut", clear);
+    }, []);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 

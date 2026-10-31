@@ -679,6 +679,7 @@ export function signOut() {
         // What this browser kept of this person's sessions goes with their sign-in, and nothing saves it again: not a save
         // of this tab still to come, nor one of the other tabs, which hear of it through the storage event.
         deviceCacheStopped = true;
+        dispatchEvent(new Event("pocket:signedOut"));
 
         try {
             localStorage.setItem(SIGNED_OUT_KEY, String(Date.now()));
@@ -894,6 +895,7 @@ const SIGNED_OUT_KEY = "pocket.signedOut";
 addEventListener("storage", (event) => {
     if (event.key === SIGNED_OUT_KEY) {
         deviceCacheStopped = true;
+        dispatchEvent(new Event("pocket:signedOut"));
     }
 });
 
