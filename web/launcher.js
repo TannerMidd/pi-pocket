@@ -425,7 +425,7 @@ function actionItems() {
             label: "Running now",
             detail: "everything Pi is doing",
             icon: "pulse",
-            run: () => openSheet({ type: "running" }),
+            run: () => toggleBoard("running"),
         },
         session && {
             label: "Background",
@@ -434,10 +434,10 @@ function actionItems() {
             run: () => openSheet({ type: "background" }),
         },
         {
-            label: store.state.board ? "Close the subagents board" : "Subagents",
+            label: store.state.board === "subagents" ? "Close the subagents board" : "Subagents",
             detail: "subagents in every session",
             icon: "fork",
-            run: toggleBoard,
+            run: () => toggleBoard("subagents"),
         },
         collab() && {
             label: "Notifications",
