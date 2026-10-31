@@ -64,7 +64,16 @@ Use a template for a message that people send often. Use a skill for steps that 
 
 People sign in to providers in Menu → **Providers**, and pick a model for each session with the model chip in the message box. Pi Pocket uses Pi's sign-ins (`~/.pi/agent/auth.json`) and Pi's list of models. To add a model or a provider that Pi does not know, add it to `models.json` as Pi's `models.md` says. A provider that needs code comes as a Pi Pocket drop-in that calls `host.registerModelProvider` ([host.md](extensions/reference/host.md#registermodelprovider)), not as a Pi extension: see [Pi's extensions and packages](#pis-extensions-and-packages).
 
-**A Claude subscription.** Sign in to Anthropic with it in Providers. Then turn on **Claude subscription billing** in Menu → Extensions → Installed → **Built in**, so that requests count against the plan. It is off by default. Without it, Anthropic can bill the requests as extra usage, and refuse them when that is used up. Anthropic can change how it counts requests at any time.
+**A Claude subscription.** Sign in to Anthropic with it in Providers. Then turn on **Claude subscription billing** in Menu → Extensions → Installed → **Built in**, so that requests count against the plan. It is off by default, and it asks before it turns on. Without it, Anthropic can bill the requests as extra usage, and refuse them when that is used up.
+
+> [!WARNING]
+> **Using a Claude subscription in Pi Pocket is at your own risk.** Anthropic's terms and its help pages disagree on it:
+>
+> - Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) forbid accessing its services "through automated or non-human means, whether through a bot, script, or otherwise", except with an Anthropic API key or where Anthropic explicitly permits it.
+> - Its help pages say that third-party apps can use your subscription limits. Yet its servers often bill such requests as extra usage.
+> - Claude subscription billing makes Pi Pocket's requests look like Claude Code's.
+>
+> Anthropic can change how it counts these requests, refuse them, or act on an account it finds using them. An Anthropic API key, or a model from another provider, has none of these risks.
 
 Models are the person's choice, never Pi's:
 
