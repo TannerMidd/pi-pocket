@@ -37,7 +37,7 @@ type ConfigRun = { ok: true; config: unknown } | { ok: false; message: string };
 export type PortState =
     | { kind: "free" }
     | { kind: "ours"; url: string }
-    | { kind: "taken"; detail: string }
+    | { kind: "taken"; detail: string; command: string }
     | { kind: "funnel"; detail: string };
 
 export interface ServeEvents {
@@ -110,9 +110,17 @@ export function preflightProblem(status: unknown): string | undefined {
         return NOT_NAMED;
     }
 
-    // CertDomains comes from the control plane and is empty unless HTTPS certificates are enabled in the admin console:
-    // the one safe preflight for the certificate the mount needs.
-    const certificates = settings.CertDomains;
+    return undefined;
+}
+
+/**
+ * Why this node has no HTTPS certificate for its name yet, in terms someone can act on; undefined when it has one.
+ * `CertDomains` comes from the control plane and is empty unless HTTPS certificates are enabled in the admin console.
+ * An empty list is also what a netmap that has not arrived yet looks like, so this asks rather than asserts. It is a
+ * check of its own rather than part of preflightProblem() because a mount already in place needs no new certificate.
+ */
+export function certificateProblem(status: unknown): string | undefined {
+    const certificates = recordOf(status)?.CertDomains;
 
     if (!Array.isArray(certificates) || certificates.length === 0) {
         return NO_CERTIFICATES;
@@ -123,7 +131,8 @@ export function preflightProblem(status: unknown): string | undefined {
 
 /**
  * Who holds `port` on this node, and whether that is this Pi Pocket's own mount at `/`. `localPort` is the server's own
- * port on loopback, which is what a mount of ours proxies to.
+ * port on loopback, which is what a mount of ours proxies to. A `taken` state carries the command that frees the port:
+ * what frees a web mount does not free a TCP forward, and tailscaled refuses the web form while one is there.
  */
 export function portState(
     config: unknown,
@@ -137,35 +146,42 @@ export function portState(
     const funnelKey = host === undefined ? undefined : entryKey(allowFunnel, host, port);
 
     // Funnel comes before the mounts: it publishes the port to the whole internet, which matters more than who else, or
-    // we ourselves, holds a path on it. Older and simple configs key AllowFunnel by port alone.
-    if (
-        allowFunnel?.[String(port)] === true ||
-        (funnelKey !== undefined && allowFunnel?.[funnelKey] === true)
-    ) {
+    // we ourselves, holds a path on it. `AllowFunnel` is keyed "<dnsname>:<port>" in every version 1.52 and later.
+    if (funnelKey !== undefined && allowFunnel?.[funnelKey] === true) {
         return { kind: "funnel", detail: webKey(host ?? dnsName, port) };
     }
 
     const mount = host === undefined ? undefined : mountAt(config, dnsName, port);
+    const tcp = recordOf(recordOf(settings?.TCP)?.[String(port)]);
 
     if (host !== undefined && mount !== undefined) {
         // Our own mount can be spelled several ways, so the target is compared rather than the exact string: it is ours
-        // while it points at this server's own loopback port, whoever wrote it down.
-        if (sameLocalTarget(mount.Proxy, localPort)) {
+        // while it points at this server's own loopback port, whoever wrote it down. A plain-http serve at our port is
+        // not: calling it https would hand out an address that answers with a TLS error.
+        if (sameLocalTarget(mount.Proxy, localPort) && tcp?.HTTP !== true) {
             return { kind: "ours", url: serveUrl(host, port) };
         }
 
         return {
             kind: "taken",
             detail: typeof mount.Proxy === "string" ? mount.Proxy : 'another mount at "/"',
+            command:
+                tcp?.HTTP === true
+                    ? `tailscale serve --http=${port} --set-path=/ off`
+                    : `tailscale serve --https=${port} --set-path=/ off`,
         };
     }
 
     // HTTPS on the port is how tailscaled terminates TLS for the mounts above, ours included, so on its own it holds
     // nothing. A TCP forward does: it hands the whole port to something that is not http.
-    const forward = recordOf(recordOf(settings?.TCP)?.[String(port)])?.TCPForward;
+    const forward = tcp?.TCPForward;
 
     if (typeof forward === "string" && forward !== "") {
-        return { kind: "taken", detail: `a TCP forward to ${forward}` };
+        return {
+            kind: "taken",
+            detail: `a TCP forward to ${forward}`,
+            command: `tailscale serve --tcp=${port} off`,
+        };
     }
 
     return { kind: "free" };
@@ -283,9 +299,18 @@ export class TailscaleServe {
         }
 
         const state = portState(before.config, dnsName, SERVE_PORT, this.#port);
+        const adopted = state.kind === "ours";
 
-        // `tailscale funnel --https=443 off` is the only switch the CLI has, and it takes every handler on the port with
-        // it, ours and anyone else's, so the message says so rather than leaving that to the command's own help.
+        // A mount of ours needs no certificate check: it is up, so its certificate already is. Reading the mount before
+        // the check is what lets an existing address survive a netmap that has not reported CertDomains yet.
+        if (!adopted) {
+            const certificates = certificateProblem(status);
+
+            if (certificates !== undefined) {
+                return { ok: false, message: certificates };
+            }
+        }
+
         if (state.kind === "funnel") {
             // Mounting `/` under Funnel would put Pi Pocket on the internet, not just on the tailnet the menu promises.
             return {
@@ -297,23 +322,24 @@ export class TailscaleServe {
         if (state.kind === "taken") {
             return {
                 ok: false,
-                message: `Port ${SERVE_PORT} is already served by ${state.detail}. Pi Pocket will not replace it. Free it with "tailscale serve --https=${SERVE_PORT} --set-path=/ off", or pick another access mode.`,
+                message: `Port ${SERVE_PORT} is already served by ${state.detail}. Pi Pocket will not replace it. Free it with "${state.command}", or pick another access mode.`,
             };
         }
 
         /** What the mount command said, for the case where it exits without mounting anything. */
         let said = "";
-        const adopted = state.kind === "ours";
 
-        // A mount command that timed out may still have been applied by tailscaled, and nothing else can tell us whether
-        // it was: counting it as attempted before it runs is what lets stop() take it away again.
-        this.#published = true;
+        // `#published` follows what this run is responsible for. A mount command that timed out may still have been
+        // applied by tailscaled, and nothing else can tell us whether it was, so an attempt counts before it runs. An
+        // adopted mount is not this run's to remove: quitting leaves it where it is.
+        this.#published = !adopted;
 
         if (!adopted) {
             // --set-path=/ keeps the mount to this one path, so removing it later cannot take another mount with it.
             const mounted = this.#run(
                 ["serve", "--bg", `--https=${SERVE_PORT}`, "--set-path=/", proxy],
                 MOUNT_TIMEOUT_MS,
+                "If you were enabling HTTPS certificates for this tailnet, finish that in the admin console, then try again.",
             );
 
             if (!mounted.ok) {
@@ -363,9 +389,12 @@ export class TailscaleServe {
         const removed = this.#run(["serve", `--https=${SERVE_PORT}`, "--set-path=/", "off"]);
 
         // An `off` with no handler under it, or with no serve config at all, has nothing to remove: that is what a mount
-        // that never took leaves behind, and it is not a problem to report.
+        // that never took leaves behind, and it is not a problem to report. Any other failure leaves the mount publishing
+        // this server, so say what that means: the start after this one takes it down, or reuses it in serve mode.
         if (!removed.ok && !missingMount(removed.message)) {
-            this.#events.problem(removed.message);
+            this.#events.problem(
+                `${removed.message} The tailnet may still point here; the next start takes the mount down or reuses it.`,
+            );
         }
     }
 
@@ -373,17 +402,22 @@ export class TailscaleServe {
         return readServeConfig(this.#binary);
     }
 
-    #run(args: string[], timeout = TIMEOUT_MS): Run {
-        return runTailscale(this.#binary, args, timeout);
+    #run(args: string[], timeout = TIMEOUT_MS, timedOutHint?: string): Run {
+        return runTailscale(this.#binary, args, timeout, timedOutHint);
     }
 }
 
 /**
- * Remove the mount a crashed launcher left at `/` for `port`, so the next start finds it free or adopts it instead of
- * refusing its own remains. This never throws: a problem is said through `events?.problem`, and the answer is whether a
- * mount of ours was there to remove.
+ * Remove a mount a crashed launcher left at `/` for one of `ports`, so the next start finds it free or adopts it
+ * instead of refusing its own remains. Any port the launcher used before counts, because a mount left by a killed run
+ * still points at the port that run listened on, not at this one. This never throws: a problem is said through
+ * `events?.problem`, and the answer is whether a mount of ours was there to remove.
  */
-export function removeStaleServe(binary: string, port: number, events?: ServeEvents): boolean {
+export function removeStaleServe(
+    binary: string,
+    ports: readonly number[],
+    events?: ServeEvents,
+): boolean {
     try {
         const statusRun = runTailscale(binary, ["status", "--json"], PROBE_TIMEOUT_MS);
 
@@ -410,7 +444,7 @@ export function removeStaleServe(binary: string, port: number, events?: ServeEve
         const mount = mountAt(before.config, dnsName, SERVE_PORT);
 
         // Only a `/` of ours is ours to remove: the scoped `off` cannot take another mount or another path with it.
-        if (mount === undefined || !sameLocalTarget(mount.Proxy, port)) {
+        if (mount === undefined || !ports.some((port) => sameLocalTarget(mount.Proxy, port))) {
             return false;
         }
 
@@ -440,8 +474,16 @@ function loopback(port: number): string {
     return `http://127.0.0.1:${port}`;
 }
 
-/** One CLI command, bounded by `timeout` so a hung daemon cannot hang Pi Pocket with it. */
-function runTailscale(binary: string, args: string[], timeout = TIMEOUT_MS): Run {
+/**
+ * One CLI command, bounded by `timeout` so a hung daemon cannot hang Pi Pocket with it. `timedOutHint` replaces the
+ * generic "it may be hung" advice for a command that legitimately waits on something outside this machine.
+ */
+function runTailscale(
+    binary: string,
+    args: string[],
+    timeout = TIMEOUT_MS,
+    timedOutHint?: string,
+): Run {
     const result = spawnSync(binary, args, {
         timeout,
         // `status --json` lists every peer: a large tailnet passes the 1 MiB default.
@@ -457,7 +499,7 @@ function runTailscale(binary: string, args: string[], timeout = TIMEOUT_MS): Run
         return {
             ok: false,
             message: timedOut
-                ? `"tailscale ${args.join(" ")}" did not answer within ${timeout / 1000} seconds. Tailscale may be hung: restart it, then try again.`
+                ? `"tailscale ${args.join(" ")}" did not answer within ${timeout / 1000} seconds. ${timedOutHint ?? "Tailscale may be hung: restart it, then try again."}`
                 : `Could not run ${binary}: ${error.message}`,
         };
     }
@@ -490,9 +532,11 @@ function readServeConfig(binary: string, timeout = TIMEOUT_MS): ConfigRun {
 }
 
 /** Whether a failed `off` is tailscaled saying there was nothing mounted under that path. */
+/** Whether a failed `off` is tailscaled saying there was nothing mounted under that path. */
 function missingMount(message: string): boolean {
-    // "handler does not exist" and "serve config does not exist" are the two ways tailscaled says it, in every version.
-    return message.toLowerCase().includes("does not exist");
+    // "handler does not exist" is what the web `off` prints for a path with no handler. The `--tcp` form says "serve
+    // config does not exist" instead, and this never runs that one.
+    return message.toLowerCase().includes("handler does not exist");
 }
 
 /** The last thing a command said, for the message about why it exited without doing what it was asked. */

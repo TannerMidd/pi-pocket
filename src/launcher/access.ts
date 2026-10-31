@@ -218,6 +218,23 @@ export function serveBailOut(request: {
     );
 }
 
+/**
+ * The loopback ports a mount left by an earlier run could point at: the port this run listens on, and the one the last
+ * run saved, since a killed run's mount still targets the port that run used. Empty for `tailscale-serve` itself, whose
+ * mount prepareServe() mounted or adopted for this run's port.
+ */
+export function staleServePorts(
+    mode: AccessMode | "custom",
+    saved: number | undefined,
+    port: number,
+): number[] {
+    if (mode === "tailscale-serve") {
+        return [];
+    }
+
+    return [...new Set([saved, port].filter((each): each is number => each !== undefined))];
+}
+
 /** Where to get cloudflared on this platform: a release binary the launcher can download, or how to install it. */
 export function cloudflaredSource(): { url: string } | { install: string } {
     const arch = (
