@@ -19,7 +19,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -309,6 +309,17 @@ test("PiP follows its person's standing instructions in pip.md, read again when 
     writeFileSync(file, "Answer me in Japanese, and keep it short.\n");
     await say(app, id, "and again");
     assert.match(instructions() ?? "", /\n\nAnswer me in Japanese, and keep it short\.\n/);
+
+    // A file it cannot read gives none, and is read once it can be.
+    if (process.getuid?.() !== 0) {
+        writeFileSync(file, "Answer me in French.\n");
+        chmodSync(file, 0o000);
+        await say(app, id, "locked");
+        assert.equal(instructions(), undefined);
+        chmodSync(file, 0o644);
+        await say(app, id, "unlocked");
+        assert.match(instructions() ?? "", /\n\nAnswer me in French\.\n/);
+    }
 
     rmSync(file);
     await say(app, id, "one more");

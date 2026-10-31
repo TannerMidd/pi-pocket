@@ -33,6 +33,8 @@ const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
 function ownerInstructions(host: PocketHost): () => string | undefined {
     const file = join(host.dataDir, "pip.md");
     let seen: { key: string; text: string | undefined } | undefined;
+    // A file that cannot be read is tried again with each message, and said once until it reads or fails otherwise.
+    let told: string | undefined;
 
     return () => {
         let key: string;
@@ -46,15 +48,17 @@ function ownerInstructions(host: PocketHost): () => string | undefined {
         }
 
         if (seen?.key !== key) {
-            let text: string | undefined;
-
             try {
-                text = readFileSync(file, "utf8").trim() || undefined;
+                seen = { key, text: readFileSync(file, "utf8").trim() || undefined };
+                told = undefined;
             } catch (error) {
-                host.notice("warning", `Could not read ${file}: ${String(error)}`);
-            }
+                if (told !== String(error)) {
+                    told = String(error);
+                    host.notice("warning", `Could not read ${file}: ${told}`);
+                }
 
-            seen = { key, text };
+                return undefined;
+            }
         }
 
         return seen.text === undefined

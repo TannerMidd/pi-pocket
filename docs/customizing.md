@@ -25,7 +25,7 @@ Keep the files short and true. They go with each request, and a rule that Pi can
 
 ## PiP's instructions
 
-PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP, such as the language of its answers, in `pip.md` in Pi Pocket's data folder: `~/.pi-pocket/pip.md`, or the folder that `PI_POCKET_DIR` names (since 0.28.0).
+PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP, such as the language of its answers, in `pip.md` in Pi Pocket's data folder: `~/.pi-pocket/pip.md`, unless `--data` or `PI_POCKET_DIR` names another folder (since 0.28.0).
 
 - PiP gets the file with each message. When the file changes, the next message has the new text.
 - Only PiP reads it: sessions, subagents, and Pi's terminal app do not.
