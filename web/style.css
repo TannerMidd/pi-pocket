@@ -1100,6 +1100,22 @@ kbd {
     height: auto;
 }
 
+/*
+ * Tiled, the window whose bar runs under the buttons is cut around them: its border (and its focus ring) goes down,
+ * around the buttons, and back up its side, instead of under them. A browser without corner-shape keeps the corner.
+ */
+@supports (corner-shape: notch) {
+    :root[data-tiling="on"][data-window-controls="right"] .layout > [data-controls-notch] {
+        border-top-right-radius: var(--notch-w) var(--notch-h);
+        corner-top-right-shape: superellipse(-5);
+    }
+
+    :root[data-tiling="on"][data-window-controls="left"] .layout > [data-controls-notch] {
+        border-top-left-radius: var(--notch-w) var(--notch-h);
+        corner-top-left-shape: superellipse(-5);
+    }
+}
+
 /* The strip beside the buttons, over what starts below them: to move the window by. Under every layer of the app. */
 .window-drag {
     position: fixed;

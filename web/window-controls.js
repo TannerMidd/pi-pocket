@@ -2,13 +2,18 @@
 // top edge, or Pi Pocket installed as an app with its title bar hidden, says where they are through the Window Controls
 // Overlay (navigator.windowControlsOverlay). Only what is under them makes room, and only as much as they take: a bar
 // there (the conversation's top bar, a panel's, a viewer's) keeps its contents beside them; a window without one (the
-// sidebar, an extension's page) starts below them. The rest of the layout keeps its whole height. In a browser tab
+// sidebar, an extension's page) starts below them. The rest of the layout keeps its whole height. Tiled, the window
+// whose bar is under them has its corner cut around them, so its border does not run under them. In a browser tab
 // there are none, and nothing changes. docs/desktop.md describes it.
 //
 // On <html>: data-window-controls, "left", "right", or "none" (set before the app's first paint, so a desktop app can
 // tell that the page makes its own room), and --controls-h, how far down the buttons reach. What makes room gets
 // data-under-controls, "bar" or "push", and --controls-room: the bar's padding on the buttons' side, or how far the
-// window's top moves down.
+// window's top moves down. The window cut around them gets data-controls-notch, and --notch-w and --notch-h: the cut.
+//
+// What is under the buttons is read from the layout, before the frame that shows a change: a window, a bar, or a
+// panel that opens has its room in its first frame. A window that pops in is measured where it lands, not where its
+// animation has it.
 
 const overlay = navigator.windowControlsOverlay;
 const root = document.documentElement;
@@ -20,8 +25,11 @@ const BARS =
 /** Without a bar, the window (or the drawer, or the phone's home list) starts below the buttons. */
 const PUSHED = ".drawer, .home-list, .layout > .window";
 
-/** How far apart the points are, along the buttons, where the page looks for what is under them. */
-const STEP = 8;
+/** What, added, removed, or changed, can change what is under the buttons. */
+const LAYOUT = `${BARS}, .drawer, .home-list, .layout, .window`;
+
+/** How far the cut stays from the buttons, beside them and below them. */
+const NOTCH_GAP = 6;
 
 /** What makes room now: element → { kind, room }. */
 let marked = new Map();
@@ -29,8 +37,45 @@ let marked = new Map();
 /** A bar's own padding on the buttons' side, from before it made room: it never gets less. */
 const ownPadding = new WeakMap();
 
+/** The tiled window cut around the buttons, and its cut: { element, w, h }, or null. */
+let notched = null;
+
 let drag = null;
 let resizes = null;
+let frame = 0;
+let timer = 0;
+
+/**
+ * Where `element` is laid out in the window, without transforms: a window that pops in (scaled) or slides in
+ * (translated) is where it lands. `getBoundingClientRect` would give where its animation has it in this frame.
+ */
+function layoutBox(element) {
+    let left = 0;
+    let top = 0;
+
+    for (let each = element; each !== null; each = each.offsetParent) {
+        left += each.offsetLeft + (each === element ? 0 : each.clientLeft);
+        top += each.offsetTop + (each === element ? 0 : each.clientTop);
+    }
+
+    for (
+        let each = element.parentElement;
+        each !== null && each !== document.body;
+        each = each.parentElement
+    ) {
+        left -= each.scrollLeft;
+        top -= each.scrollTop;
+    }
+
+    return {
+        left,
+        top,
+        right: left + element.offsetWidth,
+        bottom: top + element.offsetHeight,
+        width: element.offsetWidth,
+        height: element.offsetHeight,
+    };
+}
 
 function mark(next) {
     for (const [element] of marked) {
@@ -62,20 +107,48 @@ function mark(next) {
     marked = next;
 }
 
+/** Cut `next.element`'s corner (style.css draws it), and no other window's. */
+function notch(next) {
+    const same = notched !== null && notched.element === next?.element;
+
+    if (notched !== null && !same) {
+        notched.element.removeAttribute("data-controls-notch");
+        notched.element.style.removeProperty("--notch-w");
+        notched.element.style.removeProperty("--notch-h");
+    }
+
+    if (next !== null) {
+        if (!same) {
+            next.element.setAttribute("data-controls-notch", "");
+        }
+
+        if (!same || notched.w !== next.w) {
+            next.element.style.setProperty("--notch-w", `${next.w}px`);
+        }
+
+        if (!same || notched.h !== next.h) {
+            next.element.style.setProperty("--notch-h", `${next.h}px`);
+        }
+    }
+
+    notched = next;
+}
+
 function clear() {
-    if (root.dataset.windowControls === "none" && marked.size === 0) {
+    if (root.dataset.windowControls === "none" && marked.size === 0 && notched === null) {
         return;
     }
 
     root.dataset.windowControls = "none";
     root.style.removeProperty("--controls-h");
     mark(new Map());
+    notch(null);
     drag?.remove();
 }
 
 /** How much room `element` makes, measured as if it made none. */
 function roomOf(element, bar, side, reach, height) {
-    const box = element.getBoundingClientRect();
+    const box = layoutBox(element);
     const style = getComputedStyle(element);
 
     if (bar) {
@@ -97,21 +170,59 @@ function roomOf(element, bar, side, reach, height) {
     return height - (box.top - moved);
 }
 
-function update() {
+/**
+ * Tiled, the window that holds `bar` has its border run under the buttons. Its corner is cut around them instead, as
+ * wide and as deep as they reach into it, and a little more; never more than half the window. Without tiling there is
+ * no border to cut.
+ */
+function notchOf(bar, side, reach, height) {
+    const window = root.dataset.tiling === "on" ? bar.closest(".layout > .window") : null;
+
+    if (window === null) {
+        return null;
+    }
+
+    const box = layoutBox(window);
+    const w = Math.round(
+        (side === "left" ? reach - box.left : box.right - (innerWidth - reach)) + NOTCH_GAP,
+    );
+    const h = Math.round(height - box.top + NOTCH_GAP);
+
+    return w > NOTCH_GAP && h > NOTCH_GAP && w < box.width / 2 && h < box.height / 2
+        ? { element: window, w, h }
+        : null;
+}
+
+/** Where the buttons are: { side, reach, height }, or null when there are none over the page. */
+function controls() {
     const rect = overlay?.visible ? overlay.getTitlebarAreaRect() : null;
     const height = rect === null ? 0 : Math.round(rect.y + rect.height);
 
     if (rect === null || height <= 0 || rect.width >= innerWidth) {
-        clear();
-
-        return;
+        return null;
     }
 
     // The buttons are where the title bar's area is not: on its left (macOS) or its right (Windows, Linux).
     const left = Math.max(0, Math.round(rect.x));
     const right = Math.max(0, Math.round(innerWidth - rect.x - rect.width));
     const side = left >= right ? "left" : "right";
-    const reach = side === "left" ? left : right;
+
+    return { side, reach: side === "left" ? left : right, height };
+}
+
+function update() {
+    cancelAnimationFrame(frame);
+    frame = 0;
+
+    const found = controls();
+
+    if (found === null) {
+        clear();
+
+        return;
+    }
+
+    const { side, reach, height } = found;
 
     if (root.dataset.windowControls !== side) {
         root.dataset.windowControls = side;
@@ -121,50 +232,62 @@ function update() {
         root.style.setProperty("--controls-h", `${height}px`);
     }
 
-    // Across the buttons and just below them: the topmost things there that make room. A short session tab strip
-    // and the bar below it can both meet the buttons. A sheet's scrim or the launcher makes none, so the window under
-    // them keeps its room while they show.
+    // Everything shown that reaches under the buttons and makes room, in the order of the page. What floats over the
+    // app (a sheet's scrim, the launcher) makes none, so the window under it keeps its room while it shows.
     const next = new Map();
 
-    for (let offset = 1; offset < reach + STEP; offset += STEP) {
-        const along = Math.min(offset, reach - 1);
-        const x = side === "left" ? along : innerWidth - along;
+    for (const element of document.querySelectorAll(`${BARS}, ${PUSHED}`)) {
+        if (!element.checkVisibility({ visibilityProperty: true })) {
+            continue;
+        }
 
-        for (let down = 1; down < height + STEP + 1; down += STEP) {
-            for (const element of document.elementsFromPoint(x, Math.min(down, height + 1))) {
-                const bar = element.matches(BARS);
+        const box = layoutBox(element);
+        const under =
+            box.width > 0 &&
+            box.height > 0 &&
+            box.bottom > 0 &&
+            box.top <= height + 1 &&
+            (side === "left"
+                ? box.left < reach && box.right > 0
+                : box.right > innerWidth - reach && box.left < innerWidth);
 
-                if (bar || element.matches(PUSHED)) {
-                    if (!next.has(element)) {
-                        next.set(element, {
-                            kind: bar ? "bar" : "push",
-                            room: roomOf(element, bar, side, reach, height),
-                        });
-                    }
+        if (under) {
+            const bar = element.matches(BARS);
 
-                    break;
-                }
-            }
+            next.set(element, {
+                kind: bar ? "bar" : "push",
+                room: roomOf(element, bar, side, reach, height),
+            });
         }
     }
 
-    // A rounded window's edge can be hit above its bar. The bar makes room for the window; do not also push it down.
-    const bars = [...next].filter(([, { kind }]) => kind === "bar").map(([element]) => element);
-
+    // A window with a bar (or the phone's home list) under the buttons makes room there; it does not also move down.
     for (const [element, { kind }] of next) {
-        if (kind === "push" && bars.some((bar) => element.contains(bar))) {
+        if (
+            kind === "push" &&
+            [...next.keys()].some((other) => other !== element && element.contains(other))
+        ) {
             next.delete(element);
         }
     }
 
     mark(next);
 
+    // The topmost tiled window with a bar under the buttons: the last in the page, as the page stacks them.
+    let cut = null;
+
+    for (const [element, { kind }] of next) {
+        cut = (kind === "bar" && notchOf(element, side, reach, height)) || cut;
+    }
+
+    notch(cut);
+
     // To move the window by: the strip beside the buttons, over the windows that start below them.
     let width = reach;
 
     for (const [element, { kind }] of next) {
         if (kind === "push") {
-            const box = element.getBoundingClientRect();
+            const box = layoutBox(element);
 
             width = Math.max(width, side === "left" ? box.right : innerWidth - box.left);
         }
@@ -187,13 +310,11 @@ function update() {
     }
 }
 
-let frame = 0;
-let timer = 0;
-
-/** Before the next frame: the buttons or the window changed. */
+/** Before the next frame: something changed that the page sees only then (the buttons, a bar's size). */
 function now() {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(update);
+    if (frame === 0) {
+        frame = requestAnimationFrame(update);
+    }
 }
 
 /** A little later, at most every 100 ms: the page changed, which it does with every word of a streamed reply. */
@@ -206,22 +327,39 @@ function soon() {
     }
 }
 
-// Before the app's first paint: a desktop app reads it to know that the page makes room for its buttons itself.
-root.dataset.windowControls = overlay?.visible ? "left" : "none";
+/** Whether these changes in the page can change what is under the buttons: a window, a bar, or the layout's state. */
+function moves(records) {
+    const layout = (node) =>
+        node.nodeType === Node.ELEMENT_NODE &&
+        node !== drag &&
+        (node.matches(LAYOUT) || node.querySelector(LAYOUT) !== null);
+
+    return records.some((record) =>
+        record.type === "attributes"
+            ? layout(record.target)
+            : [...record.addedNodes, ...record.removedNodes].some(layout),
+    );
+}
+
+// Before the app's first paint, on the buttons' side: a desktop app reads it to know that the page makes room for its
+// buttons itself.
+root.dataset.windowControls = controls()?.side ?? "none";
 
 if (overlay) {
+    // A bar or window that makes room changed size (the theme's spacing, a font): seen after the frame's layout.
     resizes = new ResizeObserver(now);
-    overlay.addEventListener("geometrychange", now);
-    addEventListener("resize", now);
+    overlay.addEventListener("geometrychange", update);
+    addEventListener("resize", update);
 
     // Windows, viewers, and bars come and go; the sidebar folds, shows, and hides with the width and the person's
-    // choices.
-    new MutationObserver(now).observe(root, { attributeFilter: ["data-rail", "data-tiling"] });
-    new MutationObserver(soon).observe(document.body, {
+    // choices. A mutation is seen before the frame that shows it, so those make room at once. The rest (a streamed
+    // reply's words) is checked a little later.
+    new MutationObserver(update).observe(root, { attributeFilter: ["data-rail", "data-tiling"] });
+    new MutationObserver((records) => (moves(records) ? update() : soon())).observe(document.body, {
         childList: true,
         subtree: true,
         attributeFilter: ["class"],
     });
 
-    now();
+    update();
 }

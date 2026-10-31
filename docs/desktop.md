@@ -88,8 +88,11 @@ An app that hides its title bar, and shows Pi Pocket up to its window's top edge
 - A bar under them (the session tabs, the conversation's top bar, a panel's, a viewer's) keeps what it holds beside them, and the window can be dragged by it.
 - A window without one (the sidebar on wide screens, an extension's page) starts below them. Tiled, its margin moves it, so the tiles' gap stays above it.
 - A strip beside the buttons, as wide as the windows that moved down, moves the window too. What floats over the app (sheets, the launcher, viewers, PiP) takes clicks there.
+- Tiled, the window whose bar is under the buttons has its corner cut around them (`corner-shape`), so its border and focus ring go down, around them, and back up, instead of under them. A browser without `corner-shape` keeps the rounded corner.
 
-On `<html>`, `data-window-controls` is `left` (macOS), `right` (Windows, Linux), or `none`, and `--controls-h` is how far down the buttons reach. What makes room has `data-under-controls`, `bar` or `push`, and `--controls-room`. The page sets `data-window-controls` before its first paint, so an app can tell that it makes its own room. For a page without it (an older Pi Pocket, a sign-in page), Pi Pocket GUI instead sets a top safe-area inset as tall as the buttons, which Pi Pocket's bars have long kept clear of on phones.
+The page reads the layout, not the screen: a window, a bar, or a panel that opens (the subagents board, Design, Files, Browser, People) has its room and its cut before the frame that first shows it, and a window that pops in is measured where it lands. Nothing shows under the buttons first and moves after.
+
+On `<html>`, `data-window-controls` is `left` (macOS), `right` (Windows, Linux), or `none`, and `--controls-h` is how far down the buttons reach. What makes room has `data-under-controls`, `bar` or `push`, and `--controls-room`. The window cut around the buttons has `data-controls-notch`, and `--notch-w` and `--notch-h`. The page sets `data-window-controls` before its first paint, so an app can tell that it makes its own room. For a page without it (an older Pi Pocket, a sign-in page), Pi Pocket GUI instead sets a top safe-area inset as tall as the buttons, which Pi Pocket's bars have long kept clear of on phones.
 
 ## Security
 
