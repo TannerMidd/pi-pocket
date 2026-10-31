@@ -22,13 +22,13 @@ function bySession(entries) {
     return [...groups.values()];
 }
 
-/** One session's artifacts, in the frame that Running now uses for a session. */
+/** One session's artifacts, in a frame of its own: a header with the session, then a row for each. */
 function Group({ group, open }) {
     const cwd = store.state.sessions.find((entry) => entry.id === group.session)?.cwd;
     const title = group.title || `Session ${group.session}`;
 
-    return html`<div class="running">
-        <div class="running-head">
+    return html`<div class="overview-group">
+        <div class="overview-head">
             <span
                 class="folder-mark"
                 style=${`--folder:${folderColor(cwd)}`}

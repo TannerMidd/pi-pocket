@@ -20314,6 +20314,26 @@ pre.gallery-code {
 }
 
 /* All artifacts: a row for each, in the session's own group (it shares `.running`'s frame), with its current version. */
+.overview-group {
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    overflow: hidden;
+}
+
+.overview-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 10px 12px 10px 14px;
+    background: var(--card);
+}
+
+.overview-head > .folder-mark {
+    width: 8px;
+    height: 8px;
+    border-radius: calc(var(--r-mark) - 0.5px);
+}
+
 .overview-session {
     min-width: 0;
     color: var(--text);

@@ -1,9 +1,23 @@
 // The artifacts overview: every artifact in every session a person can see, with its current version.
-import { type App, cleanUp, context, openApp, owner, scriptedModel, work } from "./helpers.ts";
+import {
+    type App,
+    cleanUp,
+    context,
+    openApp,
+    owner,
+    root,
+    scriptedModel,
+    until,
+    work,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { Browsers } from "../src/server/browser.ts";
+import { findBrowser } from "../src/server/browser/discovery.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
 import { createHandler } from "../src/server/http.ts";
@@ -119,3 +133,59 @@ test("a session whose artifacts cannot be read does not hide the others", async 
         console.error = log;
     }
 });
+
+test(
+    "the sheet frames each session's artifacts in a card of its own, with the session's name and count apart",
+    { skip: findBrowser() === undefined ? "no Chromium-based browser on this machine" : false },
+    async () => {
+        const { id } = await app.commands.createSession(owner(app), { cwd: work });
+
+        await publish(id, { id: "sheet-page", title: "Sheet page", content: "<p>one</p>" });
+
+        const browsers = new Browsers({
+            dataDir: mkdtempSync(join(root, "all-artifacts-ui-")),
+            load: async () => undefined,
+            save: () => {},
+        });
+
+        try {
+            const page = await browsers.open(1);
+            const inPage = async <T>(script: string) =>
+                JSON.parse(await page.evaluate(script)) as T;
+
+            await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+            await page.navigate(`${base}/s/${id}`);
+            await until(
+                async () =>
+                    await inPage<boolean>(
+                        `return JSON.stringify(document.querySelector(".composer") !== null)`,
+                    ),
+                "the session",
+            );
+            await inPage(
+                `(await import("/store.js")).openSheet({ type: "all-artifacts" }); return "null"`,
+            );
+            await until(
+                async () =>
+                    await inPage<boolean>(
+                        `return JSON.stringify(document.querySelector(".overview-row") !== null)`,
+                    ),
+                "the list",
+            );
+
+            // Its styles are its own: Running now's sheet, whose frame it once borrowed, is gone.
+            const look = await inPage<{ border: string; display: string; gap: string }>(`
+                const group = getComputedStyle(document.querySelector(".overview-row").parentElement);
+                const head = getComputedStyle(document.querySelector(".overview-row").parentElement.firstElementChild);
+
+                return JSON.stringify({ border: group.borderTopWidth, display: head.display, gap: head.columnGap });
+            `);
+
+            assert.equal(look.border, "1px");
+            assert.equal(look.display, "flex");
+            assert.notEqual(look.gap, "normal");
+        } finally {
+            await browsers.closeAll({ final: true });
+        }
+    },
+);
