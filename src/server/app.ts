@@ -58,6 +58,7 @@ import {
     ArtifactBodyDoc,
     type ArtifactMeta,
     ArtifactsDoc,
+    type ArtifactType,
     AuthorsDoc,
     BackgroundDoc,
     type BackgroundTask,
@@ -202,6 +203,26 @@ type SubagentsValue = {
 };
 
 type SubagentsOf = { agents: Record<string, SubagentRecord>; reporting: Set<string> };
+
+/** How many sessions the artifacts overview reads at once. */
+const OVERVIEW_BATCH = 8;
+
+/** One artifact in the artifacts overview: where it is, and which of its versions is the current one. */
+export type ArtifactOverviewEntry = {
+    session: number;
+    sessionTitle: string;
+    id: string;
+    title: string;
+    type: ArtifactType;
+    kind?: "page" | "deck";
+    group?: string;
+    /** The number of the latest version: the one a person sees first. */
+    current: number;
+    /** How many versions there are. */
+    versions: number;
+    size: number;
+    updatedAt: number;
+};
 
 /** One subagent on the subagents board: the subagents bar's view, the session it works in, and the call it waits on. */
 export type SubagentEntry = ReturnType<typeof subagentView> & {
@@ -2944,6 +2965,70 @@ export class PocketApp {
                 this.#sendBoard(client, this.subagents(user));
             }
         }
+    }
+
+    /**
+     * Every artifact in the sessions this person can see, for the artifacts overview: one entry for each, with its
+     * current (latest) version and how many versions it has. Archived sessions are left out. Newest first.
+     */
+    async artifactOverview(user: User): Promise<ArtifactOverviewEntry[]> {
+        const one = async (
+            session: string,
+            meta: SessionMeta,
+        ): Promise<ArtifactOverviewEntry[]> => {
+            const id = Number(session) as unknown as ConversationId;
+
+            // A PiP is its owner's assistant, and kept out of the session list.
+            if (meta.archived === true || meta.pip !== undefined || !this.canSee(user, id)) {
+                return [];
+            }
+
+            try {
+                const index = await this.harness.snapshot(ArtifactsDoc, id, context);
+                const entries: ArtifactOverviewEntry[] = [];
+
+                for (const [artifact, item] of Object.entries(index?.items ?? {})) {
+                    const current = item.versions.at(-1);
+
+                    if (current === undefined) {
+                        continue;
+                    }
+
+                    entries.push({
+                        session: Number(session),
+                        sessionTitle: meta.title ?? "",
+                        id: artifact,
+                        title: item.title,
+                        type: item.type,
+                        ...(item.kind === undefined ? {} : { kind: item.kind }),
+                        ...(item.group === undefined ? {} : { group: item.group }),
+                        current: current.version,
+                        versions: item.versions.length,
+                        size: current.size,
+                        updatedAt: current.createdAt,
+                    });
+                }
+
+                return entries;
+            } catch (error) {
+                // One session's broken artifacts must not hide the others'.
+                console.error(`Artifacts of session ${session} could not be read:`, error);
+
+                return [];
+            }
+        };
+
+        const sessions = Object.entries(this.#sessions);
+        const found: ArtifactOverviewEntry[] = [];
+
+        // A few sessions at a time: a person with many sessions does not make the server read all of them at once.
+        for (let from = 0; from < sessions.length; from += OVERVIEW_BATCH) {
+            const batch = sessions.slice(from, from + OVERVIEW_BATCH);
+
+            found.push(...(await Promise.all(batch.map(([id, meta]) => one(id, meta)))).flat());
+        }
+
+        return found.sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     async artifactBody(id: ConversationId, artifact: string, version?: number) {

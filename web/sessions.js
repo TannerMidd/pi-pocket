@@ -2515,6 +2515,16 @@ function Rail({ foldable = false, folded = false }) {
                 html`<span class="rail-trouble" aria-hidden="true"></span>`
             }
         </button>
+        <button
+            class="rail-button"
+            data-part="rail-button"
+            data-state=${railState(false, false)}
+            title="Artifacts in every session"
+            aria-label="All artifacts"
+            onClick=${() => openSheet({ type: "all-artifacts" })}
+        >
+            <${Icon} name="artifact" size=${19} />
+        </button>
         <${ExtensionRailButtons} />
         ${
             collab()
