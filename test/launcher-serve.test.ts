@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import {
+    certificateProblem,
     parseTailscaleVersion,
     portState,
     preflightProblem,
@@ -128,7 +129,7 @@ test("a node the tailnet has not admitted yet waits on the admin console, not on
 });
 
 test("serve needs HTTPS certificates, which the control plane reports as CertDomains", () => {
-    const noCertificates = preflightProblem({
+    const noCertificates = certificateProblem({
         BackendState: "Running",
         Self: { DNSName: "host.tail1.ts.net." },
         CertDomains: [],
@@ -137,10 +138,21 @@ test("serve needs HTTPS certificates, which the control plane reports as CertDom
     assert.match(noCertificates ?? "", /HTTPS certificates are off/);
 
     assert.equal(
-        preflightProblem({
+        certificateProblem({
             BackendState: "Running",
             Self: { DNSName: "host.tail1.ts.net." },
             CertDomains: ["host.tail1.ts.net"],
+        }),
+        undefined,
+    );
+
+    // Certificates are a check of their own: a mount already in place needs no new one, so preflightProblem() no longer
+    // speaks for them.
+    assert.equal(
+        preflightProblem({
+            BackendState: "Running",
+            Self: { DNSName: "host.tail1.ts.net." },
+            CertDomains: [],
         }),
         undefined,
     );
@@ -175,11 +187,24 @@ test("a mount of ours at / is ours however its loopback target is spelled", () =
     assert.deepEqual(portState(ours("http://127.0.0.1:9999"), NAME, 443, LOCAL_PORT), {
         kind: "taken",
         detail: "http://127.0.0.1:9999",
+        command: "tailscale serve --https=443 --set-path=/ off",
     });
     assert.deepEqual(portState(ours("http://10.0.0.5:8787"), NAME, 443, LOCAL_PORT), {
         kind: "taken",
         detail: "http://10.0.0.5:8787",
+        command: "tailscale serve --https=443 --set-path=/ off",
     });
+
+    // A plain-http serve at our own port is somebody else's: announcing it as https would hand out an address that
+    // answers with a TLS error, so it is theirs to free, with the plain-http form of the command.
+    assert.deepEqual(
+        portState({ ...ours(PROXY), TCP: { "443": { HTTP: true } } }, NAME, 443, LOCAL_PORT),
+        {
+            kind: "taken",
+            detail: PROXY,
+            command: "tailscale serve --http=443 --set-path=/ off",
+        },
+    );
 });
 
 test("only a loopback target on our own port counts as this server", () => {
@@ -215,6 +240,7 @@ test("a mount someone else put on 443 is left alone", () => {
     assert.deepEqual(portState(served, "host.tail1.ts.net.", 443, LOCAL_PORT), {
         kind: "taken",
         detail: "http://127.0.0.1:9999",
+        command: "tailscale serve --https=443 --set-path=/ off",
     });
 });
 
@@ -243,6 +269,8 @@ test("a TCP forward holds 443", () => {
     assert.deepEqual(portState(served, "host.tail1.ts.net.", 443, LOCAL_PORT), {
         kind: "taken",
         detail: "a TCP forward to localhost:22",
+        // The web form of `off` fails while a forward holds the port ("cannot remove web handler").
+        command: "tailscale serve --tcp=443 off",
     });
 });
 
@@ -271,12 +299,14 @@ test("a Funnel on this name and port is reported before anything else holds it",
         funnel,
     );
 
-    // Older and simple configs key AllowFunnel by the port alone, and the name is spelled the config's own way.
-    assert.deepEqual(portState({ AllowFunnel: { "443": true } }, NAME, 443, LOCAL_PORT), funnel);
+    // The name is spelled the config's own way; a port-only key is not something tailscaled writes, so it holds nothing.
     assert.deepEqual(
         portState({ AllowFunnel: { "HOST.Tail1.ts.net:443": true } }, NAME, 443, LOCAL_PORT),
         funnel,
     );
+    assert.deepEqual(portState({ AllowFunnel: { "443": true } }, NAME, 443, LOCAL_PORT), {
+        kind: "free",
+    });
 
     // Off, absent, and another name's Funnel change nothing.
     assert.deepEqual(
@@ -321,12 +351,23 @@ function mounted(proxy: string = PROXY): unknown {
  */
 function fakeScript(dir: string): string {
     return `#!/bin/sh
-printf '%s\\n' "$*" >> "${dir}/calls"
+printf '%s\n' "$*" >> "${dir}/calls"
 case "$1" in
 version)
-    printf '1.60.0\\n'
+    if [ -f "${dir}/fail-version" ]; then
+        cat "${dir}/fail-version" >&2
+        exit "$(cat "${dir}/fail-version-status")"
+    fi
+    cat "${dir}/version"
     ;;
 status)
+    if [ -f "${dir}/hang-status" ]; then
+        sleep 5
+    fi
+    if [ -f "${dir}/fail-status" ]; then
+        cat "${dir}/fail-status" >&2
+        exit "$(cat "${dir}/fail-status-status")"
+    fi
     cat "${dir}/status.json"
     ;;
 serve)
@@ -339,9 +380,16 @@ serve)
             cat "${dir}/off-error" >&2
             exit "$(cat "${dir}/off-status")"
         fi
-        printf '{"Web":{}}\\n' > "${dir}/serve.json"
+        printf '{"Web":{}}\n' > "${dir}/serve.json"
         ;;
     *)
+        if [ -f "${dir}/fail-mount" ]; then
+            cat "${dir}/fail-mount" >&2
+            exit "$(cat "${dir}/fail-mount-status")"
+        fi
+        if [ -f "${dir}/mount-says" ]; then
+            cat "${dir}/mount-says"
+        fi
         cat "${dir}/mounted.json" > "${dir}/serve.json"
         ;;
     esac
@@ -354,6 +402,16 @@ interface FakeOptions {
     status?: unknown;
     serve?: unknown;
     mounted?: unknown;
+    /** Raw text for `serve status --json`, for an answer JSON.parse refuses. */
+    serveText?: string;
+    /** What `tailscale version` prints, for a version the gate refuses. */
+    version?: string;
+    /** What the mount command prints on stdout, as it does when it wants the owner to enable certificates. */
+    mountSays?: string;
+    /** Fails one command, the way the CLI does: anything on stderr, this exit code. */
+    fail?: { command: "version" | "status" | "mount"; status: number; error: string };
+    /** Makes `tailscale status` hang, for a probe that has to be abandoned. */
+    hang?: boolean;
     /** Makes `off` fail with this, the way tailscaled complains about a mount that is not there. */
     offFailure?: { status: number; error: string };
 }
@@ -371,9 +429,26 @@ function fakeTailscale(options: FakeOptions = {}): Fake {
     const previous = process.env.PATH;
 
     writeFileSync(binary, fakeScript(dir), { mode: 0o755 });
+    writeFileSync(join(dir, "version"), options.version ?? "1.60.0\n");
     writeFileSync(join(dir, "status.json"), JSON.stringify(options.status ?? STATUS));
-    writeFileSync(join(dir, "serve.json"), JSON.stringify(options.serve ?? {}));
+    writeFileSync(
+        join(dir, "serve.json"),
+        options.serveText ?? JSON.stringify(options.serve ?? {}),
+    );
     writeFileSync(join(dir, "mounted.json"), JSON.stringify(options.mounted ?? mounted()));
+
+    if (options.mountSays !== undefined) {
+        writeFileSync(join(dir, "mount-says"), options.mountSays);
+    }
+
+    if (options.fail !== undefined) {
+        writeFileSync(join(dir, `fail-${options.fail.command}`), `${options.fail.error}\n`);
+        writeFileSync(join(dir, `fail-${options.fail.command}-status`), `${options.fail.status}`);
+    }
+
+    if (options.hang === true) {
+        writeFileSync(join(dir, "hang-status"), "");
+    }
 
     if (options.offFailure !== undefined) {
         writeFileSync(join(dir, "off-error"), `${options.offFailure.error}\n`);
@@ -643,7 +718,7 @@ test("stop reports an off that failed for any other reason", async (t) => {
         serve.start();
         serve.stop();
         assert.deepEqual(said.problems, [
-            'Run "sudo tailscale set --operator=$USER" once, so Pi Pocket may configure serve.',
+            'Run "sudo tailscale set --operator=$USER" once, so Pi Pocket may configure serve. The tailnet may still point here; the next start takes the mount down or reuses it.',
         ]);
     } finally {
         fake.restore();
@@ -661,7 +736,7 @@ test("a mount a crashed launcher left behind is removed before anything is mount
     const said = heard();
 
     try {
-        assert.equal(removeStaleServe(fake.binary, LOCAL_PORT, said.events), true);
+        assert.equal(removeStaleServe(fake.binary, [LOCAL_PORT], said.events), true);
         assert.deepEqual(fake.calls(), [
             "status --json",
             "serve status --json",
@@ -684,7 +759,7 @@ test("a mount that points somewhere else is not ours to remove", async (t) => {
     const said = heard();
 
     try {
-        assert.equal(removeStaleServe(fake.binary, LOCAL_PORT, said.events), false);
+        assert.equal(removeStaleServe(fake.binary, [LOCAL_PORT], said.events), false);
         assert.equal(
             fake.calls().some((line) => line.endsWith(" off")),
             false,
@@ -704,8 +779,223 @@ test("nothing mounted means nothing for removeStaleServe to remove", async (t) =
     const fake = fakeTailscale();
 
     try {
-        assert.equal(removeStaleServe(fake.binary, LOCAL_PORT), false);
+        assert.equal(removeStaleServe(fake.binary, [LOCAL_PORT]), false);
         assert.deepEqual(fake.calls(), ["status --json", "serve status --json"]);
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a daemon that is not running is named as such, not as an unreadable answer", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({
+        fail: {
+            command: "status",
+            status: 1,
+            error: "failed to connect to local tailscale daemon; Falling back to flags-only handling",
+        },
+    });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), {
+            ok: false,
+            message:
+                "Tailscale is not running on this machine. Start it (or run: tailscale up), then try again.",
+        });
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a tailscale older than the gate is refused with its own version in the message", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({ version: "1.50.1\n  tailscale commit: 0123456789abcdef\n" });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), {
+            ok: false,
+            message:
+                "Tailscale 1.50.1 is too old for serve. Version 1.52 or newer is needed; update Tailscale.",
+        });
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a serve status answer that is not JSON is not the same as an empty config", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({ serveText: "No serve config\n" });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), {
+            ok: false,
+            message:
+                'Pi Pocket could not read the "tailscale serve status" output. Update Tailscale, then try again.',
+        });
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a mount that exits 0 without mounting says what tailscale said", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const certificate = "To enable HTTPS, visit https://login.tailscale.com/f/certificates\n";
+    const fake = fakeTailscale({ mounted: {}, mountSays: certificate });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+        const result = serve.start();
+
+        assert.equal(result.ok, false);
+        assert.match(
+            result.ok ? "" : result.message,
+            /Tailscale said: To enable HTTPS, visit https:\/\/login\.tailscale\.com\/f\/certificates/,
+        );
+        assert.match(
+            result.ok ? "" : result.message,
+            /reports no mount at "\/" for host\.tail1\.ts\.net/,
+        );
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a mount that fails says its own complaint", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({
+        fail: { command: "mount", status: 1, error: "error: invalid proxy target" },
+    });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), { ok: false, message: "error: invalid proxy target" });
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a probe that hangs is abandoned and says so", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({ hang: true });
+    const said = heard();
+
+    try {
+        assert.equal(removeStaleServe(fake.binary, [LOCAL_PORT], said.events), false);
+        assert.deepEqual(said.problems, [
+            '"tailscale status --json" did not answer within 3 seconds. Tailscale may be hung: restart it, then try again.',
+        ]);
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a mount already in place is adopted even before the netmap reports CertDomains", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // An empty CertDomains is also a netmap that has not arrived yet. A working mount of ours needs no new certificate.
+    const fake = fakeTailscale({
+        status: { ...STATUS, CertDomains: [] },
+        serve: mounted(),
+    });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), {
+            ok: true,
+            url: "https://host.tail1.ts.net",
+            adopted: true,
+        });
+        assert.equal(
+            fake.calls().some((line) => line.startsWith("serve --bg")),
+            false,
+        );
+    } finally {
+        fake.restore();
+    }
+});
+
+test("an adopted mount is left alone when the launcher quits", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({ serve: mounted() });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        serve.start();
+        serve.stop();
+        assert.equal(
+            fake.calls().some((line) => line.endsWith(" off")),
+            false,
+        );
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a mount left on a port this run no longer uses is still cleared", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // A killed run on --port 9000 leaves a mount pointing there; this run listens on 8787.
+    const fake = fakeTailscale({ serve: mounted("http://127.0.0.1:9000") });
+
+    try {
+        assert.equal(removeStaleServe(fake.binary, [9000, LOCAL_PORT]), true);
+        assert.deepEqual(fake.calls(), [
+            "status --json",
+            "serve status --json",
+            "serve --https=443 --set-path=/ off",
+        ]);
     } finally {
         fake.restore();
     }

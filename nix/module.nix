@@ -8,6 +8,9 @@
 let
   cfg = config.services.pi-pocket;
   extensionNames = map builtins.baseNameOf cfg.extensions;
+  # The serve mode asks tailscaled for the node's name and certificates before it starts, and exits 1 when the daemon is
+  # not up yet: without this ordering the first start after boot is a Restart=on-failure loop.
+  needsTailscaled = cfg.access == "tailscale-serve";
   skillsDir =
     if cfg.skills == null then
       null
@@ -74,9 +77,10 @@ in
       description = ''
         Access mode: loopback only, LAN, a Cloudflare quick tunnel, Tailscale, or Tailscale Serve.
         Tailscale mode requires Tailscale to be connected separately.
-        Tailscale Serve needs pkgs.tailscale in extraPackages (the module does not add it), HTTPS
-        certificates enabled in the tailnet, and either root or
-        `sudo tailscale set --operator=<service user>`.
+        Tailscale Serve needs pkgs.tailscale in extraPackages (the module does not add it), Tailscale 1.52 or newer,
+        HTTPS certificates enabled in the tailnet, and either root or
+        `sudo tailscale set --operator=<service user>`. It cannot be combined with `host`, since it serves through
+        loopback.
       '';
     };
 
@@ -208,8 +212,8 @@ in
     systemd.services.pi-pocket = {
       description = "Pi Pocket";
       wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ] ++ lib.optional needsTailscaled "tailscaled.service";
+      after = [ "network-online.target" ] ++ lib.optional needsTailscaled "tailscaled.service";
       path = cfg.extraPackages;
       preStart = ''
         agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
