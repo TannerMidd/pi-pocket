@@ -50,7 +50,7 @@ services:
       # the shell, and pocket.sh sources ~/.bash_secrets when the shell is missing it.
       LITELLM_API_KEY:
 #      OPENROUTER_API_KEY:
-      GITLAB_TOKEN:
+      GITLAB_TOKEN: ${LUKAS_AI_GH_TOKEN}
 
       # uv
       UV_COMPILE_BYTECODE: "1"
