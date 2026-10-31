@@ -180,6 +180,57 @@ test("a run that then answers clears the failure, and a stop is not one", async 
     assert.equal(linked?.failed, undefined);
 });
 
+test("a restart rebuilds a failure line a crash never stored, and drops one a new run left behind", async () => {
+    const dir = join(root, "run-failure-reconcile");
+    const app = await openApp(scriptedModel(route), dir);
+
+    open.push(app);
+
+    const id = await newSession(app);
+
+    await app.commands.submit(id, owner(app), { text: "fail now", requestId: "fail-lost" });
+    await until(() => row(app, id).failed === true, "the failure");
+    await until(async () => (await stored(app, id)) !== undefined, "the stored line");
+    await app.harness.commit(async (tx) => {
+        delete (await tx.doc(RunFailureDoc, id)).text;
+    }, context);
+    await app.close();
+    open.pop();
+
+    const lost = await openApp(scriptedModel(route), dir);
+
+    open.push(lost);
+    assert.equal(row(lost, id).failure, "Invalid request: unsupported parameter temperature");
+    await until(
+        async () =>
+            (await stored(lost, id)) === "Invalid request: unsupported parameter temperature",
+        "the line written back",
+    );
+
+    await lost.commands.submit(id, owner(lost), { text: "again", requestId: "fail-stale" });
+    await until(() => lost.isBusy(id), "the new run");
+    await lost.harness.commit(async (tx) => {
+        (await tx.doc(RunFailureDoc, id)).text = "a line the crash kept";
+    }, context);
+    await lost.close();
+    open.pop();
+
+    const stale = await openApp(scriptedModel(route), dir);
+
+    open.push(stale);
+    assert.equal(row(stale, id).failed, undefined, "a run still going shows no failure");
+    await until(async () => (await stored(stale, id)) === undefined, "the stale line cleared");
+    await stale.close();
+    open.pop();
+
+    const done = await openApp(scriptedModel(route), dir);
+
+    open.push(done);
+    await until(() => !done.isBusy(id), "the run finished");
+    assert.equal(row(done, id).failed, undefined);
+    assert.equal(await stored(done, id), undefined);
+});
+
 test("a limit the provider then clears is not a failure", async () => {
     let calls = 0;
     const model = scriptedModel(() => {

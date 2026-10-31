@@ -37,6 +37,7 @@ import {
     ProviderDoc,
     type Registry,
     type Storage,
+    type SubmissionRecord,
     UsageDoc,
     type UsageState,
 } from "@earendil-works/pi-durable";
@@ -1039,9 +1040,11 @@ export class PocketApp {
                 }
 
                 if (this.#sessions[String(id)] !== undefined) {
-                    const failure = (await this.harness.snapshot(RunFailureDoc, id, context))?.text;
+                    // The settled submission is what lasted. The failure line is written after it, so a crash can leave
+                    // that line missing or stale: this puts it back, or clears it when a run is still going.
+                    const failure = await this.#failureOf(storage, id, live);
 
-                    if (failure !== undefined && live?.run === undefined) {
+                    if (failure !== undefined) {
                         this.#failed.set(id, failure);
                     }
                 }
@@ -2683,6 +2686,55 @@ export class PocketApp {
     /** When a session's last run ended, since this server started. */
     endedAt(id: ConversationId): number | undefined {
         return this.#endedAt.get(id);
+    }
+
+    /**
+     * The failure line a session should show after a restart. A run still going clears a line a crash left behind. An
+     * idle session takes the line of its run's newest settled input, which the run's own commit stored, and writes a line
+     * that disagrees back. Undefined when there is nothing to show.
+     */
+    async #failureOf(
+        storage: Storage,
+        id: ConversationId,
+        live: { run?: unknown } | null | undefined,
+    ): Promise<string | undefined> {
+        const stored = (await this.harness.snapshot(RunFailureDoc, id, context))?.text;
+
+        if (live?.run !== undefined) {
+            if (stored !== undefined) {
+                this.#storeRunFailure(id, undefined);
+            }
+
+            return undefined;
+        }
+
+        // The newest settled input is the last run's: submission ids grow with each commit. Notes and other writes
+        // after it are skipped. A run that gave up leaves every one of its inputs unanswered, so that input still says so.
+        let record: SubmissionRecord | undefined;
+        let cursor: Cursor | undefined;
+
+        do {
+            const page = await storage.scanSubmissions(
+                { conversationId: id, order: "descending" },
+                64,
+                cursor,
+                context,
+            );
+
+            record = page.items.find((each) => each.type === "input");
+            cursor = record === undefined ? page.next : undefined;
+        } while (cursor !== undefined);
+
+        const text =
+            record?.status === "unanswered"
+                ? failureText(record.status, record.reason, record.detail)
+                : undefined;
+
+        if (text !== stored) {
+            this.#storeRunFailure(id, text);
+        }
+
+        return text;
     }
 
     /** Keep or clear a session's failure line, so the next process still knows. A listener may not commit. */
