@@ -64,6 +64,10 @@ services:
       - ${HOME}/dotfiles:/home/node/dotfiles:rw
       - ${HOME}/Sync/SecondBrain:/home/node/Sync/SecondBrain:r
       - ${HOME}/Sync/LLMWiki:/home/node/Sync/LLMWiki:rw
+      - ${HOME}/.kube/config:/home/node/.kube/config:ro
     # Deliberately no /var/run/docker.sock, unlike a setup where an agent drives
     # Docker: nothing in pi-pocket needs it, and a session that can steer Pi would
     # then steer the host's Docker daemon. Add it knowing that is what it means.
+    ports:
+      - "${PI_POCKET_BIND:-0.0.0.0}:${PI_POCKET_PORT:-8787}:${PI_POCKET_PORT:-8787}"
+      - 8788:8788
