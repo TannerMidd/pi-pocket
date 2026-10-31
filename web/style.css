@@ -3507,6 +3507,16 @@ pre.diff .del {
     /* As tall as what is written, to the most above; browsers without this measure it in script (`fitBox`). */
     field-sizing: content;
 }
+/* A message on its way: what it says and sends stays, dimmed and still, until the server takes it. */
+.composer.sending textarea,
+.composer.sending .files {
+    opacity: 0.5;
+    transition: opacity var(--t-border) var(--ease-out);
+}
+
+.composer.sending .files button {
+    pointer-events: none;
+}
 
 /* Touch screens keep 16px, below which iOS zooms into the field. */
 @media (pointer: coarse) {
