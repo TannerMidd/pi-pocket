@@ -180,6 +180,153 @@ function LimitWait() {
     </div>`;
 }
 
+/** How far from full the context is when Pi summarizes it: the reserve, and the recent part kept as it is. */
+const COMPACT_RESERVE = [
+    [8192, "8k"],
+    [16384, "16k"],
+    [32768, "32k"],
+    [65536, "64k"],
+];
+const COMPACT_KEEP = [
+    [8000, "8k"],
+    [14000, "14k"],
+    [20000, "20k"],
+    [40000, "40k"],
+];
+const COMPACT_OVER = [
+    [40000, "40k"],
+    [60000, "60k"],
+    [100000, "100k"],
+    [200000, "200k"],
+    [500000, "500k"],
+    [1000000, "1M"],
+];
+
+/** The owner's choice of when Pi compacts a session's context, from Pi's own settings. */
+function Compaction() {
+    const policy = store.state.server?.compaction;
+
+    // A server that does not know the policy, or Pi settings it refuses, sends none.
+    if (!policy || typeof policy !== "object") {
+        return null;
+    }
+
+    const change = (patch) => attempt(() => api("settings", { compaction: patch }));
+
+    const line = (label, values, current, onPick, hint) => html`<div class="compact-row">
+        <span class="small">${label}</span>
+        <div class="segmented" role="group" aria-label=${label}>
+            ${values.map(
+                ([value, text]) => html`<button
+                    class=${current === value ? "on" : ""}
+                    aria-pressed=${current === value}
+                    onClick=${() => onPick(value)}
+                >
+                    ${text}
+                </button>`,
+            )}
+        </div>
+        <span class="muted compact-hint">${hint}</span>
+    </div>`;
+
+    const row = (label, values, field, hint) => {
+        const current = policy[field];
+        const choices = values.some(([value]) => value === current)
+            ? values
+            : [
+                  ...values,
+                  [
+                      current,
+                      current >= 1000000
+                          ? `${current / 1000000}M`
+                          : `${Math.round(current / 1000)}k`,
+                  ],
+              ].sort((a, b) => a[0] - b[0]);
+
+        return line(label, choices, current, (value) => change({ [field]: value }), hint);
+    };
+
+    const fromFull = policy.trigger !== "over";
+    const copy = fromFull
+        ? `When a session's context comes within ${policy.reserveTokens} tokens of full, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A bigger reserve compacts earlier; a bigger kept part summarizes less. From full also applies to Pi in the terminal.`
+        : `When a session's context goes over ${policy.overTokens} tokens, Pi summarizes its older messages and keeps about ${policy.keepRecentTokens} tokens of the newest as they are. A smaller number compacts earlier. This choice is for Pi Pocket sessions; Pi in the terminal still uses how far from full.`;
+
+    return html`<div class="limit-wait compact-settings" title=${copy}>
+        ${row("Compaction size", COMPACT_KEEP, "keepRecentTokens", "How much of the newest context stays as it is when anything compacts, manual or automatic. Bigger summarizes less.")}
+        ${line(
+            "Automatic compaction",
+            [
+                [true, "On"],
+                [false, "Off"],
+            ],
+            policy.enabled,
+            (value) => change({ enabled: value }),
+            "Summarize older messages by itself when the context gets long. Off: only the manual compact command does it, and nothing below applies.",
+        )}
+        ${
+            policy.enabled &&
+            html`
+        ${line(
+            "Start",
+            [
+                ["fromFull", "From full"],
+                ["over", "Once over"],
+            ],
+            policy.trigger ?? "fromFull",
+            (value) => change({ trigger: value }),
+            "From full: near the model's limit (Pi in the terminal too). Once over: at a token count, Pocket only.",
+        )}
+        ${
+            fromFull
+                ? row(
+                      "Reserve",
+                      COMPACT_RESERVE,
+                      "reserveTokens",
+                      "Tokens kept free before the window is full. Bigger compacts earlier.",
+                  )
+                : row(
+                      "Over",
+                      COMPACT_OVER,
+                      "overTokens",
+                      "Compact once the context passes this. Smaller compacts earlier.",
+                  )
+        }
+        `
+        }
+    </div>`;
+}
+
+/** The two run settings in one block, a tab each: how a run waits for a limit, and when a context is compacted. */
+function RunSettings() {
+    const server = store.state.server;
+    const tabs = [
+        ["compaction", "Compaction", typeof server?.compaction === "object" && server.compaction],
+        ["limit", "Usage limit", typeof server?.limitWaitHours === "number"],
+    ].filter(([, , there]) => there);
+    const [tab, setTab] = useState("compaction");
+    const shown = tabs.some(([id]) => id === tab) ? tab : tabs[0]?.[0];
+
+    if (tabs.length === 0) {
+        return null;
+    }
+
+    return html`<div class="run-settings">
+        <div class="segmented" role="tablist" aria-label="Run settings">
+            ${tabs.map(
+                ([id, label]) => html`<button
+                    role="tab"
+                    class=${shown === id ? "on" : ""}
+                    aria-selected=${shown === id}
+                    onClick=${() => setTab(id)}
+                >
+                    ${label}
+                </button>`,
+            )}
+        </div>
+        ${shown === "limit" ? html`<${LimitWait} />` : html`<${Compaction} />`}
+    </div>`;
+}
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -297,8 +444,6 @@ export function ProvidersSheet() {
             ${
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
-                    <${RefreshModels} />
-                    <${LimitWait} />
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
@@ -308,6 +453,7 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
+                ${owner && html`<${RefreshModels} /><${RunSettings} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
