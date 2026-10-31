@@ -105,6 +105,17 @@ if [ "$REPORT_ONLY" -eq 0 ]; then
     if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
         fail "a merge is already in progress. Finish it with 'git commit', or stop it with 'git merge --abort'."
     fi
+
+    # A merge makes a commit. A scheduled run cannot answer the prompt for a name and an email.
+    if ! git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then
+        say "" >&2
+        say "sync-upstream: stopped. Git has no name and email for a commit." >&2
+        say "The merge makes a commit, and a scheduled run cannot answer a prompt." >&2
+        say "Run these 2 commands in this checkout, then run the script again:" >&2
+        say "  git config user.name \"Your Name\"" >&2
+        say "  git config user.email \"you@example.com\"" >&2
+        exit 1
+    fi
 fi
 
 # 2. Report the divergence.
