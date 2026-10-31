@@ -41,7 +41,6 @@ import { openSubagent, stateOf } from "./subagents.js";
 import { motionLevel, prefs } from "./theme.js";
 import {
     diffCounts,
-    INLINE_TOOL,
     itemsOf,
     lineCount,
     matchCount,
@@ -782,8 +781,8 @@ function Collapsible({ text, limit = 600 }) {
 
 // ─── What Pi did: its thinking and tool calls, a line each on a timeline ───────────────
 
-/** The tools that publish artifacts: `artifact_inline` also shows its page as a card in the reply. */
-const isArtifactCall = (name) => name === "artifact" || name === INLINE_TOOL;
+/** The tools that publish artifacts: `artifact_inline` (from before 0.28) is `artifact` with `inline: true`. */
+const isArtifactCall = (name) => name === "artifact" || name === "artifact_inline";
 
 /** What a step's mark says, by how the call went; a call still running shows a spinner instead. */
 const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!" };
@@ -1748,7 +1747,7 @@ function ActivityGroup({
 }
 
 /**
- * A page Pi showed in its reply (`artifact_inline`): its card once the call has published, between the words around
+ * A page Pi showed in its reply (`artifact` with `inline: true`): its card once the call has published, between the words around
  * it. Until then, and if the call failed, was denied, or stopped, its step as the timeline draws it, so the reason shows.
  */
 function InlineRow({ item, results, slots, approvals, busy, conversationId }) {

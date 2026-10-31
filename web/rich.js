@@ -336,7 +336,7 @@ function pageOf(conversationId, id, version) {
 }
 
 /**
- * What `artifact_inline` published, as a card in the reply: the version its call made, with Preview/Code, Run/Stop, and
+ * What an `inline: true` artifact call published, as a card in the reply: the version its call made, with Preview/Code, Run/Stop, and
  * the viewer a tap away. The page comes from the artifact's own address, as the viewer's does, so whoever may see the
  * session may see the card; later versions never change it. Until it comes the card says so.
  */
