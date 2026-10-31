@@ -115,6 +115,7 @@ async function reportToServer(colors) {
 }
 
 let applied = "";
+
 /** The colors in use, `frame.card.ring1.ring2.pi`, and whether this browser reports them: only the owner's may. */
 let colorsInUse = null;
 let reports = false;
