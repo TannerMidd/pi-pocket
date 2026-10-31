@@ -37,7 +37,7 @@ services:
     image: pi-pocket:tools
     # Mirrored: repos, dotfiles and notes at their host paths. SecondBrain read-only,
     # as everywhere else in this setup.
-    working_dir: /home/node/Repos
+    working_dir: /home/node/Sync/LLMWiki
     # No PATH here: the image sets it and the shell it starts reads that value. A
     # PATH in this file would replace the image's, not add to it.
     environment:
