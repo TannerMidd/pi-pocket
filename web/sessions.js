@@ -2486,7 +2486,7 @@ function Rail({ foldable = false, folded = false }) {
             title="Running now"
             aria-label=${busy > 0 ? `Running now, ${busy}` : "Running now"}
             aria-pressed=${board === "running"}
-            onPointerDown=${() => board !== "running" && prefetchRunning()}
+            onPointerDown=${() => board !== "running" && prefetchRunning().catch(() => undefined)}
             onClick=${toggleRunning}
         >
             <${Icon} name="pulse" size=${19} />

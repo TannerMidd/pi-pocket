@@ -10280,6 +10280,18 @@ textarea.notes {
     inset: -8px;
 }
 
+.rb-pin-tail {
+    position: absolute;
+    top: 50%;
+    height: 0;
+    border-top: 1.5px dashed var(--accent-line);
+    pointer-events: none;
+}
+
+.rb-pin-tail.held {
+    border-top-color: var(--warn-line, var(--hair-2));
+}
+
 .rb-pin-label {
     position: absolute;
     top: 50%;

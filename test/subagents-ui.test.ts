@@ -365,3 +365,37 @@ test(
         );
     },
 );
+
+test(
+    "Running now: a repeat past its last time listed goes on as a dashed line, and only its first time is a tab stop",
+    real,
+    async () => {
+        const id = await newSession(app);
+        const schedule = await app.commands.schedule(id, owner(app), {
+            when: "every 30m check the build",
+            zone: "UTC",
+        });
+
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/s/${id}`);
+        await settled();
+        await page.click({ selector: ".rail-running" });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".rb-timeline .rb-pin.repeat").length > 1)`,
+            "the repeat's times on the timeline",
+        );
+        // The server lists 24 times, 12 hours of them: the 7-day range goes on past the last one.
+        await page.click({ selector: ".rb-range button:last-child" });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".rb-timeline .rb-pin-tail").length === 1)`,
+            "the dashed line after the last time",
+        );
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".rb-timeline button.rb-pin:not([tabindex='-1'])").length)`,
+            ),
+            1,
+        );
+        await app.schedules.cancel(id, schedule.id);
+    },
+);

@@ -30,6 +30,11 @@ const REACH = 24;
 const PAST = 0.14;
 
 const PHONE = matchMedia("(max-width: 699px)");
+/** Below this width the schedule picked shows under the matrix, not beside it (`style.css`). */
+const SIDE_BELOW = matchMedia("(max-width: 1439px)");
+
+/** A schedule's id is unique only in its own session: the board, which lists every session's, names one by both. */
+const scheduleKey = (schedule) => `${schedule.session}:${schedule.id}`;
 
 /** Close the board: back to the conversation, or the home screen, it took the place of. */
 export const closeRunning = () => store.set({ board: false, boardAgents: null });
@@ -210,28 +215,46 @@ function useBoard() {
     const [board, setBoard] = useState(lastBoard);
     const [error, setError] = useState(null);
     const asked = useRef(0);
+    const busy = useRef(false);
 
     const load = (first = false) => {
         const n = ++asked.current;
 
-        return (first && ahead !== null ? ahead : api("running/board")).then(
-            (data) => {
-                lastBoard = data;
+        busy.current = true;
 
-                if (n === asked.current) {
-                    setBoard(data);
-                    setError(null);
-                }
-            },
-            (failure) => n === asked.current && setError(failure.message),
-        );
+        return (first && ahead !== null ? ahead : api("running/board"))
+            .finally(() => {
+                busy.current = false;
+            })
+            .then(
+                (data) => {
+                    lastBoard = data;
+
+                    if (n === asked.current) {
+                        setBoard(data);
+                        setError(null);
+                    }
+                },
+                (failure) => n === asked.current && setError(failure.message),
+            );
     };
 
     useEffect(() => {
         load(true);
-        const timer = setInterval(load, EVERY_MS);
+        // Not while the tab is hidden, and not over an answer still on its way.
+        const timer = setInterval(() => {
+            if (!document.hidden && !busy.current) {
+                load();
+            }
+        }, EVERY_MS);
+        const shown = () => !document.hidden && !busy.current && load();
 
-        return () => clearInterval(timer);
+        document.addEventListener("visibilitychange", shown);
+
+        return () => {
+            clearInterval(timer);
+            document.removeEventListener("visibilitychange", shown);
+        };
     }, []);
 
     return { board, error, reload: load };
@@ -353,7 +376,7 @@ export function RunningBoard() {
             .includes(needle);
     const shown = rows.filter(FILTERS.find((each) => each.key === filter).keep).filter(matches);
     const schedules = board?.schedules ?? [];
-    const chosen = schedules.find((each) => each.id === selected) ?? null;
+    const chosen = schedules.find((each) => scheduleKey(each) === selected) ?? null;
     const colorOf = (id) =>
         folderColor(
             board?.sessions.find((s) => s.id === id)?.cwd ??
@@ -366,17 +389,23 @@ export function RunningBoard() {
         navigate(id);
     };
 
-    const pick = (id) => {
-        const next = selected === id ? null : id;
-        const schedule = schedules.find((each) => each.id === next);
+    const pick = (schedule) => {
+        const next = selected === scheduleKey(schedule) ? null : scheduleKey(schedule);
 
         setSelected(next);
-        setRow(schedule?.session ?? null);
+        setRow(next === null ? null : schedule.session);
 
-        if (schedule && !phone) {
-            box.current
-                ?.querySelector(`[data-row="${schedule.session}"]`)
-                ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (next !== null && !phone) {
+            // Beside the matrix, the panel is in view and its row comes to it; under it, the panel comes into view.
+            requestAnimationFrame(() =>
+                box.current
+                    ?.querySelector(
+                        SIDE_BELOW.matches
+                            ? '[data-part="running-schedule"]'
+                            : `[data-row="${schedule.session}"]`,
+                    )
+                    ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+            );
         }
     };
 
@@ -428,8 +457,8 @@ export function RunningBoard() {
         ...schedules
             .filter((each) => each.held)
             .map((each) => ({
-                key: `h${each.id}`,
-                schedule: each.id,
+                key: `h${scheduleKey(each)}`,
+                schedule: each,
                 session: each.session,
                 title: each.sessionTitle,
                 what: `Held: ${each.held}`,
@@ -741,6 +770,18 @@ function Timeline({
         let labelled = phone;
 
         for (const schedule of each.schedules) {
+            // The server lists a repeat's next 24 times at most: past the last one, a dashed line says it goes on.
+            const last = schedule.upcoming[schedule.upcoming.length - 1];
+
+            if (schedule.every && schedule.upcoming.length >= 24 && last < t1) {
+                marks.push(html`<span
+                    key=${`${schedule.id}-tail`}
+                    class=${`rb-pin-tail ${schedule.held ? "held" : ""}`}
+                    style=${`left:${x(last)}px;width:${Math.max(0, full - x(last))}px`}
+                    title=${`Goes on ${schedule.repeat ?? ""}`}
+                ></span>`);
+            }
+
             schedule.upcoming
                 .filter((t) => t <= t1)
                 .forEach((t, i) => {
@@ -749,10 +790,11 @@ function Timeline({
 
                     marks.push(html`<button
                         key=${`${schedule.id}-${t}`}
-                        class=${`rb-pin ${schedule.every ? "repeat" : ""} ${i > 0 ? "later" : ""} ${schedule.held ? "held" : ""} ${selected === schedule.id ? "on" : ""}`}
+                        class=${`rb-pin ${schedule.every ? "repeat" : ""} ${i > 0 ? "later" : ""} ${schedule.held ? "held" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
                         style=${`left:${left}px`}
                         aria-label=${`${schedule.text}, ${label}`}
-                        onClick=${() => onPick(schedule.id)}
+                        tabIndex=${i > 0 ? -1 : 0}
+                        onClick=${() => onPick(schedule)}
                         onPointerEnter=${(event) => {
                             const box = event.currentTarget.getBoundingClientRect();
 
@@ -1000,8 +1042,8 @@ function Row({
                     ? row.schedules.map(
                           (schedule) => html`<button
                               key=${schedule.id}
-                              class=${`rb-sched ${schedule.held ? "held" : ""} ${selected === schedule.id ? "on" : ""}`}
-                              onClick=${() => onPick(schedule.id)}
+                              class=${`rb-sched ${schedule.held ? "held" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
+                              onClick=${() => onPick(schedule)}
                           >
                               <span class="rb-sched-text">${schedule.text}</span>
                               <span class="rb-sched-time" title=${schedule.zone}>
@@ -1114,7 +1156,7 @@ function NextUp({ schedules, now, colorOf, onPick }) {
             ({
                 at,
                 schedule,
-            }) => html`<button key=${`${schedule.id}-${at}`} class="rb-next" onClick=${() => onPick(schedule.id)}>
+            }) => html`<button key=${`${scheduleKey(schedule)}-${at}`} class="rb-next" onClick=${() => onPick(schedule)}>
                 <span class="rb-next-time">${clock(at, schedule.zone, now)}</span>
                 <span class="folder-mark" style=${`--folder:${colorOf(schedule.session)}`}></span>
                 <span class="rb-ellipsis grow">${schedule.text}</span>
