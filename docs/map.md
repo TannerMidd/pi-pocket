@@ -268,6 +268,8 @@ rsvg-convert -w 352 -h 352 --page-width 512 --page-height 512 --left 80 --top 80
 
 The maskable icon places the 352 × 352 artwork on a 512 × 512 page with 80-pixel margins and a `#13141c` background. Keep these commands outside the SVG: XML comments cannot contain `--`. The icon test in `test/mobile-ui.test.ts` checks that the served SVG decodes as an image.
 
+[`web/icons/light/`](../web/icons/light) holds an alternate icon: a white tile with a dark π, in the same four PNG sizes and an SVG. Nothing loads it yet. To use it on one install, copy its files over the ones in `web/`.
+
 ## How a message travels
 
 1. `POST /api/c/:id/submit` → `commands.submit`: checks access, turns, and spend, expands a template, then `conversation.submit()` with request id `u:<userId>:<clientId>`. The request id makes a retry a no-op and names the author.
