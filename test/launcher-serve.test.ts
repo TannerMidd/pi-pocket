@@ -1096,6 +1096,8 @@ async function launchLocal(data: string, port: number): Promise<void> {
     const repo = fileURLToPath(new URL("..", import.meta.url));
     const root = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-"));
     const started = join(root, "started");
+    let launcher: ReturnType<typeof spawn> | undefined;
+    let exited: Promise<unknown> | undefined;
 
     try {
         mkdirSync(join(root, "src", "launcher"), { recursive: true });
@@ -1120,7 +1122,7 @@ setInterval(() => {}, 60_000);
 `,
         );
 
-        const launcher = spawn(
+        launcher = spawn(
             process.execPath,
             [
                 join(root, "src", "launcher", "main.ts"),
@@ -1128,17 +1130,37 @@ setInterval(() => {}, 60_000);
             ],
             { stdio: "ignore", env: { ...process.env, NO_COLOR: "1" } },
         );
-        const exited = once(launcher, "exit");
+        let launchError: unknown;
+
+        exited = once(launcher, "exit").catch((error: unknown) => {
+            launchError = error;
+        });
 
         for (let waited = 0; !existsSync(started); waited += 50) {
+            if (launchError !== undefined) {
+                throw launchError;
+            }
+
             assert.ok(waited < 15_000, "the launcher did not start its server");
             await new Promise((resolve) => setTimeout(resolve, 50));
         }
-
-        launcher.kill("SIGTERM");
-        await exited;
     } finally {
-        rmSync(root, { recursive: true, force: true });
+        const timer = setTimeout(() => launcher?.kill("SIGKILL"), 15_000);
+
+        try {
+            if (
+                launcher !== undefined &&
+                launcher.exitCode === null &&
+                launcher.signalCode === null
+            ) {
+                launcher.kill("SIGTERM");
+            }
+
+            await exited;
+        } finally {
+            clearTimeout(timer);
+            rmSync(root, { recursive: true, force: true });
+        }
     }
 }
 
