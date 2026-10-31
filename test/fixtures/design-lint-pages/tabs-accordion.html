@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Tabs</title>
+        <style>
+            body {
+                margin: 0;
+                font: 16px/1.5 system-ui;
+                background: #fff;
+                color: #1a1c20;
+            }
+            .tabs {
+                display: flex;
+                border-bottom: 1px solid #cfd4dc;
+                padding: 0 8px;
+            }
+            [role="tab"] {
+                min-height: 48px;
+                padding: 0 16px;
+                border: 0;
+                background: none;
+                font: inherit;
+                color: #4b5260;
+                border-bottom: 3px solid transparent;
+            }
+            [role="tab"][aria-selected="true"] {
+                color: #0b3fb8;
+                border-color: #0b3fb8;
+                font-weight: 600;
+            }
+            [role="tab"]:focus-visible {
+                outline: 2px solid #0b3fb8;
+                outline-offset: -4px;
+            }
+            [role="tabpanel"] {
+                padding: 16px;
+            }
+            details {
+                border: 1px solid #d6dae1;
+                border-radius: 10px;
+                margin: 8px 16px;
+            }
+            summary {
+                padding: 12px 16px;
+                min-height: 48px;
+                cursor: pointer;
+                font-weight: 600;
+            }
+            details p {
+                margin: 0;
+                padding: 0 16px 16px;
+                color: #454b57;
+            }
+            .crumbs {
+                display: flex;
+                gap: 4px;
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+            .crumbs a {
+                display: inline-flex;
+                align-items: center;
+                min-height: 44px;
+                padding: 0 6px;
+                color: #0b3fb8;
+            }
+            .pages {
+                display: flex;
+                gap: 4px;
+                padding: 16px;
+            }
+            .pages a {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 44px;
+                min-height: 44px;
+                border: 1px solid #cfd4dc;
+                border-radius: 8px;
+                color: #1a1c20;
+                text-decoration: none;
+            }
+            .pages a[aria-current] {
+                background: #0b3fb8;
+                color: #fff;
+                border-color: #0b3fb8;
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="crumbs" aria-label="Breadcrumb" data-pid="bc">
+            <a href="#">Home</a><span aria-hidden="true">/</span><a href="#">Docs</a>
+        </nav>
+        <div class="tabs" role="tablist" data-pid="tabs">
+            <button role="tab" aria-selected="true">Overview</button
+            ><button role="tab" aria-selected="false">Usage</button
+            ><button role="tab" aria-selected="false">API</button>
+        </div>
+        <div role="tabpanel" data-pid="panel"><h1 style="margin: 0">Overview</h1></div>
+        <details open data-pid="d1">
+            <summary>What is it?</summary>
+            <p>A small thing.</p>
+        </details>
+        <details data-pid="d2">
+            <summary>Why use it?</summary>
+            <p>Because.</p>
+        </details>
+        <nav class="pages" aria-label="Pages" data-pid="pg">
+            <a href="#">1</a><a href="#" aria-current="page">2</a><a href="#">3</a>
+        </nav>
+    </body>
+</html>

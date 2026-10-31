@@ -9,12 +9,12 @@ import { Auth } from "./auth.ts";
 import { describe, HttpError } from "./errors.ts";
 import { createApi } from "./http/api.ts";
 import { artifact } from "./http/artifacts.ts";
+import { publicArtifactBundle } from "./http/artifact-assets.ts";
 import { extensionFile } from "./http/extension-routes.ts";
 import { hookRoute } from "./http/hook-routes.ts";
 import { linkRoute } from "./http/link-routes.ts";
 import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
-import { publicArtifact } from "./http/public.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
 
@@ -49,11 +49,19 @@ export function createHandler(options: HttpOptions) {
             }
 
             // An artifact published to anyone with its address: the token is the whole of the access, no sign-in.
-            // Exactly `/pub/<token>`: nothing under it is a page.
+            // `/pub/<token>` is the page, and `/pub/<token>/<name>` one of its bundle's files (`http/artifact-assets.ts`).
             if (parts[0] === "pub") {
-                const token = parts.length === 2 ? parts[1] : undefined;
+                const token = parts.length >= 2 ? parts[1] : undefined;
+                const name = parts.slice(2).join("/");
 
-                return await publicArtifact(app, request, response, token, url.searchParams);
+                return await publicArtifactBundle(
+                    app,
+                    request,
+                    response,
+                    token,
+                    name,
+                    url.searchParams,
+                );
             }
 
             // A page an extension module shows to anyone with its link: the token is the whole of the access, no sign-in.

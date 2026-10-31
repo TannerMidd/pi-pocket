@@ -132,6 +132,45 @@ export class HiddenValues {
     }
 
     /**
+     * How much of `text` can be shown before the rest comes, in characters: up to where its end could be the start of a
+     * value hidden in the session, and never inside a whole value, so output read in parts still hides a value split
+     * between two reads. Values can overlap themselves (`ABAB` in `ABABAB`): a cut is moved back to the start of any
+     * value it would fall inside, until none.
+     */
+    safe(text: string, conversationId: ConversationId | number): number {
+        const values = this.for(conversationId).map((each) => each.value);
+        let cut = text.length;
+
+        for (const value of values) {
+            for (let length = Math.min(value.length - 1, text.length); length > 0; length--) {
+                if (text.endsWith(value.slice(0, length))) {
+                    cut = Math.min(cut, text.length - length);
+                    break;
+                }
+            }
+        }
+
+        for (let moved = true; moved;) {
+            moved = false;
+
+            for (const value of values) {
+                for (
+                    let at = text.indexOf(value);
+                    at !== -1 && at < cut;
+                    at = text.indexOf(value, at + 1)
+                ) {
+                    if (at + value.length > cut) {
+                        cut = at;
+                        moved = true;
+                    }
+                }
+            }
+        }
+
+        return cut;
+    }
+
+    /**
      * A tool's result with each value replaced, in what the model reads, what programs read, and its details: in strings
      * and in object keys. The same object when nothing changed, found without copying it.
      */

@@ -57,8 +57,10 @@ export type LimitTuning = {
     resetJitterMs: [number, number];
     /** The waits when no time is known, in order; the last repeats. */
     backoffMs: number[];
-    /** The longest total wait when no time is known. */
+    /** The longest total wait for overloads when no time is known. */
     maxBackoffMs: number;
+    /** The retry interval for an unknown-reset subscription limit, within the owner's wait budget. */
+    subscriptionBackoffMs: number;
     /** Between the sessions a gate lets go after its canary got content: from, to. */
     spacingMs: [number, number];
     /** How long a gate that gave up fails requests at once. */
@@ -76,6 +78,7 @@ export const DEFAULT_TUNING: LimitTuning = {
     resetJitterMs: [5_000, 30_000],
     backoffMs: [15_000, 30_000, 60_000, 120_000, 300_000, 600_000],
     maxBackoffMs: 30 * 60_000,
+    subscriptionBackoffMs: 15 * 60_000,
     spacingMs: [1_000, 5_000],
     refuseMs: 5 * 60_000,
     maxTries: 40,
@@ -137,6 +140,7 @@ type Gate = {
     until: number;
     resetAt?: number;
     source?: Source;
+    subscription?: true;
     reason: string;
     tries: number;
     state: "waiting" | "probing" | "refusing";
@@ -410,7 +414,7 @@ export class LimitGate {
         const now = this.#now();
 
         for (const gate of [...this.#gates.values()]) {
-            const deadline = this.#deadline(gate.kind, gate.since);
+            const deadline = this.#deadline(gate);
 
             if (gate.state === "refusing") {
                 continue;
@@ -706,11 +710,14 @@ export class LimitGate {
     }
 
     /** When a wait that began at `since` must end: the owner's maximum for a known reset, less for load with no time. */
-    #deadline(kind: "reset" | "backoff", since: number): number {
+    #deadline(gate: Gate): number {
         const maxReset = this.#deps.hours() * 3_600_000;
 
         return (
-            since + (kind === "reset" ? maxReset : Math.min(this.#tuning.maxBackoffMs, maxReset))
+            gate.since +
+            (gate.kind === "reset" || gate.subscription
+                ? maxReset
+                : Math.min(this.#tuning.maxBackoffMs, maxReset))
         );
     }
 
@@ -731,7 +738,7 @@ export class LimitGate {
             if (
                 gate.waiters.size === 0 &&
                 gate.state === "waiting" &&
-                this.#now() >= this.#deadline(gate.kind, gate.since)
+                this.#now() >= this.#deadline(gate)
             ) {
                 gate.until = Math.min(gate.until, this.#now());
             }
@@ -787,6 +794,11 @@ export class LimitGate {
         // the canary: it must not free the canary or move the state. It can only move the time on, when its reset is
         // later, and only to a time within the deadline.
         if (gate !== undefined && gate !== owned) {
+            if (verdict.subscription) {
+                gate.subscription = true;
+                this.#save();
+            }
+
             if (gate.state !== "refusing" && verdict.resetAt !== undefined) {
                 const jitter =
                     tuning.resetJitterMs[0] +
@@ -844,6 +856,10 @@ export class LimitGate {
         gate.reason = describeLimit(verdict, model.provider);
         gate.canary = undefined;
 
+        if (verdict.subscription) {
+            gate.subscription = true;
+        }
+
         // One deadline for the whole wait, from when the gate closed: a reset after it, or a backoff that comes to it,
         // gives up. A new reset does not start the wait again.
         const maxReset = this.#deps.hours() * 3_600_000;
@@ -865,11 +881,13 @@ export class LimitGate {
 
             why = this.#tooFar(verdict, gate.since, until, now);
         } else {
-            const total = Math.min(tuning.maxBackoffMs, maxReset);
+            const total = gate.subscription ? maxReset : Math.min(tuning.maxBackoffMs, maxReset);
             const deadline = gate.since + total;
             // No tries are counted yet when a manual try moved the scope: the first delay.
             const step = Math.max(0, Math.min(gate.tries - 1, tuning.backoffMs.length - 1));
-            const delay = tuning.backoffMs[step]! * (0.8 + this.#random() * 0.4);
+            const delay =
+                (gate.subscription ? tuning.subscriptionBackoffMs : tuning.backoffMs[step]!) *
+                (0.8 + this.#random() * 0.4);
 
             // The last try is at the deadline, not after it.
             until = Math.min(now + Math.max(delay, tuning.minWaitMs), deadline);
@@ -882,7 +900,11 @@ export class LimitGate {
             }
         }
 
-        if (why === undefined && Math.max(gate.tries, waiter.tries) > tuning.maxTries) {
+        if (
+            why === undefined &&
+            !gate.subscription &&
+            Math.max(gate.tries, waiter.tries) > tuning.maxTries
+        ) {
             why = `it did not clear after ${tuning.maxTries} tries`;
         }
 
@@ -1184,6 +1206,7 @@ export class LimitGate {
             until: gate.until,
             resetAt: gate.resetAt,
             source: gate.source,
+            subscription: gate.subscription,
             reason: gate.reason,
             tries: gate.tries,
         }));
@@ -1288,6 +1311,7 @@ export class LimitGate {
             until,
             ...(resetAt === undefined ? {} : { resetAt }),
             ...(source ? { source: each.source as Source } : {}),
+            ...(each.subscription === true ? { subscription: true as const } : {}),
             reason: text(each.reason) ?? "",
             tries,
             state: refusing ? "refusing" : "waiting",
@@ -1298,7 +1322,7 @@ export class LimitGate {
             gate.refusal = text(each.refusal, 700) ?? gate.reason;
             gate.timer = setTimeout(() => this.#drop(gate), until - now);
             gate.timer.unref();
-        } else if (now >= this.#deadline(gate.kind, gate.since)) {
+        } else if (now >= this.#deadline(gate)) {
             // The wait ran out while the server was down: the limit may have cleared. One request goes as canary at
             // once, and the first time is kept, so a canary that meets the limit again gives up (see `#closed`).
             gate.until = Math.min(gate.until, now);

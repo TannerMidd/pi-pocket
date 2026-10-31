@@ -9,6 +9,14 @@ const MIN_INTERVAL_MINUTES = 10;
 /** How far ahead a one-time message may go. */
 const MAX_AHEAD_MS = 366 * 24 * 60 * 60_000;
 
+/** What `parseWhen` accepts; the defaults are the constants above. */
+export type WhenLimits = {
+    /** The shortest repeat, in minutes. */
+    repeatMinutes?: number;
+    /** How far ahead `in …` may go, in milliseconds. */
+    aheadMs?: number;
+};
+
 /** A repeat: every so many minutes, or at a clock time on some days of the week (0 Sunday … 6 Saturday; all when absent). */
 export type Repeat = { minutes: number } | { at: string; days?: number[] };
 
@@ -217,11 +225,29 @@ function duration(words: readonly string[]): { minutes: number; used: number } |
 export const WHEN_HELP =
     "Say when: in 30m, 7:00, 7pm, tomorrow 9:00, fri 17:30, or every 2h, every day 8:00, every weekday 8:00, every mon,thu 9:00.";
 
+/** A span of time for a message: `a year` for the default, else days. */
+function aheadText(ms: number): string {
+    if (ms === MAX_AHEAD_MS) {
+        return "a year";
+    }
+
+    const days = Math.floor(ms / (24 * 60 * 60_000));
+
+    return days === 1 ? "1 day" : `${days} days`;
+}
+
 /**
  * Read when a message goes out from the start of `text`, and what the rest says. Throws with a short explanation
  * when the start is not a time this understands.
  */
-export function parseWhen(text: string, now: number, zone: string): When & { rest: string } {
+export function parseWhen(
+    text: string,
+    now: number,
+    zone: string,
+    limits: WhenLimits = {},
+): When & { rest: string } {
+    const repeatMinutes = limits.repeatMinutes ?? MIN_INTERVAL_MINUTES;
+    const aheadMs = limits.aheadMs ?? MAX_AHEAD_MS;
     const words = text.trim().split(/\s+/);
     const lower = words.map((word) => word.toLowerCase());
     const rest = (used: number) => words.slice(used).join(" ");
@@ -230,9 +256,9 @@ export function parseWhen(text: string, now: number, zone: string): When & { res
         const interval = duration(lower.slice(1));
 
         if (interval !== undefined) {
-            if (interval.minutes < MIN_INTERVAL_MINUTES) {
+            if (interval.minutes < repeatMinutes) {
                 throw new Error(
-                    `A schedule can repeat at most every ${MIN_INTERVAL_MINUTES} minutes.`,
+                    `A schedule can repeat at most every ${repeatMinutes} ${repeatMinutes === 1 ? "minute" : "minutes"}.`,
                 );
             }
 
@@ -275,8 +301,8 @@ export function parseWhen(text: string, now: number, zone: string): When & { res
 
         const next = now + delay.minutes * 60_000;
 
-        if (next - now > MAX_AHEAD_MS) {
-            throw new Error("A message can be scheduled up to a year ahead.");
+        if (next - now > aheadMs) {
+            throw new Error(`A message can be scheduled up to ${aheadText(aheadMs)} ahead.`);
         }
 
         return { next, rest: rest(1 + delay.used) };

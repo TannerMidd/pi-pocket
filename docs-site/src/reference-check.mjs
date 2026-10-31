@@ -94,6 +94,8 @@ export const PAGES = {
         "MessagesOptions",
         "MessagePage",
         "MessageInfo",
+        "PipApi",
+        "PipAskResult",
         "ComposerKeySpec",
         "ComposerBox",
         "SlotName",

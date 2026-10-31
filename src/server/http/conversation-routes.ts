@@ -1,6 +1,7 @@
 /** `/api/c/:id`: one conversation's routes, for people the API has checked may see it. */
 import { randomUUID } from "node:crypto";
-import { createWriteStream, rmSync } from "node:fs";
+import { constants, createWriteStream, rmSync } from "node:fs";
+import { type FileHandle, open } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -164,6 +165,16 @@ export async function conversationRoutes(
         return json(response, 200, {
             result: await app.commands.withdraw(id, user, Number(body.submissionId)),
         });
+    }
+
+    if (third === "edit-queued" && method === "POST") {
+        const body = await readJson<{ submissionId?: number }>(request);
+
+        return json(
+            response,
+            200,
+            await app.commands.editQueued(id, user, Number(body.submissionId)),
+        );
     }
 
     if (third === "move" && method === "POST") {
@@ -410,6 +421,50 @@ export async function conversationRoutes(
         return serveImage(request, response, app.workspace.conversationFile(user, id, requested));
     }
 
+    // A file of the session's folder as a download (a design's export): whom the file viewer lets read it, as it is.
+    if (third === "download" && method === "GET") {
+        const requested = url.searchParams.get("path") ?? "";
+
+        if (requested.trim() === "") {
+            throw new HttpError(400, "path is required");
+        }
+
+        const file = app.workspace.readableFile(user, id, requested);
+        let handle: FileHandle;
+
+        try {
+            handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        } catch {
+            throw new HttpError(404, "File not found");
+        }
+
+        try {
+            const stats = await handle.stat();
+
+            if (!stats.isFile()) {
+                throw new HttpError(404, "File not found");
+            }
+
+            // An ASCII fallback, then the whole name (RFC 6266): no quote or line break gets into the header.
+            const name = basename(file);
+            const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+
+            response.writeHead(200, {
+                "content-type": "application/octet-stream",
+                "content-length": stats.size,
+                "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+                "cache-control": "private, no-store",
+                "x-content-type-options": "nosniff",
+            });
+
+            await pipeline(handle.createReadStream({ autoClose: false }), response);
+        } finally {
+            await handle.close();
+        }
+
+        return;
+    }
+
     if (third === "entry" && fourth !== undefined && method === "GET") {
         const entry = await app.transcripts.fullEntry(id, Number(fourth));
 
@@ -555,6 +610,26 @@ export async function conversationRoutes(
 
     if (third === "shell" && fourth !== undefined && parts[4] === "stop" && method === "POST") {
         await app.shell.stop(id, user, Number(fourth));
+
+        return json(response, 200, { ok: true });
+    }
+
+    // Running now's Stop for a command Pi runs in the background: anyone who may steer the session.
+    if (
+        third === "background" &&
+        fourth !== undefined &&
+        parts[4] === "stop" &&
+        method === "POST"
+    ) {
+        app.requireSee(user, id);
+        app.requireSteer(user);
+        const item = await app.background.byTask(id, fourth);
+
+        if (item === undefined) {
+            throw new HttpError(404, "No such background task here.");
+        }
+
+        await app.background.stop(id, item.id);
 
         return json(response, 200, { ok: true });
     }

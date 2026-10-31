@@ -381,7 +381,7 @@ function FontTools() {
             ${
                 look.builtIn
                     ? html`<strong>${set.ligatures ? "On" : "Off"}</strong>`
-                    : html`<div>
+                    : html`<div class="font-ligatures">
                           <${Switch}
                               on=${set.ligatures}
                               label="Ligatures"
@@ -780,6 +780,16 @@ export function AppearanceSheet() {
                     on=${p.showThinking}
                     label="Show thinking"
                     onChange=${() => setPrefs({ showThinking: !p.showThinking })}
+                />
+            <//>
+            <${SettingRow}
+                title="Keep activity folded"
+                detail="Pi's thinking and tool calls stay on their one line until you open them, also while it works and in the newest turn"
+            >
+                <${Switch}
+                    on=${p.foldActivity}
+                    label="Keep activity folded"
+                    onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
                 />
             <//>
         </div>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Docs</title>
+        <style>
+            body {
+                margin: 0;
+                font:
+                    17px/1.7 Georgia,
+                    serif;
+                color: #222;
+                background: #fffdf8;
+            }
+            .layout {
+                display: grid;
+                grid-template-columns: 240px 1fr;
+                gap: 32px;
+                max-width: 1100px;
+                margin: 0 auto;
+                padding: 24px;
+            }
+            nav {
+                position: sticky;
+                top: 0;
+                align-self: start;
+                font:
+                    15px/1.4 system-ui,
+                    sans-serif;
+            }
+            nav a {
+                display: block;
+                padding: 12px 8px;
+                color: #355;
+                text-decoration: none;
+            }
+            nav a[aria-current] {
+                background: #eef3ee;
+                font-weight: 600;
+            }
+            main {
+                max-width: 68ch;
+            }
+            h1 {
+                font: 700 2rem/1.2 system-ui;
+            }
+            h2 {
+                font: 700 1.4rem/1.3 system-ui;
+                margin-top: 2em;
+            }
+            h3 {
+                font: 600 1.1rem/1.3 system-ui;
+            }
+            code {
+                font:
+                    14px ui-monospace,
+                    monospace;
+                background: #f1efe6;
+                padding: 2px 4px;
+                border-radius: 3px;
+            }
+            pre {
+                background: #1e1e1e;
+                color: #e8e8e8;
+                padding: 16px;
+                overflow: auto;
+                border-radius: 6px;
+            }
+            blockquote {
+                margin: 1em 0;
+                padding: 8px 16px;
+                border-left: 4px solid #9bb;
+                color: #445;
+            }
+            table {
+                border-collapse: collapse;
+            }
+            th,
+            td {
+                border: 1px solid #ccc;
+                padding: 6px 10px;
+            }
+            a {
+                color: #0b5394;
+            }
+            @media (max-width: 700px) {
+                .layout {
+                    grid-template-columns: 1fr;
+                }
+                nav {
+                    position: static;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="layout">
+            <nav data-pid="toc">
+                <a href="#s0" aria-current="true">Intro</a><a href="#s1">Install</a
+                ><a href="#s2">Usage</a><a href="#s3">API</a>
+            </nav>
+            <main data-pid="doc">
+                <h1 data-pid="t">Guide</h1>
+                <p>
+                    Paragraph 0: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 1: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <p>
+                    Paragraph 2: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s2">See section 2</a>.
+                </p>
+                <p>
+                    Paragraph 3: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s3">See section 3</a>.
+                </p>
+                <p>
+                    Paragraph 4: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 5: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <p>
+                    Paragraph 6: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s2">See section 2</a>.
+                </p>
+                <p>
+                    Paragraph 7: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s3">See section 3</a>.
+                </p>
+                <p>
+                    Paragraph 8: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 9: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <p>
+                    Paragraph 10: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s2">See section 2</a>.
+                </p>
+                <p>
+                    Paragraph 11: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s3">See section 3</a>.
+                </p>
+                <p>
+                    Paragraph 12: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 13: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <h2 id="s1" data-pid="h2a">Install</h2>
+                <pre data-pid="code"><code>npm install pi-pocket
+npm start</code></pre>
+                <h3>Options</h3>
+                <table data-pid="tbl">
+                    <tr>
+                        <th>Name</th>
+                        <th>Default</th>
+                    </tr>
+                    <tr>
+                        <td><code>port</code></td>
+                        <td>8899</td>
+                    </tr>
+                </table>
+                <blockquote data-pid="q">Keep it simple.</blockquote>
+                <h2 id="s2" data-pid="h2b">Usage</h2>
+                <p>
+                    Paragraph 0: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 1: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <p>
+                    Paragraph 2: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s2">See section 2</a>.
+                </p>
+                <p>
+                    Paragraph 3: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s3">See section 3</a>.
+                </p>
+                <p>
+                    Paragraph 4: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 5: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <p>
+                    Paragraph 6: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s2">See section 2</a>.
+                </p>
+                <p>
+                    Paragraph 7: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s3">See section 3</a>.
+                </p>
+                <p>
+                    Paragraph 8: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 9: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+                <p>
+                    Paragraph 10: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s2">See section 2</a>.
+                </p>
+                <p>
+                    Paragraph 11: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s3">See section 3</a>.
+                </p>
+                <p>
+                    Paragraph 12: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s0">See section 0</a>.
+                </p>
+                <p>
+                    Paragraph 13: pi pocket keeps long text readable with generous line height,
+                    measured line length and quiet colors. <a href="#s1">See section 1</a>.
+                </p>
+            </main>
+        </div>
+    </body>
+</html>

@@ -1,0 +1,163 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Tool step",
+        "description": "One step in Pi's activity timeline: a mark on a rule, what Pi did, and the detail in mono. The mark and the word both say the state.",
+        "states": ["running", "done", "failed", "waiting"],
+        "usage": {
+            "do": [
+                "Name the step with a verb in the past tense once it is done.",
+                "Set paths, commands, and counts in the mono font."
+            ],
+            "dont": [
+                "Do not tell the state by color alone: keep the mark shape.",
+                "Do not keep a spinner running after the step ends."
+            ]
+        },
+        "tokens": [
+            "border.width.hairline",
+            "border.width.thick",
+            "color.text.muted",
+            "color.text.primary",
+            "duration.spring",
+            "font.family.mono",
+            "font.family.sans",
+            "font.size.2xs",
+            "font.size.sm",
+            "font.size.xs",
+            "font.weight.bold",
+            "font.weight.medium",
+            "radius.pill",
+            "space.2",
+            "space.3",
+            "space.4",
+            "step.done",
+            "step.failed",
+            "step.mark-size",
+            "step.rule",
+            "step.running",
+            "step.waiting"
+        ]
+    }
+</script>
+<style>
+    .pk-step {
+        position: relative;
+        display: grid;
+        grid-template-columns: var(--step-mark-size) 1fr auto;
+        gap: var(--space-2) var(--space-3);
+        align-items: center;
+        max-width: 420px;
+        padding-bottom: var(--space-4);
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-sm);
+    }
+
+    .pk-step::before {
+        content: "";
+        position: absolute;
+        top: var(--step-mark-size);
+        bottom: 0;
+        left: calc(var(--step-mark-size) / 2);
+        width: var(--border-width-hairline);
+        background: var(--step-rule);
+    }
+
+    .pk-step__mark {
+        display: grid;
+        place-items: center;
+        width: var(--step-mark-size);
+        height: var(--step-mark-size);
+        border: var(--border-width-thick) solid transparent;
+        border-radius: var(--radius-pill);
+        font-size: var(--font-size-2xs);
+        font-weight: var(--font-weight-bold);
+        line-height: 1;
+    }
+
+    .pk-step__label {
+        color: var(--color-text-primary);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .pk-step__time {
+        color: var(--color-text-muted);
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-xs);
+    }
+
+    .pk-step__detail {
+        grid-column: 2 / 4;
+        color: var(--color-text-muted);
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-xs);
+    }
+
+    .pk-step--running .pk-step__mark {
+        border-color: var(--step-running);
+        color: var(--step-running);
+    }
+
+    .pk-step--running .pk-step__mark {
+        border-right-color: transparent;
+        animation: pk-step-spin calc(var(--duration-spring) * 2) linear infinite;
+    }
+
+    .pk-step--done .pk-step__mark {
+        border-color: var(--step-done);
+        color: var(--step-done);
+    }
+
+    .pk-step--failed .pk-step__mark {
+        border-color: var(--step-failed);
+        color: var(--step-failed);
+    }
+
+    .pk-step--waiting .pk-step__mark {
+        border-color: var(--step-waiting);
+        color: var(--step-waiting);
+    }
+
+    @keyframes pk-step-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .pk-step--running .pk-step__mark {
+            animation: none;
+        }
+    }
+</style>
+<template data-state="running">
+    <div class="pk-step pk-step--running">
+        <span class="pk-step__mark" aria-hidden="true"></span>
+        <span class="pk-step__label">Running tests</span>
+        <span class="pk-step__time">12s</span>
+        <span class="pk-step__detail">npm test -- design</span>
+    </div>
+</template>
+<template data-state="done">
+    <div class="pk-step pk-step--done">
+        <span class="pk-step__mark" aria-hidden="true">✓</span>
+        <span class="pk-step__label">Edited docsite.ts</span>
+        <span class="pk-step__time">0.4s</span>
+        <span class="pk-step__detail">src/server/design/docsite.ts · +212 −8</span>
+    </div>
+</template>
+<template data-state="failed">
+    <div class="pk-step pk-step--failed">
+        <span class="pk-step__mark" aria-hidden="true">×</span>
+        <span class="pk-step__label">Type check failed</span>
+        <span class="pk-step__time">8s</span>
+        <span class="pk-step__detail">2 errors in guide.ts</span>
+    </div>
+</template>
+<template data-state="waiting">
+    <div class="pk-step pk-step--waiting">
+        <span class="pk-step__mark" aria-hidden="true">!</span>
+        <span class="pk-step__label">Waiting for approval</span>
+        <span class="pk-step__time">3s</span>
+        <span class="pk-step__detail">git push origin ds/guide</span>
+    </div>
+</template>

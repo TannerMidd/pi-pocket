@@ -7,9 +7,9 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
@@ -26,6 +26,13 @@ import {
     tailscaleAddress,
 } from "./access.ts";
 import { fail, parseArgs } from "./options.ts";
+// The one server module the launcher runs itself: it imports only Node's own, so an update cannot break the launcher.
+import {
+    readPending,
+    restoreMissingNpmPackage,
+    rollBackUpdate,
+    stopMeansRollBack,
+} from "../server/update-state.ts";
 import {
     accent,
     bold,
@@ -46,7 +53,18 @@ import {
 } from "./term.ts";
 
 const SERVER = fileURLToPath(new URL("../server/main.ts", import.meta.url));
+/** Pi Pocket's checkout, which an update from the app changes (`src/server/updates.ts`). */
+const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+/**
+ * From an npm install (a node_modules folder), Node strips no types: the server then starts with the hook that does
+ * (`bin/strip-types.js`). A checkout starts without it.
+ */
+const SERVER_FLAGS = APP_ROOT.split(sep).includes("node_modules")
+    ? ["--import", new URL("../../bin/strip-types.js", import.meta.url).href]
+    : [];
 const RESTART_CODE = 75;
+/** How long a server started with an update under way may take to be ready before it counts as not starting. */
+const UPDATE_START_LIMIT_MS = 5 * 60_000;
 
 // ─── Options ────────────────────────────────────────────────────────────
 
@@ -306,9 +324,11 @@ function appUrl(): string {
 
 /** The address a browser on this machine should open. */
 function localUrl(): string {
-    return wildcard(state.host) || loopback(state.host)
-        ? `http://127.0.0.1:${options.port}`
-        : appUrl();
+    // A specific address, loopback or not, only answers on itself: keep it. `localhost` too, since Node may listen
+    // for it on ::1 alone.
+    const host = wildcard(state.host) ? "127.0.0.1" : state.host;
+
+    return `http://${host.includes(":") ? `[${host}]` : host}:${options.port}`;
 }
 
 function modeLabel(): string {
@@ -438,6 +458,13 @@ function maybeShowPanel(): void {
 // ─── The server ─────────────────────────────────────────────────────────
 
 function startServer(first: boolean): void {
+    try {
+        restoreMissingNpmPackage(APP_ROOT);
+    } catch (error) {
+        // A child that cannot load still reaches the normal rollback and retry path below.
+        log(red(`Could not restore the live npm package: ${(error as Error).message}`));
+    }
+
     const args = [
         SERVER,
         "--host",
@@ -455,10 +482,33 @@ function startServer(first: boolean): void {
     }
 
     // Node 22 calls node:sqlite experimental and says so at every start, right above the panel.
-    const proc = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...args], {
+    const flags = ["--disable-warning=ExperimentalWarning", ...SERVER_FLAGS];
+    const proc = spawn(process.execPath, [...flags, ...args], {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: { ...process.env, PI_POCKET_SUPERVISED: "1", PI_POCKET_LAUNCHER: "1" },
+        // PI_POCKET_ROLLBACK: this launcher goes back to the version before an update that does not start.
+        env: {
+            ...process.env,
+            PI_POCKET_SUPERVISED: "1",
+            PI_POCKET_LAUNCHER: "1",
+            PI_POCKET_ROLLBACK: "1",
+            PI_POCKET_NPM_ROLLBACK: "1",
+        },
     });
+    /** This start said it was ready: a stop after that is not a new version that cannot start. */
+    let ready = false;
+    // A new version that hangs before it is ready never exits: stop it, so the exit goes back to the version before.
+    const watchdog = readPending(APP_ROOT)
+        ? setTimeout(() => {
+              if (!ready && child === proc) {
+                  log(
+                      yellow(
+                          `  The server did not get ready in ${UPDATE_START_LIMIT_MS / 60_000} minutes after an update: stopping it.`,
+                      ),
+                  );
+                  proc.kill("SIGKILL");
+              }
+          }, UPDATE_START_LIMIT_MS)
+        : undefined;
 
     child = proc;
     pipeLines(proc.stdout, (line) => log(line));
@@ -467,6 +517,9 @@ function startServer(first: boolean): void {
         if (message?.type !== "ready" || child !== proc) {
             return;
         }
+
+        ready = true;
+        clearTimeout(watchdog);
 
         state.loginPath = message.loginPath;
         state.serverReady = true;
@@ -489,6 +542,8 @@ function startServer(first: boolean): void {
     });
 
     const exited = (code: number | null, signal: NodeJS.Signals | null) => {
+        clearTimeout(watchdog);
+
         if (child !== proc) {
             return;
         }
@@ -498,6 +553,30 @@ function startServer(first: boolean): void {
 
         if (quitting) {
             return;
+        }
+
+        // A server that stops before it is ready, with an update from the app under way: the new version does not
+        // start. Go back to the version before, and start that one, also on a first start.
+        if (stopMeansRollBack(ready, code)) {
+            let undone: string | undefined;
+
+            try {
+                undone = rollBackUpdate(APP_ROOT);
+            } catch (error) {
+                // The update stays noted: the next try, after the usual pause, tries going back again.
+                log(
+                    red(
+                        `  Going back to the version before the update failed: ${(error as Error).message}`,
+                    ),
+                );
+            }
+
+            if (undone !== undefined) {
+                log(yellow(`  ${undone}`));
+                startServer(false);
+
+                return;
+            }
         }
 
         if (code === RESTART_CODE) {
@@ -824,10 +903,6 @@ async function main(): Promise<void> {
 
     if (mode !== "custom") {
         saveSettings(mode);
-    }
-
-    if (!existsSync(SERVER)) {
-        fail(`Missing ${SERVER}`);
     }
 
     log(dim(`  Starting Pi Pocket (${modeLabel()})…`));

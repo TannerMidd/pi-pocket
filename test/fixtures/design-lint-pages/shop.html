@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Shop</title>
+        <style>
+            body {
+                margin: 0;
+                font: 16px/1.4 system-ui;
+                background: #fff;
+                color: #1b1b1f;
+            }
+            header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 16px;
+                border-bottom: 1px solid #ddd;
+            }
+            .logo {
+                font-weight: 800;
+                padding: 12px 0;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 16px;
+                padding: 16px;
+            }
+            .p {
+                border: 1px solid #e1e1e6;
+                border-radius: 10px;
+                padding: 12px;
+            }
+            .p h3 {
+                margin: 8px 0 0;
+                font-size: 16px;
+            }
+            .pr {
+                color: #9a3412;
+                font-weight: 700;
+                margin: 4px 0 8px;
+            }
+            button {
+                min-height: 44px;
+                width: 100%;
+                border: 0;
+                border-radius: 8px;
+                background: #1b1b1f;
+                color: #fff;
+                font: inherit;
+            }
+            .sale {
+                background: #fef3c7;
+                color: #78350f;
+                padding: 8px 16px;
+                text-align: center;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="sale" data-pid="sale">Free shipping over $50</div>
+        <header data-pid="hd">
+            <span class="logo">Shop</span
+            ><a
+                href="#"
+                style="display: inline-flex; align-items: center; min-height: 44px; color: #1b1b1f"
+                >Cart (2)</a
+            >
+        </header>
+        <main class="grid" data-pid="grid">
+            <article class="p" data-pid="p0">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Product 0"
+                    width="200"
+                    height="160"
+                    style="width: 100%; height: 160px; background: #dde3ee"
+                />
+                <h3>Item 0</h3>
+                <p class="pr">$9</p>
+                <button>Add</button>
+            </article>
+            <article class="p" data-pid="p1">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Product 1"
+                    width="200"
+                    height="160"
+                    style="width: 100%; height: 160px; background: #dde3ee"
+                />
+                <h3>Item 1</h3>
+                <p class="pr">$16</p>
+                <button>Add</button>
+            </article>
+            <article class="p" data-pid="p2">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Product 2"
+                    width="200"
+                    height="160"
+                    style="width: 100%; height: 160px; background: #dde3ee"
+                />
+                <h3>Item 2</h3>
+                <p class="pr">$23</p>
+                <button>Add</button>
+            </article>
+            <article class="p" data-pid="p3">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Product 3"
+                    width="200"
+                    height="160"
+                    style="width: 100%; height: 160px; background: #dde3ee"
+                />
+                <h3>Item 3</h3>
+                <p class="pr">$30</p>
+                <button>Add</button>
+            </article>
+            <article class="p" data-pid="p4">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Product 4"
+                    width="200"
+                    height="160"
+                    style="width: 100%; height: 160px; background: #dde3ee"
+                />
+                <h3>Item 4</h3>
+                <p class="pr">$37</p>
+                <button>Add</button>
+            </article>
+            <article class="p" data-pid="p5">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Product 5"
+                    width="200"
+                    height="160"
+                    style="width: 100%; height: 160px; background: #dde3ee"
+                />
+                <h3>Item 5</h3>
+                <p class="pr">$44</p>
+                <button>Add</button>
+            </article>
+        </main>
+    </body>
+</html>

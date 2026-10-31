@@ -1,11 +1,33 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The repository root: `web/`, `src/`, and `node_modules/` live here. */
+/** The repository root: `web/` and `src/` live here, and `node_modules/` too, except in an npx or local install. */
 export const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+/**
+ * The node_modules folder with the package `name`, as Node looks for it from `from`: Pi Pocket's own, or one above
+ * it, where npm puts Pi Pocket's packages in an npx or local install. Pi Pocket's own when none has it.
+ */
+export function modulesWith(name: string, from = APP_ROOT): string {
+    for (let folder = from; ;) {
+        const modules = basename(folder) === "node_modules" ? folder : join(folder, "node_modules");
+
+        if (existsSync(join(modules, name, "package.json"))) {
+            return modules;
+        }
+
+        const parent = dirname(folder);
+
+        if (parent === folder) {
+            return join(from, "node_modules");
+        }
+
+        folder = parent;
+    }
+}
 
 /** Where Pi Pocket keeps its database, users, uploads, and logs. */
 export function dataDir(): string {

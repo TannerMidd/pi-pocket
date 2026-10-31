@@ -25,7 +25,7 @@ import {
     watch,
     writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Extension, Registry } from "@earendil-works/pi-durable";
 import { describe } from "./errors.ts";
@@ -49,6 +49,7 @@ const ORDER = [
     "subagents.ts",
     "agent-teams.ts",
     "schedules.ts",
+    "background.ts",
     "goals.ts",
     "plan.ts",
     "anthropic-subscription.ts",
@@ -59,7 +60,11 @@ const ORDER = [
     "triggers.ts",
     "gallery.ts",
     "session-tags.ts",
+    "ask.ts",
     "ask-someone.ts",
+    "updates.ts",
+    "design.ts",
+    "tool-search.ts",
 ];
 
 /** The built-in modules' names (their files' without `.ts`): a drop-in with one of them is never loaded. */
@@ -83,6 +88,7 @@ const TITLES: Record<string, string> = {
     "subagents.ts": "Subagents",
     "agent-teams.ts": "Agent Teams",
     "schedules.ts": "Scheduled messages",
+    "background.ts": "Background tasks",
     "goals.ts": "Done when",
     "plan.ts": "Plan mode",
     "anthropic-subscription.ts": "Claude subscription billing",
@@ -93,7 +99,11 @@ const TITLES: Record<string, string> = {
     "triggers.ts": "Triggers",
     "gallery.ts": "Extension gallery",
     "session-tags.ts": "Session tags",
+    "ask.ts": "Ask",
     "ask-someone.ts": "Ask someone",
+    "updates.ts": "Pi Pocket updates",
+    "design.ts": "Design",
+    "tool-search.ts": "Tool search",
 };
 
 /**
@@ -115,7 +125,9 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "subagent",
     "team",
     "schedule",
+    "background",
     "codemode",
+    "tool_search",
     "memory",
     "sessions",
     "session_read",
@@ -129,7 +141,11 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "watch_pr",
     "repo_watch",
     "session_watch_pr",
+    "ask",
     "ask_someone",
+    "design_preview",
+    "design_export",
+    "design_system",
 ]);
 
 /** Pi Pocket's own modules, or the owner's from the drop-in folder. */
@@ -191,16 +207,36 @@ function moduleFiles(directory: string): string[] {
 /**
  * Make the drop-in folder, with a `node_modules` link to Pi Pocket's own packages. Drop-ins then import
  * `@earendil-works/pi-durable` and the rest as built-in modules do, and get the very modules the server runs. A
- * `node_modules` folder the owner made there stays as it is; a link to another place is replaced.
+ * `node_modules` folder the owner made there stays as it is; a link to another place is replaced. Where npm split Pi
+ * Pocket's packages between folders (a local install beside other versions of them), `packageModules` says where each
+ * is, and the link leads to a hidden folder with a link to each one instead.
  */
-export function prepareDropInFolder(directory: string, appModules: string): void {
+export function prepareDropInFolder(
+    directory: string,
+    appModules: string,
+    packageModules: Readonly<Record<string, string>> = {},
+): void {
     mkdirSync(directory, { recursive: true });
     // A junction on Windows: no administrator rights needed.
-    keepLink(
-        join(directory, "node_modules"),
-        appModules,
-        process.platform === "win32" ? "junction" : "dir",
-    );
+    const type = process.platform === "win32" ? "junction" : "dir";
+    let target = appModules;
+
+    // All in one folder, as in a checkout and most installs: one link to it, as before.
+    if (Object.values(packageModules).some((modules) => modules !== appModules)) {
+        target = join(directory, ".pocket-packages");
+        mkdirSync(target, { recursive: true });
+
+        for (const [name, modules] of Object.entries(packageModules)) {
+            const link = join(target, name);
+
+            if (existsSync(join(modules, name))) {
+                mkdirSync(dirname(link), { recursive: true });
+                keepLink(link, join(modules, name), type);
+            }
+        }
+    }
+
+    keepLink(join(directory, "node_modules"), target, type);
 }
 
 /** The first line of a copy of the types that Pi Pocket made where it cannot link: it refreshes only such a copy. */
@@ -859,6 +895,23 @@ export class ExtensionLoader {
         }
     }
 
+    /** While an update moves the checkout, edits load nothing: the restart after it loads the new version. */
+    #paused = false;
+
+    /** Stop or start loading modules again when they change, as `watch` does (`updates.ts`). */
+    pause(paused: boolean): void {
+        this.#paused = paused;
+        this.#webs.pause(paused);
+
+        if (paused) {
+            for (const timer of this.#timers.values()) {
+                clearTimeout(timer);
+            }
+
+            this.#timers.clear();
+        }
+    }
+
     /** Watch both folders and reload a module shortly after it changes. Keeps the old code when the new one fails. */
     watch(): void {
         this.#webs.watch();
@@ -886,6 +939,10 @@ export class ExtensionLoader {
     }
 
     #changed(file: string, directory: string): void {
+        if (this.#paused) {
+            return;
+        }
+
         // A browser module's file, or its folder: tabs load the new version.
         this.#webs.touched(directory, file);
 

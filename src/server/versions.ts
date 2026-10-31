@@ -45,3 +45,63 @@ export function atLeast(version: string, minimum: string): boolean {
 
     return true;
 }
+
+const RELEASE_VERSION =
+    /^(\d{1,4})\.(\d{1,4})\.(\d{1,4})(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+function releaseParts(
+    version: string,
+): { numbers: [number, number, number]; pre: string[] } | undefined {
+    const match = RELEASE_VERSION.exec(version.replace(/\+.*$/, ""));
+
+    return match === null
+        ? undefined
+        : {
+              numbers: [Number(match[1]), Number(match[2]), Number(match[3])],
+              pre: match[4] === undefined ? [] : match[4].split("."),
+          };
+}
+
+/** `versionParts` and `atLeast` treat a pre-release as its release, which API versions need. */
+export function compareReleases(a: string, b: string): number | undefined {
+    const left = releaseParts(a);
+    const right = releaseParts(b);
+
+    if (left === undefined || right === undefined) {
+        return undefined;
+    }
+
+    for (let at = 0; at < 3; at++) {
+        if (left.numbers[at] !== right.numbers[at]) {
+            return left.numbers[at]! - right.numbers[at]!;
+        }
+    }
+
+    if (left.pre.length === 0 || right.pre.length === 0) {
+        return right.pre.length - left.pre.length;
+    }
+
+    for (let at = 0; at < Math.min(left.pre.length, right.pre.length); at++) {
+        const one = left.pre[at]!;
+        const other = right.pre[at]!;
+
+        if (one === other) {
+            continue;
+        }
+
+        const oneNumber = /^\d+$/.test(one);
+        const otherNumber = /^\d+$/.test(other);
+
+        if (oneNumber && otherNumber) {
+            return Number(one) - Number(other);
+        }
+
+        if (oneNumber !== otherNumber) {
+            return oneNumber ? -1 : 1;
+        }
+
+        return one < other ? -1 : 1;
+    }
+
+    return left.pre.length - right.pre.length;
+}

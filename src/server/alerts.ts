@@ -213,7 +213,12 @@ export class Alerts {
                                 "approval",
                                 {
                                     title: `Pi asks you · ${title}`,
-                                    body: snippet(approval.form.title, 400),
+                                    body: snippet(
+                                        !approval.form.fields.some((field) => field.choices)
+                                            ? approval.form.title
+                                            : `${approval.form.title}: ${approval.reason}`,
+                                        400,
+                                    ),
                                     url: `/s/${String(approval.conversationId)}`,
                                     tag: `approval-${approval.id}`,
                                 },

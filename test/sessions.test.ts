@@ -132,6 +132,25 @@ test("a fork keeps the history through the chosen message, then goes its own way
     assert.equal(await app.transcripts.fullEntry(grandchild, Number(secondAnswer!.id)), undefined);
 });
 
+test("a fork with no message chosen takes the whole session, through Pi's latest reply", async () => {
+    const id = await newSession(app);
+    const { id: empty } = await app.commands.fork(id, owner(app), {});
+
+    assert.doesNotMatch(
+        await texts(empty),
+        /question/,
+        "before any reply there is nothing to take",
+    );
+
+    await say(app, id, "first question");
+    await say(app, id, "second question");
+    const { id: fork } = await app.commands.fork(id, owner(app), {});
+
+    assert.match(await texts(fork), /first question/);
+    assert.match(await texts(fork), /second question/);
+    assert.match(app.sessionMeta(fork)?.title ?? "", /· fork$/);
+});
+
 test("a message can be edited and sent again in a fork that ends just before it", async () => {
     const id = await newSession(app);
 

@@ -1195,6 +1195,43 @@ test("a queued message moves between Queue and Steer, by its sender only", async
     }
 });
 
+test("a queued message taken back to edit gives its sender its words and files, and leaves the queue", async () => {
+    const id = await newSession();
+    const guest = app.config.addUser("Sam", "guest").user;
+    const path = join(app.workspace.uploadDirectory(id), "lzx-1234abcd-notes (v2).txt");
+    const file = { path, name: "notes (v2).txt", mime: "text/plain", size: 3 };
+
+    writeFileSync(path, "abc");
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "e-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        const { submissionId } = await app.commands.submit(id, owner(), {
+            text: "first line\nsecond line",
+            attachments: [file],
+            mode: "followUp",
+            requestId: "e-2",
+        });
+
+        await assert.rejects(
+            app.commands.editQueued(id, guest, Number(submissionId)),
+            /Only its sender/,
+        );
+        assert.deepEqual(await app.commands.editQueued(id, owner(), Number(submissionId)), {
+            text: "first line\nsecond line",
+            attachments: [file],
+        });
+        assert.equal((await app.harness.snapshot(InboxDoc, id, context))?.items.length, 0);
+        await assert.rejects(
+            app.commands.editQueued(id, owner(), Number(submissionId)),
+            /already gone/,
+        );
+    } finally {
+        await app.commands.abort(id, owner());
+        app.config.removeUser(guest.id);
+    }
+});
+
 test("a queued message moved to Interrupt goes now, as Pi answers it, and the other queued messages stay", async () => {
     const id = await newSession();
     const started = Date.now();

@@ -45,6 +45,7 @@ if (!answer.answered) {
 
 - The values are in `answer.values`, by field name. They are not in the transcript, nor sent to the other people in the session. A plain Allow, as from a notification, is refused: each field must be filled in.
 - With no fields, the card is a question that the button answers: "Solve the CAPTCHA in the browser, then tap Done".
+- Since 0.27.0, a field can have `choices`: 2 to 4 answers that show as buttons, with `multiple` for one or more and `other` for an answer the person types. Its value is the label chosen (labels one per line with `multiple`). Pi's own `ask` tool uses them ([the reference](reference/host.md#askfield)).
 - **Do not keep the values** in `api.memo` or a document: a restart would find them there. A tool that asks is not safe to replay (the default), so a call that a restart cut off comes back as interrupted, and Pi asks again.
 - Tell Pi what happened, never the values: "Signed in as the person".
 
@@ -128,6 +129,7 @@ await page.press("Enter");
 ```
 
 - `snapshot()` gives the page as Pi reads it, and its controls as data: each one's ref, role, name, kind, and value. A password field's value is `••••` when it holds one, never its value.
+- `snapshot()` also gives `scroll: { y, viewport, height }` in CSS pixels (since 0.27.0, experimental): the top of the viewport, its height, and the page's height. There is more below when `y + viewport < height`, and more above when `y > 0`.
 - `fill` puts a person's value into a field, and returns only what the field is. It fills only a field named by a ref, a selector, or a label, never a point, and fills nothing when something covers the field or the focus does not reach it, so a value never lands in another field. `type` types as Pi types.
 - A value filled into a field that is not a password field shows in that field: in screenshots, in the Browser panel that the people in the session watch, and in the snapshot's `value`. Fill secrets only into password fields.
 - `inspect` says what a target is, and whether it is a password field. A `beforeTool` hook can use it to refuse Pi's own `type` into a password field ([Hooks](hooks.md)), as below.

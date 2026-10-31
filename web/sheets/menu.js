@@ -152,6 +152,19 @@ const PLACES = [
         place: () => ({ icon: "search", run: () => openSheet({ type: "find" }) }),
     },
     {
+        // Ctrl K's launcher, for touch screens that have no keyboard to open it.
+        id: "core:launcher",
+        label: "Launcher",
+        place: () =>
+            touch && {
+                icon: "command",
+                run: () => {
+                    closeSheet();
+                    store.set({ launcher: true });
+                },
+            },
+    },
+    {
         id: "core:branch",
         label: "Branch",
         place: () =>

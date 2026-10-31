@@ -20,7 +20,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import createArtifacts, { slugify } from "../src/server/extensions/artifacts.ts";
+import { readFileSync } from "node:fs";
+import createArtifacts, { BRIDGE_GUIDE, slugify } from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
 import { createHandler } from "../src/server/http.ts";
 import { withBridge } from "../src/server/http/artifacts.ts";
@@ -146,8 +147,11 @@ test("the module has both tools, and the guide says when to use each", async () 
 
     assert.match(withBoth, /artifact_inline shows the page as a card in your reply/);
     assert.match(withBoth, /only a call you make directly shows a card/i);
-    assert.match(withBoth, /schema, optional, is a string such as "v1"/);
-    assert.match(withBoth, /focus alone does not count/);
+    assert.ok(withBoth.includes(BRIDGE_GUIDE), "the section names the bridge guide");
+    const bridge = readFileSync(BRIDGE_GUIDE, "utf8");
+
+    assert.match(bridge, /schema, optional, is a string such as "v1"/);
+    assert.match(bridge, /focus alone does not count/);
     // A session without the tool (PiP's) is not told about it.
     const without = await render(["artifact"]);
 
@@ -462,6 +466,7 @@ test("one tap serves one follow-up: no other event of the same tap gives it back
 
     new Function(
         "window",
+        "document",
         "self",
         "location",
         "performance",
@@ -471,6 +476,7 @@ test("one tap serves one follow-up: no other event of the same tap gives it back
         body,
     )(
         window,
+        { readyState: "loading" },
         { origin: "null" },
         { origin: "null" },
         performance,

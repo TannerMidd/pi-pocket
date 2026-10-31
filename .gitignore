@@ -1,4 +1,6 @@
 node_modules/
+# What an update from the app keeps while it works (src/server/update-state.ts).
+/.pocket-update/
 *.log
 .env
 .env.*
@@ -11,3 +13,6 @@ result-*
 # Folders docker-compose.yml mounts from the host; user data, never tracked.
 /data/
 .idea
+
+# What `npm pack` makes.
+/*.tgz

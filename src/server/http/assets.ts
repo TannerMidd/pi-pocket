@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { closeSync, createReadStream, openSync, readFileSync, readSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix } from "node:path";
-import { APP_ROOT } from "../config.ts";
+import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
 import {
     accepted,
@@ -15,14 +15,15 @@ import {
 import { send } from "./io.ts";
 
 export const WEB = join(APP_ROOT, "web");
-const MODULES = join(APP_ROOT, "node_modules");
+/** A file of a package, wherever npm put the package. */
+const vendor = (name: string, ...path: string[]) => join(modulesWith(name), name, ...path);
 
 export const VENDOR: Record<string, string> = {
-    "preact.mjs": join(MODULES, "preact", "dist", "preact.mjs"),
-    "preact-hooks.mjs": join(MODULES, "preact", "hooks", "dist", "hooks.mjs"),
-    "htm.mjs": join(MODULES, "htm", "dist", "htm.module.js"),
-    "marked.mjs": join(MODULES, "marked", "lib", "marked.esm.js"),
-    "purify.mjs": join(MODULES, "dompurify", "dist", "purify.es.mjs"),
+    "preact.mjs": vendor("preact", "dist", "preact.mjs"),
+    "preact-hooks.mjs": vendor("preact", "hooks", "dist", "hooks.mjs"),
+    "htm.mjs": vendor("htm", "dist", "htm.module.js"),
+    "marked.mjs": vendor("marked", "lib", "marked.esm.js"),
+    "purify.mjs": vendor("dompurify", "dist", "purify.es.mjs"),
 };
 
 export const TYPES: Record<string, string> = {

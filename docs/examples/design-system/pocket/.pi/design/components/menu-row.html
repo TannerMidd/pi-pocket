@@ -1,0 +1,167 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Menu row",
+        "description": "A row in a pop-up menu or a list. The pointer, the keyboard, and the current choice each have a look of their own.",
+        "states": ["default", "hover", "selected", "focus", "disabled"],
+        "usage": {
+            "do": [
+                "Keep the rows 36 px tall, and 44 px on a touch screen.",
+                "Show the current choice with the wash and a check, not the wash alone."
+            ],
+            "dont": [
+                "Do not put more than one line in a row.",
+                "Do not hide a disabled row: say why in a hint."
+            ]
+        },
+        "tokens": [
+            "border.width.thick",
+            "color.accent.default",
+            "color.text.disabled",
+            "color.text.muted",
+            "color.text.primary",
+            "font.family.mono",
+            "font.family.sans",
+            "font.size.sm",
+            "font.size.xs",
+            "menu.bg",
+            "menu.padding",
+            "menu.radius",
+            "menu.row-height",
+            "menu.row-hover",
+            "menu.row-radius",
+            "menu.row-selected",
+            "menu.shadow",
+            "shadow.focus-ring",
+            "size.tap",
+            "space.2",
+            "space.3"
+        ]
+    }
+</script>
+<style>
+    .pk-menu {
+        display: grid;
+        gap: var(--menu-padding);
+        width: 220px;
+        padding: var(--menu-padding);
+        border-radius: var(--menu-radius);
+        background: var(--menu-bg);
+        box-shadow: var(--menu-shadow);
+        font-family: var(--font-family-sans);
+    }
+
+    .pk-menu__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        min-height: var(--menu-row-height);
+        padding: 0 var(--space-3);
+        border: 0;
+        border-radius: var(--menu-row-radius);
+        background: transparent;
+        color: var(--color-text-primary);
+        font-family: inherit;
+        font-size: var(--font-size-sm);
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .pk-menu__key {
+        color: var(--color-text-muted);
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-xs);
+    }
+
+    .pk-menu__row:hover,
+    .pk-menu__row.is-hover {
+        background: var(--menu-row-hover);
+    }
+
+    .pk-menu__row[aria-checked="true"] {
+        background: var(--menu-row-selected);
+        color: var(--color-accent-default);
+    }
+
+    .pk-menu__row:focus-visible,
+    .pk-menu__row.is-focus {
+        outline: var(--border-width-thick) solid transparent;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    .pk-menu__row:disabled {
+        color: var(--color-text-disabled);
+        cursor: not-allowed;
+    }
+
+    @media (pointer: coarse) {
+        .pk-menu__row {
+            min-height: var(--size-tap);
+        }
+    }
+</style>
+<template data-state="default">
+    <div class="pk-menu" role="menu">
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Opus<span class="pk-menu__key">⌘1</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Sonnet<span class="pk-menu__key">⌘2</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Haiku<span class="pk-menu__key">⌘3</span>
+        </button>
+    </div>
+</template>
+<template data-state="hover">
+    <div class="pk-menu" role="menu">
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Opus<span class="pk-menu__key">⌘1</span>
+        </button>
+        <button class="pk-menu__row is-hover" role="menuitemradio" aria-checked="false">
+            Sonnet<span class="pk-menu__key">⌘2</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Haiku<span class="pk-menu__key">⌘3</span>
+        </button>
+    </div>
+</template>
+<template data-state="selected">
+    <div class="pk-menu" role="menu">
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Opus<span class="pk-menu__key">⌘1</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="true">
+            Sonnet<span class="pk-menu__key">✓</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Haiku<span class="pk-menu__key">⌘3</span>
+        </button>
+    </div>
+</template>
+<template data-state="focus">
+    <div class="pk-menu" role="menu">
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Opus<span class="pk-menu__key">⌘1</span>
+        </button>
+        <button class="pk-menu__row is-focus" role="menuitemradio" aria-checked="false">
+            Sonnet<span class="pk-menu__key">⌘2</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Haiku<span class="pk-menu__key">⌘3</span>
+        </button>
+    </div>
+</template>
+<template data-state="disabled">
+    <div class="pk-menu" role="menu">
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Opus<span class="pk-menu__key">⌘1</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false" disabled>
+            Sonnet<span class="pk-menu__key">No key</span>
+        </button>
+        <button class="pk-menu__row" role="menuitemradio" aria-checked="false">
+            Haiku<span class="pk-menu__key">⌘3</span>
+        </button>
+    </div>
+</template>

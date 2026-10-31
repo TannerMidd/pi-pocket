@@ -100,6 +100,8 @@ sudo systemctl start pi-pocket@lan
 
 If the unit file changed, copy it again and run `sudo systemctl daemon-reload` before starting.
 
+Menu → **Update Pi Pocket** can also update the checkout from the app, when the service user owns it (`sudo chown -R pi-pocket: /opt/pi-pocket`). With the checkout owned by another user, as in the steps above, the sheet only says when a new version is out. A global npm install (`npm install -g pi-pocket`) updates from the sheet the same way, when the service user can write the folder that holds the package. An update from the app does not back up the data folder: for a release whose notes have a warning, back it up first, as above.
+
 ## When it does not start
 
 The launcher has no terminal under systemd, so it uses the mode from `--access` and never shows its menu. When that mode is not ready, it exits with a message:

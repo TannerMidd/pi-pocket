@@ -602,6 +602,8 @@ export class Room {
                 id,
                 title: meta.title,
                 type: meta.type,
+                ...(meta.group === undefined ? {} : { group: meta.group }),
+                ...(meta.kind === undefined ? {} : { kind: meta.kind }),
                 versions: meta.versions.map((version) => ({
                     version: version.version,
                     size: version.size,

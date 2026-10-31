@@ -177,8 +177,8 @@ test("a repeated start or send makes one session or one message", async () => {
     );
     const count = app.sessions().length;
 
-    // Never thinking harder than the session that started it, which is at "off".
-    assert.equal((await app.agentState(target))?.thinkingLevel, "off");
+    // Harder than the session that started it, which is at "off".
+    assert.equal((await app.agentState(target))?.thinkingLevel, "high");
 
     assert.equal((await start(id, "start-key")).session, target);
     assert.equal(app.sessions().length, count);

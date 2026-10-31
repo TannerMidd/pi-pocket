@@ -24,7 +24,7 @@ import {
 } from "./docs.ts";
 import { ChooseModelError, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
-import { isThinkingLevel, levelAtMost, resolveModel, THINKING_LEVELS } from "./models.ts";
+import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -618,8 +618,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const spec = named ?? source;
-        const own = agent.thinkingLevel ?? "off";
-        const asked = request.thinking ?? own;
+        const asked = request.thinking ?? agent.thinkingLevel ?? "off";
 
         if (!spec || spec.indexOf("/") <= 0) {
             throw new HttpError(
@@ -647,16 +646,12 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const selected = app.models.getModel(model.provider, model.modelId)!;
-        const cap = THINKING_LEVELS.indexOf(asked) > THINKING_LEVELS.indexOf(own) ? own : asked;
-        const thinking = levelAtMost(selected, cap);
+        const thinking = levelFor(selected, asked);
 
-        if (
-            thinking === undefined ||
-            (strict && request.thinking !== undefined && thinking !== asked)
-        ) {
+        if (strict && request.thinking !== undefined && thinking !== asked) {
             throw new HttpError(
                 400,
-                `The model ${spec} does not support the requested thinking within the source's ${own} cap.`,
+                `The model ${spec} does not support the requested thinking level ${asked}.`,
             );
         }
 

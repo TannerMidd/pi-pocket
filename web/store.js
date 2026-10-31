@@ -2,6 +2,7 @@
 import { onRoute, pushRoute } from "./back.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
+import { fitClock, moment } from "./clock.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
 export function uid() {
@@ -143,6 +144,7 @@ export const store = {
         auth: null,
         /** A transcript message the next chat message discusses: `{ entryId, text }`. */
         chatQuote: null,
+        replyQuote: null,
         /** Text to put into the message box to Pi: `{ text, n }`, picked up by the composer. */
         composerInsert: null,
         /** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */
@@ -274,6 +276,7 @@ function peopleFor(id, reads = store.state.chatReads) {
         presence: [],
         notes: null,
         chatQuote: null,
+        replyQuote: null,
         chatRead: id === null ? 0 : (reads[id] ?? 0),
     };
 }
@@ -441,6 +444,31 @@ export const scoped = () => Array.isArray(store.state.me?.sessions);
 /** The notices that announce chat messages, here or a mention elsewhere, by id: their session's. Reading its chat takes them down. */
 const chatNotices = new Map();
 
+// Read from storage: another tab's read counts before its event arrives.
+export function chatReadStored(id) {
+    return Number(localStorage.getItem(CHAT_READ_PREFIX + id)) || 0;
+}
+
+export function setChatReadAt(id, at) {
+    if (at > 0) {
+        localStorage.setItem(CHAT_READ_PREFIX + id, String(at));
+    } else {
+        localStorage.removeItem(CHAT_READ_PREFIX + id);
+    }
+
+    store.set((state) => {
+        const chatReads = { ...state.chatReads };
+
+        if (at > 0) {
+            chatReads[id] = at;
+        } else {
+            delete chatReads[id];
+        }
+
+        return { chatReads, ...(id === state.conversationId ? { chatRead: at } : {}) };
+    });
+}
+
 /** Everything in the chat counts as read: called while the chat is open. */
 export function markChatRead() {
     const { chat, chatRead, conversationId } = store.state;
@@ -458,11 +486,7 @@ export function markChatRead() {
         return;
     }
 
-    localStorage.setItem(CHAT_READ_PREFIX + conversationId, String(last));
-    store.set((state) => ({
-        chatRead: last,
-        chatReads: { ...state.chatReads, [conversationId]: last },
-    }));
+    setChatReadAt(conversationId, last);
 }
 
 function applyChat(data) {
@@ -822,18 +846,24 @@ function keptEach(had, next) {
         : items;
 }
 
-/** How far the server's clock is ahead of this browser's, from its last hello (`seen.js`). */
-let clockOffset = 0;
+/** How far the server's clock is ahead of this browser's, from its hellos (`seen.js`); undefined before the first. */
+let clockOffset;
 
-export const serverClockOffset = () => clockOffset;
+export const serverClockOffset = () => clockOffset ?? 0;
+
+/**
+ * When this tab asked for the hello its new connection brings first (`fitClock`): the server reads its clock after
+ * that. Undefined for a hello the server sends of itself, or after a stream reconnects by itself.
+ */
+let helloAsked;
 
 /**
  * The server's facts from a hello. Its clock (`now`) is new in each one and is no change to them: the clock goes to
- * `clockOffset`, and the facts keep the clock of the hello that brought them.
+ * `clockOffset`, and the facts keep the clock of the hello that brought them. `asked`: when this tab asked for it.
  */
-function keptServer(had, next) {
+function keptServer(had, next, asked) {
     if (typeof next?.now === "number") {
-        clockOffset = next.now - Date.now();
+        clockOffset = fitClock(clockOffset, next.now, moment(), asked);
     }
 
     return had && next && sameJson({ ...had, now: 0 }, { ...next, now: 0 }) ? had : next;
@@ -863,14 +893,17 @@ const handlers = {
     // Sent again on each connect, mostly as it was: what is the same keeps its identity (`kept`).
     hello: (data) => {
         const state = store.state;
+        // Only a new connection's first hello answers this tab's asking; any later one, the server sent of itself.
+        const asked = helloAsked;
 
+        helloAsked = undefined;
         setChanged({
             me: kept(state.me, data.user),
             users: keptEach(state.users, data.users),
             folderFavorites: kept(state.folderFavorites, data.folderFavorites ?? []),
             models: kept(state.models, data.models),
             guard: kept(state.guard, data.guard),
-            server: keptServer(state.server, data.server),
+            server: keptServer(state.server, data.server, asked),
             // Every theme folder (`theme.js`): an older server lists none.
             themeList: kept(state.themeList, Array.isArray(data.themes) ? data.themes : []),
             // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
@@ -1002,6 +1035,7 @@ addEventListener("pageshow", (event) => {
 
 /** Server-sent events: one long response the server writes to as things change. */
 function streamEvents(query) {
+    helloAsked = moment();
     const events = new EventSource(`/api/events?${query}`);
     /** The first batch arrived whole: the session's view, or the session list when no session is open. */
     let settled = false;
@@ -1106,6 +1140,7 @@ function pollEvents(query) {
 
         while (!stopped) {
             request = new AbortController();
+            const asked = moment();
 
             try {
                 const response = await fetch(
@@ -1131,9 +1166,11 @@ function pollEvents(query) {
                 }
 
                 if (data.session !== session) {
-                    // A new session (first poll, or the server restarted): it starts with hello and a full view.
+                    // A new session (first poll, or the server restarted): it starts with hello and a full view. The
+                    // server made that session, and read the hello's clock, after this request went out.
                     session = data.session;
                     ack = 0;
+                    helloAsked = asked;
                 }
 
                 failures = 0;
@@ -1299,6 +1336,7 @@ onRoute(() => {
 
 export async function start() {
     try {
+        const asked = moment();
         const hello = await api("me");
 
         store.set({
@@ -1306,7 +1344,7 @@ export async function start() {
             users: hello.users,
             models: hello.models,
             guard: hello.guard,
-            server: keptServer(store.state.server, hello.server),
+            server: keptServer(store.state.server, hello.server, asked),
             themeList: Array.isArray(hello.themes) ? hello.themes : [],
         });
         connect();
@@ -1366,6 +1404,7 @@ export const actions = {
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
     /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
     move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
+    editQueued: (submissionId) => api(`c/${current()}/edit-queued`, { submissionId }),
     configure: (change) => api(`c/${current()}/configure`, change),
     /** The owner's model and thinking level for new sessions, `{ provider, modelId, thinkingLevel }`; null clears it. */
     setDefaultModel: (choice) => api("settings", { defaultModel: choice }),
@@ -1375,6 +1414,7 @@ export const actions = {
     /** A new session with this one's history through `entryId`. */
     fork: (entryId, { worktree = false } = {}) =>
         api(`c/${current()}/fork`, { entryId, ...(worktree ? { worktree } : {}) }),
+    forkSession: (id) => api(`c/${id}/fork`, {}),
     /** Send a message to Pi again in a fork that ends just before it: `{ text }` edits it, `{ model }` picks another model. */
     resend: (entryId, change = {}) => api(`c/${current()}/resend`, { entryId, ...change }),
     setPlan: (on) => api(`c/${current()}/plan`, { on }),
@@ -1664,6 +1704,10 @@ export function insertIntoComposer(text, files = [], { inline = false } = {}) {
         sheet: null,
         composerInsert: { text, files, inline, n: (state.composerInsert?.n ?? 0) + 1 },
     }));
+}
+
+export function quoteReply(text) {
+    store.set({ replyQuote: text });
 }
 
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */

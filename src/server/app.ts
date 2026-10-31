@@ -51,12 +51,15 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
-import { APP_ROOT, ConfigStore, type User } from "./config.ts";
+import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
 import {
+    ArtifactAssetDoc,
     ArtifactBodyDoc,
     type ArtifactMeta,
     ArtifactsDoc,
     AuthorsDoc,
+    BackgroundDoc,
+    type BackgroundTask,
     BrowserDoc,
     ChatDoc,
     type ChatMessage,
@@ -65,6 +68,7 @@ import {
     MemoryDoc,
     type SessionMeta,
     SessionsDoc,
+    SpendDoc,
     type SubagentRecord,
     SubagentsDoc,
     TurnsDoc,
@@ -88,7 +92,9 @@ import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { Memory } from "./memory.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
-import { pocketVersion } from "./versions.ts";
+import { Updates } from "./updates.ts";
+import { pocketPackage, pocketVersion } from "./versions.ts";
+import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
@@ -101,13 +107,16 @@ import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./p
 import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
+import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
+import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
+import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
 import { AppEventBus } from "./app-events.ts";
@@ -165,6 +174,24 @@ export const MAX_PEEKS = 20;
  * ask, or the run broke. Stopped (`aborted`), cleared (`reset`), and replaced (`stale`) runs did not fail.
  */
 const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
+
+/** The session list goes to every tab on each change: these bound what it carries. */
+const FAILURE_TEXT = 120;
+const ASK_SUBJECT = 200;
+const ASK_REASON = 200;
+const FAILED_AGENTS = 5;
+
+type SessionAsk = {
+    id: string;
+    conversationId: number;
+    tool: string;
+    subject: string;
+    reason: string;
+    requestedBy?: string;
+    form?: true;
+    at: number;
+    count: number;
+};
 
 /** A conversation's subagents document, as far as the app reads it. */
 type SubagentsValue = {
@@ -253,6 +280,20 @@ function countSubagents(
     return counts;
 }
 
+function failedSubagents(
+    entries: readonly SubagentEntry[],
+): { name: string; conversationId: number; at: number }[] {
+    return entries
+        .filter((entry) => subagentState(entry) === "failed" && entry.dealt !== true)
+        .sort((a, b) => (b.answeredAt ?? 0) - (a.answeredAt ?? 0))
+        .slice(0, FAILED_AGENTS)
+        .map((entry) => ({
+            name: entry.name,
+            conversationId: Number(entry.conversationId),
+            at: entry.answeredAt ?? 0,
+        }));
+}
+
 export interface OpenOptions {
     dataDir: string;
     defaultCwd: string;
@@ -268,6 +309,10 @@ export interface OpenOptions {
     browser?: string | null;
     /** The home folder, whose `.agents/skills/` every session has. Undefined is Pi's: `$HOME`. Tests use their own. */
     home?: string;
+    /** Restart the server, as Menu → Restart server does (`main.ts`); undefined where nothing can (tests). */
+    restart?: () => void;
+    /** Where Pi Pocket's own code is, for its updates; tests give a checkout of their own. */
+    appRoot?: string;
 }
 
 export class PocketApp {
@@ -294,7 +339,11 @@ export class PocketApp {
     readonly providers = new Providers(this);
     /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
     readonly limits: LimitGate;
+    /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
+    readonly cacheKeeper: CacheKeeper;
     readonly schedules = new Schedules(this);
+    /** Commands Pi runs in the background, watched until they end (`background.ts`). */
+    readonly background = new BackgroundTasks(this);
     readonly goals = new Goals(this);
     readonly shell = new Shell(this);
     readonly spend = new Spend(this);
@@ -334,6 +383,8 @@ export class PocketApp {
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
+    /** Updates of Pi Pocket itself: the newest release, and updating to it (`updates.ts`). */
+    readonly updates: Updates;
     /** Theme folders: the app's look and layout, built in and the owner's (`themes.ts`). */
     readonly themes: Themes;
     /** Each conversation's browser page, which Pi and the people in the conversation share. */
@@ -355,7 +406,9 @@ export class PocketApp {
      * Conversations whose last run ended because the model or provider failed (not stopped by someone), since this
      * server started: the session list marks them until their next run starts.
      */
-    readonly #failed = new Set<ConversationId>();
+    readonly #failed = new Map<ConversationId, string>();
+    /** How many commands each session runs in the background now (`background.ts`): the list and status line show it. */
+    readonly #background = new Map<ConversationId, number>();
     readonly #agents = new Map<ConversationId, AgentState>();
 
     /** The newest chat message (not activity) of each conversation, for unread dots in the session list. */
@@ -397,9 +450,53 @@ export class PocketApp {
         setGlabConfigDir(join(options.dataDir, "glab"));
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
+        this.updates = new Updates({
+            appRoot: options.appRoot ?? APP_ROOT,
+            version: pocketVersion(),
+            supervised: options.supervised && options.restart !== undefined,
+            // The launcher says so when it goes back to the version before a new one that does not start.
+            rollback: process.env.PI_POCKET_ROLLBACK === "1",
+            npmRollback: process.env.PI_POCKET_NPM_ROLLBACK === "1",
+            restart: () => options.restart?.(),
+            quiesce: (paused) => this.pauseReloads(paused),
+            busy: () => this.#busy.size,
+            log: (line) => this.#log(line),
+            // Releases from somewhere else: a fork's, or a copy of Pi Pocket's repository to try updates on.
+            ...(process.env.PI_POCKET_UPDATES_REPO
+                ? { repository: process.env.PI_POCKET_UPDATES_REPO }
+                : {}),
+        });
         this.config = new ConfigStore(options.dataDir);
         this.#lockFile = join(options.dataDir, "harness.lock");
         this.#log = options.log ?? ((line) => console.log(line));
+        this.cacheKeeper = new CacheKeeper({
+            log: (line) => this.#log(line),
+            conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
+            isRunning: (conversationId) => this.#busy.has(conversationId as ConversationId),
+            accountFor: (conversationId) => {
+                const id = conversationId as ConversationId;
+                const payer = this.spend.payer(id);
+
+                return {
+                    check: () => {
+                        const person = this.config.userById(payer);
+
+                        if (person === undefined || !this.#busy.has(id)) {
+                            return false;
+                        }
+
+                        try {
+                            this.spend.check(person, id);
+
+                            return true;
+                        } catch {
+                            return false;
+                        }
+                    },
+                    recordUsage: (message) => this.spend.recordModelUsage(id, payer, message),
+                };
+            },
+        });
         this.limits = new LimitGate({
             hours: () => this.config.limitWaitHours,
             epoch: (provider) => this.providers.signInEpoch(provider),
@@ -637,6 +734,15 @@ export class PocketApp {
         }, 50);
     }
 
+    /** While an update moves Pi Pocket's checkout, edited web files and modules load nothing (`updates.ts`). */
+    reloadsPaused = false;
+
+    pauseReloads(paused: boolean): void {
+        this.reloadsPaused = paused;
+        this.loader?.pause(paused);
+        this.themes?.pause(paused);
+    }
+
     /** Write a line to the server log. */
     log(line: string): void {
         this.#log(line);
@@ -679,12 +785,16 @@ export class PocketApp {
         }
 
         this.models = await ModelRuntime.create();
+        // Innermost: observe the adapter payload only after the caller and all extension shapers finish.
+        this.cacheKeeper.installPayloadObserver(this.models);
         installRequestShaping(this.models, this.#shapers, this.#log);
         this.providers.modelRefresh.watch(this.models);
         this.#configureModels?.(this.models);
         measureModelStreams(this.models);
         // Outside the timing wrapper: each attempt is timed on its own, not the wait before it.
         this.limits.install(this.models);
+        // Outermost: it sees each real request finish, and replays it through the wrappers below.
+        this.cacheKeeper.install(this.models);
         await this.models.getAvailable().catch(() => []);
 
         const registry = createRegistry();
@@ -746,6 +856,7 @@ export class PocketApp {
             },
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
+            roleOf: (personId) => this.config.userById(personId)?.role,
             on: (event, listener) => this.events.on(event, listener),
             ask: (request, askContext) => ask(this.approvals, request, askContext),
             hide: (value) => this.hidden.add(value),
@@ -762,6 +873,7 @@ export class PocketApp {
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
             schedules: this.schedules,
+            background: this.background,
             goals: this.goals,
             browsers: this.browsers,
             pip: this.pip,
@@ -770,6 +882,7 @@ export class PocketApp {
             repoWatches: this.repoWatches,
             memory: this.memory,
             gallery: this.gallery,
+            updates: this.updates,
             text: Object.freeze({ quoted, defang }),
             thinkingLevels: THINKING_LEVELS,
         };
@@ -778,7 +891,16 @@ export class PocketApp {
         const dropIn = join(this.dataDir, "extensions");
 
         try {
-            prepareDropInFolder(dropIn, join(APP_ROOT, "node_modules"));
+            prepareDropInFolder(
+                dropIn,
+                modulesWith("@earendil-works/pi-durable"),
+                Object.fromEntries(
+                    Object.keys(pocketPackage.dependencies ?? {}).map((name) => [
+                        name,
+                        modulesWith(name),
+                    ]),
+                ),
+            );
         } catch (error) {
             this.#log(`Drop-in extensions cannot import Pi Pocket's packages: ${describe(error)}`);
         }
@@ -930,6 +1052,7 @@ export class PocketApp {
                 }
 
                 this.#noteSubagents(id, await this.harness.snapshot(SubagentsDoc, id, context));
+                this.#noteBackground(id, await this.harness.snapshot(BackgroundDoc, id, context));
             }
 
             cursor = page.next;
@@ -943,6 +1066,20 @@ export class PocketApp {
     /** Every commit, as Pi Durable publishes it: what the app keeps in memory follows it, and so do the open views. */
     #committed(publication: CommitPublication): void {
         let sessionsChanged = false;
+        let alreadyPaid = false;
+
+        // Auxiliary requests pay their captured person in the same commit as usage, in either document order.
+        // A commit with both documents must pay every usage change. Normal spend counts never change UsageDoc.
+        for (const change of publication.changes) {
+            if (
+                change.type === "document" &&
+                change.record.kind === SpendDoc.definition.kind &&
+                change.value !== null
+            ) {
+                this.spend.countedChanged(change.value as { people: Record<string, number> });
+                alreadyPaid = true;
+            }
+        }
 
         // Usage in a commit is from the work that was going on before it: it is counted before a message the same
         // commit places changes whom Pi works for.
@@ -952,7 +1089,11 @@ export class PocketApp {
                 change.record.kind === UsageDoc.definition.kind &&
                 change.conversationId !== undefined
             ) {
-                this.spend.usageChanged(change.conversationId, change.value as UsageState | null);
+                this.spend.usageChanged(
+                    change.conversationId,
+                    change.value as UsageState | null,
+                    alreadyPaid,
+                );
 
                 // A team's top session with a limit shows the team's spend: it follows a linked session's too.
                 const root = this.rootOf(change.conversationId);
@@ -995,7 +1136,13 @@ export class PocketApp {
                     this.#sessions[String(change.value.conversationId)] !== undefined &&
                     !this.#failed.has(change.value.conversationId)
                 ) {
-                    this.#failed.add(change.value.conversationId);
+                    this.#failed.set(
+                        change.value.conversationId,
+                        whyUnanswered(change.value.reason, change.value.detail).slice(
+                            0,
+                            FAILURE_TEXT,
+                        ),
+                    );
                     sessionsChanged = true;
                 }
             }
@@ -1031,6 +1178,17 @@ export class PocketApp {
         const kind = change.record.kind;
         const id = change.conversationId;
         let sessionsChanged = false;
+
+        if (
+            kind === BackgroundDoc.definition.kind &&
+            id !== undefined &&
+            this.#noteBackground(
+                id,
+                change.value as { items: Record<string, BackgroundTask> } | null,
+            )
+        ) {
+            sessionsChanged = true;
+        }
 
         if (kind === "pi.live" && id !== undefined) {
             const busy = (change.value as LiveState | null)?.run !== undefined;
@@ -1070,6 +1228,8 @@ export class PocketApp {
 
                 if (!busy) {
                     this.spend.runEnded(id);
+                    // No request follows the last tool call of a run that ended or was stopped (PiP's runs too).
+                    this.cacheKeeper.runEnded(Number(id));
                     this.pipCompaction.runEnded(id);
 
                     if (this.#sessions[String(id)] !== undefined) {
@@ -1191,6 +1351,7 @@ export class PocketApp {
 
         const registry = () => this.#registry;
         const stream = () => this.streamSettings();
+        const compaction = compactionReader(settings, (line) => this.#log(line));
 
         return {
             // A phase can wait for hours without changing state; repeated process kills must not park it.
@@ -1207,7 +1368,7 @@ export class PocketApp {
                 return stream();
             },
             get compaction() {
-                return safe(() => settings.getCompactionSettings()) ?? {};
+                return safe(compaction) ?? {};
             },
             get retry() {
                 return safe(() => settings.getRetrySettings()) ?? {};
@@ -1891,6 +2052,34 @@ export class PocketApp {
         return true;
     }
 
+    /**
+     * Count the commands a session runs in the background, starting ones too. While their extension is off no watch
+     * settles a task whose process died, so only a task with a live process counts. True when the count changed.
+     */
+    #noteBackground(
+        id: ConversationId,
+        doc: { items: Record<string, BackgroundTask> } | null | undefined,
+    ): boolean {
+        const watched = this.background.running;
+        const running = Object.values(doc?.items ?? {}).filter(
+            (item) =>
+                (item.status === "running" || item.status === "starting") &&
+                (watched || this.background.alive(id, item)),
+        ).length;
+
+        if (running === (this.#background.get(id) ?? 0)) {
+            return false;
+        }
+
+        if (running === 0) {
+            this.#background.delete(id);
+        } else {
+            this.#background.set(id, running);
+        }
+
+        return true;
+    }
+
     #noteSubagents(id: ConversationId, doc: SubagentsValue | null | undefined): void {
         const agents = doc?.agents ?? {};
 
@@ -2205,6 +2394,35 @@ export class PocketApp {
         }
     }
 
+    #oldestAsks(): Map<string, SessionAsk> {
+        const asks = new Map<string, SessionAsk>();
+
+        for (const request of this.approvals.all()) {
+            const session = String(this.rootOf(request.conversationId));
+            const kept = asks.get(session);
+
+            if (kept !== undefined && kept.at <= request.createdAt) {
+                kept.count++;
+
+                continue;
+            }
+
+            asks.set(session, {
+                id: request.id,
+                conversationId: Number(request.conversationId),
+                tool: request.tool,
+                subject: request.subject.slice(0, ASK_SUBJECT),
+                reason: request.reason.slice(0, ASK_REASON),
+                ...(request.requestedBy === undefined ? {} : { requestedBy: request.requestedBy }),
+                ...(request.form === undefined ? {} : { form: true as const }),
+                at: request.createdAt,
+                count: (kept?.count ?? 0) + 1,
+            });
+        }
+
+        return asks;
+    }
+
     /** The session list, with who is in each session and its newest chat message. Scoped people see only theirs. */
     sessions(user?: User) {
         const waiting = new Set(
@@ -2212,6 +2430,7 @@ export class PocketApp {
         );
         const people = new Map<string, Map<string, string>>();
         const subagents = this.#subagentsBySession();
+        const asks = this.#oldestAsks();
         // The sessions in a wait for a provider's limit, their subagents' included: when the next request goes out.
         const limited = new Map<string, number>();
 
@@ -2249,6 +2468,10 @@ export class PocketApp {
                 const chat = this.#lastChat.get(id);
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
                 const counts = countSubagents(subagents.get(id) ?? []);
+                const background = this.#background.get(Number(id) as unknown as ConversationId);
+                const failure = this.#failed.get(Number(id) as unknown as ConversationId);
+                const failedAgents = failedSubagents(subagents.get(id) ?? []);
+                const ask = asks.get(id);
                 // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
                 const { fromPi: _fromPi, linkedFrom, ...shown } = meta;
                 // Linking does not share the origin: do not leak its id to someone who only sees the new chat.
@@ -2275,13 +2498,14 @@ export class PocketApp {
                     waiting: waiting.has(id),
                     ...(limited.has(id) ? { limited: limited.get(id)! } : {}),
                     ...(endedAt === undefined ? {} : { endedAt }),
-                    ...(this.#failed.has(Number(id) as unknown as ConversationId)
-                        ? { failed: true }
-                        : {}),
+                    ...(failure === undefined ? {} : { failed: true, failure }),
+                    ...(failedAgents.length === 0 ? {} : { failedAgents }),
+                    ...(ask === undefined ? {} : { approval: ask }),
                     ...(model === undefined ? {} : { model: model.modelId }),
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
                     ...(counts === undefined ? {} : { subagents: counts }),
+                    ...(background === undefined ? {} : { background }),
                 };
             })
             .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -2477,11 +2701,13 @@ export class PocketApp {
                 .catch((error: unknown) => this.#log(`decision not recorded: ${describe(error)}`));
         }
 
-        await this.collab.activity(
-            conversationId,
-            user,
-            `${allow ? "allowed" : "denied"} the ${request.tool} call: ${snippet(request.subject, 120)}`,
-        );
+        const form = request.form;
+        const what =
+            form === undefined
+                ? `${allow ? "allowed" : "denied"} the ${request.tool} call: ${request.subject}`
+                : `${allow ? "answered" : "declined"}: ${form.fields.some((field) => field.choices) ? request.reason : request.subject}`;
+
+        await this.collab.activity(conversationId, user, snippet(what, 160));
 
         return true;
     }
@@ -2638,7 +2864,7 @@ export class PocketApp {
         }
     }
 
-    async artifactBody(id: ConversationId, artifact: string, version: number | undefined) {
+    async artifactBody(id: ConversationId, artifact: string, version?: number) {
         const index = await this.harness.snapshot(ArtifactsDoc, id, context);
         // Its own entries only: `__proto__` and the like name no artifact.
         const meta =
@@ -2671,6 +2897,50 @@ export class PocketApp {
         }
 
         return { meta, version: chosen.version, content: body.content };
+    }
+
+    /** One manifest asset. Missing names must not load the rest of a potentially large bundle. */
+    async artifactAsset(id: ConversationId, artifact: string, version: number, name: string) {
+        const found = await this.artifactBody(id, artifact, version);
+        const manifest = found.meta.versions.find((each) => each.version === found.version)!.assets;
+        const asset =
+            manifest !== undefined && Object.hasOwn(manifest, name) ? manifest[name] : undefined;
+
+        if (asset === undefined) {
+            throw new HttpError(404, "No such asset");
+        }
+
+        const stored = await this.harness.snapshot(ArtifactAssetDoc, asset.hash, context);
+
+        if (stored === undefined) {
+            throw new HttpError(404, "Artifact asset is missing");
+        }
+
+        return {
+            name,
+            type: asset.type,
+            bytes: Buffer.from(stored.base64, "base64"),
+            title: found.meta.title,
+        };
+    }
+
+    /** A complete bundle for rendering and export. Callers must check conversation access first. */
+    async artifactBundle(id: ConversationId, artifact: string, version?: number) {
+        const found = await this.artifactBody(id, artifact, version);
+        const manifest = found.meta.versions.find((each) => each.version === found.version)!.assets;
+        const assets = await Promise.all(
+            Object.entries(manifest ?? {}).map(async ([name, asset]) => {
+                const stored = await this.harness.snapshot(ArtifactAssetDoc, asset.hash, context);
+
+                if (stored === undefined) {
+                    throw new HttpError(404, "Artifact asset is missing");
+                }
+
+                return { name, type: asset.type, bytes: Buffer.from(stored.base64, "base64") };
+            }),
+        );
+
+        return { ...found, assets };
     }
 
     /** The folder a conversation works in. */
@@ -2795,7 +3065,7 @@ export class PocketApp {
         return {
             available: status.available,
             enabled: false,
-            detail: "Lancet Guard is off in Pi Pocket: bash, write, and edit calls run unchecked here.",
+            detail: "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here.",
         };
     }
 
@@ -3363,8 +3633,10 @@ export class PocketApp {
             clearTimeout(this.#sessionsTimer);
             this.alerts.close();
             this.themes.close();
+            await this.cacheKeeper.close();
             this.spend.close();
             this.limits.close();
+            this.background.close();
             this.#unsubscribeCommits?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();

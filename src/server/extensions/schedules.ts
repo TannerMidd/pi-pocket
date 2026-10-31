@@ -3,17 +3,82 @@
  * to check back on something slow or for a regular job. While this is off, no scheduled message goes out; they wait
  * until it is on again.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { Schedule } from "../docs.ts";
-import type { PocketHost } from "../host.ts";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 import type { Pip } from "../pip.ts";
-import { SCHEDULED_PREFIX, SCHEDULES_EXTENSION } from "../schedules.ts";
+import { DEFAULT_SCHEDULE_LIMITS, SCHEDULED_PREFIX, SCHEDULES_EXTENSION } from "../schedules.ts";
 import { describeMoment, describeRepeat, WHEN_HELP } from "../when.ts";
 
 const GUIDE = `Messages that start with "${SCHEDULED_PREFIX.trim()}" were set up earlier, by a person or by you with the schedule tool, and arrive at their time. Nobody may be watching when one arrives: do the work, then end with a short summary that stands on its own.`;
 
-export default function createSchedules(host: PocketHost) {
+export default function createSchedules(host: PocketHost, web: ExtensionWeb) {
+    const defaults = DEFAULT_SCHEDULE_LIMITS;
+
+    web.settings([
+        {
+            name: "perSession",
+            label: "Schedules per session",
+            description: "How many scheduled messages one session can have at once.",
+            type: "number",
+            default: defaults.perSession,
+            min: 1,
+            max: 1000,
+        },
+        {
+            name: "chars",
+            label: "Longest message (characters)",
+            description: "The longest text a scheduled message can have.",
+            type: "number",
+            default: defaults.chars,
+            min: 100,
+            max: 50000,
+        },
+        {
+            name: "repeatMinutes",
+            label: "Shortest repeat (minutes)",
+            description:
+                "The least time between two sendings of a repeat, such as every 10m. A short repeat can cost money: each sending is a model call.",
+            type: "number",
+            default: defaults.repeatMinutes,
+            min: 1,
+            max: 1440,
+        },
+        {
+            name: "aheadDays",
+            label: "Furthest ahead (days)",
+            description: "How far ahead a message can be set with “in …”, such as in 30d.",
+            type: "number",
+            default: defaults.aheadDays,
+            min: 1,
+            max: 3650,
+        },
+    ]);
+
+    // A server from before the limits has none on its schedules until it restarts.
+    const apply = () => {
+        if (!("limits" in host.schedules)) {
+            return;
+        }
+
+        const number = (name: keyof typeof defaults) => {
+            const value = web.setting(name);
+
+            return typeof value === "number" ? value : defaults[name];
+        };
+
+        Object.assign(host.schedules.limits, {
+            perSession: number("perSession"),
+            chars: number("chars"),
+            repeatMinutes: number("repeatMinutes"),
+            aheadDays: number("aheadDays"),
+        });
+    };
+
+    apply();
+    web.onSettings(apply);
+
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const schedule = defineTool({
         name: "schedule",
@@ -21,7 +86,7 @@ export default function createSchedules(host: PocketHost) {
             "Send yourself a message in this conversation later, or on repeat: to check back on something slow, or for a regular job. " +
             `Actions: add (when, message), list, cancel (id). ${WHEN_HELP} Clock times are in ${zone}.`,
         parameters: Type.Object({
-            action: Type.Union([Type.Literal("add"), Type.Literal("list"), Type.Literal("cancel")]),
+            action: StringEnum(["add", "list", "cancel"] as const),
             when: Type.Optional(
                 Type.String({
                     description:

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Hero bg</title>
+        <style>
+            body {
+                margin: 0;
+                font: 18px/1.5 system-ui;
+                color: #101216;
+                background: #fff;
+            }
+            .hero {
+                min-height: 320px;
+                background: #223
+                    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='%23345'/%3E%3C/svg%3E")
+                    center/cover;
+                color: #fff;
+                display: flex;
+                align-items: flex-end;
+                padding: 24px;
+            }
+            .hero h1 {
+                margin: 0;
+                text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+                font-size: 36px;
+            }
+            .band {
+                background: #f0f3f8;
+                padding: 24px;
+            }
+            .band p {
+                margin: 0;
+                max-width: 50ch;
+                color: #33394a;
+            }
+            .cta {
+                display: inline-flex;
+                align-items: center;
+                min-height: 48px;
+                padding: 0 24px;
+                margin: 16px 0 0;
+                border-radius: 8px;
+                background: #0a3dc2;
+                color: #fff;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <section class="hero" data-pid="hero">
+            <h1 data-pid="h">Bold headline over a picture</h1>
+        </section>
+        <section class="band" data-pid="band">
+            <p>Support copy under the hero.</p>
+            <a class="cta" href="#" data-pid="cta">Start</a>
+        </section>
+    </body>
+</html>

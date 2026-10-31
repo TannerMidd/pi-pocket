@@ -15,6 +15,10 @@ import { join, resolve } from "node:path";
 import type { AccessInfo, PocketApp } from "./app.ts";
 import { APP_ROOT, dataDir } from "./config.ts";
 import type { createHandler } from "./http.ts";
+import { restoreMissingNpmPackage } from "./update-state.ts";
+
+// A resident process can reach recovery even when a stopped package switch left no live folder.
+restoreMissingNpmPackage(APP_ROOT);
 
 const RESTART_CODE = 75;
 /**
@@ -193,6 +197,8 @@ const opened = await App.open({
     dataDir: options.data,
     defaultCwd: options.cwd,
     supervised: process.env.PI_POCKET_SUPERVISED === "1",
+    // For updates of Pi Pocket itself, which restart the server once the new version is in place.
+    restart: () => void stop(RESTART_CODE),
 });
 
 app = opened;
@@ -209,7 +215,12 @@ handle = makeHandler({
     restart: () => void stop(RESTART_CODE),
 });
 stopWatching = (() => {
-    const stops = [watchTree(join(APP_ROOT, "web"), (file) => opened.reloadClients(file))];
+    const stops = [
+        watchTree(
+            join(APP_ROOT, "web"),
+            (file) => !opened.reloadsPaused && opened.reloadClients(file),
+        ),
+    ];
 
     opened.loader.watch();
     opened.themes.watch();
@@ -222,6 +233,12 @@ stopWatching = (() => {
 })();
 
 const token = encodeURIComponent(opened.config.ownerToken);
+
+// An update this process started for is done only now: a start that fails before here, the launcher undoes. One that
+// stopped part way is put back, and the server restarts on the files before.
+await opened.updates.recover().catch((error: unknown) => {
+    console.error(`Pi Pocket could not finish its update: ${(error as Error).message}`);
+});
 
 if (launcher) {
     process.send?.({

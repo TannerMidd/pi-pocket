@@ -91,6 +91,26 @@ export function describeCall(call) {
             };
         }
 
+        case "ask": {
+            const questions = Array.isArray(args.questions) ? args.questions : [];
+
+            return {
+                icon: "?",
+                label: "Ask",
+                // A peek line's call carries only short scalar arguments (`peekArgs`): no questions, no subject.
+                subject:
+                    questions.length === 0
+                        ? ""
+                        : questions.length === 1
+                          ? short(String(questions[0]?.question ?? ""), 120)
+                          : questions
+                                .map((each) => each?.header)
+                                .filter(Boolean)
+                                .join(" · "),
+                mono: false,
+            };
+        }
+
         case "subagent":
             return {
                 icon: "⧉",

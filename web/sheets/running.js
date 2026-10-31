@@ -35,7 +35,11 @@ export function RunningSheet() {
     };
 
     const stopCommand = (task) => {
-        const path = task.kind === "pocket.shell" ? "shell" : "extension-commands";
+        const path = {
+            "pocket.shell": "shell",
+            "pocket.background": "background",
+            "pocket.extension-command": "extension-commands",
+        }[task.kind];
 
         return attempt(() => api(`c/${task.conversationId}/${path}/${task.id}/stop`, {}));
     };
@@ -106,7 +110,11 @@ export function RunningSheet() {
                         }
                         ${
                             steer &&
-                            ["pocket.shell", "pocket.extension-command"].includes(task.kind) &&
+                            [
+                                "pocket.shell",
+                                "pocket.background",
+                                "pocket.extension-command",
+                            ].includes(task.kind) &&
                             html`<button
                                 class="link small"
                                 onClick=${() => stopCommand(task)}

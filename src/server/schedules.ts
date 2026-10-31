@@ -32,8 +32,25 @@ const context = BACKGROUND_CONTEXT;
 export const SCHEDULED_PREFIX = "[scheduled] ";
 /** The extension that runs schedules; while it is off, none go out and none can be set up. */
 export const SCHEDULES_EXTENSION = "pocket-schedules";
-const MAX_SCHEDULES = 50;
-const MAX_TEXT = 4000;
+
+/** What bounds scheduled messages; the schedules extension sets them from the owner's settings. */
+export type ScheduleLimits = {
+    /** How many schedules a session can have. */
+    perSession: number;
+    /** The longest message, in characters. */
+    chars: number;
+    /** The shortest time between two sendings of a repeat, in minutes: a runaway loop of model calls costs money. */
+    repeatMinutes: number;
+    /** How far ahead a one-time message may go, in days. */
+    aheadDays: number;
+};
+
+export const DEFAULT_SCHEDULE_LIMITS: Readonly<ScheduleLimits> = {
+    perSession: 50,
+    chars: 4000,
+    repeatMinutes: 10,
+    aheadDays: 366,
+};
 
 type ScheduleInput = { scheduleId: string };
 type ScheduleState = { phase: "wait" } | { phase: "send" };
@@ -70,6 +87,8 @@ export class Schedules {
     readonly #app: PocketApp;
     /** How long a schedule of PiP's waits before it looks again whether PiP is back. */
     holdMs = 60_000;
+    /** The limits in force; the schedules extension changes them when the owner does. */
+    readonly limits: ScheduleLimits = { ...DEFAULT_SCHEDULE_LIMITS };
     /** The durable task behind each schedule; the schedules extension installs it. */
     readonly task: Task<ScheduleInput, ScheduleState, null, object>;
 
@@ -259,11 +278,15 @@ export class Schedules {
             throw new HttpError(400, "Only sessions can have scheduled messages.");
         }
 
+        const limits = this.limits;
         const zone = request.zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
         let parsed: ReturnType<typeof parseWhen>;
 
         try {
-            parsed = parseWhen(request.when, app.now(), zone);
+            parsed = parseWhen(request.when, app.now(), zone, {
+                repeatMinutes: limits.repeatMinutes,
+                aheadMs: limits.aheadDays * 24 * 60 * 60_000,
+            });
         } catch (error) {
             throw new HttpError(400, describe(error));
         }
@@ -281,8 +304,11 @@ export class Schedules {
             throw new HttpError(400, "Say what Pi should get, after when.");
         }
 
-        if (text.length > MAX_TEXT) {
-            throw new HttpError(413, `Scheduled messages are limited to ${MAX_TEXT} characters.`);
+        if (text.length > limits.chars) {
+            throw new HttpError(
+                413,
+                `Scheduled messages are limited to ${limits.chars} characters.`,
+            );
         }
 
         const by = request.by;
@@ -302,10 +328,10 @@ export class Schedules {
                 return JSON.parse(JSON.stringify(same)) as Schedule;
             }
 
-            if (Object.keys(doc.items).length >= MAX_SCHEDULES) {
+            if (Object.keys(doc.items).length >= limits.perSession) {
                 throw new HttpError(
                     409,
-                    `A session can have ${MAX_SCHEDULES} scheduled messages at most.`,
+                    `A session can have ${limits.perSession} scheduled messages at most.`,
                 );
             }
 

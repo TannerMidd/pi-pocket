@@ -3,12 +3,14 @@
 // while PiP works, or has something new. The panel watches PiP's conversation through a view of its own (`pipview`
 // events), so the session behind it stays as it was.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { followUpText } from "./artifact-bridge.js";
 import { useBack } from "./back.js";
 import { boxKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
 import { usePipResize } from "./pip-window.js";
 import { api, attempt, isRow, navigate, notify, openSheet, store, uid } from "./store.js";
+import { spendTap } from "./taps.js";
 import { memoryAvailable, useMemory } from "./sheets/memory.js";
 import { itemsOf, says, summarize } from "./turns.js";
 import {
@@ -220,12 +222,19 @@ export function closePip() {
 
 export const togglePip = () => (store.state.pipOpen ? closePip() : openPip());
 
-/** Send PiP a message from anywhere (`/pip …`), and open the panel to show what it says. */
+/** Put `text` in PiP's box, after what is there, and open the panel. */
+function draftPip(text) {
+    const draft = localStorage.getItem(DRAFT_KEY)?.trim();
+
+    openPip(draft ? `${draft}\n\n${text}` : text);
+}
+
+/** Send PiP a message from anywhere (`/pip …`), and open the panel to show what it says; true when it went. */
 export async function askPip(text) {
     if (!pipAvailable()) {
         notify("error", "PiP is not on here.");
 
-        return;
+        return false;
     }
 
     const account = store.state.me?.id;
@@ -234,7 +243,7 @@ export async function askPip(text) {
     const pip = store.state.pip ?? (await opening);
 
     if (account !== store.state.me?.id) {
-        return;
+        return false;
     }
 
     if (!pip) {
@@ -242,15 +251,43 @@ export async function askPip(text) {
     }
 
     // Not sent: the words wait in PiP's box rather than be lost (`send` said why), after what was there already.
-    if (!pip || !(await send(pip.id, text, false))) {
-        if (account !== store.state.me?.id || (pip && store.state.pip?.id !== pip.id)) {
-            return;
-        }
-
-        const draft = localStorage.getItem(DRAFT_KEY)?.trim();
-
-        openPip(draft ? `${draft}\n\n${text}` : text);
+    if (pip && (await send(pip.id, text, false))) {
+        return true;
     }
+
+    if (account === store.state.me?.id && (!pip || store.state.pip?.id === pip.id)) {
+        draftPip(text);
+    }
+
+    return false;
+}
+
+const PIP_UNAVAILABLE = "PiP is not available";
+
+/**
+ * What `pocket.pip.ask` does for the browser module `source` names: put its text in PiP's box for the person to read,
+ * edit, and send; or, with `send` and only just after a tap or a key press, send it as the person's own message. The
+ * text starts with where it came from, as an artifact's follow-up does, so it never reads as a command. The answer says
+ * why nothing happened, or whether the message went (`sent` is false when it waits in the box).
+ */
+export async function askPipFrom(source, text, send) {
+    if (!pipAvailable()) {
+        return { ok: false, reason: PIP_UNAVAILABLE };
+    }
+
+    const words = followUpText(text.trim(), undefined, source);
+
+    if (!send) {
+        draftPip(words);
+
+        return { ok: true, sent: false };
+    }
+
+    if (!spendTap()) {
+        return { ok: false, reason: "Sending needs a click or a key press just before" };
+    }
+
+    return { ok: true, sent: await askPip(words) };
 }
 
 /** Send PiP a message; false when it did not go (a notice says why). PiP made just now is waited for. */

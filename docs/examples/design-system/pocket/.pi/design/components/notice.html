@@ -1,0 +1,171 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Notice",
+        "description": "A message that sits in the page and stays until the problem is gone. Four kinds, each with a mark, a title, and one line of detail.",
+        "states": ["info", "success", "warning", "danger"],
+        "usage": {
+            "do": [
+                "Say what happened first, then what to do.",
+                "Use role=alert only for a danger that needs attention now."
+            ],
+            "dont": [
+                "Do not stack more than two notices.",
+                "Do not use a notice for a result that goes away: use a toast."
+            ]
+        },
+        "tokens": [
+            "border.width.hairline",
+            "color.danger.default",
+            "color.danger.line",
+            "color.danger.soft",
+            "color.info.default",
+            "color.info.line",
+            "color.info.soft",
+            "color.success.default",
+            "color.success.line",
+            "color.success.soft",
+            "color.text.secondary",
+            "color.warning.default",
+            "color.warning.line",
+            "color.warning.soft",
+            "font.family.sans",
+            "font.leading.normal",
+            "font.size.sm",
+            "font.size.xs",
+            "font.weight.bold",
+            "font.weight.semibold",
+            "notice.padding",
+            "notice.radius",
+            "radius.pill",
+            "size.icon.lg",
+            "space.3"
+        ]
+    }
+</script>
+<style>
+    .pk-notice {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: var(--space-3);
+        max-width: 420px;
+        padding: var(--notice-padding);
+        border: var(--border-width-hairline) solid transparent;
+        border-radius: var(--notice-radius);
+        color: var(--color-text-secondary);
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-sm);
+        line-height: var(--font-leading-normal);
+    }
+
+    .pk-notice__mark {
+        display: grid;
+        place-items: center;
+        width: var(--size-icon-lg);
+        height: var(--size-icon-lg);
+        border-radius: var(--radius-pill);
+        font-size: var(--font-size-xs);
+        font-weight: var(--font-weight-bold);
+        line-height: 1;
+    }
+
+    .pk-notice__title {
+        margin: 0;
+        font-weight: var(--font-weight-semibold);
+    }
+
+    .pk-notice__text {
+        margin: 0;
+    }
+
+    .pk-notice--info {
+        background: var(--color-info-soft);
+        border-color: var(--color-info-line);
+    }
+
+    .pk-notice--info .pk-notice__title {
+        color: var(--color-info-default);
+    }
+
+    .pk-notice--info .pk-notice__mark {
+        background: var(--color-info-default);
+        color: var(--color-info-soft);
+    }
+
+    .pk-notice--success {
+        background: var(--color-success-soft);
+        border-color: var(--color-success-line);
+    }
+
+    .pk-notice--success .pk-notice__title {
+        color: var(--color-success-default);
+    }
+
+    .pk-notice--success .pk-notice__mark {
+        background: var(--color-success-default);
+        color: var(--color-success-soft);
+    }
+
+    .pk-notice--warning {
+        background: var(--color-warning-soft);
+        border-color: var(--color-warning-line);
+    }
+
+    .pk-notice--warning .pk-notice__title {
+        color: var(--color-warning-default);
+    }
+
+    .pk-notice--warning .pk-notice__mark {
+        background: var(--color-warning-default);
+        color: var(--color-warning-soft);
+    }
+
+    .pk-notice--danger {
+        background: var(--color-danger-soft);
+        border-color: var(--color-danger-line);
+    }
+
+    .pk-notice--danger .pk-notice__title {
+        color: var(--color-danger-default);
+    }
+
+    .pk-notice--danger .pk-notice__mark {
+        background: var(--color-danger-default);
+        color: var(--color-danger-soft);
+    }
+</style>
+<template data-state="info">
+    <div class="pk-notice pk-notice--info" role="status">
+        <span class="pk-notice__mark" aria-hidden="true">i</span>
+        <div>
+            <p class="pk-notice__title">A new version is ready</p>
+            <p class="pk-notice__text">Restart the server to use 0.27.0.</p>
+        </div>
+    </div>
+</template>
+<template data-state="success">
+    <div class="pk-notice pk-notice--success" role="status">
+        <span class="pk-notice__mark" aria-hidden="true">✓</span>
+        <div>
+            <p class="pk-notice__title">Exported</p>
+            <p class="pk-notice__text">The file is in exports/design-v3.pdf.</p>
+        </div>
+    </div>
+</template>
+<template data-state="warning">
+    <div class="pk-notice pk-notice--warning" role="status">
+        <span class="pk-notice__mark" aria-hidden="true">!</span>
+        <div>
+            <p class="pk-notice__title">Near the spend limit</p>
+            <p class="pk-notice__text">This session used 90% of its budget.</p>
+        </div>
+    </div>
+</template>
+<template data-state="danger">
+    <div class="pk-notice pk-notice--danger" role="alert">
+        <span class="pk-notice__mark" aria-hidden="true">×</span>
+        <div>
+            <p class="pk-notice__title">The render failed</p>
+            <p class="pk-notice__text">Chromium did not answer in 90 seconds. Try again.</p>
+        </div>
+    </div>
+</template>

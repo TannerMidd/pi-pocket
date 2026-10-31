@@ -87,7 +87,10 @@ export async function download(
             );
         }
 
-        if (Number(response.headers.get("content-length")) > limit) {
+        if (
+            response.headers.get("content-encoding") === null &&
+            Number(response.headers.get("content-length")) > limit
+        ) {
             await response.body?.cancel().catch(() => {});
 
             throw large();

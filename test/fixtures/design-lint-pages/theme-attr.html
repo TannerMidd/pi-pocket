@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Theme attr</title>
+        <style>
+            :root {
+                --bg: #fff;
+                --fg: #14171f;
+                --mut: #4a5160;
+                --card: #f3f5f9;
+                --ln: #c3c9d6;
+                --ac: #1d4ed8;
+                --on: #fff;
+            }
+            html[data-theme="dark"] {
+                --bg: #0d1017;
+                --fg: #e9edf5;
+                --mut: #a9b2c4;
+                --card: #161b26;
+                --ln: #2b3345;
+                --ac: #8ab0ff;
+                --on: #0d1017;
+            }
+            body {
+                margin: 0;
+                background: var(--bg);
+                color: var(--fg);
+                font: 16px/1.5 system-ui;
+            }
+            .wrap {
+                max-width: 640px;
+                margin: 0 auto;
+                padding: 24px;
+                display: grid;
+                gap: 16px;
+            }
+            .card {
+                background: var(--card);
+                border: 1px solid var(--ln);
+                border-radius: 12px;
+                padding: 16px;
+            }
+            .m {
+                color: var(--mut);
+            }
+            button {
+                min-height: 44px;
+                padding: 0 20px;
+                border: 0;
+                border-radius: 10px;
+                background: var(--ac);
+                color: var(--on);
+                font: inherit;
+                font-weight: 600;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap" data-pid="w">
+            <h1 data-pid="h">Theme by attribute</h1>
+            <div class="card" data-pid="c">
+                <p class="m">Muted copy on a card.</p>
+                <button
+                    data-pid="b"
+                    onclick="
+                        document.documentElement.dataset.theme =
+                            document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
+                    "
+                >
+                    Toggle
+                </button>
+            </div>
+        </div>
+    </body>
+</html>

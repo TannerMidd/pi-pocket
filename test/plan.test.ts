@@ -69,9 +69,13 @@ test("only commands that read pass, with arguments that keep them reading", () =
     }
 });
 
-test("in plan mode only reading tools pass", () => {
+test("in plan mode reads and subagent spawning pass, but writes are blocked", () => {
     assert.equal(blockedInPlanMode("read", { path: "a" }), undefined);
     assert.equal(blockedInPlanMode("bash", { command: "git log" }), undefined);
+    assert.equal(
+        blockedInPlanMode("subagent", { action: "spawn", name: "helper", message: "hello" }),
+        undefined,
+    );
     assert.match(
         blockedInPlanMode("write", { path: "a", content: "" }) ?? "",
         /^Plan mode is on: The write tool can change things/,
@@ -209,6 +213,31 @@ test("a session in plan mode is told so, cannot write, still reads, and approvin
     const viewer = app.config.addUser("Vee", "viewer").user;
 
     await assert.rejects(app.commands.setPlan(id, viewer, true), { status: 403 });
+});
+
+test("subagents spawned in plan mode inherit it and cannot write", async () => {
+    const id = await newSession(app);
+
+    await app.commands.setPlan(id, owner(app), true);
+    await say(app, id, "start a helper");
+    await until(
+        async () =>
+            (await modelTexts(app, id)).some((text) => text.includes("[subagent helper answered")),
+        "the helper to report",
+    );
+    const helper = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.helper!
+        .conversationId;
+
+    assert.equal((await app.harness.snapshot(PlanDoc, helper, context))?.on, true);
+
+    await say(app, helper, "helper, write");
+    assert.equal(existsSync(join(work, "helper.txt")), false, "the inherited plan blocked writing");
+    assert.match(
+        (await modelTexts(app, helper)).join("\n"),
+        /Plan mode is on: The write tool can change things/,
+    );
+    await app.commands.approvePlan(id, owner(app));
+    assert.equal((await app.harness.snapshot(PlanDoc, helper, context))?.on, false);
 });
 
 test("plan mode reaches the subagents already at work", async () => {

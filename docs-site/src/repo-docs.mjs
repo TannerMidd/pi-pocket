@@ -42,13 +42,19 @@ export const VERSION = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8
 
 const ROOT_PAGES = ["SECURITY.md", "CONTRIBUTING.md"];
 
+/**
+ * Folders of docs/ that the site does not publish: Design mode's notes, and the example design system (a project's
+ * `.pi/design/` folder, with its generated files), which goes with them.
+ */
+const UNPUBLISHED = ["docs/design/", "docs/examples/design-system/"];
+
 /** Whether a repository path is a page of the site (it may not exist yet). */
 export function isPagePath(repoPath) {
     return (
         ROOT_PAGES.includes(repoPath) ||
         (repoPath.startsWith("docs/") &&
             repoPath.endsWith(".md") &&
-            !repoPath.startsWith("docs/design/"))
+            !UNPUBLISHED.some((folder) => repoPath.startsWith(folder)))
     );
 }
 
@@ -79,7 +85,7 @@ export function pages() {
         for (const entry of readdirSync(join(REPO, folder), { withFileTypes: true })) {
             const path = `${folder}/${entry.name}`;
 
-            if (entry.isDirectory() && path !== "docs/design") {
+            if (entry.isDirectory() && !UNPUBLISHED.includes(`${path}/`)) {
                 walk(path);
             } else if (entry.isFile() && isPagePath(path)) {
                 found.push(path);

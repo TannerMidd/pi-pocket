@@ -4,6 +4,7 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -19,6 +20,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { AuthorsDoc, ScheduleDoc } from "../src/server/docs.ts";
+import { DEFAULT_SCHEDULE_LIMITS } from "../src/server/schedules.ts";
 import { describeRepeat, nextClockTime, parseWhen, zonedMoment } from "../src/server/when.ts";
 
 const iso = (moment: number) => new Date(moment).toISOString();
@@ -59,6 +61,30 @@ test("times read the way people write them, in their time zone", () => {
     ] as const) {
         assert.throws(() => parseWhen(text, sunday, chicago), problem, text);
     }
+});
+
+test("the shortest repeat and the furthest ahead can be set", () => {
+    const minutes = (text: string, repeatMinutes?: number) =>
+        parseWhen(text, sunday, chicago, repeatMinutes === undefined ? {} : { repeatMinutes });
+    const day = 24 * 60 * 60_000;
+
+    assert.deepEqual(minutes("every 2m x", 1).every, { minutes: 2 });
+    assert.deepEqual(minutes("every 1m x", 1).every, { minutes: 1 });
+    assert.throws(() => minutes("every 5m x", 30), /at most every 30 minutes/);
+    assert.throws(() => minutes("every 5m x"), /at most every 10 minutes/, "the default");
+    assert.equal(
+        parseWhen("in 3d x", sunday, chicago, { aheadMs: 5 * day }).next,
+        sunday + 3 * day,
+    );
+    assert.throws(
+        () => parseWhen("in 6d x", sunday, chicago, { aheadMs: 5 * day }),
+        /up to 5 days ahead/,
+    );
+    assert.equal(
+        parseWhen("in 400d x", sunday, chicago, { aheadMs: 500 * day }).next,
+        sunday + 400 * day,
+    );
+    assert.throws(() => parseWhen("in 400d x", sunday, chicago), /up to a year ahead/);
 });
 
 test("clock times hold across daylight saving changes", () => {
@@ -267,6 +293,8 @@ test("a scheduled message goes out at its time, also after a restart, once; a re
 test("Pi schedules, lists, and cancels its own messages with its tool", async () => {
     const id = await newSession(app);
 
+    await loadTools(app, id, "schedule");
+
     await say(id, "remind yourself");
     const [mine] = await items(id);
 
@@ -279,6 +307,8 @@ test("Pi schedules, lists, and cancels its own messages with its tool", async ()
 
 test("a schedule Pi sets up is the work of whom it worked for, and is cancelled once they may not steer", async () => {
     const id = await newSession(app);
+
+    await loadTools(app, id, "schedule");
     const hal = app.config.addUser("Hal", "guest").user;
     const ida = app.config.addUser("Ida", "guest").user;
 
@@ -342,4 +372,43 @@ test("a schedule is cancelled once its person may not steer anymore or a limit i
         [],
         "neither went out",
     );
+});
+
+test("the limits in force bound what a session can schedule", async () => {
+    const id = await newSession(app);
+    const limits = app.schedules.limits;
+
+    assert.deepEqual(limits, DEFAULT_SCHEDULE_LIMITS);
+
+    try {
+        limits.perSession = 2;
+        limits.chars = 100;
+        limits.repeatMinutes = 1;
+        limits.aheadDays = 2;
+        await app.schedules.add(id, { when: "every 1m", text: "often", zone: "UTC" });
+        await app.schedules.add(id, { when: "in 1d", text: "tomorrow", zone: "UTC" });
+        await assert.rejects(app.schedules.add(id, { when: "in 1h", text: "third" }), {
+            status: 409,
+            message: /2 scheduled messages at most/,
+        });
+        await assert.rejects(app.schedules.add(id, { when: "in 3d", text: "far" }), {
+            status: 400,
+            message: /up to 2 days ahead/,
+        });
+        await assert.rejects(app.schedules.add(id, { when: "in 1h", text: "x".repeat(101) }), {
+            status: 413,
+            message: /limited to 100 characters/,
+        });
+        limits.repeatMinutes = 60;
+        await assert.rejects(app.schedules.add(id, { when: "every 30m", text: "often" }), {
+            status: 400,
+            message: /at most every 60 minutes/,
+        });
+    } finally {
+        Object.assign(limits, DEFAULT_SCHEDULE_LIMITS);
+    }
+
+    for (const each of await items(id)) {
+        await app.schedules.cancel(id, each.id);
+    }
 });

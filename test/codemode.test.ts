@@ -65,6 +65,7 @@ function fakeApi(tools: ToolRegistration[], extensions: ReturnType<typeof define
             env: undefined,
             agent: async () => ({
                 tools: [...tools, codemodeTool],
+                callable: [...tools, codemodeTool],
                 extensions,
                 sections: [],
                 thinkingLevel: "off",

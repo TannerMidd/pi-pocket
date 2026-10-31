@@ -182,6 +182,12 @@ export interface Host {
      */
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
+     * The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here.
+     * @since 0.27.0
+     * @experimental
+     */
+    roleOf(personId: string): Role | undefined;
+    /**
      * Listens to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and runs that start and end. Returns how to stop: pass it to `web.onDispose`. PiP's conversations send none.
      * @since 0.22.0
      * @experimental
@@ -449,11 +455,36 @@ export interface AskField {
      */
     name: string;
     /**
-     * What the card says above the field.
+     * What the card says above the field: one line of up to 80 characters, or 300 for a field with `choices`.
      * @since 0.22.0
      * @experimental
      */
     label: string;
+    /**
+     * A short tag over the field, such as "Database": up to 12 characters.
+     * @since 0.27.0
+     * @experimental
+     */
+    header?: string;
+    /**
+     * 2 to 4 answers to pick, with different labels, shown as buttons: the value is the label chosen. `secret` and
+     * `autocomplete` do not apply to such a field; its `placeholder` is for its `other` text.
+     * @since 0.27.0
+     * @experimental
+     */
+    choices?: AskChoice[];
+    /**
+     * With `choices`: one or more can be chosen, and the value is their labels, one per line.
+     * @since 0.27.0
+     * @experimental
+     */
+    multiple?: boolean;
+    /**
+     * With `choices`: the person can type an answer of their own instead, which is then the value.
+     * @since 0.27.0
+     * @experimental
+     */
+    other?: boolean;
     /**
      * A hidden input, as for a password.
      * @since 0.22.0
@@ -472,6 +503,26 @@ export interface AskField {
      * @experimental
      */
     autocomplete?: string;
+}
+
+/**
+ * An answer to pick on an ask's card (`AskField.choices`).
+ * @since 0.27.0
+ * @experimental
+ */
+export interface AskChoice {
+    /**
+     * One line of up to 60 characters: the field's value when it is chosen.
+     * @since 0.27.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * One line of up to 160 characters, under the label.
+     * @since 0.27.0
+     * @experimental
+     */
+    description?: string;
 }
 
 /**
@@ -683,7 +734,17 @@ export interface BrowserPageHandle {
      * @since 0.22.0
      * @experimental
      */
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        /**
+         * Where the page is scrolled, in CSS pixels: `y` is the top of the viewport, `viewport` its height, and `height` the page's.
+         * @since 0.27.0
+         * @experimental
+         */
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     /**
      * What a target is: its description, its kind, and whether it is a field or a password field.
      * @since 0.22.0
@@ -773,7 +834,7 @@ export interface PublicFetchInit {
 export interface LinkedSessions {
     /**
      * Starts a session linked to `source`, in `cwd` or the source's folder, and sends it `message` as its first
-     * message. `model` is `provider/modelId`; `thinking` is a level no higher than the source's. `cwd` is since 0.19.0:
+     * message. `model` is `provider/modelId`; `thinking` is any level (since 0.25.0; before, no higher than the source's). `cwd` is since 0.19.0:
      * an older Pi Pocket ignores it, and starts the session in the source's folder. A blank `cwd` counts as none; a
      * relative one resolves against the server process's folder, not the source's.
      * @since 0.14.0
@@ -866,7 +927,7 @@ export interface HumanLinkedSessions {
     /**
      * Starts once for this key, as the clicking person. Optional `cwd` (since 0.19.0) selects an existing folder: blank
      * counts as none, and a relative one resolves against the server process's folder.
-     * Explicit thinking must be supported and no higher than source.
+     * Explicit thinking must be a level the model supports; since 0.25.0 it can be above the source's.
      * @since 0.16.0
      */
     start(
@@ -2379,6 +2440,32 @@ export interface SwitchProps {
 }
 
 /**
+ * What `pocket.pip.ask` answers. It does not throw when PiP is not there: `reason` tells why nothing happened. `sent` is
+ * false when the text waits in PiP's message box.
+ * @since 0.26.0
+ * @experimental
+ */
+export type PipAskResult = { ok: true; sent: boolean } | { ok: false; reason: string };
+
+/**
+ * The part of `pocket` that talks to PiP.
+ * @since 0.26.0
+ * @experimental
+ */
+export interface PipApi {
+    /**
+     * Gives PiP text as the person's own message. By default it opens PiP and puts the text in its message box, after
+     * what is there, for the person to read, edit, and send. With `send: true` it sends the text at once, but only just
+     * after the person tapped or pressed a key: one tap serves for 5 seconds and for one send. The text starts with the
+     * module's title, so the person and PiP see where it came from. It resolves with `{ ok: false, reason }` when the
+     * person has no PiP, and when `send` has no tap to use. Text that is empty or past 100,000 characters throws.
+     * @since 0.26.0
+     * @experimental
+     */
+    ask(text: string, options?: { send?: boolean }): Promise<PipAskResult>;
+}
+
+/**
  * The app's API for a browser module: the argument of its default export.
  * @since 0.14.0
  */
@@ -2637,6 +2724,12 @@ export interface Pocket {
      * @experimental
      */
     insertText(text: string, options?: { inline?: boolean }): void;
+    /**
+     * Gives text to the person's PiP, their assistant.
+     * @since 0.26.0
+     * @experimental
+     */
+    readonly pip: PipApi;
     /**
      * Hides or reorders a slot's items, the app's own too. A person's own choices in Appearance → Layout win.
      * @since 0.19.0

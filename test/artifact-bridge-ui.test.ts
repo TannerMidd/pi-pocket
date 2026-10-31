@@ -60,6 +60,8 @@ const ask = (message) => new Promise((resolve) => {
     inner.src = "data:text/html," + encodeURIComponent("<script>for (const win of [top, parent]) { try { win.postMessage({ type: 'pocket-state-set', requestId: 'inner', schema: 'v1', state: { inner: true } }, '*'); } catch {} } try { parent.parent.postMessage({ type: 'pocket-state-set', requestId: 'inner', schema: 'v1', state: { inner: true } }, '*'); } catch {}<" + "/script>");
     document.body.append(inner);
 })();
+// Tells the test server each click it sees (see tapPage).
+addEventListener("click", () => fetch("__TAPS__/tap", { mode: "no-cors" }), true);
 document.getElementById("go").onclick = () =>
     parent.postMessage({ type: "pocket-follow-up", text: "Tell me about option " + count, selection: { option: count } }, "*");
 </script></body></html>`;
@@ -149,6 +151,7 @@ let calls = 0;
 let elsewhere: Server;
 let elsewhereBase = "";
 let heard: string[] = [];
+let taps = 0;
 let slow: { end: () => void }[] = [];
 /** What a busy machine (the whole suite at once) may take to open a viewer and load its page. */
 const SLOW = 30_000;
@@ -205,12 +208,53 @@ const closeSheet = () =>
 
 /** Tap the middle of a frame, as a person does: the frame takes the focus, and its page the click. */
 async function tapFrame(selector: string) {
+    // A viewer slides in: wait until the frame has held still for five frames, or the tap lands on a moving frame.
+    await inPage(`
+        const frame = document.querySelector(${JSON.stringify(selector)});
+        const place = () => JSON.stringify(frame.getBoundingClientRect());
+        let held = 0;
+        let last = place();
+
+        while (held < 5) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+
+            const now = place();
+
+            held = now === last ? held + 1 : 0;
+            last = now;
+        }
+
+        return "null";
+    `);
+
     const box = await inPage<{ x: number; y: number }>(`
         const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
         return JSON.stringify({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
     `);
 
     await page.click({ x: Math.round(box.x), y: Math.round(box.y) });
+}
+
+/**
+ * Chromium routes a pointer to a just-opened frame by hit-test data that arrives after the frame is drawn, so on a busy
+ * machine the first tap can go to nothing: tap again until the page reports a click.
+ */
+async function tapPage(selector: string) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        const seen = taps;
+
+        await tapFrame(selector);
+
+        try {
+            await until(() => taps > seen, "the page to see the tap", 4000);
+
+            return;
+        } catch {
+            // Not routed to the page: tap again.
+        }
+    }
+
+    throw new Error("The calculator's page never saw a tap");
 }
 
 const savedFor = async (artifact: string) =>
@@ -241,7 +285,6 @@ before(async () => {
     app = await openApp(scriptedModel());
     app.config.lastModel ??= { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
     ({ id: session } = await app.commands.createSession(owner(app), { cwd: work }));
-    await publish("calc", CALC);
     await publish("focus", FOCUS);
     await publish("schema", SCHEMA);
     elsewhere = createServer((request, response) => {
@@ -249,6 +292,13 @@ before(async () => {
 
         if (url.pathname === "/slow") {
             slow.push(response);
+
+            return;
+        }
+
+        if (url.pathname === "/tap") {
+            taps += 1;
+            response.writeHead(204).end();
 
             return;
         }
@@ -266,6 +316,7 @@ before(async () => {
     elsewhereBase = `http://127.0.0.1:${(elsewhere.address() as { port: number }).port}`;
     // A frame goes nowhere but a page of the app's own address, and signed out (its sandbox sends no cookie): a
     // published page.
+    await publish("calc", CALC.replace("__TAPS__", elsewhereBase));
     await publish("elsewhere", ELSEWHERE, "markdown");
     await publish("dest", DEST(elsewhereBase), "markdown");
 
@@ -326,7 +377,7 @@ test(
         assert.equal(await boxText(), "my draft", "the follow-up at load, with no tap, is refused");
         assert.deepEqual(await savedFor("calc"), { count: 1 }, "the frame inside it saved nothing");
 
-        await tapFrame(".viewer iframe");
+        await tapPage(".viewer iframe");
         await until(
             async () => (await boxText()).includes("option 1"),
             "the follow-up in the box",
@@ -355,7 +406,7 @@ test("its saved state comes back when it opens again", real, async () => {
         "the count saved again",
         SLOW,
     );
-    await tapFrame(".viewer iframe");
+    await tapPage(".viewer iframe");
     await until(
         async () => (await boxText()).includes("option 2"),
         "the second open's follow-up",
@@ -576,7 +627,7 @@ test("a viewer gets a notice, not a message", real, async () => {
         );
         await openViewer("calc");
         await new Promise((resolve) => setTimeout(resolve, 800));
-        await tapFrame(".viewer iframe");
+        await tapPage(".viewer iframe");
         await until(
             async () => (await notices()).some((each) => each.includes("you can only view here")),
             "the notice",

@@ -1,0 +1,1798 @@
+/*
+ * Design: the canvas beside the chat. It uses the app's own tokens (--bg, --text, --muted, --accent, --line, --ok, --warn,
+ * --err) and mixes the rest from them, so a theme that changes those changes the canvas with the app.
+ */
+
+/* The panel: a workspace that fills it, with no padding of its own, and a wider share of the screen than other panels. */
+.ext-panel[data-module="design"] .ext-panel-body {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+@media (min-width: 1100px) {
+    /* The canvas takes what the chat can spare: the chat keeps 440px, and the canvas is never narrower than 480px. */
+    .layout.paneling .ext-panel.wide[data-module="design"] {
+        --ext-panel-w: max(480px, min(58%, calc(100% - 760px)));
+    }
+}
+
+.dsn {
+    --dsn-fill: color-mix(in srgb, var(--text) 6%, var(--bg));
+    --dsn-fill-2: color-mix(in srgb, var(--text) 12%, var(--bg));
+    --dsn-hair: color-mix(in srgb, var(--text) 12%, transparent);
+    --dsn-accent: var(--accent);
+    --dsn-accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --dsn-on-accent: var(--accent-ink, var(--bg));
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 13.5px;
+}
+
+.dsn button {
+    font: inherit;
+    color: inherit;
+}
+
+.dsn .grow {
+    flex: 1;
+}
+
+.dsn .mono {
+    font-family: var(--mono, ui-monospace, monospace);
+}
+
+.dsn .muted {
+    color: var(--muted);
+}
+
+.dsn .small {
+    font-size: 12px;
+}
+
+/* ─── Bars ─────────────────────────────────────────────────── */
+
+.dsn-bars {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px 0;
+    border-bottom: 1px solid var(--dsn-hair);
+}
+
+.dsn-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dsn-picker {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 36px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: var(--dsn-fill);
+    font-weight: 600;
+    text-align: left;
+}
+
+@media (hover: hover) {
+    .dsn-picker:hover {
+        background: var(--dsn-fill-2);
+    }
+}
+
+.dsn-picker-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dsn-version-tag {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--dsn-fill-2);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.dsn-version-tag.old {
+    color: var(--warn);
+}
+
+.dsn-seg {
+    display: inline-flex;
+    flex: none;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 9px;
+    background: var(--dsn-fill);
+}
+
+.dsn-seg button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 32px;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 7px;
+    color: var(--muted);
+    font-size: 12.5px;
+    white-space: nowrap;
+}
+
+.dsn-seg button.on {
+    background: var(--dsn-fill-2);
+    color: var(--text);
+}
+
+.dsn-seg button:disabled {
+    opacity: 0.4;
+}
+
+.dsn .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    color: var(--muted);
+}
+
+.dsn .icon-button.on {
+    background: var(--dsn-accent-soft);
+    color: var(--text);
+}
+
+.dsn .icon-button:disabled {
+    opacity: 0.35;
+}
+
+@media (hover: hover) {
+    .dsn .icon-button:hover:not(:disabled) {
+        background: var(--dsn-fill);
+        color: var(--text);
+    }
+}
+
+.dsn-custom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+}
+
+.dsn-custom label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+}
+
+.dsn-custom input {
+    width: 76px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 7px;
+    background: var(--dsn-fill);
+    color: var(--text);
+    font: inherit;
+}
+
+.dsn-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+}
+
+.dsn-tab {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.dsn-tab.on {
+    background: var(--dsn-accent-soft);
+    color: var(--text);
+}
+
+@media (hover: hover) {
+    .dsn-tab:not(.on):hover {
+        background: var(--dsn-fill);
+        color: var(--text);
+    }
+}
+
+.dsn[data-size="narrow"] .dsn-tab:not(.on) .dsn-tab-label {
+    display: none;
+}
+
+.dsn[data-size="narrow"] .dsn-tab:not(.on) {
+    padding: 0 9px;
+}
+
+.dsn[data-size="narrow"] .dsn-tabs:not(.dsy-tabs) .dsn-tab:not(.on) {
+    gap: 4px;
+    padding: 0 7px;
+}
+
+.dsn-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--dsn-fill-2);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.dsn-tab.on .dsn-count,
+.dsn-dock-head .dsn-count {
+    background: var(--dsn-accent);
+    color: var(--dsn-on-accent);
+}
+
+.dsn-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 12.5px;
+}
+
+@media (hover: hover) {
+    .dsn-link:hover {
+        background: var(--dsn-accent-soft);
+    }
+}
+
+.dsn-chip {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--dsn-fill-2);
+    color: var(--muted);
+    font-size: 11px;
+}
+
+button.dsn-chip {
+    cursor: pointer;
+}
+
+.dsn-old {
+    flex: none;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--dsn-hair);
+    background: color-mix(in srgb, var(--warn) 12%, var(--bg));
+    color: var(--text);
+    font-size: 12.5px;
+}
+
+/* ─── Layout: the center, and the dock beside or under it ──── */
+
+.dsn-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.dsn[data-side="true"] .dsn-main {
+    flex-direction: row;
+}
+
+.dsn-center {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.dsn-dock {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    height: 40%;
+    max-height: 340px;
+    min-height: 0;
+    border-top: 1px solid var(--dsn-hair);
+    background: var(--bg);
+}
+
+.dsn[data-side="true"] .dsn-dock {
+    width: 300px;
+    height: auto;
+    max-height: none;
+    border-top: 0;
+    border-left: 1px solid var(--dsn-hair);
+}
+
+.dsn[data-size="wide"][data-side="true"] .dsn-dock {
+    width: 330px;
+}
+
+.dsn-dock-head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    height: 42px;
+    padding: 0 6px 0 14px;
+    border-bottom: 1px solid var(--dsn-hair);
+}
+
+.dsn-dock-head h3 {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.dsn-dock-body {
+    flex: 1;
+    min-height: 0;
+    padding: 10px 12px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.dsn-dock-foot {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--dsn-hair);
+}
+
+.dsn-dock-foot .button {
+    width: 100%;
+}
+
+.dsn-note,
+.dsn-empty {
+    margin: 4px 0 8px;
+    line-height: 1.5;
+}
+
+.dsn-empty p {
+    margin: 0 0 10px;
+}
+
+/* ─── The canvas ───────────────────────────────────────────── */
+
+.dsn-canvas {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background:
+        radial-gradient(
+                circle at 1px 1px,
+                color-mix(in srgb, var(--text) 9%, transparent) 1px,
+                transparent 0
+            )
+            0 0 / 16px 16px,
+        var(--dsn-fill);
+}
+
+.dsn-canvas[data-backdrop="light"] {
+    background:
+        radial-gradient(circle at 1px 1px, rgb(0 0 0 / 0.1) 1px, transparent 0) 0 0 / 16px 16px,
+        #e9ebef;
+}
+
+.dsn-canvas[data-backdrop="dark"] {
+    background:
+        radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.08) 1px, transparent 0) 0 0 / 16px
+            16px,
+        #0d0e11;
+}
+
+.dsn-scroll {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    padding: 16px;
+    overflow: auto;
+}
+
+.dsn-canvas.has-zoom > .dsn-scroll {
+    padding-bottom: 56px;
+}
+
+.dsn-stage {
+    position: relative;
+    flex: none;
+    margin: auto;
+    overflow: hidden;
+    border-radius: 3px;
+    background: #fff;
+    box-shadow:
+        0 0 0 1px var(--dsn-hair),
+        0 14px 36px -12px rgb(0 0 0 / 0.55);
+}
+
+.dsn-stage-in {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+}
+
+.dsn-canvas:has(.dsn-frame.wait:not(.loaded)) .dsn-stage {
+    background: var(--dsn-fill-2);
+}
+
+.dsn-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
+}
+
+.dsn-canvas .dsn-frame.wait:not(.loaded) {
+    opacity: 0;
+}
+
+.dsn-loading {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    color: var(--muted);
+}
+
+.dsn-hint {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    max-width: calc(100% - 24px);
+    padding: 5px 13px;
+    border-radius: 999px;
+    background: var(--dsn-accent);
+    color: var(--dsn-on-accent);
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-align: center;
+    pointer-events: none;
+    transform: translateX(-50%);
+    box-shadow: 0 6px 18px -6px rgb(0 0 0 / 0.5);
+    animation: dsn-hint 5s ease forwards;
+}
+
+/* It says what to do, then gets out of the page's way. */
+@keyframes dsn-hint {
+    0%,
+    70% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+    }
+}
+
+.dsn-zoom {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    max-width: calc(100% - 16px);
+    padding: 3px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    box-shadow:
+        0 0 0 1px var(--dsn-hair),
+        0 8px 20px -8px rgb(0 0 0 / 0.55);
+    backdrop-filter: blur(10px);
+    font-size: 12px;
+    transform: translateX(-50%);
+}
+
+.dsn-zoom button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    border-radius: 999px;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .dsn-zoom button:hover {
+        background: var(--dsn-fill-2);
+        color: var(--text);
+    }
+}
+
+.dsn-zoom .dsn-zoom-value {
+    min-width: 58px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.dsn-zoom-size {
+    padding: 0 8px;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.dsn[data-size="narrow"] .dsn-zoom-size {
+    display: none;
+}
+
+/* ─── The empty state ──────────────────────────────────────── */
+
+.dsn-empty-state {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 24px 20px;
+    overflow: auto;
+    color: var(--muted);
+    text-align: center;
+}
+
+.dsn-empty-state h3 {
+    margin: 6px 0 0;
+    color: var(--text);
+    font-size: 16px;
+}
+
+.dsn-empty-state p {
+    max-width: 38ch;
+    margin: 0;
+    line-height: 1.55;
+}
+
+.dsn-ideas {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 420px;
+    margin-top: 14px;
+}
+
+.dsn-idea {
+    padding: 10px 12px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 10px;
+    background: var(--dsn-fill);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.45;
+    text-align: left;
+}
+
+@media (hover: hover) {
+    .dsn-idea:hover {
+        border-color: var(--accent);
+    }
+}
+
+/* ─── Pop-ups ──────────────────────────────────────────────── */
+
+.dsn-pop-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+}
+
+.dsn-scrim {
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, #000 38%, transparent);
+}
+
+.dsn-pop {
+    position: absolute;
+    top: 50px;
+    left: 10px;
+    width: min(380px, calc(100% - 20px));
+    max-height: calc(100% - 64px);
+    padding: 6px;
+    overflow: auto;
+    border-radius: 12px;
+    background: var(--bg);
+    box-shadow:
+        0 0 0 1px var(--dsn-hair),
+        0 24px 60px -16px rgb(0 0 0 / 0.6);
+    outline: none;
+}
+
+.dsn-pop.wide {
+    width: min(440px, calc(100% - 20px));
+}
+
+.dsn-pop[data-align="end"] {
+    right: 10px;
+    left: auto;
+}
+
+.dsn-pop[data-sheet="true"] {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-height: 82%;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0;
+}
+
+.dsn-search {
+    width: 100%;
+    height: 36px;
+    margin-bottom: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 8px;
+    background: var(--dsn-fill);
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+}
+
+.dsn-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dsn-list-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 10px 4px;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.dsn-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 46px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    text-align: left;
+}
+
+.dsn-list-item.in-group {
+    margin-left: 10px;
+    width: calc(100% - 10px);
+}
+
+.dsn-list-item.on {
+    background: var(--dsn-accent-soft);
+}
+
+@media (hover: hover) {
+    .dsn-list-item:hover {
+        background: var(--dsn-fill);
+    }
+}
+
+.dsn-list-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.dsn-list-main strong,
+.dsn-list-main span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dsn-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.dsn-menu-label {
+    padding: 10px 10px 4px;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.dsn-menu .dsn-seg {
+    align-self: stretch;
+    margin: 0 4px 4px;
+}
+
+.dsn-menu .dsn-seg button {
+    flex: 1;
+}
+
+.dsn-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    padding: 0 10px;
+    border-radius: 8px;
+    color: var(--text);
+    text-align: left;
+    text-decoration: none;
+}
+
+.dsn-menu-item:disabled {
+    opacity: 0.45;
+}
+
+@media (hover: hover) {
+    .dsn-menu-item:hover:not(:disabled) {
+        background: var(--dsn-fill);
+    }
+}
+
+/* ─── Versions ─────────────────────────────────────────────── */
+
+.dsn-versions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dsn-version {
+    padding: 4px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 10px;
+}
+
+.dsn-version.on {
+    border-color: var(--accent);
+    background: var(--dsn-accent-soft);
+}
+
+.dsn-version-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    text-align: left;
+}
+
+.dsn-version-no {
+    flex: none;
+    min-width: 30px;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.dsn-version-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.dsn-version-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 6px;
+    padding: 0 4px 2px 46px;
+}
+
+.dsn-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 6px 4px 4px;
+    padding: 10px;
+    border-radius: 8px;
+    background: var(--dsn-fill);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.dsn-confirm-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ─── Comments ─────────────────────────────────────────────── */
+
+.dsn-comments {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dsn-comment {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 4px;
+    border-radius: 8px;
+}
+
+.dsn-comment.done {
+    opacity: 0.6;
+}
+
+.dsn-pin {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-top: 1px;
+    border-radius: 50%;
+    background: var(--dsn-accent);
+    color: var(--dsn-on-accent);
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.dsn-pin.off {
+    background: var(--dsn-fill-2);
+    color: var(--muted);
+}
+
+.dsn-comment-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.dsn-comment-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dsn-comment-body p {
+    margin: 2px 0;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.dsn-comment-target {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dsn-comment-actions {
+    display: flex;
+    flex: none;
+}
+
+.dsn-comment-actions .icon-button {
+    width: 30px;
+    height: 30px;
+}
+
+.dsn-done-toggle {
+    margin-top: 6px;
+}
+
+.dsn-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    background: var(--dsn-accent-soft);
+}
+
+.dsn-composer-target {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-weight: 600;
+}
+
+.dsn-composer-target span:nth-child(2) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dsn-composer textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+    resize: vertical;
+}
+
+.dsn-composer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* ─── Text edits ───────────────────────────────────────────── */
+
+.dsn-edits {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dsn-edit {
+    position: relative;
+    padding: 8px 36px 8px 10px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 10px;
+}
+
+.dsn-edit .icon-button {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 28px;
+    height: 28px;
+}
+
+.dsn-edit-before {
+    color: var(--muted);
+    text-decoration: line-through;
+    overflow-wrap: anywhere;
+}
+
+.dsn-edit-after {
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+/* ─── Tweaks ───────────────────────────────────────────────── */
+
+.dsn-knobs {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.dsn-knob {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dsn-knob-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.dsn-knob input[type="range"] {
+    width: 100%;
+    height: 28px;
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.dsn-knob input[type="text"],
+.dsn-knob select {
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 8px;
+    background: var(--dsn-fill);
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+}
+
+.dsn-knob[data-type="toggle"] {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.dsn-color {
+    display: flex;
+    gap: 8px;
+}
+
+.dsn-color input[type="color"] {
+    flex: none;
+    width: 44px;
+    height: 34px;
+    padding: 2px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 8px;
+    background: var(--dsn-fill);
+}
+
+/* ─── Compare ──────────────────────────────────────────────── */
+
+.dsn-compare {
+    position: relative;
+    display: grid;
+    flex: 1;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    min-height: 0;
+    background: var(--dsn-hair);
+}
+
+.dsn-compare.stacked {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+}
+
+.dsn-compare-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg);
+}
+
+.dsn-compare-pane header {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--dsn-hair);
+}
+
+.dsn-compare-side {
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.dsn-compare-pane select {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 7px;
+    background: var(--dsn-fill);
+    color: var(--text);
+    font: inherit;
+}
+
+.dsn-compare-room {
+    flex: 1;
+}
+
+/* ─── Variations ───────────────────────────────────────────── */
+
+.dsn-grid-view {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+}
+
+.dsn-grid-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    padding: 12px 14px 4px;
+}
+
+.dsn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 10px 14px 20px;
+}
+
+.dsn-thumb {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 12px;
+    background: var(--dsn-fill);
+}
+
+.dsn-thumb.on {
+    border-color: var(--accent);
+}
+
+.dsn-thumb-shot {
+    position: relative;
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    background: #fff;
+}
+
+.dsn-thumb-in {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+}
+
+.dsn-thumb-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+}
+
+.dsn-thumb-title {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.dsn-thumb-title strong,
+.dsn-thumb-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dsn-thumb-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ─── Decks ────────────────────────────────────────────────── */
+
+.dsn-deck {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border-top: 1px solid var(--dsn-hair);
+    background: var(--bg);
+}
+
+.dsn-deck-chips {
+    display: flex;
+    flex: 1;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.dsn-slide {
+    flex: none;
+    min-width: 32px;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 7px;
+    background: var(--dsn-fill);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.dsn-slide.on {
+    background: var(--dsn-accent);
+    color: var(--dsn-on-accent);
+    font-weight: 700;
+}
+
+.dsn-present {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: #000;
+}
+
+.dsn-present-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
+}
+
+.dsn-present-bar {
+    position: absolute;
+    top: calc(10px + env(safe-area-inset-top));
+    right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, #000 62%, transparent);
+    color: #fff;
+    opacity: 0.45;
+    transition: opacity 160ms;
+    backdrop-filter: blur(8px);
+}
+
+.dsn-present-bar:hover,
+.dsn-present-bar:focus-within {
+    opacity: 1;
+}
+
+.dsn-present-bar .icon-button {
+    color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsn-hint {
+        animation: none;
+    }
+}
+
+/* Fingers: bigger targets for what is small. */
+@media (pointer: coarse) {
+    .dsn-zoom button {
+        min-width: 36px;
+        height: 36px;
+    }
+
+    .dsn-seg button {
+        min-width: 38px;
+        height: 36px;
+    }
+
+    .dsn-custom input,
+    .dsn-compare-pane select {
+        height: 38px;
+    }
+
+    .dsn .icon-button {
+        width: 38px;
+        height: 38px;
+    }
+
+    .dsn-comment-actions .icon-button,
+    .dsn-edit .icon-button {
+        width: 36px;
+        height: 36px;
+    }
+
+    .dsn-slide {
+        height: 36px;
+    }
+}
+
+html[data-dsn-focus] .layout.paneling:has(.ext-panel[data-module="design"]) > .pane {
+    display: none;
+}
+
+html[data-dsn-focus] .layout.paneling .ext-panel.wide[data-module="design"] {
+    --ext-panel-w: 100%;
+    flex: 1 1 0;
+    max-width: none;
+    border-left: 0;
+}
+
+.dsn-list > li:has(> .dsy-pinned) {
+    margin-bottom: 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--dsn-hair);
+}
+
+.dsy-pinned-mark {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: var(--dsn-accent-soft);
+    color: var(--accent);
+}
+
+.dsy-modeselect {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: 150px;
+    height: 34px;
+    padding: 0 8px;
+    border: 1px solid var(--dsn-hair);
+    border-radius: 8px;
+    background: var(--dsn-fill);
+}
+
+.dsy-tag {
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.dsy-tag.edit {
+    background: var(--dsn-accent-soft);
+    color: var(--accent);
+}
+
+.dsy-tag.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.dsy-tag.bad,
+.button.danger {
+    background: var(--err-soft);
+    color: var(--err);
+}
+
+.dsy-problem {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--err);
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+
+.dsy-arrow {
+    color: var(--muted);
+}
+
+.dsy-chip {
+    max-width: 100%;
+    padding: 3px 8px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--dsn-fill-2);
+    color: var(--text);
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+button.dsy-chip:disabled {
+    opacity: 0.45;
+}
+
+.dsy-check-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.dsy-check-options .dsn-seg {
+    flex: 1;
+}
+
+.dsy-check-options .dsn-seg button {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dsn-seg button > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dsn-seg button > svg {
+    flex: none;
+}
+
+.dsy-checking {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 4px;
+    color: var(--muted);
+}
+
+.dsy-check-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 6px;
+}
+
+.dsy-stat {
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--ok-soft);
+    color: var(--ok);
+    font-size: 12.5px;
+}
+
+.dsy-check-filter {
+    display: flex;
+    gap: 2px;
+}
+
+.dsy-check-filter button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 12.5px;
+}
+
+.dsy-check-filter button.on {
+    background: var(--dsn-fill-2);
+    color: var(--text);
+}
+
+.dsy-check-filter button span {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.dsy-clean {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 4px;
+    color: var(--ok);
+    font-weight: 600;
+}
+
+.dsy-findings {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dsy-finding {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 4px;
+    border-top: 1px solid var(--dsn-hair);
+}
+
+.dsy-finding-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.dsy-finding-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dsy-finding p {
+    margin: 3px 0;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.dsy-fix {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.dsy-from {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.dsy-finding-target {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dsy-empty-system {
+    margin-top: 14px;
+    padding: 8px 14px;
+}
+
+.dsy-check-foot {
+    flex-direction: row;
+}
+
+.dsy-check-foot .button {
+    flex: 1;
+    width: auto;
+}
+
+.dsn[data-size="narrow"] .dsy-check-options {
+    flex-wrap: nowrap;
+    margin-bottom: 8px;
+}
+
+.dsn[data-size="narrow"] .dsy-check-options .dsn-seg button span {
+    display: none;
+}
+
+.dsn-dock[data-sheet="true"] {
+    height: var(--sheet, 62%);
+    max-height: none;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -14px 28px -14px rgb(0 0 0 / 0.6);
+}
+
+.dsy-sheet-handle {
+    display: grid;
+    flex: none;
+    place-items: center;
+    height: 24px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.dsy-sheet-handle span {
+    width: 40px;
+    height: 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--text) 30%, var(--bg));
+}
+
+.dsy-sheet-handle:focus-visible {
+    border-radius: 10px;
+}
+
+.dsy-check-filter button.error.on {
+    color: var(--err);
+}
+
+.dsy-check-filter button.warning.on {
+    color: var(--warn);
+}
+
+.dsy-finding.placed {
+    cursor: pointer;
+}
+
+.dsy-finding.on {
+    background: var(--dsn-accent-soft);
+    box-shadow:
+        -8px 0 0 var(--dsn-accent-soft),
+        8px 0 0 var(--dsn-accent-soft);
+}
+
+button.dsy-pin-button[aria-pressed="true"] {
+    box-shadow:
+        0 0 0 2px var(--bg),
+        0 0 0 4px var(--accent);
+}
+
+@media (pointer: coarse) {
+    button.dsy-pin-button {
+        width: 32px;
+        height: 32px;
+        font-size: 13px;
+    }
+}
+
+/* Always in the page, so that a change in it is read out. */
+.dsy-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.dsn[data-size="narrow"] .dsy-modeselect {
+    width: 108px;
+}
+
+.dsn-dock :focus-visible {
+    outline: 2px solid var(--focus-ring, var(--accent));
+    outline-offset: 1px;
+}
+
+.dsy-check-filter button:focus-visible {
+    outline-offset: -2px;
+}
+
+.dsy-fixbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--dsn-accent-soft);
+}
+
+.dsy-fixbar > span {
+    flex: 1 1 160px;
+}
+
+.dsn-dock[data-shut="true"] {
+    height: auto;
+    max-height: none;
+    box-shadow: 0 -10px 20px -14px rgb(0 0 0 / 0.6);
+}
+
+.dsy-check-bar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
+}
+
+.dsy-check-bar-main {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 4px;
+    border-radius: 10px;
+    text-align: left;
+}
+
+.dsy-check-bar-main strong,
+.dsy-check-bar-main .dsy-tag,
+.dsy-check-bar .button {
+    flex: none;
+    white-space: nowrap;
+}
+
+.dsy-check-bar-main .dsy-tag {
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.dsy-check-bar-up {
+    display: inline-flex;
+    transform: rotate(180deg);
+    color: var(--muted);
+}
+
+.dsy-finding-actions {
+    display: flex;
+    margin-top: 6px;
+}
+
+.dsy-accept {
+    flex: none;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    background: var(--dsn-fill);
+}
+
+@media (hover: hover) {
+    button.dsy-chip:hover:not(:disabled) {
+        background: var(--dsn-accent-soft);
+        color: var(--accent);
+    }
+
+    .dsy-accept:hover {
+        background: var(--dsn-fill-2);
+        color: var(--text);
+    }
+}
+
+.dsn[data-size="narrow"] .dsy-accept {
+    min-height: 36px;
+    padding: 0 12px;
+}
+
+.dsy-accepted {
+    margin-top: 12px;
+    border-top: 1px solid var(--dsn-hair);
+}
+
+.dsy-accepted-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 4px;
+    text-align: left;
+}
+
+.dsy-accepted-head > svg {
+    color: var(--muted);
+    transition: transform 0.15s;
+}
+
+.dsy-accepted-head[aria-expanded="false"] > svg {
+    transform: rotate(-90deg);
+}
+
+.dsy-finding.accepted {
+    opacity: 0.85;
+}
+
+.dsy-finding.accepted p {
+    color: var(--muted);
+}

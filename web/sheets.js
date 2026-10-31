@@ -224,6 +224,7 @@ function sheetBody(sheet) {
                       selected=${sheet.type === "gallery-entry" ? sheet.id : null}
                       tab=${sheet.tab ?? "discover"}
                       origin=${sheet.origin ?? (sheet.type === "gallery" ? "gallery" : "extensions")}
+                      show=${sheet.show ?? null}
                       Management=${ExtensionsContent}
                   />`
                 : sheet.type === "extensions"
@@ -270,7 +271,7 @@ function sheetBody(sheet) {
             break;
         case "session":
             body = store.state.sessions.some((each) => each.id === sheet.id)
-                ? html`<${SessionSheet} id=${sheet.id} />`
+                ? html`<${SessionSheet} id=${sheet.id} at=${sheet.at ?? null} />`
                 : null;
             break;
         case "places":
@@ -279,14 +280,23 @@ function sheetBody(sheet) {
         case "chat":
             body = view.conversation ? html`<${ChatSheet} />` : null;
             break;
-        case "rename":
-            body = html`<${TextSheet}
+
+        case "rename": {
+            const renamed = sheet.id
+                ? store.state.sessions.find((each) => each.id === sheet.id)
+                : view.conversation;
+
+            body =
+                renamed &&
+                html`<${TextSheet}
                 title="Rename"
                 label="Session title"
-                initial=${view.conversation?.title ?? ""}
-                submit=${(value) => actions.updateSession(view.conversation.id, { title: value })}
+                initial=${renamed.title ?? ""}
+                submit=${(value) => actions.updateSession(renamed.id, { title: value })}
             />`;
             break;
+        }
+
         case "worktree":
             body = html`<${WorktreeSheet} />`;
             break;
@@ -303,7 +313,12 @@ function sheetBody(sheet) {
             break;
         case "file":
             body = view.conversation
-                ? html`<${FileSheet} key=${sheet.id} path=${sheet.id} line=${sheet.line} />`
+                ? html`<${FileSheet}
+                      key=${sheet.id}
+                      path=${sheet.id}
+                      line=${sheet.line}
+                      refresh=${sheet.n}
+                  />`
                 : null;
             break;
         case "find":

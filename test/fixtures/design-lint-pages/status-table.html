@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Status</title>
+        <style>
+            body {
+                margin: 0;
+                font: 14px/1.5 system-ui;
+                background: #f6f7f9;
+                color: #1b1f24;
+            }
+            .wrap {
+                overflow-x: auto;
+                margin: 16px;
+            }
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                min-width: 420px;
+                background: #fff;
+            }
+            thead th {
+                position: sticky;
+                top: 0;
+                background: #eceff3;
+                text-align: left;
+                padding: 10px;
+                font-weight: 600;
+            }
+            td {
+                padding: 10px;
+                border-top: 1px solid #e1e4e8;
+            }
+            tr:nth-child(even) td {
+                background: #fafbfc;
+            }
+            .st {
+                display: inline-block;
+                padding: 2px 10px;
+                border-radius: 99px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            .ok {
+                background: #d1f5dc;
+                color: #0b5a26;
+            }
+            .bad {
+                background: #fcd9d9;
+                color: #8f1212;
+            }
+            .warn {
+                background: #fdecc0;
+                color: #6b4300;
+            }
+            .run {
+                background: #d6e6ff;
+                color: #0b3f94;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap" data-pid="w">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Status</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tr>
+                    <td>Job 0</td>
+                    <td><span class="st ok">Passed</span></td>
+                    <td>0s</td>
+                </tr>
+                <tr>
+                    <td>Job 1</td>
+                    <td><span class="st bad">Failed</span></td>
+                    <td>13s</td>
+                </tr>
+                <tr>
+                    <td>Job 2</td>
+                    <td><span class="st warn">Flaky</span></td>
+                    <td>26s</td>
+                </tr>
+                <tr>
+                    <td>Job 3</td>
+                    <td><span class="st ok">Passed</span></td>
+                    <td>39s</td>
+                </tr>
+                <tr>
+                    <td>Job 4</td>
+                    <td><span class="st run">Running</span></td>
+                    <td>52s</td>
+                </tr>
+            </table>
+        </div>
+    </body>
+</html>

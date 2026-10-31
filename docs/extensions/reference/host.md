@@ -172,6 +172,16 @@ Since 0.3.0 · Stable
 
 The id of the person that Pi works for in a session now. This is the person whose message started Pi's current work.
 
+### `roleOf`
+
+```ts
+roleOf(personId: string): Role | undefined;
+```
+
+Since 0.27.0 · Experimental
+
+The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here. It reads the role that core uses, so a module does not keep its own copy. Use it with `requesterOf` to know if Pi works for the owner. It can change in a minor release. Check that it is there first: `host.roleOf?.(id)`.
+
 ### `heldBack`
 
 ```ts
@@ -402,7 +412,7 @@ Makes a session linked to `source` and sends it `message` as its first message. 
 - The new session works in `cwd` when supplied, otherwise the folder of `source`. `cwd` must name an existing folder and uses the normal folder-picker path rules. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. `cwd` is since 0.19.0: an older Pi Pocket ignores it and uses the folder of `source`, so a gallery entry that needs it sets `minPocket` to `0.19.0`. It gets a copy of the agent settings of `source`, but not its history.
 - Without `title`, the title is the first line of `message`.
 - `model` is `provider/modelId`. While the owner's list of models for subagents is empty, it must be the model of `source`. Once the list has models, it must be one of them. Without it, the session uses the model of `source` when the list is empty or has it. Otherwise `start` is refused with an error that names the allowed models.
-- `thinking` is a level no higher than the level of `source`. Without it, the session uses the level of `source`. Pi Pocket lowers it to the highest level that the model has.
+- `thinking` can be any level, also one above the level of `source`. Without it, the session uses the level of `source`. Pi Pocket lowers it to the highest level that the model has, or uses the lowest level of the model when it has none that low.
 - When Pi cannot use the model now, `start` makes nothing and throws an error.
 
 #### `linkedSessions.send`
@@ -527,18 +537,32 @@ Since 0.22.0 · Experimental
 interface AskField {
     name: string;
     label: string;
+    header?: string;
+    choices?: AskChoice[];
+    multiple?: boolean;
+    other?: boolean;
     secret?: boolean;
     placeholder?: string;
     autocomplete?: string;
 }
+
+interface AskChoice {
+    label: string;
+    description?: string;
+}
 ```
 
-Since 0.22.0 · Experimental
+Since 0.22.0 · Experimental. `header`, `choices`, `multiple`, `other`, and `AskChoice` since 0.27.0.
 
 - `name`: the value's key in the answer: letters, digits, and `_`, up to 40, starting with a letter. Each field's is its own.
-- `label`: what the card says above the field.
-- `secret`: a hidden input, as for a password.
-- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`.
+- `label`: what the card says above the field, one line of up to 80 characters. A field with `choices` has its question here, up to 300.
+- `header`: a short tag over the field, such as "Database", up to 12 characters.
+- `choices`: 2 to 4 answers to pick, shown as buttons, with different labels. A choice's `label` is one line of up to 60 characters, and its `description`, under it, of up to 160. The field's value is the label chosen.
+- `multiple`: with `choices`, the person can choose one or more. The value is their labels, one per line, in the order of `choices`.
+- `other`: with `choices`, the person can type an answer of their own instead, and the value is what they typed. Its `placeholder` is the words of that field while it is empty.
+- A value that is not one of the choices (and with no `other`) is refused, with an error that names the field, never the value.
+- `secret`: a hidden input, as for a password. Not for a field with `choices`.
+- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`. Not for a field with `choices`.
 
 ### `AskAnswer`
 
@@ -647,7 +671,12 @@ One control of a snapshot, as data, up to 500 of them.
 interface BrowserPageHandle {
     readonly url: string;
     readonly title: string;
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     inspect(
         target: BrowserTarget,
     ): Promise<{ label: string; kind: string; editable: boolean; password: boolean }>;
@@ -679,7 +708,8 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 
 - `approvals`: tool calls that wait for a person to allow them.
 - `guard`: Lancet Guard.
-- `schedules`: scheduled messages, for the schedule tool.
+- `schedules`: scheduled messages, for the schedule tool. `schedules.limits` holds the limits in force (`perSession`, `chars`, `repeatMinutes`, `aheadDays`); the schedules module copies the owner's settings into it, so a module should read it and not change it. A server from before 0.24.0 has no `limits`.
+- `background`: commands Pi runs in the background, for the background tool: `start`, `read`, `stop`, `list`, and `limits` (`running`, which the background module copies from the owner's setting). A server from before 0.24.0 has none.
 - `goals`: Done when, for the goals module.
 - `browsers`: the built-in browser, for the browser tool.
 - `memory`: the lessons that Pi keeps across sessions, for the memory tool.
@@ -688,3 +718,4 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 - `pip`: what the tools of PiP, the owner's assistant, do.
 - `pipCompaction`: PiP's own summaries when its context is compacted.
 - `gallery`: the extension gallery, for its own routes.
+- `updates`: updates of Pi Pocket itself, for the Updates module's routes. Its status says how the copy was installed (`installKind`: `git`, `npm-global`, `npm-local`, `npx`, or `unknown`) and what stands in the way of an update from the app.

@@ -1,0 +1,131 @@
+/* The Updates sheet: cards in the app's colors, with targets a thumb can hit. */
+.updates-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.updates-sheet p {
+    margin: 0;
+}
+
+.updates-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--card);
+    min-width: 0;
+}
+
+.updates-card.updates-new {
+    border-color: var(--accent);
+}
+
+.updates-card.updates-warn {
+    border-color: var(--warn);
+}
+
+.updates-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.updates-row > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.updates-title {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.updates-label {
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.updates-list {
+    margin: 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.updates-list p {
+    margin: 0;
+}
+
+.updates-list.updates-blockers li::marker {
+    color: var(--err);
+}
+
+.updates-list.updates-cautions li::marker {
+    color: var(--warn);
+}
+
+.updates-notes summary {
+    cursor: pointer;
+    padding: 10px 0;
+}
+
+.updates-notes-body {
+    max-height: 50vh;
+    overflow: auto;
+    overflow-wrap: anywhere;
+}
+
+.updates-confirm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+}
+
+.updates-confirm input {
+    width: 20px;
+    height: 20px;
+    flex: none;
+}
+
+.updates-go {
+    min-height: 44px;
+    white-space: normal;
+}
+
+.updates-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+}
+
+.updates-row .button {
+    min-height: 40px;
+    flex: none;
+}
+
+.updates-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    flex: none;
+}
+
+.updates-badge {
+    display: inline-block;
+    padding: 0 6px;
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    color: var(--warn);
+    font-size: 0.75em;
+    font-weight: 600;
+    vertical-align: middle;
+}

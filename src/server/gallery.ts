@@ -51,6 +51,18 @@ import {
     sourcePage,
     type ThemeEntry,
 } from "./gallery/entry.ts";
+import {
+    loadReach,
+    mapLimit,
+    PALETTE_FILES,
+    type Reach,
+    reachKey,
+    SCAN_FILE,
+    saveReach,
+    scanFiles,
+    themePalette,
+    usable,
+} from "./gallery/reach.ts";
 import { shareDraft, shareThemeDraft } from "./gallery/share.ts";
 import {
     changedThemeFiles,
@@ -205,6 +217,7 @@ export class Gallery {
     #queue: Promise<unknown> = Promise.resolve();
     /** Revoked versions the owner was warned about: `<name>@<commit>`. */
     readonly #warned = new Set<string>();
+    #reaching: Promise<{ entries: Record<string, Reach & { pin: string }> }> | undefined;
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -1227,6 +1240,132 @@ export class Gallery {
             repoUrl: repoUrlOf(address, this.#read?.index),
             version: HERE.version,
         });
+    }
+
+    reach(): Promise<{ entries: Record<string, Reach & { pin: string }> }> {
+        if (this.#reaching === undefined) {
+            const run = this.#reachAll().finally(() => {
+                if (this.#reaching === run) {
+                    this.#reaching = undefined;
+                }
+            });
+
+            this.#reaching = run;
+        }
+
+        return this.#reaching;
+    }
+
+    async #reachAll(): Promise<{ entries: Record<string, Reach & { pin: string }> }> {
+        const { index } = await this.#index(false);
+        const items = [
+            ...index.entries.map((entry) => ({ kind: "extension" as const, entry })),
+            ...index.themes.map((entry) => ({ kind: "theme" as const, entry })),
+        ];
+        const kept = await loadReach(this.#folder());
+        const now: Record<string, Reach> = {};
+        let changed = false;
+        const results = await mapLimit(items, 3, async ({ kind, entry }) => {
+            const { commit } = entry.source;
+            const key = reachKey(kind, entry.name, commit, entry.files);
+            const hit = kept[key];
+
+            if (usable(hit, kind, commit)) {
+                now[key] = hit;
+
+                return hit;
+            }
+
+            try {
+                const reach =
+                    kind === "theme"
+                        ? await this.#themeReach(entry as ThemeEntry)
+                        : await this.#extensionReach(entry as Entry);
+
+                now[key] = reach;
+                changed = true;
+
+                return reach;
+            } catch (error) {
+                return { kind, commit, error: describe(error) };
+            }
+        });
+
+        if (changed || Object.keys(now).length !== Object.keys(kept).length) {
+            await saveReach(this.#folder(), now).catch(() => {});
+        }
+
+        return {
+            entries: Object.fromEntries(
+                items.map(({ entry }, at) => [entry.name, { ...results[at]!, pin: pinOf(entry) }]),
+            ),
+        };
+    }
+
+    async #reachFiles(
+        entry: Pick<Entry, "files" | "source">,
+        wanted: (file: string) => boolean,
+        installed: ((file: string) => Promise<Uint8Array | undefined>) | undefined,
+    ): Promise<{ name: string; text: string }[]> {
+        const have = new Map<string, Uint8Array>();
+        const files = entry.files.filter((file) => wanted(file.name));
+
+        for (const file of files) {
+            const bytes = await installed?.(file.name).catch(() => undefined);
+
+            if (
+                bytes !== undefined &&
+                bytes.byteLength === file.size &&
+                sha256(bytes) === file.sha256
+            ) {
+                have.set(file.name, bytes);
+            }
+        }
+
+        const missing = files.filter((file) => !have.has(file.name));
+
+        for (const file of missing.length === 0
+            ? []
+            : await this.#fetchFiles({ source: entry.source, files: missing })) {
+            have.set(file.name, file.bytes);
+        }
+
+        return files.map((file) => ({
+            name: file.name,
+            text: textOf(have.get(file.name)!) ?? "",
+        }));
+    }
+
+    async #extensionReach(entry: Entry): Promise<Reach> {
+        const provenance = await this.#provenance(entry.name).catch(() => undefined);
+        const here = provenance?.entry.source.commit === entry.source.commit;
+        const files = await this.#reachFiles(
+            entry,
+            (file) => SCAN_FILE.test(file),
+            here ? (file) => readInstalled(this.#dropIns(), entry.name, file) : undefined,
+        );
+
+        return { kind: "extension", commit: entry.source.commit, scanned: scanFiles(files) };
+    }
+
+    async #themeReach(entry: ThemeEntry): Promise<Reach> {
+        const provenance = await themeProvenance(this.#themes(), entry.name).catch(() => undefined);
+        const here = provenance?.entry.source.commit === entry.source.commit;
+        const files = await this.#reachFiles(
+            entry,
+            (file) => PALETTE_FILES.includes(innerPath(entry, file)),
+            here
+                ? (file) => readThemeFile(this.#themes(), entry.name, innerPath(entry, file))
+                : undefined,
+        );
+        const text = (inner: string) =>
+            files.find((file) => innerPath(entry, file.name) === inner)?.text;
+
+        return {
+            kind: "theme",
+            commit: entry.source.commit,
+            palette: themePalette(text("colors.toml"), text("colors-light.toml")),
+        };
     }
 
     // ─── Themes ──────────────────────────────────────────────────────────────────────

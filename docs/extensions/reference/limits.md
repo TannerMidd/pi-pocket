@@ -51,7 +51,8 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Pages and sheets that a module opens or closes:** past 300 in 1 s, the module stops. With no task between them, it stops past 1000, or at 5 or more over more than 1 s.
 - **Redraws in a hidden tab:** by a timer of 100 ms, which the browser can make slower.
 - **Notices from `pocket.notify`:** 5 every 5 s for a module, for all its versions together. The app drops the rest.
-- **Rail buttons of modules:** together, the height of 4 buttons. Past that, they scroll.
+- **The text of `pocket.pip.ask`:** 1 to 100,000 characters. Others throw. A send needs a tap just before it: it serves for 5 s and for one send.
+- **Rail buttons of modules:** no limit of their own. A rail with more buttons than room scrolls as a whole, and fades the edge where more is. The folded rail keeps up to a third of the window for its sessions first.
 - **A count on a rail button:** a count past 99, and `Infinity`, shows "99+".
 - **Text on a rail button:** past 24 characters, it is cut to 23 characters and "…". A panel's badge is the same.
 - **Text of a status item:** past 40 characters, `text` and `short` are cut to 39 characters and "…".
@@ -78,6 +79,9 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Saved state of an artifact (`pocket-state-set`):** 16 KB of JSON at most for one value. A schema is 1 to 64 letters, digits, and `. _ : -`.
 - **Saves:** 20 in 10 s for one person and one artifact. Past that, the save fails.
 - **Saved values of a session:** 300 at most, for all its artifacts and people together.
+- **Assets of a version (since 0.26.0):** 200 files at most, 5 MB for one, 20 MB for all. A name is a relative path of 200 characters at most, with no `.` or `..` segment. A group is a lowercase kebab-case slug of 64 characters at most.
+- **A private asset address:** it is valid for 12 hours.
+- **Design:** a tweaks manifest has 40 knobs at most; a page sends 60 messages a second at most; 2 renders run at once and each takes 90 s at most; a design system file is 16 KB at most.
 - **Shares of a session:** 100 at most at once. A share lasts 1 day, 7 days, or 30 days, or until it is ended (`hours` left out).
 
 ## Tool calls

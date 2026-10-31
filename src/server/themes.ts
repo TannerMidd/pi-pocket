@@ -346,9 +346,24 @@ export class Themes {
         return this.#failure;
     }
 
+    /** While an update moves Pi Pocket's checkout, the built-in themes' edits are read at the restart after it. */
+    #paused = false;
+
+    pause(paused: boolean): void {
+        this.#paused = paused;
+
+        if (paused) {
+            clearTimeout(this.#timer);
+        }
+    }
+
     /** Read the themes again shortly after their files change. */
     watch(): void {
         const later = () => {
+            if (this.#paused) {
+                return;
+            }
+
             clearTimeout(this.#timer);
             this.#timer = setTimeout(() => this.rescan(), 300);
         };

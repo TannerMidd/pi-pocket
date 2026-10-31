@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Footer</title>
+        <style>
+            body {
+                margin: 0;
+                font: 14px/2 system-ui;
+                background: #101419;
+                color: #c9d1dc;
+            }
+            footer {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                gap: 24px;
+                padding: 32px 24px;
+            }
+            h3 {
+                margin: 0;
+                font-size: 12px;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #8d99aa;
+            }
+            a {
+                display: block;
+                color: #c9d1dc;
+                text-decoration: none;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+            .legal {
+                padding: 16px 24px;
+                border-top: 1px solid #232a34;
+                color: #8d99aa;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <footer data-pid="f">
+            <div>
+                <h3>Product</h3>
+                <a href="#">Features</a><a href="#">Pricing</a>
+            </div>
+            <div>
+                <h3>Company</h3>
+                <a href="#">About</a><a href="#">Jobs</a>
+            </div>
+        </footer>
+        <div class="legal" data-pid="l">© 2025 Example Inc.</div>
+    </body>
+</html>

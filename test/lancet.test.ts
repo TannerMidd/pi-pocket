@@ -35,4 +35,17 @@ test("a guard that cannot load stays out of the way while off, and blocks while 
     const judged = await lancet.judge("bash", { command: "ls" }, root);
 
     assert.equal(judged?.decision.action, "block");
+
+    // A command started in the background is judged as bash's is; reading or stopping one runs nothing.
+    const started = await lancet.judge("background", { action: "start", command: "ls" }, root);
+
+    assert.equal(started?.decision.action, "block");
+
+    for (const action of ["output", "list", "stop"]) {
+        assert.equal(
+            await lancet.judge("background", { action, id: "x" }, root),
+            undefined,
+            action,
+        );
+    }
 });

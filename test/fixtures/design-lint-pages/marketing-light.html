@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Marketing</title>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                font:
+                    18px/1.6 "Helvetica Neue",
+                    Arial,
+                    sans-serif;
+                color: #1d1d1f;
+                background: #fff;
+            }
+            .hero {
+                padding: 72px 24px;
+                text-align: center;
+                background: linear-gradient(#f5f5f7, #fff);
+            }
+            h1 {
+                font-size: 44px;
+                line-height: 1.1;
+                margin: 0 0 16px;
+            }
+            .hero p {
+                color: #515154;
+                max-width: 36ch;
+                margin: 0 auto 24px;
+            }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                min-height: 48px;
+                padding: 0 28px;
+                border-radius: 99px;
+                background: #0066cc;
+                color: #fff;
+                text-decoration: none;
+            }
+            .btn.alt {
+                background: transparent;
+                color: #0066cc;
+            }
+            .features {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+                gap: 24px;
+                padding: 48px 24px;
+                max-width: 1000px;
+                margin: 0 auto;
+            }
+            .f h3 {
+                margin: 8px 0;
+            }
+            .f p {
+                color: #515154;
+                margin: 0;
+            }
+            .quote {
+                background: #fbfbfd;
+                padding: 48px 24px;
+                text-align: center;
+            }
+            .quote blockquote {
+                margin: 0 auto;
+                max-width: 30ch;
+                font-size: 24px;
+            }
+            footer {
+                padding: 32px 24px;
+                background: #f5f5f7;
+                color: #6e6e73;
+                font-size: 14px;
+            }
+            footer a {
+                color: #424245;
+                display: inline-block;
+                padding: 12px 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <section class="hero" data-pid="hero">
+            <h1 data-pid="h1">Think different</h1>
+            <p data-pid="p">A phone you can fix, a plan you can read.</p>
+            <a class="btn" href="#" data-pid="buy">Buy now</a>
+            <a class="btn alt" href="#" data-pid="more">Learn more</a>
+        </section>
+        <section class="features" data-pid="feat">
+            <div class="f">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt=""
+                    width="48"
+                    height="48"
+                />
+                <h3>Battery</h3>
+                <p>All day, every day.</p>
+            </div>
+            <div class="f">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="Camera icon"
+                    width="48"
+                    height="48"
+                />
+                <h3>Camera</h3>
+                <p>Low light, no fuss.</p>
+            </div>
+            <div class="f">
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt=""
+                    width="48"
+                    height="48"
+                />
+                <h3>Repair</h3>
+                <p>Parts for everyone.</p>
+            </div>
+        </section>
+        <section class="quote" data-pid="quote">
+            <blockquote>"The best thing we shipped this year."</blockquote>
+        </section>
+        <footer data-pid="foot">
+            <a href="#">Privacy</a><a href="#">Terms</a><a href="#">Contact</a>
+        </footer>
+    </body>
+</html>

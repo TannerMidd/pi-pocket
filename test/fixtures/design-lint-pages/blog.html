@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Blog</title>
+        <style>
+            body {
+                margin: 0;
+                font:
+                    18px/1.7 Georgia,
+                    serif;
+                color: #262626;
+                background: #fff;
+            }
+            .hero {
+                position: relative;
+                height: 280px;
+                background: #2b3a55;
+            }
+            .hero img {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+            .hero::after {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+            }
+            .hero h1 {
+                position: absolute;
+                left: 24px;
+                right: 24px;
+                bottom: 24px;
+                margin: 0;
+                z-index: 1;
+                color: #fff;
+                font: 700 34px/1.15 system-ui;
+            }
+            article {
+                max-width: 660px;
+                margin: 0 auto;
+                padding: 24px;
+            }
+            .meta {
+                font: 14px system-ui;
+                color: #595959;
+            }
+            figure {
+                margin: 24px 0;
+            }
+            figcaption {
+                font: 14px system-ui;
+                color: #595959;
+            }
+            a {
+                color: #1a56c4;
+            }
+            .tags a {
+                display: inline-block;
+                padding: 12px 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <header class="hero" data-pid="hero">
+            <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" />
+            <h1 data-pid="t">Why we stopped using cookies</h1>
+        </header>
+        <article data-pid="art">
+            <p class="meta">By Sam · 5 min read</p>
+            <p>
+                It started with a banner nobody read, and ended with a deleted table.
+                <a href="#">The full story</a> is below.
+            </p>
+            <figure>
+                <img
+                    src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                    alt="A chart of consent rates"
+                    width="600"
+                    height="200"
+                    style="max-width: 100%"
+                />
+                <figcaption>Consent rates by month.</figcaption>
+            </figure>
+            <h2>What changed</h2>
+            <p>We measured less and learned more.</p>
+            <div class="tags"><a href="#">privacy</a><a href="#">web</a></div>
+        </article>
+    </body>
+</html>

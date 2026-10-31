@@ -283,6 +283,151 @@ test(
     },
 );
 
+test("on a phone the launcher is a bottom sheet that a swipe down closes", real, async () => {
+    await home(VIEWPORTS.mobile, true);
+    await page.evaluate(`document.querySelector('.composer textarea').focus()`);
+    await page.evaluate(`(await import('/store.js')).store.set({ launcher: true })`);
+    await see(`return JSON.stringify(document.querySelector('.launcher') !== null)`, "launcher");
+    await settle();
+
+    const shown = await inPage<{
+        bottom: number;
+        height: number;
+        grip: string;
+        coarse: boolean;
+        held: boolean;
+    }>(`
+        const sheet = document.querySelector('.launcher');
+        const box = sheet.getBoundingClientRect();
+
+        return JSON.stringify({
+            bottom: Math.round(box.bottom),
+            height: innerHeight,
+            grip: getComputedStyle(sheet.querySelector('.grip')).display,
+            coarse: matchMedia('(pointer: coarse)').matches,
+            held: document.activeElement === sheet,
+        });
+    `);
+
+    assert.equal(shown.coarse, true, "the mobile viewport is a touch screen");
+    assert.equal(shown.bottom, shown.height, "the launcher sits on the bottom edge");
+    assert.equal(shown.grip, "block", "its grip shows");
+    // The launcher takes focus, not its field, so no keyboard covers the results.
+    assert.equal(shown.held, true, "the launcher, not its field, has focus");
+
+    // A finger dragged down from the filters, past a quarter of the sheet, closes it.
+    await page.evaluate(`
+        const target = document.querySelector('.launcher-types');
+        const at = (y) => new Touch({ identifier: 1, target, clientX: 200, clientY: y });
+        const fire = (type, y) => target.dispatchEvent(new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches: type === 'touchend' ? [] : [at(y)],
+            changedTouches: [at(y)],
+        }));
+
+        fire('touchstart', 200);
+
+        for (let y = 230; y <= 560; y += 30) {
+            fire('touchmove', y);
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+
+        fire('touchend', 560);
+    `);
+    await closed();
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify((await import('/store.js')).store.state.launcher)`,
+        ),
+        false,
+    );
+    await see(
+        `return JSON.stringify(document.activeElement === document.querySelector('.composer textarea'))`,
+        "focus back in the message box after the swipe",
+    );
+
+    // A keyboard on a touch screen (an iPad's): typing goes to the field, and arrows and Escape work.
+    await page.evaluate(`(await import('/store.js')).store.set({ launcher: true })`);
+    await see(`return JSON.stringify(document.querySelector('.launcher') !== null)`, "launcher");
+    await settle();
+    await page.press("ArrowDown");
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify(document.querySelectorAll('.launcher-item')[1]?.classList.contains('on'))`,
+        ),
+        true,
+        "ArrowDown moves the selection from the launcher",
+    );
+    await page.press("a");
+    await until(focused, "typing moves focus to the field");
+    assert.equal(await value(), "a", "the typed key lands in the field");
+    await page.press("Escape");
+    await closed();
+});
+
+test(
+    "on a touch screen, an accent, an input method, or AltGr typed first goes to the search",
+    real,
+    async () => {
+        await home(VIEWPORTS.mobile, true);
+
+        for (const init of [
+            { key: "Dead" },
+            { key: "Process", keyCode: 229 },
+            { key: "a", isComposing: true },
+            { key: "@", ctrlKey: true, altKey: true },
+        ]) {
+            await page.evaluate(`(await import('/store.js')).store.set({ launcher: true })`);
+            await see(
+                `return JSON.stringify(document.activeElement === document.querySelector('.launcher'))`,
+                "the launcher holding focus",
+            );
+            await page.evaluate(`
+            document.querySelector('.launcher').dispatchEvent(
+                new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...${JSON.stringify(init)} }),
+            );
+        `);
+            assert.equal(await focused(), true, `${JSON.stringify(init)} moves focus to the field`);
+            await page.press("Escape");
+            await closed();
+        }
+    },
+);
+
+test("a phone turned with the launcher open gets its swipe to close", real, async () => {
+    // On its side the phone is wide: a centered launcher, which a swipe does not close.
+    await home({ width: 844, height: 390, scale: 2, mobile: true }, true);
+    await page.evaluate(`(await import('/store.js')).store.set({ launcher: true })`);
+    await see(`return JSON.stringify(document.querySelector('.launcher') !== null)`, "launcher");
+    await page.setViewport(VIEWPORTS.mobile);
+    await see(
+        `return JSON.stringify(Math.round(document.querySelector('.launcher').getBoundingClientRect().bottom) === innerHeight)`,
+        "a bottom sheet once upright",
+    );
+    await settle();
+    await page.evaluate(`
+        const target = document.querySelector('.launcher-types');
+        const at = (y) => new Touch({ identifier: 1, target, clientX: 200, clientY: y });
+        const fire = (type, y) => target.dispatchEvent(new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches: type === 'touchend' ? [] : [at(y)],
+            changedTouches: [at(y)],
+        }));
+
+        fire('touchstart', 200);
+
+        for (let y = 230; y <= 560; y += 30) {
+            fire('touchmove', y);
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+
+        fire('touchend', 560);
+    `);
+    await closed();
+});
+
 // Last: it starts a session, and home() counts them. PR #92 by @elithecho.
 test(
     "a favorite folder shows while the launcher is open and starts a session there",

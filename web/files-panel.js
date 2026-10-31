@@ -315,6 +315,7 @@ function FilesTab({ changes, covering }) {
     const width = useWidth(ref);
     const side = width >= SIDE_BY_SIDE;
     const handled = useRef(filesTarget?.n ?? 0);
+    const picks = useRef(0);
 
     const setSelected = (next) => {
         if (next) {
@@ -376,7 +377,8 @@ function FilesTab({ changes, covering }) {
 
     /** Open a file; `from`, the tab it was asked for from, for back to go back to. */
     const pick = (path, line, from) => {
-        setSelected({ path, line, from });
+        // `n` differs for each pick, so picking the open file again reads it again.
+        setSelected({ path, line, from, n: ++picks.current });
         reveal(path);
     };
 
@@ -654,6 +656,7 @@ function FilesTab({ changes, covering }) {
                           key=${`${shown.path}:${shown.line ?? ""}:${head}`}
                           path=${shown.path}
                           line=${shown.line}
+                          refresh=${shown.n}
                           onOpen=${(path) => pick(path)}
                       />
                   </div>`

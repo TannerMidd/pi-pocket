@@ -51,6 +51,8 @@ export type Classified =
           resetAt?: number;
           source?: Source;
           backoff: boolean;
+          /** An unknown-reset subscription limit uses the owner's full wait budget, not the overload budget. */
+          subscription?: true;
           /** A window of days (Claude's 7-day, a Codex window over 300 minutes): not waited for, failed with its reset. */
           long?: true;
           reason: string;
@@ -72,24 +74,30 @@ const REASON_CHARS = 300;
 const SIGN_IN =
     /OAuth (?:refresh|auth derivation) failed|\b40[13]\b|unauthori[sz]ed|invalid[ _-]?(?:x-)?api[ _-]?key|authentication[ _-]?(?:error|failed)|permission[ _-]?denied|forbidden/i;
 
-/** Money: a balance, a budget, or a plan that must be topped up. Waiting does not fix it. */
+/**
+ * Money: a balance, a budget, or a plan that must be topped up. Waiting does not fix it. Only words that ask for money:
+ * "in good standing" alone says all is well, and "recharge" alone can be part of a model's name.
+ */
 const BILLING =
-    /insufficient[ _-]?(?:quota|credits?|funds)|out of budget|quota exceeded|credit balance|\b402\b|payment required|billing/i;
+    /insufficient[ _-]?(?:quota|credits?|funds|balance)|out of budget|quota exceeded|credit[ _-]?balance|used all available credits|spend(?:ing)?[ _-]?limit|enforced_spend_limit_reached|exceeded_current_quota|quota is insufficient|arrearage|not in good standing|please recharge|recharge your account|FreeUsageLimitError|ServiceQuotaExceeded|usage_not_included|\b402\b|payment[ _-]?required|billing/i;
 
 /** A request the provider refuses for what it says, not for load. */
 const REFUSED =
     /\b400\b|\b404\b|invalid[ _-](?:request|argument)|not[ _-]found|content[ _-]filter|does not exist|unsupported/i;
 
-/** Limits of an account's plan: the sign-in, not the model. They clear at a reset, which only a time can tell. */
+/** Limits of an account's plan: the sign-in, not the model. An unknown reset uses bounded subscription retries. */
 const USAGE =
-    /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|usage_limit_reached|subscription_sharing_usage_limit_exceeded|usage limit|available balance/i;
+    /GoUsageLimitError|Monthly usage limit reached|usage_limit_reached|subscription_sharing_usage_limit_exceeded|usage[ _-]limit|session limit|available balance/i;
+const LONG_WINDOW =
+    /weekly|per[_ -]?week|monthly|per[_ -]?month|daily|per[_ -]?day|PerDay|PerMonth|seven_day|7[- ]day|\b[TR]PD\b/i;
+const SHORT_WINDOW = /\b5[- ]?hours?\b|five[- ]hour|session limit/i;
 
 /** Words that say the provider is loaded or rate limiting, whatever else the text holds. */
 const LOAD = /overloaded|rate[ _.-]?limit|too many requests|resource[ _-]?exhausted/i;
 
 /** Load and rate: tried again, these clear soon. */
 const TRANSIENT =
-    /overloaded|server[ _-]busy|servers are currently busy|high demand|at capacity|rate[ _.-]?limit|too many requests|\b(?:429|500|502|503|504|520|524|529)\b|service[ _-]?(?:is[ _-])?(?:temporarily[ _-])?unavailable|server[ _-]?error|internal[ _-]?error|retry delay|resource[ _-]?exhausted/i;
+    /overloaded|server[ _-]busy|servers are currently busy|high demand|at capacity|rate[ _.-]?limit|too many requests|\b(?:429|500|502|503|504|520|524|529)\b|service[ _-]?(?:is[ _-])?(?:temporarily[ _-])?unavailable|server[ _-]?error|internal[ _-]?error|retry delay|resource[ _-]?exhausted|throttl|slow_down|exhausted your capacity/i;
 
 const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504, 520, 524, 529]);
 
@@ -98,7 +106,7 @@ const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504, 520, 524, 529]);
  * limit" in a text) let a 403 wait.
  */
 const USAGE_SHAPE =
-    /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|usage_limit_reached|subscription_sharing_usage_limit_exceeded/i;
+    /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|usage_limit_reached|subscription_sharing_usage_limit_exceeded|subscription sharing usage limit/i;
 
 /**
  * Whether a response's status can be a failure that clears with time: a timeout, a rate limit, a server that failed
@@ -174,6 +182,10 @@ function moment(value: string | number | undefined): number | undefined {
         return epochMs(number);
     }
 
+    if (!/(?:Z|[+-]\d{2}:?\d{2}|\bUTC|\bGMT)$/i.test(String(value))) {
+        return undefined;
+    }
+
     const parsed = Date.parse(String(value));
 
     return Number.isNaN(parsed) ? undefined : parsed;
@@ -219,25 +231,27 @@ function fromHeaders(
 
     if (week || hours5) {
         const named = headers[`anthropic-ratelimit-unified-${week ? "7d" : "5h"}-reset`];
-        const reset = moment(named) ?? moment(headers["anthropic-ratelimit-unified-reset"]);
+        const reset =
+            moment(named) ??
+            moment(headers["anthropic-ratelimit-unified-reset"]) ??
+            retryAfter(headers, now);
 
-        if (reset !== undefined) {
-            return {
-                resetAt: reset,
-                account: !/opus|sonnet|haiku/i.test(claim),
-                model: /opus|sonnet|haiku/i.test(claim),
-                ...(week ? { long: true as const } : {}),
-            };
-        }
+        return {
+            ...(reset === undefined ? {} : { resetAt: reset }),
+            account: !/opus|sonnet|haiku/i.test(claim),
+            model: /opus|sonnet|haiku/i.test(claim),
+            ...(week ? { long: true as const } : {}),
+        };
     }
 
     if (unified !== undefined || headers["anthropic-ratelimit-unified-reset"] !== undefined) {
         const rejected = unified === undefined || unified === "rejected";
-        const reset = moment(headers["anthropic-ratelimit-unified-reset"]);
+        const reset =
+            moment(headers["anthropic-ratelimit-unified-reset"]) ?? retryAfter(headers, now);
 
-        if (rejected && reset !== undefined) {
+        if (rejected) {
             return {
-                resetAt: reset,
+                ...(reset === undefined ? {} : { resetAt: reset }),
                 account: !/opus|sonnet|haiku/i.test(claim),
                 model: /opus|sonnet|haiku/i.test(claim),
             };
@@ -247,6 +261,7 @@ function fromHeaders(
     // ChatGPT sign-in (Codex): a window is full at 100 percent; the later of two full windows decides, and a full
     // window of more than 300 minutes is a weekly limit.
     const codex: number[] = [];
+    let full = false;
     let long = false;
 
     for (const window of ["primary", "secondary"]) {
@@ -255,6 +270,7 @@ function fromHeaders(
         const after = Number(headers[`x-codex-${window}-reset-after-seconds`]);
 
         if (used >= 100) {
+            full = true;
             long ||= Number(headers[`x-codex-${window}-window-minutes`]) > 300;
 
             if (at !== undefined) {
@@ -265,9 +281,11 @@ function fromHeaders(
         }
     }
 
-    if (codex.length > 0) {
+    if (full) {
+        const reset = codex.length > 0 ? Math.max(...codex) : retryAfter(headers, now);
+
         return {
-            resetAt: Math.max(...codex),
+            ...(reset === undefined ? {} : { resetAt: reset }),
             account: true,
             model: false,
             ...(long ? { long: true as const } : {}),
@@ -330,10 +348,13 @@ function fromText(message: string, now: number): number | undefined {
     }
 
     const again =
-        /(?:try|retry)(?:ing)?(?: your request)?(?: again)? (?:in|after)\s*~?\s*(\d+(?:\.\d+)?\s*[a-z]+)/i.exec(
+        /(?:retry[ _]?delay|quotaResetDelay)"?\s*[:=]?\s*"?((?:\d+(?:\.\d+)?\s*[a-z]+\s*)+)/i.exec(
             message,
         ) ??
-        /retry[ _]?delay"?\s*[:=]?\s*"?(\d+(?:\.\d+)?\s*[a-z]+)/i.exec(message) ??
+        /(?:try|retry)(?:ing)?(?: your request)?(?: again)? (?:in|after)\s*~?\s*((?:\d+(?:\.\d+)?\s*[a-z]+\s*)+)/i.exec(
+            message,
+        ) ??
+        /resets? (?:in|after)\s*~?\s*((?:\d+(?:\.\d+)?\s*[a-z]+\s*)+)/i.exec(message) ??
         /requested (\d+(?:\.\d+)?\s*s) retry delay/i.exec(message);
 
     if (again !== null) {
@@ -344,7 +365,12 @@ function fromText(message: string, now: number): number | undefined {
         }
     }
 
-    return undefined;
+    const dated =
+        /resets? (?:at|on)\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/i.exec(
+            message,
+        );
+
+    return dated === null ? undefined : moment(dated[1]);
 }
 
 function cut(message: string): string {
@@ -361,7 +387,11 @@ function cut(message: string): string {
  */
 export function classify(input: LimitInput): Classified {
     const { message, facts, now } = input;
-    const status = facts?.status;
+    // A successful HTTP stream can still end with a provider error event: its text decides, not HTTP 200.
+    const status =
+        facts?.status !== undefined && facts.status >= 200 && facts.status < 300
+            ? undefined
+            : facts?.status;
 
     if (input.contextOverflow === true) {
         return { type: "other", why: "context overflow" };
@@ -379,7 +409,14 @@ export function classify(input: LimitInput): Classified {
         return { type: "other", why: "sign-in or permission" };
     }
 
-    if (BILLING.test(message) || status === 402) {
+    // Google's quota errors include generic billing-help prose; Z.ai names the price of EXTRA usage, not the plan.
+    let billingMessage = message.replace(/please check your plan and billing details\.?/gi, "");
+
+    if (SHORT_WINDOW.test(message)) {
+        billingMessage = billingMessage.replace(/insufficient balance for extra usage\.?/gi, "");
+    }
+
+    if (BILLING.test(billingMessage) || status === 402) {
         return { type: "other", why: "billing" };
     }
 
@@ -403,7 +440,7 @@ export function classify(input: LimitInput): Classified {
         return { type: "other", why: "HTTP 409" };
     }
 
-    const usage = USAGE.test(message) || fromHeader.account;
+    const usage = USAGE.test(message) || fromHeader.account || fromHeader.model;
     const transient =
         (status !== undefined && TRANSIENT_STATUS.has(status)) ||
         // A conflict that says when to try again (checked above) is a wait.
@@ -426,6 +463,7 @@ export function classify(input: LimitInput): Classified {
     const found = fromHeader.resetAt ?? text;
     const scope: Scope = usage && !fromHeader.model ? "account" : "model";
     const reason = cut(message);
+    const long = fromHeader.long || LONG_WINDOW.test(message);
 
     if (found !== undefined) {
         return {
@@ -434,14 +472,17 @@ export function classify(input: LimitInput): Classified {
             resetAt: Math.max(found, now),
             source: source ?? (/"?resets_(?:at|in_seconds)"?/i.test(message) ? "body" : "text"),
             backoff: false,
-            ...(fromHeader.long ? { long: true as const } : {}),
+            ...(long ? { long: true as const } : {}),
             reason,
         };
     }
 
-    // A plan's usage limit says nothing until its reset: there is no time to wait until.
+    if (long) {
+        return { type: "other", why: "usage limit of days" };
+    }
+
     if (usage) {
-        return { type: "other", why: "usage limit, reset unknown" };
+        return { type: "limit", scope, backoff: true, subscription: true, reason };
     }
 
     return { type: "limit", scope, backoff: true, reason };

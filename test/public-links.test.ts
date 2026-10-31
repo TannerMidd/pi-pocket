@@ -6,6 +6,7 @@ import {
     cleanUp,
     fakeTab,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -385,6 +386,8 @@ test("while its module is off, a link answers nothing; on again, it is back", as
 test("Ask someone: Pi drafts, a person shares it, a stranger answers once", async () => {
     const id: ConversationId = await newSession(app);
 
+    // ask_someone waits for a search (`tool-search.ts`): Pi loads it first.
+    await loadTools(app, id, "ask_someone");
     await say(app, id, "please ask");
 
     const list = async (who = "owner") =>
@@ -517,6 +520,7 @@ test("Ask someone: Pi drafts, a person shares it, a stranger answers once", asyn
 test("Ask someone: ending a link takes the page down, and the draft can be shared again", async () => {
     const id: ConversationId = await newSession(app);
 
+    await loadTools(app, id, "ask_someone");
     await say(app, id, "ask");
 
     const [question] = (await call(`/api/x/ask-someone/questions/${id}`)).data.questions as {

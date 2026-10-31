@@ -81,6 +81,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     messages: true,
     reveal: true,
     insertText: true,
+    pip: true,
     arrange: true,
     toolCall: true,
     openPage: true,
@@ -224,6 +225,7 @@ before(async () => {
         join(dropIns, "shared", "index.js"),
         `export default (pocket) => {
 	pocket.rail({ id: "hi", title: "Shared", run: () => pocket.notify("info", "hi from shared") });
+	globalThis.sharedPocket = pocket;
 };
 `,
     );
@@ -392,6 +394,15 @@ test(
         await until(() => hasLabel("App row"), "the default App row without a session");
         assert.equal(await hasLabel("Session row"), false, "a Session row needs a session");
         await inPage(`(await import("/store.js")).closeSheet(); return "null";`);
+        // A closing sheet takes its history entry off a moment later: a route written before then is undone.
+        await until(
+            async () =>
+                (await inPage<number>(
+                    `return JSON.stringify(history.state?.pocket?.layers ?? 0)`,
+                )) === 0,
+            "the sheet's history entry to go",
+            30_000,
+        );
 
         await inPage(`(await import("/store.js")).navigate(${session}); return "null";`);
         await until(() => has(".composer"), "the session opens");
@@ -652,7 +663,7 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(".composer"), "the conversation");
     await inPage(
-        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
+        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed", show: "built-in" }); return "null";`,
     );
     await until(() => has('.switch[aria-label="Lancet Guard: on"]'), "the guard switch");
     await settled();
@@ -674,6 +685,339 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
         "guard off and focus restored",
     );
 });
+
+test(
+    "Send, and while Pi works Stop, stay inside the message box on every phone width, with extension buttons and with more",
+    real,
+    async () => {
+        const busy = (on: boolean) =>
+            page.evaluate(`
+                const { store } = await import("/store.js");
+                store.set((state) => ({ view: { ...state.view, live: { ...state.view.live, busy: ${on} } } }));
+                for (let frame = 0; frame < 3; frame++) {
+                    await new Promise((resolve) => requestAnimationFrame(resolve));
+                }
+            `);
+        const fit = () =>
+            inPage<{
+                scroll: number;
+                client: number;
+                stop: number;
+                send: number;
+                right: number;
+                shown: number;
+                below: boolean;
+            }>(`
+                const row = document.querySelector(".composer-row");
+                const stop = row.querySelector(".stop-button")?.getBoundingClientRect();
+                const send = row.querySelector(".send-button")?.getBoundingClientRect();
+                const shown = [...row.querySelectorAll(".ext-composer-button")].filter((each) => each.offsetWidth > 0);
+                const end = (stop ?? send).bottom;
+
+                return JSON.stringify({
+                    scroll: row.scrollWidth,
+                    client: row.clientWidth,
+                    stop: stop?.right ?? 0,
+                    send: send?.right ?? 0,
+                    right: row.getBoundingClientRect().right,
+                    shown: shown.length,
+                    below: shown.every((each) => each.getBoundingClientRect().top >= end),
+                });
+            `);
+
+        const inside = (width: number, what: string, f: Awaited<ReturnType<typeof fit>>) => {
+            assert.ok(
+                f.scroll <= f.client,
+                `${what}: the row overflows at ${width} px: ${JSON.stringify(f)}`,
+            );
+            assert.ok(
+                f.stop > 0 && f.stop <= f.right,
+                `${what}: Stop is out of the row at ${width} px: ${JSON.stringify(f)}`,
+            );
+        };
+
+        try {
+            for (const width of [320, 360, 375, 390, 412, 430]) {
+                await page.setViewport({ width, height: 700, scale: 2, mobile: true });
+                await page.navigate(`${base}/s/${session}`);
+                await until(() => has(".composer-row"), "the message box");
+                await withMeter(`
+                    for (const id of ["a", "b", "c"]) {
+                        pocket.composerButton({ id, title: "Tool " + id, icon: "pulse", run: () => {} });
+                    }
+
+                    return "null";
+                `);
+                await until(() => has(".ext-composer-button"), "the extension's buttons");
+
+                // Idle: three buttons would push Send out of a phone's box: they take a line under it.
+                const idle = await fit();
+
+                assert.ok(
+                    idle.scroll <= idle.client && idle.send > 0 && idle.send <= idle.right,
+                    `Send is out of the row at ${width} px: ${JSON.stringify(idle)}`,
+                );
+                assert.equal(idle.shown, 3, `the buttons show at ${width} px`);
+                assert.ok(idle.below, `the buttons are on a line under Send at ${width} px`);
+
+                await busy(true);
+                const working = await fit();
+
+                inside(width, "with three extension buttons", working);
+                assert.equal(working.shown, 3, "the extension's buttons stay, on their own line");
+                assert.ok(working.below, `the buttons are on a line under Stop at ${width} px`);
+
+                // A touch screen's taller tap layer on each mode still takes a tap above and below it: the cut that
+                // keeps Stop in is sideways only.
+                const taps = await inPage<{ above: boolean; below: boolean }[]>(`
+                    const touch = new CSSStyleSheet();
+
+                    touch.replaceSync(".mode-switch button { position: relative } .mode-switch button::before { content: ''; position: absolute; inset: -6px 0 }");
+                    document.adoptedStyleSheets = [...document.adoptedStyleSheets, touch];
+                    const hits = [...document.querySelectorAll(".composer .mode-switch button")].map((each) => {
+                        const box = each.getBoundingClientRect();
+                        const x = box.left + box.width / 2;
+
+                        return {
+                            above: document.elementFromPoint(x, box.top - 4) === each,
+                            below: document.elementFromPoint(x, box.bottom + 4) === each,
+                        };
+                    });
+
+                    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((each) => each !== touch);
+
+                    return JSON.stringify(hits);
+                `);
+
+                assert.ok(
+                    taps.length === 3 && taps.every((each) => each.above && each.below),
+                    `the modes' tap layer is cut at ${width} px: ${JSON.stringify(taps)}`,
+                );
+
+                // Text that the browser's own font-size setting makes bigger (Firefox on a phone does): the labels of the
+                // three modes grow, and Stop still stays in.
+                await page.evaluate(`
+                    const sheet = new CSSStyleSheet();
+                    sheet.replaceSync(".composer .mode-switch button { font-size: 18px !important; }");
+                    window.__bigText = sheet;
+                    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+                `);
+                inside(width, "with the mode labels at 18 px", await fit());
+                await page.evaluate(
+                    `document.adoptedStyleSheets = document.adoptedStyleSheets.filter((each) => each !== window.__bigText)`,
+                );
+
+                // Something that nothing planned for: the row still keeps Stop.
+                await page.evaluate(`
+                    const spacer = document.createElement("span");
+                    spacer.id = "stress";
+                    spacer.style.cssText = "flex: none; width: 140px; height: 10px";
+                    document.querySelector(".composer-row > .grow").before(spacer);
+                `);
+                inside(width, "with 140 px more in the row", await fit());
+                await page.evaluate(`document.getElementById("stress")?.remove()`);
+                await busy(false);
+                assert.equal((await fit()).shown, 3, "and the buttons are back when Pi stops");
+            }
+        } finally {
+            await busy(false);
+            await page.setViewport(DESKTOP);
+        }
+    },
+);
+
+test(
+    "many rail buttons: the rail scrolls as a whole, and fades the edge where more is",
+    real,
+    async () => {
+        const measure = () =>
+            inPage<{
+                more: string | null;
+                scroll: number;
+                client: number;
+                groupScrolls: boolean;
+                lastIn: boolean;
+            }>(`
+                const rail = document.querySelector(".sidebar .rail");
+                const group = rail.querySelector(".rail-exts");
+                const last = [...rail.querySelectorAll(".rail-ext")].at(-1).getBoundingClientRect();
+                const box = rail.getBoundingClientRect();
+
+                return JSON.stringify({
+                    more: rail.dataset.more ?? null,
+                    scroll: rail.scrollHeight,
+                    client: rail.clientHeight,
+                    groupScrolls: group.scrollHeight > group.clientHeight,
+                    lastIn: last.top >= box.top && last.bottom <= box.bottom,
+                });
+            `);
+        const frames = () =>
+            page.evaluate(`
+                for (let frame = 0; frame < 3; frame++) {
+                    await new Promise((resolve) => requestAnimationFrame(resolve));
+                }
+            `);
+
+        try {
+            await page.setViewport({ ...DESKTOP, height: 560 });
+            await page.navigate(`${base}/s/${session}`);
+            await until(() => has(rail("Meter")), "the meter's rail button");
+            await withMeter(`
+                globalThis.manyRail = [];
+
+                for (let at = 0; at < 8; at++) {
+                    globalThis.manyRail.push(
+                        pocket.rail({ id: "many-" + at, title: "Many " + at, icon: "grid", run: () => {} }),
+                    );
+                }
+
+                return "null";
+            `);
+            await until(() => has(rail("Many 7")), "the eight buttons");
+            await frames();
+            const top = await measure();
+
+            // One scroller: the extensions' group shows all its buttons, and the rail says that more is below.
+            assert.equal(
+                top.groupScrolls,
+                false,
+                "the extensions' buttons do not scroll on their own",
+            );
+            assert.ok(
+                top.scroll > top.client,
+                `the rail is taller than the window: ${JSON.stringify(top)}`,
+            );
+            assert.equal(top.more, "down");
+            assert.equal(top.lastIn, false);
+
+            await page.evaluate(`document.querySelector(".sidebar .rail").scrollTop = 1e6`);
+            await frames();
+            const end = await measure();
+
+            assert.equal(end.more, "up");
+            assert.equal(end.lastIn, true, "the last button scrolls into view");
+
+            // Room for all: no fade.
+            await page.setViewport({ ...DESKTOP, height: 1400 });
+            await frames();
+            await until(
+                async () => (await measure()).more === null,
+                "no fade once everything shows",
+            );
+        } finally {
+            await withMeter(`
+                for (let at = 0; at < 8; at++) {
+                    globalThis.manyRail?.[at]?.remove();
+                }
+
+                return "null";
+            `);
+            await page.setViewport(DESKTOP);
+        }
+    },
+);
+
+test(
+    "pocket.pip.ask drafts into PiP's box, sends only right after a tap, and tells a guest PiP is not there",
+    real,
+    async () => {
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(rail("Meter")), "the meter's rail button");
+        await until(
+            () => inPage<boolean>(`return JSON.stringify(Boolean(globalThis.meterPocket))`),
+            "the meter's pocket",
+        );
+        // The submit goes nowhere: the test is about what the app sends, not about PiP's answer.
+        await page.evaluate(`
+            localStorage.removeItem("pocket.pip.draft");
+            globalThis.submitted = [];
+            const fetched = window.fetch;
+            window.fetch = (url, init) => {
+                if (String(url).endsWith("/submit")) {
+                    globalThis.submitted.push(JSON.parse(init.body).text);
+
+                    return Promise.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+                }
+
+                return fetched(url, init);
+            };
+            document.body.insertAdjacentHTML("beforeend", '<button id="ask-pip" style="position:fixed;top:0;left:0;z-index:99999">Ask</button>');
+            document.querySelector("#ask-pip").onclick = async () => {
+                globalThis.asked = await globalThis.meterPocket.pip.ask("Look at this", { send: true });
+            };
+        `);
+
+        // Draft only, by default: PiP opens with the words, from the extension, and nothing is sent.
+        assert.deepEqual(
+            await withMeter(`return JSON.stringify(await pocket.pip.ask("Look at this"))`),
+            { ok: true, sent: false },
+        );
+        await until(
+            async () =>
+                (await inPage<string>(
+                    `return JSON.stringify(document.querySelector(".pip-composer textarea")?.value ?? "")`,
+                )) === "From the extension “meter”:\nLook at this",
+            "the draft in PiP's box",
+        );
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.submitted)`), []);
+
+        // A send with no tap is refused, and drafts nothing more. A tap from before does not count.
+        await page.evaluate(`(await import("/taps.js")).spendTap()`);
+        assert.deepEqual(
+            await withMeter(
+                `return JSON.stringify(await pocket.pip.ask("Look at this", { send: true }))`,
+            ),
+            { ok: false, reason: "Sending needs a click or a key press just before" },
+        );
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.submitted)`), []);
+
+        // A real click on the module's button sends, once.
+        await page.click({ selector: "#ask-pip" });
+        await until(
+            () => inPage<boolean>(`return JSON.stringify(globalThis.asked !== undefined)`),
+            "the answer",
+        );
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.asked)`), {
+            ok: true,
+            sent: true,
+        });
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.submitted)`), [
+            "From the extension “meter”:\nLook at this",
+        ]);
+        assert.deepEqual(
+            await withMeter(`return JSON.stringify(await pocket.pip.ask("Again", { send: true }))`),
+            { ok: false, reason: "Sending needs a click or a key press just before" },
+            "the click served one send",
+        );
+
+        // A guest has no PiP: a result, not an error.
+        const guest = app.config.addUser("Guest", "guest");
+        const other = await browsers.open(2);
+
+        try {
+            await other.navigate(`${base}/login?token=${encodeURIComponent(guest.token)}`);
+            await until(
+                async () =>
+                    JSON.parse(
+                        await other.evaluate(
+                            `return JSON.stringify(Boolean(globalThis.sharedPocket) && (await import("/store.js")).store.state.server !== undefined)`,
+                        ),
+                    ) as boolean,
+                "the guest's tab",
+            );
+            assert.deepEqual(
+                JSON.parse(
+                    await other.evaluate(
+                        `return JSON.stringify(await globalThis.sharedPocket.pip.ask("Look", { send: true }))`,
+                    ),
+                ),
+                { ok: false, reason: "PiP is not available" },
+            );
+        } finally {
+            app.config.removeUser(guest.user.id);
+        }
+    },
+);
 
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);

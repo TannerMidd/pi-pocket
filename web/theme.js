@@ -61,7 +61,7 @@ const DEFAULTS = {
     sidebar: "open",
     /** The open sidebar's width, its borders, the rail, and the list's: a 254px list. */
     sidebarWidth: 312,
-    /** How the session list groups: "recent" (by day) or "folder". */
+    /** How the session list groups: "priority" (by what needs you), "recent" (by day), or "folder". */
     group: "recent",
     /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). Off until turned on. */
     peeks: false,
@@ -69,6 +69,12 @@ const DEFAULTS = {
     speed: false,
     /** Pi's current thought above the live line, and its finished thoughts open. Off until turned on. */
     showThinking: false,
+    /**
+     * Pi's thinking and tool calls stay folded into their one line until opened, also while they run and in the newest
+     * turn; off, the newest turn's groups open as they come. A group opened or closed by hand keeps that choice, and a
+     * thought alone in its group still follows Show thinking. Off until turned on.
+     */
+    foldActivity: false,
     /** This browser's own layout of each slot (`slots.js`): `{ [slot]: { order: [ids], hidden: { [id]: boolean } } }`. */
     layout: {},
 };
@@ -262,6 +268,18 @@ export function togglePin(id) {
     const pinned = isPinned(id)
         ? store.state.pinned.filter((each) => each !== id)
         : [...store.state.pinned, id];
+
+    localStorage.setItem(PINNED, JSON.stringify(pinned));
+    store.set({ pinned });
+}
+
+export function movePin(id, last) {
+    if (!isPinned(id)) {
+        return;
+    }
+
+    const others = store.state.pinned.filter((each) => each !== id);
+    const pinned = last ? [...others, id] : [id, ...others];
 
     localStorage.setItem(PINNED, JSON.stringify(pinned));
     store.set({ pinned });

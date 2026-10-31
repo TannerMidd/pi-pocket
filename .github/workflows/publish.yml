@@ -1,0 +1,91 @@
+# Publishes the package to npm when a GitHub release is published.
+# It uses npm trusted publishing (OIDC): no npm token, no login, no one-time password.
+# One-time setup on npmjs.com: pi-pocket → Settings → Trusted publishing → GitHub Actions,
+# repository TannerMidd/pi-pocket, workflow publish.yml.
+name: Publish to npm
+
+on:
+    release:
+        types: [published]
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Release tag to publish, such as v0.26.1 or v0.27.0-beta.1"
+                required: true
+
+permissions:
+    contents: read
+    id-token: write
+
+concurrency:
+    group: npm-publish
+    cancel-in-progress: false
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  registry-url: https://registry.npmjs.org
+
+            # npm 11.5.1 and later publish with trusted publishing; npm 12 leaves npm-shrinkwrap.json out of the package.
+            - name: Use an npm that supports trusted publishing
+              run: npm install -g npm@11
+
+            - name: Check the tag matches package.json
+              env:
+                  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+              run: |
+                  version="$(node -p "require('./package.json').version")"
+                  if [ "v$version" != "$TAG" ]; then
+                      echo "Tag $TAG does not match package.json version $version"
+                      exit 1
+                  fi
+                  echo "VERSION=$version" >> "$GITHUB_ENV"
+
+            - name: Skip a version npm already has
+              id: exists
+              run: |
+                  if npm view "pi-pocket@$VERSION" version >/dev/null 2>&1; then
+                      echo "pi-pocket@$VERSION is already on npm"
+                      echo "skip=true" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Install
+              if: steps.exists.outputs.skip != 'true'
+              run: npm ci
+
+            - name: Type check and lint
+              if: steps.exists.outputs.skip != 'true'
+              run: npm run check && npm run lint
+
+            # The full suite (with its browser tests) runs before a release is merged, not here.
+            # A pre-release version (0.27.0-beta.1) goes to the beta dist-tag, so latest and its
+            # installs and updates stay on the stable release.
+            - name: Publish
+              if: steps.exists.outputs.skip != 'true'
+              run: |
+                  cp package-lock.json npm-shrinkwrap.json
+                  npm pack --dry-run --json --ignore-scripts | node -e '
+                      let text = "";
+                      process.stdin.on("data", (chunk) => (text += chunk)).on("end", () => {
+                          const packed = Object.values(JSON.parse(text))[0];
+
+                          if (!packed?.files?.some((file) => file.path === "npm-shrinkwrap.json")) {
+                              console.error("The package has no npm-shrinkwrap.json: installs would not get the tested dependency versions.");
+                              process.exit(1);
+                          }
+                      });
+                  '
+                  case "$VERSION" in
+                      *-*) dist_tag=beta ;;
+                      *) dist_tag=latest ;;
+                  esac
+                  echo "Publishing pi-pocket@$VERSION with the dist-tag $dist_tag"
+                  npm publish --ignore-scripts --access public --tag "$dist_tag" --loglevel verbose

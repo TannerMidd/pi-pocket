@@ -271,3 +271,24 @@ export default (_host, web) => {
     await loader.reload("tooled.ts");
     assert.equal(told, 2);
 });
+
+test("while paused for an update, an edited module loads nothing; after the pause, edits load again", async () => {
+    const { dropIn, loader, installed } = setUp();
+
+    writeFileSync(join(dropIn, "paused.ts"), gated("paused", 1));
+    await loader.reload("paused.ts");
+    loader.watch();
+
+    try {
+        loader.pause(true);
+        writeFileSync(join(dropIn, "paused.ts"), gated("paused", 2));
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        assert.deepEqual(installed(), ["t-paused@1"], "the new version does not load");
+
+        loader.pause(false);
+        writeFileSync(join(dropIn, "paused.ts"), gated("paused", 3));
+        await until(() => installed().includes("t-paused@3"), "the edit after the pause loads");
+    } finally {
+        await loader.close();
+    }
+});

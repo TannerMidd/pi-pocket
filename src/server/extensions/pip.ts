@@ -206,16 +206,29 @@ export default function createPip(host: PocketHost) {
     const read = defineTool({
         name: "session_read",
         description:
-            "Read the newest part of a session: its state, calls waiting for approval, scheduled messages, and its last messages, with Pi's last answer in full.",
+            "Read the newest part of a session: its state, calls waiting for approval, scheduled messages, and its last messages. Pi's last answer comes in parts of up to 12000 characters: when it is cut, a note says how many characters are left, and answerFrom reads them.",
         parameters: Type.Object({
             session,
             entries: Type.Optional(
                 Type.Number({ description: "How many of the newest entries to read (default 40)" }),
             ),
+            answerFrom: Type.Optional(
+                Type.Number({
+                    description:
+                        "Read only Pi's last answer, from this character on (use the number in the note of a cut answer)",
+                }),
+            ),
         }),
         replay: "safe",
         execute: async (args, api) =>
-            reply(await host.pip.read(api.conversationId, args.session, args.entries)),
+            reply(
+                await host.pip.read(
+                    api.conversationId,
+                    args.session,
+                    args.entries,
+                    args.answerFrom,
+                ),
+            ),
     });
 
     // The GitHub tools need a server that has them: one started before they were added gets them at its restart.

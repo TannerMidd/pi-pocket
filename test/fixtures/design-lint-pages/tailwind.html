@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Tailwind-like</title>
+        <style>
+            *,
+            ::before,
+            ::after {
+                box-sizing: border-box;
+                margin: 0;
+                border: 0 solid #e5e7eb;
+            }
+            body {
+                font-family: ui-sans-serif, system-ui, sans-serif;
+                line-height: 1.5;
+                color: #111827;
+                background: #f9fafb;
+            }
+            .flex {
+                display: flex;
+            }
+            .grid {
+                display: grid;
+            }
+            .items-center {
+                align-items: center;
+            }
+            .justify-between {
+                justify-content: space-between;
+            }
+            .gap-4 {
+                gap: 1rem;
+            }
+            .gap-2 {
+                gap: 0.5rem;
+            }
+            .p-4 {
+                padding: 1rem;
+            }
+            .p-6 {
+                padding: 1.5rem;
+            }
+            .px-4 {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+            .py-2 {
+                padding-top: 0.5rem;
+                padding-bottom: 0.5rem;
+            }
+            .px-6 {
+                padding-left: 1.5rem;
+                padding-right: 1.5rem;
+            }
+            .py-3 {
+                padding-top: 0.75rem;
+                padding-bottom: 0.75rem;
+            }
+            .bg-white {
+                background: #fff;
+            }
+            .bg-indigo-600 {
+                background: #4f46e5;
+            }
+            .text-white {
+                color: #fff;
+            }
+            .text-gray-600 {
+                color: #4b5563;
+            }
+            .text-gray-900 {
+                color: #111827;
+            }
+            .text-indigo-700 {
+                color: #4338ca;
+            }
+            .rounded-lg {
+                border-radius: 0.5rem;
+            }
+            .rounded-full {
+                border-radius: 9999px;
+            }
+            .shadow {
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+            .text-sm {
+                font-size: 0.875rem;
+                line-height: 1.25rem;
+            }
+            .text-2xl {
+                font-size: 1.5rem;
+                line-height: 2rem;
+            }
+            .font-bold {
+                font-weight: 700;
+            }
+            .font-semibold {
+                font-weight: 600;
+            }
+            .max-w-4xl {
+                max-width: 56rem;
+            }
+            .mx-auto {
+                margin-left: auto;
+                margin-right: auto;
+            }
+            .mt-4 {
+                margin-top: 1rem;
+            }
+            .mb-2 {
+                margin-bottom: 0.5rem;
+            }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                min-height: 44px;
+            }
+            .border-b {
+                border-bottom-width: 1px;
+            }
+            @media (min-width: 768px) {
+                .md-cols {
+                    grid-template-columns: repeat(3, 1fr);
+                }
+            }
+            a:focus-visible,
+            button:focus-visible {
+                outline: 2px solid #4f46e5;
+                outline-offset: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <header class="bg-white border-b" data-pid="nav">
+            <div class="flex items-center justify-between max-w-4xl mx-auto px-4">
+                <a class="btn font-bold text-gray-900" href="#">Acme</a>
+                <nav class="flex gap-2">
+                    <a class="btn px-4 text-gray-600" href="#">Docs</a
+                    ><a class="btn px-4 text-gray-600" href="#">Pricing</a>
+                </nav>
+            </div>
+        </header>
+        <main class="max-w-4xl mx-auto p-6" data-pid="main">
+            <h1 class="text-2xl font-bold" data-pid="title">Ship faster</h1>
+            <p class="text-gray-600 mt-4" data-pid="lede">Everything your team needs.</p>
+            <div class="grid md-cols gap-4 mt-4">
+                <section class="bg-white rounded-lg shadow p-6" data-pid="c1">
+                    <h2 class="font-semibold mb-2">Fast</h2>
+                    <p class="text-sm text-gray-600">Builds in seconds.</p>
+                </section>
+                <section class="bg-white rounded-lg shadow p-6" data-pid="c2">
+                    <h2 class="font-semibold mb-2">Safe</h2>
+                    <p class="text-sm text-gray-600">Typed end to end.</p>
+                </section>
+                <section class="bg-white rounded-lg shadow p-6" data-pid="c3">
+                    <h2 class="font-semibold mb-2">Open</h2>
+                    <p class="text-sm text-gray-600">MIT licensed.</p>
+                </section>
+            </div>
+            <div class="mt-4">
+                <a
+                    class="btn bg-indigo-600 text-white rounded-lg px-6 py-3 font-semibold"
+                    href="#"
+                    data-pid="cta"
+                    >Get started</a
+                >
+                <a class="btn text-indigo-700 px-4" href="#" data-pid="learn">Learn more</a>
+            </div>
+        </main>
+    </body>
+</html>

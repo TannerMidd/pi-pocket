@@ -20,7 +20,7 @@ A linked session is an ordinary session. The session list shows it under the ses
 - Without `title`, the title is the first line of the message.
 - `model` is `provider/modelId`. While the owner's list (Menu → Providers → Models for subagents) is empty, it must be the source's model. Once the list has models, it must be one of them, and the source's own model counts only when it is listed. Without `model`, the session uses the source's model if the list is empty or has it. If the list does not have it, the call is refused with an error that names the allowed models: the caller must choose one (the error is a 400 for a human route).
 - `send` refuses a session that runs on a model off the list (a person changed it, or the owner changed the list), when the list is not empty. A message from a linked session to the session that started it is a reply, not work: it goes whatever model that session runs on.
-- `thinking` can be at most the source's level. Without it, the session uses the source's level. Pi Pocket lowers it to the highest level that the model has.
+- `thinking` can be any level, also one above the source's. Without it, the session uses the source's level. Pi Pocket lowers it to the highest level that the model has, or uses the lowest level of the model when it has none that low.
 - When a model cannot be used now, Pi Pocket refuses the call before it makes anything.
 
 ## Starts from a human page
@@ -28,13 +28,13 @@ A linked session is an ordinary session. The session list shows it under the ses
 Since 0.16.0, a [conversation-bound route](routes.md#bind-a-source-conversation) gets `request.linkedSessions.start({ title?, message, model?, thinking?, cwd? }, key)` and `list()`. These methods act as the authenticated person and bound source, not `host.requesterOf(source)`. They have no source-id or actor parameter. They end with the request, so await each start in the handler.
 
 - The same team, source plan, turn, spend, allowed-model, and provider checks apply. No message is added to the source, and its requester is unchanged.
-- Explicit thinking must be supported by the chosen model and no higher than the source's level. It is rejected rather than silently lowered. Omitted thinking inherits with the existing model cap policy. Read `request.conversation.model` and `thinkingLevel`, with `host.modelInfo("provider/modelId")`, to show the effective choices.
+- Explicit thinking must be a level that the chosen model has. It is rejected rather than silently lowered. Omitted thinking inherits the source's level, which Pi Pocket lowers to a level that the model has. Read `request.conversation.model` and `thinkingLevel`, with `host.modelInfo("provider/modelId")`, to show the effective choices.
 - Source folder/model/thinking changes while a start waits cause a 409. Other inherited agent settings are read fresh in the creation transaction. The target cannot be reconfigured to substitute another model, level, or folder before its first message is admitted.
 - Keys share the existing receipt store. Prefix them with the module's name and keep one stable key per logical role start. A receipt made for another clicking person is a 409, never permission to act as that person.
 - `list()` returns `HumanLinkedSession[]`: the existing address and audience-safe metadata, plus a `conversationId` visible to this person. Use `pocket.openConversation(item.conversationId)` or a start's `session` to open it. Do not put these ids in a model transcript. The host's `list(source)` still gives opaque addresses only.
 - The route waits only for initial-message admission, not an answer. The final authorization boundary is when that admission enters Durable's mutation line. A short child-context lease rejects intervening source/target policy changes and rechecks synchronous actor, model, and spend policy there. After admission, later cancellation does not undo work.
 
-Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0"`. `host.linkedSessions` retains its previous requester and thinking-cap behavior.
+Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0"`. `host.linkedSessions` retains its previous requester behavior.
 
 ## Send a message
 

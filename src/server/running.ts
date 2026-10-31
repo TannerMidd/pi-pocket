@@ -114,6 +114,17 @@ async function describeTask(
             };
         }
 
+        case "pocket.background": {
+            const item = await app.background.byTask(id, String(node.id));
+
+            return {
+                label:
+                    item === undefined
+                        ? "running a command in the background"
+                        : `running in the background: ${app.background.describe(id, item)}`,
+            };
+        }
+
         case "pocket.shell": {
             const command = await app.shell.describe(node.id);
 

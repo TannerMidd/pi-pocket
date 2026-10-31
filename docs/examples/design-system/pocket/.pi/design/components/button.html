@@ -1,0 +1,203 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Button",
+        "description": "Starts an action. Four kinds: primary for the one thing to do on a screen, secondary for the rest, ghost for quiet actions in a toolbar, and danger for what cannot be undone.",
+        "states": ["default", "hover", "focus", "active", "disabled"],
+        "usage": {
+            "do": [
+                "Use one primary button on a screen.",
+                "Start the label with a verb: Run, Save, Send to Pi.",
+                "Keep the label to one or two words."
+            ],
+            "dont": [
+                "Do not use danger for an action that can be undone.",
+                "Do not remove the focus ring.",
+                "Do not make a touch target smaller than 44 px."
+            ]
+        },
+        "tokens": [
+            "border.width.hairline",
+            "border.width.thick",
+            "button.danger.bg",
+            "button.danger.bg-hover",
+            "button.danger.fg",
+            "button.disabled.bg",
+            "button.disabled.fg",
+            "button.focus-offset",
+            "button.gap",
+            "button.ghost.bg-active",
+            "button.ghost.bg-hover",
+            "button.ghost.fg",
+            "button.height",
+            "button.padding-x",
+            "button.primary.bg",
+            "button.primary.bg-active",
+            "button.primary.bg-hover",
+            "button.primary.fg",
+            "button.radius",
+            "button.secondary.bg",
+            "button.secondary.bg-hover",
+            "button.secondary.border",
+            "button.secondary.fg",
+            "color.bg.pressed",
+            "color.danger.fill-hover",
+            "font.family.sans",
+            "font.leading.snug",
+            "font.size.sm",
+            "font.weight.semibold",
+            "motion.duration.hover",
+            "motion.ease.standard",
+            "shadow.focus-ring",
+            "size.tap",
+            "space.2"
+        ]
+    }
+</script>
+<style>
+    .pk-button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .pk-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--button-gap);
+        min-height: var(--button-height);
+        padding: 0 var(--button-padding-x);
+        border: var(--border-width-hairline) solid transparent;
+        border-radius: var(--button-radius);
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        line-height: var(--font-leading-snug);
+        cursor: pointer;
+        transition:
+            background-color var(--motion-duration-hover) var(--motion-ease-standard),
+            box-shadow var(--motion-duration-hover) var(--motion-ease-standard);
+    }
+
+    .pk-button:focus-visible,
+    .pk-button.is-focus {
+        outline: var(--border-width-thick) solid transparent;
+        outline-offset: var(--button-focus-offset);
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    .pk-button--primary {
+        background: var(--button-primary-bg);
+        color: var(--button-primary-fg);
+    }
+
+    .pk-button--primary:hover,
+    .pk-button--primary.is-hover {
+        background: var(--button-primary-bg-hover);
+    }
+
+    .pk-button--primary:active,
+    .pk-button--primary.is-active {
+        background: var(--button-primary-bg-active);
+    }
+
+    .pk-button--secondary {
+        background: var(--button-secondary-bg);
+        border-color: var(--button-secondary-border);
+        color: var(--button-secondary-fg);
+    }
+
+    .pk-button--secondary:hover,
+    .pk-button--secondary.is-hover {
+        background: var(--button-secondary-bg-hover);
+    }
+
+    .pk-button--secondary:active,
+    .pk-button--secondary.is-active {
+        background: var(--color-bg-pressed);
+    }
+
+    .pk-button--ghost {
+        background: transparent;
+        color: var(--button-ghost-fg);
+    }
+
+    .pk-button--ghost:hover,
+    .pk-button--ghost.is-hover {
+        background: var(--button-ghost-bg-hover);
+    }
+
+    .pk-button--ghost:active,
+    .pk-button--ghost.is-active {
+        background: var(--button-ghost-bg-active);
+    }
+
+    .pk-button--danger {
+        background: var(--button-danger-bg);
+        color: var(--button-danger-fg);
+    }
+
+    .pk-button--danger:hover,
+    .pk-button--danger.is-hover {
+        background: var(--button-danger-bg-hover);
+    }
+
+    .pk-button--danger:active,
+    .pk-button--danger.is-active {
+        background: var(--color-danger-fill-hover);
+    }
+
+    .pk-button:disabled,
+    .pk-button.is-disabled {
+        background: var(--button-disabled-bg);
+        border-color: transparent;
+        color: var(--button-disabled-fg);
+        cursor: not-allowed;
+    }
+
+    @media (pointer: coarse) {
+        .pk-button {
+            min-height: var(--size-tap);
+        }
+    }
+</style>
+<template data-state="default">
+    <div class="pk-button-row">
+        <button class="pk-button pk-button--primary">Run</button>
+        <button class="pk-button pk-button--secondary">Cancel</button>
+        <button class="pk-button pk-button--ghost">Skip</button>
+        <button class="pk-button pk-button--danger">Delete</button>
+    </div>
+</template>
+<template data-state="hover">
+    <div class="pk-button-row">
+        <button class="pk-button pk-button--primary is-hover">Run</button>
+        <button class="pk-button pk-button--secondary is-hover">Cancel</button>
+        <button class="pk-button pk-button--ghost is-hover">Skip</button>
+        <button class="pk-button pk-button--danger is-hover">Delete</button>
+    </div>
+</template>
+<template data-state="focus">
+    <div class="pk-button-row">
+        <button class="pk-button pk-button--primary is-focus">Run</button>
+        <button class="pk-button pk-button--secondary is-focus">Cancel</button>
+        <button class="pk-button pk-button--ghost is-focus">Skip</button>
+        <button class="pk-button pk-button--danger is-focus">Delete</button>
+    </div>
+</template>
+<template data-state="active">
+    <div class="pk-button-row">
+        <button class="pk-button pk-button--primary is-active">Run</button>
+        <button class="pk-button pk-button--secondary is-active">Cancel</button>
+        <button class="pk-button pk-button--ghost is-active">Skip</button>
+        <button class="pk-button pk-button--danger is-active">Delete</button>
+    </div>
+</template>
+<template data-state="disabled">
+    <div class="pk-button-row">
+        <button class="pk-button pk-button--primary" disabled>Run</button>
+        <button class="pk-button pk-button--secondary" disabled>Cancel</button>
+        <button class="pk-button pk-button--ghost" disabled>Skip</button>
+        <button class="pk-button pk-button--danger" disabled>Delete</button>
+    </div>
+</template>

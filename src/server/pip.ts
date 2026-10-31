@@ -108,8 +108,7 @@ export const SESSION_OPEN = "<session-output>";
 export const SESSION_CLOSE = "</session-output>";
 /** Follows waiting at once, at most. */
 const MAX_FOLLOWS = 50;
-/** How much of a session's last answer a report and a read carry. */
-const ANSWER_CHARS = 3000;
+const ANSWER_CHARS = 12_000;
 const LINE_CHARS = 600;
 
 type FollowInput = {
@@ -149,6 +148,30 @@ export function fenced(text: string): string {
 /** A tool call's key made into a request id's: short and safe whatever the call ids look like. */
 function requestKey(key: string): string {
     return createHash("sha256").update(key).digest("base64url").slice(0, 40);
+}
+
+// The note is ours, so it goes outside the fence.
+function answerPart(
+    text: string,
+    from: number,
+    session: ConversationId,
+): { text: string; note?: string } {
+    let end = Math.min(text.length, from + ANSWER_CHARS);
+
+    // Never split a surrogate pair.
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) {
+        end -= 1;
+    }
+
+    const left = text.length - end;
+
+    return {
+        text: text.slice(from, end),
+        note:
+            left === 0
+                ? undefined
+                : `[… ${left} more characters: read them with session_read, session ${String(session)}, answerFrom ${end}]`,
+    };
 }
 
 function textOf(message: AssistantMessage | undefined): string {
@@ -862,8 +885,8 @@ export class Pip {
         };
     }
 
-    /** The newest part of a session, as text for PiP: its state, what waits there, and its last messages. */
-    async read(pipId: ConversationId, sessionId: number, entries = 40): Promise<string> {
+    async read(pipId: ConversationId, sessionId: number, entries = 40, from = 0): Promise<string> {
+        const answerFrom = Number.isFinite(from) ? Math.max(0, Math.floor(from)) : 0;
         const app = this.#app;
         const user = this.#person(pipId);
         const id = this.#session(pipId, user, sessionId);
@@ -879,16 +902,33 @@ export class Pip {
             .map((entry) => projectEntry(entry))
             .filter((entry): entry is ClientEntry => entry !== undefined)
             .reverse();
-        const lastAnswer = projected.findLast(
+        const last = projected.findLast(
             (entry) =>
                 entry.kind === "assistant" && entry.blocks.some((block) => block.type === "text"),
-        )?.id;
+        );
+        const lastAnswer = last?.id;
+        const answer =
+            last?.kind === "assistant"
+                ? last.blocks
+                      .flatMap((block) =>
+                          block.type === "text" && block.text.trim() !== "" ? [block.text] : [],
+                      )
+                      .join("\n")
+                      .trim()
+                : "";
+
+        if (answerFrom > answer.length) {
+            throw new Error(`The last answer has only ${answer.length} characters.`);
+        }
+
         const failed = new Set(
             projected.flatMap((entry) =>
                 entry.kind === "toolResult" && entry.isError ? [entry.callId] : [],
             ),
         );
         const lines: string[] = [];
+        const part = answerPart(answer, answerFrom, id);
+        let shown = false;
 
         for (const entry of projected) {
             if (entry.kind === "user") {
@@ -896,9 +936,12 @@ export class Pip {
             } else if (entry.kind === "assistant") {
                 for (const block of entry.blocks) {
                     if (block.type === "text" && block.text.trim() !== "") {
-                        lines.push(
-                            `Pi: ${clip(block.text, entry.id === lastAnswer ? ANSWER_CHARS : LINE_CHARS)}`,
-                        );
+                        if (entry.id !== lastAnswer) {
+                            lines.push(`Pi: ${clip(block.text, LINE_CHARS)}`);
+                        } else if (!shown) {
+                            shown = true;
+                            lines.push(`Pi: ${part.text}`);
+                        }
                     } else if (block.type === "toolCall") {
                         lines.push(
                             `  · ${callLine(block.name, block.args)}${failed.has(block.id) ? " (failed)" : ""}`,
@@ -950,13 +993,13 @@ export class Pip {
         ];
 
         this.#looked(pipId, id);
+        const body = answerFrom > 0 ? [`Pi: ${part.text}`] : [...pending, ...lines];
         const head = [
             `#${String(sessionId)} ${quoted(meta.title ?? "New session")} · ${state}${meta.archived === true ? " · archived" : ""}`,
             `Folder: ${snippet(homePath(app.cwdOf(id)), 300)}${meta.worktree === undefined ? "" : ` (worktree, branch ${snippet(meta.worktree.branch, 120)})`}`,
             "",
-            pending.length + lines.length === 0
-                ? "(no messages yet)"
-                : fenced([...pending, ...lines].join("\n")),
+            body.length === 0 ? "(no messages yet)" : fenced(body.join("\n")),
+            ...(part.note === undefined ? [] : [part.note]),
         ];
 
         return head.join("\n");
@@ -1531,7 +1574,9 @@ export class Pip {
             .flatMap((block) => (block.type === "text" ? [block.text] : []))
             .join("\n");
 
-        return `${name} ${state}. Pi's last answer:\n${fenced(clip(text, ANSWER_CHARS))}`;
+        const part = answerPart(text.trim(), 0, id);
+
+        return `${name} ${state}. Pi's last answer:\n${fenced(part.text)}${part.note === undefined ? "" : `\n${part.note}`}`;
     }
 
     /**
@@ -1647,7 +1692,9 @@ export class Pip {
             return undefined;
         }, context);
 
-        return `${name} answered your message:\n${fenced(clip(text, ANSWER_CHARS) || "(no text)")}`;
+        const part = answerPart(text.trim(), 0, input.sessionId);
+
+        return `${name} answered your message:\n${fenced(part.text || "(no text)")}${part.note === undefined ? "" : `\n${part.note}`}`;
     }
 
     /** Mark this follow as reported in PiP's list, where it stays a while so a replayed call does not follow again. */

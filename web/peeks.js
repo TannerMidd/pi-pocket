@@ -479,7 +479,7 @@ function PeekLine({ line }) {
  * Whether a call's command is short enough to show whole on its tile: only then may it be allowed from there. Shown
  * whole, it is never clamped; the tile also measures that it fits (`PeekTile`), as wide characters take more room.
  */
-const wholeOnTile = (approval) =>
+export const wholeOnTile = (approval) =>
     approval.subject.length <= ALLOW_LENGTH && !/[\r\n]/.test(approval.subject);
 
 /** The call a session waits on, in full when it is short, and why the guard asks. */
@@ -492,7 +492,12 @@ function PeekAsk({ approval, compact, who }) {
         <div class=${`peek-ask-what mono ${wholeOnTile(approval) ? "whole" : ""}`}>
             ${approval.subject}
         </div>
-        ${!compact && approval.reason && html`<div class="peek-ask-why">${approval.reason}</div>`}
+        ${
+            // A question (a form) is in its reason, its title alone says little: a compact tile shows it too.
+            (!compact || approval.form) &&
+            approval.reason &&
+            html`<div class="peek-ask-why">${approval.reason}</div>`
+        }
     </div>`;
 }
 

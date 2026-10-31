@@ -953,6 +953,21 @@ export class ExtensionWebs {
         };
     }
 
+    /** While an update moves Pi Pocket's checkout, browser modules' edits reach no tab: the restart after it does. */
+    #paused = false;
+
+    pause(paused: boolean): void {
+        this.#paused = paused;
+
+        if (paused) {
+            for (const timer of this.#timers.values()) {
+                clearTimeout(timer);
+            }
+
+            this.#timers.clear();
+        }
+    }
+
     /** Look again at browser modules' files when they change: a new version reaches the tabs. */
     watch(): void {
         this.#watching = true;
@@ -1009,6 +1024,10 @@ export class ExtensionWebs {
     }
 
     #recheck(part: WebPart): void {
+        if (this.#paused) {
+            return;
+        }
+
         clearTimeout(this.#timers.get(part));
         this.#timers.set(
             part,

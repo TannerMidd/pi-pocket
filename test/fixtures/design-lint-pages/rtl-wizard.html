@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>RTL</title>
+        <style>
+            body {
+                margin: 0;
+                font: 16px/1.6 system-ui;
+                background: #f7f8fa;
+                color: #1a1d24;
+            }
+            .steps {
+                display: flex;
+                gap: 8px;
+                padding: 16px;
+                list-style: none;
+                margin: 0;
+            }
+            .steps li {
+                flex: 1;
+                padding: 10px;
+                border-radius: 8px;
+                background: #e6e9ef;
+                color: #3c4352;
+                text-align: center;
+            }
+            .steps li.on {
+                background: #1d4ed8;
+                color: #fff;
+            }
+            form {
+                max-width: 420px;
+                margin: 0 auto;
+                padding: 16px;
+                display: grid;
+                gap: 12px;
+            }
+            input {
+                min-height: 44px;
+                border: 1px solid #6b7384;
+                border-radius: 8px;
+                padding: 0 12px;
+                font: inherit;
+            }
+            button {
+                min-height: 44px;
+                border: 0;
+                border-radius: 8px;
+                background: #1d4ed8;
+                color: #fff;
+                font: inherit;
+            }
+            .float {
+                position: relative;
+            }
+            .float label {
+                position: absolute;
+                top: -9px;
+                inset-inline-start: 10px;
+                background: #f7f8fa;
+                padding: 0 4px;
+                font-size: 12px;
+                color: #3c4352;
+            }
+        </style>
+    </head>
+    <body>
+        <ol class="steps" data-pid="steps">
+            <li class="on">1</li>
+            <li>2</li>
+            <li>3</li>
+        </ol>
+        <form data-pid="f">
+            <div class="float"><label for="n">الاسم</label><input id="n" data-pid="n" /></div>
+            <button data-pid="go">التالي</button>
+        </form>
+    </body>
+</html>

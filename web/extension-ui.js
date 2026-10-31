@@ -33,6 +33,7 @@ import {
     panelsBeside,
     store,
 } from "./store.js";
+import { askPipFrom } from "./pip.js";
 import { fromExtensions, SLOTS, slotsChanged } from "./slots.js";
 import { setCallSummary } from "./turns.js";
 import {
@@ -79,7 +80,7 @@ const KINDS = [
 const OPENS = ["page", "sheet", "panel"];
 /** The event core sends a module's tabs when the owner changes its settings (`app.setExtensionSettings`). */
 const SETTINGS_EVENT = "pocket:settings";
-/** The most text `pocket.insertText` puts into the message box at once. */
+/** The most text `pocket.insertText` puts into the message box at once, and `pocket.pip.ask` gives PiP. */
 const INSERT_MAX = 100_000;
 /** The most of a message's text `pocket.messages` gives, and the most messages in a page. */
 const MESSAGE_TEXT = 1000;
@@ -440,7 +441,7 @@ function sync(list, known = true) {
         notify(
             "warning",
             "Extensions' browser parts are off in this tab, and so is the theme. Menu → Extensions turns them back on.",
-            () => openSheet({ type: "extensions", tab: "installed" }),
+            () => openSheet({ type: "extensions", tab: "installed", show: "built-in" }),
         );
     }
 
@@ -1148,6 +1149,25 @@ function pocketFor(record) {
                 insertIntoComposer(text, [], { inline: options?.inline === true });
             }
         },
+        pip: Object.freeze({
+            /** Give PiP text as the person's message: in its box to review, or sent after a tap (`askPipFrom`). */
+            ask(text, options) {
+                tick(record);
+
+                if (typeof text !== "string" || text.trim() === "" || text.length > INSERT_MAX) {
+                    throw new Error(`pocket.pip.ask: give it text, up to ${INSERT_MAX} characters`);
+                }
+
+                if (!live()) {
+                    return Promise.resolve({
+                        ok: false,
+                        reason: "This version of the module is not loaded",
+                    });
+                }
+
+                return askPipFrom(`the extension “${record.title}”`, text, options?.send === true);
+            },
+        }),
         /**
          * Hide or reorder a slot's items, the app's own too, for the people who load this module: what a person chooses
          * in Appearance → Layout wins. Again for the same slot replaces it; `remove` takes it back.
@@ -1773,8 +1793,8 @@ export function browserModuleState(module) {
 // ─── Where they show ─────────────────────────────────────────────────────────
 
 /**
- * The rail's buttons that extensions added, after the app's own tools: a group that scrolls when they are many, so the
- * folded rail's sessions keep their room.
+ * The rail's buttons that extensions added, after the app's own tools. They take the room they need: a rail with more
+ * buttons than room scrolls as a whole, and fades the edge where more is (`useScrollMore`).
  */
 export function ExtensionRailButtons() {
     const buttons = added("rail");

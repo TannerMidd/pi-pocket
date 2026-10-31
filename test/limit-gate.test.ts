@@ -175,6 +175,153 @@ test("the gate opens at the canary's first content, not when its whole stream en
     assert.deepEqual(await stops(a, b), ["stop", "stop"]);
 });
 
+const sharingLimit = {
+    fail:
+        "The ChatGPT user has reached their Subscription Sharing usage limit. " +
+        "Ask the user to try again after their usage limit resets or use an API key instead.",
+};
+
+test("unknown-reset OpenAI subscription limits share the full budget, not overload or try caps", async () => {
+    const g = gate({
+        hours: () => 3_000 / 3_600_000,
+        tuning: {
+            ...TUNING,
+            subscriptionBackoffMs: 30,
+            maxBackoffMs: 10,
+            maxTries: 1,
+        },
+    });
+    const rt = fake(Array(4).fill({ ...sharingLimit, headers: {} }), { ok: true });
+
+    g.install(rt.models);
+
+    try {
+        const first = ask(rt, "gpt-a", "openai", {
+            fetch: async () => new Response("", { status: 200 }),
+        });
+
+        await until(() => g.gates().length === 1);
+
+        const other = ask(rt, "gpt-b", "openai");
+
+        assert.equal(g.gates()[0]!.key, "openai");
+        assert.deepEqual(await stops(first, other), ["stop", "stop"]);
+        assert.equal(rt.calls.length, 6);
+    } finally {
+        g.close();
+    }
+});
+
+test("the six-hour subscription deadline survives restarts and never starts a fresh budget", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "limit-subscription-")), "provider-limits.json");
+    const clock = { now: Date.now() };
+    const since = clock.now;
+    const options = { file, now: () => clock.now, random: () => 0.5 };
+
+    // An unknown reset stays a backoff, not a fabricated provider reset time.
+    for (const minutes of [0, 31, 359]) {
+        clock.now = since + minutes * 60_000;
+
+        const g = gate(options);
+        const rt = fake([], sharingLimit);
+        const stop = new AbortController();
+
+        g.install(rt.models);
+
+        const result = ask(rt, "gpt", "openai", { signal: stop.signal });
+
+        try {
+            await until(
+                () =>
+                    g.gates()[0]?.until ===
+                    Math.min(clock.now + 15 * 60_000, since + 6 * 3_600_000),
+            );
+            assert.equal(g.gates()[0]!.since, since);
+            assert.equal(g.gates()[0]!.kind, "backoff");
+            assert.equal(g.gates()[0]!.resetAt, undefined);
+            assert.equal(g.gates()[0]!.refusing, undefined);
+        } finally {
+            stop.abort();
+            await result;
+            g.close();
+        }
+    }
+
+    clock.now = since + 361 * 60_000;
+
+    const expired = gate(options);
+    const rt = fake([], sharingLimit);
+
+    expired.install(rt.models);
+
+    try {
+        assert.match(
+            (await ask(rt, "gpt", "openai")).errorMessage!,
+            /Not waiting: it did not clear in 6 h/,
+        );
+        await ask(rt, "gpt", "openai");
+        assert.equal(rt.calls.length, 1, "the retry layer cannot start a new six-hour wait");
+    } finally {
+        expired.close();
+    }
+});
+
+test("OpenAI HTTP errors expose reset headers even when the SDK skips onResponse", async () => {
+    const g = gate();
+    const rt = fake([sharingLimit]);
+    const models = {
+        streamSimple(m: Model<Api>, context: unknown, options?: SimpleStreamOptions) {
+            const out = createAssistantMessageEventStream();
+
+            void (async () => {
+                await options!.fetch!("https://provider.example/v1");
+
+                const stream = rt.models.streamSimple(m, context);
+
+                for await (const event of stream) {
+                    out.push(event);
+                }
+
+                out.end(await stream.result());
+            })();
+
+            return out;
+        },
+    };
+    const stop = new AbortController();
+    const reset = Math.floor(Date.now() / 1000) + 3600;
+
+    g.install(models);
+
+    const result = models
+        .streamSimple(
+            { ...model("gpt", "openai"), api: "openai-responses" },
+            {},
+            {
+                signal: stop.signal,
+                fetch: async () =>
+                    new Response("quota", {
+                        status: 429,
+                        headers: {
+                            "x-codex-primary-reset-at": String(reset),
+                            "x-codex-primary-used-percent": "100",
+                        },
+                    }),
+            },
+        )
+        .result();
+
+    try {
+        await until(() => g.gates().length === 1);
+        assert.equal(g.gates()[0]!.kind, "reset");
+        assert.equal(g.gates()[0]!.resetAt, reset * 1000);
+    } finally {
+        stop.abort();
+        await result;
+        g.close();
+    }
+});
+
 test("a weekly window found late, behind a gate that waits hours, refuses at once", async () => {
     const g = gate({ hours: () => 6 });
     const rt = fake(Array(2).fill({ fail: "429 rate_limit_error", headers: {} }));

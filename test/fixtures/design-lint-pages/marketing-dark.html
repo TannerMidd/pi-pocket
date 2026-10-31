@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Marketing dark</title>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            html {
+                color-scheme: dark;
+            }
+            body {
+                margin: 0;
+                font: 18px/1.6 system-ui;
+                background: #0b0d12;
+                color: #e6e9ef;
+            }
+            .hero {
+                padding: 72px 24px;
+                text-align: center;
+                background: radial-gradient(circle at 50% 0, #1b2440, #0b0d12 60%);
+            }
+            h1 {
+                font-size: 44px;
+                line-height: 1.1;
+                margin: 0 0 16px;
+                background: linear-gradient(90deg, #9ab8ff, #e0b3ff);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+            }
+            .hero p {
+                color: #aab2c0;
+                max-width: 36ch;
+                margin: 0 auto 24px;
+            }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                min-height: 48px;
+                padding: 0 28px;
+                border-radius: 12px;
+                background: #7c9cff;
+                color: #0b0d12;
+                text-decoration: none;
+                font-weight: 600;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+                gap: 16px;
+                padding: 32px 24px;
+                max-width: 1000px;
+                margin: 0 auto;
+            }
+            .c {
+                background: #131722;
+                border: 1px solid #232a3a;
+                border-radius: 16px;
+                padding: 20px;
+            }
+            .c h3 {
+                margin: 0 0 8px;
+            }
+            .c p {
+                margin: 0;
+                color: #98a1b3;
+            }
+            .tag {
+                display: inline-block;
+                padding: 2px 10px;
+                border-radius: 99px;
+                background: #1f2a4a;
+                color: #a9bfff;
+                font-size: 13px;
+            }
+        </style>
+    </head>
+    <body>
+        <section class="hero" data-pid="hero">
+            <h1 data-pid="h1">Build in the dark</h1>
+            <p data-pid="p">Dark by default, light when you ask.</p>
+            <a class="btn" href="#" data-pid="cta">Try it</a>
+        </section>
+        <section class="grid" data-pid="grid">
+            <div class="c">
+                <span class="tag">New</span>
+                <h3>Fast</h3>
+                <p>Instant previews.</p>
+            </div>
+            <div class="c">
+                <h3>Private</h3>
+                <p>Runs on your machine.</p>
+            </div>
+            <div class="c">
+                <h3>Open</h3>
+                <p>Read the source.</p>
+            </div>
+        </section>
+    </body>
+</html>
