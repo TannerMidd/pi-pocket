@@ -75,7 +75,7 @@ const stampOf = (info: { mtimeMs: number; size: number }) => `${info.mtimeMs}:${
 /**
  * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
  * a conversation holds many, and then every request fails until they leave its context. A HEIC or HEIF photo is made
- * JPEG first. The note says what differs from the file, in the words of Pi's read tool: the format, then the size.
+ * JPEG first. The note says what differs from the file: the format, then the size in the words of Pi's read tool.
  */
 function make(path: string, mimeType: string, first: boolean): Promise<ModelImage> {
     return inTurn(async () => {
