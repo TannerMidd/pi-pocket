@@ -22,6 +22,15 @@ test("inline math respects delimiters and escapes", () => {
     assert.equal(inlineMath(`$${"x".repeat(MATH_LIMIT + 1)}$`), null);
 });
 
+test("inline math does not close on a $ that has a letter or a digit after it", () => {
+    assert.equal(inlineMath("$HOME/bin:$PATH"), null);
+    assert.equal(inlineMath('$value" and "$type"'), null);
+    assert.equal(inlineMath("$x$é"), null);
+    assert.ok(inlineMath("$a+b$"));
+    assert.ok(inlineMath("$x$, and"));
+    assert.ok(inlineMath("$y$)"));
+});
+
 test("display math supports one or more lines", () => {
     assert.deepEqual(blockMath("$$x=1$$\nrest"), { raw: "$$x=1$$\n", text: "x=1" });
     assert.deepEqual(blockMath("$$\nx+y\n$$\n"), { raw: "$$\nx+y\n$$\n", text: "x+y" });

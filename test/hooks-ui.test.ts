@@ -165,6 +165,15 @@ for (const viewport of ["desktop", "mobile"] as const) {
         await page.click({ selector: ".hook .field button.ghost" });
         assert.ok(await page.waitFor({ selector: ".hook-text" }));
         assert.deepEqual((await hooks())[0], before);
+        await edit();
+        await page.type({ selector: ".hook textarea" }, "Escape drops this draft.");
+        await page.press("Escape");
+        assert.ok(await page.waitFor({ selector: ".hook-text" }));
+        assert.ok(
+            await page.waitFor({ selector: ".sheet" }),
+            "the first Esc leaves the sheet open",
+        );
+        assert.deepEqual((await hooks())[0], before);
         await until(
             () =>
                 inPage<boolean>(

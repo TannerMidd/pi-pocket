@@ -1,11 +1,12 @@
-// Where math starts and ends in markdown. The rules are pandoc's, so that prices stay text: "$5 and $10" holds no math.
+// Where math starts and ends in markdown. The rules are pandoc's, so that "$5 and $10" holds no math.
+// A closing $ before a letter ("$HOME:$PATH") does not close it either.
 // No imports, so Node tests it.
 
 export const MATH_LIMIT = 20_000;
 
 /**
  * Math in a line, at the start of `src`: `$…$`, or `$$…$$` (shown as a block). The opening `$` has no space after it; the
- * closing one has no space before it and no digit after it; `\$` does not close it, and it stays in one paragraph.
+ * closing one has no space before it and no letter or digit after it; `\$` does not close it, and it stays in one paragraph.
  */
 export function inlineMath(src) {
     if (src[0] !== "$") {
@@ -28,7 +29,7 @@ export function inlineMath(src) {
         } else if (char === "\n" && src[at + 1] === "\n") {
             return null;
         } else if (char === "$") {
-            if (!display && (/\s/.test(src[at - 1]) || /\d/.test(src[at + 1] ?? ""))) {
+            if (!display && (/\s/.test(src[at - 1]) || /[\p{L}\p{N}]/u.test(src[at + 1] ?? ""))) {
                 return null;
             }
 

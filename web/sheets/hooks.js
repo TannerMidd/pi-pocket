@@ -93,6 +93,17 @@ function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
                         disabled=${saving}
                         value=${draft}
                         onInput=${(event) => setDraft(event.currentTarget.value)}
+                        onKeyDown=${(event) => {
+                            // Esc cancels the edit, as Cancel does; the sheet closes on the next Esc.
+                            if (
+                                event.key === "Escape" &&
+                                !event.isComposing &&
+                                event.keyCode !== 229
+                            ) {
+                                event.stopPropagation();
+                                setDraft(null);
+                            }
+                        }}
                     ></textarea>
                     <div class="muted small">
                         Applies to future posts. Leave empty for the default instructions.
