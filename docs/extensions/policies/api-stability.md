@@ -45,7 +45,7 @@ These members are public:
 - `roleOf(personId)` (experimental, since 0.27.0)
 - `skillPaths()`, `skills(cwd)`
 - `heldBack(conversationId)`, `onLimitsChanged(listener)`
-- `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental))
+- `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental)); `stop`, `archive` (experimental, since 0.28.0)
 - `text`: `quoted`, `defang`
 - `thinkingLevels`
 - `fetchPublic(url, init)` (experimental, since 0.20.0)
@@ -167,6 +167,8 @@ Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskRes
 Since 0.27.0, `host.roleOf(personId)` is experimental, and so is the `scroll` field of `host.browser`'s `snapshot()`.
 
 Since 0.28.0, `web.presentEntry` and `pocket.entryPresentation` are experimental, with `PresentEntry`; so is `ConversationWebRequest.conversationUsage`, with `UsageTotals` and `ConversationUsage`. A module names how an input it sends shows. The model still reads that message in full. Since then too, `pocket.messages` leaves out an input stored as a module's own kind: before, such an input was not a message in the transcript at all.
+
+Since 0.28.0, `run.ended` carries `outcome` (`done`, `failed`, or `aborted`) and, when the run gave up, `failure`: the same short line the session list shows. `LinkedSession.failed` carries that line for a linked session's last run, with the same audience rule as its title, and only while the failure stands. Both are experimental.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
 

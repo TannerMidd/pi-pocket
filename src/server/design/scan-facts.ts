@@ -161,6 +161,7 @@ export function newFacts(): Facts {
             certain: false,
             pending: [],
             notes: [],
+            partial: false,
             done: false,
         },
         figs: [],

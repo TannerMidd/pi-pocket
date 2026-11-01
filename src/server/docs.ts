@@ -102,7 +102,20 @@ export const LinkedSessionRelayDoc = defineDoc<{ sent: number }>({
  * 30 days, and the newest 1000, as `shell.ts` keeps its requests. (Not a document family: those cannot be pruned.)
  */
 export const LinkedSessionCallsDoc = defineDoc<{
-    items: Record<string, { conversationId?: number; by?: string; at: number }>;
+    items: Record<
+        string,
+        {
+            conversationId?: number;
+            by?: string;
+            at: number;
+            /**
+             * What a stop or an archive returned, so a repeat gives that and changes nothing again. `stopping`: the stop
+             * has not finished.
+             */
+            result?:
+                { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
+        }
+    >;
 }>({
     kind: "pocket.linked-session-calls",
     version: 1,
@@ -532,6 +545,8 @@ export type BackgroundTask = {
      * `toldAt`) is not told again.
      */
     untold?: true;
+    /** The request id of the message that tells it, saved before that message is sent, until it is told. */
+    batch?: string;
     /** Whether Pi gets a message when it ends: false for one Pi stopped itself, which needs no message. */
     notify: boolean;
     /** Whom Pi worked for when it started the command: its message goes out as their work. */
@@ -681,6 +696,20 @@ export const ShellRequestsDoc = defineDoc<{ items: Record<string, number> }>({
     history: "latest",
     fork: "initial",
     initial: () => ({ items: {} }),
+});
+
+/**
+ * Why a session's last run failed, in the same short line the session list shows. A later run clears it when that run
+ * starts, so a process that starts again still knows a run that gave up. A stop is not a failure and writes nothing.
+ */
+export const RunFailureDoc = defineDoc<{ text?: string }>({
+    kind: "pocket.run-failure",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({}),
 });
 
 /**

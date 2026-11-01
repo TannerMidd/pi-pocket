@@ -3,7 +3,7 @@ import { onRoute, pushRoute } from "./back.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
 import { fitClock, moment } from "./clock.js";
-import { fingerprint } from "./fingerprint.js";
+import { fingerprint } from "./text-hash.js";
 import * as disk from "./session-cache.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
@@ -80,6 +80,7 @@ const emptyView = () => ({
     artifacts: [],
     subagents: [],
     authors: {},
+    linkedPeers: {},
     reactions: {},
     pins: [],
     turns: { on: false, asks: [] },
@@ -1374,6 +1375,7 @@ function mergeView(current, data) {
         artifacts: data.artifacts ?? base.artifacts,
         subagents: data.subagents ?? base.subagents,
         authors: data.authors ?? base.authors,
+        linkedPeers: data.linkedPeers ?? base.linkedPeers,
         reactions: data.reactions ?? base.reactions,
         pins: data.pins ?? base.pins,
         turns: data.turns ?? base.turns,

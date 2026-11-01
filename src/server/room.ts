@@ -28,6 +28,7 @@ import {
     DecisionsDoc,
     type Goal,
     GoalDoc,
+    LinkedSessionPeersDoc,
     type Notes,
     NotesDoc,
     type Pin,
@@ -65,7 +66,7 @@ import {
     turnStart,
 } from "./projection.ts";
 import { describeRepeat } from "./when.ts";
-import { fingerprint } from "../../web/fingerprint.js";
+import { fingerprint } from "../../web/text-hash.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -85,6 +86,7 @@ export const ROOM_DOCS = new Set(
         ScheduleDoc,
         GoalDoc,
         WatchDoc,
+        LinkedSessionPeersDoc,
     ].map((doc) => doc.definition.kind),
 );
 /** A typing indicator lasts this long unless the browser renews it. */
@@ -356,6 +358,8 @@ export class Room {
     schedules: Record<string, Schedule> = {};
     goal: Goal | undefined;
     watch: PrWatch | undefined;
+    /** The sessions this one knows by an address (`linked-sessions.ts`): whom each linked session's message is from. */
+    peers: Record<string, number> = {};
     /** Who is typing where, by user id. Memory only: it means nothing after a restart. */
     readonly #typing = new Map<string, { where: TypingPlace; timer: NodeJS.Timeout }>();
     parent: { id: ConversationId; title: string } | undefined;
@@ -410,6 +414,9 @@ export class Room {
         };
         this.goal = (await harness.snapshot(GoalDoc, this.id, context))?.goal;
         this.watch = (await harness.snapshot(WatchDoc, this.id, context))?.watch;
+        this.peers = {
+            ...((await harness.snapshot(LinkedSessionPeersDoc, this.id, context))?.peers ?? {}),
+        };
 
         if (owner !== undefined) {
             const siblings =
@@ -481,6 +488,8 @@ export class Room {
             this.goal = (value?.goal as Goal | undefined) ?? undefined;
         } else if (kind === WatchDoc.definition.kind) {
             this.watch = (value?.watch as PrWatch | undefined) ?? undefined;
+        } else if (kind === LinkedSessionPeersDoc.definition.kind) {
+            this.peers = { ...((value?.peers as Record<string, number>) ?? {}) };
         }
 
         if (kind === AuthorsDoc.definition.kind) {
@@ -735,6 +744,12 @@ export class Room {
             // Reports on their way that a spend limit holds back, and why: the subagents bar says so.
             subagentsHeld: this.#reporting.size > 0 ? (this.#held ?? null) : null,
             authors: this.authors,
+            // The session each linked session's message is from, by its address: only those this person may open.
+            linkedPeers: Object.fromEntries(
+                Object.entries(this.peers).filter(([, id]) =>
+                    this.#app.canSee(client.user, id as unknown as ConversationId),
+                ),
+            ),
             reactions: this.reactions,
             pins: this.pins,
             turns: this.turns,

@@ -73,7 +73,10 @@ test("a schedule of an archived session is marked in the Schedules sheet", real,
         async () =>
             await inPage<boolean>(`
                 const { store, openSheet } = await import("/store.js");
-                if (store.state.sessions.length === 0) return JSON.stringify(false);
+                if (store.state.sessions.length === 0) {
+                    return JSON.stringify(false);
+                }
+
                 openSheet({ type: "schedules" });
                 return JSON.stringify(document.querySelector(".schedule") !== null);
             `),

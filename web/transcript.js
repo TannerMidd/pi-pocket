@@ -574,6 +574,99 @@ function PresentedText({ entry, text }) {
     `;
 }
 
+/** How the app marks a linked session's message (`linked-sessions.ts`): the sender's address in this session. */
+const LINKED_VIA = /^linked session (\S+)$/;
+
+/** A linked session's message folds past this many lines, or this many characters. */
+const LINKED_FOLD_LINES = 10;
+const LINKED_FOLD_CHARS = 900;
+
+/**
+ * A message from a linked session: an agent, not a person, in a card of its own. Its head names the session and opens
+ * it when this person may (`linkedPeers`, by address); its text shows as Markdown, as Pi's replies do, and a long one
+ * folds to its first lines. Tapping the card opens its message sheet, as a person's message does.
+ */
+function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
+    const [open, setOpen] = useState(false);
+    const id = view.linkedPeers?.[address];
+    const session =
+        id === undefined ? undefined : store.state.sessions.find((each) => each.id === id);
+    const name = session ? (session.title ?? "New session") : undefined;
+    const lines = text.split("\n").length;
+    const folds = lines > LINKED_FOLD_LINES || text.length > LINKED_FOLD_CHARS;
+
+    return html`<div
+        class=${`user-row ${fresh ? "enter" : ""}`}
+        data-part="prompt-row"
+        data-entry-kind=${entry.presentation?.entryKind}
+        id=${`entry-${entry.id}`}
+    >
+        <div
+            class=${`prompt linked-message tappable ${folds ? "folds" : ""} ${open ? "open" : ""}`}
+            data-part="prompt"
+            data-from="linked"
+            title="Edit, send again, or copy"
+            tabindex="0"
+            onClick=${(event) => openMessage(event, entry.id)}
+            onKeyDown=${(event) => {
+                if (
+                    (event.key === "Enter" || event.key === " ") &&
+                    event.target === event.currentTarget
+                ) {
+                    event.preventDefault();
+                    openMessage(event, entry.id);
+                }
+            }}
+        >
+            <div class="linked-head" data-part="linked-head">
+                <span class="linked-mark" data-part="linked-mark" aria-hidden="true">
+                    <${Icon} name="fork" size=${16} />
+                </span>
+                <span class="linked-who">
+                    <span class="linked-kicker">
+                        <span class="linked-tag">Linked session</span>
+                        ${entry.at && html`<span>· ${clock(entry.at)}</span>`}
+                    </span>
+                    <span
+                        class=${`linked-name ${name ? "" : "unknown"}`}
+                        data-part="linked-name"
+                    >
+                        ${name ?? "A session you cannot open"}
+                    </span>
+                </span>
+                ${
+                    session &&
+                    html`<button
+                        class="linked-open"
+                        data-part="linked-open"
+                        aria-label=${`Open ${name}`}
+                        onClick=${() => navigate(session.id)}
+                    >
+                        Open
+                        <${Icon} path="M5 12h14M13 6l6 6-6 6" size=${14} />
+                    </button>`
+                }
+            </div>
+            <div class="linked-body" data-part="linked-body" id=${`linked-body-${entry.id}`}>
+                <${Markdown} text=${text} />
+                <${MessageExtras} entry=${entry} attachments=${attachments} />
+            </div>
+            ${
+                folds &&
+                html`<button
+                    class="linked-more"
+                    data-part="linked-more"
+                    aria-expanded=${open ? "true" : "false"}
+                    aria-controls=${`linked-body-${entry.id}`}
+                    onClick=${() => setOpen(!open)}
+                >
+                    ${open ? "Show less" : `Show all · ${lines} lines`}
+                </button>`
+            }
+        </div>
+    </div>`;
+}
+
 /** A person's message, including one a module presents when this browser shows it open. */
 function UserMessage({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
@@ -654,10 +747,22 @@ function UserMessage({ entry, view, users }) {
     // A linked session's message: shown by its label and its fence alone, so the words before the fence (which tell Pi
     // how to read it) can change without changing how older messages show.
     const peerText =
-        via && /^linked session \S+$/.test(via[1])
+        via && LINKED_VIA.test(via[1])
             ? /\n<linked-session-message>\n([\s\S]*)\n<\/linked-session-message>$/.exec(sent)?.[1]
             : undefined;
-    const body = peerText ?? (scheduled ? sent.slice(SCHEDULED.length) : sent);
+
+    if (peerText !== undefined) {
+        return html`<${LinkedMessage}
+            entry=${entry}
+            view=${view}
+            address=${LINKED_VIA.exec(via[1])[1]}
+            text=${peerText}
+            attachments=${attachments}
+            fresh=${fresh}
+        />`;
+    }
+
+    const body = scheduled ? sent.slice(SCHEDULED.length) : sent;
     // `/skill:name request`: the skill by name, and the request.
     const skill = SKILL.exec(body);
     const name = author ?? (scheduled ? "Pi" : undefined);
@@ -672,16 +777,10 @@ function UserMessage({ entry, view, users }) {
 
     const picture = avatarSrc({ id: authorId });
 
-    // Who it is from, for themes: you, someone else, a linked session, or no one the app knows (Pi's schedule, the main
-    // agent, a watch or a webhook).
+    // Who it is from, for themes: you, someone else, or no one the app knows (Pi's schedule, the main agent, a watch or a
+    // webhook). A linked session's message is `linked` (`LinkedMessage`).
     const from =
-        peerText !== undefined
-            ? "linked"
-            : authorId === undefined
-              ? "other"
-              : authorId === store.state.me?.id
-                ? "me"
-                : "person";
+        authorId === undefined ? "other" : authorId === store.state.me?.id ? "me" : "person";
 
     return html`<div
         class=${`user-row ${fresh ? "enter" : ""}`}
@@ -724,7 +823,7 @@ function UserMessage({ entry, view, users }) {
                 }
                 ${entry.at && html`<span class="prompt-time">${clock(entry.at)}</span>`}
                 ${scheduled && html`<span class="prompt-time">· scheduled</span>`}
-                ${via && html`<span class="prompt-time">· via ${peerText === undefined ? via[1] : "a linked session"}</span>`}
+                ${via && html`<span class="prompt-time">· via ${via[1]}</span>`}
             </span>
             <div class="prompt-body" data-part="prompt-text">
                 ${
@@ -2561,6 +2660,16 @@ function rowDeps(entry) {
         if (entry.text.startsWith("[subagent ")) {
             deps.push(agentsKey(view));
         }
+
+        // A linked session's message names its session: it shows again when the session's name or access changes.
+        const address = /^\[via linked session (\S+)\] /.exec(entry.text)?.[1];
+
+        if (address !== undefined) {
+            const id = view.linkedPeers?.[address];
+            const session = store.state.sessions.find((each) => each.id === id);
+
+            deps.push(id, session === undefined ? undefined : (session.title ?? ""));
+        }
     }
 
     return deps;
@@ -3128,6 +3237,16 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
                         }
                     })}
             >Retry now</button>`
+        }
+        ${
+            limit &&
+            !waiting &&
+            canSteer() &&
+            html`<button
+                class="live-retry live-stop"
+                data-part="live-stop"
+                onClick=${() => attempt(actions.abort)}
+            >Stop</button>`
         }
         ${
             retry &&

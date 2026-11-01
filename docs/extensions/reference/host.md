@@ -216,9 +216,9 @@ Calls `listener` each time something happens in the app: a session is made, rena
 
 ```typescript
 web.onDispose(
-    host.on("run.ended", ({ conversationId, session }) => {
-        if (conversationId === session) {
-            counts.set(session, (counts.get(session) ?? 0) + 1);
+    host.on("run.ended", ({ conversationId, session, outcome, failure }) => {
+        if (conversationId === session && outcome === "failed") {
+            log.push({ session, failure });
         }
     }),
 );
@@ -391,7 +391,7 @@ readonly linkedSessions: LinkedSessions;
 
 Since 0.14.0 · Experimental
 
-Lets a tool start sessions from the session that it runs in, and send messages between them, as Agent Teams does. A linked session is an ordinary session. [Starting and messaging sessions](../linked-sessions.md) tells you how they work, what they cannot do, and how to call them.
+Lets a tool start sessions from the session that it runs in, send messages between them, and stop or archive one, as Agent Teams does. A team or orchestration extension uses the same calls. A linked session is an ordinary session. [Starting and messaging sessions](../linked-sessions.md) tells you how they work, what they cannot do, and how to call them.
 
 Each call acts as the person that Pi works for in `source`, and that person's checks apply. Give each call a `key` that stays the same when the call runs again, such as `${api.taskId}:${api.callId}`. A second call with the same `key` does nothing again: it returns what the first call returned.
 
@@ -431,6 +431,34 @@ Sends `message` to the linked session at the address `to`. Without `steer`, the 
 
 The session that gets the message reads it between tags. Words before it say that the agent of another session wrote it, and that it is a request, not a person's order. They also give the address to reply to.
 
+#### `linkedSessions.stop`
+
+```ts
+stop(
+    source: ConversationId,
+    request: { to: string },
+    key: string,
+): Promise<{ busy: boolean }>;
+```
+
+Since 0.28.0 · Experimental
+
+Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When the session is idle, it has no run to stop, and the call only withdraws what waits in its queue. `busy` is true when it was working. It needs the same access as `send`, and it reaches only a session of this team. An older Pi Pocket has no `stop`: check for it, and set `minPocket` to `0.28.0` when you need it.
+
+#### `linkedSessions.archive`
+
+```ts
+archive(
+    source: ConversationId,
+    request: { to: string; archived?: boolean },
+    key: string,
+): Promise<{ archived: boolean; repeating: number }>;
+```
+
+Since 0.28.0 · Experimental
+
+Archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives. `archived` in the result says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them. It needs the same access as `send`. An older Pi Pocket has no `archive`.
+
 #### `linkedSessions.list`
 
 ```ts
@@ -450,6 +478,7 @@ interface LinkedSession {
     cwd?: string;
     busy?: boolean;
     archived?: boolean;
+    failed?: string;
 }
 ```
 
@@ -458,7 +487,8 @@ Since 0.14.0 · Experimental
 A linked session, as `list` gives it.
 
 - `address`: the address that the asking session uses for it. It is never the session's id.
-- `title`, `cwd` (its folder), `busy` (Pi works in it now), and `archived`: these are there only when all the people who see the asking session see this session too.
+- `title`, `cwd` (its folder), `busy` (Pi works in it now), `archived`, and `failed`: these are there only when all the people who see the asking session see this session too.
+- `failed` (since 0.28.0): why its last run gave up, the same short line the session list shows. It is there only while that failure stands. A later run clears it, and a run that was stopped leaves none.
 
 ## Types for events
 
@@ -483,7 +513,12 @@ interface AppEvents {
         via?: string;
     };
     "run.started": { conversationId: number; session: number };
-    "run.ended": { conversationId: number; session: number };
+    "run.ended": {
+        conversationId: number;
+        session: number;
+        outcome: "done" | "failed" | "aborted";
+        failure?: string;
+    };
 }
 ```
 
@@ -494,7 +529,7 @@ What each event's listener gets.
 - `session.created`: a session in the list was made, by a person, a fork (`forkedFrom`), a linked start (`linkedFrom`), or a resend. `createdBy` is a person's id. Subagents are not sessions in the list, and send none.
 - `session.renamed`, `session.archived`: its new title, or whether it is archived now.
 - `message.sent`: a person's message to Pi, a steer or a queued one too. `by` is their id. `text` is the words as stored, with values that extensions hide already hidden and attachments left out. `via` names what sent it for them, such as PiP or a schedule.
-- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to.
+- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to. Since 0.28.0, `run.ended` also says how the run stopped: `outcome` is `done` when it finished, `failed` when it gave up, or `aborted` when it was stopped. `failure` is why it gave up, the same short line the session list shows, and only when `outcome` is `failed`. A session's failure stands until a later run starts.
 
 ### `AppEventName`
 

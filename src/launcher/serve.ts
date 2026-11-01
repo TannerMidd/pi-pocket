@@ -193,7 +193,8 @@ export function portState(
 
 /**
  * Whether `proxy` is a proxy target on this machine's own loopback at exactly `port`. Serve records a target as written,
- * so `localhost:8787`, `127.0.0.1:8787` and `http://[::1]:8787` all name the same local server as `http://127.0.0.1:8787`.
+ * so `localhost:8787` and `127.0.0.1:8787` name the same local server as `http://127.0.0.1:8787`. `[::1]` does not:
+ * Serve mode listens on 127.0.0.1 alone, so a mount at `[::1]` reaches nothing.
  */
 export function sameLocalTarget(proxy: unknown, port: number): boolean {
     if (typeof proxy !== "string") {
@@ -243,15 +244,21 @@ export class TailscaleServe {
     #published = false;
     /** The node's DNS name as `start` found it, where the mount at `/` is looked for. */
     #dnsName = "";
+    /**
+     * Whether the receipt in the data folder names this run's port: then a mount found at `/` is this launcher's own, left
+     * by a run that was killed, and quitting takes it down rather than leaving it pointing at a dead port.
+     */
+    readonly #owned: boolean;
 
     /**
      * `binary` is the tailscale CLI to run, and `port` the local server it should proxy to: the tailnet port is always
-     * SERVE_PORT.
+     * SERVE_PORT. `owned` is whether the saved receipt names `port`.
      */
-    constructor(binary: string, port: number, events: ServeEvents) {
+    constructor(binary: string, port: number, events: ServeEvents, owned = false) {
         this.#binary = binary;
         this.#port = port;
         this.#events = events;
+        this.#owned = owned;
     }
 
     start(): ServeResult {
@@ -319,7 +326,7 @@ export class TailscaleServe {
             // Mounting `/` under Funnel would put Pi Pocket on the internet, not just on the tailnet the menu promises.
             return {
                 ok: false,
-                message: `Tailscale Funnel is on for ${state.detail ?? servedName}, which would publish Pi Pocket to the internet. Turn it off with "tailscale funnel --https=${SERVE_PORT} off", which takes every handler on ${SERVE_PORT} with it, then try again.`,
+                message: `Tailscale Funnel is on for ${state.detail ?? servedName}, which would publish Pi Pocket to the internet. Turn it off with "tailscale funnel --https=${SERVE_PORT} off", which takes every handler on ${SERVE_PORT} with it, then try again. If ${SERVE_PORT} is a TCP forward rather than a web handler, only "tailscale serve reset" clears its Funnel.`,
             };
         }
 
@@ -335,10 +342,11 @@ export class TailscaleServe {
 
         // `#published` follows what this run is responsible for. A mount command that timed out may still have been
         // applied by tailscaled, and nothing else can tell us whether it was, so an attempt counts before it runs. An
-        // adopted mount is not this run's to remove: quitting leaves it where it is.
+        // adopted mount is only this run's when the receipt names this port: a killed run of ours left it.
+        this.#published = !adopted || this.#owned;
+
         if (!adopted) {
             this.#events.mountAttempt?.();
-            this.#published = true;
 
             // --set-path=/ keeps the mount to this one path, so removing it later cannot take another mount with it.
             const mounted = this.#run(
@@ -376,8 +384,13 @@ export class TailscaleServe {
         return { ok: true, url, adopted };
     }
 
-    stop(): void {
-        if (!this.#published) {
+    /**
+     * Take down the mount at `/` that publishes this server: on quit when this run made it, and always when the user
+     * moves to another mode, where leaving it would keep serving the app to an audience the panel no longer promises.
+     * A mount someone pointed at another target is theirs and stays.
+     */
+    stop(always = false): void {
+        if (!this.#published && !always) {
             return;
         }
 
@@ -385,6 +398,16 @@ export class TailscaleServe {
 
         // Someone may have put another service at `/` since: that one is theirs, and stays.
         const now = this.#serveConfig();
+
+        // On quit, a mount that cannot be read may be someone else's by now: leave it, and keep the receipt so the next
+        // start tries again. Leaving the mode takes it down anyway, as the mode must stop publishing this server.
+        if (!now.ok && !always) {
+            this.#events.mountAttempt?.();
+            this.#events.problem(`${now.message} Pi Pocket left the Serve mount as it is.`);
+
+            return;
+        }
+
         const mount = now.ok ? mountAt(now.config, this.#dnsName, SERVE_PORT) : undefined;
 
         if (mount !== undefined && !sameLocalTarget(mount.Proxy, this.#port)) {
@@ -399,6 +422,9 @@ export class TailscaleServe {
         // that never took leaves behind, and it is not a problem to report. Any other failure leaves the mount publishing
         // this server, so say what that means: the start after this one takes it down, or reuses it in serve mode.
         if (!removed.ok && !missingMount(removed.message)) {
+            // Keep ownership: the receipt is what makes the next start try again, including for an adopted mount this
+            // run took responsibility for by leaving the mode.
+            this.#events.mountAttempt?.();
             this.#events.problem(
                 `${removed.message} The tailnet may still point here; the next start takes the mount down or reuses it.`,
             );
@@ -545,21 +571,29 @@ function readServeConfig(binary: string, timeout = TIMEOUT_MS): ConfigRun {
 }
 
 /** Whether a failed `off` is tailscaled saying there was nothing mounted under that path. */
-/** Whether a failed `off` is tailscaled saying there was nothing mounted under that path. */
 function missingMount(message: string): boolean {
     // "handler does not exist" is what the web `off` prints for a path with no handler. The `--tcp` form says "serve
     // config does not exist" instead, and this never runs that one.
     return message.toLowerCase().includes("handler does not exist");
 }
 
+/** The lines a command said that are worth repeating, without blanks and without the CLI's help footer. */
+function saidLines(text: string): string[] {
+    return (
+        text
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line !== "")
+            // `tailscale` prints the reason, a blank line, then this footer as the last line of stderr. Keeping it would hide
+            // the reason, and missingMount() would never see "handler does not exist" in an `off` that found nothing.
+            .filter((line) => !/^try `tailscale [a-z]+ --help` for usage info\.?$/i.test(line))
+            .map((line) => line.replace(/^error: /, ""))
+    );
+}
+
 /** The last thing a command said, for the message about why it exited without doing what it was asked. */
 function lastSaid(text: string): string {
-    const said = text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line !== "")
-        .slice(-3)
-        .join(" ");
+    const said = saidLines(text).slice(-3).join(" ");
 
     return said.length > 300 ? `${said.slice(0, 297)}…` : said;
 }
@@ -586,12 +620,7 @@ function complaint(err: string, out: string, args: string[]): string {
 }
 
 function lastLine(text: string): string | undefined {
-    const lines = text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line !== "");
-
-    return lines.at(-1);
+    return saidLines(text).at(-1);
 }
 
 function parseJson(text: string): unknown {
@@ -611,7 +640,7 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** The hosts that name this machine itself; `URL` keeps the brackets on an IPv6 literal. */
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
 
 /** The node's name without Tailscale's trailing dot. */
 function tailnetHost(dnsName: string): string | undefined {

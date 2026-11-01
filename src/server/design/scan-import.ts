@@ -1,6 +1,7 @@
 import { parseColor } from "./color.ts";
 import { isGroup, isObject, type Obj } from "./scan-import-convert.ts";
 import {
+    type Budget,
     changesBetween,
     DARK,
     type Entry,
@@ -26,6 +27,8 @@ interface Found {
     extra: Record<string, Obj>;
     count: number;
     notes: string[];
+    /** True when the token limit left tokens out of the files: the ones after it are not read. */
+    partial: boolean;
 }
 
 export interface Imported extends Found {
@@ -120,6 +123,7 @@ function addFound(into: Imported, found: Found, count: number, files: string[]):
     into.count += count;
     into.files.push(...files);
     into.notes.push(...found.notes);
+    into.partial = into.partial || found.partial;
 }
 
 function addStudio(into: Imported, source: StudioSource, files: string[]): void {
@@ -349,7 +353,7 @@ function pickModes(
     return { light: light ?? [], dark, extra };
 }
 
-function readMode(budget: { left: number }, roots: Obj[]): Mode {
+function readMode(budget: Budget, roots: Obj[]): Mode {
     const entries = new Map<string, Entry>();
 
     for (const root of roots) {
@@ -381,7 +385,7 @@ function studioTokens(input: StudioSource): Found {
         `Tokens Studio sets: the default mode is ${light.join(" + ") || "none"}${dark === undefined ? "" : `; the dark mode is ${dark.join(" + ")}`}${extra.map(([mode, sets]) => `; ${mode} is ${sets.join(" + ")}`).join("")}.`,
     );
 
-    const budget = { left: LIMITS.tokens };
+    const budget: Budget = { left: LIMITS.tokens, over: false };
 
     const read = (list: string[]) =>
         readMode(
@@ -396,6 +400,7 @@ function studioTokens(input: StudioSource): Found {
         extra: {},
         count: first.flat.size,
         notes,
+        partial: false,
     };
 
     if (dark !== undefined && dark.join("\n") !== light.join("\n")) {
@@ -405,6 +410,9 @@ function studioTokens(input: StudioSource): Found {
     for (const [mode, sets] of extra) {
         result.extra[mode] = changesFrom(first.flat, read(sets), notes, `the ${mode} mode`);
     }
+
+    // Only a token that the budget left out makes the scan partial: a set of exactly the budget is whole.
+    result.partial = budget.over;
 
     return result;
 }
@@ -513,7 +521,7 @@ function inferType(path: string[], value: unknown, node: Obj): string | undefine
 
 function styleDictionaryTokens(files: SdFile[]): Found {
     const notes: string[] = [];
-    const budget = { left: LIMITS.tokens };
+    const budget: Budget = { left: LIMITS.tokens, over: false };
     const base: Obj[] = [];
     const modes = new Map<string, Obj[]>();
 
@@ -554,6 +562,7 @@ function styleDictionaryTokens(files: SdFile[]): Found {
         extra: {},
         count: first.flat.size,
         notes,
+        partial: false,
     };
 
     if (names.length > 0) {
@@ -571,6 +580,9 @@ function styleDictionaryTokens(files: SdFile[]): Found {
             result.extra[name] = tree;
         }
     }
+
+    // Only a token that the budget left out makes the scan partial: a folder of exactly the budget is whole.
+    result.partial = budget.over;
 
     return result;
 }

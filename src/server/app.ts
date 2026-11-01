@@ -37,6 +37,7 @@ import {
     ProviderDoc,
     type Registry,
     type Storage,
+    type SubmissionRecord,
     UsageDoc,
     type UsageState,
 } from "@earendil-works/pi-durable";
@@ -68,6 +69,7 @@ import {
     DecisionsDoc,
     FolderFavoritesDoc,
     MemoryDoc,
+    RunFailureDoc,
     type SessionMeta,
     SessionsDoc,
     SpendDoc,
@@ -96,6 +98,7 @@ import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } 
 import { Updates } from "./updates.ts";
 import { pocketPackage, pocketVersion } from "./versions.ts";
 import { serverBuild } from "./build.ts";
+import { presentedBuild } from "./entry-presentation.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
@@ -179,6 +182,20 @@ const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
 
 /** The session list goes to every tab on each change: these bound what it carries. */
 const FAILURE_TEXT = 120;
+
+/** The short failure line the session list and extensions share, or none when the run did not fail. */
+function failureText(
+    status: string,
+    reason: string | undefined,
+    detail: unknown,
+): string | undefined {
+    if (status !== "unanswered" || reason === undefined || !FAILED_RUN.has(reason)) {
+        return undefined;
+    }
+
+    return whyUnanswered(reason, detail).slice(0, FAILURE_TEXT);
+}
+
 const ASK_SUBJECT = 200;
 const ASK_REASON = 200;
 const FAILED_AGENTS = 5;
@@ -345,11 +362,15 @@ export class PocketApp {
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
+    readonly #code = serverBuild();
+
     /**
-     * This server's code (`serverBuild`): sessions a tab keeps, in its memory or on the device, are good for a server of
-     * the same build, so they last across a restart but not across new code.
+     * This server's code (`serverBuild`) and how its modules present inputs: sessions a tab keeps, in its memory or on
+     * the device, are good for a server of the same build, so they last across a restart but not across new code.
      */
-    readonly build = serverBuild();
+    get build(): string {
+        return presentedBuild(this.#code, this.webs.presentations());
+    }
     /** Set by the launcher over IPC; undefined when the server runs on its own. */
     access: AccessInfo | undefined;
     harness!: Harness;
@@ -597,6 +618,9 @@ export class PocketApp {
             // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
             commandsChanged: () => this.#websChanged("all"),
             presentationsChanged: () => {
+                // A new build in `hello`: what tabs kept shows the inputs as presented before.
+                this.#websChanged("all");
+
                 for (const pending of this.#rooms.values()) {
                     void pending.then(
                         (room) => room.reproject(),
@@ -1023,6 +1047,16 @@ export class PocketApp {
                     this.#busy.add(id);
                 }
 
+                if (this.#sessions[String(id)] !== undefined) {
+                    // The settled submission is what lasted. The failure line is written after it, so a crash can leave
+                    // that line missing or stale: this puts it back, or clears it when a run is still going.
+                    const failure = await this.#failureOf(storage, id, live);
+
+                    if (failure !== undefined) {
+                        this.#failed.set(id, failure);
+                    }
+                }
+
                 // A compaction that resumes asks the model too: it may wait for a limit.
                 if ((live?.compactions?.length ?? 0) > 0) {
                     this.#compacting.add(id);
@@ -1061,6 +1095,23 @@ export class PocketApp {
     #committed(publication: CommitPublication): void {
         let sessionsChanged = false;
         let alreadyPaid = false;
+        // How each run in this commit stopped, read before the live document ends it: both land here, in either order.
+        const failedNow = new Map<ConversationId, string>();
+        const abortedNow = new Set<ConversationId>();
+
+        for (const change of publication.changes) {
+            if (change.type !== "submission") {
+                continue;
+            }
+
+            const text = failureText(change.value.status, change.value.reason, change.value.detail);
+
+            if (text !== undefined) {
+                failedNow.set(change.value.conversationId, text);
+            } else if (change.value.status === "unanswered" && change.value.reason === "aborted") {
+                abortedNow.add(change.value.conversationId);
+            }
+        }
 
         // Auxiliary requests pay their captured person in the same commit as usage, in either document order.
         // A commit with both documents must pay every usage change. Normal spend counts never change UsageDoc.
@@ -1104,7 +1155,7 @@ export class PocketApp {
 
         for (const change of publication.changes) {
             if (change.type === "document") {
-                if (this.#documentCommitted(change)) {
+                if (this.#documentCommitted(change, failedNow, abortedNow)) {
                     sessionsChanged = true;
                 }
             } else if (change.type === "submission") {
@@ -1124,19 +1175,16 @@ export class PocketApp {
                 }
 
                 // Its run failed: the commit that settles it ends the run too, so the list hears of both at once.
+                // The line is stored too, so the next process still knows; a new run clears that record.
+                const text = failedNow.get(change.value.conversationId);
+
                 if (
-                    change.value.status === "unanswered" &&
-                    FAILED_RUN.has(change.value.reason) &&
+                    text !== undefined &&
                     this.#sessions[String(change.value.conversationId)] !== undefined &&
                     !this.#failed.has(change.value.conversationId)
                 ) {
-                    this.#failed.set(
-                        change.value.conversationId,
-                        whyUnanswered(change.value.reason, change.value.detail).slice(
-                            0,
-                            FAILURE_TEXT,
-                        ),
-                    );
+                    this.#failed.set(change.value.conversationId, text);
+                    this.#storeRunFailure(change.value.conversationId, text);
                     sessionsChanged = true;
                 }
             }
@@ -1168,7 +1216,11 @@ export class PocketApp {
     }
 
     /** A document changed: the views that show it update. True when the session list changed too. */
-    #documentCommitted(change: Extract<DocumentCommitChange, { type: "document" }>): boolean {
+    #documentCommitted(
+        change: Extract<DocumentCommitChange, { type: "document" }>,
+        failedNow: ReadonlyMap<ConversationId, string>,
+        abortedNow: ReadonlySet<ConversationId>,
+    ): boolean {
         const kind = change.record.kind;
         const id = change.conversationId;
         let sessionsChanged = false;
@@ -1196,12 +1248,21 @@ export class PocketApp {
 
             if (busy !== this.#busy.has(id)) {
                 const session = Number(this.rootOf(id));
+                const failure = busy ? undefined : (failedNow.get(id) ?? this.#failed.get(id));
+                const outcome =
+                    failure !== undefined ? "failed" : abortedNow.has(id) ? "aborted" : "done";
 
                 // For extensions (`host.on`): PiP's runs are its person's alone.
                 if (this.#sessions[String(session)]?.pip === undefined) {
                     this.events.emit(busy ? "run.started" : "run.ended", {
                         conversationId: Number(id),
                         session,
+                        ...(busy
+                            ? {}
+                            : {
+                                  outcome,
+                                  ...(failure === undefined ? {} : { failure }),
+                              }),
                     });
                 }
 
@@ -1209,6 +1270,7 @@ export class PocketApp {
                     this.#busy.add(id);
                     // A new run starts over: whether it fails is its own to say.
                     this.#failed.delete(id);
+                    this.#storeRunFailure(id, undefined);
 
                     if (this.#sessions[String(id)] !== undefined) {
                         this.#movedUp(id, Date.now());
@@ -2634,6 +2696,82 @@ export class PocketApp {
         return this.#endedAt.get(id);
     }
 
+    /**
+     * The failure line a session should show after a restart. A run still going clears a line a crash left behind. An
+     * idle session takes the line of its run's newest settled input, which the run's own commit stored, and writes a line
+     * that disagrees back. Undefined when there is nothing to show.
+     */
+    async #failureOf(
+        storage: Storage,
+        id: ConversationId,
+        live: { run?: unknown } | null | undefined,
+    ): Promise<string | undefined> {
+        const stored = (await this.harness.snapshot(RunFailureDoc, id, context))?.text;
+
+        if (live?.run !== undefined) {
+            if (stored !== undefined) {
+                this.#storeRunFailure(id, undefined);
+            }
+
+            return undefined;
+        }
+
+        // The newest settled input is the last run's: submission ids grow with each commit. Notes and other writes
+        // after it are skipped. A run that gave up leaves every one of its inputs unanswered, so that input still says so.
+        let record: SubmissionRecord | undefined;
+        let cursor: Cursor | undefined;
+
+        do {
+            const page = await storage.scanSubmissions(
+                { conversationId: id, order: "descending" },
+                64,
+                cursor,
+                context,
+            );
+
+            // A queued input, or one withdrawn from the queue, never joined a run. One a run gave up on may have no entry.
+            record = page.items.find(
+                (each) =>
+                    each.type === "input" &&
+                    (each.entry !== undefined ||
+                        (each.status === "unanswered" && FAILED_RUN.has(each.reason))),
+            );
+            cursor = record === undefined ? page.next : undefined;
+        } while (cursor !== undefined);
+
+        const text =
+            record?.status === "unanswered"
+                ? failureText(record.status, record.reason, record.detail)
+                : undefined;
+
+        if (text !== stored) {
+            this.#storeRunFailure(id, text);
+        }
+
+        return text;
+    }
+
+    /** Keep or clear a session's failure line, so the next process still knows. A listener may not commit. */
+    #storeRunFailure(id: ConversationId, text: string | undefined): void {
+        if (this.#sessions[String(id)] === undefined) {
+            return;
+        }
+
+        setImmediate(() => {
+            this.harness
+                .commit(async (tx) => {
+                    const record = await tx.doc(RunFailureDoc, id);
+
+                    if (text === undefined) {
+                        delete record.text;
+                    } else {
+                        record.text = text;
+                    }
+                }, context)
+                .catch((error: unknown) => this.log(`run failure not stored: ${describe(error)}`));
+        });
+    }
+
     async conversationTitle(id: ConversationId): Promise<string> {
         const meta = this.#sessions[String(id)];
 
@@ -3028,7 +3166,16 @@ export class PocketApp {
             found.push(...(await Promise.all(batch.map(([id, meta]) => one(id, meta)))).flat());
         }
 
-        return found.sort((a, b) => b.updatedAt - a.updatedAt);
+        // The person as they are now: a share removed while this ran takes its entries out.
+        const now = this.config.userById(user.id);
+
+        return found
+            .filter(
+                (entry) =>
+                    now !== undefined &&
+                    this.canSee(now, entry.session as unknown as ConversationId),
+            )
+            .sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     async artifactBody(id: ConversationId, artifact: string, version?: number) {

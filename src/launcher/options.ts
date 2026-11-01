@@ -13,7 +13,7 @@ Usage: pi-pocket [options]
                         lan              devices on the same network (http)
                         cloudflare       anywhere, through a Cloudflare quick tunnel (https)
                         tailscale        devices on your tailnet
-                        tailscale-serve  your tailnet over https (tailscale serve)
+                        tailscale-serve  your tailnet over https (tailscale 1.52+, tailscale serve)
                       Without it, a menu asks (in a terminal) or the last choice is used.
   -y, --yes           Use the last choice without asking
   -p, --port N        Port (default 8787)

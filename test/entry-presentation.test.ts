@@ -1,7 +1,11 @@
 // A module's presentation exists only while that module is on. A failed load leaves the registry empty.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compilePresentations, queuePresentation } from "../src/server/entry-presentation.ts";
+import {
+    compilePresentations,
+    presentedBuild,
+    queuePresentation,
+} from "../src/server/entry-presentation.ts";
 import { ExtensionWebs } from "../src/server/extension-web.ts";
 
 test("presentEntry is on only while the module is", () => {
@@ -34,6 +38,29 @@ test("presentEntry is on only while the module is", () => {
     webs.remove("quiet-input.ts");
     assert.equal(changes, 2);
     assert.equal(webs.presentations().byKind.size, 0);
+});
+
+test("what a tab kept is good only while the presentations stay the same (#254)", () => {
+    const build = "0123456789abcdef";
+    const webs = new ExtensionWebs();
+
+    const present = (label: string) => {
+        const staged = webs.stage("quiet-input.ts", "/tmp", "Quiet input");
+
+        staged.web.presentEntry({ kind: "x.quiet-input.note", label });
+        webs.commit(staged.part);
+
+        return presentedBuild(build, webs.presentations());
+    };
+
+    assert.equal(presentedBuild(build, webs.presentations()), build);
+    const note = present("Note");
+
+    assert.match(note, /^[0-9a-f]{16}$/);
+    assert.notEqual(note, build);
+    assert.notEqual(present("Memo"), note);
+    webs.remove("quiet-input.ts");
+    assert.equal(presentedBuild(build, webs.presentations()), build);
 });
 
 test("a failed load keeps the registry empty", () => {

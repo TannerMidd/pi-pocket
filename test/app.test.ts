@@ -1124,7 +1124,7 @@ test("a tab of protocol 5 gets a session's newest entries light first, and whole
 
 test("a tab of protocol 6 that kept a session gets only what came after, and the end of the order", async () => {
     const { fingerprint } = (await import(
-        new URL("../web/fingerprint.js", import.meta.url).href
+        new URL("../web/text-hash.js", import.meta.url).href
     )) as {
         fingerprint: (text: string) => string;
     };
@@ -1284,7 +1284,7 @@ test("hello names the server's build, the same for the same code, and whether br
 
 test("a tab switches session on the connection it has: the new one comes, and nothing else again", async () => {
     const { fingerprint } = (await import(
-        new URL("../web/fingerprint.js", import.meta.url).href
+        new URL("../web/text-hash.js", import.meta.url).href
     )) as {
         fingerprint: (text: string) => string;
     };
