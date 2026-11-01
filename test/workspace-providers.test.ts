@@ -7,8 +7,18 @@ import { once } from "node:events";
 import { join } from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
-import { cleanUp, newSession, openApp, owner, root, say, scriptedModel, work } from "./helpers.ts";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import {
+    cleanUp,
+    newSession,
+    openApp,
+    owner,
+    root,
+    say,
+    scriptedModel,
+    until,
+    work,
+} from "./helpers.ts";
 
 after(cleanUp);
 
@@ -242,6 +252,41 @@ test("a remote session's prompt has no AGENTS.md from this machine", async () =>
         await say(app, await newSession(app, "ssh://host/work"), "hello");
         assert.ok(sections.length > 0, "the request has sections");
         assert.ok(!sections.some((text) => text.includes("LOCAL-ONLY-MARKER")));
+    } finally {
+        remove();
+        await app.close();
+    }
+});
+
+test("an edit of a queued message in a remote session gives the message back", async () => {
+    const app = await openApp(
+        scriptedModel((request) =>
+            (request as { messages: { role: string }[] }).messages.at(-1)?.role === "toolResult"
+                ? fauxAssistantMessage([fauxText("done")])
+                : fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 30" })], {
+                      stopReason: "toolUse",
+                  }),
+        ),
+    );
+    const remove = app.registerWorkspaceProvider("ssh", {
+        env: () => new NodeExecutionEnv({ cwd: root }),
+        resolveCwd: async (cwd) => cwd,
+    });
+
+    try {
+        const id = await newSession(app, "ssh://host/work");
+
+        await app.commands.submit(id, owner(app), { text: "wait", requestId: "wait-1" });
+        await until(() => app.isBusy(id), "the long run");
+        const { submissionId } = await app.commands.submit(id, owner(app), {
+            text: "queued",
+            mode: "followUp",
+            requestId: "wait-2",
+        });
+        const edited = await app.commands.editQueued(id, owner(app), Number(submissionId));
+
+        assert.equal(edited.text, "queued");
+        await app.commands.abort(id, owner(app));
     } finally {
         remove();
         await app.close();

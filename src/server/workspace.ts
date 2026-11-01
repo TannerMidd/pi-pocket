@@ -40,7 +40,8 @@ export class Workspace {
     /** The files in each folder, for `@` mentions. */
     readonly #files = new FileLists();
 
-    #requireLocal(id: ConversationId): void {
+    /** Refuse a local file or Git action for a session on a workspace URI. */
+    requireLocal(id: ConversationId): void {
         if (this.#app.workspaceScheme(this.#app.cwdOf(id)) !== undefined) {
             throw new HttpError(
                 400,
@@ -106,7 +107,7 @@ export class Workspace {
     /** The branches of a session's repository, for the branch sheet: for people who can steer, as Changes is. */
     async branches(id: ConversationId, user: User): Promise<Branches> {
         this.#app.requireSee(user, id);
-        this.#requireLocal(id);
+        this.requireLocal(id);
         this.#app.requireSteer(user);
 
         const cwd = this.#app.cwdOf(id);
@@ -132,7 +133,7 @@ export class Workspace {
         request: { name?: unknown; create?: unknown; track?: unknown },
     ): Promise<{ branch: string }> {
         this.#app.requireSee(user, id);
-        this.#requireLocal(id);
+        this.requireLocal(id);
         this.#app.requireSteer(user);
 
         if (user.sessions !== undefined) {
@@ -272,7 +273,7 @@ export class Workspace {
 
     /** A path as a conversation means it: absolute, `~/…`, or relative to the conversation's working directory. */
     conversationPath(id: ConversationId, path: string): string {
-        this.#requireLocal(id);
+        this.requireLocal(id);
 
         return resolve(this.#app.cwdOf(id), expandHome(path.trim()));
     }
@@ -382,7 +383,7 @@ export class Workspace {
      */
     async fileList(id: ConversationId, user: User): Promise<FileListing> {
         this.#app.requireSee(user, id);
-        this.#requireLocal(id);
+        this.requireLocal(id);
         this.#app.requireSteer(user);
         await this.#app.conversation(id);
 
@@ -426,7 +427,7 @@ export class Workspace {
      */
     async revertChange(id: ConversationId, user: User, path: string): Promise<void> {
         this.#app.requireSee(user, id);
-        this.#requireLocal(id);
+        this.requireLocal(id);
         await this.#app.requireDriver(id, user);
 
         if (this.#app.isBusy(id)) {
@@ -454,7 +455,7 @@ export class Workspace {
     /** What changed in a session's folder: Pi's edits, and the uncommitted changes of its git repository. */
     async changes(id: ConversationId, user: User): Promise<Changes> {
         this.#app.requireSee(user, id);
-        this.#requireLocal(id);
+        this.requireLocal(id);
         this.#app.requireSteer(user);
 
         // Someone invited to this session only sees the files in its folder, here as in `conversationFile`.
@@ -516,7 +517,7 @@ export class Workspace {
     /** The diff of one changed file in a session's repository. */
     async changeDiff(id: ConversationId, user: User, path: string): Promise<string> {
         this.#app.requireSee(user, id);
-        this.#requireLocal(id);
+        this.requireLocal(id);
         this.#app.requireSteer(user);
 
         try {
@@ -527,7 +528,6 @@ export class Workspace {
     }
 
     uploadDirectory(id: ConversationId): string {
-        this.#requireLocal(id);
         const directory = join(this.#app.dataDir, "uploads", String(id));
 
         mkdirSync(directory, { recursive: true });

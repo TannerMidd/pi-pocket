@@ -774,6 +774,8 @@ export async function conversationRoutes(
         }
 
         await app.conversation(id);
+        // A remote session's machine cannot read a file stored on this one.
+        app.workspace.requireLocal(id);
         const name = safeName(url.searchParams.get("name") ?? "upload");
         const directory = app.workspace.uploadDirectory(id);
         // Unique, and never written over: pasted images all arrive as image.png, often at once.
