@@ -98,13 +98,13 @@ export interface Module {
 
 /**
  * An execution provider for one workspace URI scheme.
- * @since 0.23.0
+ * @since 0.28.0
  * @experimental
  */
 export interface WorkspaceProvider {
-    /** @experimental @since 0.23.0 */
+    /** @experimental @since 0.28.0 */
     env(cwd: string): ExecutionEnv;
-    /** @experimental @since 0.23.0 */
+    /** @experimental @since 0.28.0 */
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
 }
 
@@ -182,7 +182,7 @@ export interface Host {
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
     /**
      * Registers an execution provider for a workspace URI scheme.
-     * @since 0.23.0
+     * @since 0.28.0
      * @experimental
      */
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
@@ -202,7 +202,8 @@ export interface Host {
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
      * The conversation's current working folder or workspace URI.
-     * @since 0.24.0
+     * @since 0.28.0
+     * @experimental
      */
     cwdOf(conversationId: ConversationId): string;
     /**
@@ -1035,7 +1036,7 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface WebRequest {
     /**
      * Creates a session from an owner-only route.
-     * @since 0.23.0
+     * @since 0.28.0
      * @experimental
      */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;

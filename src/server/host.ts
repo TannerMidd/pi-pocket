@@ -410,7 +410,7 @@ export interface PocketHost {
      * that is not the last one changes nothing.
      */
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
-    /** @experimental @since 0.23.0 */
+    /** @experimental @since 0.28.0 */
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
     /**
      * Shape the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
@@ -491,7 +491,7 @@ export interface PocketHost {
      * @experimental In 0.14: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     readonly linkedSessions: LinkedSessionsApi;
-    /** The conversation's current working folder or workspace URI. */
+    /** The conversation's current working folder or workspace URI. @experimental @since 0.28.0 */
     cwdOf(conversationId: ConversationId): string;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
@@ -581,7 +581,7 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** A request to a module's route, as its handler gets it. */
 export interface WebRequest {
-    /** @experimental @since 0.23.0 */
+    /** @experimental @since 0.28.0 */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     readonly method: WebMethod;
     /** The path's `:name` parts, by name. */

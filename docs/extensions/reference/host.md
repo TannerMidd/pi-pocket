@@ -46,7 +46,7 @@ Pi's own folder, usually `~/.pi/agent`. Pi keeps its sign-ins, models, settings,
 cwdOf(conversationId: ConversationId): string;
 ```
 
-Since 0.24.0 · Stable
+Since 0.28.0 · Experimental
 
 The conversation's current working folder, or its canonical workspace URI for a remote session. It reads the current agent state, so a module must not cache it across folder changes.
 
@@ -178,7 +178,7 @@ The thinking levels, lowest first. They have the names that models and sessions 
 registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
 ```
 
-Since 0.23.0 · Experimental
+Since 0.28.0 · Experimental
 
 Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd` returns the canonical address. It must keep the same scheme. Pi Pocket stores that address and refuses to use the local machine when no provider is active. The returned disposer removes only its own registration. See [Execution environments for workspaces](../workspaces.md).
 

@@ -49,7 +49,7 @@ Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose funct
 
 ## Workspace execution providers
 
-`PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Session creation rechecks the actor in its transaction; HTTP requests pass cancellation through creation and configuration. The optional SSH Sessions extension owns host-key trust, connections, remote project context, and cleanup. Files/Git actions and managed worktrees remain local-only.
+`PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Only the owner can use a workspace URI. The optional SSH Sessions extension owns host-key trust, connections, remote project context, and cleanup. Files/Git actions and managed worktrees remain local-only.
 
 ## Favorite folders
 
