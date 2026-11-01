@@ -17,6 +17,9 @@ const NATIVE = ["bool", "byte", "int", "uint", "float", "string", "int64", "uint
 /** The kinds of definition, by their code in the schema. */
 const KINDS = ["ENUM", "STRUCT", "MESSAGE"] as const;
 
+/** The largest integer that a number holds exactly: a 64-bit value past it is its digits. */
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
 export type FigKind = (typeof KINDS)[number];
 
 export interface FigLimits {
@@ -173,6 +176,21 @@ class Cursor {
 
     /** An unsigned 64-bit integer: a number when it fits, else its digits. */
     varUint64(): number | string {
+        const value = this.bigUint();
+
+        return value <= MAX_SAFE ? Number(value) : value.toString();
+    }
+
+    /** A signed 64-bit integer, zigzag-encoded like `varInt`: the low bit is the sign. */
+    varInt64(): number | string {
+        const zigzag = this.bigUint();
+        const value = (zigzag >> BigInt(1)) ^ -(zigzag & BigInt(1));
+
+        return value <= MAX_SAFE && value >= -MAX_SAFE ? Number(value) : value.toString();
+    }
+
+    /** The 64-bit form of a varint, as a BigInt: 7 bits a byte, and the top bit says another byte follows. */
+    bigUint(): bigint {
         let value = BigInt(0);
         let shift = BigInt(0);
         let byte = 0;
@@ -183,7 +201,7 @@ class Cursor {
             shift += BigInt(7);
         } while (byte & 128 && shift < BigInt(70));
 
-        return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();
+        return value;
     }
 
     /** A float, in the compressed form kiwi writes: one zero byte is 0, else 4 bytes with the bits rotated. */
@@ -433,6 +451,7 @@ function readValue(cursor: Cursor, schema: FigSchema, type: string, depth: numbe
         case "string":
             return cursor.string();
         case "int64":
+            return cursor.varInt64();
         case "uint64":
             return cursor.varUint64();
 
