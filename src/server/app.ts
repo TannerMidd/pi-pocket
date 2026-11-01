@@ -49,7 +49,6 @@ import { Alerts } from "./alerts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
-import type { WorkspaceProvider } from "./host.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
@@ -91,6 +90,7 @@ import {
     type ModelRequestShaper,
     type PocketHost,
     type WebAccess,
+    type WorkspaceProvider,
 } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
@@ -102,9 +102,9 @@ import { serverBuild } from "./build.ts";
 import { presentedBuild } from "./entry-presentation.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
+import { workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
-import { workspaceScheme } from "./paths.ts";
 import { Hooks } from "./hooks.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
@@ -1531,8 +1531,8 @@ export class PocketApp {
 
         const registration = this.#workspaceProviders.get(scheme)?.at(-1);
 
-        // 400, not 503: an unknown scheme and a provider module that is off look the same here, and only the owner
-        // can fix either one. A retry does not help.
+        // 400, not 503: an unknown scheme and a provider module that is off look the same here.
+        // Only the owner can fix either one, and a retry does not help.
         if (registration === undefined) {
             throw new HttpError(
                 400,
@@ -1559,7 +1559,7 @@ export class PocketApp {
         return canonical;
     }
 
-    /** Where a conversation's commands run: its folder on this machine, or its workspace provider's env. */
+    /** Where a conversation's commands run: its folder here, or its workspace provider's env. */
     envFor(id: ConversationId): ExecutionEnv {
         return this.#wrapped(id, this.cwdOf(id));
     }

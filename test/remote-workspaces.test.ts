@@ -34,7 +34,7 @@ const provider = (env: () => ExecutionEnv = () => new NodeExecutionEnv({ cwd: re
 mkdirSync(remote, { recursive: true });
 writeFileSync(join(remote, "AGENTS.md"), "LOCAL-ONLY-MARKER");
 
-/** A model that runs `command` with bash for each message (`sleep` for WAIT); it keeps the prompt sections. */
+/** A model that runs `command` with bash for each message (`sleep` for WAIT); it keeps sections. */
 function runs(command: string, sections: string[] = []) {
     return scriptedModel((request) => {
         const { messages } = request as {

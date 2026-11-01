@@ -72,7 +72,7 @@ export class Workspace {
 
     #gitDir(cwd: string): string | undefined {
         if (this.#app.workspaceScheme(cwd) !== undefined) {
-            // Automatic view metadata has no local repository; explicit local Git actions stay guarded.
+            // View metadata has no local repository; explicit local Git actions stay guarded.
             return undefined;
         }
 

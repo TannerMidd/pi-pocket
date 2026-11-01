@@ -141,7 +141,7 @@ export default function createPrompt(host: PocketHost) {
     };
 
     const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
-    // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote machine's.
+    // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote's.
     const local = (input: PromptInput) => workspaceScheme(input.agent.cwd ?? "") === undefined;
 
     return defineExtension({
