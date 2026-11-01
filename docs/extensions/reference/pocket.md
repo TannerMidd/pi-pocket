@@ -569,6 +569,26 @@ pocket.composerKey({
 });
 ```
 
+### `fence`
+
+```ts
+fence(spec: FenceSpec): Added<FenceSpec>;
+```
+
+Since 0.28.0 · Experimental
+
+Registers a component for one or more fenced-code languages. The app renders it with exactly `{ source, lang, streaming }`: the code text, the language label from the fence, and whether the Markdown is still streaming. The component uses the app's Preact and can use the Preact functions in `pocket`. Language matching ignores case. When registrations match the same language, the first one in server module order, then registration order, wins. See [`FenceSpec`](#fencespec), [`FenceProps`](#fenceprops), and [`Added`](#added).
+
+### `mathInline`
+
+```ts
+mathInline(spec: MathInlineSpec): Added<MathInlineSpec>;
+```
+
+Since 0.28.0 · Experimental
+
+Registers the renderer for inline `$…$` and display `$$…$$` math. The app calls `mount(element, source, display)` for each math element: `element` is the code element, `source` is the formula without delimiters, and `display` is true for display math. Math parsing is on only while a registration is active. When multiple registrations exist, the first one in server module order, then registration order, wins. See [`MathInlineSpec`](#mathinlinespec) and [`Added`](#added).
+
 ### `insertText`
 
 ```ts
@@ -1259,6 +1279,33 @@ Since 0.14.0 · Stable
 
 What a sheet's component gets: the fields of the `props` that `openSheet` gave, and `pocket` and `close`.
 
+### `FenceSpec`
+
+```ts
+interface FenceSpec {
+    id: string;
+    langs: string[];
+    component: ComponentType<FenceProps>;
+}
+```
+
+Since 0.28.0 · Experimental
+
+The registration's id, the code fence languages it handles, and the Preact component the app renders. Language matching ignores case. See [`FenceProps`](#fenceprops).
+
+### `MathInlineSpec`
+
+```ts
+interface MathInlineSpec {
+    id: string;
+    mount(element: HTMLElement, source: string, display: boolean): void;
+}
+```
+
+Since 0.28.0 · Experimental
+
+The registration's id and its math mounter. The app calls the mounter with the rendered code element, formula text without delimiters, and whether the formula uses display math.
+
 ### `ToolCallSpec`
 
 ```ts
@@ -1309,7 +1356,7 @@ interface Added<S> {
 
 Since 0.14.0 · Stable
 
-What `rail`, `menu`, `launcher`, `page`, and `sheet` return.
+What `rail`, `menu`, `launcher`, `page`, `sheet`, `fence`, and `mathInline` return.
 
 - `update`: changes the fields in `patch`. An update that changes nothing draws nothing again. Values count as the same only when they are the very same value: a new array or function is a change.
 - `remove`: removes what was added.
@@ -1355,6 +1402,20 @@ interface MarkdownProps {
 Since 0.14.0 · Stable
 
 `text` is the Markdown to show.
+
+### `FenceProps`
+
+```ts
+interface FenceProps {
+    source: string;
+    lang: string;
+    streaming: boolean;
+}
+```
+
+Since 0.28.0 · Experimental
+
+The exact props the app passes to a `pocket.fence` component. `source` is the code text, `lang` is the language label from the fence, and `streaming` says whether the Markdown is still streaming.
 
 ### `SwitchProps`
 
