@@ -134,6 +134,27 @@ test("a session whose artifacts cannot be read does not hide the others", async 
     }
 });
 
+test("a share removed while the overview is read takes its entries out", async () => {
+    const { id: shared } = await app.commands.createSession(owner(app), { cwd: work });
+
+    await publish(shared, { id: "was-shared", title: "Shared", content: "<p>s</p>" });
+
+    const { user } = app.config.addUser("Late guest", "guest", [String(shared)]);
+    const snapshot = app.harness.snapshot.bind(app.harness) as (...args: unknown[]) => unknown;
+
+    app.harness.snapshot = (async (...args: unknown[]) => {
+        app.config.updateUser(user.id, { sessions: [] });
+
+        return snapshot(...args);
+    }) as never;
+
+    try {
+        assert.deepEqual(await app.artifactOverview(user), []);
+    } finally {
+        app.harness.snapshot = snapshot as never;
+    }
+});
+
 test(
     "the sheet frames each session's artifacts in a card of its own, with the session's name and count apart",
     { skip: findBrowser() === undefined ? "no Chromium-based browser on this machine" : false },

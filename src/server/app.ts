@@ -3166,7 +3166,16 @@ export class PocketApp {
             found.push(...(await Promise.all(batch.map(([id, meta]) => one(id, meta)))).flat());
         }
 
-        return found.sort((a, b) => b.updatedAt - a.updatedAt);
+        // The person as they are now: a share removed while this ran takes its entries out.
+        const now = this.config.userById(user.id);
+
+        return found
+            .filter(
+                (entry) =>
+                    now !== undefined &&
+                    this.canSee(now, entry.session as unknown as ConversationId),
+            )
+            .sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     async artifactBody(id: ConversationId, artifact: string, version?: number) {
