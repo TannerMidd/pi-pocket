@@ -19,7 +19,45 @@ function copy(text, what) {
  * One hook: where it sends, what Pi is told to do, how it has been used; its address (and a signed one's secret), a new
  * secret, and removing it.
  */
-function HookRow({ hook, base, fresh, onRemove, onRotate }) {
+function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
+    const [draft, setDraft] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const savingNow = useRef(false);
+    const field = useRef(null);
+    const change = useRef(null);
+    const edited = useRef(false);
+    const editing = draft !== null;
+
+    useEffect(() => {
+        if (editing) {
+            field.current?.focus();
+        } else if (edited.current) {
+            change.current?.focus();
+        }
+
+        edited.current = editing;
+    }, [editing]);
+
+    const save = () => {
+        if (savingNow.current) {
+            return;
+        }
+
+        savingNow.current = true;
+        setSaving(true);
+        attempt(async () => {
+            const updated = await api(`hooks/${encodeURIComponent(hook.id)}`, {
+                instructions: draft,
+            });
+
+            onSaved(updated);
+            setDraft(null);
+        }).finally(() => {
+            savingNow.current = false;
+            setSaving(false);
+        });
+    };
+
     const open = (event) => {
         event.preventDefault();
         closeSheet();
@@ -30,6 +68,11 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
         hook.count === 0
             ? "no posts yet"
             : `${hook.count} post${hook.count === 1 ? "" : "s"}, last ${formatWhen(hook.lastAt)}`;
+    const status = [
+        hook.signed ? "GitHub, signed" : "secret in the address",
+        ...(hook.anyone ? ["from anyone"] : []),
+        used,
+    ].join(" · ");
 
     return html`<div class=${`hook ${fresh ? "fresh" : ""}`}>
         <div class="hook-head">
@@ -38,14 +81,44 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
                 to ${hook.pip ? "PiP" : html`<a href=${`/s/${hook.target}`} onClick=${open}>${hook.targetTitle}</a>`}
             </span>
         </div>
-        ${hook.instructions && html`<div class="hook-text">${hook.instructions}</div>`}
+        ${
+            draft !== null
+                ? html`<div class="field">
+                    <div class="label">What Pi should do with each post</div>
+                    <textarea
+                        aria-label="What Pi should do with each post"
+                        rows="4"
+                        maxlength="2000"
+                        ref=${field}
+                        disabled=${saving}
+                        value=${draft}
+                        onInput=${(event) => setDraft(event.currentTarget.value)}
+                    ></textarea>
+                    <div class="muted small">
+                        Applies to future posts. Leave empty for the default instructions.
+                    </div>
+                    <div class="hook-actions">
+                        <button
+                            class="button small ghost"
+                            disabled=${saving}
+                            onClick=${() => setDraft(null)}
+                        >
+                            Cancel
+                        </button>
+                        <button class="button small primary" disabled=${saving} onClick=${save}>
+                            ${saving ? "Saving…" : "Save"}
+                        </button>
+                    </div>
+                </div>`
+                : hook.instructions && html`<div class="hook-text">${hook.instructions}</div>`
+        }
         ${
             fresh &&
             html`<div class="mono small hook-address">${addressOf(base, hook)}</div>
                 ${hook.signed && html`<div class="mono small hook-address">Secret: ${hook.secret}</div>`}`
         }
         <div class="hook-actions">
-            <span class="muted small grow">${hook.signed ? "GitHub, signed" : "secret in the address"}${hook.anyone ? " · from anyone" : ""} · ${used}</span>
+            <span class="muted small grow hook-status">${status}</span>
             <button
                 class="button small"
                 onClick=${() => copy(addressOf(base, hook), hook.signed ? "Address copied: GitHub's Payload URL." : "Address copied. Keep it secret: anyone with it can message Pi.")}
@@ -61,8 +134,23 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
                     Copy secret
                 </button>`
             }
-            <button class="button small ghost" onClick=${onRotate}>New secret</button>
-            <button class="button small ghost" onClick=${onRemove}>Remove</button>
+            ${
+                editable &&
+                draft === null &&
+                html`<button
+                    class="button small ghost"
+                    ref=${change}
+                    onClick=${() => setDraft(hook.instructions)}
+                >
+                    Edit prompt
+                </button>`
+            }
+            <button class="button small ghost" disabled=${saving} onClick=${onRotate}>
+                New secret
+            </button>
+            <button class="button small ghost" disabled=${saving} onClick=${onRemove}>
+                Remove
+            </button>
         </div>
     </div>`;
 }
@@ -333,6 +421,14 @@ export function HooksSheet() {
                 hook=${hook}
                 base=${list.base}
                 fresh=${hook.id === fresh}
+                editable=${steer}
+                onSaved=${(updated) =>
+                    setList((current) => ({
+                        ...current,
+                        hooks: current.hooks.map((each) =>
+                            each.id === updated.id ? { ...each, ...updated } : each,
+                        ),
+                    }))}
                 onRemove=${() => remove(hook)}
                 onRotate=${() => rotate(hook)}
             />`,

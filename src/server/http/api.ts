@@ -371,6 +371,12 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, { ok: true });
         }
 
+        if (first === "hooks" && second !== undefined && third === undefined && method === "POST") {
+            const body = await readJson<{ instructions?: unknown }>(request);
+
+            return json(response, 200, await app.hooks.update(user, second, body.instructions));
+        }
+
         // A new secret, for a hook whose address or secret got out.
         if (first === "hooks" && second !== undefined && third === "rotate" && method === "POST") {
             return json(response, 200, await app.hooks.rotate(user, second));
