@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { forModel, imageWork, modelImage, prepareModelImage } from "../src/server/model-images.ts";
+import { heicToJpeg } from "../src/server/heic.ts";
 
 // A 1×1 PNG, and a 2×2 blue one.
 const PNG = Buffer.from(
@@ -143,4 +144,15 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
+});
+
+test("HEIC photos convert one at a time, as the decoder's memory is outside the heap", async () => {
+    const photo = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
+    const ports = () => process.getActiveResourcesInfo().filter((n) => n === "MessagePort").length;
+    let most = 0;
+    const timer = setInterval(() => (most = Math.max(most, ports())), 1);
+
+    await Promise.all([heicToJpeg(photo), heicToJpeg(photo), heicToJpeg(photo)]);
+    clearInterval(timer);
+    assert.equal(most, 1);
 });
