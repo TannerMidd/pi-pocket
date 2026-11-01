@@ -1108,6 +1108,131 @@ kbd {
     }
 }
 
+/* ─── Session tabs: a strip of the numbered sessions above the top bar (Appearance → Switch sessions with → Tabs) ─── */
+
+.tabstrip {
+    flex: none;
+    display: flex;
+    gap: 5px;
+    padding: calc(env(safe-area-inset-top) + 6px) calc(var(--inset-r) + 20px) 0
+        calc(var(--inset-l) + 20px);
+    background: var(--bg);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.tabstrip::-webkit-scrollbar {
+    display: none;
+}
+
+/* The strip has the safe area now: the bar under it does not take it again. */
+.tabstrip + .topbar {
+    min-height: calc(46px + 12px * var(--space-y));
+    padding-top: 0;
+}
+
+.tabstrip-tab {
+    position: relative;
+    flex: 1 0 40px;
+    min-height: 24px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    color: var(--muted);
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+/* The bar is thin, the finger is not: the tap reaches up over the strip's edge, where nothing else is. */
+.tabstrip-tab::before {
+    content: "";
+    position: absolute;
+    inset: -12px 0 0;
+}
+
+.tabstrip-tab.on {
+    color: var(--text);
+}
+
+/* The segment: a track, and its fill, which grows from the left to the open one. */
+.tabstrip-bar {
+    position: relative;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--hair-2);
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.tabstrip-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--folder, var(--accent));
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform var(--t-in) var(--ease-out);
+}
+
+.tabstrip-tab.on .tabstrip-bar::after {
+    transform: scaleX(1);
+}
+
+@media (hover: hover) {
+    .tabstrip-tab:not(.on):hover {
+        color: var(--text);
+    }
+
+    .tabstrip-tab:not(.on):hover .tabstrip-bar {
+        background: color-mix(in srgb, var(--folder, var(--accent)) 40%, var(--hair-2));
+    }
+}
+
+/* Working: the track breathes; waiting for you: the warning color, as the rail's numbers show it. */
+.tabstrip-tab[data-state="working"]:not(.on) .tabstrip-bar {
+    animation: pulse 1.4s var(--ease-out) infinite;
+}
+
+.tabstrip-tab[data-state="waiting"] {
+    color: var(--warn);
+}
+
+.tabstrip-tab[data-state="waiting"] .tabstrip-bar {
+    background: var(--warn-line, var(--warn));
+}
+
+.tabstrip-tab[data-state="waiting"].on .tabstrip-bar::after {
+    background: var(--warn);
+}
+
+.tabstrip-name {
+    display: none;
+    padding: 6px 0 4px;
+    font-size: 12px;
+    line-height: 1.3;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tabstrip-tab[data-state="unread"] .tabstrip-name {
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Names show where the strip has room: a phone shows the bars alone, and the top bar names the open session. */
+@media (min-width: 700px) {
+    .tabstrip {
+        gap: 8px;
+        padding-top: calc(env(safe-area-inset-top) + 10px);
+    }
+
+    .tabstrip-name {
+        display: block;
+    }
+}
+
 /* Its buttons: quiet, and lit in the accent while what they open is open. */
 .topbar .icon-button {
     width: 36px;
@@ -1566,6 +1691,12 @@ kbd {
     animation: rise-in 0.42s var(--ease-out) backwards;
 }
 
+/* What came while away, as a kept session catches up: it rises in as long as the column glides to it (`GLIDE_LONG_MS` in
+   transcript.js), in every motion but reduced. */
+:root:not([data-motion="reduced"]) .transcript.catching .enter {
+    animation-duration: 0.9s;
+}
+
 .empty {
     display: grid;
     place-items: center;
@@ -1681,6 +1812,7 @@ kbd {
 
 /* Yours takes the accent, someone else's their color (`--who`), anyone else a quiet one. */
 .prompt-avatar {
+    overflow: hidden;
     flex: none;
     display: grid;
     place-items: center;
@@ -1712,6 +1844,201 @@ kbd {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     text-wrap: pretty;
+}
+
+/* Code a person wrote in backticks: as Pi's replies show it (`.md code`, `.md pre`), sized like the message's text. */
+.user-text code {
+    padding: 2px 6px;
+    border-radius: var(--r-tag);
+    background: var(--card-2);
+    color: var(--text);
+    font: 0.83em var(--mono);
+}
+
+.user-text pre.user-code {
+    margin: 0.4rem 0;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--code-bg);
+    color: var(--body);
+    font: 0.83em / 1.6 var(--mono);
+}
+
+/* An input a module presents (`web.presentEntry`), folded: a card of one line, as Pi's groups are, that opens to the
+ * message. It starts a turn like a person's message, and is a card like theirs, but quieter: nobody typed it. */
+.presented-input {
+    min-width: 0;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-window);
+    background: var(--card);
+    overflow: hidden;
+}
+
+.presented-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    /* 40px, 35px, and 30px; a thumb's 34px at least on a touch screen. */
+    min-height: calc(22px + 18px * var(--space-y));
+    padding: 0 calc(14px * var(--space-x));
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+/* The line that opens it, and beside it the button for its message sheet (Show, Fold, Hide; Copy). */
+.presented-bar {
+    display: flex;
+    align-items: stretch;
+}
+
+.presented-bar > .presented-head {
+    flex: 1;
+    min-width: 0;
+}
+
+.presented-more {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: calc(22px + 18px * var(--space-y));
+    color: var(--faint);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+@media (pointer: coarse) {
+    .presented-more {
+        width: max(34px, calc(22px + 18px * var(--space-y)));
+    }
+}
+
+.presented-more:focus-visible {
+    outline-offset: -2px;
+}
+
+.presented-input.open > .presented-bar {
+    border-bottom: 1px solid var(--hair);
+}
+
+/* Its chevron turns as other chevrons do (`.open > button > .chev`), one level further in. */
+.presented-input.open > .presented-bar > .presented-head > .chev {
+    transform: rotate(90deg);
+}
+
+.presented-body.tappable {
+    cursor: pointer;
+}
+
+@media (hover: hover) {
+    .presented-head:hover,
+    .presented-more:hover {
+        color: var(--text);
+        background: var(--hover);
+    }
+}
+
+/* Inside a card that cuts off what is past it. */
+.presented-head:focus-visible {
+    outline-offset: -2px;
+}
+
+/* The label, then the summary: one line that gives way at its end. */
+.presented-line {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.presented-label {
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* In a presented input's message sheet: how every input of its kind shows in this browser, between the message and
+ * what can be done with it. */
+.presented-choice {
+    margin: 0 0 12px;
+}
+
+/* In the queue too: the label, then its summary, quieter. */
+.queued-text .presented-summary {
+    color: var(--muted);
+}
+
+.presented-time {
+    flex: none;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--faint);
+}
+
+/* Opened: the message, as a person's message shows its words. */
+.presented-body {
+    padding: calc(10px * var(--space-y)) calc(16px * var(--space-x)) calc(12px * var(--space-y))
+        calc(38px * var(--space-x));
+    color: var(--text);
+}
+
+.presented-body.unrolling {
+    animation: unroll var(--t-in) var(--ease-out);
+}
+
+@media (max-width: 699px) {
+    .presented-input {
+        border-radius: calc(var(--r-window) + 2px);
+    }
+
+    .presented-body {
+        padding-left: calc(14px * var(--space-x));
+    }
+}
+
+/* Shown open, a presented input is a message with its label beside who sent it. */
+.presented-tag {
+    padding: 0 7px;
+    border-radius: var(--r-pill);
+    background: var(--hover);
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 18px;
+}
+
+.transcript > .presented-hidden,
+.history > .presented-hidden {
+    height: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+}
+
+.transcript > .presented-hidden:not(:first-child) {
+    margin-top: calc(-16px * var(--space-y));
+}
+
+.history > .presented-hidden:not(:first-child) {
+    margin-top: -16px;
+}
+
+.transcript > .presented-hidden:first-child:not(:has(+ .presented-hidden)) {
+    margin-bottom: calc(-16px * var(--space-y));
+}
+
+.history > .presented-hidden:first-child:not(:has(+ .presented-hidden)) {
+    margin-bottom: -16px;
 }
 
 /* What a PR watch or a webhook fenced for Pi (a check's log, a post): a block of its own, scrolling past a few lines. */
@@ -3158,12 +3485,16 @@ pre.diff .del {
     }
 }
 
-/* The way back to the newest message. */
+/* The way back to the newest message: right above the end of the message box, beside the conversation's rows, not at
+ * the far edge of a wide pane. A margin's percentage is of the scroller's width, as the column's width is. */
 .jump {
     position: sticky;
     bottom: 0.8rem;
     left: 100%;
-    margin-right: 0.8rem;
+    margin-right: max(
+        0.8rem,
+        calc((100% - min(100%, var(--composer-width))) / 2 + 24px * var(--space-x))
+    );
     width: 40px;
     height: 40px;
     border: 1px solid var(--hair-2);
@@ -3179,6 +3510,13 @@ pre.diff .del {
         border-color var(--t-hover) var(--ease-out),
         color var(--t-hover) var(--ease-out),
         transform 90ms var(--ease-out);
+}
+
+/* A narrow pane: the message box spans it, and the button keeps to its edge. */
+@media (max-width: 699px) {
+    .jump {
+        margin-right: 0.8rem;
+    }
 }
 
 @media (hover: hover) {
@@ -3337,30 +3675,61 @@ pre.diff .del {
     color: var(--muted);
 }
 
-/* Tapped open, one's own message: a row of buttons under it to move it to Steer or Queue, or send it now. */
+/* Tapped open, one's own message: a quiet row under it, past a line from edge to edge, to move it to Steer or Queue, or
+   send it now. Words at the end, as under Pi's answers. */
 .queued:has(> .queued-actions) {
     flex-wrap: wrap;
 }
 
 .queued-actions {
-    flex-basis: 100%;
+    flex-basis: calc(100% + 16px);
     display: flex;
-    gap: 6px;
-    padding-bottom: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 2px;
+    margin: 0 -4px 0 -12px;
+    padding: 3px 4px 3px 12px;
+    border-top: 1px solid var(--hair);
+}
+
+.queued-actions .button.small {
+    min-height: 26px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: var(--r-seg);
+    background: none;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .queued-actions .button.small:hover {
+        color: var(--text);
+        background: var(--hover);
+    }
 }
 
 /* Interrupt, tapped once: the color of stopping the run. */
-.queued-actions .button.danger {
-    border-color: var(--err);
+.queued-actions .button.small.danger {
     color: var(--err);
+    background: var(--err-soft);
 }
 
-/* A thumb's room around the small mark. */
+/* A thumb's room around the small mark, and around the words under an open message. */
 @media (pointer: coarse) {
     .queued .queued-remove::after {
         content: "";
         position: absolute;
         inset: -8px -4px;
+    }
+
+    .queued-actions .button {
+        position: relative;
+    }
+
+    .queued-actions .button::after {
+        content: "";
+        position: absolute;
+        inset: -6px 0;
     }
 }
 
@@ -3506,6 +3875,16 @@ pre.diff .del {
     line-height: 1.5;
     /* As tall as what is written, to the most above; browsers without this measure it in script (`fitBox`). */
     field-sizing: content;
+}
+/* A message on its way: what it says and sends stays, dimmed and still, until the server takes it. */
+.composer.sending textarea,
+.composer.sending .files {
+    opacity: 0.5;
+    transition: opacity var(--t-border) var(--ease-out);
+}
+
+.composer.sending .files button {
+    pointer-events: none;
 }
 
 /* Touch screens keep 16px, below which iOS zooms into the field. */
@@ -7597,6 +7976,42 @@ div.group-head {
     color: var(--faint);
 }
 
+/* Pin default workspace to always open there for new sessions. */
+.fp-pin {
+    flex: none;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-sm, 4px);
+    color: var(--faint);
+    opacity: 0;
+    transition:
+        opacity var(--t-fast, 0.15s),
+        color var(--t-fast, 0.15s);
+}
+
+.fp-place:hover .fp-pin,
+.fp-pin.on {
+    opacity: 1;
+}
+
+.fp-pin.on {
+    color: var(--brand);
+}
+
+@media (hover: hover) {
+    .fp-pin:hover {
+        color: var(--accent);
+    }
+
+    .fp-pin.on:hover {
+        color: var(--brand);
+    }
+}
+
 .fp-places-title {
     margin: 10px 10px 4px;
     font-size: 12px;
@@ -7851,8 +8266,8 @@ div.group-head {
 }
 
 /*
- * Wide screens, the owner's view: the providers to sign in to on the left, and what is shared on the right (the refresh,
- * and the models for subagents). A fixed height, and each side scrolls on its own. Narrower: one column, as on a phone.
+ * Wide screens: provider controls on the left, a full-height model library on the right.
+ * Each side scrolls on its own. Narrower: the model library comes first, as on a phone.
  */
 @media (min-width: 700px) {
     .sheet.providers-sheet.with-side {
@@ -7862,8 +8277,8 @@ div.group-head {
 
 @media (min-width: 1000px) {
     .sheet.providers-sheet.with-side {
-        max-width: 1160px;
-        height: min(86dvh, 880px);
+        max-width: 1280px;
+        height: min(90dvh, 960px);
     }
     .providers-sheet.with-side .sheet-body {
         overflow-y: hidden;
@@ -7872,7 +8287,7 @@ div.group-head {
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 24px;
     }
     .providers-sheet .providers-main {
@@ -7895,26 +8310,16 @@ div.group-head {
         overflow-y: auto;
         overscroll-behavior: contain;
     }
-    .providers-side .model-refresh {
-        margin-top: 0;
-    }
     .providers-side .subagent-models {
         flex: 1 1 0;
-        min-height: 18rem;
+        min-height: 0;
         margin: 0;
-        padding: 12px 0 0;
-        border-bottom: 0;
-        border-top: 1px solid var(--line);
-    }
-    .providers-side .subagent-models > .label {
-        margin: 0;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
+        padding: 0;
+        border: 0;
     }
     .providers-side .subagent-models-list {
-        flex: 1;
-        min-height: 8rem;
+        flex: 1 1 0;
+        min-height: 12rem;
         max-height: none;
         background: var(--bg);
     }
@@ -7984,21 +8389,69 @@ div.group-head {
 .subagent-models {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 12px;
     padding: 0.6rem 0 0.8rem;
     margin-bottom: 0.4rem;
     border-bottom: 1px solid var(--line);
+}
+
+.subagent-models-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.subagent-models-heading .label {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
 }
 
 .subagent-models p {
     margin: 0;
 }
 
-/* What is allowed, on one line: the list under it stays put while models are checked one after another. */
+/* The count stays compact even with many models allowed. */
 .subagent-models-chosen {
+    padding: 3px 8px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    color: var(--muted);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+}
+
+.subagent-models-legend {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: -6px;
+    padding: 0 18px;
+    font-size: 12px;
+    color: var(--faint);
+}
+
+.subagent-models-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.model-filters {
+    align-self: flex-start;
+}
+
+.model-menu > .model-filters {
+    margin: 0 10px 8px;
+}
+
+.model-filters button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 40px;
 }
 
 .subagent-models .search {
@@ -8032,16 +8485,50 @@ div.group-head {
 .subagent-model {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    min-height: 44px;
-    padding: 8px 12px;
+    min-height: 60px;
+    padding-right: 6px;
     border-top: 1px solid var(--hair);
+}
+
+.subagent-model-choice {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    flex: 1;
+    min-width: 0;
+    gap: 12px;
+    padding: 10px 12px;
     cursor: pointer;
 }
 
-.subagent-model > span {
+.subagent-model-choice > span {
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.subagent-model:has(input:checked) {
+    background: var(--accent-soft);
+}
+
+.model-favorite {
+    flex: none;
+    min-width: 44px;
+    min-height: 44px;
+    color: var(--faint);
+}
+
+.model-favorite[aria-pressed="true"] {
+    color: var(--accent);
+}
+
+.model-favorite[aria-pressed="true"] svg {
+    fill: currentColor;
+}
+
+@media (hover: hover) {
+    .subagent-model:hover {
+        background: var(--hover);
+    }
 }
 
 .subagent-model .muted {
@@ -8723,10 +9210,23 @@ body.plain-page {
     color: var(--who, var(--accent));
     border: 0;
     border-radius: 50%;
+    overflow: hidden;
     font-size: 0.62rem;
     font-weight: 600;
     line-height: 1;
     letter-spacing: 0;
+}
+
+.avatar-img,
+.prompt-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    /* A pale picture keeps its edge on a pale theme. */
+    outline: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    outline-offset: -1px;
+    border-radius: 50%;
 }
 
 .avatar.typing {
@@ -8736,6 +9236,7 @@ body.plain-page {
 @keyframes avatar-typing {
     50% {
         background: var(--accent-soft);
+        box-shadow: 0 0 0 2px var(--accent-soft);
     }
 }
 
@@ -9460,64 +9961,1239 @@ textarea.notes {
     --tone: var(--warn);
 }
 
-/* Running now: a session, then what is at work in it. */
-.running {
+/* Running now: a board in the conversation's place, as the subagents board is (`running-board.js`). A timeline of each
+   session's scheduled messages over a matrix of sessions, what runs there now beside what is scheduled, and at the side
+   what needs you, what goes out next, and the schedule selected. */
+.running-board .board-sub b {
+    font: 500 11px var(--mono);
+    color: var(--text);
+}
+
+.rb-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 22px;
+}
+
+.rb-scroll.with-bar {
+    padding-bottom: 320px;
+}
+
+.rb-ellipsis {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The timeline: a lane per session, scrolled sideways, with now a little in from the left. */
+.rb-timeline {
+    margin: 16px calc(22px + var(--inset-r)) 0 calc(22px + var(--inset-l));
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    overflow: hidden;
+}
+
+/* One line: the title, what goes out next (as much as fits), the legend, and the range. */
+.rb-tl-head {
+    display: flex;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 8px 10px 8px 14px;
+    border-bottom: 1px solid var(--hair);
+}
+
+.rb-tl-head h3 {
+    flex: none;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.rb-tl-next {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rb-legend {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.rb-legend > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.rb-legend .rb-pin {
+    position: static;
+    margin: 0;
+    width: 10px;
+    height: 10px;
+}
+
+.rb-legend .rb-runbar {
+    position: static;
+    display: inline-block;
+    width: 18px;
+    margin: 0;
+}
+
+.rb-range {
+    flex: none;
+    align-self: center;
+}
+
+.rb-tl-grid {
+    display: grid;
+    grid-template-columns: 176px minmax(0, 1fr);
+}
+
+.rb-tl-labels {
+    border-right: 1px solid var(--hair);
+}
+
+.rb-axis {
+    position: relative;
+    height: 26px;
+    border-bottom: 1px solid var(--hair);
+}
+
+.rb-lane-label,
+.rb-lane {
+    height: 30px;
+    border-bottom: 1px solid var(--hair);
+}
+
+.rb-lane-label:last-child,
+.rb-lane:last-of-type {
+    border-bottom: 0;
+}
+
+.rb-lane-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 0 10px 0 14px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: left;
+    transition: color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .rb-lane-label:hover {
+        color: var(--text);
+    }
+}
+
+.rb-lane-label.on,
+.rb-lane.on {
+    background: var(--accent-soft);
+}
+
+.rb-tl-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+}
+
+.rb-tl-track {
+    position: relative;
+    min-width: 100%;
+}
+
+.rb-lane {
+    position: relative;
+}
+
+.rb-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    padding-left: 5px;
+    border-left: 1px solid var(--hair);
+    font: 10.5px/26px var(--mono);
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.rb-tick.day {
+    border-left-color: var(--line);
+    color: var(--text);
+}
+
+.rb-gridline {
+    position: absolute;
+    top: 26px;
+    bottom: 0;
+    border-left: 1px solid var(--hair);
+    pointer-events: none;
+}
+
+.rb-gridline.day {
+    border-left-color: var(--line);
+}
+
+.rb-past {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: repeating-linear-gradient(
+        135deg,
+        transparent 0 6px,
+        color-mix(in srgb, var(--muted) 8%, transparent) 6px 7px
+    );
+    pointer-events: none;
+}
+
+.rb-now {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--accent);
+    pointer-events: none;
+}
+
+.rb-now span {
+    position: absolute;
+    top: 5px;
+    left: 1px;
+    transform: translateX(-50%);
+    padding: 0 3px;
+    border-radius: 3px;
+    background: var(--card);
+    font: 600 10px/16px var(--mono);
+    color: var(--accent);
+}
+
+.rb-runbar {
+    position: absolute;
+    top: 50%;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 4px 0 0 4px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        color-mix(in srgb, var(--muted) 35%, transparent)
+    );
+    pointer-events: none;
+}
+
+/* The area over a lane's bar that takes the pointer, as tall as the lane; the bar is drawn in it, left to right. */
+.rb-runhit {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    padding: 0;
+    border-radius: 0;
+    cursor: help;
+}
+
+.rb-runhit .rb-runbar {
+    left: var(--bar-from, 0);
+    right: 0;
+    min-width: 6px;
+}
+
+@media (hover: hover) {
+    .rb-runhit:hover .rb-runbar {
+        filter: brightness(1.5);
+    }
+}
+
+.rb-runbar.busy {
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ok) 50%, transparent));
+}
+
+.rb-runbar.waiting::after {
+    content: "";
+    position: absolute;
+    right: -4px;
+    top: -2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--warn);
+}
+
+.rb-pin {
+    position: absolute;
+    top: 50%;
+    z-index: 1;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    padding: 0;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    background: var(--card);
+    transition: transform var(--t-hover) var(--ease-out);
+}
+
+.rb-pin.repeat {
+    border-radius: 3px;
+    transform: rotate(45deg) scale(0.85);
+}
+
+.rb-pin.later {
+    opacity: 0.45;
+}
+
+.rb-pin.held {
+    border-color: var(--warn);
+    background: var(--warn-soft);
+}
+
+.rb-pin.on {
+    background: var(--accent);
+    opacity: 1;
+}
+
+@media (hover: hover) {
+    .rb-tl-track .rb-pin:hover {
+        z-index: 3;
+        transform: scale(1.35);
+    }
+
+    .rb-tl-track .rb-pin.repeat:hover {
+        transform: rotate(45deg) scale(1.2);
+    }
+}
+
+/* A bigger target than it looks, for a finger. */
+.rb-tl-track .rb-pin::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+}
+
+.rb-pin-tail {
+    position: absolute;
+    top: 50%;
+    height: 0;
+    border-top: 1.5px dashed var(--accent-line);
+    pointer-events: none;
+}
+
+.rb-pin-tail.held {
+    border-top-color: var(--warn-line, var(--hair-2));
+}
+
+.rb-pin-label {
+    position: absolute;
+    top: 50%;
+    margin-left: 12px;
+    padding: 0 3px;
+    transform: translateY(-50%);
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--card) 85%, transparent);
+    font: 10.5px var(--mono);
+    color: var(--muted);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.rb-tl-empty {
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.rb-tip {
+    position: fixed;
+    z-index: 50;
+    max-width: 260px;
+    padding: 8px 10px;
+    border-radius: var(--r-card);
+    background: var(--raised);
+    box-shadow: var(--pop);
+    font-size: 12px;
+    color: var(--muted);
+    pointer-events: none;
+}
+
+.rb-tip b {
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+/* A message a session works on: wider, its lines kept, and cut at a readable height. */
+.rb-tip.long {
+    max-width: min(360px, calc(100vw - 16px));
+}
+
+.rb-tip.long b {
+    display: -webkit-box;
+    max-height: 14lh;
+    margin-bottom: 6px;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 14;
+}
+
+/* The filters, as the subagents board's legend. */
+.rb-filters {
+    padding: 16px calc(22px + var(--inset-r)) 0 calc(22px + var(--inset-l));
+}
+
+.rb-mark {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: calc(var(--r-mark) - 0.5px);
+    background: var(--muted);
+}
+
+.rb-mark-running {
+    background: var(--ok);
+}
+
+.rb-mark-scheduled {
+    background: var(--accent);
+}
+
+.rb-mark-approval {
+    background: var(--warn);
+}
+
+.rb-mark-held {
+    border-radius: 50%;
+    background: var(--warn);
+}
+
+/* The matrix, and the side beside it. */
+.rb-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 12px calc(22px + var(--inset-r)) 0 calc(22px + var(--inset-l));
+}
+
+.rb-matrix {
+    flex: 1;
+    min-width: 0;
     border: 1px solid var(--hair);
     border-radius: var(--r-card);
     overflow: hidden;
 }
 
-.running-head,
-.running-task {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+.rb-thead,
+.rb-row {
+    display: grid;
+    grid-template-columns: minmax(190px, 22%) minmax(0, 1.25fr) minmax(0, 1fr);
 }
 
-.running-head {
-    padding: 10px 12px 10px 14px;
+.rb-thead {
+    border-bottom: 1px solid var(--hair);
     background: var(--card);
 }
 
-.running-head > .folder-mark {
-    width: 8px;
-    height: 8px;
-    border-radius: calc(var(--r-mark) - 0.5px);
+.rb-thead > div {
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
 
-.running-head .link {
+.rb-thead > div + div,
+.rb-row > div + div {
+    border-left: 1px solid var(--hair);
+}
+
+.rb-row {
+    border-bottom: 1px solid var(--hair);
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.rb-row:last-child {
+    border-bottom: 0;
+}
+
+.rb-row.on {
+    background: color-mix(in srgb, var(--accent-soft) 50%, transparent);
+}
+
+.rb-row > div {
     min-width: 0;
-    text-align: left;
-    font-size: 14px;
+    padding: 10px 14px;
+}
+
+.rb-none {
+    padding: 16px 14px;
+}
+
+.rb-who {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rb-who-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    font-size: 13.5px;
     font-weight: 500;
+    color: var(--text);
+    text-align: left;
+}
+
+@media (hover: hover) {
+    .rb-who-title:hover .rb-ellipsis {
+        color: var(--accent);
+    }
+}
+
+/* Where it works, its badges, and Stop, on one line under the title, wrapping where the column is narrow. */
+.rb-who-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    min-width: 0;
+}
+
+.rb-who-meta {
+    padding-left: 16px;
+}
+
+.rb-who-path {
+    max-width: 100%;
+    font: 11px var(--mono);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rb-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+}
+
+.rb-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 7px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-pill);
+    background: var(--card-2);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 18px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.rb-badge i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentcolor;
+}
+
+.rb-badge.ok {
+    border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+    background: var(--ok-soft);
+    color: var(--ok);
+}
+
+.rb-badge.warn {
+    border-color: var(--warn-line);
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+/* Stop sits with the badges, a pill of their size; its tap area reaches past its edges, as a thumb needs. */
+.rb-stop {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 8px;
+    border: 1px solid var(--err-line);
+    border-radius: var(--r-pill);
+    background: var(--err-soft);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--err);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.rb-stop::after {
+    content: "";
+    position: absolute;
+    inset: -8px -4px;
+}
+
+@media (hover: hover) {
+    .rb-stop:hover {
+        background: var(--err);
+        color: var(--bg);
+    }
+}
+
+.rb-cell-label {
+    display: none;
+}
+
+.rb-task {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    font-size: 12.5px;
+}
+
+.rb-task .spinner {
+    flex: none;
+}
+
+.rb-dot {
+    flex: none;
+    width: 14px;
+    text-align: center;
+    color: var(--muted);
+}
+
+.rb-task-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rb-agent {
+    font: 11px var(--mono);
+    color: var(--o-cyan);
+}
+
+.rb-status {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: var(--r-tag);
+    background: var(--card-2);
+    font: 10.5px var(--mono);
+    color: var(--muted);
+}
+
+.rb-status.ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+}
+
+.rb-status.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.rb-elapsed {
+    flex: none;
+    min-width: 50px;
+    font: 11px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    text-align: right;
+}
+
+.rb-x,
+.rb-x-space {
+    flex: none;
+    width: 28px;
+    height: 28px;
+}
+
+.rb-x {
+    display: grid;
+    place-items: center;
+    border-radius: var(--r-row);
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .rb-x:hover {
+        background: var(--err-soft);
+        color: var(--err);
+    }
+}
+
+.rb-more {
+    min-height: 30px;
+    padding: 0 0 0 22px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+}
+
+.rb-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+    font: 11px var(--mono);
+    color: var(--muted);
+}
+
+.rb-idle {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+    font-size: 12.5px;
+    color: var(--muted);
+}
+
+.rb-sched {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    width: 100%;
+    margin-bottom: 6px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    border-radius: var(--r-row);
+    background: var(--card);
+    text-align: left;
+    transition: border-color var(--t-hover) var(--ease-out);
+}
+
+.rb-sched:last-child {
+    margin-bottom: 0;
+}
+
+@media (hover: hover) {
+    .rb-sched:hover {
+        border-color: var(--line);
+    }
+}
+
+.rb-sched.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.rb-sched.held {
+    background: var(--warn-soft);
+}
+
+.rb-sched-text {
+    font-size: 12.5px;
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.running-head .warn {
-    padding: 1px 8px;
-    border-radius: var(--r-pill);
-    background: var(--warn-soft);
+.rb-sched-time {
+    font: 500 12px var(--mono);
+    color: var(--text);
+    text-align: right;
 }
 
-.running-head .button {
+.rb-sched-rule {
+    font-size: 11.5px;
+    color: var(--accent);
+}
+
+.rb-sched.held .rb-sched-rule {
+    color: var(--warn);
+}
+
+.rb-sched-rel {
+    font: 11px var(--mono);
+    color: var(--muted);
+    text-align: right;
+}
+
+.rb-side {
+    flex: none;
+    position: sticky;
+    top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 300px;
+}
+
+.rb-panel {
+    padding: 14px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.rb-panel > .label {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.rb-panel.board-needs .board-need {
+    grid-template-columns: 8px minmax(0, 1fr);
+}
+
+.rb-next {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 32px;
+    border-top: 1px solid var(--hair);
+    font-size: 12.5px;
+    text-align: left;
+}
+
+.rb-panel > .label + .rb-next {
+    border-top: 0;
+}
+
+.rb-next-time {
+    flex: none;
+    width: 46px;
+    font: 12px var(--mono);
+    color: var(--text);
+}
+
+.rb-next-rel {
+    flex: none;
+    font: 11px var(--mono);
+    color: var(--muted);
+}
+
+.rb-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.rb-detail-title {
+    flex: 1;
+    font-weight: 500;
+    color: var(--text);
+    text-align: left;
+}
+
+.rb-held {
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--warn-line);
+    border-radius: var(--r-row);
+    background: var(--warn-soft);
+    font-size: 12px;
+    color: var(--warn);
+}
+
+.rb-message {
+    margin: 0 0 12px;
+    padding: 10px;
+    border-radius: var(--r-row);
+    background: var(--o-bg-dark, var(--card-2));
+    font: 12px/1.5 var(--mono);
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.rb-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 5px 14px;
+    margin: 0 0 12px;
+    font-size: 12px;
+}
+
+.rb-facts dt {
+    color: var(--muted);
+}
+
+.rb-facts dd {
+    margin: 0;
+    color: var(--text);
+}
+
+.rb-sub {
+    margin: 12px 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.rb-upcoming {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font: 12px var(--mono);
+    color: var(--muted);
+}
+
+.rb-upcoming span:first-child {
+    color: var(--text);
+}
+
+.rb-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.rb-actions .button.danger {
     background: var(--err-soft);
+    border-color: var(--err-line);
     color: var(--err);
 }
 
-.running-task {
-    font-size: 13px;
-    padding: 9px 14px;
-    border-top: 1px solid var(--hair);
+.rb-phone-side {
+    padding: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
 }
 
-.running-task > .grow {
+/* Narrower than a sidebar and a wide matrix: what needs you and what is next go under the matrix, side by side. */
+@media (max-width: 1439px) and (min-width: 700px) {
+    .rb-body {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .rb-side {
+        position: static;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        align-items: start;
+        width: auto;
+    }
+}
+
+/* Phones: one column, a timeline that pans with only the folder marks for lanes, and each session a card. */
+@media (max-width: 699px) {
+    .rb-timeline {
+        margin: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
+    }
+
+    .rb-tl-grid {
+        grid-template-columns: 28px minmax(0, 1fr);
+    }
+
+    /* Each lane says whose it is: the session's name above its marks, held at the timeline's left as it pans. */
+    .rb-lane-label,
+    .rb-lane {
+        height: 40px;
+    }
+
+    .rb-lane .rb-pin,
+    .rb-lane > .rb-runbar,
+    .rb-runhit .rb-runbar {
+        top: 28px;
+    }
+
+    .rb-lane-name {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        display: block;
+        width: max-content;
+        max-width: calc(100vw - 90px);
+        margin-top: 2px;
+        padding: 0 6px;
+        border-radius: 0 4px 4px 0;
+        background: var(--card);
+        font-size: 11px;
+        line-height: 15px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+    }
+
+    .rb-lane-label {
+        justify-content: center;
+        padding: 0;
+    }
+
+    .rb-lane-label .rb-ellipsis,
+    .rb-pin-label {
+        display: none;
+    }
+
+    .board-legend.rb-filters {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding: 12px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
+        scrollbar-width: none;
+    }
+
+    .rb-filters .board-filter {
+        flex: none;
+        height: 36px;
+    }
+
+    .rb-body {
+        display: block;
+        padding: 10px calc(12px + var(--inset-r)) 0 calc(12px + var(--inset-l));
+    }
+
+    .rb-matrix {
+        border: 0;
+        border-radius: 0;
+        overflow: visible;
+    }
+
+    .rb-thead {
+        display: none;
+    }
+
+    .rb-row {
+        display: block;
+        margin-bottom: 10px;
+        border: 1px solid var(--hair);
+        border-radius: var(--r-card);
+        overflow: hidden;
+    }
+
+    .rb-row:last-child {
+        border-bottom: 1px solid var(--hair);
+    }
+
+    .rb-row > div + div {
+        border-left: 0;
+        border-top: 1px solid var(--hair);
+    }
+
+    /* The head: the title, then where it works, its badges, and Stop on one line. */
+    .rb-row > .rb-who {
+        gap: 6px;
+        background: var(--card);
+    }
+
+    .rb-row > .rb-cell {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+
+    .rb-row > .rb-cell.empty {
+        display: none;
+    }
+
+    /* A task's line keeps its words: the spinner says it runs, so only a wait keeps its tag, and the time is narrow. */
+    .rb-task {
+        gap: 6px;
+        min-height: 36px;
+    }
+
+    .rb-status.running {
+        display: none;
+    }
+
+    .rb-elapsed {
+        min-width: 0;
+    }
+
+    .rb-x-space {
+        width: 0;
+        min-width: 0;
+    }
+
+    .rb-cell-label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+    }
+
+    .rb-x,
+    .rb-x-space {
+        min-width: 36px;
+        min-height: 36px;
+    }
+
+    .rb-stop {
+        height: 24px;
+        padding: 0 10px;
+        font-size: 12px;
+    }
+
+    .rb-bar {
+        max-height: 70dvh;
+        overflow-y: auto;
+    }
+}
+
+/* Background: the session's commands in one row, the open one's command, and what it prints as it runs. */
+.background-tasks {
+    display: flex;
     min-width: 0;
-    white-space: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+}
+
+.background-tasks::-webkit-scrollbar {
+    display: none;
+}
+
+.background-task {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    max-width: 62%;
+    padding: 6px 11px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-pill);
+    background: var(--card);
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+}
+
+.background-task .mark {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--line);
+}
+
+.background-task .mono {
+    flex: none;
+    color: var(--text);
+}
+
+.background-task .what {
+    min-width: 0;
+    max-width: 11rem;
     overflow: hidden;
+    white-space: nowrap;
     text-overflow: ellipsis;
+}
+
+.background-task.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.background-task.on .mono {
+    color: inherit;
+}
+
+@media (max-width: 699px) {
+    .background-task .what {
+        max-width: 6.5rem;
+    }
+}
+
+.background-view {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    min-height: 0;
+}
+
+.background-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--muted);
+}
+
+.background-head .icon {
+    margin-top: 3px;
+}
+
+.background-head .mono {
+    min-width: 0;
+    max-height: 4.5em;
+    overflow: hidden;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.background-said {
+    margin-top: -4px;
+}
+
+.background-log {
+    min-width: 0;
+    max-height: 46vh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    background: var(--code-bg);
+    outline: none;
+}
+
+.background-log:focus-visible {
+    border-color: var(--accent);
+}
+
+.background-log pre {
+    margin: 0;
+    padding: 10px 12px;
+    font: 12px / 1.55 var(--mono);
+    color: var(--body);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.background-log > .muted {
+    margin: 0;
+    padding: 10px 12px;
+}
+
+.background-end {
+    align-self: flex-start;
 }
 
 /* Spend: a person or a session, what Pi spent for it, and its limit. */
@@ -11037,6 +12713,15 @@ textarea.notes {
 
 .peek-line.user b {
     color: var(--o-cyan);
+    font-weight: 600;
+}
+
+.peek-line.presented .peek-text {
+    color: var(--muted);
+}
+
+.peek-line.presented b {
+    color: var(--body);
     font-weight: 600;
 }
 
@@ -14220,7 +15905,8 @@ textarea.notes {
     .step-head {
         min-height: 36px;
     }
-    .activity-head {
+    .activity-head,
+    .presented-head {
         min-height: max(34px, calc(22px + 18px * var(--space-y)));
     }
     .browser-servers .chip,
@@ -14294,15 +15980,9 @@ textarea.notes {
         height: auto;
     }
     .answer-actions > button:not(.reaction),
-    .link.small,
-    .running-head .link {
+    .link.small {
         padding-block: 11px;
         margin-block: -11px;
-    }
-    /* A task's Stop or Cancel, at the end of its row: wider too. */
-    .running-task .link.small {
-        padding-inline: 7px;
-        margin-inline: -7px;
     }
     .answer-actions > button:not(.reaction) {
         min-width: 40px;
@@ -18299,7 +19979,7 @@ pre.gallery-code {
 }
 
 /* Pi's answer, what it did, and reports: quieter, a short rise. */
-:root[data-motion="fluid"] :is(.reply, .activity, .report).enter {
+:root[data-motion="fluid"] :is(.reply, .activity, .report, .presented-input).enter {
     animation: fluid-rise var(--t-glide) var(--ease-glide) backwards;
 }
 
@@ -18324,7 +20004,8 @@ pre.gallery-code {
 }
 
 /* A group of steps opening: it unrolls on the glide, and its first steps drop in one after another. */
-:root[data-motion="fluid"] :is(.timeline, .activity-thought, .step-body).unrolling {
+:root[data-motion="fluid"]
+    :is(.timeline, .activity-thought, .step-body, .presented-body).unrolling {
     animation: unroll var(--t-glide) var(--ease-glide);
 }
 
@@ -18622,4 +20303,85 @@ pre.gallery-code {
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* Your picture in the name sheet: a preview and its buttons. */
+.my-photo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0 1rem;
+}
+
+/* All artifacts: a row for each, in the session's own group (it shares `.running`'s frame), with its current version. */
+.overview-group {
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    overflow: hidden;
+}
+
+.overview-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 10px 12px 10px 14px;
+    background: var(--card);
+}
+
+.overview-head > .folder-mark {
+    width: 8px;
+    height: 8px;
+    border-radius: calc(var(--r-mark) - 0.5px);
+}
+
+.overview-session {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.overview-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    border-top: 1px solid var(--hair);
+    text-align: left;
+    color: var(--faint);
+}
+
+@media (hover: hover) {
+    .overview-row:hover {
+        background: var(--card);
+    }
+}
+
+.overview-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.overview-title {
+    color: var(--text);
+    font-size: 13.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.overview-version {
+    flex: none;
+    padding: 2px 9px;
+    border-radius: var(--r-pill);
+    background: var(--accent-soft, var(--card));
+    color: var(--accent);
+    font: 12px var(--mono);
 }

@@ -9,16 +9,19 @@ const HELP = `Pi Pocket: a durable, multiplayer, mobile-first web app for Pi age
 Usage: pi-pocket [options]
 
   -a, --access MODE   How other devices reach this server:
-                        local       this device only
-                        lan         devices on the same network (http)
-                        cloudflare  anywhere, through a Cloudflare quick tunnel (https)
-                        tailscale   devices on your tailnet
+                        local            this device only
+                        lan              devices on the same network (http)
+                        cloudflare       anywhere, through a Cloudflare quick tunnel (https)
+                        tailscale        devices on your tailnet
+                        tailscale-serve  your tailnet over https (tailscale serve)
                       Without it, a menu asks (in a terminal) or the last choice is used.
   -y, --yes           Use the last choice without asking
   -p, --port N        Port (default 8787)
       --cwd DIR       Folder for new sessions (default: the current folder)
       --data DIR      Data folder (default ~/.pi-pocket)
-      --host HOST     Listen on this address instead of choosing an access mode
+      --host HOST     Listen on this address instead of choosing an access mode; it overrides the
+                      address a named mode would pick, except with --access tailscale-serve, which
+                      always listens on 127.0.0.1
       --rotate-token  Replace the owner sign-in link, signing out the devices that used it
   -h, --help          Show this help
 

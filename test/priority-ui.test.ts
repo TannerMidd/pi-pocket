@@ -348,3 +348,44 @@ test("an open session that gets a call and has it answered leaves Needs you", re
     await answer;
     await gone(rowIn("needs", id), "the row, out of Needs you");
 });
+
+test(
+    "a session whose linked sessions work is at work too, in Working with a working square",
+    real,
+    async () => {
+        const parent = await newSession(app);
+        const child = await newSession(app);
+
+        await click('.sidebar .session-tabs [data-tab="priority"]');
+        await present(rowIn("quiet", parent), "the parent, quiet");
+        // The child is a linked session of the parent, at work: the parent waits for its report.
+        await page.evaluate(`
+        const { store } = await import("/store.js");
+
+        store.set((state) => ({
+            sessions: state.sessions.map((session) =>
+                session.id === ${Number(child)}
+                    ? { ...session, linkedFrom: { id: ${Number(parent)} }, busy: true }
+                    : session,
+            ),
+        }));
+    `);
+        await present(rowIn("working", parent), "the parent in Working");
+        // The home screen's Jump back in draws its square the same way.
+        assert.equal(
+            await inPage<string>(`
+            const { store } = await import("/store.js");
+            const { sessionMark } = await import("/sessions.js");
+
+            return JSON.stringify(sessionMark(store.state.sessions.find((each) => each.id === ${Number(parent)})).shape);
+        `),
+            "working",
+        );
+        assert.equal(
+            await inPage<string | null>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(rowIn("working", parent))}).dataset.state ?? null)`,
+            ),
+            "working",
+        );
+    },
+);

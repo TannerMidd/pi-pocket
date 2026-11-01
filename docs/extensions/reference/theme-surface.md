@@ -132,6 +132,7 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `home-list`                                                            | The session list as a phone's home screen                                                                                                                                                      |
 | `pane`                                                                 | The conversation's window (or the subagents board, or an extension's page)                                                                                                                     |
 | `topbar`, `topbar-title`, `topbar-sub`                                 | The conversation's title bar, its title, and the line under it (folder, branch)                                                                                                                |
+| `tabstrip`, `tabstrip-tab`, `tabstrip-name`                            | The session tabs above the title bar: the strip, each tab (`data-state`, its `--folder` color), and its name                                                                                   |
 
 ### The conversation
 
@@ -142,6 +143,10 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `prompt`                                        | A person's message                                                                                            |
 | `prompt-head`, `author-mark`, `prompt-author`   | Its head: who sent it and when; their initials; their name                                                    |
 | `prompt-text`                                   | What it says (its skill chip, words, and files)                                                               |
+| `presented-input`, `presented-head`             | An extension's input (`web.presentEntry`), folded: its card and the line that opens it (since 0.28.0)         |
+| `presented-chevron`, `presented-tag`            | That line's chevron; the input's label in its head, when shown open (since 0.28.0)                            |
+| `presented-more`                                | The button beside that line that opens its message sheet (since 0.28.0)                                       |
+| `presented-choice`                              | In its message sheet: Show, Fold, and Hide for every input of its kind (since 0.28.0)                         |
 | `reply`                                         | Pi's answer                                                                                                   |
 | `reply-quote`                                   | The passage a reply quotes, at the top of a message (since 0.27.0)                                            |
 | `reply-actions`                                 | The row under an answer: react, discuss, pin, copy                                                            |
@@ -199,6 +204,11 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `browser-panel`      | The Browser panel                                                         |
 | `pip`                | PiP's panel                                                               |
 | `subagents-board`    | The subagents board                                                       |
+| `running-board`      | The Running now board                                                     |
+| `running-timeline`   | Its Coming up timeline                                                    |
+| `running-needs`      | Its Needs you list                                                        |
+| `running-next`       | Its Next up list                                                          |
+| `running-schedule`   | The schedule selected on it                                               |
 | `extension-page`     | An extension's page, with `data-module` naming its module                 |
 | `extension-panel`    | An extension's panel, with `data-module` naming its module (since 0.19.0) |
 | `diff`               | A diff, in a tool call, a reply, or the review                            |
@@ -214,6 +224,8 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `session-button`                                   | `aria-current`                                   | `page` on the open session's                                                                                                                   |
 | `session-group-head`, `activity-head`, `step-head` | `aria-expanded`                                  | `true` while open; none on Priority's Needs you head, which does not fold                                                                      |
 | `activity`                                         | `data-state`                                     | `open` while open                                                                                                                              |
+| `presented-input`                                  | `data-state`                                     | `open` while open; its `presented-head` has `aria-expanded` `true` (since 0.28.0)                                                              |
+| `prompt-row`                                       | `data-entry-kind`                                | The input's kind (`x.<module>.<name>`) on one an extension presents (since 0.28.0)                                                             |
 | `tool-call`                                        | `data-state`                                     | `running`, `ok`, `failed`, `waiting` (for approval), `denied`, `stopped`                                                                       |
 | `prompt`                                           | `data-from`                                      | `me`, `person` (someone else), `linked` (a linked session), `other` (Pi's schedule, the main agent, a watch or a webhook)                      |
 | `send-button`                                      | `data-state`                                     | `ready` when there is something to send                                                                                                        |

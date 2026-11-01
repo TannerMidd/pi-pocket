@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 import { RefreshModels } from "../model-refresh.js";
+import { favoriteModels, setModelFavorite } from "../model-favorites.js";
 
 /** Models past this many get a box to find them by. */
 const MODEL_SEARCH_AT = 8;
@@ -24,6 +25,9 @@ function SubagentModels({ names }) {
     // What this tab asked for and has no answer to yet, by model: shown at once.
     const [asked, setAsked] = useState({});
     const [query, setQuery] = useState("");
+    const [filter, setFilter] = useState("all");
+    const favoritesOnly = filter === "favorites";
+    const favorites = new Set(favoriteModels());
 
     // A server that does not keep the choice sends none.
     if (!Array.isArray(allowed)) {
@@ -51,7 +55,10 @@ function SubagentModels({ names }) {
         const provider = row.spec.slice(0, row.spec.indexOf("/"));
         const words = `${row.spec} ${row.model?.name ?? ""} ${names[provider] ?? ""}`;
 
-        if (needle === "" || words.toLowerCase().includes(needle)) {
+        if (
+            (filter === "all" || (favoritesOnly ? favorites.has(row.spec) : isOn(row.spec))) &&
+            (needle === "" || words.toLowerCase().includes(needle))
+        ) {
             groups.set(provider, [...(groups.get(provider) ?? []), row]);
         }
     }
@@ -85,11 +92,31 @@ function SubagentModels({ names }) {
     };
 
     return html`<div class="subagent-models">
-        <div class="label">Models for subagents</div>
+        <div class="subagent-models-heading">
+            <div class="label">Models</div>
+            <span class="small subagent-models-chosen" title=${summary} aria-live="polite">
+                ${chosen.length} for subagents
+            </span>
+        </div>
         <p class="muted small">
-            With none checked, subagents and linked sessions run on their session's model, and Pi cannot choose another. Check some, and they run only on those: on the session's model when it is checked, otherwise on a checked model that Pi chooses to suit the work. Pi cannot use any other.
+            <strong>Checkbox:</strong> models subagents and linked sessions may use. With none checked, they use the
+            session's model. <strong>Star:</strong> only a shortcut in your model picker; it changes no permission.
         </p>
-        <p class="small subagent-models-chosen" title=${summary}>${summary}</p>
+        <div class="segmented model-filters" role="group" aria-label="Filter models">
+            ${[
+                ["all", "All models", null],
+                ["allowed", "Allowed", "check"],
+                ["favorites", "Favorites", "star"],
+            ].map(
+                ([value, label, icon]) => html`<button
+                    class=${filter === value ? "on" : ""}
+                    aria-pressed=${filter === value}
+                    onClick=${() => setFilter(value)}
+                >
+                    ${icon && html`<${Icon} name=${icon} size=${15} />`} ${label}
+                </button>`,
+            )}
+        </div>
         ${
             (rows.length > MODEL_SEARCH_AT || query !== "") &&
             html`<label class="search">
@@ -102,37 +129,65 @@ function SubagentModels({ names }) {
                 />
             </label>`
         }
+        <div class="subagent-models-legend" aria-hidden="true">
+            <span><${Icon} name="check" size=${13} />${" "}Allowed for subagents</span>
+            <span>Favorite${" "}<${Icon} name="star" size=${13} /></span>
+        </div>
         <div class="subagent-models-list" role="group" aria-label="Models for subagents">
             ${
                 groups.size === 0 &&
                 html`<p class="muted small">
-                    ${rows.length === 0 ? "No models: sign in to a provider below." : "No model matches."}
+                    ${rows.length === 0 ? "No models: sign in to a provider first." : needle === "" && filter !== "all" ? (favoritesOnly ? "Star models in All models to add favorites." : "No model is allowed yet: check some in All models.") : "No model matches."}
                 </p>`
             }
             ${[...groups].map(
                 ([provider, list]) => html`<div key=${provider}>
                     <div class="subagent-models-head">${names[provider] ?? provider}</div>
                     ${list.map(
-                        ({ spec, model }) => html`<label class="subagent-model" key=${spec}>
-                            <input
-                                type="checkbox"
-                                value=${spec}
-                                checked=${isOn(spec)}
-                                onChange=${(event) => toggle(spec, event.currentTarget.checked)}
-                            />
-                            <span>
-                                ${model?.name ?? spec.slice(spec.indexOf("/") + 1)}
-                                <span class="muted small">
-                                    ${spec}
-                                    ${
-                                        !model
-                                            ? html` · <span class="warn">not signed in</span>`
-                                            : model.signIn &&
-                                              html` · <span class="warn">needs sign-in</span>`
-                                    }
+                        ({ spec, model }) => html`<div class="subagent-model" key=${spec}>
+                            <label class="subagent-model-choice">
+                                <input
+                                    type="checkbox"
+                                    value=${spec}
+                                    checked=${isOn(spec)}
+                                    onChange=${(event) => toggle(spec, event.currentTarget.checked)}
+                                />
+                                <span>
+                                    ${model?.name ?? spec.slice(spec.indexOf("/") + 1)}
+                                    <span class="muted small">
+                                        ${spec}
+                                        ${
+                                            !model
+                                                ? html` · <span class="warn">not signed in</span>`
+                                                : model.signIn &&
+                                                  html` · <span class="warn">needs sign-in</span>`
+                                        }
+                                    </span>
                                 </span>
-                            </span>
-                        </label>`,
+                            </label>
+                            <button
+                                class="icon-button model-favorite"
+                                aria-label=${`Favorite ${model?.name ?? spec} (model picker shortcut)`}
+                                aria-pressed=${favorites.has(spec)}
+                                title=${favorites.has(spec) ? "Remove from model picker favorites" : "Add to model picker favorites (does not allow it for subagents)"}
+                                onClick=${(event) => {
+                                    if (favoritesOnly) {
+                                        event.currentTarget
+                                            .closest(".subagent-models")
+                                            .querySelector(
+                                                '.model-filters button[aria-pressed="true"]',
+                                            )
+                                            .focus();
+                                    }
+
+                                    return attempt(() =>
+                                        setModelFavorite(spec, !favorites.has(spec)),
+                                    );
+                                }}
+                            >
+                                <${Icon} name="star" size=${18} />
+                            </button>
+                        </div>`,
                     )}
                 </div>`,
             )}
@@ -297,8 +352,6 @@ export function ProvidersSheet() {
             ${
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
-                    <${RefreshModels} />
-                    <${LimitWait} />
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
@@ -308,6 +361,7 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
+                ${owner && html`<${RefreshModels} /><${LimitWait} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input

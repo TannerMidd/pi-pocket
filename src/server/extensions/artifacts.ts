@@ -1,7 +1,8 @@
 /**
  * Artifacts: HTML pages, Markdown documents, and SVG images the agent publishes for the user to open in the app, and
- * HTML pages it shows as a card in its reply (`artifact_inline`, the same store). Every call with the same id adds a
- * version. The index and the bodies are durable documents committed together with
+ * HTML pages it shows as a card in its reply (`artifact` with `inline: true`, the same store). Every call with the same
+ * id adds a version. Replies from before 0.28 hold calls of a second tool, `artifact_inline`: it is gone, and the model
+ * is shown those calls as `artifact` with `inline: true` (`legacyInline`), so it does not repeat a name it cannot call. The index and the bodies are durable documents committed together with
  * the call, so a replayed call finds the version it already wrote instead of writing another.
  */
 import { createHash } from "node:crypto";
@@ -9,9 +10,12 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import {
     defineExtension,
     defineTool,
+    GenerationTask,
+    hook,
     section,
     type ToolRegistration,
 } from "@earendil-works/pi-durable";
@@ -204,8 +208,8 @@ function applyEdits(
     return next;
 }
 
-/** The bullet about the second tool, for sessions that have it. */
-const INLINE_GUIDE = `- artifact_inline shows the page as a card in your reply, for a small interactive piece the person uses right there (a calculator, a chart, a form); artifact is for a whole page, a game, Markdown, or SVG. Its result says which version it made: after an update, say what changed and do not repeat the page. Only a call you make directly shows a card, not one inside codemode. An id made by artifact_inline stays HTML: use a new id for Markdown or SVG. Write its page for a narrow column with no fixed height: the card grows up to 900 px, then scrolls.
+/** The bullet about `inline`, for sessions whose tool has it. */
+const INLINE_GUIDE = `- inline: true shows the page as a card in your reply, for a small interactive piece the person uses right there (a calculator, a chart, a form); without it the person opens the artifact, for a whole page, a game, Markdown, or SVG. Its result says which version it made: after an update, say what changed and do not repeat the page. Only a call you make directly shows a card, not one inside codemode. An id used with inline stays HTML: use a new id for Markdown or SVG. Write its page for a narrow column with no fixed height: the card grows up to 900 px, then scrolls.
 `;
 
 export const BRIDGE_GUIDE = join(APP_ROOT, "src", "server", "guides", "artifact-bridge.md");
@@ -235,8 +239,7 @@ type PublishArgs = {
 };
 
 /**
- * Publish a version, for `artifact` and for `artifact_inline` (`inline`: HTML only, and the result says the page shows
- * as a card in the reply). The commit is idempotent per call, so a rerun after a crash is harmless.
+ * Publish a version (`inline`: HTML only, and the result says the page shows as a card in the reply). The commit is idempotent per call, so a rerun after a crash is harmless.
  */
 async function publish(
     args: PublishArgs,
@@ -255,7 +258,7 @@ async function publish(
     };
     const previous = Object.hasOwn(index.items, id) ? (index.items[id] as ArtifactMeta) : undefined;
     const notHtml = (type: ArtifactType) =>
-        new Error(`Artifact ${id} is ${type}, not HTML: publish it with the artifact tool.`);
+        new Error(`Artifact ${id} is ${type}, not HTML: publish it without inline.`);
 
     // A replay of this very call, not another call of the same task (codemode makes several in one).
     const mine = (version: { taskId: unknown; callId?: string }) =>
@@ -266,6 +269,14 @@ async function publish(
 
     if (inline && version === undefined && previous !== undefined && previous.type !== "html") {
         throw notHtml(previous.type);
+    }
+
+    if (inline && version === undefined && args.path !== undefined) {
+        throw new Error("Give content or edits with inline; a path is for a page the user opens.");
+    }
+
+    if (inline && version === undefined && args.type !== undefined && args.type !== "html") {
+        throw new Error(`An inline page is HTML, not ${args.type}.`);
     }
 
     if (version === undefined) {
@@ -587,12 +598,77 @@ const bundleParameters = {
     ),
 };
 
+/**
+ * Replies from before 0.28 hold calls of `artifact_inline` and their results. The tool is gone (its schema was the
+ * artifact tool's again, sent twice on every request), so a model shown its own earlier calls under that name would make
+ * them again, and Pi Durable answers a call to a tool the request did not offer with "not available". So a request
+ * shows them as the call that does the same now: `artifact` with `inline: true`. Nothing stored changes, and the
+ * transcript still draws them as cards.
+ */
+export function legacyInline(messages: readonly Message[]): readonly Message[] | undefined {
+    let changed = false;
+    const shown = messages.map((message) => {
+        if (message.role === "toolResult" && message.toolName === LEGACY_INLINE) {
+            changed = true;
+
+            return { ...message, toolName: "artifact" };
+        }
+
+        if (
+            message.role !== "assistant" ||
+            !message.content.some((part) => part.type === "toolCall" && part.name === LEGACY_INLINE)
+        ) {
+            return message;
+        }
+
+        changed = true;
+
+        return {
+            ...message,
+            content: message.content.map((part) =>
+                part.type === "toolCall" && part.name === LEGACY_INLINE
+                    ? { ...part, name: "artifact", arguments: { ...part.arguments, inline: true } }
+                    : part,
+            ),
+        };
+    });
+
+    return changed ? shown : undefined;
+}
+
+const LEGACY_INLINE = "artifact_inline";
+
+/** What the artifact tool says it does where no reply draws a card. */
+const VIEWER_ONLY =
+    "Publish an HTML page, Markdown document, or SVG image that the user opens in the app's artifact viewer. The same id publishes a new version. Give exactly one of content, edits, or path (up to 2,000,000 bytes).";
+
+/** The artifact tool without `inline`, for a session whose panel draws no cards (PiP's). */
+export function withoutInline(tool: ToolRegistration): ToolRegistration {
+    const { inline: _inline, ...properties } = (
+        tool.parameters as unknown as { properties: Record<string, unknown> }
+    ).properties;
+
+    return {
+        ...tool,
+        description: VIEWER_ONLY,
+        parameters: Type.Object(properties as never),
+        execute: (args, api, context) =>
+            tool.execute({ ...(args as object), inline: undefined } as never, api, context),
+    } as ToolRegistration;
+}
+
 export default function createArtifacts(_host: PocketHost) {
     const artifact = defineTool({
         name: "artifact",
         description:
-            "Publish an HTML page, Markdown document, or SVG image that the user opens in the app's artifact viewer. The same id publishes a new version. Give exactly one of content, edits, or path (up to 2,000,000 bytes).",
+            "Publish an HTML page, Markdown document, or SVG image that the user opens in the app's artifact viewer, or (inline: true, HTML only) show a page as a card in your reply. The same id publishes a new version. Give exactly one of content, edits, or path (up to 2,000,000 bytes); inline takes content or edits.",
         parameters: Type.Object({
+            inline: Type.Optional(
+                Type.Boolean({
+                    description:
+                        "Show the HTML page as a card in your reply, where the person uses it right there.",
+                }),
+            ),
             ...bundleParameters,
             type: Type.Optional(
                 StringEnum(["html", "markdown", "svg"] as const, {
@@ -610,46 +686,30 @@ export default function createArtifacts(_host: PocketHost) {
         }),
         // The commit in publish() is idempotent per call, so a rerun after a crash is harmless.
         replay: "safe",
-        execute: (args, api, context) => publish(args, api, context, false),
-    });
-
-    const inline = defineTool({
-        name: "artifact_inline",
-        description:
-            "Show an HTML page as a card in your reply, where the person uses it right there (Preview/Code, Run/Stop, and a button for the viewer). It shares artifact's store: the same id adds a version, and each card keeps the version its call made. Give exactly one of content or edits.",
-        parameters: Type.Object({
-            ...bundleParameters,
-            content: Type.Optional(
-                Type.String({ description: "The whole HTML of the new version." }),
-            ),
-        }),
-        replay: "safe",
-        // Only its own fields: the model may send others, and a path or a type is the artifact tool's.
-        execute: (args, api, context) =>
-            publish(
-                {
-                    id: args.id,
-                    title: args.title,
-                    content: args.content,
-                    edits: args.edits,
-                    assets: args.assets,
-                    removeAssets: args.removeAssets,
-                    group: args.group,
-                    kind: args.kind,
-                },
-                api,
-                context,
-                true,
-            ),
+        execute: (args, api, context) => publish(args, api, context, args.inline === true),
     });
 
     return defineExtension({
         name: "pocket-artifacts",
-        tools: [artifact, inline],
+        tools: [artifact],
         sections: [
             section("artifacts", (input) =>
-                guide(input.agent.tools.some((tool) => tool.name === "artifact_inline")),
+                guide(
+                    (
+                        input.agent.tools.find((tool) => tool.name === "artifact")?.parameters as
+                            { properties?: Record<string, unknown> } | undefined
+                    )?.properties?.inline !== undefined,
+                ),
             ),
+        ],
+        hooks: [
+            hook(GenerationTask, {
+                beforeRequest: (request) => {
+                    const messages = legacyInline(request.messages);
+
+                    return messages === undefined ? undefined : { messages };
+                },
+            }),
         ],
     });
 }

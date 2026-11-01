@@ -25,6 +25,7 @@ This page is the map. Read all of it, then only the pages that your task needs.
 | Use the app's services, and work with older servers             | [Using the host](extensions/host.md)                                                                            |
 | Start sessions, and send messages between them                  | [Starting and messaging sessions](extensions/linked-sessions.md)                                                |
 | Add to the app: routes, a browser module, commands              | [Adding to the app](extensions/app.md)                                                                          |
+| Name how an input this module sends shows in the transcript     | [Adding to the app](extensions/app.md), [`web.presentEntry`](extensions/reference/web.md#presententry)          |
 | Answer requests on the server, and say who may use them         | [Routes](extensions/routes.md)                                                                                  |
 | Show a page to anyone with a link, with no sign-in              | [Public pages](extensions/public-pages.md)                                                                      |
 | Ask for a password or a key, hide it, or drive the browser page | [People's values and the browser](extensions/people-values.md)                                                  |
@@ -102,6 +103,7 @@ These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 - [examples/no-force-push.ts](examples/no-force-push.ts): a hook that stops some bash calls, and a prompt section that tells Pi so.
 - [examples/read-page.ts](examples/read-page.ts): a tool that reads a public web page with `host.fetchPublic`, and fences its text with `host.text`.
 - [examples/server-status.ts](examples/server-status.ts) with [examples/server-status.js](examples/server-status.js): a page on the rail, with a route that reads the machine's load and memory, and events that keep it live.
+- [examples/quiet-note.ts](examples/quiet-note.ts) with [examples/quiet-note.js](examples/quiet-note.js): an input the transcript can fold. The model still reads the whole message.
 
 ## Rules that are easy to break
 

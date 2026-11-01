@@ -239,7 +239,7 @@ function preloads(imports: Record<string, string>): string[] {
 }
 
 /** The app page, with its content security policy, and the modules it loads listed for the browser to fetch at once. */
-export function serveApp(response: ServerResponse): void {
+export function serveApp(response: ServerResponse, icon: string | null = null): void {
     let body: string;
 
     try {
@@ -248,6 +248,14 @@ export function serveApp(response: ServerResponse): void {
         send(response, 404, "Not found");
 
         return;
+    }
+
+    // The home-screen icon in the colors this browser chose, in the page as it is served (`http/icon-route.ts`).
+    if (icon !== null) {
+        body = body.replace(
+            '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />',
+            () => `<link rel="apple-touch-icon" href="${icon}" />`,
+        );
     }
 
     // The policy is of the page as it is stored: links are not scripts, and add nothing to it.

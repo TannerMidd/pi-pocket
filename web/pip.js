@@ -538,7 +538,7 @@ function Item({ item, last, busy, conversationId }) {
         return line && html`<div class="pip-event"><span>${line}</span></div>`;
     }
 
-    // A page it showed in a reply (`artifact_inline`): in this panel, a line like its other work.
+    // A page it showed in a reply (an old `artifact_inline` call): in this panel, a line like its other work.
     if (item.type === "inline") {
         return html`<div class="pip-steps">
             <span class="pip-tick"><${Icon} name="check" size=${10} /></span>
@@ -1099,7 +1099,13 @@ function PipPanel({ leaving, scrim }) {
             }
             ${pending.map(
                 (item) => html`<div class="pip-you pending" key=${`pending-${item.id}`}>
-                    <div>${(item.text ?? "").replace(FROM, "")}</div>
+                    <div>
+                        ${
+                            typeof item.label === "string" && item.label !== ""
+                                ? `▸ ${item.label}${item.summary ? `: ${item.summary}` : ""}`
+                                : (item.text ?? "").replace(FROM, "")
+                        }
+                    </div>
                     <div class="pip-pending-line">
                         <span>${pendingWhen(item, busy)}</span>
                         <button

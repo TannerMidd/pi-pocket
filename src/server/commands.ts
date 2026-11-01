@@ -5,7 +5,7 @@
  * command checks who may do it, and changes others should know about become activity lines in the session's chat.
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { basename, extname, join, sep } from "node:path";
 import { type Context, copyJson } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -15,7 +15,6 @@ import {
     type ModelThinkingLevel,
     type TextContent,
 } from "@earendil-works/pi-ai";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
 import {
     type AgentChange,
     AgentDoc,
@@ -58,6 +57,7 @@ import {
 } from "./entry-format.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
+import { forModel, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
@@ -129,9 +129,6 @@ export interface SubmitRequest {
     inlineFiles?: boolean;
 }
 
-/** Attached images that also go to the model itself, when it takes images. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
 /** How many `@` mentioned files go along with a message, and how much of them. */
 const MAX_MENTIONED = 10;
 const MAX_MENTIONED_FILE = 100_000;
@@ -190,20 +187,6 @@ function entryIdOf(value: unknown): number {
     }
 
     return id;
-}
-
-/**
- * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
- * a conversation holds many, and then every request fails until they leave its context.
- */
-async function modelImage(path: string, mimeType: string): Promise<ImageContent> {
-    const image = await resizeImage(readFileSync(path), mimeType);
-
-    if (image === null) {
-        throw new Error("it could not be made small enough for the model");
-    }
-
-    return { type: "image", mimeType: image.mimeType, data: image.data };
 }
 
 /** A request's model, when it names one, must name a provider and a model id. */
@@ -689,7 +672,7 @@ export class Commands {
         id: ConversationId,
         user: User,
         patch: { title?: string; archived?: boolean },
-    ): Promise<void> {
+    ): Promise<{ repeating: number }> {
         const app = this.#app;
 
         app.requireSee(user, id);
@@ -735,6 +718,14 @@ export class Commands {
                     : "brought the session back from the archive",
             );
         }
+
+        // Archiving leaves its repeating schedules running: the person is told how many.
+        const repeating =
+            patch.archived === true
+                ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+                : 0;
+
+        return { repeating };
     }
 
     /**
@@ -813,21 +804,25 @@ export class Commands {
             ),
         ];
 
-        for (const file of attachments) {
-            if (
-                !model.input.includes("image") ||
-                !IMAGE_TYPES.has(file.mime) ||
-                file.size > MAX_INLINE_IMAGE
-            ) {
-                continue;
-            }
+        // Most were made ready as they were uploaded (`model-images.ts`); the rest are made side by side, in their order.
+        const images = model.input.includes("image")
+            ? attachments.filter((file) => forModel(file.mime, file.size))
+            : [];
+        const made = await Promise.allSettled(
+            images.map((file) => modelImage(file.path, file.mime)),
+        );
 
-            try {
-                parts.push(await modelImage(file.path, file.mime));
-            } catch (error) {
-                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
+        made.forEach((result, index) => {
+            if (result.status === "fulfilled") {
+                parts.push(result.value);
+            } else {
+                app.notice(
+                    "warning",
+                    `Could not attach ${images[index]!.name}: ${describe(result.reason)}`,
+                    id,
+                );
             }
-        }
+        });
 
         const content = parts.length === 1 ? body : parts;
         const requestId =

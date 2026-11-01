@@ -525,7 +525,14 @@ export type BackgroundTask = {
     /** The machine's boot it started in: a task of another boot has no process left. */
     boot?: string;
     endedAt?: number;
-    /** Whether Pi gets a message when it ends. */
+    /** When Pi was told that it ended, if it was: a task told once is not told again. */
+    toldAt?: number;
+    /**
+     * Pi is still to be told that it ended. Set when it ends, so a task that ended before 0.28 (told then, with no
+     * `toldAt`) is not told again.
+     */
+    untold?: true;
+    /** Whether Pi gets a message when it ends: false for one Pi stopped itself, which needs no message. */
     notify: boolean;
     /** Whom Pi worked for when it started the command: its message goes out as their work. */
     requestedBy?: string;

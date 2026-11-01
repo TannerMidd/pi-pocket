@@ -1,4 +1,5 @@
-// How other devices reach Pi Pocket: this device only, the local network, a Cloudflare quick tunnel, or Tailscale.
+// How other devices reach Pi Pocket: this device only, the local network, a Cloudflare quick tunnel,
+// Tailscale, or Tailscale Serve.
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -15,14 +16,21 @@ import { networkInterfaces } from "node:os";
 import { delimiter, join } from "node:path";
 import { createInterface } from "node:readline";
 
-export type AccessMode = "local" | "lan" | "cloudflare" | "tailscale";
-export const ACCESS_MODES: readonly AccessMode[] = ["local", "lan", "cloudflare", "tailscale"];
+export type AccessMode = "local" | "lan" | "cloudflare" | "tailscale" | "tailscale-serve";
+export const ACCESS_MODES: readonly AccessMode[] = [
+    "local",
+    "lan",
+    "cloudflare",
+    "tailscale",
+    "tailscale-serve",
+];
 
 export const ACCESS_LABELS: Record<AccessMode, string> = {
     local: "This device only",
     lan: "Local network",
     cloudflare: "Cloudflare Tunnel",
     tailscale: "Tailscale",
+    "tailscale-serve": "Tailscale Serve",
 };
 
 export function isAccessMode(value: string | undefined): value is AccessMode {
@@ -61,7 +69,8 @@ export function tailscaleAddress(): string | undefined {
 
 /**
  * The address the server listens on. A tunnel reaches it on this machine, so only the local network mode opens it to
- * other machines directly, and Tailscale opens it to the tailnet only.
+ * other machines directly, and Tailscale opens it to the tailnet only. Tailscale Serve is a tunnel as well: tailscaled
+ * proxies the tailnet to loopback, so nothing binds the tailnet address for it as Tailscale mode does.
  */
 export function bindHost(mode: AccessMode): string {
     if (mode === "lan") {
@@ -73,6 +82,11 @@ export function bindHost(mode: AccessMode): string {
     }
 
     return "127.0.0.1";
+}
+
+/** Where the server listens: `--host` when it is given, with any mode, as in 0.27; else the mode's own address. */
+export function listenHost(mode: AccessMode | "custom", host: string | undefined): string {
+    return host ?? (mode === "custom" ? "127.0.0.1" : bindHost(mode));
 }
 
 // ─── Choosing a mode ────────────────────────────────────────────────────
@@ -154,6 +168,63 @@ function findExecutable(name: string, extraDirectories: string[]): string | unde
 /** cloudflared from PATH, or the copy the launcher downloaded into the data folder. */
 export function findCloudflared(dataDir: string): string | undefined {
     return findExecutable("cloudflared", [join(dataDir, "bin")]);
+}
+
+// ─── Tailscale Serve ────────────────────────────────────────────────────
+
+/**
+ * tailscale from PATH. Pi Pocket neither ships nor downloads Tailscale, so it has to be installed already, and only
+ * PATH is searched: the data folder never holds a copy.
+ */
+export function findTailscale(): string | undefined {
+    return findExecutable("tailscale", []);
+}
+
+export const TAILSCALE_MISSING_MESSAGE =
+    'Tailscale Serve needs the tailscale command, and it is not on PATH.\nInstall it: macOS "brew install tailscale" (the App Store app keeps its command in the bundle, not on PATH) · Linux "curl -fsSL https://tailscale.com/install.sh | sh" · Windows "winget install Tailscale.Tailscale".\nOr pick another access mode: --access local|lan|cloudflare|tailscale.';
+
+/**
+ * Whether the start has to stop because `tailscale-serve` needs the missing tailscale and nobody is there to choose
+ * another mode: `--access tailscale-serve` or PI_POCKET_ACCESS asked for it, or it is the saved choice and no terminal
+ * can ask. It never falls back to `local` on its own, because the user would believe they are on their tailnet while
+ * they are not, and it leaves the saved choice alone so the next start works once Tailscale is installed.
+ */
+export function serveWithoutTailscale(request: {
+    given: AccessMode | undefined;
+    saved: AccessMode | undefined;
+    ask: boolean;
+}): boolean {
+    if (request.given === "tailscale-serve") {
+        return true;
+    }
+
+    return request.given === undefined && request.saved === "tailscale-serve" && !request.ask;
+}
+
+/**
+ * Whether the start stops for the missing `tailscale-serve` tailscale, `--host` aside: `--host` means the launcher
+ * listens where it is told and never uses serve, so a saved serve choice must not refuse to start there. An explicit
+ * `--access tailscale-serve` together with `--host` never arrives here; `main` refuses that pair before choosing.
+ */
+export function serveBailOut(request: {
+    access: AccessMode | undefined;
+    saved: AccessMode | undefined;
+    host: string | undefined;
+    ask: boolean;
+}): boolean {
+    return (
+        request.host === undefined &&
+        serveWithoutTailscale({ given: request.access, saved: request.saved, ask: request.ask })
+    );
+}
+
+/**
+ * The loopback ports that a mount left by an earlier run of this launcher could point at: the port its receipt names.
+ * None without a receipt, and none for `tailscale-serve` itself, whose mount prepareServe() mounted or adopted for this
+ * run's port.
+ */
+export function staleServePorts(mode: AccessMode | "custom", owned: number | undefined): number[] {
+    return mode === "tailscale-serve" || owned === undefined ? [] : [owned];
 }
 
 /** Where to get cloudflared on this platform: a release binary the launcher can download, or how to install it. */

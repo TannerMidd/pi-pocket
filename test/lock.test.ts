@@ -45,7 +45,7 @@ function fixture(t: TestContext) {
             ? spawn(executable, ["--input-type=module", "-e", holderScript, "--", lock], {
                   stdio: ["ignore", "inherit", "inherit", "ipc"],
               })
-            : spawn("/bin/sleep", ["60"], { stdio: "ignore" });
+            : spawn("sleep", ["60"], { stdio: "ignore" });
 
         children.push(each);
         await (hold ? once(each, "message") : once(each, "spawn"));

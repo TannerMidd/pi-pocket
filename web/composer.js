@@ -99,6 +99,66 @@ function loadPastes(id) {
     }
 }
 
+const attachedKey = (id) => `pocket.attached.${store.state.me?.id}.${id ?? "home"}`;
+let attachmentsStopped = false;
+
+addEventListener("pocket:signedOut", () => {
+    attachmentsStopped = true;
+
+    try {
+        for (const key of Object.keys(localStorage)) {
+            if (key.startsWith("pocket.attached.")) {
+                localStorage.removeItem(key);
+            }
+        }
+    } catch {
+        // Storage can be unavailable.
+    }
+});
+
+/**
+ * Each conversation's uploaded files, kept with its draft: the browser drops a tab in the background, or reloads it after
+ * an update, and the files must still be there. A file still uploading is not kept: its upload ends with the page.
+ */
+function loadAttached(id) {
+    if (attachmentsStopped || !store.state.me?.id) {
+        return [];
+    }
+
+    try {
+        const list = JSON.parse(localStorage.getItem(attachedKey(id)) ?? "[]");
+
+        return list.map((attachment) => ({
+            key: uid(),
+            name: attachment.name,
+            size: attachment.size,
+            state: "done",
+            preview: attachment.mime?.startsWith("image/") ? fileUrl(attachment.path) : null,
+            attachment,
+        }));
+    } catch {
+        return [];
+    }
+}
+
+function saveAttached(id, files) {
+    if (attachmentsStopped || !store.state.me?.id) {
+        return;
+    }
+
+    const list = files.filter((file) => file.state === "done").map((file) => file.attachment);
+
+    try {
+        if (list.length === 0) {
+            localStorage.removeItem(attachedKey(id));
+        } else {
+            localStorage.setItem(attachedKey(id), JSON.stringify(list));
+        }
+    } catch {
+        // No room: the files stay attached until the page goes.
+    }
+}
+
 function savePastes(id, pastes) {
     try {
         if (Object.keys(pastes).length === 0) {
@@ -139,7 +199,7 @@ const QUEUED_INTERRUPT_HINT =
     "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued";
 
 /**
- * Whether a queued message's Interrupt asks first: the first tap reads "Interrupt?", a second within 4 s sends it.
+ * Whether a queued message's Interrupt asks first: the first tap reads "Interrupt now?", a second within 4 s sends it.
  * Set to false to send it on the first tap.
  */
 const CONFIRM_INTERRUPT = true;
@@ -160,6 +220,15 @@ const FROM = /^\[from: [^\]\n]{1,60}\] /;
 
 /** What a waiting message says (its row names who sent it); subagents' reports say whose, as their text is long. */
 function queuedText(item) {
+    // An input an extension presents: its label and summary, as the transcript shows it, never its body.
+    if (typeof item.label === "string" && item.label !== "") {
+        return html`<span class="presented-label">${item.label}</span>${
+            typeof item.summary === "string" &&
+            item.summary !== "" &&
+            html`<span class="presented-summary"> · ${item.summary}</span>`
+        }`;
+    }
+
     const names = queuedReports(item);
 
     if (!names) {
@@ -379,7 +448,7 @@ export function Composer() {
     const { view, conversationId } = store.state;
     const historyScope = { person: store.state.me?.id, conversation: conversationId };
     const [text, setText] = useState(() => drafts.get(conversationId));
-    const [files, setFiles] = useState([]);
+    const [files, setFiles] = useState(() => loadAttached(conversationId));
     // How a message goes while Pi works: "steer", "followUp" (Queue), or "interrupt" (stop the run, then send).
     const [sendMode, setSendMode] = useState("steer");
     // The queued message tapped open, wrapped: one line each until then. The queue holds only a message's start.
@@ -458,6 +527,14 @@ export function Composer() {
 
         return () => clearTimeout(timer);
     }, [interrupting]);
+    useEffect(() => saveAttached(conversationId, files), [files]);
+    useEffect(() => {
+        const clear = () => setFiles([]);
+
+        addEventListener("pocket:signedOut", clear);
+
+        return () => removeEventListener("pocket:signedOut", clear);
+    }, []);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -743,7 +820,8 @@ export function Composer() {
         sent(full);
     };
 
-    const send = async () => {
+    // `other`: Ctrl/⌘+Enter, which sends the other way round (Steer and Queue swap; Interrupt stays).
+    const send = async (other = false) => {
         if (!canSend) {
             return;
         }
@@ -773,14 +851,19 @@ export function Composer() {
         }
 
         setSending(true);
-        const attachments = files
-            .filter((file) => file.state === "done")
-            .map((file) => file.attachment);
+        const going = files.filter((file) => file.state === "done");
+        const attachments = going.map((file) => file.attachment);
         const ok = await attempt(() =>
             actions.submit(
                 withQuote(store.state.replyQuote, full),
                 attachments,
-                busy ? sendMode : "followUp",
+                busy
+                    ? other === true && sendMode !== "interrupt"
+                        ? sendMode === "steer"
+                            ? "followUp"
+                            : "steer"
+                        : sendMode
+                    : "followUp",
                 inlineFiles && mentionsFiles,
             ),
         );
@@ -795,8 +878,9 @@ export function Composer() {
 
             sent(full);
             store.set({ replyQuote: null });
-            forget(files);
-            setFiles([]);
+            // Files pasted while it went stay for the next message.
+            forget(going);
+            setFiles((current) => current.filter((file) => !going.includes(file)));
 
             if (!coarse) {
                 box.current?.focus();
@@ -1039,9 +1123,15 @@ export function Composer() {
             return;
         }
 
-        if (event.key === "Enter" && !event.shiftKey && !coarse && !event.isComposing) {
+        const chord = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
+
+        if (
+            event.key === "Enter" &&
+            !event.isComposing &&
+            (chord || (!event.shiftKey && !coarse))
+        ) {
             event.preventDefault();
-            send();
+            send(chord);
         }
     };
 
@@ -1248,7 +1338,7 @@ export function Composer() {
                                             void attempt(() => actions.move(item.id, "interrupt"));
                                         }}
                                     >
-                                        ${interrupting === item.id ? "Interrupt?" : "Interrupt"}
+                                        ${interrupting === item.id ? "Interrupt now?" : "Interrupt now"}
                                     </button>
                                 </div>`
                             }
@@ -1427,8 +1517,9 @@ export function Composer() {
                     </div>`
                 }
                 <div
-                    class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""}`}
+                    class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""} ${sending ? "sending" : ""}`}
                     data-part="message-box"
+                    aria-busy=${sending ? "true" : undefined}
                     onClick=${(event) => {
                         // The box is one target: a tap on its edge, around the files sent along, between its buttons,
                         // or on Send with nothing to send (a disabled button takes no taps), goes to the text.
@@ -1494,6 +1585,7 @@ export function Composer() {
                         ref=${setBox}
                         rows="1"
                         value=${text}
+                        readonly=${sending}
                         placeholder=${placeholder}
                         onInput=${(event) => {
                             setBrowsing(null);
@@ -1988,7 +2080,7 @@ function backgroundNow() {
 }
 
 const backgroundTitle = (count) =>
-    `${count} ${count === 1 ? "command runs" : "commands run"} in the background: open Running now to see or stop ${count === 1 ? "it" : "them"}`;
+    `${count} ${count === 1 ? "command runs" : "commands run"} in the background: open Background to watch ${count === 1 ? "it" : "them"}, or Running now to stop one`;
 
 defineItem("status", {
     id: "core:background",
@@ -2003,7 +2095,7 @@ defineItem("status", {
                 class="background-now"
                 aria-label=${backgroundTitle(count)}
                 title=${backgroundTitle(count)}
-                onClick=${() => openSheet({ type: "running" })}
+                onClick=${() => openSheet({ type: "background" })}
             >
                 <span class="dot" aria-hidden="true"></span>
                 <span class="num">${count}</span>
