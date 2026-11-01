@@ -68,6 +68,11 @@ function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
         hook.count === 0
             ? "no posts yet"
             : `${hook.count} post${hook.count === 1 ? "" : "s"}, last ${formatWhen(hook.lastAt)}`;
+    const status = [
+        hook.signed ? "GitHub, signed" : "secret in the address",
+        ...(hook.anyone ? ["from anyone"] : []),
+        used,
+    ].join(" · ");
 
     return html`<div class=${`hook ${fresh ? "fresh" : ""}`}>
         <div class="hook-head">
@@ -113,7 +118,7 @@ function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
                 ${hook.signed && html`<div class="mono small hook-address">Secret: ${hook.secret}</div>`}`
         }
         <div class="hook-actions">
-            <span class="muted small grow hook-status">${hook.signed ? "GitHub, signed" : "secret in the address"}${hook.anyone ? " · from anyone" : ""} · ${used}</span>
+            <span class="muted small grow hook-status">${status}</span>
             <button
                 class="button small"
                 onClick=${() => copy(addressOf(base, hook), hook.signed ? "Address copied: GitHub's Payload URL." : "Address copied. Keep it secret: anyone with it can message Pi.")}
@@ -140,8 +145,12 @@ function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
                     Edit prompt
                 </button>`
             }
-            <button class="button small ghost" disabled=${saving} onClick=${onRotate}>New secret</button>
-            <button class="button small ghost" disabled=${saving} onClick=${onRemove}>Remove</button>
+            <button class="button small ghost" disabled=${saving} onClick=${onRotate}>
+                New secret
+            </button>
+            <button class="button small ghost" disabled=${saving} onClick=${onRemove}>
+                Remove
+            </button>
         </div>
     </div>`;
 }
