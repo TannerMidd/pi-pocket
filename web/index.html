@@ -143,7 +143,7 @@
                     if (event.type === "load") {
                         if (app) {
                             removeEventListener("error", watch, true);
-                            removeEventListener("load", watch, true);
+                            document.removeEventListener("load", watch, true);
                         }
                     } else if (app) {
                         fail(
@@ -157,7 +157,7 @@
                     }
                 };
                 addEventListener("error", watch, true);
-                addEventListener("load", watch, true);
+                document.addEventListener("load", watch, true);
             })();
         </script>
         <script type="module" src="/app.js"></script>
