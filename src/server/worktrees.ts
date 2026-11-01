@@ -10,6 +10,7 @@ import { copyFile, lstat, mkdir } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { describe, HttpError } from "./errors.ts";
 import { git, GitError } from "./git.ts";
+import { workspaceScheme } from "./paths.ts";
 
 export type Worktree = {
     /** The worktree's folder. */
@@ -71,7 +72,7 @@ export async function createWorktree(
     folder: string,
     label: string,
 ): Promise<{ worktree: Worktree; cwd: string; skipped: string[] }> {
-    if (/^(?![a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(cwd)) {
+    if (workspaceScheme(cwd) !== undefined) {
         throw new HttpError(400, "Remote workspaces do not support worktrees.");
     }
 

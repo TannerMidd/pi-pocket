@@ -25,7 +25,8 @@ const TAB_KEY = "pocket.filesTab";
 const WIDTH_KEY = "pocket.filesWidth";
 /** Tree and viewer side by side from this width of the tile; one at a time below it. */
 const SIDE_BY_SIDE = 600;
-const isWorkspaceUri = (cwd) => /^(?![a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(cwd ?? "");
+/** A workspace URI (`ssh://host/path`), as `workspaceScheme` in `src/server/paths.ts` reads it. */
+const isWorkspaceUri = (cwd) => /^[a-z][a-z0-9+.-]+:\/\//i.test(cwd ?? "");
 
 /** The tile is for people who can steer: the viewer reads local files as Pi would. */
 export const filesAvailable = () =>

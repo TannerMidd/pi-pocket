@@ -104,6 +104,7 @@ import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
+import { workspaceScheme } from "./paths.ts";
 import { Hooks } from "./hooks.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
@@ -1482,7 +1483,7 @@ export class PocketApp {
 
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void {
         if (
-            !/^[a-z][a-z0-9+.-]*$/i.test(scheme) ||
+            !/^[a-z][a-z0-9+.-]+$/i.test(scheme) ||
             typeof provider?.env !== "function" ||
             typeof provider?.resolveCwd !== "function"
         ) {
@@ -1511,7 +1512,7 @@ export class PocketApp {
     }
 
     workspaceScheme(cwd: string): string | undefined {
-        return /^(?![a-z]:[\\/])([a-z][a-z0-9+.-]*):/i.exec(cwd)?.[1]?.toLowerCase();
+        return workspaceScheme(cwd);
     }
 
     /** A workspace URI reaches a provider's machines and keys: they are the owner's. */

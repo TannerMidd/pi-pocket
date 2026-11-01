@@ -124,6 +124,10 @@ test("remote addresses never enter local path or Git operations", async () => {
         await assert.rejects(app.workspace.changes(id, owner(app)), /remote workspaces/i);
         await assert.rejects(app.workspace.branches(id, owner(app)), /remote workspaces/i);
         assert.equal(app.workspace.checkDirectory(work), work);
+
+        for (const path of ["C:\\work", "D:", "c:foo", "ssh:host"]) {
+            assert.equal(app.workspaceScheme(path), undefined, path);
+        }
     } finally {
         remove();
         await app.close();

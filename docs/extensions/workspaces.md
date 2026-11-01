@@ -1,6 +1,6 @@
 # Execution environments for workspaces
 
-A workspace provider lets a module run a session in an address such as `ssh://host/path`. Pi Pocket stores the provider's canonical address in the session. It passes that address to the provider's `env` method for execution. It does not use the local machine when a provider is missing.
+A workspace provider lets a module run a session in an address such as `ssh://host/path`. A workspace address has a scheme of 2 characters or more, then `://`: `C:\work` and `D:` stay local paths. Pi Pocket stores the provider's canonical address in the session. It passes that address to the provider's `env` method for execution. It does not use the local machine when a provider is missing.
 
 The interface is experimental since 0.28.0. It can change in a minor release. A module must check that `host.registerWorkspaceProvider` exists when it supports older servers.
 

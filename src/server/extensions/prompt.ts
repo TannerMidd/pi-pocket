@@ -11,6 +11,7 @@ import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-work
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
+import { workspaceScheme } from "../paths.ts";
 
 const PREAMBLE = `You are Pi, a coding agent running inside Pi Pocket: a durable, multiplayer web app built on Pi Durable. People talk to you from a browser, often a phone, and several people can share one conversation. When more than one person uses this server, each message starts with [from: Name].
 
@@ -141,8 +142,7 @@ export default function createPrompt(host: PocketHost) {
 
     const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
     // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote machine's.
-    const local = (input: PromptInput) =>
-        !/^(?![a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(input.agent.cwd ?? "");
+    const local = (input: PromptInput) => workspaceScheme(input.agent.cwd ?? "") === undefined;
 
     return defineExtension({
         name: "pocket-prompt",

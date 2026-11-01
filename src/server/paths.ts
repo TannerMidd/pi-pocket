@@ -26,3 +26,11 @@ export function homePath(path: string): string {
 export function displayPath(path: string, cwd: string): string {
     return path.startsWith(cwd + sep) ? relative(cwd, path) : homePath(path);
 }
+
+/**
+ * The scheme of a workspace URI (`ssh://host/path`), lower case, or undefined for a local path. It needs 2 characters
+ * or more and `://`, so a Windows drive (`C:\work`, `D:`, `c:foo`) stays a path.
+ */
+export function workspaceScheme(cwd: string): string | undefined {
+    return /^([a-z][a-z0-9+.-]+):\/\//i.exec(cwd)?.[1]?.toLowerCase();
+}
