@@ -1719,8 +1719,10 @@ function eventsQuery(kept) {
     const have = kept && id !== null ? haveOf(store.state.view) : null;
     // A desktop app that shows notifications itself gets them over this connection (`web/host.js`).
     const host = hostCan("notify") ? "&host=notify" : "";
+    const session = id === null ? "" : `&c=${id}`;
+    const resume = have === null ? "" : `&have=${have}`;
 
-    return `tab=${encodeURIComponent(TAB)}&p=${PROTOCOL}${id === null ? "" : `&c=${id}`}${have === null ? "" : `&have=${have}`}${host}`;
+    return `tab=${encodeURIComponent(TAB)}&p=${PROTOCOL}${session}${resume}${host}`;
 }
 
 // A page kept for Back and Forward stays alive, frozen, and so would its stream: each holds one of the few connections a
