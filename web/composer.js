@@ -1581,7 +1581,7 @@ export function Composer() {
                                     : html`<${Icon} name="send" size=${16} stroke=${2.4} />`
                             }
                         </button>
-                        ${busy && html`<${StopButton} />`}
+                        ${(busy || sending) && html`<${StopButton} />`}
                     </div>
                 </div>`
         }

@@ -62,6 +62,7 @@ import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
+import { contextTokens, tokensSinceCompaction } from "./pip-compact.ts";
 import { globalModelSettings, projectModelDefault } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor } from "./requests.ts";
@@ -333,8 +334,17 @@ async function followed(
     }
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+/** Pi's own default for the recent part it keeps when it compacts, if its settings cannot be read. */
+const DEFAULT_KEEP_TOKENS = 20_000;
+/** A summary is worth its request only with this much more than the kept part. */
+const SUMMARY_MARGIN_TOKENS = 4096;
+
 export class Commands {
     readonly #app: PocketApp;
+    /** In-flight idle compaction tasks by conversation ID, so concurrent submissions share the same compaction. */
+    readonly #activeCompaction = new Map<ConversationId, Promise<void>>();
+    readonly #pendingIdle = new Map<ConversationId, Set<() => void>>();
     /**
      * Follows a person's message to a failed subagent to its end and settles the failure by it (`settle`): a task of the
      * parent's, beside its work, so a restart before the run ends still settles it, as the subagent's reports do Pi's
@@ -788,8 +798,6 @@ export class Commands {
             throw new HttpError(409, "Pick a model for this conversation first.");
         }
 
-        app.spend.check(user, id);
-
         const lines = attachments.map(
             (file) =>
                 `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`,
@@ -834,6 +842,9 @@ export class Commands {
             via === undefined
                 ? ownRequest(user.id, clientKey(request.requestId))
                 : requestFor(user.id, clientKey(request.requestId));
+
+        app.spend.check(user, id);
+
         // A failed subagent's failure as the person writes to it: what their message comes to settles it.
         const failure = await this.#failureOf(id);
 
@@ -849,27 +860,88 @@ export class Commands {
             submitContext.abortSignal?.throwIfAborted();
         }
 
-        // Interrupt: stop the run now, rather than waiting for its tool round or turn to end. Like Stop, this withdraws
-        // what waits in the queue. Only a person's own message interrupts, never one sent for them (`via`).
-        // A retried request finds its first submission: it must not stop the run that the first one started. (Two POSTs
-        // of one request at the same moment can both find none and both stop the run: a rare race, left as it is.)
-        if (
-            request.mode === "interrupt" &&
-            via === undefined &&
-            app.isBusy(id) &&
-            (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) ===
-                undefined
-        ) {
-            await this.#discardReports(id);
-            await conversation.abort(context);
-            await app.collab.activity(id, user, "interrupted the run");
+        // Deduplication: if this request has already been admitted (e.g. client retry), return existing submission
+        // without re-running compaction or duplicate admission logic.
+        let existing = await app.harness.commit(
+            (tx) => tx.submissionByRequest(id, requestId),
+            context,
+        );
+        let known = app.pip.ownerOf(id) === undefined && existing !== undefined;
+
+        // Interrupt: do not abort idle compaction; wait for it to complete before proceeding.
+        if (request.mode === "interrupt" && via === undefined) {
+            if (this.#activeCompaction.has(id) || app.isCompacting(id)) {
+                await this.#waitForIdleCompaction(id);
+
+                // Re-check deduplication: if a duplicate retry raced and was admitted while we waited for compaction,
+                // return its submission immediately to prevent duplicate side effects or double submission.
+                existing = await app.harness.commit(
+                    (tx) => tx.submissionByRequest(id, requestId),
+                    context,
+                );
+                known = app.pip.ownerOf(id) === undefined && existing !== undefined;
+
+                if (known && existing !== undefined) {
+                    return { submissionId: existing.id, requestId };
+                }
+            }
+
+            // Stop the run now, rather than waiting for its tool round or turn to end. Like Stop, this withdraws
+            // what waits in the queue. Only a person's own message interrupts, never one sent for them (`via`).
+            // A retried request finds its first submission: it must not stop the run that the first one started. (Two POSTs
+            // of one request at the same moment can both find none and both stop the run: a rare race, left as it is.)
+            if (app.isBusy(id) && !known) {
+                await this.#discardReports(id);
+                await conversation.abort(context);
+                await app.collab.activity(id, user, "interrupted the run");
+            }
         }
 
-        // A retry of a request finds its first submission: it is no new message, and no event goes out for it again.
-        const known =
-            app.pip.ownerOf(id) === undefined &&
-            (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) !==
-                undefined;
+        // Idle compaction: only for fresh direct messages, and never when interrupting a running conversation.
+        if (!known && request.mode !== "interrupt" && via === undefined) {
+            let stopped = false;
+            let cancel!: () => void;
+            const cancelled = new Promise<void>((resolve) => {
+                cancel = () => {
+                    stopped = true;
+                    resolve();
+                };
+            });
+            const pending = this.#pendingIdle.get(id) ?? new Set<() => void>();
+
+            pending.add(cancel);
+            this.#pendingIdle.set(id, pending);
+
+            try {
+                await Promise.race([this.#compactAfterPause(id, user), cancelled]);
+
+                if (!stopped) {
+                    existing = await app.harness.commit(
+                        (tx) => tx.submissionByRequest(id, requestId),
+                        context,
+                    );
+                }
+
+                if (stopped) {
+                    admission?.afterSubmit();
+
+                    throw new HttpError(409, "Message stopped; your draft was kept.");
+                }
+
+                known = app.pip.ownerOf(id) === undefined && existing !== undefined;
+
+                if (known && existing !== undefined) {
+                    return { submissionId: existing.id, requestId };
+                }
+            } finally {
+                pending.delete(cancel);
+
+                if (pending.size === 0) {
+                    this.#pendingIdle.delete(id);
+                }
+            }
+        }
+
         const submission = await conversation
             .submit(
                 {
@@ -1249,7 +1321,20 @@ export class Commands {
 
         app.requireSee(user, id);
         app.requireSteer(user);
+
+        for (const cancel of this.#pendingIdle.get(id) ?? []) {
+            cancel();
+        }
+
         const conversation = await app.conversation(id);
+
+        // A stopped message must not cancel the compaction it was waiting for.
+        if (this.#activeCompaction.has(id) || app.isCompacting(id)) {
+            await this.#discardReports(id);
+
+            return;
+        }
+
         const busy = app.isBusy(id);
 
         // Stop withdraws what waits in the queue, subagents' reports too: a person meant them gone.
@@ -1399,6 +1484,11 @@ export class Commands {
         // as sending is.
         if (mode !== "followUp") {
             await app.requireDriver(id, user);
+        }
+
+        // Interrupt must not abort idle compaction: wait for it to finish before promoting.
+        if (mode === "interrupt" && (this.#activeCompaction.has(id) || app.isCompacting(id))) {
+            await this.#waitForIdleCompaction(id);
         }
 
         // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
@@ -2424,5 +2514,130 @@ export class Commands {
             },
             (error: unknown) => app.notice("error", describe(error), id),
         );
+    }
+
+    /**
+     * A session idle for the owner's chosen time (an hour by default) has lost its prompt cache: sending the whole context again costs full
+     * price, so it is summarized first, as Claude Code offers. Only a person's message to a session of their own (not
+     * PiP's or a subagent's), with enough context to be worth a summary. A summary that fails never stops the message.
+     */
+    async #compactAfterPause(id: ConversationId, user: User): Promise<void> {
+        // If a compaction is already being handled or tracked for this conversation, wait for it instead of spawning a duplicate.
+        const active = this.#activeCompaction.get(id);
+
+        if (active !== undefined) {
+            try {
+                await active;
+            } catch {
+                // An active compaction failure does not block subsequent submissions.
+            }
+
+            return;
+        }
+
+        const app = this.#app;
+        const meta = app.sessionMeta(id);
+        const idleHours = app.config.compactIdleHours;
+        let policy: { enabled?: boolean; keepRecentTokens?: number } | undefined;
+
+        try {
+            policy = app.settings.getCompactionSettings();
+        } catch {
+            policy = undefined;
+        }
+
+        // Synchronously reserve an in-flight promise before any awaits to prevent concurrency races.
+        const promise = (async () => {
+            const liveCompactions =
+                (await app.harness.snapshot(LiveDoc, id, context))?.compactions ?? [];
+
+            // If a durable compaction task is already active, wait for existing ones before proceeding.
+            if (liveCompactions.length > 0) {
+                for (const existing of liveCompactions) {
+                    try {
+                        await app.harness.waitForTask(existing.taskId, context);
+                    } catch {
+                        // Failure in an existing compaction does not block this submission.
+                    }
+                }
+
+                return;
+            }
+
+            if (
+                meta === undefined ||
+                idleHours === 0 ||
+                policy?.enabled === false ||
+                app.now() - meta.updatedAt < idleHours * HOUR_MS ||
+                app.isBusy(id) ||
+                app.pip.ownerOf(id) !== undefined ||
+                app.parentOf(id) !== undefined
+            ) {
+                return;
+            }
+
+            try {
+                const conversation = await app.conversation(id);
+                const view = await conversation.context(context);
+
+                // Worth a summary only with more than the part Pi keeps as it is.
+                const worth =
+                    (policy?.keepRecentTokens ?? DEFAULT_KEEP_TOKENS) + SUMMARY_MARGIN_TOKENS;
+
+                if (
+                    contextTokens(view) < worth ||
+                    tokensSinceCompaction(view) < SUMMARY_MARGIN_TOKENS
+                ) {
+                    return;
+                }
+
+                app.notice("info", "Idle for a while: compacting the context first…", id);
+                const taskId = await conversation.compact(undefined, context);
+                const receipt = await app.harness.waitForTask(taskId, context);
+
+                if (receipt.state.outcome.status === "completed") {
+                    await app.collab.activity(
+                        id,
+                        user,
+                        "compacted the context after a pause",
+                        false,
+                    );
+                }
+            } catch (error) {
+                app.log(`compaction after a pause skipped: ${describe(error)}`);
+            }
+        })();
+
+        this.#activeCompaction.set(id, promise);
+
+        try {
+            await promise;
+        } finally {
+            this.#activeCompaction.delete(id);
+        }
+    }
+
+    /** Wait for any in-flight or durable idle compaction on this conversation to settle. */
+    async #waitForIdleCompaction(id: ConversationId): Promise<void> {
+        const active = this.#activeCompaction.get(id);
+
+        if (active !== undefined) {
+            try {
+                await active;
+            } catch {
+                // An active compaction failure does not block subsequent submissions.
+            }
+        }
+
+        const liveCompactions =
+            (await this.#app.harness.snapshot(LiveDoc, id, context))?.compactions ?? [];
+
+        for (const existing of liveCompactions) {
+            try {
+                await this.#app.harness.waitForTask(existing.taskId, context);
+            } catch {
+                // A compaction failure does not block subsequent operations.
+            }
+        }
     }
 }

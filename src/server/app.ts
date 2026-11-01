@@ -51,7 +51,7 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
-import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
+import { APP_ROOT, COMPACT_IDLE_CHOICES, ConfigStore, modulesWith, type User } from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
@@ -107,6 +107,7 @@ import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
+import { assessCacheContext, CacheExpiryPilot } from "./cache-expiry-pilot.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
@@ -338,6 +339,7 @@ export class PocketApp {
     readonly limits: LimitGate;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
     readonly cacheKeeper: CacheKeeper;
+    #cacheExpiryPilot?: CacheExpiryPilot;
     readonly schedules = new Schedules(this);
     /** Commands Pi runs in the background, watched until they end (`background.ts`). */
     readonly background = new BackgroundTasks(this);
@@ -745,6 +747,18 @@ export class PocketApp {
         }
 
         this.models = await ModelRuntime.create();
+
+        if (process.env.PI_POCKET_CACHE_EXPIRY_PILOT === "observe") {
+            this.#cacheExpiryPilot = new CacheExpiryPilot({
+                now: this.now,
+                conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
+                assess: (id, model) => assessCacheContext(this, id as ConversationId, model),
+                log: this.#log,
+            });
+            this.#cacheExpiryPilot.install(this.models);
+            this.#log("[cache-expiry-pilot] Observation only: no additional model requests.");
+        }
+
         // Innermost: observe the adapter payload only after the caller and all extension shapers finish.
         this.cacheKeeper.installPayloadObserver(this.models);
         installRequestShaping(this.models, this.#shapers, this.#log);
@@ -2276,6 +2290,8 @@ export class PocketApp {
                 pipCompactAt: this.pipCompaction.compactAt,
                 // The most hours a run waits for a provider's limit to clear; 0: it does not wait (`limit-gate.ts`).
                 limitWaitHours: this.config.limitWaitHours,
+                // Hours of idleness after which a person's next message compacts the session first.
+                compactIdleHours: this.config.compactIdleHours,
             },
             // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
             folderFavorites: await this.folderFavorites.list(user),
@@ -2471,6 +2487,11 @@ export class PocketApp {
 
     isBusy(id: ConversationId): boolean {
         return this.#busy.has(id);
+    }
+
+    /** Whether a conversation is currently compacting. */
+    isCompacting(id: ConversationId): boolean {
+        return this.#compacting.has(id);
     }
 
     /** The conversations with a run going. */
@@ -3218,6 +3239,29 @@ export class PocketApp {
     }
 
     /**
+     * How many hours of idleness before a session's next message compacts it first (0: off).
+     */
+    async setCompactIdleHours(user: User, hours: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (typeof hours !== "number" || !COMPACT_IDLE_CHOICES.includes(hours)) {
+            throw new HttpError(
+                400,
+                `compactIdleHours must be one of ${COMPACT_IDLE_CHOICES.join(", ")}`,
+            );
+        }
+
+        if (hours === this.config.compactIdleHours) {
+            return;
+        }
+
+        this.config.compactIdleHours = hours;
+        await this.#refreshClients();
+    }
+
+    /**
      * A module's settings as `user` may see them: the owner, and whoever its browser module is for. A secret's value
      * never leaves the server: only whether it is set. 404 for anyone else, and for a module that is off or has none.
      */
@@ -3591,6 +3635,7 @@ export class PocketApp {
             clearTimeout(this.#sessionsTimer);
             this.alerts.close();
             this.themes.close();
+            this.#cacheExpiryPilot?.close();
             await this.cacheKeeper.close();
             this.spend.close();
             this.limits.close();
