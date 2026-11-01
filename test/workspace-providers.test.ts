@@ -189,3 +189,28 @@ export default (host, web) => {
         await app.close();
     }
 });
+
+test("only the owner can start or move a session to a workspace URI", async () => {
+    const app = await openApp(scriptedModel());
+    const uri = "ssh://host/work";
+    const remove = app.registerWorkspaceProvider("ssh", {
+        env: fakeEnv,
+        resolveCwd: async (cwd) => cwd,
+    });
+
+    try {
+        const { user } = app.config.addUser("Workspace guest", "guest");
+        const before = app.sessions().length;
+
+        await assert.rejects(app.commands.createSession(user, { cwd: uri }), /owner/i);
+        assert.equal(app.sessions().length, before);
+
+        const local = await app.commands.createSession(user, { cwd: work });
+
+        await assert.rejects(app.commands.configure(local.id, user, { cwd: uri }), /owner/i);
+        assert.equal(app.cwdOf(local.id), work);
+    } finally {
+        remove();
+        await app.close();
+    }
+});

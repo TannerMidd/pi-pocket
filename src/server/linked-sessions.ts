@@ -549,7 +549,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             const selected = this.#selection(agent, request, true);
 
             approved = {
-                cwd: await this.#directory(source, agent, request.cwd),
+                cwd: await this.#directory(source, user, agent, request.cwd),
                 model: selected.model,
                 thinkingLevel: selected.thinking,
             };
@@ -578,7 +578,12 @@ export class LinkedSessions implements LinkedSessionsApi {
     }
 
     /** Use the normal folder-picker validation for an explicit working directory. */
-    async #directory(source: ConversationId, agent: AgentState, cwd?: string): Promise<string> {
+    async #directory(
+        source: ConversationId,
+        user: User,
+        agent: AgentState,
+        cwd?: string,
+    ): Promise<string> {
         // A blank field (an empty form input) is no folder, not the home folder.
         if (cwd === undefined || (typeof cwd === "string" && cwd.trim() === "")) {
             return agent.cwd ?? this.#app.cwdOf(source);
@@ -587,6 +592,8 @@ export class LinkedSessions implements LinkedSessionsApi {
         if (typeof cwd !== "string") {
             throw new HttpError(400, "The working directory must be a folder path.");
         }
+
+        this.#app.requireWorkspaceOwner(user, cwd);
 
         return await this.#app.resolveCwd(cwd);
     }
@@ -700,7 +707,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             throw new HttpError(400, `The model ${spec} cannot be used now: ${problem}.`);
         }
 
-        const cwd = approved?.cwd ?? (await this.#directory(source, agent, request.cwd));
+        const cwd = approved?.cwd ?? (await this.#directory(source, user, agent, request.cwd));
         const now = Date.now();
 
         return app.harness.commit(async (tx) => {

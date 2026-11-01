@@ -1514,6 +1514,13 @@ export class PocketApp {
         return /^(?![a-z]:[\\/])([a-z][a-z0-9+.-]*):/i.exec(cwd)?.[1]?.toLowerCase();
     }
 
+    /** A workspace URI reaches a provider's machines and keys: they are the owner's. */
+    requireWorkspaceOwner(user: User, cwd: string): void {
+        if (user.role !== "owner" && this.workspaceScheme(cwd.trim()) !== undefined) {
+            throw new HttpError(403, "Only the owner can use a remote workspace.");
+        }
+    }
+
     async resolveCwd(cwd: string, signal?: AbortSignal): Promise<string> {
         const scheme = this.workspaceScheme(cwd);
 

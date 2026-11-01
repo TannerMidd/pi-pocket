@@ -401,6 +401,8 @@ export class Commands {
         const given = optionalText(request.title, "title");
         const title = (given === undefined ? undefined : oneLine(given)) || undefined;
         const requested = optionalText(request.cwd, "cwd") ?? app.defaultCwd;
+
+        app.requireWorkspaceOwner(user, requested);
         const remote = app.workspaceScheme(requested) !== undefined;
 
         if (remote && request.worktree === true) {
@@ -1571,6 +1573,10 @@ export class Commands {
                 403,
                 "You were invited to one session and cannot move it to another folder.",
             );
+        }
+
+        if (request.cwd !== undefined) {
+            app.requireWorkspaceOwner(user, request.cwd);
         }
 
         const conversation = await app.conversation(id);
