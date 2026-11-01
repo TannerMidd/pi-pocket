@@ -3,7 +3,7 @@
 [Unit]
 Description=Pi Pocket (%i access)
 Documentation=https://github.com/TannerMidd/pi-pocket/blob/main/docs/systemd.md
-Wants=network-online.target
+Wants=network-online.target tailscaled.service
 After=network-online.target tailscaled.service
 
 [Service]

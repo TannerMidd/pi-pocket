@@ -627,7 +627,7 @@ test("a Funnel already on 443 stops the start before anything is mounted", async
         assert.deepEqual(serve.start(), {
             ok: false,
             message:
-                'Tailscale Funnel is on for host.tail1.ts.net:443, which would publish Pi Pocket to the internet. Turn it off with "tailscale funnel --https=443 off", which takes every handler on 443 with it, then try again.',
+                'Tailscale Funnel is on for host.tail1.ts.net:443, which would publish Pi Pocket to the internet. Turn it off with "tailscale funnel --https=443 off", which takes every handler on 443 with it, then try again. If 443 is a TCP forward rather than a web handler, only "tailscale serve reset" clears its Funnel.',
         });
         assert.equal(
             fake.calls().some((line) => line.startsWith("serve --bg")),
@@ -686,7 +686,11 @@ test("stop leaves a mount at / that someone pointed at another service", async (
             JSON.stringify(mounted("http://127.0.0.1:9999")),
         );
         serve.stop();
-        assert.equal(fake.calls().at(-1), "serve status --json");
+        // No `off` at all: someone else's mount stays, and the receipt is dropped so nothing tries again.
+        assert.equal(
+            fake.calls().some((line) => line.endsWith(" off")),
+            false,
+        );
     } finally {
         fake.restore();
     }
@@ -724,15 +728,27 @@ test("stop reports an off that failed for any other reason", async (t) => {
 
     const fake = fakeTailscale({ offFailure: { status: 1, error: "serve config denied" } });
     const said = heard();
+    const lifecycle: string[] = [];
 
     try {
-        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, said.events);
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, {
+            ...said.events,
+            mountAttempt() {
+                lifecycle.push("recorded");
+            },
+            mountRemoved() {
+                lifecycle.push("removed");
+            },
+        });
 
         serve.start();
+        lifecycle.length = 0;
         serve.stop();
         assert.deepEqual(said.problems, [
             'Run "sudo tailscale set --operator=$USER" once, so Pi Pocket may configure serve. The tailnet may still point here; the next start takes the mount down or reuses it.',
         ]);
+        // Ownership is kept, not cleared: the mount is still up, so a later start has to find it.
+        assert.deepEqual(lifecycle, ["recorded"]);
     } finally {
         fake.restore();
     }
@@ -913,7 +929,7 @@ test("a mount that fails says its own complaint", async (t) => {
     try {
         const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
 
-        assert.deepEqual(serve.start(), { ok: false, message: "error: invalid proxy target" });
+        assert.deepEqual(serve.start(), { ok: false, message: "invalid proxy target" });
     } finally {
         fake.restore();
     }
@@ -981,7 +997,11 @@ test("an adopted mount is left alone when the launcher quits", async (t) => {
     try {
         const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
 
-        serve.start();
+        assert.deepEqual(serve.start(), {
+            ok: true,
+            url: "https://host.tail1.ts.net",
+            adopted: true,
+        });
         serve.stop();
         assert.equal(
             fake.calls().some((line) => line.endsWith(" off")),
@@ -1029,6 +1049,13 @@ test("a new mount records ownership before its CLI command and clears it after s
                 lifecycle.push("recorded");
             },
             mountRemoved() {
+                // The receipt goes only once the CLI has been asked to take the mount down: a run killed before that
+                // must leave the receipt for the next start.
+                assert.equal(
+                    fake.calls().at(-1),
+                    "serve --https=443 --set-path=/ off",
+                    "the receipt was dropped before the removal",
+                );
                 lifecycle.push("removed");
             },
         });
@@ -1092,7 +1119,7 @@ test("a failed cleanup preserves ownership for a later retry", () => {
  * The launcher itself, copied beside a stub server that only says it is ready, started in `local` mode on `port` with
  * the fake tailscale on its PATH. It runs until the stub starts, which is after the stale mount cleanup, then quits.
  */
-async function launchLocal(data: string, port: number): Promise<void> {
+async function launchLocal(data: string, port: number, access = "local"): Promise<void> {
     const repo = fileURLToPath(new URL("..", import.meta.url));
     const root = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-"));
     const started = join(root, "started");
@@ -1114,8 +1141,21 @@ async function launchLocal(data: string, port: number): Promise<void> {
         symlinkSync(join(repo, "node_modules"), join(root, "node_modules"));
         writeFileSync(
             join(root, "src", "server", "main.ts"),
-            `import { writeFileSync } from "node:fs";
+            `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(started)}, "");
+// What the launcher tells its server about access, for the test to read back, and the Serve receipt as it was then.
+process.on("message", (message) => {
+    appendFileSync(${JSON.stringify(join(data, "access.jsonl"))}, JSON.stringify(message) + "\\n");
+
+    if (message?.type === "access") {
+        try {
+            writeFileSync(
+                ${JSON.stringify(join(data, "receipt-at-ready.json"))},
+                readFileSync(${JSON.stringify(join(data, "serve-mount.json"))}, "utf8"),
+            );
+        } catch {}
+    }
+});
 process.send?.({ type: "ready" });
 process.on("disconnect", () => process.exit(0));
 setInterval(() => {}, 60_000);
@@ -1126,7 +1166,7 @@ setInterval(() => {}, 60_000);
             process.execPath,
             [
                 join(root, "src", "launcher", "main.ts"),
-                ...["--access", "local", "--port", String(port), "--data", data, "--cwd", root],
+                ...["--access", access, "--port", String(port), "--data", data, "--cwd", root],
             ],
             { stdio: "ignore", env: { ...process.env, NO_COLOR: "1" } },
         );
@@ -1186,6 +1226,232 @@ test("a local start leaves the owner's own mount at its port alone, and takes do
         writeFileSync(join(data, "serve-mount.json"), `${JSON.stringify({ port: LOCAL_PORT })}\n`);
         await launchLocal(data, LOCAL_PORT);
         assert.ok(fake.calls().includes("serve --https=443 --set-path=/ off"));
+        assert.equal(existsSync(join(data, "serve-mount.json")), false);
+    } finally {
+        fake.restore();
+        rmSync(data, { recursive: true, force: true });
+    }
+});
+
+test("the CLI's help footer does not hide why it refused", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // `tailscale` prints the reason, a blank line, then this footer as the last line of stderr.
+    const fake = fakeTailscale({
+        fail: {
+            command: "mount",
+            status: 1,
+            error: "error: cannot serve web; already serving TCP\n\ntry `tailscale serve --help` for usage info",
+        },
+    });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), {
+            ok: false,
+            message: "cannot serve web; already serving TCP",
+        });
+    } finally {
+        fake.restore();
+    }
+});
+
+test("an off that finds no handler is the footer's neighbour, not a problem", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // The ordinary outcome for a mount that never took, which is what `#published` exists for.
+    const fake = fakeTailscale({
+        offFailure: {
+            status: 1,
+            error: "error: failed to remove web serve: handler does not exist\n\ntry `tailscale serve --help` for usage info",
+        },
+    });
+    const said = heard();
+    const lifecycle: string[] = [];
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, {
+            ...said.events,
+            mountAttempt() {},
+            mountRemoved() {
+                lifecycle.push("removed");
+            },
+        });
+
+        serve.start();
+        serve.stop();
+        assert.deepEqual(said.problems, []);
+        assert.deepEqual(lifecycle, ["removed"]);
+    } finally {
+        fake.restore();
+    }
+});
+
+test("leaving serve mode takes down an adopted mount that publishes this server", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({ serve: mounted() });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events);
+
+        assert.deepEqual(serve.start(), {
+            ok: true,
+            url: "https://host.tail1.ts.net",
+            adopted: true,
+        });
+        // Quitting leaves an adopted mount (it may be the owner's); moving to another mode cannot, or the tailnet keeps
+        // serving the app while the panel says "this device only".
+        serve.stop(true);
+        assert.ok(fake.calls().includes("serve --https=443 --set-path=/ off"));
+    } finally {
+        fake.restore();
+    }
+});
+
+test("leaving serve mode still leaves a mount that points somewhere else", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({ serve: mounted() });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events, true);
+
+        assert.deepEqual(serve.start(), {
+            ok: true,
+            url: "https://host.tail1.ts.net",
+            adopted: true,
+        });
+
+        // Someone re-pointed `/` at another service since: that is theirs, whatever the mode, so neither the quit nor
+        // leaving the mode takes it down.
+        writeFileSync(
+            join(dirname(fake.binary), "serve.json"),
+            JSON.stringify(mounted("http://127.0.0.1:9999")),
+        );
+        serve.stop(true);
+        assert.equal(
+            fake.calls().some((line) => line.endsWith(" off")),
+            false,
+        );
+    } finally {
+        fake.restore();
+    }
+});
+
+test("a mount the receipt names is this run's, so quitting takes it down", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // A run killed with its mount up leaves both the mount and the receipt for this port.
+    const fake = fakeTailscale({ serve: mounted() });
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, heard().events, true);
+
+        assert.deepEqual(serve.start(), {
+            ok: true,
+            url: "https://host.tail1.ts.net",
+            adopted: true,
+        });
+        serve.stop();
+        assert.ok(fake.calls().includes("serve --https=443 --set-path=/ off"));
+    } finally {
+        fake.restore();
+    }
+});
+
+/** What the launcher sent its server about access, once it has sent one. */
+async function accessMessages(
+    data: string,
+): Promise<{ mode?: string; label?: string; url?: string }[]> {
+    const file = join(data, "access.jsonl");
+
+    for (let waited = 0; waited < 10_000; waited += 50) {
+        try {
+            const messages = readFileSync(file, "utf8")
+                .split("\n")
+                .filter((line) => line !== "")
+                .map((line) => JSON.parse(line) as { type?: string; access?: unknown });
+
+            const access = messages
+                .filter((message) => message.type === "access")
+                .map(
+                    (message) => message.access as { mode?: string; label?: string; url?: string },
+                );
+
+            if (access.length > 0) {
+                return access;
+            }
+        } catch {
+            // Not written yet.
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    return [];
+}
+
+test("a serve-mode start clears a receipted mount, writes its own, and takes it down on quit", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    // A run killed on --port 9000 left its mount and a receipt for it: serve mode on 8787 has to clear that one first, or
+    // it reads its own mount as someone else's and refuses to start. One launcher run covers the whole lifecycle.
+    const fake = fakeTailscale({ serve: mounted("http://127.0.0.1:9000") });
+    const data = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-data-"));
+
+    try {
+        writeFileSync(join(data, "serve-mount.json"), `${JSON.stringify({ port: 9000 })}\n`);
+
+        await launchLocal(data, LOCAL_PORT, "tailscale-serve");
+
+        // The stale mount went, this run's went up, and the receipt was this run's before the server heard about access.
+        assert.ok(fake.calls().includes("serve --https=443 --set-path=/ off"));
+        assert.ok(
+            fake.calls().includes("serve --bg --https=443 --set-path=/ http://127.0.0.1:8787"),
+        );
+        assert.equal(
+            readFileSync(join(data, "receipt-at-ready.json"), "utf8").trim(),
+            '{"port":8787}',
+        );
+        assert.deepEqual(await accessMessages(data), [
+            {
+                mode: "tailscale-serve",
+                label: "Tailscale Serve",
+                url: "https://host.tail1.ts.net",
+            },
+        ]);
+
+        // SIGTERM goes through the same quit as "q": the mount this run made is taken down and the receipt dropped.
+        assert.equal(
+            fake.calls().filter((line) => line === "serve --https=443 --set-path=/ off").length,
+            2,
+        );
         assert.equal(existsSync(join(data, "serve-mount.json")), false);
     } finally {
         fake.restore();

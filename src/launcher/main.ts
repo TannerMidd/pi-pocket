@@ -97,17 +97,26 @@ function savedServeMountPort(): number | undefined {
     }
 }
 
-/** Write the receipt, all at once, for a mount this run is about to make. */
+/** Write the receipt, all at once, for a mount this run is about to make. A data folder that cannot be written to is
+ * not worth failing the start over: the mount still works for this run, and the next start finds it as an adopted one. */
 function recordServeMount(): void {
     const temp = `${serveMountFile}.tmp`;
 
-    writeFileSync(temp, `${JSON.stringify({ port: options.port })}\n`, { mode: 0o600 });
-    renameSync(temp, serveMountFile);
+    try {
+        writeFileSync(temp, `${JSON.stringify({ port: options.port })}\n`, { mode: 0o600 });
+        renameSync(temp, serveMountFile);
+    } catch (error) {
+        log(yellow(`  Could not write ${tilde(serveMountFile)}: ${(error as Error).message}`));
+    }
 }
 
 /** Drop the receipt: its mount is gone, or no longer points here. */
 function forgetServeMount(): void {
-    rmSync(serveMountFile, { force: true });
+    try {
+        rmSync(serveMountFile, { force: true });
+    } catch (error) {
+        log(yellow(`  Could not remove ${tilde(serveMountFile)}: ${(error as Error).message}`));
+    }
 }
 
 function loadSettings(): { access?: AccessMode } {
@@ -123,7 +132,13 @@ function loadSettings(): { access?: AccessMode } {
 }
 
 function saveSettings(access: AccessMode): void {
-    writeFileSync(settingsFile, `${JSON.stringify({ access }, null, "\t")}\n`, { mode: 0o600 });
+    try {
+        writeFileSync(settingsFile, `${JSON.stringify({ access }, null, "\t")}\n`, { mode: 0o600 });
+    } catch (error) {
+        // A full disk or a data folder that went read-only must not decide how this run behaves: it works, and the next
+        // start simply asks again.
+        log(yellow(`  Could not save the access choice: ${(error as Error).message}`));
+    }
 }
 
 const home = homedir();
@@ -234,19 +249,25 @@ function accessChoices(): { mode: AccessMode; choice: Choice }[] {
         {
             mode: "tailscale-serve",
             choice:
-                findTailscale() === undefined
+                options.host !== undefined
                     ? {
                           label: ACCESS_LABELS["tailscale-serve"],
-                          detail: "needs tailscale on PATH",
+                          detail: "not with --host: serve listens on 127.0.0.1",
                           disabled: true,
                       }
-                    : {
-                          label: ACCESS_LABELS["tailscale-serve"],
-                          detail:
-                              state.mode === "tailscale-serve" && state.accessUrl !== undefined
-                                  ? `${state.accessUrl} · your tailnet, encrypted`
-                                  : "https on your tailnet · tailscale serve",
-                      },
+                    : findTailscale() === undefined
+                      ? {
+                            label: ACCESS_LABELS["tailscale-serve"],
+                            detail: "needs tailscale on PATH",
+                            disabled: true,
+                        }
+                      : {
+                            label: ACCESS_LABELS["tailscale-serve"],
+                            detail:
+                                state.mode === "tailscale-serve" && state.accessUrl !== undefined
+                                    ? `${state.accessUrl} · your tailnet, encrypted`
+                                    : "https on your tailnet · tailscale serve",
+                        },
         },
     ];
 }
@@ -444,6 +465,12 @@ function modeNote(): string {
 function reachable(): boolean {
     if (served()) {
         return state.accessUrl !== undefined;
+    }
+
+    // A wildcard bind on a machine with no other address has nothing to hand out: 127.0.0.1 is this machine's own, and a
+    // QR code made from it opens the phone's loopback.
+    if (wildcard(state.host)) {
+        return lanAddresses().length > 0;
     }
 
     return !loopback(state.host);
@@ -825,19 +852,40 @@ function prepareServe(): boolean {
         return false;
     }
 
-    const current = new TailscaleServe(binary, options.port, {
-        problem(line) {
-            log(yellow(`  tailscale: ${line}`));
-        },
-        mountAttempt: recordServeMount,
-        mountRemoved: forgetServeMount,
-    });
+    // A run that was killed leaves its mount on the port it listened on, which `start()` would read as someone else's at
+    // `/`. The receipt names it, so clear that one before mounting for this port: an adoption only counts for our own
+    // port, where the mount still points at this server.
+    const receipted = savedServeMountPort();
 
-    // Recorded before it is up, so a quit during the CLI round-trips below still takes down a mount those made.
+    if (receipted !== undefined && receipted !== options.port) {
+        const events = {
+            problem(line: string) {
+                log(yellow(`  tailscale: ${line}`));
+            },
+        };
+
+        if (removeStaleServe(binary, [receipted], events)) {
+            log(dim("  Removed the Tailscale Serve mount an earlier run left behind."));
+        }
+    }
+
+    const current = new TailscaleServe(
+        binary,
+        options.port,
+        {
+            problem(line) {
+                log(yellow(`  tailscale: ${line}`));
+            },
+            mountAttempt: recordServeMount,
+            mountRemoved: forgetServeMount,
+        },
+        receipted === options.port,
+    );
+
+    // Recorded before it is up, so a quit during the CLI round-trips below still takes down a mount those made. The
+    // receipt (written just before the mount command) is what makes a killed run recoverable, so the saved choice can
+    // wait until the mode actually runs.
     serve = current;
-    // Saved for the same reason from the other side: the receipt (written just before the mount command) says what to
-    // take down, and the saved choice says whether a failure to do so is worth telling.
-    saveSettings("tailscale-serve");
 
     const result = current.start();
 
@@ -851,12 +899,14 @@ function prepareServe(): boolean {
         return false;
     }
 
-    // An existing mount of ours is adopted rather than mounted again, and it is the owner's as much as ours: it stays
-    // when this launcher quits, which is what the line says, rather than being taken down at the end of the session.
+    // An existing mount of ours is adopted rather than mounted again. Only a mount this launcher left behind is this
+    // run's to take down; one the owner made stays when this launcher quits, which is what the line says.
     if (result.adopted) {
         log(
             dim(
-                "  Using the Tailscale Serve mount already in place; it stays when this launcher quits.",
+                savedServeMountPort() === options.port
+                    ? "  Using the Tailscale Serve mount an earlier run left behind."
+                    : "  Using the Tailscale Serve mount already in place; it stays when this launcher quits.",
             ),
         );
     }
@@ -866,12 +916,13 @@ function prepareServe(): boolean {
     return true;
 }
 
-function stopServe(): void {
+/** Stop the Serve mount. `always` takes down an adopted one too: leaving the mode must stop publishing this server. */
+function stopServe(always = false): void {
     const current = serve;
 
     serve = undefined;
     state.accessUrl = undefined;
-    current?.stop();
+    current?.stop(always);
 }
 
 /** Switch to `mode`: start or stop the tunnel, and restart the server when it has to listen somewhere else. */
@@ -884,7 +935,9 @@ async function applyAccess(mode: AccessMode, binary: string | undefined): Promis
     await stopTunnel();
 
     if (mode !== "tailscale-serve") {
-        stopServe();
+        // Leaving the mode must stop publishing this server: an adopted mount still points at this port, and leaving it
+        // would serve the app to the audience the panel no longer promises.
+        stopServe(true);
     }
 
     state.mode = mode;
@@ -952,20 +1005,28 @@ async function changeAccess(): Promise<void> {
             return;
         }
 
-        // prepareServe() saves the serve choice before it tries: a switch that fails puts back what was saved.
-        const saved = loadSettings().access;
-
-        if (next === "tailscale-serve" && !prepareServe()) {
-            if (saved === undefined) {
-                rmSync(settingsFile, { force: true });
-            } else {
-                saveSettings(saved);
-            }
+        // `main()` refuses `--access tailscale-serve --host` outright, and the same pair is just as wrong when it comes
+        // from the menu: the mount proxies to 127.0.0.1, so a bind address of its own leaves it pointing at nothing (or
+        // at the LAN, which the panel calls the tailnet).
+        if (next === "tailscale-serve" && options.host !== undefined) {
+            log(
+                yellow(
+                    "  --access tailscale-serve keeps the server on 127.0.0.1 and lets Tailscale reach it; --host cannot be combined with it.",
+                ),
+            );
 
             return;
         }
 
+        if (next === "tailscale-serve" && !prepareServe()) {
+            // Nothing was saved: a mode that never ran is not the last choice.
+            return;
+        }
+
         await applyAccess(next, binary);
+    } catch (error) {
+        // Nothing a menu does is worth taking the launcher down with: the server and the tunnel keep running.
+        log(red(`  Could not change access: ${(error as Error).message}`));
     } finally {
         release();
     }
@@ -1128,11 +1189,10 @@ async function main(): Promise<void> {
             if (tailscale !== undefined) {
                 // Tailscale installed but never used is ordinary, so a failing probe is worth saying only when the last
                 // run was the serve mode. A failure keeps the receipt, so the next start tries again.
+                // The receipt means the mount is ours, so a failure to remove it is always worth saying.
                 const removed = removeStaleServe(tailscale, stalePorts, {
                     problem(line) {
-                        if (settings.access === "tailscale-serve") {
-                            log(yellow(`  tailscale: ${line}`));
-                        }
+                        log(yellow(`  tailscale: ${line}`));
                     },
                     mountRemoved: forgetServeMount,
                 });
