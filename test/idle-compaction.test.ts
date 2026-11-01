@@ -264,6 +264,89 @@ test("interrupt waits for active compaction and admits the interrupt message", a
     await app.harness.waitForIdle(context);
 });
 
+for (const action of ["interrupt", "stop"] as const) {
+    test(`${action} waits when idle compaction has not started its task`, async () => {
+        const id = await newSession(app);
+
+        await say(app, id, "x".repeat(80_000));
+        clock += 61 * 60 * 1000;
+        const original = app.conversation.bind(app);
+        let entered!: () => void;
+        let release!: () => void;
+        const beforeTask = new Promise<void>((resolve) => (entered = resolve));
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let taskId:
+            Awaited<ReturnType<Awaited<ReturnType<typeof original>>["compact"]>> | undefined;
+        let abortedBeforeCompletion = false;
+        let completed = false;
+
+        app.conversation = async (conversationId) => {
+            const conversation = await original(conversationId);
+
+            if (conversationId === id) {
+                const compact = conversation.compact.bind(conversation);
+                const abort = conversation.abort.bind(conversation);
+
+                conversation.compact = async (entry, ctx) => {
+                    entered();
+                    await gate;
+                    taskId = await compact(entry, ctx);
+                    const receipt = await app.harness.waitForTask(taskId, context);
+
+                    completed = receipt.state.outcome.status === "completed";
+
+                    return taskId;
+                };
+
+                conversation.abort = async (ctx) => {
+                    abortedBeforeCompletion ||= !completed;
+
+                    return abort(ctx);
+                };
+            }
+
+            return conversation;
+        };
+
+        try {
+            const pending = app.commands.submit(id, owner(app), {
+                text: "message before compaction",
+                requestId: crypto.randomUUID(),
+            });
+
+            await beforeTask;
+            let settled = false;
+            const operation = (
+                action === "interrupt"
+                    ? app.commands.submit(id, owner(app), {
+                          text: "interrupt after compaction",
+                          mode: "interrupt",
+                          requestId: crypto.randomUUID(),
+                      })
+                    : app.commands.abort(id, owner(app))
+            ).then(() => {
+                settled = true;
+            });
+
+            // Give the operation time to reach the wait while task creation is held.
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            assert.equal(settled, false, "the operation waits for compaction");
+            assert.equal(abortedBeforeCompletion, false);
+            release();
+            const [submission] = await Promise.all([pending, operation]);
+
+            assert.ok(submission.submissionId, "the pending message is admitted after compaction");
+            assert.ok(taskId !== undefined, "the idle compaction task started");
+            assert.equal(completed, true, "the compaction task completed");
+            assert.equal(abortedBeforeCompletion, false, "abort did not cancel compaction");
+            await app.harness.waitForIdle(context);
+        } finally {
+            release();
+            app.conversation = original;
+        }
+    });
+}
+
 test("stop waits for active compaction", async () => {
     const id = await newSession(app);
 
