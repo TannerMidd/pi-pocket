@@ -643,7 +643,7 @@ Who can use a route, or whose tabs load a browser module.
 - `"steer"`: the owner, and guests who can steer all sessions.
 - `"view"`: the owner, guests, and viewers who can see all sessions.
 
-A person invited to one session never can, because these parts belong to the whole app. Each route has its own `access`, so a browser module for everyone can call a route for the owner alone.
+A person invited to one session never can, because these parts belong to the whole app. The one exception is the built-in Diagrams browser module, which draws Mermaid and math in their replies. They get its browser module and no routes. Each route has its own `access`, so a browser module for everyone can call a route for the owner alone.
 
 `access` is the same for all methods. A POST route with `"view"` lets viewers change something through it, though they cannot steer a session. Give `"owner"` or `"steer"` to a route that changes things.
 
