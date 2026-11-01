@@ -509,7 +509,15 @@ export function RunningBoard() {
                 <div class="board-sub">
                     ${
                         board
-                            ? html`<b>${rows.filter((row) => row.run !== undefined).length}</b> at work · <b>${active}</b> running · <b>${schedules.length}</b> scheduled${next && html` · next <b>${span(next.next - now)}</b>`}`
+                            ? html`
+                                  <b>${rows.filter((row) => row.run !== undefined).length}</b>
+                                  ${" at work · "}
+                                  <b>${active}</b>
+                                  ${" running · "}
+                                  <b>${schedules.length}</b>
+                                  ${" scheduled"}
+                                  ${next && html`${" · next "}<b>${span(next.next - now)}</b>`}
+                              `
                             : "Looking"
                     }
                 </div>
@@ -534,7 +542,11 @@ export function RunningBoard() {
             ${
                 board === null
                     ? html`<div class="board-empty">
-                          ${error ? html`<span class="err">${error}</span>` : html`<${Spinner} /> Looking…`}
+                          ${
+                              error
+                                  ? html`<span class="err">${error}</span>`
+                                  : html`<${Spinner} /> Looking…`
+                          }
                       </div>`
                     : html`
                       <${Timeline}
@@ -560,9 +572,14 @@ export function RunningBoard() {
                                   aria-pressed=${filter === each.key}
                                   onClick=${() => setFilter(filter === each.key ? "all" : each.key)}
                               >
-                                  ${each.key !== "all" && html`<span class=${`rb-mark rb-mark-${each.key}`}></span>`}
+                                  ${
+                                      each.key !== "all" &&
+                                      html`<span class=${`rb-mark rb-mark-${each.key}`}></span>`
+                                  }
                                   ${each.label}
-                                  <span class="board-filter-count">${rows.filter(each.keep).length}</span>
+                                  <span class="board-filter-count">
+                                      ${rows.filter(each.keep).length}
+                                  </span>
                               </button>`,
                           )}
                       </div>
@@ -617,15 +634,30 @@ export function RunningBoard() {
                                           />
                                       </div>`
                                   }
-                                  <${Needs} needs=${needs} colorOf=${colorOf} onOpen=${open} onPick=${pick} />
-                                  <${NextUp} schedules=${schedules} now=${now} colorOf=${colorOf} onPick=${pick} />
+                                  <${Needs}
+                                      needs=${needs}
+                                      colorOf=${colorOf}
+                                      onOpen=${open}
+                                      onPick=${pick}
+                                  />
+                                  <${NextUp}
+                                      schedules=${schedules}
+                                      now=${now}
+                                      colorOf=${colorOf}
+                                      onPick=${pick}
+                                  />
                               </aside>`
                           }
                       </div>
                       ${
                           phone &&
                           html`<div class="rb-phone-side">
-                              <${Needs} needs=${needs} colorOf=${colorOf} onOpen=${open} onPick=${pick} />
+                              <${Needs}
+                                  needs=${needs}
+                                  colorOf=${colorOf}
+                                  onOpen=${open}
+                                  onPick=${pick}
+                              />
                           </div>`
                       }
                   `
@@ -846,7 +878,11 @@ function Timeline({
                         Math.abs(left - x(now)) > 24 &&
                         room(left)
                     ) {
-                        marks.push(html`<span key=${`${schedule.id}-label`} class="rb-pin-label" style=${`left:${left}px`}>
+                        marks.push(html`<span
+                            key=${`${schedule.id}-label`}
+                            class="rb-pin-label"
+                            style=${`left:${left}px`}
+                        >
                             ${clock(t, schedule.zone, now)}
                         </span>`);
                         labelled = true;
@@ -857,7 +893,11 @@ function Timeline({
         return { id: each.id, title: each.title, marks };
     });
 
-    return html`<section class="rb-timeline" data-part="running-timeline" aria-label="Schedule timeline">
+    return html`<section
+        class="rb-timeline"
+        data-part="running-timeline"
+        aria-label="Schedule timeline"
+    >
         <div class="rb-tl-head">
             <h3>Coming up</h3>
             <span class="rb-tl-next" title=${next ? `Next: ${next.text}` : ""}>
@@ -921,17 +961,23 @@ function Timeline({
                     )}
                     <div class="rb-past" style=${`width:${x(now)}px`}></div>
                     ${lanes.map(
-                        (
-                            lane,
-                        ) => html`<div key=${lane.id} class=${`rb-lane ${row === lane.id ? "on" : ""}`}>
+                        (lane) => html`<div
+                            key=${lane.id}
+                            class=${`rb-lane ${row === lane.id ? "on" : ""}`}
+                        >
                             ${phone && html`<span class="rb-lane-name">${lane.title}</span>`}
                             ${lane.marks}
                         </div>`,
                     )}
                     <div class="rb-now" style=${`left:${x(now)}px`}>
-                        <span>${formatter("en-GB", { hour: "2-digit", minute: "2-digit" }).format(now)}</span>
+                        <span>
+                            ${formatter("en-GB", { hour: "2-digit", minute: "2-digit" }).format(now)}
+                        </span>
                     </div>
-                    ${lanes.length === 0 && html`<div class="rb-tl-empty">Nothing to show here.</div>`}
+                    ${
+                        lanes.length === 0 &&
+                        html`<div class="rb-tl-empty">Nothing to show here.</div>`
+                    }
                 </div>
             </div>
         </div>
@@ -1029,14 +1075,19 @@ function Row({
                                       : html`<span class="rb-dot" aria-hidden="true">·</span>`
                               }
                               <span class="rb-task-label">
-                                  ${task.subagent && html`<span class="rb-agent">${task.subagent}</span> `}${task.label}
+                                  ${
+                                      task.subagent &&
+                                      html`<span class="rb-agent">${task.subagent}</span> `
+                                  }${task.label}
                               </span>
                               <span
                                   class=${`rb-status ${task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
                               >
                                   ${task.status}
                               </span>
-                              <span class="rb-elapsed">${task.since ? elapsed(now - task.since) : ""}</span>
+                              <span class="rb-elapsed">
+                                  ${task.since ? elapsed(now - task.since) : ""}
+                              </span>
                               ${
                                   stoppable
                                       ? html`<button
@@ -1089,7 +1140,8 @@ function Row({
                                   ${schedule.repeat ? `↻ ${schedule.repeat}` : "once"}
                               </span>
                               <span class="rb-sched-rel">
-                                  ${relative(schedule.next, now)}${schedule.every ? ` · ${schedule.runs}×` : ""}
+                                  ${relative(schedule.next, now)}
+                                  ${schedule.every ? ` · ${schedule.runs}×` : ""}
                               </span>
                           </button>`,
                       )
@@ -1112,20 +1164,34 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
                 <${Icon} name="close" size=${16} />
             </button>
         </div>
-        ${schedule.held && html`<div class="rb-held">Held: ${schedule.held}. At its time it is cancelled, unless that changes first.</div>`}
+        ${
+            schedule.held &&
+            html`<div class="rb-held">
+                Held: ${schedule.held}. At its time it is cancelled, unless that changes first.
+            </div>`
+        }
         <pre class="rb-message">${schedule.text}</pre>
         <dl class="rb-facts">
             <dt>Repeats</dt>
             <dd>${schedule.repeat ?? "no, once"}</dd>
             <dt>Next</dt>
-            <dd>${clock(schedule.next, schedule.zone, now, { day: "always" })}${zone && ` ${zone}`} · ${relative(schedule.next, now)}</dd>
+            <dd>
+                ${clock(schedule.next, schedule.zone, now, { day: "always" })}
+                ${zone && ` ${zone}`}
+                ${" · "}
+                ${relative(schedule.next, now)}
+            </dd>
             <dt>Zone</dt>
             <dd>${schedule.zone}</dd>
             <dt>Set by</dt>
             <dd>${setBy(schedule)}</dd>
             <dt>Set up</dt>
             <dd>${relative(schedule.createdAt, now)}</dd>
-            ${schedule.every && html`<dt>Went out</dt><dd>${schedule.runs} ${schedule.runs === 1 ? "time" : "times"}</dd>`}
+            ${
+                schedule.every &&
+                html`<dt>Went out</dt>
+                    <dd>${schedule.runs} ${schedule.runs === 1 ? "time" : "times"}</dd>`
+            }
             <dt>Id</dt>
             <dd class="mono">${schedule.id}</dd>
         </dl>
@@ -1133,17 +1199,23 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
             schedule.upcoming.length > 1 &&
             html`<div class="rb-sub">Coming up</div>
                 <div class="rb-upcoming">
-                    ${schedule.upcoming
-                        .slice(0, 5)
-                        .map(
-                            (t) =>
-                                html`<span key=${t}>${clock(t, schedule.zone, now, { day: "always" })}${zone && ` ${zone}`}</span>`,
-                        )}
+                    ${schedule.upcoming.slice(0, 5).map(
+                        (t) =>
+                            html`<span key=${t}>
+                                    ${clock(t, schedule.zone, now, { day: "always" })}
+                                    ${zone && ` ${zone}`}
+                                </span>`,
+                    )}
                 </div>`
         }
         <div class="rb-actions">
             <button class="button" onClick=${() => onOpen(schedule.session)}>Open session</button>
-            ${steer && html`<button class="button danger" onClick=${() => onCancel(schedule)}>Cancel</button>`}
+            ${
+                steer &&
+                html`<button class="button danger" onClick=${() => onCancel(schedule)}>
+                    Cancel
+                </button>`
+            }
         </div>
     </div>`;
 }
@@ -1185,10 +1257,11 @@ function NextUp({ schedules, now, colorOf, onPick }) {
     return html`<div class="rb-panel" data-part="running-next">
         <div class="label">Next up</div>
         ${times.map(
-            ({
-                at,
-                schedule,
-            }) => html`<button key=${`${scheduleKey(schedule)}-${at}`} class="rb-next" onClick=${() => onPick(schedule)}>
+            ({ at, schedule }) => html`<button
+                key=${`${scheduleKey(schedule)}-${at}`}
+                class="rb-next"
+                onClick=${() => onPick(schedule)}
+            >
                 <span class="rb-next-time">${clock(at, schedule.zone, now)}</span>
                 <span class="folder-mark" style=${`--folder:${colorOf(schedule.session)}`}></span>
                 <span class="rb-ellipsis grow">${schedule.text}</span>
