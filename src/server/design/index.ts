@@ -4,6 +4,7 @@ import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { readBundle } from "./bundle.ts";
 import { EXPORT_TYPES, type ExportFormat, saveDesignExport } from "./export.ts";
+import { localFolder, REMOTE_DESIGN } from "./files.ts";
 import {
     checkPage,
     mergeFindings,
@@ -243,9 +244,10 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
 
                 if (checks || args.mode !== undefined) {
                     const cwd = (await api.agent(context)).cwd;
+                    const folder = localFolder(cwd);
 
                     try {
-                        system = cwd === undefined ? undefined : loadSystem(cwd);
+                        system = folder === undefined ? undefined : loadSystem(folder);
                     } catch (error) {
                         notes.push(
                             `The design system could not be read: ${error instanceof Error ? error.message : String(error)}`,
@@ -253,7 +255,11 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
                     }
 
                     if (args.mode !== undefined && system === undefined) {
-                        throw new Error("A mode needs a design system: this project has none.");
+                        throw new Error(
+                            cwd !== undefined && folder === undefined
+                                ? REMOTE_DESIGN
+                                : "A mode needs a design system: this project has none.",
+                        );
                     }
 
                     picked =
@@ -418,6 +424,10 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
                 throw new Error("This session has no working directory for the export.");
             }
 
+            if (localFolder(cwd) === undefined) {
+                throw new Error(REMOTE_DESIGN);
+            }
+
             const saved = await saveDesignExport(
                 bundle,
                 {
@@ -527,6 +537,10 @@ export function designRoutes(web: ExtensionWeb, host: PocketHost, deps: DesignTo
 
             if (!cwd) {
                 throw web.error(400, "This session has no folder for the export.");
+            }
+
+            if (localFolder(cwd) === undefined) {
+                throw web.error(400, REMOTE_DESIGN);
             }
 
             try {

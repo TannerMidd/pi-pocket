@@ -30,6 +30,7 @@ import {
 } from "../docs.ts";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
+import { localFolder } from "../design/files.ts";
 import { loadDesignSystem } from "../design/tokens.ts";
 import { assetName, assetType } from "../http/artifact-assets.ts";
 import { expandHome, workspaceScheme } from "../paths.ts";
@@ -430,7 +431,7 @@ async function publish(
             let cwd: string | undefined;
 
             try {
-                cwd = (await api.agent(context)).cwd;
+                cwd = localFolder((await api.agent(context)).cwd);
             } catch {
                 // No session folder to look in: the page keeps its link.
             }
