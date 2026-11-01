@@ -35,7 +35,10 @@ let last: Promise<unknown> = Promise.resolve();
  * runs at a time: the memory of the decoder (WebAssembly, so outside the heap limit) is about 1 GB for 64 million pixels.
  */
 export function heicToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
-    if (pixelsOf(bytes) > MAX_PIXELS) {
+    const pixels = pixelsOf(bytes);
+
+    // A HEIF image always has an `ispe` box: with none that can be read, its size is not known.
+    if (pixels === 0 || pixels > MAX_PIXELS) {
         return Promise.reject(new Error("the photo has too many pixels"));
     }
 

@@ -118,10 +118,14 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
             huge.writeUInt32BE(65535, at + 12);
         }
 
+        // The photo with no `ispe` box that can be read: its size is not known.
+        const unsized = Buffer.from(photo.toString("latin1").replaceAll("ispe", "xxxx"), "latin1");
+
         for (const [bytes, message] of [
             [Buffer.from("....ftypheic not a photo at all"), /./],
             [photo.subarray(0, 300), /./],
             [huge, /too many pixels/],
+            [unsized, /too many pixels/],
         ] as const) {
             writeFileSync(path, bytes);
             await assert.rejects(modelImage(path, "image/heic"), message);
