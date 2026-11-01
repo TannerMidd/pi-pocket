@@ -696,6 +696,32 @@ test("stop leaves a mount at / that someone pointed at another service", async (
     }
 });
 
+test("stop on quit leaves a mount it cannot read, which may be someone else's by now", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale();
+    const said = heard();
+
+    try {
+        const serve = new TailscaleServe(fake.binary, LOCAL_PORT, said.events, true);
+
+        assert.equal(serve.start().ok, true);
+        writeFileSync(join(dirname(fake.binary), "serve.json"), "No serve config\n");
+        serve.stop();
+        assert.equal(
+            fake.calls().some((line) => line.endsWith(" off")),
+            false,
+        );
+        assert.equal(said.problems.length, 1);
+    } finally {
+        fake.restore();
+    }
+});
+
 test("stop says nothing about a handler Tailscale does not have", async (t) => {
     if (process.platform === "win32") {
         t.skip(SKIP_WINDOWS);

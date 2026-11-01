@@ -397,6 +397,16 @@ export class TailscaleServe {
 
         // Someone may have put another service at `/` since: that one is theirs, and stays.
         const now = this.#serveConfig();
+
+        // On quit, a mount that cannot be read may be someone else's by now: leave it, and keep the receipt so the next
+        // start tries again. Leaving the mode takes it down anyway, as the mode must stop publishing this server.
+        if (!now.ok && !always) {
+            this.#events.mountAttempt?.();
+            this.#events.problem(`${now.message} Pi Pocket left the Serve mount as it is.`);
+
+            return;
+        }
+
         const mount = now.ok ? mountAt(now.config, this.#dnsName, SERVE_PORT) : undefined;
 
         if (mount !== undefined && !sameLocalTarget(mount.Proxy, this.#port)) {
