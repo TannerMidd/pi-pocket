@@ -1,53 +1,34 @@
-/**
- * A Figma `.fig` file's kiwi schema and message, decoded offline (design system scan). The schema travels inside the file, so
- * a decode needs no Figma account, token, or network: the schema is read as data, and the message is walked by an
- * interpreter, never compiled.
- *
- * Everything is bounded: the values, strings, arrays and nodes read, the nesting, and the time. A string of the file that a
- * reason repeats is quoted, one line, and 60 characters at most, so a name cannot break the report's fence. A file this
- * module cannot read throws `FigError` with a reason for a person; `scan-fig.ts` turns that into a note and the scan goes on.
- */
+// The kiwi schema travels in the file: it is read as data, and the message is interpreted,
+// never compiled.
 import { quoted } from "../fence.ts";
 
 export type Obj = Record<string, unknown>;
 
-/** The types a schema field can name, by their code in the schema: `~code` is the place in this list. */
+// A native type's code in a schema is `~index` in this list.
 const NATIVE = ["bool", "byte", "int", "uint", "float", "string", "int64", "uint64"] as const;
 
-/** The kinds of definition, by their code in the schema. */
 const KINDS = ["ENUM", "STRUCT", "MESSAGE"] as const;
 
-/** The largest integer that a number holds exactly: a 64-bit value past it is its digits. */
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
 export type FigKind = (typeof KINDS)[number];
 
 export interface FigLimits {
-    /** Bytes read from the file. */
     file: number;
-    /** Bytes in all, after decompression. */
+    /** Bytes after decompression, for the whole file. */
     raw: number;
-    /** Values decoded: every field, every array element, and every byte array counts. */
+    /** Every field, list element, and byte array counts. */
     values: number;
-    /** Nodes in the file's `nodeChanges`. */
+    /** The longest list. */
     nodes: number;
-    /** Characters in one string. */
     chars: number;
-    /** Nesting of definitions. */
     depth: number;
-    /** Milliseconds for one file. */
     ms: number;
-    /** Entries in a ZIP's central directory. */
     entries: number;
 }
 
-/**
- * What one file may cost. The value limit is a memory limit: a decoded value costs about 45 to 70 bytes of heap, so 1 500 000
- * of them is about 100 MB, and the scan reads its files in a worker of 256 MB (`WORKER.heapMb` in `scan.ts`) that also holds
- * the rest of the scan. A file of 100 000 variables makes about 4 500 000 values and needs about 500 MB: it is a note, and
- * the scan goes on. Figma's own Simple Design System, at 274 KB the largest real file this reader has read, uses about
- * 737 000 values, which is half of the limit.
- */
+// The value limit is a memory limit: a value costs 45 to 70 bytes, so 1 500 000 are about 100 MB of
+// the scan worker's 256 MB (`WORKER.heapMb` in `scan.ts`). The 274 KB fixture uses about half.
 export const FIG_LIMITS: FigLimits = {
     file: 20_000_000,
     raw: 100_000_000,
@@ -59,7 +40,6 @@ export const FIG_LIMITS: FigLimits = {
     entries: 4000,
 };
 
-/** A file that cannot be read, with the reason a person needs. */
 export class FigError extends Error {
     constructor(reason: string) {
         super(reason);
@@ -67,19 +47,14 @@ export class FigError extends Error {
     }
 }
 
-/** Stops the read with a reason for a person: a file that the scan cannot take. */
 export function fail(reason: string): never {
     throw new FigError(reason);
 }
 
-// --- The schema -----------------------------------------------------------------------------------------------------
-
 export interface FigField {
     name: string;
-    /** A native type (`uint`), a definition's name, or `enum`. */
     type: string;
     array: boolean;
-    /** The field's tag in a message. */
     tag: number;
 }
 
@@ -94,16 +69,15 @@ export interface FigSchema {
     byName: Map<string, FigDef>;
 }
 
-/** How much of a file one read may use: one counter for the schema and the data together. */
+// One budget for the schema and the data together.
 export interface Budget {
     limits: FigLimits;
     started: number;
     values: number;
-    /** Definitions decoded: a struct with no fields costs no byte, so this count has a bound of its own. */
+    /** Definitions decoded: a struct with no fields costs no byte, so it has a bound of its own. */
     decoded: number;
 }
 
-/** A reader over one buffer: every read is checked against what is left, and each value counts against the budget. */
 class Cursor {
     bytes: Buffer;
     at = 0;
@@ -118,7 +92,7 @@ class Cursor {
         return this.bytes.length - this.at;
     }
 
-    /** One value read: the time and the count are checked here, so every decode path passes through it. */
+    // Every decode path passes here, so the count and the time hold on all of them.
     spend(values = 1): void {
         const budget = this.budget;
 
@@ -159,7 +133,6 @@ class Cursor {
         return slice;
     }
 
-    /** A variable-length unsigned integer: 7 bits a byte, the top bit says another byte follows. */
     varUint(): number {
         let value = 0;
         let shift = 0;
@@ -174,21 +147,20 @@ class Cursor {
         return value >>> 0;
     }
 
-    /** A signed integer, zigzag-encoded: the low bit is the sign. */
+    // Zigzag: the low bit is the sign.
     varInt(): number {
         const value = this.varUint() | 0;
 
         return value & 1 ? ~(value >>> 1) : value >>> 1;
     }
 
-    /** An unsigned 64-bit integer: a number when it fits, else its digits. */
+    // A number when it is exact, else its digits.
     varUint64(): number | string {
         const value = this.bigUint();
 
         return value <= MAX_SAFE ? Number(value) : value.toString();
     }
 
-    /** A signed 64-bit integer, zigzag-encoded like `varInt`: the low bit is the sign. */
     varInt64(): number | string {
         const zigzag = this.bigUint();
         const value = (zigzag >> BigInt(1)) ^ -(zigzag & BigInt(1));
@@ -196,7 +168,6 @@ class Cursor {
         return value <= MAX_SAFE && value >= -MAX_SAFE ? Number(value) : value.toString();
     }
 
-    /** The 64-bit form of a varint, as a BigInt: 7 bits a byte, and the top bit says another byte follows. */
     bigUint(): bigint {
         let value = BigInt(0);
         let shift = BigInt(0);
@@ -211,7 +182,7 @@ class Cursor {
         return value;
     }
 
-    /** A float, in the compressed form kiwi writes: one zero byte is 0, else 4 bytes with the bits rotated. */
+    // kiwi writes 0 as one zero byte, and any other float as 4 bytes with the bits rotated.
     varFloat(): number {
         const first = this.bytes[this.at];
 
@@ -237,7 +208,6 @@ class Cursor {
         return view.getFloat32(0, true);
     }
 
-    /** A string: UTF-8 up to a NUL, with a ceiling on its length. */
     string(): string {
         const start = this.at;
 
@@ -262,10 +232,7 @@ class Cursor {
     }
 }
 
-/**
- * The schema a file carries: its definitions, and the fields of each, with their types resolved by name. A field of an enum
- * type is named by its enum's definition, so its value decodes to the name that Figma gives it (`VARIABLE`, not `28`).
- */
+// A field of an enum type keeps the enum's name: its value decodes to `VARIABLE`, not `28`.
 export function readSchema(bytes: Buffer, budget: Budget): FigSchema {
     const cursor = new Cursor(bytes, budget);
     const count = cursor.varUint();
@@ -344,15 +311,12 @@ export function readSchema(bytes: Buffer, budget: Budget): FigSchema {
     return { defs, byName };
 }
 
-// --- The message ----------------------------------------------------------------------------------------------------
-
-/** A field's name that must not become a key of a decoded object: it would change the object's prototype. */
+// A field of one of these names would change the decoded object's prototype.
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
 
-/** The definitions a read may decode before its data has paid for any: a tiny file has a floor of its own. */
+// What a tiny file may decode before its bytes pay for it.
 const DECODED_FLOOR = 64;
 
-/** One message decoded by the schema: messages read tagged fields, structs read their fields in order. */
 function decodeDef(cursor: Cursor, schema: FigSchema, def: FigDef, depth: number): Obj {
     const limits = cursor.budget.limits;
 
@@ -360,10 +324,8 @@ function decodeDef(cursor: Cursor, schema: FigSchema, def: FigDef, depth: number
         fail(`its data nests deeper than ${limits.depth} levels`);
     }
 
-    // A definition is a value, however few bytes it takes. A struct with no fields takes none, so the count is held to the
-    // bytes of the data that the message has read so far: padding at the end of a chunk buys nothing (a 3 KB file padded to
-    // 2.5 MB made 2.5 million empty objects), and a file cannot ask for a tree of empty structs that grows without bound (the
-    // time check would never run either).
+    // A struct with no fields takes no byte, so the definitions are held to the bytes read so far:
+    // empty structs cannot grow without bound, and padding buys nothing (2.5 MB made 2.5M objects).
     cursor.spend();
 
     const decoded = (cursor.budget.decoded += 1);
@@ -375,7 +337,7 @@ function decodeDef(cursor: Cursor, schema: FigSchema, def: FigDef, depth: number
         );
     }
 
-    // A key from the file must never become the object's prototype: a node could inherit a `type` from it.
+    // No prototype: a node could inherit a `type` from it.
     const out: Obj = Object.create(null) as Obj;
 
     if (def.kind !== "MESSAGE") {
@@ -476,21 +438,14 @@ function readValue(cursor: Cursor, schema: FigSchema, type: string, depth: numbe
     }
 }
 
-/**
- * An enum's value as the name the schema gives it, or as the number when the schema does not hold that value: a file is
- * read the way Figma reads it, where `type` is `VARIABLE` and not 28. The name is the schema's own string, so no string is
- * made for each value.
- */
+// A value that the schema does not name stays a number, so a file of a newer Figma still reads.
 function enumValue(cursor: Cursor, def: FigDef): string | number {
     const value = cursor.varUint();
 
     return def.fields.find((field) => field.tag === value)?.name ?? value;
 }
 
-/**
- * The root of a schema: Figma names it `Message`, and a schema that does not is read from its last message, where kiwi puts
- * the top of a file.
- */
+// Figma names the root `Message`; else it is the last message, where kiwi puts the top of a file.
 export function rootOf(schema: FigSchema): FigDef | undefined {
     return (
         schema.byName.get("Message") ??
@@ -498,7 +453,6 @@ export function rootOf(schema: FigSchema): FigDef | undefined {
     );
 }
 
-/** The message a file's data chunk holds, read by the file's own schema. */
 export function readMessage(schema: FigSchema, bytes: Buffer, budget: Budget): Obj {
     const root = rootOf(schema);
 

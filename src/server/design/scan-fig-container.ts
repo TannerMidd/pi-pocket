@@ -1,15 +1,3 @@
-/**
- * A Figma `.fig` container (design system scan): a ZIP of `canvas.fig` and `images/`, or a bare container of a header, a
- * version, and chunks (a kiwi schema, then the file's data, each raw deflate or zstd). This module opens the container and
- * hands the schema and the data to `scan-fig-kiwi.ts`.
- *
- * Nothing is executed, and every read is bounded: the file's size, the size after decompression (a ZIP entry's claim is
- * checked before it is inflated, and the inflate itself has a ceiling), the entries of the archive, and the chunks of a bare
- * container (the 2 a `.fig` uses are kept, and a file of more than 8 is refused). One budget covers every inflate of one
- * file, so the inner `canvas.fig` and the two chunks it holds cannot each take the whole of it. A name of the archive that a
- * reason repeats is quoted, one line, and 60 characters at most. A file this module cannot read throws `FigError` with a
- * reason for a person.
- */
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { inflateRawSync, inflateSync, zstdDecompressSync } from "node:zlib";
 import { quoted } from "../fence.ts";
@@ -24,31 +12,23 @@ import {
     readSchema,
 } from "./scan-fig-kiwi.ts";
 
-/** The container headers that Figma writes: a file of layers, a deck, a site, a slide deck. */
 const HEADERS = new Set(["fig-kiwi", "fig-jam.", "fig-deck", "fig-make", "fig-site", "fig-buzz"]);
 
-/** The first 4 bytes of a zstd frame, as a chunk holds them. */
 const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd];
 
-/** A ZIP's end of central directory (`PK\x05\x06`), one of its entries (`PK\x01\x02`), and a local header. */
 const EOCD = 0x06054b50;
 const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
 
-/** One line, and no character that a report's fence could take for a tag. */
+// Printable ASCII only: the header is repeated in the report.
 const oneLine = (text: string): string => text.replace(/[^\x20-\x7e]/g, "?");
 
-/**
- * Why a file's first bytes are not a Figma file's, or `undefined` when they are. A `.fig` is a Figma file by its header and
- * nothing else: MATLAB writes a `.fig` too, and a folder of those is no design. 8 bytes are enough for both a container's
- * header and a ZIP's, and the walk reads no more than that to decide whether to read the file.
- */
+// A `.fig` is a Figma file only by its header (MATLAB writes `.fig` files too). 8 bytes are enough.
 export function figHeaderReason(bytes: Buffer): string | undefined {
     if (bytes.length === 0) {
         return "the file is empty";
     }
 
-    // A ZIP holds the file's layers in its `canvas.fig`, and a Figma file may be one.
     if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) {
         return undefined;
     }
@@ -56,7 +36,6 @@ export function figHeaderReason(bytes: Buffer): string | undefined {
     return headerReason(bytes);
 }
 
-/** `undefined` when the bytes start with one of Figma's container headers, else the reason for a person. */
 function headerReason(bytes: Buffer): string | undefined {
     const header = bytes.subarray(0, 8).toString("latin1");
 
@@ -65,9 +44,6 @@ function headerReason(bytes: Buffer): string | undefined {
         : `it is not a Figma file: its first bytes are "${oneLine(header.slice(0, 4))}" and not "fig-kiwi"`;
 }
 
-// --- The container --------------------------------------------------------------------------------------------------
-
-/** One entry of a ZIP's central directory. */
 interface ZipEntry {
     name: string;
     method: number;
@@ -81,18 +57,14 @@ export interface FigDecoded {
     version: number;
     schema: FigSchema;
     message: Obj;
-    /** The file's nodes (`nodeChanges`): the layers, the variable collections, the variables, and the styles. */
     nodes: Obj[];
-    /** The names of the ZIP's entries (`canvas.fig`, `meta.json`, `images/…`), bounded and not read. */
     entries: string[];
-    /** What the file cost to decode: the values the reader made, which is what its limits bound. */
     values: number;
 }
 
-/** The most chunks a bare container may hold: the schema and the data, with room for a version that adds one. */
+// A `.fig` holds 2 chunks: the rest is room for a version that adds some.
 const MAX_CHUNKS = 8;
 
-/** The chunks that hold the schema and the data, from a bare container. */
 function kiwiChunks(bytes: Buffer, limits: FigLimits): { version: number; chunks: Buffer[] } {
     const reason = headerReason(bytes);
 
@@ -129,8 +101,7 @@ function kiwiChunks(bytes: Buffer, limits: FigLimits): { version: number; chunks
             );
         }
 
-        // Only the 2 chunks a `.fig` uses are kept, and a file of more than 8 is refused: a Buffer view for each chunk of a
-        // file of zero-length chunks is 3.4 GB for 99 MB of them, and the loop would walk every 4 bytes of it.
+        // A Buffer view for each chunk of 99 MB of empty chunks was 3.4 GB.
         count += 1;
 
         if (count > MAX_CHUNKS) {
@@ -147,7 +118,6 @@ function kiwiChunks(bytes: Buffer, limits: FigLimits): { version: number; chunks
     return { version, chunks };
 }
 
-/** The central directory of a ZIP: its entries, without inflating anything. */
 function zipEntries(bytes: Buffer, limits: FigLimits): ZipEntry[] {
     const floor = Math.max(0, bytes.length - 65_557);
     let end = -1;
@@ -208,17 +178,15 @@ function zipEntries(bytes: Buffer, limits: FigLimits): ZipEntry[] {
     return entries;
 }
 
-/** What one file has decompressed so far: every step pays from the same budget, so the peak is that budget and no more. */
+// Every inflate of one file pays from one budget, so the peak is that budget and no more.
 interface Spend {
     used: number;
 }
 
-/** The bytes this file may still decompress. */
 function left(limits: FigLimits, spend: Spend): number {
     return Math.max(0, limits.raw - spend.used);
 }
 
-/** One entry's bytes, inflated with a ceiling on what it may produce, and counted against the file's budget. */
 function zipBytes(bytes: Buffer, entry: ZipEntry, limits: FigLimits, spend: Spend): Buffer {
     const room = left(limits, spend);
 
@@ -257,10 +225,7 @@ function zipBytes(bytes: Buffer, entry: ZipEntry, limits: FigLimits, spend: Spen
     return out;
 }
 
-/**
- * Deflate or zstd, whichever the chunk is, with a ceiling on what it may make. `what` is what a reason calls it, already
- * quoted when it comes from the file: a name reaches no reason raw.
- */
+// `what` is already quoted when it comes from the file: a name reaches no reason raw.
 function inflate(data: Buffer, ceiling: number, what: string): Buffer {
     const zstd =
         data.length >= 4 &&
@@ -279,7 +244,7 @@ function inflate(data: Buffer, ceiling: number, what: string): Buffer {
         try {
             return decompress(data, { maxOutputLength: ceiling }) as Buffer;
         } catch {
-            // A chunk of either form: the next one is tried, and its error is the one reported.
+            // Not this form: the next one is tried.
         }
     }
 
@@ -291,7 +256,6 @@ function inflate(data: Buffer, ceiling: number, what: string): Buffer {
 const reasonOf = (error: unknown): string =>
     error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 160) : "unknown";
 
-/** The schema chunk and the data chunk of a `.fig`, from either container. */
 function container(
     bytes: Buffer,
     limits: FigLimits,
@@ -340,7 +304,6 @@ function container(
     };
 }
 
-/** One chunk, inflated within what the file has left, and counted against it. */
 function chunk(bytes: Buffer, limits: FigLimits, spend: Spend, what: string): Buffer {
     const out = inflate(bytes, left(limits, spend), what);
 
@@ -349,10 +312,7 @@ function chunk(bytes: Buffer, limits: FigLimits, spend: Spend, what: string): Bu
     return out;
 }
 
-/**
- * Decodes a `.fig` in memory: its message, its nodes, and the names of its ZIP entries. `until` is when the whole scan's
- * Figma files must end, in milliseconds since the epoch; the default is one file's own limit.
- */
+/** `until` is the deadline of all the scan's Figma files; the default is one file's own limit. */
 export function decodeFig(
     bytes: Buffer,
     limits: FigLimits = FIG_LIMITS,
@@ -364,7 +324,7 @@ export function decodeFig(
 
     const budget: Budget = {
         limits,
-        // The reader stops when `now - started` passes the limit, so a deadline of the whole scan is where it started.
+        // The reader stops when `now - started` passes `limits.ms`.
         started: until - limits.ms,
         values: 0,
         decoded: 0,
@@ -389,14 +349,13 @@ export function decodeFig(
     };
 }
 
-/** The bytes of a `.fig`, never through a link, never a folder, and never more than the limit. */
+// Never through a link, never a folder or a pipe, and never more than the limit.
 export function readFigBytes(path: string, limit: number = FIG_LIMITS.file): Buffer {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
 
     try {
         const info = fstatSync(fd);
 
-        // A path named `x.fig` may be a folder (or a pipe): reading one is an `EISDIR` in the report instead of a reason.
         if (!info.isFile()) {
             return fail(
                 info.isDirectory()

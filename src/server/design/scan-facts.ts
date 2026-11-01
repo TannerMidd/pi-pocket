@@ -117,7 +117,7 @@ export interface Facts {
     /** Custom properties used inside a color function (`rgb(var(--c))`): their values are channels. */
     channels: Map<string, string>;
     imported: Imported;
-    /** What each Figma `.fig` file gave the scan, one line for each, or why it could not be read (untrusted text). */
+    /** One line for each Figma file read (untrusted text). */
     figs: string[];
 }
 

@@ -32,7 +32,6 @@ export interface Skipped {
 
 const DOT_STYLE_FOLDERS = new Set([".storybook", ".vitepress", ".vuepress", ".docusaurus"]);
 
-/** The bytes of a `.fig` that tell whether it is a Figma file: its container's header, or a ZIP's. */
 const HEADER_BYTES = 8;
 
 const FIG = /\.fig$/i;
@@ -52,14 +51,14 @@ export const LIMITS = {
     jsonBytes: 1_500_000,
     totalBytes: 8_000_000,
     valueChars: 200,
-    /** Figma `.fig` files read: each one is decoded, so only a few. */
+    /** Figma files: each one is decoded, so only a few. */
     figs: 4,
 } as const;
 
 const EXTENSION_SCORE: [RegExp, number][] = [
     [/^\.(?:css|scss|less|pcss|postcss)$/, 40],
     [/^\.json$/, 45],
-    // A Figma file is the design itself, before any stylesheet that a person wrote from it.
+    // A Figma file is the design itself, before any stylesheet written from it.
     [/^\.fig$/, 50],
     [/^\.(?:[cm]?[jt]s)$/, 20],
     [/^\.(?:html?|vue|svelte|astro|mdx)$/, 25],
@@ -101,7 +100,6 @@ export function priority(rel: string): number {
     return score - rel.split("/").length * 2;
 }
 
-// A `.fig` is the design itself: the scan reads it as a Figma file, so the walk keeps every one of them.
 const wanted = (rel: string, name: string) =>
     /\.fig$/i.test(name) ||
     (STYLE.test(name) ? !name.endsWith(".d.ts") : TOKEN_JSON.test(rel) && name.endsWith(".json"));
@@ -173,7 +171,6 @@ export function collectFiles(root: string): {
 } {
     const found: string[] = [];
     const skipped: Skipped[] = [];
-    // The `.fig` files that are no Figma files: their count, the first of them, and why. One note for all of them.
     let notFigma = { count: 0, first: "", reason: "" };
     let partial = false;
     let seen = 0;
@@ -184,7 +181,6 @@ export function collectFiles(root: string): {
         }
     };
 
-    /** Whether a `.fig` is a Figma file: the walk reads its header, and a file that is not is no style file. */
     const isFigma = (path: string, rel: string): boolean => {
         let reason: string | undefined;
 
@@ -235,7 +231,6 @@ export function collectFiles(root: string): {
             } else if (entry.isSymbolicLink() && !hidden) {
                 note(rel, "a link, not followed");
             } else if (entry.isFile() && wanted(rel, entry.name)) {
-                // A `.fig` is a style file only when its header says it is a Figma file: MATLAB writes a `.fig` too.
                 if (FIG.test(entry.name) && !isFigma(path, rel)) {
                     continue;
                 }
@@ -247,8 +242,8 @@ export function collectFiles(root: string): {
 
     walk(root, 0);
 
-    // One note for every `.fig` that is no Figma file, and not one for each: 450 of them would take the whole list of notes,
-    // and the file that the scan could not read would go unnamed. It comes first, for the same reason.
+    // One note for all the `.fig` files that are no Figma files, and first: 450 notes filled the list,
+    // and the Figma file that could not be read went unnamed.
     if (notFigma.count > 0) {
         const one = notFigma.count === 1;
 
@@ -295,7 +290,6 @@ export function readHead(path: string, limit: number = LIMITS.fileBytes): string
     return readBytes(path, limit).toString("utf8");
 }
 
-/** The first bytes of a file, never through a link, and never more than it holds. */
 function readBytes(path: string, limit: number): Buffer {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
 

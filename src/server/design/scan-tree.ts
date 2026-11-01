@@ -114,8 +114,6 @@ export function nodeFor(category: Category, text: string, colorText?: string): O
     }
 }
 
-// How much of one step ran: `until` is when it must end, `read` counts the entries it placed, and `stopped` says the
-// time ended it early.
 export interface Progress {
     until: number;
     read: number;
@@ -128,8 +126,7 @@ export function assemble(
     progress?: Progress,
 ): Obj {
     const paths = new Set(entries.map((entry) => entry.path.join(".")));
-    // The names that hold another name, indexed once: asking every path for every entry is quadratic, and 40 000 variables
-    // took 27 seconds that way.
+    // Indexed once: asking every path about every entry is quadratic (40 000 variables took 27 s).
     const groups = new Set<string>();
 
     for (const other of paths) {
@@ -141,7 +138,6 @@ export function assemble(
     const root: Obj = {};
 
     for (const entry of entries) {
-        // Past the deadline the rest of the entries are left out, instead of assembling every one first.
         if (progress !== undefined && Date.now() >= progress.until) {
             progress.stopped = true;
 

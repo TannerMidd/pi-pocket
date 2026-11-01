@@ -43,8 +43,6 @@ export function infer(facts: Facts, folder: string): Inferred {
     };
     const { imported } = facts;
 
-    // A Figma `.fig` gave tokens of its own, or a reason it could not be read: the report says so, before the roles that
-    // the scan guessed.
     result.sources.push(...facts.figs);
 
     finishImports(imported);

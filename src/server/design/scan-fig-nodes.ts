@@ -361,7 +361,7 @@ export function stylesOf(nodes: Obj[]): { styles: FigStyle[]; left: number } {
         const kind = asText(node.styleType).toUpperCase();
         const style = Object.hasOwn(STYLES, kind) ? STYLES[kind as FigStyle["kind"]] : undefined;
 
-        // Figma writes a style as the layer it edits, with a `styleType`; an older export as a `STYLE`.
+        // A style is the layer it edits, with a `styleType`; an older export writes a `STYLE`.
         if (node.type !== "STYLE" && style === undefined) {
             continue;
         }

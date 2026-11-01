@@ -1,4 +1,4 @@
-// It reads a project's style files, and the Figma `.fig` files beside them, into a DTCG draft; it writes nothing. The walk is bounded and never follows a symlink, so a project cannot lead it out of the folder. Everything it reads is untrusted data and reaches Pi fenced.
+// It writes nothing. The walk is bounded and never follows a symlink, so a project cannot lead it out of the folder. Everything it reads is untrusted data and reaches Pi fenced.
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -41,12 +41,9 @@ export interface TokenScan {
     tailwind: boolean;
 }
 
-// A Figma `.fig` file, whose name says so.
 export const isFigFile = (path: string): boolean => /\.fig$/i.test(path);
 
-/**
- * Whether a path is one `.fig` file: a folder named `x.fig` is a folder, and it is walked (and rendered) as one.
- */
+// A folder named `x.fig` is a folder, walked and rendered as one.
 export function isOneFigFile(path: string): boolean {
     return isFigFile(path) && statSync(path).isFile();
 }
@@ -80,7 +77,6 @@ export function scanRoot(cwd: string, path: string | undefined): string {
         throw new Error("path does not exist in the session's folder.");
     }
 
-    // A Figma file is the whole of what the scan needs from it, so a `.fig` file is a path it takes.
     if (info.isSymbolicLink() || !(info.isDirectory() || isFigFile(target))) {
         throw new Error(
             "path must be a folder or a Figma .fig file, not a symlink or another file.",
@@ -113,7 +109,7 @@ function skip(facts: Facts, path: string, why: string): void {
     }
 }
 
-// `figUntil` is the deadline of every Figma file of the scan, and is for a test that must reach the limit.
+// `figUntil` is the deadline of all the Figma files: a test sets it to reach the limit.
 export function readFacts(
     root: string,
     rendered?: Rendered,
@@ -121,8 +117,6 @@ export function readFacts(
 ): Facts {
     const facts = newFacts();
 
-    // The path may be one `.fig` file: then it is the whole of what is read, and there is no folder to walk. A folder may be
-    // named `x.fig` too, and it is a folder to walk, not one file to read.
     const one = isOneFigFile(root) ? basename(root) : undefined;
     const { files, partial, skipped } =
         one === undefined
@@ -131,11 +125,9 @@ export function readFacts(
     let bytes = 0;
 
     facts.partial = partial;
-    // The notes of the Figma files come first, and the walk's after them: a project of 450 files named `.fig` (or of a
-    // minified build) must not take the place of the one Figma file that the scan could not read.
+    // The Figma notes come first: the walk's notes of a big project must not push them out of the list.
     facts.skipped = [];
 
-    // Figma files first: a `.fig` holds the design's own variables and styles, not a build of them.
     const found = one === undefined ? files.filter((rel) => isFigFile(rel)) : [];
     const figs =
         one === undefined
@@ -156,7 +148,6 @@ export function readFacts(
         facts.skipped.push(item);
     }
 
-    // A design has one or two Figma files; a folder of many is a download folder, and only the best were read.
     const extraFigs = found.length - figs.length;
 
     if (extraFigs > 0) {
@@ -177,7 +168,7 @@ export function readFacts(
             break;
         }
 
-        // A `.fig` was read above as a Figma file: its bytes are not text, and would read as minified.
+        // Read above as a Figma file: its bytes are not text.
         if (isFigFile(rel)) {
             continue;
         }

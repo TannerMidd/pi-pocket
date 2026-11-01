@@ -35,8 +35,8 @@ export interface FigTokens {
     line: string;
 }
 
-// One deadline for all the Figma files of a scan. It is generous because a busy machine slows the clock many times
-// over the work: the 274 KB test fixture takes about a second.
+// One deadline for all the scan's Figma files. It is generous: a busy machine slows the clock,
+// not the work, and the 274 KB fixture takes about a second.
 export const FIG_TIME_MS = 20_000;
 
 type Shaped = Named & { type: string };
@@ -62,7 +62,7 @@ function modeNameOf(name: string): string {
 const isDarkMode = (name: string): boolean => /(?:^|[^a-z])dark(?:[^a-z]|$)/i.test(name);
 
 function modesOf(collections: Map<string, Collection>) {
-    // A variable names its collection by guid, or by the collection's published key in a library file.
+    // A variable names its collection by guid, or by its published key in a library file.
     const collectionOf = new Map<string, string>();
     const firstOf = new Map<string, string>();
     const firstNames = new Set<string>();
@@ -349,7 +349,7 @@ export function figTokens(
     };
 }
 
-// A file that was not read may still hold tokens: the scan is partial, so resync does not call them gone.
+// A file not read may still hold tokens: the scan is partial, so resync does not call them gone.
 function notRead(facts: Facts, file: string, why: string): void {
     facts.partial = true;
 
