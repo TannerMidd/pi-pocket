@@ -352,6 +352,53 @@ test("a draft past the engine's token limit makes the plan partial", () => {
     assert.match(report, /Not seen in this scan \(1\):\n {2}color\.v6999\n/);
 });
 
+test("a draft token that the engine drops is not a partial scan", () => {
+    // The engine drops a token that does not resolve, so the draft declares one token more than the scan resolved. That is
+    // not a limit: the scan read the whole project, and the token really is gone from it.
+    const dir = project({
+        ".pi/design/tokens.json": JSON.stringify({
+            $extensions: { "com.pi-pocket": { name: "Broken", mode: "light" } },
+            color: { $type: "color", a: { $value: "#ffffff" } },
+        }),
+    });
+    const loaded = loadDesignSystemWithRaw(dir);
+
+    assert.ok(loaded !== undefined, "the system loaded");
+
+    const draft: Draft = {
+        tokens: {
+            color: {
+                $type: "color",
+                a: { $value: "{color.missing}" },
+                b: { $value: "#123456" },
+            },
+        },
+        modes: {},
+    };
+    const plan = planResync(loaded.system, draft, loaded.raw);
+
+    assert.equal(plan.partial, false, "the engine dropped a token, which is not a limit");
+    assert.deepEqual(plan.gone, ["color.a"], "the code has no color.a that resolves");
+
+    const report = resyncReport({
+        name: "Broken",
+        path: ".",
+        files: 1,
+        partial: false,
+        saved: false,
+        plan,
+    });
+
+    assert.match(
+        report,
+        /1 to add, 0 kept as they are, 0 differ from the code, 1 not in the code now\./,
+    );
+    assert.ok(
+        !report.includes("not seen in this scan"),
+        "the scan read every file, so it can say that the token is gone",
+    );
+});
+
 test("guidelines and components are not touched", async () => {
     const dir = await saved();
     const specimen = `<script type="application/json" id="pocket-component">{"name":"Button","states":["default"]}</script>

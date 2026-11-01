@@ -25,7 +25,7 @@
  */
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
 import type { DesignSystem, ModeValue, ResolvedToken, SystemChange } from "./system-types.ts";
-import { EXT, clip, isObject, plain, type Obj, type RawSystem } from "./tokens-base.ts";
+import { EXT, LIMITS, clip, isObject, plain, type Obj, type RawSystem } from "./tokens-base.ts";
 import { refName } from "./tokens-values.ts";
 import { buildSystem } from "./tokens-model.ts";
 import type { Draft } from "./scan-scales.ts";
@@ -73,8 +73,9 @@ export interface ResyncPlan {
     /** The tokens the system has and the scan no longer finds, in the system's order. Never deleted. */
     gone: string[];
     /**
-     * True when the draft that the scan gave declares more tokens than the engine resolved: a token past the engine's
-     * limit is not in `scanned.tokens`, and it is not gone from the code either.
+     * True when the draft that the scan gave declares more tokens than the engine keeps: a token past the engine's limit
+     * is not in `scanned.tokens`, and it is not gone from the code either. A token that the engine drops for another
+     * reason (a broken reference, a name it refuses) does not count: the scan did not leave the project unread.
      */
     partial: boolean;
     /** How many tokens the scan found. */
@@ -408,8 +409,9 @@ export function planResync(system: DesignSystem, draft: Draft, raw: RawSystem): 
         kept,
         differs,
         gone: system.tokens.filter((token) => !found.has(token.name)).map((token) => token.name),
-        // The engine keeps only its own number of tokens: a draft with more was not read whole.
-        partial: drafted.paths.size > scanned.tokens.length,
+        // The engine keeps only its own number of tokens: a draft with more was not read whole. A token that it drops
+        // for another reason (a broken reference) is not a limit, so it does not count here.
+        partial: drafted.paths.size > LIMITS.tokens,
         scanned: scanned.tokens.length,
         modesNotAdded: scanned.modes.filter((mode) => !system.modes.includes(mode)),
     };
@@ -512,7 +514,12 @@ export function resyncReport(input: ResyncReportInput): string {
     const note = [
         "Not synced: the scan reads the style files only.",
         "Components and guidelines are not touched.",
-        ...(partial
+        ...(plan.partial
+            ? [
+                  "The draft has more tokens than the engine keeps, so a token after the first ones is not in the scan: those are listed as not seen in this scan.",
+              ]
+            : []),
+        ...(input.partial
             ? [
                   "The scan read only part of the project, so a token that it did not see may still be in the code: those are listed as not seen in this scan.",
               ]
