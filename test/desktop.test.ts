@@ -35,8 +35,8 @@ after(async () => {
 });
 
 /** A desktop app's tab: a tab whose connection said `host=notify`. */
-function desktopTab(id: ConversationId | undefined) {
-    const tab = fakeTab(id, owner(app));
+function desktopTab(id: ConversationId | undefined, user = owner(app)) {
+    const tab = fakeTab(id, user);
     const client: Client = { ...tab.client, desktop: true };
     const sent = () =>
         tab.events
@@ -151,6 +151,42 @@ test("an approval reaches a desktop app with the whole call, and whether its per
         await answered;
     } finally {
         app.detach(desktop.client);
+    }
+});
+
+test("another person's desktop app gets nothing of a session they cannot see", async () => {
+    const id = await newSession(app);
+    const mine = desktopTab(id);
+    const guest = app.config.addUser("Desk Guest", "guest").user;
+    const theirs = desktopTab(undefined, guest);
+
+    for (const each of [mine, theirs]) {
+        await app.attach(each.client);
+        app.setVisible(each === mine ? owner(app) : guest, each.client.id, false);
+    }
+
+    try {
+        const request = {
+            id: "desktop-approval-2",
+            conversationId: id,
+            taskId: 1 as never,
+            callId: "call-desktop-2",
+            tool: "bash",
+            subject: "ls",
+            reason: "risky",
+            createdAt: Date.now(),
+        };
+        const answered = app.approvals.request(request, context);
+
+        await say(app, id, "private");
+        await until(() => mine.sent().length === 2, "the owner's notifications", 10_000);
+        assert.deepEqual(theirs.sent(), []);
+        await app.answerApproval(request.id, false, owner(app));
+        await answered;
+    } finally {
+        app.detach(mine.client);
+        app.detach(theirs.client);
+        app.config.removeUser(guest.id);
     }
 });
 
