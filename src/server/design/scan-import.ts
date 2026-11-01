@@ -110,7 +110,7 @@ interface StudioSource {
     themes: unknown[];
 }
 
-function addFound(into: Imported, found: Found, count: number, files: string[]): void {
+export function addFound(into: Imported, found: Found, count: number, files: string[]): void {
     addTo(into.default, found.default);
     addTo(into.dark, found.dark);
 

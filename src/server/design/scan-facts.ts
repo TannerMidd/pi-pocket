@@ -117,6 +117,8 @@ export interface Facts {
     /** Custom properties used inside a color function (`rgb(var(--c))`): their values are channels. */
     channels: Map<string, string>;
     imported: Imported;
+    /** One line for each Figma file read (untrusted text). */
+    figs: string[];
 }
 
 export function newFacts(): Facts {
@@ -162,6 +164,7 @@ export function newFacts(): Facts {
             partial: false,
             done: false,
         },
+        figs: [],
     };
 }
 

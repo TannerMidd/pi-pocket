@@ -59,7 +59,7 @@ const WEIGHTS: Record<string, number> = {
     heavy: 900,
 };
 
-function weightOf(value: unknown): unknown {
+export function weightOf(value: unknown): unknown {
     if (typeof value !== "string") {
         return value;
     }

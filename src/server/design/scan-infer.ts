@@ -43,6 +43,8 @@ export function infer(facts: Facts, folder: string): Inferred {
     };
     const { imported } = facts;
 
+    result.sources.push(...facts.figs);
+
     finishImports(imported);
 
     if (imported.count >= 8 || (imported.certain && imported.count > 0)) {

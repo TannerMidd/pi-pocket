@@ -1,7 +1,7 @@
 // It writes nothing. The walk is bounded and never follows a symlink, so a project cannot lead it out of the folder. Everything it reads is untrusted data and reaches Pi fenced.
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { Worker } from "node:worker_threads";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
 import {
     type Have,
@@ -13,6 +13,7 @@ import {
 import { ingestStyles } from "./scan-facts-use.ts";
 import { resolveChannels } from "./scan-variables.ts";
 import { LIMITS, collectFiles, readHead, type Skipped } from "./scan-files.ts";
+import { FIG_TIME_MS, readFigInto } from "./scan-fig.ts";
 import { LIMITS as TOKEN_LIMITS } from "./scan-import-eval.ts";
 import { colorsIn } from "./scan-parse.ts";
 import { type Facts, newFacts } from "./scan-facts.ts";
@@ -38,6 +39,13 @@ export interface TokenScan {
     fonts: Counted[];
     radii: Counted[];
     tailwind: boolean;
+}
+
+export const isFigFile = (path: string): boolean => /\.fig$/i.test(path);
+
+// A folder named `x.fig` is a folder, walked and rendered as one.
+export function isOneFigFile(path: string): boolean {
+    return isFigFile(path) && statSync(path).isFile();
 }
 
 // `..` itself or a `../` start, not a folder named `..x`.
@@ -69,8 +77,10 @@ export function scanRoot(cwd: string, path: string | undefined): string {
         throw new Error("path does not exist in the session's folder.");
     }
 
-    if (info.isSymbolicLink() || !info.isDirectory()) {
-        throw new Error("path must be a folder, not a symlink or a file.");
+    if (info.isSymbolicLink() || !(info.isDirectory() || isFigFile(target))) {
+        throw new Error(
+            "path must be a folder or a Figma .fig file, not a symlink or another file.",
+        );
     }
 
     const real = realpathSync(target);
@@ -99,19 +109,68 @@ function skip(facts: Facts, path: string, why: string): void {
     }
 }
 
-function readFacts(root: string, rendered?: Rendered): Facts {
+// `figUntil` is the deadline of all the Figma files: a test sets it to reach the limit.
+export function readFacts(
+    root: string,
+    rendered?: Rendered,
+    figUntil: number = Date.now() + FIG_TIME_MS,
+): Facts {
     const facts = newFacts();
-    const { files, partial, skipped } = collectFiles(root);
+
+    const one = isOneFigFile(root) ? basename(root) : undefined;
+    const { files, partial, skipped } =
+        one === undefined
+            ? collectFiles(root)
+            : { files: [] as string[], partial: false, skipped: [] as Skipped[] };
     let bytes = 0;
 
     facts.partial = partial;
-    facts.skipped = skipped;
+    // The Figma notes come first: the walk's notes of a big project must not push them out of the list.
+    facts.skipped = [];
+
+    const found = one === undefined ? files.filter((rel) => isFigFile(rel)) : [];
+    const figs =
+        one === undefined
+            ? found
+                  .slice(0, LIMITS.figs)
+                  .map((rel) => ({ rel, path: join(root, ...rel.split("/")) }))
+            : [{ rel: one, path: root }];
+
+    for (const fig of figs) {
+        readFigInto(facts, fig.rel, fig.path, figUntil);
+    }
+
+    for (const item of skipped) {
+        if (facts.skipped.length >= 40) {
+            break;
+        }
+
+        facts.skipped.push(item);
+    }
+
+    const extraFigs = found.length - figs.length;
+
+    if (extraFigs > 0) {
+        facts.partial = true;
+    }
+
+    if (extraFigs > 0 && facts.skipped.length < 40) {
+        facts.skipped.push({
+            path: `${extraFigs} Figma files`,
+            why: `over the limit of ${LIMITS.figs} read`,
+        });
+    }
 
     for (const [rank, rel] of files.entries()) {
         if (bytes >= LIMITS.totalBytes) {
             facts.partial = true;
 
             break;
+        }
+
+        // Read above as a Figma file: its bytes are not text.
+        if (isFigFile(rel)) {
+            continue;
         }
 
         let text: string;
@@ -200,7 +259,7 @@ function counted(facts: Facts): Map<string, number> {
 
 export function scanTokens(root: string, rendered?: Rendered): TokenScan {
     const facts = readFacts(root, rendered);
-    const folder = root.split(sep).filter(Boolean).at(-1) ?? "project";
+    const folder = (root.split(sep).filter(Boolean).at(-1) ?? "project").replace(/\.fig$/i, "");
     const inferred = infer(facts, folder);
     const roots = new Map<string, string>();
 
@@ -276,7 +335,7 @@ export async function scanProject(
 
     left -= Date.now() - started;
 
-    if (options.render === false || process.env.PI_SCAN_RENDER === "0") {
+    if (options.render === false || process.env.PI_SCAN_RENDER === "0" || isOneFigFile(root)) {
         return first;
     }
 
@@ -469,7 +528,7 @@ export function scanReport(scan: TokenScan, path?: string): string {
                 ? `\n<scan_data>\nleft out: ${cleaned(skippedLine(scan.skipped))}\n</scan_data>\n${UNTRUSTED} The design may be in one of them: scan that folder with path.\n`
                 : " ";
 
-        return `The scan found no style files (css, scss, less, html, vue, svelte, tsx, jsx, a tailwind config, or a tokens file).${left}Ask the person where the brand files are, or write the design system with design_system init and tokens.`;
+        return `The scan found no style files (css, scss, less, html, vue, svelte, tsx, jsx, a tailwind config, a tokens file, or a Figma .fig file).${left}Ask the person where the brand files are, or write the design system with design_system init and tokens.`;
     }
 
     const { inferred } = scan;
