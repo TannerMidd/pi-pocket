@@ -13,7 +13,15 @@ import { publicArtifactBundle } from "./http/artifact-assets.ts";
 import { extensionFile } from "./http/extension-routes.ts";
 import { hookRoute } from "./http/hook-routes.ts";
 import { linkRoute } from "./http/link-routes.ts";
-import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
+import {
+    KATEX_CSS,
+    KATEX_FONT,
+    katexFont,
+    serveApp,
+    serveFile,
+    VENDOR,
+    WEB,
+} from "./http/assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
@@ -99,6 +107,20 @@ export function createHandler(options: HttpOptions) {
                     VENDOR[parts[1]]!,
                     "text/javascript; charset=utf-8",
                 );
+            }
+
+            if (parts[0] === "vendor" && parts[1] === "katex.css" && parts.length === 2) {
+                return await serveFile(request, response, KATEX_CSS, "text/css; charset=utf-8");
+            }
+
+            // Only the names the stylesheet asks for: nothing else under the package is reachable.
+            if (
+                parts[0] === "vendor" &&
+                parts[1] === "fonts" &&
+                parts.length === 3 &&
+                KATEX_FONT.test(parts[2]!)
+            ) {
+                return await serveFile(request, response, katexFont(parts[2]!), "font/woff2");
             }
 
             if (parts[0] === "login" && (request.method === "GET" || request.method === "POST")) {
