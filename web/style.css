@@ -726,6 +726,15 @@ kbd {
     }
 }
 
+/* A file of the app did not load or run (index.html): the screen stops, and says so under the caption. */
+.boot.failed .boot-mark {
+    animation: none;
+}
+
+.boot.failed .boot-bar {
+    display: none;
+}
+
 .boot-caption {
     font-size: 0.75rem;
     letter-spacing: 0.14em;

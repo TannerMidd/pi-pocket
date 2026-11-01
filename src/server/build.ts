@@ -27,7 +27,7 @@ function buildFiles(): string[] {
     };
 
     walk(join(APP_ROOT, "src", "server"));
-    files.push(join(APP_ROOT, "web", "fingerprint.js"));
+    files.push(join(APP_ROOT, "web", "text-hash.js"));
 
     return files;
 }

@@ -1,7 +1,8 @@
 /**
  * A short fingerprint of a string, the same in the browser and on the server (which imports this file). It names what
  * a tab already has (`have` in `web/store.js`, `Room.push`): equal fingerprints say the server's copy is the tab's.
- * 53 bits of cyrb53, as base 36: not for secrets, only to tell copies apart.
+ * 53 bits of cyrb53, as base 36: not for secrets, only to tell copies apart. Not named fingerprint.js: tracker
+ * blockers stop a file of that name, and with it the whole app (#249).
  */
 export function fingerprint(text) {
     let a = 0xdeadbeef;
