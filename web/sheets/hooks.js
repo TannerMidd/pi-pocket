@@ -82,7 +82,7 @@ function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
             </span>
         </div>
         ${
-            draft !== null
+            editing
                 ? html`<div class="field">
                     <div class="label">What Pi should do with each post</div>
                     <textarea

@@ -407,6 +407,9 @@ export function MenuSheet({ places = true }) {
     const instructions = view.agent?.instructions;
     const memory = useMemory();
 
+    // The desktop app this page runs in adds its own items at the end, below App (`desktop.js`).
+    const desktop = hostMenuItems();
+
     return html`<${MenuFrame} title=${conversation?.title ?? "Menu"}>
         ${places && html`<${Places} />`}
         <div class="menu-session">
@@ -579,18 +582,12 @@ export function MenuSheet({ places = true }) {
             }
             ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
         </div>
-        ${(() => {
-            // The desktop app this page runs in adds its own items at the end, below App,
-            // such as its server settings (`desktop.js`).
-            const desktop = hostMenuItems();
-
-            return (
-                desktop.length > 0 &&
-                html`<div class="group">
-                    <div class="group-title">Desktop</div>
-                    ${desktop.map((each) => item(each.label, each.run, each.hint))}
-                </div>`
-            );
-        })()}
+        ${
+            desktop.length > 0 &&
+            html`<div class="group">
+                <div class="group-title">Desktop</div>
+                ${desktop.map((each) => item(each.label, each.run, each.hint))}
+            </div>`
+        }
     <//>`;
 }
