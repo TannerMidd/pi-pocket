@@ -278,6 +278,29 @@ test("a task in a batch a crash cut off goes in no other batch (#254)", { skip }
     await until(() => !app.isBusy(id), "Pi to answer it");
 });
 
+test(
+    "tasks two people started go in a message each, as each one's work (#254)",
+    { skip },
+    async () => {
+        const id = await session();
+        const { user } = app.config.addUser("Batch guest", "guest");
+
+        await app.background.start(id, { command: "echo mine", requestedBy: owner(app).id });
+        await app.background.start(id, { command: "echo theirs", requestedBy: user.id });
+        const messages = async () =>
+            (await userTexts(id)).filter((text) => text.includes("[background] Task"));
+
+        await until(async () => (await messages()).length >= 2, "a message each");
+        assert.equal((await messages()).length, 2);
+        assert.ok(
+            (await messages()).every((text) => text.match(/\[background\] Task /g)?.length === 1),
+        );
+        await until(() => !app.isBusy(id), "Pi to answer them");
+        // With a second person, each message starts with whom it is from, which "hold" in the route does not expect.
+        app.config.removeUser(user.id);
+    },
+);
+
 test("a task told before 0.28 is not told again when the next one ends", { skip }, async () => {
     const id = await session();
     const old = await app.background.start(id, { command: "echo old" });

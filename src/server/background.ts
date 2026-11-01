@@ -931,62 +931,68 @@ export class BackgroundTasks {
             signal?.throwIfAborted();
         }
 
-        const items = (await runtime.snapshot(BackgroundDoc, conversationId, context))?.items ?? {};
-        // This watch's own task goes too when it ended before 0.28 marked tasks `untold`: its message was never sent.
-        const ended = Object.values(items)
-            .filter(
-                (item) =>
-                    item.notify &&
-                    item.endedAt !== undefined &&
-                    item.toldAt === undefined &&
-                    (item.untold === true || item.id === id),
-            )
-            .sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+        let sent: BackgroundTask[] = [];
+        let unasked: BackgroundTask[] = [];
+        let requestId = "";
 
-        // A batch saved before a crash goes again as it was, under its own id: a task that ended since must not
-        // change its id, or Pi would hear the batch twice. Its tasks are in no other batch.
-        const saved = ended.find((item) => item.id === id)?.batch;
-        // Not while a spend limit holds Pi back, nor for someone who can no longer steer here: those wait unread.
-        const told =
-            saved === undefined
-                ? ended.filter(
-                      (item) => item.batch === undefined && this.#askable(conversationId, item),
-                  )
-                : ended.filter((item) => item.batch === saved);
-        const unasked =
-            saved === undefined
-                ? ended.filter((item) => item.batch === undefined && !told.includes(item))
-                : [];
-        // This watch's own task must be in the batch: another watch that tells first takes it, and this one then has
-        // nothing to say. Only what is sent is marked below, so a batch this watch leaves alone is still to come.
-        const sent = told.some((item) => item.id === id) ? told : [];
+        // The batch is chosen and saved in one commit, so two watches never put one task in two batches, and a batch
+        // saved before a crash goes again as it was, under its own id, which Pi Durable places once.
+        await runtime.commit(async (tx) => {
+            const items = (await tx.doc(BackgroundDoc, conversationId)).items;
+            // This watch's own task goes too when it ended before 0.28 marked tasks `untold`: its message was never sent.
+            const ended = Object.values(items)
+                .filter(
+                    (item) =>
+                        item.notify &&
+                        item.endedAt !== undefined &&
+                        item.toldAt === undefined &&
+                        (item.untold === true || item.id === id),
+                )
+                .sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+            const own = ended.find((item) => item.id === id);
 
-        if (sent.length > 0) {
-            const ids = sent.map((item) => item.id);
-            const person = sent.every((item) => item.requestedBy === sent[0]?.requestedBy)
-                ? sent[0]?.requestedBy
-                : undefined;
-            const key = `background-batch-${ids.join("+")}`;
-            const requestId =
-                saved ??
-                (person === undefined ? `background:${ids.join("+")}` : requestFor(person, key));
-
-            if (saved === undefined) {
-                await runtime.commit(async (tx) => {
-                    const doc = await tx.doc(BackgroundDoc, conversationId);
-
-                    for (const item of sent) {
-                        const stored = doc.items[item.id];
-
-                        if (stored !== undefined) {
-                            stored.batch = requestId;
-                        }
-                    }
-
-                    return undefined;
-                }, context);
+            if (own === undefined) {
+                return undefined;
             }
 
+            const saved = own.batch;
+            // One person's tasks to a batch: its message runs as their work, against their spend limit.
+            const batch =
+                saved === undefined
+                    ? ended.filter(
+                          (item) =>
+                              item.batch === undefined && item.requestedBy === own.requestedBy,
+                      )
+                    : ended.filter((item) => item.batch === saved);
+            // Read after the commit: the stored items are its transaction's proxies.
+            const copies = batch.map((item) => JSON.parse(JSON.stringify(item)) as BackgroundTask);
+
+            // Not while a spend limit holds Pi back, nor for someone who can no longer steer here: those wait unread.
+            // Checked again for a saved batch: what holds Pi back now may have come since it was saved.
+            if (!this.#askable(conversationId, own)) {
+                unasked = copies;
+
+                return undefined;
+            }
+
+            sent = copies;
+            requestId =
+                saved ??
+                (own.requestedBy === undefined
+                    ? `background:${sent.map((item) => item.id).join("+")}`
+                    : requestFor(
+                          own.requestedBy,
+                          `background-batch-${sent.map((item) => item.id).join("+")}`,
+                      ));
+
+            for (const item of batch) {
+                item.batch = requestId;
+            }
+
+            return undefined;
+        }, context);
+
+        if (sent.length > 0) {
             await conversation.submit(
                 {
                     type: "input",
