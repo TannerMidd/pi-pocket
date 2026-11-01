@@ -141,10 +141,10 @@ export function FindSheet({ initial }) {
         };
     }, []);
 
-    const clipped = [...earlier.entries, ...view.order.map((id) => view.entries.get(id))]
+    const allClipped = [...earlier.entries, ...view.order.map((id) => view.entries.get(id))]
         .filter((entry) => entry?.kind === "user" && entry.presentation?.clipped !== undefined)
-        .slice(-FULL_READS)
         .map((entry) => entry.id);
+    const clipped = allClipped.slice(-FULL_READS);
     const clippedKey = clipped.join(",");
 
     useEffect(() => {
@@ -283,6 +283,12 @@ export function FindSheet({ initial }) {
             !earlier.all &&
             html`<p class="muted small">
                 The oldest history was not searched: only the newest ${earlier.entries.length} earlier entries.
+            </p>`
+        }
+        ${
+            allClipped.length > FULL_READS &&
+            html`<p class="muted small">
+                Only the newest ${FULL_READS} long inputs were searched in full. Older ones were searched by their start and end.
             </p>`
         }
         ${results.length === 100 && html`<p class="muted small">The newest 100 are listed.</p>`}

@@ -126,12 +126,16 @@
             (function () {
                 var fail = function (detail) {
                     var boot = document.querySelector("#app > .boot");
+
                     if (!boot) {
                         return;
                     }
+
                     boot.classList.add("failed");
                     boot.querySelector(".boot-caption").textContent = "could not start";
+
                     var line = boot.querySelector(".boot-detail") || document.createElement("div");
+
                     line.className = "boot-detail";
                     line.textContent = detail;
                     boot.appendChild(line);
@@ -142,6 +146,7 @@
                         target &&
                         target.tagName === "SCRIPT" &&
                         target.getAttribute("src") === "/app.js";
+
                     if (event.type === "load") {
                         if (app) {
                             removeEventListener("error", watch, true);
@@ -158,6 +163,7 @@
                         );
                     }
                 };
+
                 addEventListener("error", watch, true);
                 document.addEventListener("load", watch, true);
             })();
