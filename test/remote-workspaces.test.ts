@@ -113,6 +113,13 @@ test("after a restart without its provider, a remote session opens and runs noth
         assert.throws(() => app.envFor(id), /No workspace provider/);
         await say(app, id, "run");
         assert.match((await modelTexts(app, id)).at(-2)!, /No workspace provider/);
+        // A `!` command ends as a failed command with the same reason, not one left running.
+        await app.shell.start(id, owner(app), { command: "pwd" });
+        await until(
+            async () => (await modelTexts(app, id)).some((t) => /could not run/.test(t)),
+            "the failed command",
+        );
+        assert.match((await modelTexts(app, id)).at(-1)!, /No workspace provider/);
     } finally {
         app.detach(tab.client);
         await app.close();
