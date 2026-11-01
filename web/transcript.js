@@ -2,12 +2,23 @@
 // into one line that opens into a timeline), then Pi's reply, any approval, and the live line while Pi works.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { initials, personColor } from "./avatar.js";
+import { activityOpen } from "./activity-fold.js";
+import {
+    noteRevealed,
+    onPresentationMode,
+    onRevealed,
+    presentationDraw,
+    presentationLine,
+    presentationMode,
+    wasRevealed,
+} from "./entry-presentation.js";
+import { avatarSrc, initials, personColor } from "./avatar.js";
 import { routeSliding } from "./back.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
+import { splitQuote } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
 import { Highlighted, InlineArtifact } from "./rich.js";
@@ -27,10 +38,9 @@ import {
     TRANSCRIPT_ROWS,
 } from "./store.js";
 import { openSubagent, stateOf } from "./subagents.js";
-import { prefs } from "./theme.js";
+import { motionLevel, prefs } from "./theme.js";
 import {
     diffCounts,
-    INLINE_TOOL,
     itemsOf,
     lineCount,
     matchCount,
@@ -66,6 +76,25 @@ import { LessonCall, memoryAvailable } from "./sheets/memory.js";
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
 /** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
 const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed))/;
+
+/**
+ * A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced.
+ * Its time is short ("2m 04s"), which keeps a long line that is not one quick to turn down.
+ */
+const BACKGROUND =
+    /^\[background\] Task (\S+) (.+?) after ([^.\n]{1,20})\.\nCommand: (.*)\n([\s\S]*)$/;
+/** Where the next task's message starts, in a message of several that ended together (`background.ts`). */
+const NEXT_BACKGROUND = /\n\n(?=\[background\] Task )/;
+const OUTPUT_OPEN = "<background-output>\n";
+const OUTPUT_CLOSE = "\n</background-output>";
+
+/** The output fenced in a background task's message, or undefined when it printed nothing. */
+function fencedOutput(rest) {
+    const start = rest.indexOf(OUTPUT_OPEN);
+    const end = start < 0 ? -1 : rest.indexOf(OUTPUT_CLOSE, start + OUTPUT_OPEN.length);
+
+    return end < 0 ? undefined : rest.slice(start + OUTPUT_OPEN.length, end);
+}
 
 /** How a scheduled message starts (see src/server/schedules.ts). */
 const SCHEDULED = "[scheduled] ";
@@ -144,6 +173,51 @@ function EntryImages({ entryId, count, label }) {
     </div>`;
 }
 
+/**
+ * What a message carries besides its words: files sent along by name, attached pictures as thumbnails, other
+ * attachments as chips, and images in the message. `attachments` is the block `splitAttachments` cut off.
+ */
+function MessageExtras({ entry, attachments }) {
+    const files = attachments ? parseAttachments(attachments) : [];
+    const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
+    const others = files.filter((file) => !pictures.includes(file));
+
+    return html`
+        ${
+            entry.files?.length > 0 &&
+            html`<div class="attachments">
+                ${entry.files.map(
+                    (path) =>
+                        html`<button
+                            class="chip"
+                            title=${`Sent with the message: ${path}`}
+                            onClick=${() => openFile(path)}
+                        >
+                            📄 ${path.split("/").pop()}
+                        </button>`,
+                )}
+            </div>`
+        }
+        ${
+            pictures.length > 0 &&
+            html`<div class="thumbs">
+                ${pictures.map((file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`)}
+            </div>`
+        }
+        ${
+            others.length > 0 &&
+            html`<div class="attachments">
+                ${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}
+            </div>`
+        }
+        ${
+            entry.images > 0 &&
+            !attachments &&
+            html`<${EntryImages} entryId=${entry.id} count=${entry.images} label="Image" />`
+        }
+    `;
+}
+
 function authorName(entryId, view, users) {
     const userId = view.authors?.[entryId];
 
@@ -205,6 +279,47 @@ function MentionedText({ text }) {
     return parts;
 }
 
+/**
+ * Code in a person's message, as Markdown writes it: a ``` fence on lines of its own (with an optional language), or a
+ * span on one line, closed by as many backticks as opened it (`a`, ``a ` b``). Only code: the rest of the message
+ * stays as typed, so a `*` or a `#` never changes what it says. A fence or a span left open stays text.
+ */
+const CODE =
+    /(^|\n)```([\w+#.-]*)[ \t]*\n([\s\S]*?)\n```[ \t]*(?=\n|$)|(?<!`)(`+)(?!`)(.+?)(?<!`)\4(?!`)/g;
+
+/** A person's message with its code shown as code, colored when a fence names its language; the rest as `MentionedText`. */
+function CodedText({ text }) {
+    const parts = [];
+    let last = 0;
+
+    for (const match of text.matchAll(CODE)) {
+        const block = match[4] === undefined;
+        // As Markdown does, a span drops one space at each end when it has both: `` `a` `` shows `a`.
+        const span = block ? "" : match[5].replace(/^ (.*[^ ].*) $/, "$1");
+
+        if (!block && span.trim() === "") {
+            continue;
+        }
+
+        // A block is a line of its own: the line breaks around its fence would only add a blank line.
+        parts.push(html`<${MentionedText} text=${text.slice(last, match.index)} />`);
+        parts.push(
+            block
+                ? html`<${Highlighted} class="user-code" text=${match[3]} lang=${match[2]} />`
+                : html`<code>${span}</code>`,
+        );
+        last = match.index + match[0].length;
+
+        if (block && text[last] === "\n") {
+            last += 1;
+        }
+    }
+
+    parts.push(html`<${MentionedText} text=${text.slice(last)} />`);
+
+    return parts;
+}
+
 /** A subagent's report: who, whether it answered or failed, and what it said. */
 function Report({ report, view, fresh }) {
     const [, name, verb, after, text] = report;
@@ -226,6 +341,49 @@ function Report({ report, view, fresh }) {
         </div>
         ${why && html`<div class="report-why">${why}</div>`}
         ${text && html`<${Collapsible} text=${text} />`}
+    </div>`;
+}
+
+/** A background task that ended, as a card for people: its id and outcome, its command, and its output folded away. */
+function BackgroundReport({ match }) {
+    const [, id, outcome, took, command, rest] = match;
+    const output = fencedOutput(rest);
+
+    return html`<div class="report background-report">
+        <div class="report-head">
+            <span class="report-name">${id}</span> ${outcome} · ${took}
+        </div>
+        ${command !== undefined && html`<div class="background-command muted small mono">${command}</div>`}
+        ${
+            output === undefined
+                ? html`<div class="muted small">It printed nothing.</div>`
+                : html`<${BackgroundOutput}
+                      text=${output}
+                      clipped=${rest.startsWith("The end of its output")}
+                  />`
+        }
+    </div>`;
+}
+
+/** Lines of a background task's output shown while it is folded: its last ones, where an error usually is. */
+const OUTPUT_LINES = 8;
+
+/** A background task's output as it printed it, folded to its last lines; `clipped` when the task printed more. */
+function BackgroundOutput({ text, clipped }) {
+    const [open, setOpen] = useState(false);
+    const lines = text.split("\n");
+    const folds = lines.length > OUTPUT_LINES;
+    const shown = folds && !open ? lines.slice(-OUTPUT_LINES).join("\n") : text;
+
+    return html`<div class="background-output">
+        ${clipped && html`<div class="muted small">The end of its output:</div>`}
+        <pre>${shown}</pre>
+        ${
+            folds &&
+            html`<button class="link" onClick=${() => setOpen(!open)}>
+                ${open ? "Show less" : `Show all ${lines.length} lines`}
+            </button>`
+        }
     </div>`;
 }
 
@@ -263,9 +421,254 @@ const clock = (at) => clockTime(new Date(fromServer(at)));
 
 /**
  * A person's message: a filled row with a prompt mark, the accent's for your own and the author's color for someone
- * else's, then who sent it and when, and what they wrote.
+ * else's, then who sent it and when, and what they wrote. An input a module presents is one line, or an anchor when
+ * this browser hides it, until it is opened.
  */
 function UserEntry({ entry, view, users }) {
+    if (entry.presentation !== undefined) {
+        return html`<${PresentedUser} entry=${entry} view=${view} users=${users} />`;
+    }
+
+    return html`<${UserMessage} entry=${entry} view=${view} users=${users} />`;
+}
+
+/**
+ * One presented input: the message, a card of one line (its label, summary, and time) that opens to the text as Pi's
+ * groups do, or an anchor Find can still reach.
+ */
+function PresentedUser({ entry, view, users }) {
+    const kind = entry.presentation.entryKind;
+    const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
+    const unrolled = useRef(-Infinity);
+    const [mode, setMode] = useState(() => presentationMode(kind));
+    const [opened, setOpened] = useState(() => wasRevealed(entry.id));
+    const [text, setText] = useState(entry.text);
+    const wantsText = mode === "open" || opened;
+
+    // A new copy of the entry (the module changed, or its full text came): show that one.
+    useEffect(() => setText(entry.text), [entry.text]);
+
+    useEffect(
+        () =>
+            onPresentationMode((changed, next) => {
+                if (changed !== kind) {
+                    return;
+                }
+
+                setMode(next);
+                setOpened(wasRevealed(entry.id));
+            }),
+        [kind, entry.id],
+    );
+    useEffect(
+        () =>
+            onRevealed((id) => {
+                if (id === entry.id) {
+                    setOpened(true);
+                }
+            }),
+        [entry.id],
+    );
+    useEffect(() => {
+        if (!wantsText || entry.presentation.clipped === undefined) {
+            return;
+        }
+
+        let gone = false;
+
+        attempt(async () => {
+            const full = await actions.fullEntry(entry.id);
+
+            if (!gone && full?.kind === "user") {
+                setText(full.text);
+            }
+        });
+
+        return () => {
+            gone = true;
+        };
+    }, [wantsText, entry.id, entry.text, entry.presentation.clipped]);
+
+    const draw = presentationDraw(mode, opened);
+    const { label, summary } = entry.presentation;
+
+    if (draw === "message") {
+        return html`<${UserMessage} entry=${{ ...entry, text }} view=${view} users=${users} />`;
+    }
+
+    if (draw === "anchor") {
+        return html`<span
+            class="entry-anchor presented-hidden"
+            id=${`entry-${entry.id}`}
+            aria-hidden="true"
+        ></span>`;
+    }
+
+    const openedText = draw === "text";
+    const bodyId = `presented-${entry.id}`;
+
+    return html`<div
+        class="user-row"
+        data-part="prompt-row"
+        data-entry-kind=${kind}
+        id=${`entry-${entry.id}`}
+    >
+        <div
+            class=${`presented-input ${openedText ? "open" : ""} ${fresh ? "enter" : ""}`}
+            data-part="presented-input"
+            data-state=${openedText ? "open" : undefined}
+        >
+            <div class="presented-bar">
+                <button
+                    class="presented-head"
+                    data-part="presented-head"
+                    type="button"
+                    aria-expanded=${openedText ? "true" : "false"}
+                    aria-controls=${openedText ? bodyId : undefined}
+                    title=${presentationLine(label, summary)}
+                    onClick=${() => {
+                        unrolled.current = openedText ? -Infinity : performance.now();
+                        setOpened(!openedText);
+                    }}
+                >
+                    <${Icon} name="chevron" size=${14} class="chev" part="presented-chevron" />
+                    <span class="presented-line">
+                        <span class="presented-label">${label}</span>
+                        ${summary && html`<span class="presented-summary"> · ${summary}</span>`}
+                    </span>
+                    ${entry.at && html`<span class="presented-time">${clock(entry.at)}</span>`}
+                </button>
+                <button
+                    class="presented-more"
+                    data-part="presented-more"
+                    type="button"
+                    aria-label=${`${label}: show, fold, or hide, copy, and more`}
+                    title="Show, fold, or hide inputs like this; copy, and more"
+                    onClick=${() => openSheet({ type: "message", entryId: entry.id })}
+                >
+                    <${Icon} name="more" size=${16} />
+                </button>
+            </div>
+            ${
+                openedText &&
+                html`<div
+                    class=${`presented-body tappable ${unrolling(unrolled)}`}
+                    id=${bodyId}
+                    data-part="prompt-text"
+                    onClick=${(event) => openMessage(event, entry.id)}
+                >
+                    <${PresentedText} entry=${entry} text=${text} />
+                </div>`
+            }
+        </div>
+    </div>`;
+}
+
+/** A presented input's opened text: its words, then what it carries, as a message shows them. */
+function PresentedText({ entry, text }) {
+    const [written, attachments] = splitAttachments(text);
+
+    return html`
+        ${written && html`<div class="user-text"><${MentionedText} text=${written} /></div>`}
+        <${MessageExtras} entry=${entry} attachments=${attachments} />
+    `;
+}
+
+/** How the app marks a linked session's message (`linked-sessions.ts`): the sender's address in this session. */
+const LINKED_VIA = /^linked session (\S+)$/;
+
+/** A linked session's message folds past this many lines, or this many characters. */
+const LINKED_FOLD_LINES = 10;
+const LINKED_FOLD_CHARS = 900;
+
+/**
+ * A message from a linked session: an agent, not a person, in a card of its own. Its head names the session and opens
+ * it when this person may (`linkedPeers`, by address); its text shows as Markdown, as Pi's replies do, and a long one
+ * folds to its first lines. Tapping the card opens its message sheet, as a person's message does.
+ */
+function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
+    const [open, setOpen] = useState(false);
+    const id = view.linkedPeers?.[address];
+    const session =
+        id === undefined ? undefined : store.state.sessions.find((each) => each.id === id);
+    const name = session ? (session.title ?? "New session") : undefined;
+    const lines = text.split("\n").length;
+    const folds = lines > LINKED_FOLD_LINES || text.length > LINKED_FOLD_CHARS;
+
+    return html`<div
+        class=${`user-row ${fresh ? "enter" : ""}`}
+        data-part="prompt-row"
+        data-entry-kind=${entry.presentation?.entryKind}
+        id=${`entry-${entry.id}`}
+    >
+        <div
+            class=${`prompt linked-message tappable ${folds ? "folds" : ""} ${open ? "open" : ""}`}
+            data-part="prompt"
+            data-from="linked"
+            title="Edit, send again, or copy"
+            tabindex="0"
+            onClick=${(event) => openMessage(event, entry.id)}
+            onKeyDown=${(event) => {
+                if (
+                    (event.key === "Enter" || event.key === " ") &&
+                    event.target === event.currentTarget
+                ) {
+                    event.preventDefault();
+                    openMessage(event, entry.id);
+                }
+            }}
+        >
+            <div class="linked-head" data-part="linked-head">
+                <span class="linked-mark" data-part="linked-mark" aria-hidden="true">
+                    <${Icon} name="fork" size=${16} />
+                </span>
+                <span class="linked-who">
+                    <span class="linked-kicker">
+                        <span class="linked-tag">Linked session</span>
+                        ${entry.at && html`<span>· ${clock(entry.at)}</span>`}
+                    </span>
+                    <span
+                        class=${`linked-name ${name ? "" : "unknown"}`}
+                        data-part="linked-name"
+                    >
+                        ${name ?? "A session you cannot open"}
+                    </span>
+                </span>
+                ${
+                    session &&
+                    html`<button
+                        class="linked-open"
+                        data-part="linked-open"
+                        aria-label=${`Open ${name}`}
+                        onClick=${() => navigate(session.id)}
+                    >
+                        Open
+                        <${Icon} path="M5 12h14M13 6l6 6-6 6" size=${14} />
+                    </button>`
+                }
+            </div>
+            <div class="linked-body" data-part="linked-body" id=${`linked-body-${entry.id}`}>
+                <${Markdown} text=${text} />
+                <${MessageExtras} entry=${entry} attachments=${attachments} />
+            </div>
+            ${
+                folds &&
+                html`<button
+                    class="linked-more"
+                    data-part="linked-more"
+                    aria-expanded=${open ? "true" : "false"}
+                    aria-controls=${`linked-body-${entry.id}`}
+                    onClick=${() => setOpen(!open)}
+                >
+                    ${open ? "Show less" : `Show all · ${lines} lines`}
+                </button>`
+            }
+        </div>
+    </div>`;
+}
+
+/** A person's message, including one a module presents when this browser shows it open. */
+function UserMessage({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 
     // A report has nobody's name on it: a person's message that looks like one is theirs.
@@ -288,6 +691,32 @@ function UserEntry({ entry, view, users }) {
             ? html`<${Report} report=${reports[0]} view=${view} fresh=${fresh} />`
             : html`<div class="report-group">
                   ${reports.map((report) => html`<${Report} report=${report} view=${view} fresh=${fresh} />`)}
+              </div>`;
+    }
+
+    // A background task's message: nobody typed it, so a person writing "[background]" themselves keeps it theirs.
+    const background =
+        entry.from === undefined && !view.authors?.[entry.id] ? BACKGROUND.exec(entry.text) : null;
+
+    if (background) {
+        // Several tasks that ended together came as one message: a card each. A part that is not a task's start is
+        // more of the one before it.
+        const parts = [];
+
+        for (const part of entry.text.split(NEXT_BACKGROUND)) {
+            if (parts.length > 0 && !BACKGROUND.test(part)) {
+                parts[parts.length - 1] += `\n\n${part}`;
+            } else {
+                parts.push(part);
+            }
+        }
+
+        const tasks = parts.map((part) => BACKGROUND.exec(part)).filter(Boolean);
+
+        return tasks.length === 1
+            ? html`<${BackgroundReport} match=${tasks[0]} />`
+            : html`<div class="report-group">
+                  ${tasks.map((match) => html`<${BackgroundReport} match=${match} />`)}
               </div>`;
     }
 
@@ -318,15 +747,24 @@ function UserEntry({ entry, view, users }) {
     // A linked session's message: shown by its label and its fence alone, so the words before the fence (which tell Pi
     // how to read it) can change without changing how older messages show.
     const peerText =
-        via && /^linked session \S+$/.test(via[1])
+        via && LINKED_VIA.test(via[1])
             ? /\n<linked-session-message>\n([\s\S]*)\n<\/linked-session-message>$/.exec(sent)?.[1]
             : undefined;
-    const body = peerText ?? (scheduled ? sent.slice(SCHEDULED.length) : sent);
-    const files = attachments ? parseAttachments(attachments) : [];
+
+    if (peerText !== undefined) {
+        return html`<${LinkedMessage}
+            entry=${entry}
+            view=${view}
+            address=${LINKED_VIA.exec(via[1])[1]}
+            text=${peerText}
+            attachments=${attachments}
+            fresh=${fresh}
+        />`;
+    }
+
+    const body = scheduled ? sent.slice(SCHEDULED.length) : sent;
     // `/skill:name request`: the skill by name, and the request.
     const skill = SKILL.exec(body);
-    const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
-    const others = files.filter((file) => !pictures.includes(file));
     const name = author ?? (scheduled ? "Pi" : undefined);
     // Your own messages take the accent; someone else's, their color; one from someone the app does not know (a name
     // the message carries, the main agent, Pi's own schedule), a quiet one.
@@ -337,20 +775,17 @@ function UserEntry({ entry, view, users }) {
               ? "var(--muted)"
               : personColor(authorId);
 
-    // Who it is from, for themes: you, someone else, a linked session, or no one the app knows (Pi's schedule, the main
-    // agent, a watch or a webhook).
+    const picture = avatarSrc({ id: authorId });
+
+    // Who it is from, for themes: you, someone else, or no one the app knows (Pi's schedule, the main agent, a watch or a
+    // webhook). A linked session's message is `linked` (`LinkedMessage`).
     const from =
-        peerText !== undefined
-            ? "linked"
-            : authorId === undefined
-              ? "other"
-              : authorId === store.state.me?.id
-                ? "me"
-                : "person";
+        authorId === undefined ? "other" : authorId === store.state.me?.id ? "me" : "person";
 
     return html`<div
         class=${`user-row ${fresh ? "enter" : ""}`}
         data-part="prompt-row"
+        data-entry-kind=${entry.presentation?.entryKind}
         id=${`entry-${entry.id}`}
     >
         <div
@@ -377,12 +812,18 @@ function UserEntry({ entry, view, users }) {
                     style=${`--who:${mark}`}
                     aria-hidden="true"
                 >
-                    ${name ? initials(name) : "›"}
+                    ${picture ? html`<img src=${picture} alt="" />` : name ? initials(name) : "›"}
                 </span>
                 ${name && html`<b class="prompt-author" data-part="prompt-author">${name}</b>`}
+                ${
+                    entry.presentation &&
+                    html`<span class="presented-tag" data-part="presented-tag">
+                        ${entry.presentation.label}
+                    </span>`
+                }
                 ${entry.at && html`<span class="prompt-time">${clock(entry.at)}</span>`}
                 ${scheduled && html`<span class="prompt-time">· scheduled</span>`}
-                ${via && html`<span class="prompt-time">· via ${peerText === undefined ? via[1] : "a linked session"}</span>`}
+                ${via && html`<span class="prompt-time">· via ${via[1]}</span>`}
             </span>
             <div class="prompt-body" data-part="prompt-text">
                 ${
@@ -401,47 +842,25 @@ function UserEntry({ entry, view, users }) {
                         ${
                             via
                                 ? html`<${FencedText} text=${body} />`
-                                : html`<${MentionedText} text=${skill ? skill[3] : body} />`
+                                : html`<${QuotedText} text=${skill ? skill[3] : body} />`
                         }
                     </div>`
                 }
-                ${
-                    entry.files?.length > 0 &&
-                    html`<div class="attachments">
-                        ${entry.files.map(
-                            (path) =>
-                                html`<button
-                                    class="chip"
-                                    title=${`Sent with the message: ${path}`}
-                                    onClick=${() => openFile(path)}
-                                >
-                                    📄 ${path.split("/").pop()}
-                                </button>`,
-                        )}
-                    </div>`
-                }
-                ${
-                    pictures.length > 0 &&
-                    html`<div class="thumbs">
-                        ${pictures.map(
-                            (file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`,
-                        )}
-                    </div>`
-                }
-                ${
-                    others.length > 0 &&
-                    html`<div class="attachments">
-                        ${others.map((file) => html`<span class="chip">📎 ${file.name}</span>`)}
-                    </div>`
-                }
-                ${
-                    entry.images > 0 &&
-                    !attachments &&
-                    html`<${EntryImages} entryId=${entry.id} count=${entry.images} label="Image" />`
-                }
+                <${MessageExtras} entry=${entry} attachments=${attachments} />
             </div>
         </div>
     </div>`;
+}
+
+function QuotedText({ text }) {
+    const quote = splitQuote(text);
+
+    if (!quote) {
+        return html`<${CodedText} text=${text} />`;
+    }
+
+    return html`<blockquote class="reply-quote" data-part="reply-quote">${quote.passage}</blockquote>
+        ${quote.rest && html`<${CodedText} text=${quote.rest} />`}`;
 }
 
 function Collapsible({ text, limit = 600 }) {
@@ -461,8 +880,8 @@ function Collapsible({ text, limit = 600 }) {
 
 // ─── What Pi did: its thinking and tool calls, a line each on a timeline ───────────────
 
-/** The tools that publish artifacts: `artifact_inline` also shows its page as a card in the reply. */
-const isArtifactCall = (name) => name === "artifact" || name === INLINE_TOOL;
+/** The tools that publish artifacts: `artifact_inline` (from before 0.28) is `artifact` with `inline: true`. */
+const isArtifactCall = (name) => name === "artifact" || name === "artifact_inline";
 
 /** What a step's mark says, by how the call went; a call still running shows a spinner instead. */
 const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!" };
@@ -837,6 +1256,8 @@ function ToolStep({
             setFull({ call: fullCall ?? call, result: fullResult });
         });
 
+    // An image a read returned is already on screen elsewhere: it shows only when the call is opened.
+    const imagesInside = call.name === "read";
     let body = null;
 
     if (open) {
@@ -857,6 +1278,16 @@ function ToolStep({
                 >
                     Open ${args.path.split("/").pop()} →
                 </button>`,
+            );
+        }
+
+        if (imagesInside && result?.images > 0) {
+            parts.push(
+                html`<${EntryImages}
+                    entryId=${result.id}
+                    count=${result.images}
+                    label=${`${call.name} image`}
+                />`,
             );
         }
 
@@ -1005,7 +1436,12 @@ function ToolStep({
         memoryAvailable(conversationId)
             ? details.lesson
             : null;
-    const extras = result?.images > 0 || artifact || watch || lesson;
+    const imagesUnder = result?.images > 0 && !imagesInside;
+    const answers =
+        call.name === "ask" && !result?.isError && Array.isArray(details?.answers)
+            ? details.answers
+            : null;
+    const extras = imagesUnder || artifact || watch || lesson || answers;
 
     return html`<div
         class=${`step ${open ? "open" : ""} ${settled ? "settled" : ""}`}
@@ -1060,12 +1496,13 @@ function ToolStep({
         ${
             extras &&
             html`<div class="step-extras" data-part="step-detail">
+                ${answers && html`<${AskAnswers} answers=${answers} />`}
                 ${
                     lesson &&
                     html`<${LessonCall} lessonId=${lesson} conversationId=${conversationId} />`
                 }
                 ${
-                    result?.images > 0 &&
+                    imagesUnder &&
                     html`<${EntryImages}
                         entryId=${result.id}
                         count=${result.images}
@@ -1124,6 +1561,7 @@ let revealing = { entryId: null, at: 0 };
 
 document.addEventListener("pocket:reveal", (event) => {
     revealing = { entryId: event.detail, at: Date.now() };
+    noteRevealed(event.detail);
 });
 /** When this page first saw a group that began before any of its entries was stored: the start of its clock. */
 const groupSeen = new Map();
@@ -1181,7 +1619,8 @@ function GroupTime({ id, start, end, live }) {
 /**
  * Pi's thinking and tool calls between two of its words, as one line: what they did, and how long they took. It opens
  * into a timeline, a line per call, each drawn again only when what it shows changes. Open while it is live or in the
- * newest turn, closed before, unless opened or closed by hand.
+ * newest turn, closed before, unless opened or closed by hand; Appearance's Keep activity folded starts every group
+ * closed.
  */
 function ActivityGroup({
     item,
@@ -1209,20 +1648,25 @@ function ActivityGroup({
         keep(wholeGroups, id, true);
     }
 
-    const chosen = openedGroups.get(id);
     const all = item.before.length === 0 ? item.steps : [...item.before, ...item.steps];
     // A thought alone is the group's own line, not a step under a line that says the same: it opens to its words,
     // which stay folded until asked for, as a thought on the timeline does.
     const lone = all.length === 1 && all[0].block.type === "thinking" ? all[0] : null;
     // Show thinking on: thoughts show their words once written.
     const reading = prefs().showThinking === true;
-    // A thought whose words have not come yet (`partial`, as a session opens) opens once they have.
-    const open =
-        !lone?.block.partial &&
-        (chosen ??
-            (lone
-                ? reading && !lone.streaming && Boolean(lone.block.text?.trim())
-                : live || newest));
+    const open = activityOpen({
+        chosen: openedGroups.get(id),
+        lone: lone && {
+            partial: lone.block.partial,
+            streaming: lone.streaming,
+            text: lone.block.text,
+        },
+        live,
+        newest,
+        reading,
+        // Appearance's Keep activity folded.
+        fold: prefs().foldActivity === true,
+    });
     // Calls that failed, said on the line too: folded, "edited 1" alone would read as done. A call someone denied did
     // not fail, nor a script stopped by a denial: its line says who denied it.
     const failed = all.filter((step) => {
@@ -1402,7 +1846,7 @@ function ActivityGroup({
 }
 
 /**
- * A page Pi showed in its reply (`artifact_inline`): its card once the call has published, between the words around
+ * A page Pi showed in its reply (`artifact` with `inline: true`): its card once the call has published, between the words around
  * it. Until then, and if the call failed, was denied, or stopped, its step as the timeline draws it, so the reason shows.
  */
 function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
@@ -1476,15 +1920,76 @@ function stepLive(step, results, slots, approvals, busy) {
     return status === "running" || status === "approval";
 }
 
-/**
- * A question for the person Pi works for, from an extension (`host.ask`): its fields, sent only by that person, and
- * declined by anyone who can steer. What is typed goes to the extension that asked, never to Pi or into the transcript.
- */
+function AskChoices({ field, chosen, busy, onChange }) {
+    const { picked, other } = chosen;
+
+    const pick = (label) => {
+        const on = picked.includes(label);
+        const next = field.multiple
+            ? on
+                ? picked.filter((each) => each !== label)
+                : [...picked, label]
+            : [label];
+
+        onChange({ picked: next, other: "" });
+    };
+
+    return html`<fieldset class="ask-choices" disabled=${busy}>
+        <legend class="ask-question">
+            ${field.header && html`<span class="ask-header">${field.header}</span>`}
+            <span>${field.label}</span>
+            ${field.multiple && html`<span class="ask-hint">Choose one or more</span>`}
+        </legend>
+        <div class="ask-options">
+            ${field.choices.map(
+                (choice) => html`<button
+                    type="button"
+                    class="ask-option"
+                    key=${choice.label}
+                    aria-pressed=${picked.includes(choice.label)}
+                    onClick=${() => pick(choice.label)}
+                >
+                    <span class="ask-option-label">${choice.label}</span>
+                    ${choice.description && html`<span class="ask-option-text">${choice.description}</span>`}
+                </button>`,
+            )}
+        </div>
+        ${
+            field.other &&
+            html`<input
+                class="ask-other"
+                type="text"
+                aria-label=${`Your own answer to: ${field.label}`}
+                placeholder=${field.placeholder ?? "Or type your own answer"}
+                value=${other}
+                onInput=${(event) => onChange({ picked: [], other: event.currentTarget.value })}
+            />`
+        }
+    </fieldset>`;
+}
+
+function choiceValue(field, { picked, other }) {
+    if (other.trim() !== "") {
+        return other;
+    }
+
+    return field.choices
+        .map((choice) => choice.label)
+        .filter((label) => picked.includes(label))
+        .join("\n");
+}
+
+/** Sent only by that person, and declined by anyone who can steer. Only the `ask` tool passes what is typed on to Pi. */
 function AskCard({ approval }) {
     const { me, users } = store.state;
     const form = approval.form;
     const [values, setValues] = useState(() =>
-        Object.fromEntries(form.fields.map((field) => [field.name, ""])),
+        Object.fromEntries(
+            form.fields.map((field) => [
+                field.name,
+                field.choices ? { picked: [], other: "" } : "",
+            ]),
+        ),
     );
     const [busy, setBusy] = useState(false);
     const owner = users?.find?.((each) => each.role === "owner")?.id;
@@ -1492,11 +1997,19 @@ function AskCard({ approval }) {
     const who =
         users?.find?.((each) => each.id === approval.requestedBy)?.name ??
         "the person Pi works for";
-    const ready = form.fields.every((field) => values[field.name] !== "");
+    const typed = Object.fromEntries(
+        form.fields.map((field) => [
+            field.name,
+            field.choices ? choiceValue(field, values[field.name]) : values[field.name],
+        ]),
+    );
+    const ready = form.fields.every((field) => typed[field.name] !== "");
+    // Only a card of plain fields hides what is typed from Pi: the `ask` tool's answers are for Pi.
+    const plain = form.fields.some((field) => !field.choices);
 
     const answer = (allow) => {
         setBusy(true);
-        attempt(() => actions.approve(approval.id, allow, allow ? values : undefined)).finally(() =>
+        attempt(() => actions.approve(approval.id, allow, allow ? typed : undefined)).finally(() =>
             setBusy(false),
         );
     };
@@ -1521,25 +2034,36 @@ function AskCard({ approval }) {
         </div>
         ${
             mine
-                ? html`${form.fields.map(
-                      (field) => html`<label class="ask-field" key=${field.name}>
-                          <span>${field.label}</span>
-                          <input
-                              type=${field.secret ? "password" : "text"}
-                              name=${field.name}
-                              value=${values[field.name]}
-                              placeholder=${field.placeholder ?? ""}
-                              autocomplete=${field.autocomplete ?? "off"}
-                              autocapitalize="off"
-                              spellcheck="false"
-                              disabled=${busy}
-                              onInput=${(event) =>
-                                  setValues({ ...values, [field.name]: event.currentTarget.value })}
-                          />
-                      </label>`,
+                ? html`${form.fields.map((field) =>
+                      field.choices
+                          ? html`<${AskChoices}
+                                key=${field.name}
+                                field=${field}
+                                chosen=${values[field.name]}
+                                busy=${busy}
+                                onChange=${(chosen) => setValues({ ...values, [field.name]: chosen })}
+                            />`
+                          : html`<label class="ask-field" key=${field.name}>
+                                <span>${field.label}</span>
+                                <input
+                                    type=${field.secret ? "password" : "text"}
+                                    name=${field.name}
+                                    value=${values[field.name]}
+                                    placeholder=${field.placeholder ?? ""}
+                                    autocomplete=${field.autocomplete ?? "off"}
+                                    autocapitalize="off"
+                                    spellcheck="false"
+                                    disabled=${busy}
+                                    onInput=${(event) =>
+                                        setValues({
+                                            ...values,
+                                            [field.name]: event.currentTarget.value,
+                                        })}
+                                />
+                            </label>`,
                   )}
                   ${
-                      form.fields.length > 0 &&
+                      plain &&
                       html`<div class="muted small">
                           What you type goes to the page or tool that asked. Pi does not see it.
                       </div>`
@@ -1561,6 +2085,20 @@ function AskCard({ approval }) {
             </div>`
         }
     </form>`;
+}
+
+function AskAnswers({ answers }) {
+    return html`<dl class="ask-answers">
+        ${answers.map(
+            (each, at) => html`<div class="ask-answer" key=${at}>
+                <dt>
+                    <span class="ask-header">${each.header}</span>
+                    <span>${each.question}</span>
+                </dt>
+                <dd>${each.answer}</dd>
+            </div>`,
+        )}
+    </dl>`;
 }
 
 /** What someone did with a call that waited for them: an ask (`host.ask`) is answered or declined. */
@@ -2122,6 +2660,16 @@ function rowDeps(entry) {
         if (entry.text.startsWith("[subagent ")) {
             deps.push(agentsKey(view));
         }
+
+        // A linked session's message names its session: it shows again when the session's name or access changes.
+        const address = /^\[via linked session (\S+)\] /.exec(entry.text)?.[1];
+
+        if (address !== undefined) {
+            const id = view.linkedPeers?.[address];
+            const session = store.state.sessions.find((each) => each.id === id);
+
+            deps.push(id, session === undefined ? undefined : (session.title ?? ""));
+        }
     }
 
     return deps;
@@ -2300,6 +2848,8 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
             conversationId,
             after,
             prefs().showThinking === true,
+            // Keep activity folded: a group drawn before the switch moved opens or folds with it.
+            prefs().foldActivity === true,
         ];
 
         // The calls before the rows shown count in the group's line: their results, for its time.
@@ -2689,6 +3239,16 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
             >Retry now</button>`
         }
         ${
+            limit &&
+            !waiting &&
+            canSteer() &&
+            html`<button
+                class="live-retry live-stop"
+                data-part="live-stop"
+                onClick=${() => attempt(actions.abort)}
+            >Stop</button>`
+        }
+        ${
             retry &&
             !waiting &&
             html`<span
@@ -2718,24 +3278,180 @@ function windowStart(rows, from) {
     return index === -1 ? Math.max(0, rows.length - TRANSCRIPT_ROWS) : index;
 }
 
+/**
+ * How long after a kept session shows again (`keptView` in store.js) what comes for it is its catch-up: what the server
+ * sends after the switch, which glides in at the bottom, or arrives below the reader without moving what they read.
+ */
+const CATCH_UP_MS = 3000;
+/** How long a session held for its changes (Appearance's Wait for updates) waits for them before it shows anyway. */
+const HOLD_MS = 2500;
+/**
+ * The catch-up's glide, by how far it goes: a line or two `GLIDE_IN_MS`, a screen or more `GLIDE_LONG_MS`, and from no
+ * further than 2 screens down. Long enough to follow by eye: a quicker one reads as a jump. Its rows rise in as long
+ * (`.transcript.catching .enter`), so the two land together.
+ */
+const GLIDE_IN_MS = 700;
+const GLIDE_LONG_MS = 1000;
+/**
+ * The glide's curve: it sets off gently and settles slowly, so the eye follows it the whole way. The theme's `--ease-out`
+ * (easeOutQuint) does most of its distance in the first tenth: at this length, a jump and then a crawl.
+ */
+const GLIDE_EASING = "cubic-bezier(0.45, 0, 0.15, 1)";
+
+/** How far a catch-up's glide has still to go: the column's offset down, which the scroller counts in its height. */
+function glideLeft(glide, column) {
+    return glide?.playState === "running" && column
+        ? new DOMMatrixReadOnly(getComputedStyle(column).transform).m42
+        : 0;
+}
+
+/**
+ * The scroll position at the bottom. With a catch-up's glide running, the bottom the column has without its offset: from
+ * where the glide started (`base`), with what the column grew and the scroller shrank since. The scroller's height
+ * counts the offset, so its end is that much further down.
+ */
+function endOf(element, column, glide, base) {
+    if (glide?.playState !== "running" || base === null || column === null) {
+        return element.scrollHeight - element.clientHeight;
+    }
+
+    return base.top + (column.offsetHeight - base.height) - (element.clientHeight - base.client);
+}
+
+/** What the column holds that is not a row of the session: it comes and goes, so nothing is measured by it. */
+const passing = (element) =>
+    element.matches(".live-line, .live-thought, .approval, .shell-row.pending, .divider");
+
+/**
+ * Where the row the reader looks at is, before a draw changes the rows: at the bottom, the last row's lower edge; else
+ * the first row in view, its top. In the scroller's layout, not as a glide moves it: by the column's own place.
+ */
+function anchorOf(scroller, column, bottom) {
+    if (!scroller || !column) {
+        return null;
+    }
+
+    const box = column.getBoundingClientRect();
+    const at = (y) => column.offsetTop + (y - box.top) - scroller.scrollTop;
+    const rows = [...column.children];
+
+    if (bottom) {
+        const last = rows.findLast((row) => !passing(row));
+
+        // The rows there were, too: if the draw replaces the last one, what is new is what was not there.
+        return last
+            ? { row: last, bottom, at: at(last.getBoundingClientRect().bottom), had: new Set(rows) }
+            : null;
+    }
+
+    for (const row of rows) {
+        const { top, bottom: end } = row.getBoundingClientRect();
+
+        if (!passing(row) && at(end) > 1) {
+            return { row, bottom, at: at(top) };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * How tall the rows at the end of the column are that were not there when `anchorOf` measured (`had`): what the draw
+ * added below, when the row measured from is gone (a group drawn again, the rows above folded).
+ */
+function addedBelow(column, anchor) {
+    let height = 0;
+
+    for (const row of [...column.children].reverse()) {
+        if (anchor.had.has(row)) {
+            break;
+        }
+
+        if (!passing(row)) {
+            height += row.getBoundingClientRect().height;
+        }
+    }
+
+    return height;
+}
+
+/** The same row's place now, as `anchorOf` measured it, or null when it is gone. */
+function placeOf(scroller, column, anchor) {
+    if (!anchor.row.isConnected) {
+        return null;
+    }
+
+    const box = column.getBoundingClientRect();
+    const row = anchor.row.getBoundingClientRect();
+
+    return (
+        column.offsetTop + ((anchor.bottom ? row.bottom : row.top) - box.top) - scroller.scrollTop
+    );
+}
+
 export function Transcript() {
-    const { view, missing, history, transcriptFrom } = store.state;
+    const { view, missing, history, transcriptFrom, holding } = store.state;
+    // A kept session that changed while the tab was away, behind the loading screen until its changes come.
+    const held = holding !== null && holding === store.state.conversationId;
     const scroller = useRef(null);
     /** The column of rows in the scroller, whose growth keeps it at the bottom (below). */
     const column = useRef(null);
-    const stick = useRef(true);
+    // A kept session opens where the reader was in it (`transcriptPlace`), or at the bottom.
+    const stick = useRef(store.state.transcriptPlace === null);
     /** A jump to a message is under way: the reader has not scrolled or tapped since. */
     const jumping = useRef(false);
     /** Distance from the bottom to restore after rows are added above, so the reader stays in place. */
-    const keep = useRef(null);
+    const keep = useRef(store.state.transcriptPlace?.keep ?? null);
     const counted = useRef(0);
-    const [showJump, setShowJump] = useState(false);
+    const [showJump, setShowJump] = useState(() => store.state.transcriptPlace !== null);
+    // A session read from the device after the loading screen drew: where the reader was comes with its first view.
+    const placed = useRef(view.conversation != null);
+
+    if (!placed.current && view.conversation != null) {
+        placed.current = true;
+        stick.current = store.state.transcriptPlace === null;
+        keep.current = store.state.transcriptPlace?.keep ?? null;
+    }
+
     // Opened by a route on a phone, the scroller slides in with it: the column does not rise in as well, unless it comes
     // after the slide (a slow connection). Chosen as the column first draws, so a draw after does not start it.
     const entrance = useRef(null);
 
-    if (entrance.current === null && view.conversation && !missing) {
+    if (entrance.current === null && view.conversation && !missing && !held) {
         entrance.current = routeSliding() ? "" : "rising";
+    }
+
+    // When a kept session showed again, drawn from what the tab kept: what comes for it until `CATCH_UP_MS` after is its
+    // catch-up. 0 for a session that opened from the server's view (one held for its changes too).
+    const keptAt = useRef(null);
+
+    keptAt.current ??= view.conversation && !held ? performance.now() : 0;
+    const catching = () => keptAt.current > 0 && performance.now() - keptAt.current < CATCH_UP_MS;
+    /** The row the reader looks at, as this draw began, while the session catches up (`anchorOf`). */
+    const anchor = useRef(null);
+    /** The catch-up's glide that runs, if one does, and where the scroller and the column were as it started. */
+    const glide = useRef(null);
+    const glideBase = useRef(null);
+
+    /** Down to the bottom, the one without a glide's offset (`endOf`). */
+    const toEnd = (element) => {
+        element.scrollTop = endOf(element, column.current, glide.current, glideBase.current);
+    };
+
+    /**
+     * Note where the reader is, for the tab to open this session there again (`transcriptPlace`, kept with its view):
+     * null at the bottom. Without a draw, and only while this session is the one shown, not as the tab leaves it.
+     */
+    function place(element) {
+        if (store.state.conversationId !== view.conversation?.id) {
+            return;
+        }
+
+        const keepNow = stick.current ? null : element.scrollHeight - element.scrollTop;
+
+        if ((store.state.transcriptPlace?.keep ?? null) !== keepNow) {
+            store.note({ transcriptPlace: keepNow === null ? null : { keep: keepNow } });
+        }
     }
 
     // Keep the snapshot's rows stable across unrelated UI updates, including scrolling the thought reading area. Only
@@ -2772,6 +3488,16 @@ export function Transcript() {
         [view.live.tools],
     );
     const [fetching, setFetching] = useState(false);
+    // Rows of the catch-up about to be drawn: where the reader looks, before Preact changes the page (it does after this
+    // function returns), to keep it there after.
+    const drawnRows = useRef(rows);
+
+    if (rows !== drawnRows.current) {
+        drawnRows.current = rows;
+        anchor.current = catching()
+            ? anchorOf(scroller.current, column.current, stick.current)
+            : null;
+    }
 
     // After a draw that can change the rows, not after every change to the store (each draws the app): to the bottom, or
     // back to where the reader was, before the draw shows. What grows between such draws is the ResizeObserver's below.
@@ -2801,10 +3527,14 @@ export function Transcript() {
         if (keep.current !== null) {
             element.scrollTop = element.scrollHeight - keep.current;
             keep.current = null;
+            // A restore to the very top fires no scroll event: the button back down shows from here.
+            setShowJump(element.scrollHeight - element.clientHeight - element.scrollTop >= 60);
         } else if (stick.current) {
-            element.scrollTop = element.scrollHeight;
+            toEnd(element);
         }
 
+        catchUp(element);
+        place(element);
         counted.current = rows.length;
 
         if (rows.length === 0) {
@@ -2821,9 +3551,95 @@ export function Transcript() {
         }
     }, [view, history, start]);
 
-    // Once the rows a session opens with are on screen, rows that mount later are new and animate in.
+    /**
+     * The catch-up's rows are drawn and the scroller is where it goes (above): what the reader looked at moves no more
+     * than it has to. At the bottom, the new rows glide up into view from where the last one was; scrolled up, the row
+     * in view stays where it was, and what came arrives below.
+     */
+    function catchUp(element) {
+        const before = anchor.current;
+
+        anchor.current = null;
+
+        if (before === null || column.current === null) {
+            return;
+        }
+
+        const placed = placeOf(element, column.current, before);
+
+        if (placed === null && !before.bottom) {
+            return;
+        }
+
+        // The row measured from was drawn again (or folded away): the glide goes by what came below, from where the end
+        // of the column was. Without this a large catch-up jumped there in one frame.
+        const now = placed ?? before.at - addedBelow(column.current, before);
+
+        if (!before.bottom) {
+            // A browser that keeps the row in place by itself (scroll anchoring) has: then this moves nothing.
+            if (!stick.current && Math.abs(now - before.at) >= 1) {
+                element.scrollTop += now - before.at;
+            }
+
+            return;
+        }
+
+        // Up from where it was, by what came below it: the column starts that far down, and glides up into place. What
+        // a glide still running had left to go goes on with this one.
+        // A draw that moved nothing (the whole entries for the light ones the session showed with): the glide goes on.
+        if (before.at - now < 1 && glide.current?.playState === "running") {
+            return;
+        }
+
+        const from = before.at - now + glideLeft(glide.current, column.current);
+
+        glide.current?.cancel();
+        glide.current = null;
+        glideBase.current = null;
+
+        if (!stick.current || from < 1 || motionLevel() === "reduced") {
+            return;
+        }
+
+        // Longer for more: from a line or two to a screen, then as long as it gets.
+        const screens = Math.min(1, from / Math.max(1, element.clientHeight));
+        const running = column.current.animate(
+            [
+                { transform: `translateY(${Math.min(from, 2 * element.clientHeight)}px)` },
+                { transform: "none" },
+            ],
+            {
+                duration: Math.round(GLIDE_IN_MS + (GLIDE_LONG_MS - GLIDE_IN_MS) * screens),
+                easing: GLIDE_EASING,
+            },
+        );
+
+        glide.current = running;
+        glideBase.current = {
+            top: element.scrollTop,
+            height: column.current.offsetHeight,
+            client: element.clientHeight,
+        };
+        // Landed: at the bottom, with what grew while it glided.
+        running.finished.then(
+            () => {
+                if (glide.current === running) {
+                    glide.current = null;
+                    glideBase.current = null;
+
+                    if (stick.current) {
+                        element.scrollTop = element.scrollHeight;
+                    }
+                }
+            },
+            () => {},
+        );
+    }
+
+    // Once the rows a session opens with are on screen, rows that mount later are new and animate in. A kept session's
+    // rows are on screen as it shows: what comes after, its catch-up first, animates in.
     const conversationId = view.conversation?.id;
-    const hasRows = rows.length > 0;
+    const hasRows = rows.length > 0 && !held;
 
     useEffect(() => {
         settledFor = null;
@@ -2832,10 +3648,33 @@ export function Transcript() {
             return;
         }
 
+        if (keptAt.current > 0) {
+            settledFor = conversationId;
+
+            return;
+        }
+
         const timer = setTimeout(() => (settledFor = conversationId), hasRows ? 350 : 0);
 
         return () => clearTimeout(timer);
     }, [conversationId, hasRows]);
+
+    // Held for its changes, a session shows anyway if they do not come soon: the tab's copy, as without the setting.
+    useEffect(() => {
+        if (!held) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            if (store.state.holding === holding) {
+                // Its changes still to come are its catch-up, as for a session that was not held.
+                keptAt.current = performance.now();
+                store.set({ holding: null });
+            }
+        }, HOLD_MS);
+
+        return () => clearTimeout(timer);
+    }, [held, holding]);
 
     // The conversation gets shorter or taller as what is above the message box changes (the queue, the subagents' list,
     // a message box that grows), and its rows grow between draws (a card that draws late, a font that loads, a line
@@ -2883,7 +3722,10 @@ export function Transcript() {
             changes.every((change) => change.target !== element);
         const observer = new ResizeObserver((changes) => {
             if (stick.current && !gliding() && !opened(changes)) {
-                element.scrollTop = element.scrollHeight;
+                toEnd(element);
+            } else if (!stick.current) {
+                // What grew below the reader: they are that much further from the bottom (`transcriptPlace`).
+                place(element);
             }
         });
 
@@ -2948,7 +3790,7 @@ export function Transcript() {
 
         const onLoad = (event) => {
             if (event.target?.tagName === "IMG" && stick.current) {
-                element.scrollTop = element.scrollHeight;
+                toEnd(element);
             }
         };
 
@@ -2975,9 +3817,13 @@ export function Transcript() {
 
     const onScroll = () => {
         const element = scroller.current;
-        const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 60;
+        // Not what a catch-up's glide has still to go: the reader is at the bottom it glides to.
+        const atBottom =
+            endOf(element, column.current, glide.current, glideBase.current) - element.scrollTop <
+            60;
 
         stick.current = atBottom && !jumping.current;
+        place(element);
 
         if (showJump === atBottom) {
             setShowJump(!atBottom);
@@ -2993,7 +3839,7 @@ export function Transcript() {
         </main>`;
     }
 
-    if (!view.conversation) {
+    if (!view.conversation || held) {
         const { connection, sessions, conversationId } = store.state;
         const title = sessions.find((session) => session.id === conversationId)?.title;
         const caption =
@@ -3067,7 +3913,11 @@ export function Transcript() {
         conversation.forkedFrom && sessions.find((each) => each.id === conversation.forkedFrom.id);
 
     return html`<main class="scroller" ref=${scroller} onScroll=${onScroll}>
-        <div class=${`transcript ${entrance.current}`} data-part="transcript" ref=${column}>
+        <div
+            class=${`transcript ${entrance.current} ${catching() ? "catching" : ""}`}
+            data-part="transcript"
+            ref=${column}
+        >
             <${LinkedSessions} />
             ${
                 conversation.forkedFrom &&

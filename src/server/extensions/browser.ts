@@ -6,7 +6,7 @@
  * its address comes back when it opens again, but not what was typed or clicked on it.
  */
 import { awaitWithContext } from "@earendil-works/chord/context";
-import { type ImageContent, type TextContent, Type } from "@earendil-works/pi-ai";
+import { type ImageContent, StringEnum, type TextContent, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
 import { displayUrl, normalizeUrl } from "../browser/urls.ts";
@@ -48,11 +48,9 @@ const CHANGING = new Set<Action>([
 ]);
 const MAX_TEXT = 20_000;
 
-const GUIDE = `You have a browser tool: a real Chromium on this machine. The people in this conversation see the same page live in the app's Browser panel and can click and type in it too, so it is how you show and test web work: local dev servers (http://localhost:5173), HTML files on this machine (give their path), or any site.
-- Start a dev server in the background with bash first, for example \`nohup npm run dev > /tmp/dev.log 2>&1 &\`, then navigate to it.
-- snapshot lists the page's text and its controls with refs like [e12]; click, type, select, and hover take a ref (or a CSS selector, or the visible label). Refs last until the next snapshot.
-- screenshot shows you how the page looks: use it to check layout and styling. viewport switches between mobile, tablet, and desktop sizes.
-- After a change, check console for errors. evaluate runs JavaScript in the page.`;
+const GUIDE = `The browser tool is a real Chromium on this machine. The people in this conversation see its page live in the Browser panel and can use it too: show and test web work there (local dev servers, HTML files on this machine, any site).
+- Start a dev server in the background with bash first (\`nohup npm run dev > /tmp/dev.log 2>&1 &\`), then navigate to it.
+- snapshot gives refs like [e12] for click, type, select, and hover, valid until the next snapshot. screenshot shows the layout; viewport changes the size. After a change, check console for errors.`;
 
 function clip(text: string, max = MAX_TEXT): string {
     return text.length > max
@@ -83,13 +81,10 @@ export default function createBrowser(host: PocketHost) {
         description:
             "Use a real web browser (Chromium on this machine) that the people in this conversation watch live. Open pages (local dev servers, files, sites), read them as a snapshot with element refs, click, type, take screenshots you can see, read console errors, and run JavaScript in the page.",
         parameters: Type.Object({
-            action: Type.Union(
-                ACTIONS.map((action) => Type.Literal(action)),
-                {
-                    description:
-                        "navigate (url), snapshot, screenshot, click/hover (ref, selector, label, or x and y), type (text into ref/selector/label, or the focused element), press (key), select (value in a select element), scroll (to ref/selector/label, or by dy), wait (text, selector, or timeoutMs), evaluate (script), console, back, forward, reload, viewport.",
-                },
-            ),
+            action: StringEnum(ACTIONS, {
+                description:
+                    "navigate (url), snapshot, screenshot, click/hover (ref, selector, label, or x and y), type (text into ref/selector/label, or the focused element), press (key), select (value in a select element), scroll (to ref/selector/label, or by dy), wait (text, selector, or timeoutMs), evaluate (script), console, back, forward, reload, viewport.",
+            }),
             url: Type.Optional(
                 Type.String({
                     description:

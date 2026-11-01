@@ -17,7 +17,7 @@ The notes are for people who run Pi Pocket, and some of them read on a phone. Ea
 - **Credit at the end of the bullet**, in parentheses: `(#139, by @vitalNohj)`. For an issue that a person reported: `(#131, reported by @vitalNohj)`. Use "Fixes #N" where the release pull request should close the issue.
 - **Leave out empty sections.** A small release can be a few bullets and the update steps.
 - **Put anything one-way or risky in a `[!WARNING]` alert** at the top. Put needed steps (`npm install`, a restart) in a `[!IMPORTANT]` alert.
-- **The app reads the warning.** Menu → Update Pi Pocket asks the owner to confirm a release whose notes have a `[!WARNING]` or `[!CAUTION]` alert, never installs it by itself, and does not go back from it by itself. So put every step that a person must do by hand, or that cannot be undone, in that alert. Updates run `npm ci` and restart by themselves.
+- **The app reads the warning.** Menu → Update Pi Pocket asks the owner to confirm a release whose notes have a `[!WARNING]` or `[!CAUTION]` alert, never installs it by itself, and does not go back from it by itself. So put every step that a person must do by hand, or that cannot be undone, in that alert. Updates run `npm ci` (a git checkout) or `npm install -g` (a global npm install) and restart by themselves. A release must be on the npm registry's `latest` tag for an npm install to take it (a beta is on `beta`, for people who turn on beta updates), and the notes come from the GitHub release of the same version. [releases.md](releases.md) tells when releases and betas come out.
 - **Keep the review story short and folded** in a `<details>` block. Always say what was not tested.
 
 ## The template

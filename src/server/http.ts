@@ -3,18 +3,20 @@
  * modules and public pages, and the web app's own files. Each part lives in `http/`; this file routes a request to it and turns what it
  * throws into an answer.
  */
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, normalize, sep } from "node:path";
 import { Auth } from "./auth.ts";
 import { describe, HttpError } from "./errors.ts";
 import { createApi } from "./http/api.ts";
 import { artifact } from "./http/artifacts.ts";
+import { publicArtifactBundle } from "./http/artifact-assets.ts";
+import { appleTouchIcon, iconAddress, iconRoute, manifestFor } from "./http/icon-route.ts";
 import { extensionFile } from "./http/extension-routes.ts";
 import { hookRoute } from "./http/hook-routes.ts";
 import { linkRoute } from "./http/link-routes.ts";
 import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
-import { publicArtifact } from "./http/public.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
 
@@ -49,11 +51,19 @@ export function createHandler(options: HttpOptions) {
             }
 
             // An artifact published to anyone with its address: the token is the whole of the access, no sign-in.
-            // Exactly `/pub/<token>`: nothing under it is a page.
+            // `/pub/<token>` is the page, and `/pub/<token>/<name>` one of its bundle's files (`http/artifact-assets.ts`).
             if (parts[0] === "pub") {
-                const token = parts.length === 2 ? parts[1] : undefined;
+                const token = parts.length >= 2 ? parts[1] : undefined;
+                const name = parts.slice(2).join("/");
 
-                return await publicArtifact(app, request, response, token, url.searchParams);
+                return await publicArtifactBundle(
+                    app,
+                    request,
+                    response,
+                    token,
+                    name,
+                    url.searchParams,
+                );
             }
 
             // A page an extension module shows to anyone with its link: the token is the whole of the access, no sign-in.
@@ -93,6 +103,43 @@ export function createHandler(options: HttpOptions) {
                 );
             }
 
+            // The app icon in chosen colors, for the home screen (`web/app-icon.js`): a fetch by the phone, no sign-in.
+            if (parts.length === 1 && parts[0] === "app-icon.png") {
+                return iconRoute(request, response, url);
+            }
+
+            // The icon a phone fetches itself, in the owner's colors (`icon-store.ts`).
+            if (
+                parts.length === 1 &&
+                parts[0] === "apple-touch-icon.png" &&
+                (request.method === "GET" || request.method === "HEAD") &&
+                appleTouchIcon(request, response, app.dataDir)
+            ) {
+                return;
+            }
+
+            // The manifest, with the icons of the colors this browser chose when it has chosen (`http/icon-route.ts`).
+            if (
+                parts.length === 1 &&
+                parts[0] === "manifest.webmanifest" &&
+                request.method === "GET"
+            ) {
+                const body = manifestFor(
+                    request,
+                    readFileSync(join(WEB, "manifest.webmanifest"), "utf8"),
+                    app.dataDir,
+                );
+
+                if (body !== null) {
+                    response.writeHead(200, {
+                        "content-type": "application/manifest+json",
+                        "cache-control": "no-cache",
+                    });
+
+                    return void response.end(body);
+                }
+            }
+
             if (parts[0] === "login" && (request.method === "GET" || request.method === "POST")) {
                 return await login(auth, request, response, url);
             }
@@ -109,7 +156,7 @@ export function createHandler(options: HttpOptions) {
 
             // The web app: index.html for app routes, files from web/ otherwise.
             if (parts.length === 0 || parts[0] === "s") {
-                return serveApp(response);
+                return serveApp(response, iconAddress(request, app.dataDir));
             }
 
             const file = normalize(join(WEB, ...parts));
@@ -119,7 +166,7 @@ export function createHandler(options: HttpOptions) {
             }
 
             if (file === join(WEB, "index.html")) {
-                return serveApp(response);
+                return serveApp(response, iconAddress(request, app.dataDir));
             }
 
             return await serveFile(request, response, file);

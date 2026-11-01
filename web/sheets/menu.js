@@ -21,6 +21,7 @@ import {
     collab,
     navigate,
     notify,
+    openRunning,
     openSheet,
     scoped,
     setUnread,
@@ -553,7 +554,8 @@ export function MenuSheet({ places = true }) {
             ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
             ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
             ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
-            ${item("Running now", () => openSheet({ type: "running" }), "everything Pi is doing")}
+            ${item("Running now", openRunning, "everything Pi is doing")}
+            ${view.conversation && item("Background", () => openSheet({ type: "background" }), "what commands print as they run")}
             ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
             ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub, other services")}
             ${me?.role === "owner" && item("Providers", () => openSheet({ type: "providers" }))}

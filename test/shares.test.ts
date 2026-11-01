@@ -308,3 +308,48 @@ test("a share whose artifact is gone, or which names a version that never was, s
     assert.deepEqual(await app.shares.list(id, owner(app)), []);
     assert.ok(root.length > 0);
 });
+
+test("a published bundle serves its files at the share's address, follows the newest version, and closes with it", async () => {
+    const id = await publish("<p>first</p>");
+    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    let call = 0;
+    const write = (content: string, css: string) =>
+        tool.execute(
+            {
+                id: "demo",
+                title: "Demo",
+                content,
+                assets: [{ name: "css/site.css", content: css }],
+            } as never,
+            {
+                conversationId: id,
+                taskId: 6000 + call,
+                callId: `bundle-${call++}`,
+                agent: async () => ({ cwd: work }),
+                snapshot: app.harness.snapshot.bind(app.harness),
+                commit: app.harness.commit.bind(app.harness),
+            } as never,
+            context,
+        );
+
+    await write("<p>two</p>", "p { color: red; }");
+    const follow = await app.shares.create(id, owner(app), { id: "demo", hours: 24 });
+    const pinned = await app.shares.create(id, owner(app), { id: "demo", version: 2 });
+    const asset = await get(`${follow.path}/css/site.css`);
+
+    assert.equal(asset.status, 200);
+    assert.equal(asset.body, "p { color: red; }");
+    assert.match(asset.type, /^text\/css/);
+
+    // A newer version: the share that follows serves its files; the pinned one keeps its own.
+    await write("<p>three</p>", "p { color: blue; }");
+    assert.equal((await get(`${follow.path}/css/site.css`)).body, "p { color: blue; }");
+    assert.equal((await get(`${pinned.path}/css/site.css`)).body, "p { color: red; }");
+    assert.equal((await get(`${follow.path}/css/missing.css`)).status, 404);
+
+    // Ended or expired: its files answer nothing, as its page does.
+    await app.shares.revoke(owner(app), id, pinned.token);
+    assert.equal((await get(`${pinned.path}/css/site.css`)).status, 404);
+    now += 24 * 60 * 60 * 1000 + 1;
+    assert.equal((await get(`${follow.path}/css/site.css`)).status, 404);
+});

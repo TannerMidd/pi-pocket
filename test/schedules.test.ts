@@ -4,6 +4,7 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -292,6 +293,8 @@ test("a scheduled message goes out at its time, also after a restart, once; a re
 test("Pi schedules, lists, and cancels its own messages with its tool", async () => {
     const id = await newSession(app);
 
+    await loadTools(app, id, "schedule");
+
     await say(id, "remind yourself");
     const [mine] = await items(id);
 
@@ -304,6 +307,8 @@ test("Pi schedules, lists, and cancels its own messages with its tool", async ()
 
 test("a schedule Pi sets up is the work of whom it worked for, and is cancelled once they may not steer", async () => {
     const id = await newSession(app);
+
+    await loadTools(app, id, "schedule");
     const hal = app.config.addUser("Hal", "guest").user;
     const ida = app.config.addUser("Ida", "guest").user;
 
@@ -406,4 +411,15 @@ test("the limits in force bound what a session can schedule", async () => {
     for (const each of await items(id)) {
         await app.schedules.cancel(id, each.id);
     }
+});
+
+test("archiving a session says how many repeating schedules keep running there", async () => {
+    const id = await newSession(app);
+
+    await app.commands.schedule(id, owner(app), { when: "in 10m once", zone: "UTC" });
+    await app.commands.schedule(id, owner(app), { when: "every 20m ping", zone: "UTC" });
+    assert.deepEqual(await app.commands.updateSession(id, owner(app), { archived: true }), {
+        repeating: 1,
+    });
+    assert.equal((await items(id)).length, 2, "archiving cancels nothing");
 });

@@ -282,8 +282,8 @@ function sendScreen() {
     );
 }
 
-// Each connection to the server starts without tiles (a session switch reconnects, as does a restart): say again
-// which are on screen.
+// Each connection to the server starts without tiles (a reconnect or a restart; a session switch keeps the connection):
+// say again which are on screen.
 store.subscribe((state) => {
     if (state.streamId !== lastStream) {
         lastStream = state.streamId;
@@ -457,6 +457,14 @@ function PeekLine({ line }) {
                 <span class="peek-mark">${">_"}</span>
                 <span class="peek-text">${line.command}${" "}<${Status} status=${line.status} /></span>
             </div>`;
+        case "presented":
+            // An input an extension presents: its label and summary, as the transcript's folded line.
+            return html`<div class="peek-line presented">
+                <span class="peek-mark">›</span>
+                <span class="peek-text">
+                    <b>${line.label}</b>${line.summary && html` · ${line.summary}`}
+                </span>
+            </div>`;
         case "note":
             return html`<div class="peek-line faint">
                 <span class="peek-mark">⑂</span>
@@ -479,7 +487,7 @@ function PeekLine({ line }) {
  * Whether a call's command is short enough to show whole on its tile: only then may it be allowed from there. Shown
  * whole, it is never clamped; the tile also measures that it fits (`PeekTile`), as wide characters take more room.
  */
-const wholeOnTile = (approval) =>
+export const wholeOnTile = (approval) =>
     approval.subject.length <= ALLOW_LENGTH && !/[\r\n]/.test(approval.subject);
 
 /** The call a session waits on, in full when it is short, and why the guard asks. */
@@ -492,7 +500,12 @@ function PeekAsk({ approval, compact, who }) {
         <div class=${`peek-ask-what mono ${wholeOnTile(approval) ? "whole" : ""}`}>
             ${approval.subject}
         </div>
-        ${!compact && approval.reason && html`<div class="peek-ask-why">${approval.reason}</div>`}
+        ${
+            // A question (a form) is in its reason, its title alone says little: a compact tile shows it too.
+            (!compact || approval.form) &&
+            approval.reason &&
+            html`<div class="peek-ask-why">${approval.reason}</div>`
+        }
     </div>`;
 }
 
@@ -625,7 +638,7 @@ function AgentRows({ agents, compact }) {
                 title="See them all on the subagents board"
                 onClick=${() =>
                     store.set({
-                        board: true,
+                        board: "subagents",
                         drawer: false,
                         page: null,
                         boardFocus: more[0].conversationId,

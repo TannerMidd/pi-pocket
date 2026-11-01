@@ -60,6 +60,13 @@ export function levelAtMost(
         .find((each) => supported.includes(each));
 }
 
+/** The level a model thinks at when `level` is asked: `level` itself, else its nearest lower one, else its lowest. */
+export function levelFor(model: Model<Api>, level: ModelThinkingLevel): ModelThinkingLevel {
+    const supported = model.reasoning ? getSupportedThinkingLevels(model) : ["off"];
+
+    return levelAtMost(model, level) ?? THINKING_LEVELS.find((each) => supported.includes(each))!;
+}
+
 /** Whether a model thinks, and at which levels, and whether it takes images. */
 function capabilities(model: Model<Api>) {
     return {

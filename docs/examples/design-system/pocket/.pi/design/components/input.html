@@ -1,0 +1,156 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Input",
+        "description": "A single-line text field with a label and a hint. The border reaches 3:1 on every ground, so the field is easy to find.",
+        "states": ["default", "hover", "focus", "error", "disabled"],
+        "usage": {
+            "do": [
+                "Put the label above the field, never inside it.",
+                "Say what is wrong and how to fix it in the hint.",
+                "Use a 16 px font on touch screens, so iOS does not zoom."
+            ],
+            "dont": [
+                "Do not use the placeholder as the label.",
+                "Do not show an error before the person leaves the field.",
+                "Do not tell with color alone: keep the hint text."
+            ]
+        },
+        "tokens": [
+            "border.width.hairline",
+            "border.width.thick",
+            "color.danger.default",
+            "color.text.disabled",
+            "color.text.muted",
+            "color.text.primary",
+            "font.family.mono",
+            "font.family.sans",
+            "font.leading.snug",
+            "font.size.lg",
+            "font.size.sm",
+            "font.size.xs",
+            "font.weight.medium",
+            "input.bg",
+            "input.bg-disabled",
+            "input.border",
+            "input.border-error",
+            "input.border-focus",
+            "input.border-hover",
+            "input.fg",
+            "input.height",
+            "input.padding-x",
+            "input.placeholder",
+            "input.radius",
+            "motion.duration.hover",
+            "motion.ease.standard",
+            "shadow.focus-ring",
+            "size.tap",
+            "space.1"
+        ]
+    }
+</script>
+<style>
+    .pk-field {
+        display: grid;
+        gap: var(--space-1);
+        max-width: 320px;
+        font-family: var(--font-family-sans);
+    }
+
+    .pk-field__label {
+        color: var(--color-text-primary);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        line-height: var(--font-leading-snug);
+    }
+
+    .pk-field__hint {
+        color: var(--color-text-muted);
+        font-size: var(--font-size-xs);
+        line-height: var(--font-leading-snug);
+    }
+
+    .pk-input {
+        width: 100%;
+        min-height: var(--input-height);
+        padding: 0 var(--input-padding-x);
+        border: var(--border-width-hairline) solid var(--input-border);
+        border-radius: var(--input-radius);
+        background: var(--input-bg);
+        color: var(--input-fg);
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-sm);
+        transition: border-color var(--motion-duration-hover) var(--motion-ease-standard);
+    }
+
+    .pk-input::placeholder {
+        color: var(--input-placeholder);
+    }
+
+    .pk-input:hover,
+    .pk-input.is-hover {
+        border-color: var(--input-border-hover);
+    }
+
+    .pk-input:focus-visible,
+    .pk-input.is-focus {
+        border-color: var(--input-border-focus);
+        outline: var(--border-width-thick) solid transparent;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    .pk-input[aria-invalid="true"] {
+        border-color: var(--input-border-error);
+    }
+
+    .pk-input:disabled {
+        background: var(--input-bg-disabled);
+        color: var(--color-text-disabled);
+        cursor: not-allowed;
+    }
+
+    .pk-field__hint--error {
+        color: var(--color-danger-default);
+    }
+
+    @media (pointer: coarse) {
+        .pk-input {
+            min-height: var(--size-tap);
+            font-size: var(--font-size-lg);
+        }
+    }
+</style>
+<template data-state="default">
+    <label class="pk-field">
+        <span class="pk-field__label">Branch name</span>
+        <input class="pk-input" value="feat/design-system" />
+        <span class="pk-field__hint">Lowercase, with slashes.</span>
+    </label>
+</template>
+<template data-state="hover">
+    <label class="pk-field">
+        <span class="pk-field__label">Branch name</span>
+        <input class="pk-input is-hover" value="feat/design-system" />
+        <span class="pk-field__hint">Lowercase, with slashes.</span>
+    </label>
+</template>
+<template data-state="focus">
+    <label class="pk-field">
+        <span class="pk-field__label">Branch name</span>
+        <input class="pk-input is-focus" value="feat/design-system" />
+        <span class="pk-field__hint">Lowercase, with slashes.</span>
+    </label>
+</template>
+<template data-state="error">
+    <label class="pk-field">
+        <span class="pk-field__label">Branch name</span>
+        <input class="pk-input" value="feat design system" aria-invalid="true" />
+        <span class="pk-field__hint pk-field__hint--error">A branch name cannot have spaces.</span>
+    </label>
+</template>
+<template data-state="disabled">
+    <label class="pk-field">
+        <span class="pk-field__label">Branch name</span>
+        <input class="pk-input" value="main" disabled />
+        <span class="pk-field__hint">The default branch is locked.</span>
+    </label>
+</template>

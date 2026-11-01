@@ -30,9 +30,9 @@ after(async () => {
     cleanUp();
 });
 
-const call = async (who: string, path: string, body?: unknown) => {
+const call = async (who: string, path: string, body?: unknown, method?: string) => {
     const response = await fetch(`${base}${path}`, {
-        method: body === undefined ? "GET" : "POST",
+        method: method ?? (body === undefined ? "GET" : "POST"),
         headers: {
             authorization: `Bearer ${tokens[who]}`,
             "x-pocket": "1",
@@ -64,4 +64,41 @@ test("the owner reads the running version, and nobody else reaches the routes or
 
     assert.ok((await ui("owner")).includes("updates"));
     assert.ok(!(await ui("guest")).includes("updates"));
+});
+
+test("Beta updates is an owner setting, off by default, that turns the beta channel on and off", async () => {
+    const settings = await call("owner", "/api/extension-settings/updates");
+
+    assert.equal(settings.status, 200);
+    assert.equal(
+        (settings.data as { fields: { name: string }[] }).fields.some(
+            (each) => each.name === "beta",
+        ),
+        true,
+    );
+    assert.equal((settings.data as { values: { beta: boolean } }).values.beta, false);
+    assert.equal(app.updates.beta, false);
+    assert.equal(
+        ((await call("owner", "/api/x/updates/status")).data as { beta: boolean }).beta,
+        false,
+    );
+
+    assert.equal(
+        (await call("guest", "/api/extension-settings/updates", { beta: true }, "PUT")).status,
+        403,
+    );
+    assert.equal(app.updates.beta, false, "only the owner changes it");
+
+    assert.equal(
+        (await call("owner", "/api/extension-settings/updates", { beta: true }, "PUT")).status,
+        200,
+    );
+    assert.equal(app.updates.beta, true);
+    assert.equal(
+        ((await call("owner", "/api/x/updates/status")).data as { beta: boolean }).beta,
+        true,
+    );
+
+    await call("owner", "/api/extension-settings/updates", { beta: null, check: null }, "PUT");
+    assert.equal(app.updates.beta, false, "the default puts it back off");
 });

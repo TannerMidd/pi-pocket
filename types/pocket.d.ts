@@ -206,6 +206,12 @@ export interface Host {
      */
     cwdOf(conversationId: ConversationId): string;
     /**
+     * The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here.
+     * @since 0.27.0
+     * @experimental
+     */
+    roleOf(personId: string): Role | undefined;
+    /**
      * Listens to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and runs that start and end. Returns how to stop: pass it to `web.onDispose`. PiP's conversations send none.
      * @since 0.22.0
      * @experimental
@@ -349,11 +355,28 @@ export interface AppEvents {
      */
     "run.started": { conversationId: number; session: number };
     /**
-     * Pi stopped working in a conversation.
+     * Pi stopped working in a conversation. `outcome` says how: `done` when the run finished, `failed` when it gave up,
+     * or `aborted` when it was stopped. `failure` is why, the same short line the session list shows, and only when
+     * `outcome` is `failed`.
      * @since 0.22.0
      * @experimental
      */
-    "run.ended": { conversationId: number; session: number };
+    "run.ended": {
+        conversationId: number;
+        session: number;
+        /**
+         * How the run stopped: it finished, it gave up, or it was stopped.
+         * @since 0.28.0
+         * @experimental
+         */
+        outcome: "done" | "failed" | "aborted";
+        /**
+         * Why it gave up, only when `outcome` is `failed`.
+         * @since 0.28.0
+         * @experimental
+         */
+        failure?: string;
+    };
 }
 
 /**
@@ -473,11 +496,36 @@ export interface AskField {
      */
     name: string;
     /**
-     * What the card says above the field.
+     * What the card says above the field: one line of up to 80 characters, or 300 for a field with `choices`.
      * @since 0.22.0
      * @experimental
      */
     label: string;
+    /**
+     * A short tag over the field, such as "Database": up to 12 characters.
+     * @since 0.27.0
+     * @experimental
+     */
+    header?: string;
+    /**
+     * 2 to 4 answers to pick, with different labels, shown as buttons: the value is the label chosen. `secret` and
+     * `autocomplete` do not apply to such a field; its `placeholder` is for its `other` text.
+     * @since 0.27.0
+     * @experimental
+     */
+    choices?: AskChoice[];
+    /**
+     * With `choices`: one or more can be chosen, and the value is their labels, one per line.
+     * @since 0.27.0
+     * @experimental
+     */
+    multiple?: boolean;
+    /**
+     * With `choices`: the person can type an answer of their own instead, which is then the value.
+     * @since 0.27.0
+     * @experimental
+     */
+    other?: boolean;
     /**
      * A hidden input, as for a password.
      * @since 0.22.0
@@ -496,6 +544,26 @@ export interface AskField {
      * @experimental
      */
     autocomplete?: string;
+}
+
+/**
+ * An answer to pick on an ask's card (`AskField.choices`).
+ * @since 0.27.0
+ * @experimental
+ */
+export interface AskChoice {
+    /**
+     * One line of up to 60 characters: the field's value when it is chosen.
+     * @since 0.27.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * One line of up to 160 characters, under the label.
+     * @since 0.27.0
+     * @experimental
+     */
+    description?: string;
 }
 
 /**
@@ -707,7 +775,17 @@ export interface BrowserPageHandle {
      * @since 0.22.0
      * @experimental
      */
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        /**
+         * Where the page is scrolled, in CSS pixels: `y` is the top of the viewport, `viewport` its height, and `height` the page's.
+         * @since 0.27.0
+         * @experimental
+         */
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     /**
      * What a target is: its description, its kind, and whether it is a field or a password field.
      * @since 0.22.0
@@ -797,7 +875,7 @@ export interface PublicFetchInit {
 export interface LinkedSessions {
     /**
      * Starts a session linked to `source`, in `cwd` or the source's folder, and sends it `message` as its first
-     * message. `model` is `provider/modelId`; `thinking` is a level no higher than the source's. `cwd` is since 0.19.0:
+     * message. `model` is `provider/modelId`; `thinking` is any level (since 0.25.0; before, no higher than the source's). `cwd` is since 0.19.0:
      * an older Pi Pocket ignores it, and starts the session in the source's folder. A blank `cwd` counts as none; a
      * relative one resolves against the server process's folder, not the source's.
      * @since 0.14.0
@@ -824,6 +902,24 @@ export interface LinkedSessions {
         request: { to: string; message: string; steer?: boolean },
         key: string,
     ): Promise<void>;
+    /**
+     * Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When it is idle,
+     * it has no run to stop, and the call only withdraws the queue. `busy` says whether it was working.
+     * @since 0.28.0
+     * @experimental
+     */
+    stop(source: ConversationId, request: { to: string }, key: string): Promise<{ busy: boolean }>;
+    /**
+     * Archives the linked session at the address `to`, or brings it back when `archived` is false. `archived` says
+     * whether it is archived now. `repeating` is how many of its repeating schedules keep running.
+     * @since 0.28.0
+     * @experimental
+     */
+    archive(
+        source: ConversationId,
+        request: { to: string; archived?: boolean },
+        key: string,
+    ): Promise<{ archived: boolean; repeating: number }>;
     /**
      * The sessions linked to `source`, at any distance, that the person Pi works for there can see.
      * @since 0.14.0
@@ -868,6 +964,13 @@ export interface LinkedSession {
      * @experimental
      */
     archived?: boolean;
+    /**
+     * Why its last run failed, the same short line the session list shows, only while that failure stands and with the
+     * same condition as `title`. A later run clears it.
+     * @since 0.28.0
+     * @experimental
+     */
+    failed?: string;
 }
 
 /**
@@ -890,7 +993,7 @@ export interface HumanLinkedSessions {
     /**
      * Starts once for this key, as the clicking person. Optional `cwd` (since 0.19.0) selects an existing folder: blank
      * counts as none, and a relative one resolves against the server process's folder.
-     * Explicit thinking must be supported and no higher than source.
+     * Explicit thinking must be a level the model supports; since 0.25.0 it can be above the source's.
      * @since 0.16.0
      */
     start(
@@ -1028,6 +1131,41 @@ export interface WebSession {
 }
 
 /**
+ * Committed usage counters, not estimates of the next request.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface UsageTotals {
+    /** Stored assistant responses; excludes requests with no response entry. */
+    readonly requests: number;
+    /** Uncached input tokens reported by providers. */
+    readonly input: number;
+    /** Input tokens read from a prompt cache. */
+    readonly cacheRead: number;
+    /** Input tokens written to a prompt cache. */
+    readonly cacheWrite: number;
+    /** Output tokens, including reasoning when the provider includes it. */
+    readonly output: number;
+    /** Reported reasoning tokens; absent when none were reported. Do not add to output. */
+    readonly reasoning?: number;
+    /** Estimated cost in US dollars, as core records it. */
+    readonly cost: number;
+    /** Input + cacheRead + cacheWrite of the newest stored assistant response. */
+    readonly lastPrompt: number;
+}
+
+/**
+ * Own usage and sums for visible conversations started from the source, at any depth.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface ConversationUsage {
+    readonly own: UsageTotals;
+    /** Excludes the source. lastPrompt sums each child's lastPrompt; count includes unused children. */
+    readonly children: UsageTotals & { readonly count: number };
+}
+
+/**
  * A request whose named path parameter resolved to an authorized conversation.
  * @since 0.16.0
  */
@@ -1048,6 +1186,13 @@ export interface ConversationWebRequest extends WebRequest {
      * @since 0.16.0
      */
     readonly linkedSessions: HumanLinkedSessions;
+    /**
+     * Read committed usage for the bound source (or a visible conversation id) and its visible descendants.
+     * Ends with this request. No text, entries, or session ids are returned.
+     * @since 0.28.0
+     * @experimental
+     */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**
@@ -1261,8 +1406,35 @@ export type PublicPageHandler = (
 ) => PublicPageAnswer | Promise<PublicPageAnswer>;
 
 /**
- * What a module adds to the app: the second argument of its default export. Register routes, the browser module, and
- * commands while the module loads. They go when this version of the module goes.
+ * How a module's own input shows in the transcript, while the module is on. Nothing here is stored. The model still
+ * reads the message in full.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface PresentEntry {
+    /**
+     * The stored kind, `x.<module>.<name>`.
+     * @since 0.28.0
+     * @experimental
+     */
+    kind: string;
+    /**
+     * The one line the transcript shows.
+     * @since 0.28.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Matches the start of a user message only when nobody wrote that message.
+     * @since 0.28.0
+     * @experimental
+     */
+    userPrefix?: string;
+}
+
+/**
+ * What a module adds to the app: the second argument of its default export. Register routes, the browser module,
+ * commands, and presentations while the module loads. They go when this version of the module goes.
  * @since 0.14.0
  */
 export interface Web {
@@ -1307,6 +1479,14 @@ export interface Web {
      * @since 0.14.0
      */
     command(name: string, command: Command): void;
+    /**
+     * Says how an input this module sends shows in the transcript, while the module is on. The model still reads
+     * the message in full. `kind` is `x.<module>.<name>`. An optional `userPrefix` matches only a user message
+     * nobody wrote.
+     * @since 0.28.0
+     * @experimental
+     */
+    presentEntry(spec: PresentEntry): void;
     /**
      * Sends an event to the browser module: to everyone it loads for, or to the person `to`. It never throws.
      * @since 0.14.0
@@ -2409,6 +2589,32 @@ export interface SwitchProps {
 }
 
 /**
+ * What `pocket.pip.ask` answers. It does not throw when PiP is not there: `reason` tells why nothing happened. `sent` is
+ * false when the text waits in PiP's message box.
+ * @since 0.26.0
+ * @experimental
+ */
+export type PipAskResult = { ok: true; sent: boolean } | { ok: false; reason: string };
+
+/**
+ * The part of `pocket` that talks to PiP.
+ * @since 0.26.0
+ * @experimental
+ */
+export interface PipApi {
+    /**
+     * Gives PiP text as the person's own message. By default it opens PiP and puts the text in its message box, after
+     * what is there, for the person to read, edit, and send. With `send: true` it sends the text at once, but only just
+     * after the person tapped or pressed a key: one tap serves for 5 seconds and for one send. The text starts with the
+     * module's title, so the person and PiP see where it came from. It resolves with `{ ok: false, reason }` when the
+     * person has no PiP, and when `send` has no tap to use. Text that is empty or past 100,000 characters throws.
+     * @since 0.26.0
+     * @experimental
+     */
+    ask(text: string, options?: { send?: boolean }): Promise<PipAskResult>;
+}
+
+/**
  * The app's API for a browser module: the argument of its default export.
  * @since 0.14.0
  */
@@ -2542,6 +2748,22 @@ export interface Pocket {
      */
     reveal(id: string): Promise<boolean>;
     /**
+     * How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is
+     * `x.<module>.<name>`. `open` shows the message, `folded` one line, and `hidden` keeps the turn without
+     * the text until Find. The same mode again changes nothing. The choice stays in this browser, and a person
+     * can change it on any of those rows.
+     * @since 0.28.0
+     * @experimental
+     */
+    entryPresentation(kind: string, mode: "open" | "folded" | "hidden"): void;
+    /**
+     * This browser's choice for one of this module's inputs, or undefined when there is none yet (the rows are
+     * folded then). Set a mode only when there is none, so a person's choice stays theirs.
+     * @since 0.28.0
+     * @experimental
+     */
+    entryPresentation(kind: string): "open" | "folded" | "hidden" | undefined;
+    /**
      * Calls one of the module's routes: a GET without `body`, a POST with it.
      * @since 0.14.0
      */
@@ -2667,6 +2889,12 @@ export interface Pocket {
      * @experimental
      */
     insertText(text: string, options?: { inline?: boolean }): void;
+    /**
+     * Gives text to the person's PiP, their assistant.
+     * @since 0.26.0
+     * @experimental
+     */
+    readonly pip: PipApi;
     /**
      * Hides or reorders a slot's items, the app's own too. A person's own choices in Appearance → Layout win.
      * @since 0.19.0

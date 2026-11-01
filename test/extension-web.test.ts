@@ -589,6 +589,7 @@ test("bound routes use the clicking actor, keep receipts private, and expose aut
     );
     const count = app.sessions().length;
 
+    // The model has no "high", and an explicit level is never silently lowered.
     assert.equal(
         (
             await call("owner", `/api/x/workspace/start/${id}`, {

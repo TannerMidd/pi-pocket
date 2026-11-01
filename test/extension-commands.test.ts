@@ -178,7 +178,11 @@ test("a failed reload keeps the commands, and turning the module off takes them 
 
     writeFileSync(join(app.dataDir, "extensions", FILE), MODULE);
     await app.setExtensionEnabled(owner(app), FILE, false);
-    assert.deepEqual(app.webs.commands(), []);
+    // The built-in Design module has a command of its own: what the drop-in had is gone.
+    assert.deepEqual(
+        app.webs.commands().filter((each) => each.name !== "design-open"),
+        [],
+    );
 
     const id = await newSession(app);
 

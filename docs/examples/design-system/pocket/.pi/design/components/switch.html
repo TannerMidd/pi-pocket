@@ -1,0 +1,117 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Switch",
+        "description": "Turns one setting on or off at once. The track changes color and the thumb moves, so the state never depends on color alone.",
+        "states": ["off", "on", "focus", "disabled"],
+        "usage": {
+            "do": [
+                "Use a switch for a setting that applies as soon as it changes.",
+                "Write the label as the thing that turns on: Push notifications."
+            ],
+            "dont": [
+                "Do not use a switch in a form that needs a Save button: use a checkbox.",
+                "Do not put On and Off in the label."
+            ]
+        },
+        "tokens": [
+            "border.width.thick",
+            "color.text.primary",
+            "font.family.sans",
+            "font.size.md",
+            "motion.duration.hover",
+            "motion.ease.standard",
+            "radius.pill",
+            "shadow.focus-ring",
+            "space.3",
+            "switch.height",
+            "switch.thumb",
+            "switch.thumb-on",
+            "switch.track-off",
+            "switch.track-on",
+            "switch.width"
+        ]
+    }
+</script>
+<style>
+    .pk-switch-row {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-3);
+        color: var(--color-text-primary);
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-md);
+    }
+
+    .pk-switch {
+        position: relative;
+        flex: none;
+        width: var(--switch-width);
+        height: var(--switch-height);
+        border: 0;
+        border-radius: var(--radius-pill);
+        background: var(--switch-track-off);
+        cursor: pointer;
+        transition: background-color var(--motion-duration-hover) var(--motion-ease-standard);
+    }
+
+    .pk-switch::after {
+        content: "";
+        position: absolute;
+        top: calc((var(--switch-height) - var(--switch-thumb)) / 2);
+        left: calc((var(--switch-height) - var(--switch-thumb)) / 2);
+        width: var(--switch-thumb);
+        height: var(--switch-thumb);
+        border-radius: var(--radius-pill);
+        background: var(--switch-thumb);
+        transition: transform var(--motion-duration-hover) var(--motion-ease-standard);
+    }
+
+    .pk-switch[aria-checked="true"] {
+        background: var(--switch-track-on);
+    }
+
+    .pk-switch[aria-checked="true"]::after {
+        background: var(--switch-thumb-on);
+        transform: translateX(
+            calc(
+                var(--switch-width) - var(--switch-thumb) -
+                    (var(--switch-height) - var(--switch-thumb))
+            )
+        );
+    }
+
+    .pk-switch:focus-visible,
+    .pk-switch.is-focus {
+        outline: var(--border-width-thick) solid transparent;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    .pk-switch:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+</style>
+<template data-state="off">
+    <label class="pk-switch-row">
+        <button class="pk-switch" role="switch" aria-checked="false"></button>
+        Push notifications
+    </label>
+</template>
+<template data-state="on">
+    <label class="pk-switch-row">
+        <button class="pk-switch" role="switch" aria-checked="true"></button>
+        Push notifications
+    </label>
+</template>
+<template data-state="focus">
+    <label class="pk-switch-row">
+        <button class="pk-switch is-focus" role="switch" aria-checked="true"></button>
+        Push notifications
+    </label>
+</template>
+<template data-state="disabled">
+    <label class="pk-switch-row">
+        <button class="pk-switch" role="switch" aria-checked="true" disabled></button>
+        Push notifications
+    </label>
+</template>

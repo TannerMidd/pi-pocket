@@ -209,6 +209,51 @@ test("a session has the skills Pi's CLI has in the same folder, the same one of 
     );
 });
 
+test("the skills setting's exclusions, inclusions, and relative paths work as in Pi's CLI", async () => {
+    const { base, home: own, agentDir, cwd, sources } = fixture();
+    const [theirs, mine, plus] = ["theirs", "mine", "plus"].map((name) => join(base, name)) as [
+        string,
+        string,
+        string,
+    ];
+    const found = (skills: { name: string; filePath: string }[]) =>
+        skills
+            .map(({ name, filePath }) => ({ name, filePath }))
+            .filter((each) => each.name !== "pi-project")
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+    skill(theirs, "teach", "Theirs, taken out by -path.");
+    skill(mine, "teach", "Mine.");
+    skill(plus, "off");
+    skill(plus, "back");
+    skill(join(agentDir, "relative"), "from-agent-dir");
+    skill(join(agentDir, "skills"), "auto-off");
+
+    const settingsPaths = [
+        theirs,
+        mine,
+        plus,
+        "relative",
+        `-${join(theirs, "teach")}`,
+        "!**/plus/**",
+        `+${join(plus, "back")}`,
+        "!**/skills/auto-off/**",
+        `-${join(own, ".agents", "skills", "everywhere", "SKILL.md")}`,
+    ];
+
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ skills: settingsPaths }));
+
+    const ours = found(loadSessionSkills(cwd, { ...sources, settingsPaths }));
+
+    assert.deepEqual(ours, found(await cliSkills(cwd, own, agentDir, false)));
+    assert.deepEqual(
+        ours
+            .map((each) => each.name)
+            .filter((name) => !["pi-user", "from-settings"].includes(name)),
+        ["back", "from-agent-dir", "teach"],
+    );
+});
+
 test("a session lists them as /skill: commands and in its system prompt", async () => {
     const project = realpathSync(mkdtempSync(join(root, "skills-project-")));
 
@@ -227,9 +272,9 @@ test("a session lists them as /skill: commands and in its system prompt", async 
         ["everywhere", "here"],
     );
     await say(app, id, "hello");
-    assert.match(prompt, /<name>everywhere<\/name>/);
-    assert.match(prompt, /<name>here<\/name>/);
-    assert.ok(prompt.includes(join(project, ".agents", "skills", "here", "SKILL.md")));
+    assert.match(prompt, /- everywhere: The everywhere skill\./);
+    assert.match(prompt, /- here: The here skill\./);
+    assert.ok(prompt.includes(join(project, ".agents", "skills", "<name>", "SKILL.md")));
     await say(app, id, "/skill:here do the thing");
     assert.match((await modelTexts(app, id)).join("\n"), /<skill name=\\"here\\" location=/);
 });
@@ -327,7 +372,7 @@ test("the owner answers through the API, a guest cannot, and Pi has the skills f
 
     try {
         await say(app, id, "first");
-        assert.doesNotMatch(prompt, /<name>waiting<\/name>/);
+        assert.doesNotMatch(prompt, /- waiting: The waiting skill\./);
         assert.ok(!app.skillCommands(id).some((each) => each.name === "waiting"));
 
         const asked = await call(app.config.ownerToken);
@@ -356,7 +401,7 @@ test("the owner answers through the API, a guest cannot, and Pi has the skills f
         assert.ok(app.skillCommands(id).some((each) => each.name === "waiting"));
         // At once, not when the prompt's copy of the skills grows stale.
         await say(app, id, "second");
-        assert.match(prompt, /<name>waiting<\/name>/);
+        assert.match(prompt, /- waiting: The waiting skill\./);
     } finally {
         server.closeAllConnections();
         server.close();

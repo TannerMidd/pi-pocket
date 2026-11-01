@@ -1,5 +1,5 @@
 // Updates' browser module, for the owner: a menu row and a launcher action that open the Update Pi Pocket sheet (the running
-// version, the newest release and its notes, what stands in the way, and Update and restart), a notice once for each
+// version and how it was installed, the newest release and its notes, what stands in the way, and Update and restart), a notice once for each
 // new version, and one for how an update ended, after its restart. It uses only `pocket`.
 export const pocketApi = 1;
 
@@ -27,6 +27,13 @@ const remember = (key, value) => {
     }
 };
 
+/** How the running copy was installed (`installKind` in the server's status), in words for the sheet. */
+const INSTALLED = {
+    "npm-global": "installed with npm (global)",
+    "npm-local": "installed with npm (local)",
+    npx: "run with npx",
+};
+
 /** "5 minutes ago", "3 hours ago", "2 days ago". */
 function ago(at) {
     const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
@@ -47,6 +54,11 @@ function ago(at) {
 
     return `${Math.round(hours / 24)} days ago`;
 }
+
+const isBeta = (version) => typeof version === "string" && version.includes("-");
+
+const named = (release) =>
+    release.beta || isBeta(release.version) ? `${release.version} (beta)` : release.version;
 
 export default function setup(pocket) {
     const { html, useEffect, useState } = pocket;
@@ -118,13 +130,13 @@ export default function setup(pocket) {
 
         const hint =
             next.step ??
-            (next.available && next.latest ? `${next.latest.version} is out` : undefined);
+            (next.available && next.latest ? `${named(next.latest)} is out` : undefined);
 
         menu.update({ hint });
         launcher.update(
             next.available && next.latest
                 ? {
-                      label: `Update Pi Pocket to ${next.latest.version}`,
+                      label: `Update Pi Pocket to ${named(next.latest)}`,
                       detail: "See what is new, and update",
                   }
                 : { label: "Update Pi Pocket", detail: "Check for a new version of Pi Pocket" },
@@ -134,7 +146,7 @@ export default function setup(pocket) {
             remember(TOLD, next.latest.version);
             pocket.notify(
                 "info",
-                `Pi Pocket ${next.latest.version} is out: Menu → Update Pi Pocket.`,
+                `Pi Pocket ${named(next.latest)} is out: Menu → Update Pi Pocket.`,
             );
         }
 
@@ -256,18 +268,30 @@ export default function setup(pocket) {
         const careful = latest !== undefined && (latest.warning || latest.unread === true);
         const step = current.step ?? working;
         // While an update moves the checkout, the server does not read it: no commit then is no word on it.
-        const where = current.commit
-            ? `${current.branch ?? "detached"} · ${current.commit.slice(0, 7)}`
-            : current.step === undefined
-              ? "not a git checkout"
-              : null;
+        // A server older than this field, or one that cannot tell, sends no kind: the checkout words then.
+        const where = Object.hasOwn(INSTALLED, current.installKind)
+            ? INSTALLED[current.installKind]
+            : current.commit
+              ? `${current.branch ?? "detached"} · ${current.commit.slice(0, 7)}`
+              : current.step === undefined
+                ? "not a git checkout"
+                : null;
 
         return html`<div class="updates-sheet">
             <div class="updates-card">
                 <div class="updates-row">
                     <div>
-                        <div class="updates-title">Pi Pocket ${current.version}</div>
+                        <div class="updates-title">
+                            Pi Pocket ${current.version}
+                            ${
+                                isBeta(current.version) &&
+                                html` <span class="updates-badge">Beta</span>`
+                            }
+                        </div>
                         ${where && html`<div class="muted small mono">${where}</div>`}
+                        <div class="muted small">
+                            ${current.beta ? "Beta updates are on." : "Stable releases only."}
+                        </div>
                     </div>
                     <button
                         class="button"
@@ -288,7 +312,7 @@ export default function setup(pocket) {
                                   current.error
                                       ? "Could not check."
                                       : current.available
-                                        ? `${latest.version} is out.`
+                                        ? `${named(latest)} is out.`
                                         : latest
                                           ? "This is the newest version."
                                           : current.checkedAt
@@ -324,7 +348,13 @@ export default function setup(pocket) {
                 current.available &&
                 html`<div class="updates-card updates-new">
                     <div class="updates-row">
-                        <div class="updates-title">${latest.name}</div>
+                        <div class="updates-title">
+                            ${latest.name}
+                            ${
+                                (latest.beta || isBeta(latest.version)) &&
+                                html` <span class="updates-badge">Beta</span>`
+                            }
+                        </div>
                         ${
                             latest.url &&
                             html`<a
@@ -401,15 +431,15 @@ export default function setup(pocket) {
                                   disabled=${current.blockers.length > 0 || (careful && !confirmed)}
                                   onClick=${update}
                               >
-                                  Update to ${latest.version} and restart
+                                  Update to ${named(latest)} and restart
                               </button>`
                     }
                 </div>`
             }
             ${!current.available && error && html`<div class="error-box">${error}</div>`}
             <p class="muted small">
-                To look for new versions, or install them by themselves, open Menu → Extensions →
-                Installed → Pi Pocket updates.
+                To look for new versions, install them by themselves, or turn Beta updates on or
+                off, open Menu → Extensions → Installed → Pi Pocket updates.
             </p>
         </div>`;
     }

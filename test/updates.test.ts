@@ -24,19 +24,24 @@ import {
     stopMeansRollBack,
     undoPartialSwitch,
     updatePaths,
+    writePending,
 } from "../src/server/update-state.ts";
 import {
     changedFiles,
     newer,
+    newestOfReleases,
+    newestTag,
     nodeMeets,
     notesWarn,
     failureLines,
+    pickNpmVersion,
     type Release,
     repositoryProblem,
     Updates,
     type UpdatesOptions,
     type UpdateStatus,
 } from "../src/server/updates.ts";
+import { atLeast, compareReleases, versionParts } from "../src/server/versions.ts";
 import { installsByItself } from "../src/server/extensions/updates.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-pocket-updates-"));
@@ -135,6 +140,23 @@ function updater(
     return { updates, restarts };
 }
 
+function tagged(app: string, upstream: string, overrides: Partial<UpdatesOptions> = {}) {
+    const restarts: number[] = [];
+    const updates = new Updates({
+        appRoot: app,
+        version: JSON.parse(readFileSync(join(app, "package.json"), "utf8")).version,
+        supervised: true,
+        rollback: true,
+        restart: () => restarts.push(Date.now()),
+        busy: () => 0,
+        log: () => {},
+        repository: upstream,
+        ...overrides,
+    });
+
+    return { updates, restarts };
+}
+
 const releaseOf = (version: string, extra: Partial<Release> = {}): Release => ({
     tag: `v${version}`,
     version,
@@ -151,6 +173,35 @@ const waitFor = async (check: () => boolean, what: string) => {
 
     assert.ok(check(), what);
 };
+
+test("apply never replaces recovery state from an unfinished update", async () => {
+    const { upstream, app, first } = setUp();
+    const unfinished = release(upstream, "1.1.0");
+
+    release(upstream, "1.2.0");
+    writePending(app, {
+        v: 1,
+        tag: "v1.1.0",
+        fromVersion: "1.0.0",
+        toVersion: "1.1.0",
+        from: first,
+        to: unfinished,
+        branch: "main",
+        modules: false,
+        phase: "switching",
+        oneWay: false,
+        at: 123,
+    });
+    const pending = readPending(app);
+    const { updates, restarts } = updater(app, upstream, () => releaseOf("1.2.0"));
+    const status = await updates.check();
+
+    assert.match(status.blockers.join("\n"), /An update is under way/);
+    await assert.rejects(updates.apply(), /An update is under way/);
+    assert.deepEqual(readPending(app), pending);
+    assert.equal(run(app, ["rev-parse", "HEAD"]), first);
+    assert.deepEqual(restarts, []);
+});
 
 test("versions, Node.js ranges, and release notes' warnings are read as the release notes guide writes them", () => {
     assert.equal(newer("0.23.0", "0.22.0"), true);
@@ -805,7 +856,9 @@ test("a server that starts on an update stopped part way puts it back, without r
 test("the install by itself takes only a release that needs no question, and the launcher goes back only for the version's fault", () => {
     const ready = {
         version: "1.0.0",
+        installKind: "git",
         repository: "x",
+        beta: false,
         available: true,
         blockers: [],
         cautions: [],
@@ -934,4 +987,180 @@ test("a failed npm says its cause, not its help for the command", () => {
         "code EUSAGE\n`npm ci` can only install packages when your package.json and package-lock.json are in sync.\nMissing: is-number@6.0.0 from lock file",
     );
     assert.equal(failureLines("one\ntwo\n"), "one\ntwo");
+});
+
+test("updates order pre-releases, and the API version compare keeps treating them as their release", () => {
+    assert.equal(newer("0.27.0-beta.2", "0.27.0-beta.1"), true);
+    assert.equal(newer("0.27.0-beta.1", "0.27.0-beta.2"), false);
+    assert.equal(newer("0.27.0-beta.10", "0.27.0-beta.9"), true, "numbers, not text");
+    assert.equal(newer("0.27.0", "0.27.0-beta.9"), true, "the release follows its betas");
+    assert.equal(newer("0.27.0-beta.9", "0.27.0"), false);
+    assert.equal(newer("0.27.0-beta.1", "0.26.0"), true);
+    assert.equal(newer("0.26.1", "0.27.0-beta.1"), false, "no downgrade to an older stable");
+    assert.equal(newer("0.27.0-beta.1", "0.27.0-beta.1"), false);
+    assert.equal(newer("0.27.0-beta.1", "0.27.0+build.5"), false);
+    assert.equal(newer("0.27.0-beta.1", "garbage"), false);
+    assert.equal(compareReleases("0.27.0-alpha.1", "0.27.0-beta.1"), -1);
+    assert.equal(compareReleases("0.27.0-1", "0.27.0-beta.1"), -1, "numbers come first");
+    assert.equal(compareReleases("0.27.0-beta", "0.27.0-beta.1"), -1, "fewer fields first");
+    assert.equal(compareReleases("1.0", "1.0.0"), undefined);
+    // Extension and theme API versions: a pre-release is its release, as before.
+    assert.deepEqual(versionParts("0.27.0-beta.1"), [0, 27, 0]);
+    assert.equal(atLeast("0.27.0-beta.1", "0.27.0"), true);
+    assert.equal(atLeast("0.27.0", "0.27.0-beta.1"), true);
+});
+
+test("the beta channel reads GitHub's list, version tags, and npm's dist-tags", () => {
+    const repository = { owner: "o", name: "r" };
+    const entry = (tag_name: string, extra: Record<string, unknown> = {}) => ({
+        tag_name,
+        name: tag_name,
+        body: "Notes.",
+        ...extra,
+    });
+    const list = [
+        entry("v0.27.0-beta.2", { prerelease: true }),
+        entry("v0.27.0-beta.1", { prerelease: true }),
+        entry("v0.28.0", { draft: true }),
+        entry("nightly"),
+        entry("v0.26.0"),
+    ];
+    const newest = newestOfReleases(repository, list);
+
+    assert.equal(newest?.tag, "v0.27.0-beta.2");
+    assert.equal(newest?.version, "0.27.0-beta.2");
+    assert.equal(newest?.beta, true, "a beta is marked");
+    assert.equal(newest?.notes, "Notes.");
+    assert.match(newest?.url ?? "", /releases\/tag\/v0\.27\.0-beta\.2$/);
+    assert.equal(
+        newestOfReleases(repository, [entry("v0.27.0-beta.3"), entry("v0.27.0"), entry("v0.26.1")])
+            ?.tag,
+        "v0.27.0",
+        "the stable release follows its betas, whatever the order",
+    );
+    assert.equal(newestOfReleases(repository, [entry("v0.27.0", { draft: true })]), undefined);
+    assert.equal(newestOfReleases(repository, { message: "Not Found" }), undefined);
+    assert.equal(newestOfReleases(repository, [entry("v0.26.0")])?.beta, undefined);
+
+    const tags = [
+        "v0.26.0",
+        "v0.27.0-beta.1",
+        "v0.27.0-beta.10",
+        "v0.27.0-beta.2",
+        "v0.27.0-rc.1",
+        "v0.27.0-beta.1-evil",
+    ]
+        .map((tag) => `${"a".repeat(40)}\trefs/tags/${tag}`)
+        .join("\n");
+
+    assert.equal(newestTag(tags)?.tag, "v0.26.0", "betas are not offered with the channel off");
+    assert.equal(newestTag(tags, true)?.tag, "v0.27.0-beta.10");
+    assert.equal(newestTag(`${tags}\n${"a".repeat(40)}\trefs/tags/v0.27.0`, true)?.tag, "v0.27.0");
+    assert.equal(newestTag("", true), undefined);
+
+    const npm = (tags: Record<string, unknown>) => ({
+        "dist-tags": tags,
+        versions: Object.fromEntries(
+            Object.values(tags).map((version) => [String(version), { engines: {} }]),
+        ),
+    });
+
+    assert.equal(pickNpmVersion(npm({ latest: "0.26.0", beta: "0.27.0-beta.1" })), "0.26.0");
+    assert.equal(
+        pickNpmVersion(npm({ latest: "0.26.0", beta: "0.27.0-beta.1" }), true),
+        "0.27.0-beta.1",
+    );
+    assert.equal(
+        pickNpmVersion(npm({ latest: "0.27.0", beta: "0.27.0-beta.2" }), true),
+        "0.27.0",
+        "a beta tag left behind by the stable release is not newer",
+    );
+    assert.equal(pickNpmVersion(npm({ latest: "0.26.0" }), true), "0.26.0", "no beta tag yet");
+    assert.equal(
+        pickNpmVersion(
+            {
+                "dist-tags": { latest: "0.26.0", beta: "0.27.0-beta.1" },
+                versions: { "0.26.0": {} },
+            },
+            true,
+        ),
+        "0.26.0",
+        "a beta with no package metadata is skipped",
+    );
+    assert.throws(() => pickNpmVersion(npm({ latest: "0.27.0-beta.1" })), /not a release version/);
+    assert.throws(
+        () => pickNpmVersion(npm({ latest: "0.27.0-beta.1" }), true),
+        /not a release version/,
+    );
+    assert.throws(
+        () => pickNpmVersion({ "dist-tags": { latest: "0.26.0" }, versions: {} }),
+        /no published/,
+    );
+});
+
+test("the beta channel offers pre-releases only when it is on, and a beta still gets the next stable release", async () => {
+    const { upstream, app } = setUp();
+    const beta = release(upstream, "1.1.0-beta.1");
+    const off = tagged(app, upstream);
+    const stable = await off.updates.check();
+
+    assert.equal(stable.beta, false);
+    assert.equal(stable.latest?.tag, "v1.0.0");
+    assert.equal(stable.available, false);
+
+    off.updates.setBeta(true);
+    const on = await off.updates.check();
+
+    assert.equal(on.beta, true);
+    assert.equal(on.latest?.tag, "v1.1.0-beta.1");
+    assert.equal(on.latest?.beta, true);
+    assert.equal(on.available, true);
+    assert.deepEqual(on.blockers, []);
+    assert.match(on.cautions.join("\n"), /This is a beta version/);
+
+    off.updates.setBeta(false);
+    assert.equal((await off.updates.status()).available, false);
+    assert.equal((await off.updates.status()).latest, undefined);
+    assert.equal((await off.updates.check()).latest?.tag, "v1.0.0");
+
+    const going = tagged(app, upstream, { beta: true });
+
+    await going.updates.check();
+    await going.updates.apply();
+    assert.equal(run(app, ["rev-parse", "HEAD"]), beta);
+    await waitFor(() => going.restarts.length === 1, "the server restarts");
+
+    release(upstream, "1.1.0");
+    release(upstream, "1.0.1", undefined, true);
+    const running = tagged(app, upstream, { version: "1.1.0-beta.1" });
+    const next = await running.updates.check();
+
+    assert.equal(next.latest?.tag, "v1.1.0");
+    assert.equal(next.available, true, "the release follows its beta");
+    assert.equal(next.latest?.beta, undefined);
+    assert.doesNotMatch(next.cautions.join("\n"), /beta version/);
+
+    const older = updater(setUp().app, upstream, () => releaseOf("1.0.0"), {
+        version: "1.1.0-beta.1",
+    });
+
+    assert.equal((await older.updates.check()).available, false, "no downgrade");
+});
+
+test("a pre-release from a stand-in source is offered only while the channel is on", async () => {
+    const { upstream, app } = setUp();
+    const asked: (boolean | undefined)[] = [];
+
+    const source = (_signal?: AbortSignal, beta?: boolean) => {
+        asked.push(beta);
+
+        return Promise.resolve(releaseOf("1.1.0-beta.1", { beta: true }));
+    };
+
+    const { updates } = updater(app, upstream, () => undefined, { releases: source });
+
+    assert.equal((await updates.check()).latest, undefined, "a beta that slipped in is dropped");
+    updates.setBeta(true);
+    assert.equal((await updates.check()).latest?.version, "1.1.0-beta.1");
+    assert.deepEqual(asked, [false, true]);
 });

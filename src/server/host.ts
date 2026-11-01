@@ -46,6 +46,11 @@ export interface LinkedSession {
     cwd?: string;
     busy?: boolean;
     archived?: boolean;
+    /**
+     * Why its last run failed, the same short line the session list shows, only while that failure stands and only when
+     * everyone who sees the asking session sees this one too. A later run clears it.
+     */
+    failed?: string;
 }
 
 /**
@@ -55,7 +60,7 @@ export interface LinkedSession {
 export interface LinkedSessionsApi {
     /**
      * Start a session linked to `source`, in `cwd` or its folder, with a copy of its agent settings but not its history,
-     * and send it `message` as its first message. `model` is `provider/modelId`; `thinking` a level no higher than the source's.
+     * and send it `message` as its first message. `model` is `provider/modelId`; `thinking` any level; one the model lacks becomes its nearest lower one, else its lowest.
      */
     start(
         source: ConversationId,
@@ -74,6 +79,20 @@ export interface LinkedSessionsApi {
         request: { to: string; message: string; steer?: boolean },
         key: string,
     ): Promise<void>;
+    /**
+     * Stop the run of the linked session at address `to`, and withdraw what waits in its queue. Idle is a no-op.
+     * Returns whether it was working.
+     */
+    stop(source: ConversationId, request: { to: string }, key: string): Promise<{ busy: boolean }>;
+    /**
+     * Archive the linked session at address `to`, or bring it back when `archived` is false. Returns whether it is
+     * archived now, and how many of its repeating schedules keep running.
+     */
+    archive(
+        source: ConversationId,
+        request: { to: string; archived?: boolean },
+        key: string,
+    ): Promise<{ archived: boolean; repeating: number }>;
     /** The sessions linked to `source`, at any distance, that the person Pi works for there sees. */
     list(source: ConversationId): Promise<LinkedSession[]>;
 }
@@ -123,12 +142,31 @@ export type AskForm = { title: string; text?: string; fields: AskField[]; submit
 /** The answer to an approval; an ask's also carries what the person typed, which no one else sees. */
 export type ApprovalAnswer = { allow: boolean; by: string; values?: Record<string, string> };
 
+/** An answer to pick on an ask's card (`AskField.choices`): a button with its label, and a line under it. */
+export interface AskChoice {
+    /** Up to 60 characters, one line: the value when it is chosen. */
+    label: string;
+    /** Up to 160 characters, one line. */
+    description?: string;
+}
+
 /** One field of an ask's card. */
 export interface AskField {
     /** The value's key in the answer: letters, digits, and _, starting with a letter. */
     name: string;
-    /** What the card says above the field. */
+    /** What the card says above the field: up to 80 characters, or 300 for a field with `choices` (its question). */
     label: string;
+    /** A short tag over the field, such as "Database": up to 12 characters. Since 0.27.0. */
+    header?: string;
+    /**
+     * 2 to 4 answers to pick, with different labels, shown as buttons; the value is the label chosen. Since 0.27.0.
+     * `secret` and `autocomplete` do not apply to such a field; `placeholder` is for its `other` text.
+     */
+    choices?: AskChoice[];
+    /** With `choices`: one or more can be chosen, and the value is their labels, one per line. Since 0.27.0. */
+    multiple?: boolean;
+    /** With `choices`: the person can type an answer of their own instead, which is then the value. Since 0.27.0. */
+    other?: boolean;
     /** A hidden input, as for a password. */
     secret?: boolean;
     /** What the field shows while empty. */
@@ -180,7 +218,13 @@ export interface BrowserPageHandle {
     readonly url: string;
     readonly title: string;
     /** The page as Pi reads it (`text`, with refs such as `[e12]`) and its controls as data. Refs last until the next. */
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        /** Where the page is scrolled, in CSS pixels: the viewport's top and height, and the page's height. */
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     /** What a target is: its description, its kind (an input's type, or a tag), and whether it is a field or a password. */
     inspect(
         target: BrowserTarget,
@@ -384,6 +428,12 @@ export interface PocketHost {
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
+     * The role of a person by id, as core decides it; undefined for an id that is not a person here.
+     *
+     * @experimental In 0.27: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    roleOf(personId: string): Role | undefined;
+    /**
      * Listen to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and
      * runs that start and end. Returns how to stop; pass that to `web.onDispose`. PiP's conversations send none.
      *
@@ -512,9 +562,13 @@ export interface PocketHost {
         | "review"
         | "share"
         | "shareTheme"
+        | "reach"
     >;
     /** Updates of Pi Pocket itself (`updates.ts`): its extension's routes are the owner's way to them. */
-    readonly updates: Pick<Updates, "status" | "check" | "apply" | "subscribe">;
+    readonly updates: Pick<
+        Updates,
+        "status" | "check" | "apply" | "subscribe" | "setBeta" | "beta"
+    >;
 }
 
 /**
@@ -557,6 +611,24 @@ export interface WebSession {
     readonly updatedAt: number;
 }
 
+/** Committed usage counters. Experimental, since 0.28.0. */
+export interface UsageTotals {
+    requests: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+    reasoning?: number;
+    cost: number;
+    lastPrompt: number;
+}
+
+/** A source's own usage and the sum for its visible descendants. Experimental, since 0.28.0. */
+export interface ConversationUsage {
+    readonly own: Readonly<UsageTotals>;
+    readonly children: Readonly<UsageTotals> & { readonly count: number };
+}
+
 /** A route request whose named path parameter resolved to a visible conversation. */
 export interface ConversationWebRequest extends WebRequest {
     readonly conversation: {
@@ -567,6 +639,8 @@ export interface ConversationWebRequest extends WebRequest {
         readonly thinkingLevel: ModelThinkingLevel;
     };
     readonly linkedSessions: HumanLinkedSessions;
+    /** Read the source's usage and visible descendants. Experimental, since 0.28.0. */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**
@@ -641,10 +715,23 @@ export type PublicPageHandler = (
 ) => PublicPageAnswer | Promise<PublicPageAnswer>;
 
 /**
+ * How a module's own input shows in the transcript, while the module is on. Nothing here is stored. The model still
+ * reads the message in full.
+ */
+export interface PresentEntry {
+    /** `x.<module>.<name>`, the stored kind this presentation is for. */
+    kind: string;
+    /** The one line the transcript shows. */
+    label: string;
+    /** Matches the start of a user message only when nobody wrote that message. */
+    userPrefix?: string;
+}
+
+/**
  * A module's own part of the app, the second argument of its default export: routes under `/api/x/<module>/`, a browser
- * module that adds to the app's screens, events from here to that browser module, and commands for the message box.
- * Routes, the browser module, and commands are registered while the module loads; they go with it when it reloads or
- * is turned off.
+ * module that adds to the app's screens, events from here to that browser module, commands for the message box, and
+ * how its own inputs show. Routes, the browser module, commands, and presentations are registered while the module
+ * loads; they go with it when it reloads or is turned off.
  */
 export interface ExtensionWeb {
     /** The version of this API (`POCKET_API` in `extension-web.ts`). */
@@ -687,6 +774,11 @@ export interface ExtensionWeb {
      * module, as routes do. `scope: "conversation"` is for whoever may drive the session; `"global"` is the owner's.
      */
     command(name: string, command: ExtensionCommand): void;
+    /**
+     * How an input this module sends shows in the transcript, while the module is on. `kind` is `x.<module>.<name>`.
+     * An optional `userPrefix` matches only a user message nobody wrote.
+     */
+    presentEntry(spec: PresentEntry): void;
     /**
      * Draw the module's public pages: what anyone with one of its links (`web.links`) sees, with no sign-in, at
      * `/l/<token>`. GET shows the page; a form on it posts back to the same address. One handler for each module.

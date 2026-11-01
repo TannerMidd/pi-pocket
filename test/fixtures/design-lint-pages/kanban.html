@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Kanban</title>
+        <style>
+            body {
+                margin: 0;
+                font: 14px/1.4 system-ui;
+                background: #f1f2f4;
+                color: #172b4d;
+            }
+            .board {
+                display: flex;
+                gap: 12px;
+                padding: 16px;
+                overflow-x: auto;
+            }
+            .col {
+                flex: 0 0 280px;
+                background: #ebecf0;
+                border-radius: 10px;
+                padding: 12px;
+            }
+            h2 {
+                margin: 0 0 8px;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: #44546f;
+            }
+            .task {
+                background: #fff;
+                border-radius: 8px;
+                padding: 12px;
+                margin-bottom: 8px;
+                box-shadow: 0 1px 1px rgba(9, 30, 66, 0.25);
+                display: flex;
+                justify-content: space-between;
+            }
+            .tag {
+                background: #dfe1e6;
+                border-radius: 4px;
+                padding: 0 6px;
+                font-size: 12px;
+                color: #42526e;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="board" data-pid="board">
+            <section class="col" data-pid="col0">
+                <h2>Todo</h2>
+                <article class="task" data-pid="t00">
+                    <b>Task 00</b><span class="tag">P1</span>
+                </article>
+                <article class="task" data-pid="t01">
+                    <b>Task 01</b><span class="tag">P2</span>
+                </article>
+                <article class="task" data-pid="t02">
+                    <b>Task 02</b><span class="tag">P2</span>
+                </article>
+            </section>
+            <section class="col" data-pid="col1">
+                <h2>Doing</h2>
+                <article class="task" data-pid="t10">
+                    <b>Task 10</b><span class="tag">P1</span>
+                </article>
+                <article class="task" data-pid="t11">
+                    <b>Task 11</b><span class="tag">P2</span>
+                </article>
+                <article class="task" data-pid="t12">
+                    <b>Task 12</b><span class="tag">P2</span>
+                </article>
+            </section>
+            <section class="col" data-pid="col2">
+                <h2>Done</h2>
+                <article class="task" data-pid="t20">
+                    <b>Task 20</b><span class="tag">P1</span>
+                </article>
+                <article class="task" data-pid="t21">
+                    <b>Task 21</b><span class="tag">P2</span>
+                </article>
+                <article class="task" data-pid="t22">
+                    <b>Task 22</b><span class="tag">P2</span>
+                </article>
+            </section>
+        </div>
+    </body>
+</html>

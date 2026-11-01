@@ -5,8 +5,8 @@
  * command checks who may do it, and changes others should know about become activity lines in the session's chat.
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { statSync } from "node:fs";
+import { basename, extname, join, sep } from "node:path";
 import { type Context, copyJson } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import {
@@ -15,12 +15,12 @@ import {
     type ModelThinkingLevel,
     type TextContent,
 } from "@earendil-works/pi-ai";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
 import {
     type AgentChange,
     configure as configureAgent,
     type ConversationCreateOptions,
     type ConversationId,
+    type Cursor,
     defineTask,
     type EntryId,
     type InputEntry,
@@ -58,6 +58,7 @@ import {
 } from "./entry-format.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
 import { homePath } from "./paths.ts";
+import { forModel, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
@@ -91,6 +92,30 @@ const context = BACKGROUND_CONTEXT;
 
 export type Attachment = { path: string; name: string; mime: string; size: number };
 
+// A name can hold " (", so the path is the part that ends with "-name".
+function attachedFile(line: string, uploads: string): Attachment[] {
+    const tail = /, ([^,]+), (\d+) bytes\)$/.exec(line);
+
+    if (!line.startsWith("- ") || tail === null) {
+        return [];
+    }
+
+    const head = line.slice(2, tail.index);
+
+    for (let at = head.indexOf(" ("); at !== -1; at = head.indexOf(" (", at + 1)) {
+        const path = head.slice(0, at);
+        const name = head.slice(at + 2);
+
+        if (path.startsWith(uploads + sep) && path.endsWith(`-${name}`)) {
+            const mime = tail[1] === "unknown type" ? "" : tail[1]!;
+
+            return [{ path, name, mime, size: Number(tail[2]) }];
+        }
+    }
+
+    return [];
+}
+
 export interface SubmitRequest {
     text: string;
     attachments?: Attachment[];
@@ -105,9 +130,6 @@ export interface SubmitRequest {
     inlineFiles?: boolean;
 }
 
-/** Attached images that also go to the model itself, when it takes images. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
 /** How many `@` mentioned files go along with a message, and how much of them. */
 const MAX_MENTIONED = 10;
 const MAX_MENTIONED_FILE = 100_000;
@@ -166,20 +188,6 @@ function entryIdOf(value: unknown): number {
     }
 
     return id;
-}
-
-/**
- * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
- * a conversation holds many, and then every request fails until they leave its context.
- */
-async function modelImage(path: string, mimeType: string): Promise<ImageContent> {
-    const image = await resizeImage(readFileSync(path), mimeType);
-
-    if (image === null) {
-        throw new Error("it could not be made small enough for the model");
-    }
-
-    return { type: "image", mimeType: image.mimeType, data: image.data };
 }
 
 /** A request's model, when it names one, must name a provider and a model id. */
@@ -717,7 +725,7 @@ export class Commands {
         id: ConversationId,
         user: User,
         patch: { title?: string; archived?: boolean },
-    ): Promise<void> {
+    ): Promise<{ repeating: number }> {
         const app = this.#app;
 
         app.requireSee(user, id);
@@ -763,6 +771,14 @@ export class Commands {
                     : "brought the session back from the archive",
             );
         }
+
+        // Archiving leaves its repeating schedules running: the person is told how many.
+        const repeating =
+            patch.archived === true
+                ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+                : 0;
+
+        return { repeating };
     }
 
     /**
@@ -842,21 +858,25 @@ export class Commands {
             ),
         ];
 
-        for (const file of attachments) {
-            if (
-                !model.input.includes("image") ||
-                !IMAGE_TYPES.has(file.mime) ||
-                file.size > MAX_INLINE_IMAGE
-            ) {
-                continue;
-            }
+        // Most were made ready as they were uploaded (`model-images.ts`); the rest are made side by side, in their order.
+        const images = model.input.includes("image")
+            ? attachments.filter((file) => forModel(file.mime, file.size))
+            : [];
+        const made = await Promise.allSettled(
+            images.map((file) => modelImage(file.path, file.mime)),
+        );
 
-            try {
-                parts.push(await modelImage(file.path, file.mime));
-            } catch (error) {
-                app.notice("warning", `Could not attach ${file.name}: ${describe(error)}`, id);
+        made.forEach((result, index) => {
+            if (result.status === "fulfilled") {
+                parts.push(result.value);
+            } else {
+                app.notice(
+                    "warning",
+                    `Could not attach ${images[index]!.name}: ${describe(result.reason)}`,
+                    id,
+                );
             }
-        }
+        });
 
         const content = parts.length === 1 ? body : parts;
         const requestId =
@@ -1344,6 +1364,52 @@ export class Commands {
         }
 
         return result;
+    }
+
+    async editQueued(
+        id: ConversationId,
+        user: User,
+        submissionId: number,
+    ): Promise<{ text: string; attachments: Attachment[] }> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+
+        if (!Number.isInteger(submissionId) || submissionId <= 0) {
+            throw new HttpError(400, "Say which queued message to edit.");
+        }
+
+        if ((await app.attribution.submitter(submissionId)) !== user.id) {
+            throw new HttpError(403, "Only its sender can edit a queued message.");
+        }
+
+        const item = (await app.harness.snapshot(InboxDoc, id, context))?.items.find(
+            (entry) => Number(entry.id) === submissionId,
+        );
+        const result =
+            item === undefined || item.mode === "write"
+                ? "not_found"
+                : await app.harness.abortSubmission(
+                      submissionId as unknown as SubmissionId,
+                      context,
+                      id,
+                  );
+
+        if (item === undefined || item.mode === "write" || result !== "aborted") {
+            throw new HttpError(409, "That message has already gone to Pi.");
+        }
+
+        // A `/skill:` or prompt template message comes back as it was sent: expanded.
+        const [written, files] = splitAttachments(
+            userContent({ content: item.content }).text.replace(FROM_PREFIX, ""),
+        );
+        const uploads = app.workspace.uploadDirectory(id);
+
+        return {
+            text: written,
+            attachments: (files ?? "").split("\n").flatMap((line) => attachedFile(line, uploads)),
+        };
     }
 
     /**
@@ -2027,13 +2093,23 @@ export class Commands {
         }
     }
 
-    /** A new session with this session's history through `entryId`, which then goes its own way. */
     async fork(
         id: ConversationId,
         user: User,
         request: { entryId?: unknown; worktree?: unknown },
     ): Promise<{ id: ConversationId }> {
         this.#requireForkable(id, user);
+
+        if (request.entryId === undefined) {
+            return {
+                id: await this.#branch(id, user, {
+                    at: await this.#latestReply(id),
+                    label: "fork",
+                    worktree: request.worktree === true,
+                }),
+            };
+        }
+
         const entryId = entryIdOf(request.entryId);
         const entry = await this.#app.transcripts.visibleEntry(id, entryId);
 
@@ -2177,6 +2253,31 @@ export class Commands {
         this.#reportUnanswered(forked, submission.wait(context));
 
         return { id: forked };
+    }
+
+    /** A reply that called tools is not finished: a fork from it would wait for their results. */
+    async #latestReply(id: ConversationId): Promise<number | undefined> {
+        const conversation = await this.#app.conversation(id);
+        let cursor: Cursor | undefined;
+
+        do {
+            const page = await conversation.entries({}, 64, cursor, context);
+
+            for (const entry of page.items) {
+                const reply = entry.model?.[0];
+
+                if (
+                    entry.kind === "pi.assistant" &&
+                    !(reply?.role === "assistant" && reply.stopReason === "toolUse")
+                ) {
+                    return Number(entry.id);
+                }
+            }
+
+            cursor = page.next;
+        } while (cursor !== undefined);
+
+        return undefined;
     }
 
     /** Forks are new sessions: who may start one may fork, from a session they can see. */

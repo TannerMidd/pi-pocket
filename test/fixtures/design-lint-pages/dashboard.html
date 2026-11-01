@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Dashboard</title>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                font:
+                    14px/1.45 Inter,
+                    system-ui,
+                    sans-serif;
+                background: #0f1419;
+                color: #d7dde6;
+                display: grid;
+                grid-template-columns: 220px 1fr;
+                min-height: 100vh;
+            }
+            aside {
+                background: #151b23;
+                padding: 16px;
+                border-right: 1px solid #232b36;
+            }
+            aside a {
+                display: flex;
+                align-items: center;
+                min-height: 44px;
+                padding: 0 12px;
+                color: #aab4c2;
+                text-decoration: none;
+                border-radius: 8px;
+            }
+            aside a.on {
+                background: #1f2a38;
+                color: #fff;
+            }
+            main {
+                padding: 24px;
+                display: grid;
+                gap: 16px;
+            }
+            .kpis {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 16px;
+            }
+            .card {
+                background: #151b23;
+                border: 1px solid #232b36;
+                border-radius: 12px;
+                padding: 16px;
+            }
+            .kpi b {
+                display: block;
+                font-size: 28px;
+                color: #fff;
+            }
+            .up {
+                color: #4ade80;
+            }
+            .down {
+                color: #f87171;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th {
+                text-align: left;
+                color: #8b97a7;
+                font-weight: 500;
+                padding: 8px;
+            }
+            td {
+                padding: 8px;
+                border-top: 1px solid #232b36;
+            }
+            .bar {
+                height: 8px;
+                background: #232b36;
+                border-radius: 4px;
+                overflow: hidden;
+            }
+            .bar i {
+                display: block;
+                height: 100%;
+                background: #60a5fa;
+            }
+            svg {
+                display: block;
+                width: 100%;
+                height: 120px;
+            }
+            @media (max-width: 700px) {
+                body {
+                    grid-template-columns: 1fr;
+                }
+                aside {
+                    border-right: 0;
+                    border-bottom: 1px solid #232b36;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <aside data-pid="side">
+            <a class="on" href="#">Overview</a><a href="#">Reports</a><a href="#">Team</a>
+        </aside>
+        <main data-pid="main">
+            <h1 style="margin: 0; font-size: 20px" data-pid="h">Overview</h1>
+            <div class="kpis">
+                <div class="card kpi" data-pid="k1">
+                    <span>Revenue</span><b>$48k</b><span class="up">+12%</span>
+                </div>
+                <div class="card kpi" data-pid="k2">
+                    <span>Churn</span><b>2.1%</b><span class="down">-0.3%</span>
+                </div>
+            </div>
+            <div class="card" data-pid="chart">
+                <svg viewBox="0 0 300 120" role="img" aria-label="Revenue over time">
+                    <polyline
+                        fill="none"
+                        stroke="#60a5fa"
+                        stroke-width="2"
+                        points="0,100 60,80 120,90 180,40 240,50 300,20"
+                    />
+                </svg>
+            </div>
+            <div class="card" data-pid="tbl">
+                <table>
+                    <tr>
+                        <th>Region</th>
+                        <th>Share</th>
+                    </tr>
+                    <tr>
+                        <td>North</td>
+                        <td>
+                            <div class="bar"><i style="width: 70%"></i></div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>South</td>
+                        <td>
+                            <div class="bar"><i style="width: 40%"></i></div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </main>
+    </body>
+</html>

@@ -17,10 +17,18 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { type ConversationId, LiveDoc, type UsageState } from "@earendil-works/pi-durable";
+import {
+    type ConversationId,
+    createSession,
+    LiveDoc,
+    MemoryStorage,
+    UsageDoc,
+    type UsageState,
+} from "@earendil-works/pi-durable";
 import type { User } from "../src/server/config.ts";
 import { SpendDoc } from "../src/server/docs.ts";
 import { usageCost } from "../src/server/projection.ts";
+import { Spend } from "../src/server/spend.ts";
 
 /** Usage worth `dollars`, split between a model and a tool. */
 const costing = (dollars: number) =>
@@ -92,6 +100,59 @@ test("spend goes to whoever asked for the work, once, also when the server stopp
     app = await openApp(model);
     assert.equal(app.spend.personSpent(alex.id), 3, "counted on the next start, once");
     assert.equal(app.spend.sessionSpent(id), 3);
+});
+
+test("startup recovery stops a busy run after uncounted usage crosses its payer's limit", async () => {
+    const harness = createSession(new MemoryStorage());
+    const person = { id: "alex", name: "Alex", role: "guest", budget: 0.1 };
+    const aborted: ConversationId[] = [];
+    let id: ConversationId;
+    const spend = new Spend({
+        harness,
+        config: { userById: (id: string) => (id === person.id ? person : undefined) },
+        attribution: { requesterOf: () => person.id },
+        rootOf: (id: ConversationId) => id,
+        sessionMeta: () => undefined,
+        busyConversations: () => [id],
+        notice: () => {},
+        conversation: async (id: ConversationId) => ({
+            abort: async () => {
+                aborted.push(id);
+            },
+        }),
+        log: () => {},
+    } as unknown as App);
+
+    try {
+        id = await harness.commit(async (tx) => {
+            const { id } = await tx.createConversation({ ownership: { kind: "ownerless" } });
+            const stored = await tx.doc(SpendDoc);
+
+            // The response committed before shutdown, but its per-person count did not.
+            stored.people[person.id] = 0;
+            stored.counted[String(id)] = 0;
+            (await tx.doc(UsageDoc, id)).models["faux/faux-1"] = {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0.25, cacheRead: 0, cacheWrite: 0, total: 0.25 },
+            };
+
+            return id;
+        }, context);
+
+        // Startup loads spend before it installs the commit subscriber that refreshes people totals.
+        await spend.load([id]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(spend.personSpent(person.id), 0.25);
+        assert.equal(spend.heldBack(id), "Alex reached their $0.10 spend limit");
+        assert.deepEqual(aborted, [id], "the recovered run must stop after totals refresh");
+    } finally {
+        spend.close();
+        await harness.close(context);
+    }
 });
 
 test("spend goes to whoever asked for the work, also when someone else writes before it is stored", async () => {

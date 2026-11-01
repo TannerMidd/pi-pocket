@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Sticky</title>
+        <style>
+            body {
+                margin: 0;
+                font: 16px/1.6 system-ui;
+                color: #1c2330;
+                background: #fff;
+            }
+            header {
+                position: sticky;
+                top: 0;
+                z-index: 5;
+                background: rgba(255, 255, 255, 0.92);
+                backdrop-filter: blur(8px);
+                border-bottom: 1px solid #e3e7ee;
+                padding: 0 16px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                min-height: 56px;
+            }
+            header a {
+                display: inline-flex;
+                align-items: center;
+                min-height: 44px;
+                padding: 0 8px;
+                color: #1c2330;
+            }
+            section {
+                padding: 64px 24px;
+                max-width: 720px;
+                margin: 0 auto;
+            }
+            .badge {
+                position: absolute;
+                margin: -12px 0 0 8px;
+                background: #e11d48;
+                color: #fff;
+                font-size: 12px;
+                padding: 2px 8px;
+                border-radius: 99px;
+            }
+            .cards {
+                display: grid;
+                gap: 12px;
+            }
+            .card {
+                position: relative;
+                border: 1px solid #d7dce6;
+                border-radius: 12px;
+                padding: 16px;
+            }
+            .fab {
+                position: fixed;
+                right: 16px;
+                bottom: 16px;
+                width: 56px;
+                height: 56px;
+                border-radius: 50%;
+                border: 0;
+                background: #2563eb;
+                color: #fff;
+                font-size: 24px;
+            }
+        </style>
+    </head>
+    <body>
+        <header data-pid="hd">
+            <strong>Sticky</strong>
+            <nav><a href="#">One</a><a href="#">Two</a></nav>
+        </header>
+        <section data-pid="s1">
+            <h1>Scroll me</h1>
+            <div class="cards">
+                <div class="card" data-pid="c1">
+                    <span class="badge">New</span>
+                    <h2 style="margin: 0">Card one</h2>
+                    <p>Body copy.</p>
+                </div>
+                <div class="card" data-pid="c2">
+                    <h2 style="margin: 0">Card two</h2>
+                    <p>More body copy.</p>
+                </div>
+            </div>
+        </section>
+        <button class="fab" aria-label="Chat" data-pid="fab">+</button>
+    </body>
+</html>

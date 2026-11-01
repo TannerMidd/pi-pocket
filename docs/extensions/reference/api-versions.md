@@ -75,6 +75,7 @@ Each member in the reference has its own Since line. These parts came together:
 | `pocket.panel` and `pocket.status` (experimental)                                                                                                                 | 0.19.0 |
 | Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental)                                                                   | 0.19.0 |
 | `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                                                                                   | 0.19.0 |
+| `stop` and `archive` on `host.linkedSessions` (experimental)                                                                                                      | 0.28.0 |
 | The session list: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, `sessionSearch`, and `WebRequest.sessions` (experimental)                              | 0.20.0 |
 | `host.registerModelProvider` (experimental)                                                                                                                       | 0.20.0 |
 | `host.fetchPublic` (experimental)                                                                                                                                 | 0.20.0 |
@@ -84,3 +85,9 @@ Each member in the reference has its own Since line. These parts came together:
 | Public pages: `web.publicPage` and `web.links` (experimental)                                                                                                     | 0.22.0 |
 | People's values and the browser: `host.ask`, `hide`, `commandEnv`, `browser` (experimental)                                                                       | 0.22.0 |
 | Events, services, and settings: `host.on`, `web.provide`, `use`, `onService`, `settings`, `setting`, `onSettings`, `pocket.settings`, `onSettings` (experimental) | 0.22.0 |
+| Give PiP a message: `pocket.pip.ask` (experimental)                                                                                                               | 0.26.0 |
+| A person's role: `host.roleOf` (experimental)                                                                                                                     | 0.27.0 |
+| The page's scroll position: `scroll` in the `host.browser` snapshot (experimental)                                                                                | 0.27.0 |
+| Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0 |
+| Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0 |
+| How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0 |

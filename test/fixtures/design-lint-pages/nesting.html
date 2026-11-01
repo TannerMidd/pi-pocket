@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Nesting</title>
+        <style>
+            @layer base,components;
+            @layer base {
+                body {
+                    margin: 0;
+                    font: 16px/1.5 system-ui;
+                    color: #1c2024;
+                    background: #fbfbfc;
+                }
+            }
+            @layer components {
+                .panel {
+                    background: #fff;
+                    border: 1px solid #d9dde3;
+                    border-radius: 12px;
+                    padding: 16px;
+                    max-width: 520px;
+                    margin: 16px auto;
+                    container-type: inline-size;
+                    & h2 {
+                        margin: 0 0 8px;
+                        font-size: 20px;
+                    }
+                    & p {
+                        margin: 0;
+                        color: #475569;
+                    }
+                    & .row {
+                        display: grid;
+                        gap: 8px;
+                        margin-top: 12px;
+                    }
+                    @container (min-width:400px) {
+                        & .row {
+                            grid-template-columns: 1fr 1fr;
+                        }
+                    }
+                    & button {
+                        min-height: 44px;
+                        border: 1px solid #1e3a8a;
+                        border-radius: 8px;
+                        background: #1e3a8a;
+                        color: #fff;
+                        font: inherit;
+                        &:hover {
+                            background: #172e6e;
+                        }
+                    }
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <section class="panel" data-pid="p">
+            <h2 data-pid="h">Nested CSS</h2>
+            <p>With layers and container queries.</p>
+            <div class="row">
+                <button data-pid="a">One</button><button data-pid="b">Two</button>
+            </div>
+        </section>
+    </body>
+</html>

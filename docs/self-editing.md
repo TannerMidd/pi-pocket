@@ -2,6 +2,8 @@
 
 People often change Pi Pocket from inside itself. You can run on the server that you change, and so can all the other people who use it. [AGENTS.md](../AGENTS.md) gives the rules in short; this page gives all of them.
 
+Change a git checkout only. In a copy installed with npm (in a `node_modules` folder), the next update with npm replaces each edit, and the folder often belongs to another user. An update from the app (Menu → Update Pi Pocket) of a global npm install also swaps the whole package folder, so it removes edits there too.
+
 Before you start, read [map.md](map.md) to find the code that you need, and the part of [architecture.md](architecture.md) about it. Say what you will change. Then wait for a yes, unless the person asked for exactly that change.
 
 ## When a change takes effect

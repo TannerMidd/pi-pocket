@@ -18,6 +18,7 @@ import { useBack } from "./back.js";
 import { parseKeys, setBoxKeys } from "./box-keys.js";
 import { describersChanged, setCallDescriber } from "./calls.js";
 import { jumpToEntry } from "./chat.js";
+import { modulePresentationMode, setPresentationMode } from "./entry-presentation.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
     api,
@@ -33,6 +34,7 @@ import {
     panelsBeside,
     store,
 } from "./store.js";
+import { askPipFrom } from "./pip.js";
 import { fromExtensions, SLOTS, slotsChanged } from "./slots.js";
 import { setCallSummary } from "./turns.js";
 import {
@@ -79,7 +81,7 @@ const KINDS = [
 const OPENS = ["page", "sheet", "panel"];
 /** The event core sends a module's tabs when the owner changes its settings (`app.setExtensionSettings`). */
 const SETTINGS_EVENT = "pocket:settings";
-/** The most text `pocket.insertText` puts into the message box at once. */
+/** The most text `pocket.insertText` puts into the message box at once, and `pocket.pip.ask` gives PiP. */
 const INSERT_MAX = 100_000;
 /** The most of a message's text `pocket.messages` gives, and the most messages in a page. */
 const MESSAGE_TEXT = 1000;
@@ -440,7 +442,7 @@ function sync(list, known = true) {
         notify(
             "warning",
             "Extensions' browser parts are off in this tab, and so is the theme. Menu → Extensions turns them back on.",
-            () => openSheet({ type: "extensions", tab: "installed" }),
+            () => openSheet({ type: "extensions", tab: "installed", show: "built-in" }),
         );
     }
 
@@ -1048,6 +1050,23 @@ function pocketFor(record) {
 
             return jumpToEntry(entryId, { quiet: true });
         },
+        /**
+         * How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is
+         * `x.<module>.<name>`. With a mode, it sets it: `open` is the message, `folded` is one line, and `hidden` keeps
+         * the turn and shows nothing until Find. The same mode again changes nothing. Without one, it returns this
+         * browser's choice, or undefined when there is none yet (the row is folded then).
+         */
+        entryPresentation(kind, ...mode) {
+            tick(record);
+
+            if (mode.length === 0) {
+                return modulePresentationMode(kind, { module: record.module });
+            }
+
+            setPresentationMode(kind, mode[0], { module: record.module });
+
+            return undefined;
+        },
         /** Open through the app's normal navigation; the server checks access on connection. */
         openConversation: (id) => {
             tick(record);
@@ -1148,6 +1167,25 @@ function pocketFor(record) {
                 insertIntoComposer(text, [], { inline: options?.inline === true });
             }
         },
+        pip: Object.freeze({
+            /** Give PiP text as the person's message: in its box to review, or sent after a tap (`askPipFrom`). */
+            ask(text, options) {
+                tick(record);
+
+                if (typeof text !== "string" || text.trim() === "" || text.length > INSERT_MAX) {
+                    throw new Error(`pocket.pip.ask: give it text, up to ${INSERT_MAX} characters`);
+                }
+
+                if (!live()) {
+                    return Promise.resolve({
+                        ok: false,
+                        reason: "This version of the module is not loaded",
+                    });
+                }
+
+                return askPipFrom(`the extension “${record.title}”`, text, options?.send === true);
+            },
+        }),
         /**
          * Hide or reorder a slot's items, the app's own too, for the people who load this module: what a person chooses
          * in Appearance → Layout wins. Again for the same slot replaces it; `remove` takes it back.

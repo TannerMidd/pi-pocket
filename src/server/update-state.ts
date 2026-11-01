@@ -1,5 +1,5 @@
 /**
- * What an update of Pi Pocket's own checkout leaves on disk, in `.pocket-update/` in the checkout: the update under way
+ * Update state in `.pocket-update/` in a checkout, or `.pi-pocket-update/` beside an npm package: the update under way
  * (`pending.json`), how the last one ended (`last.json`), the packages it installs (`staging/`), and the ones it
  * replaced (`previous/`). The server writes them (`updates.ts`); the launcher reads them when a server it started after
  * an update stops before it is ready, and goes back to the version before (`rollBackUpdate`). It imports only Node's
@@ -17,27 +17,29 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 /** The folder in the checkout, which `.gitignore` leaves out. */
 export const UPDATE_DIR = ".pocket-update";
 
-/** An update under way: from one commit to another, written before the checkout changes. */
+/** An update under way, written before staging or changing the live package or checkout. */
 export type PendingUpdate = {
     v: 1;
+    /** Omitted by older git update records. */
+    kind?: "npm-global";
     tag: string;
     fromVersion: string;
     toVersion: string;
-    /** The commit before, and the release's. */
+    /** The commit before, and the release's. Empty strings for npm updates. */
     from: string;
     to: string;
     /** The branch the update moves, or null for a detached checkout. */
     branch: string | null;
-    /** New packages went in, and the ones before wait in `previous/`. */
+    /** New dependencies (git) or the whole new package (npm) went in. */
     modules: boolean;
     /** The release notes warn of a step that cannot be undone: the launcher does not go back by itself. */
     oneWay: boolean;
-    /** "switching" once git may have changed files: a stop then can leave some of the release's files. */
+    /** "switching" before git can change files, or before the npm package's first rename. */
     phase: "packages" | "switching";
     at: number;
 };
@@ -56,7 +58,17 @@ export type UpdateOutcome = {
 };
 
 export function updatePaths(appRoot: string) {
-    const dir = join(appRoot, UPDATE_DIR);
+    appRoot = resolve(appRoot);
+    const parent = dirname(appRoot);
+    const npmPackage =
+        basename(parent) === "node_modules" ||
+        (basename(parent).startsWith("@") && basename(dirname(parent)) === "node_modules");
+    const sibling = join(parent, ".pi-pocket-update");
+    // A global root can resolve through a symlink to a folder not named node_modules. The writer
+    // marks that exact package root; the launcher needs neither npm nor the live package to find it.
+    const markedGlobal = readJson(join(sibling, "npm-global.json"))?.appRoot === appRoot;
+    // npm ignores dot-prefixed siblings. State must survive replacement or removal of the package.
+    const dir = npmPackage || markedGlobal ? sibling : join(appRoot, UPDATE_DIR);
 
     return {
         dir,
@@ -103,12 +115,17 @@ export function readPending(appRoot: string): PendingUpdate | undefined {
         return undefined;
     }
 
-    if (!COMMIT.test(from) || !COMMIT.test(to)) {
+    if (raw.kind === "npm-global") {
+        if (!text(raw.fromVersion) || !text(raw.toVersion)) {
+            return undefined;
+        }
+    } else if (raw.kind !== undefined || !COMMIT.test(from) || !COMMIT.test(to)) {
         return undefined;
     }
 
     return {
         v: 1,
+        ...(raw.kind === "npm-global" ? { kind: "npm-global" as const } : {}),
         tag: text(raw.tag) ?? "",
         fromVersion: text(raw.fromVersion) ?? "",
         toVersion: text(raw.toVersion) ?? "",
@@ -124,6 +141,13 @@ export function readPending(appRoot: string): PendingUpdate | undefined {
 }
 
 export function writePending(appRoot: string, pending: PendingUpdate): void {
+    if (pending.kind === "npm-global") {
+        const root = resolve(appRoot);
+        const marker = join(dirname(root), ".pi-pocket-update", "npm-global.json");
+
+        writeJson(marker, { v: 1, appRoot: root });
+    }
+
     writeJson(updatePaths(appRoot).pending, pending);
 }
 
@@ -251,6 +275,226 @@ export function restoreModules(appRoot: string): boolean {
     rmSync(paths.previous, { recursive: true, force: true });
 
     return true;
+}
+
+/** The package npm installs with an isolated global prefix. Its dependencies stay inside it. */
+export function stagedPackagePath(appRoot: string): string {
+    const { staging } = updatePaths(appRoot);
+
+    return process.platform === "win32"
+        ? join(staging, "node_modules", "pi-pocket")
+        : join(staging, "lib", "node_modules", "pi-pocket");
+}
+
+/** Read without importing package code: the launcher can use this after a package rename. */
+function packageVersion(root: string): string | undefined {
+    const manifest = readJson(join(root, "package.json"));
+
+    return manifest?.name === "pi-pocket" ? text(manifest.version) : undefined;
+}
+
+function npmPending(appRoot: string): PendingUpdate {
+    const pending = readPending(appRoot);
+
+    if (pending?.kind !== "npm-global") {
+        throw new Error("No npm global update is pending.");
+    }
+
+    return pending;
+}
+
+/** Swap whole packages on the same file system. The global bin link keeps its original target. */
+export function swapInPackage(appRoot: string): void {
+    const pending = npmPending(appRoot);
+    const paths = updatePaths(appRoot);
+    const fresh = stagedPackagePath(appRoot);
+
+    if (packageVersion(fresh) !== pending.toVersion) {
+        throw new Error("The staged package does not match the pending version.");
+    }
+
+    if (
+        pending.phase !== "packages" ||
+        pending.modules ||
+        packageVersion(appRoot) !== pending.fromVersion
+    ) {
+        throw new Error("The live package changed, or this package swap already started.");
+    }
+
+    // A previous one-way update can leave its old package for manual recovery. Keep it without
+    // blocking a later update or deleting a package that the owner may still need.
+    for (const name of ["previous", "failed"] as const) {
+        if (existsSync(paths[name])) {
+            const kept = join(paths.dir, "kept");
+
+            mkdirSync(kept, { recursive: true });
+            const folder = mkdtempSync(join(kept, `npm-${name}-`));
+
+            renameSync(paths[name], join(folder, "package"));
+        }
+    }
+
+    writePending(appRoot, { ...pending, phase: "switching" });
+
+    // Keep these renames synchronous and adjacent: only a whole-process stop can interrupt them.
+    try {
+        renameSync(appRoot, paths.previous);
+        renameSync(fresh, appRoot);
+    } catch (error) {
+        if (!existsSync(appRoot) && existsSync(paths.previous)) {
+            renameSync(paths.previous, appRoot);
+        }
+
+        throw error;
+    }
+
+    writePending(appRoot, { ...pending, phase: "switching", modules: true });
+}
+
+/** Repair a missing live package before the launcher spawns a server or the server loads its app modules. */
+export function restoreMissingNpmPackage(appRoot: string): boolean {
+    const pending = readPending(appRoot);
+
+    if (pending?.kind !== "npm-global" || existsSync(appRoot)) {
+        return false;
+    }
+
+    const paths = updatePaths(appRoot);
+    const fresh = stagedPackagePath(appRoot);
+    const previous = packageVersion(paths.previous);
+    const failed = packageVersion(paths.failed);
+
+    if (existsSync(paths.previous) && previous !== pending.fromVersion) {
+        throw new Error("The previous npm package changed; it was kept for manual recovery.");
+    }
+
+    // Do not restore an older version after a warning release may have changed the data.
+    const keepNew = pending.oneWay && (pending.modules || failed === pending.toVersion);
+    const source =
+        !keepNew && previous === pending.fromVersion
+            ? paths.previous
+            : keepNew && failed === pending.toVersion
+              ? paths.failed
+              : packageVersion(fresh) === pending.toVersion
+                ? fresh
+                : undefined;
+
+    if (source === undefined) {
+        throw new Error("The live npm package is missing, with no safe copy to restore.");
+    }
+
+    if (source !== paths.previous) {
+        writePending(appRoot, { ...pending, phase: "switching", modules: true });
+    }
+
+    renameSync(source, appRoot);
+
+    return true;
+}
+
+/** Restore a whole npm package, including its dependencies, without invoking npm or a network. */
+export function restorePackage(appRoot: string): boolean {
+    const pending = npmPending(appRoot);
+    const paths = updatePaths(appRoot);
+
+    // Staging can fail before a swap starts. An older one-way update may have left an unrelated
+    // previous package: the live version is already right, so leave both packages untouched.
+    // This also handles a stop after the final restore rename.
+    if (packageVersion(appRoot) === pending.fromVersion) {
+        return true;
+    }
+
+    if (!existsSync(paths.previous)) {
+        return false;
+    }
+
+    if (packageVersion(paths.previous) !== pending.fromVersion) {
+        throw new Error("The previous package does not match the pending version; it was kept.");
+    }
+
+    if (existsSync(appRoot)) {
+        if (packageVersion(appRoot) !== pending.toVersion || existsSync(paths.failed)) {
+            throw new Error("The live package changed during recovery; no package was removed.");
+        }
+
+        renameSync(appRoot, paths.failed);
+    }
+
+    renameSync(paths.previous, appRoot);
+
+    return true;
+}
+
+/** Startup completed: record success, or recover an update that stopped before the swap completed. */
+export function finishNpmPending(
+    appRoot: string,
+    pending: PendingUpdate,
+    now = Date.now(),
+): UpdateOutcome {
+    if (pending.kind !== "npm-global") {
+        throw new Error("This is not an npm global update.");
+    }
+
+    const current = packageVersion(appRoot);
+
+    // A manual npm reinstall can finish before a staged update switches packages. Keep any
+    // unrelated backup, and clear that stale record without replacing the running package.
+    if (
+        current !== undefined &&
+        current !== pending.fromVersion &&
+        (current !== pending.toVersion || pending.phase === "packages")
+    ) {
+        return finishPending(
+            appRoot,
+            pending,
+            false,
+            `The npm package changed during the update to ${pending.toVersion}. Pi Pocket started at ${current}, so no package was replaced during recovery.`,
+            now,
+        );
+    }
+
+    if (pending.phase === "switching" && current === pending.toVersion) {
+        return finishPending(
+            appRoot,
+            pending,
+            true,
+            `Pi Pocket updated from ${pending.fromVersion} to ${pending.toVersion}.`,
+            now,
+        );
+    }
+
+    return rollBackNpm(appRoot, pending, now);
+}
+
+function rollBackNpm(appRoot: string, pending: PendingUpdate, now: number): UpdateOutcome {
+    const to = pending.toVersion;
+    const from = pending.fromVersion;
+    const paths = updatePaths(appRoot);
+    // A previous package plus a live release (or one set aside during recovery) means it may have run.
+    const mayHaveRun =
+        packageVersion(appRoot) === to || packageVersion(paths.failed) === to || pending.modules;
+
+    if (pending.oneWay && mayHaveRun) {
+        return finishPending(
+            appRoot,
+            pending,
+            false,
+            `${to} did not start. Its release notes warn of a step that cannot be undone, so Pi Pocket did not go back to ${from} by itself: read the release notes, and the server's log.`,
+            now,
+        );
+    }
+
+    if (!restorePackage(appRoot)) {
+        throw new Error("The previous npm package is missing. The pending update was kept.");
+    }
+
+    return finishPending(
+        appRoot,
+        pending,
+        false,
+        `The update to ${to} did not finish, so Pi Pocket went back to ${from}. The server's log says why.`,
+        now,
+    );
 }
 
 /** The checkout's branch, null when detached, undefined when git cannot say. */
@@ -575,6 +819,11 @@ export function rollBackUpdate(appRoot: string, now = Date.now()): string | unde
 
     if (pending === undefined) {
         return undefined;
+    }
+
+    // npm recovery must retain the pending record if a rename fails. The next start can retry it.
+    if (pending.kind === "npm-global") {
+        return rollBackNpm(appRoot, pending, now).message;
     }
 
     try {

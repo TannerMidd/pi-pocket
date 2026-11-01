@@ -172,14 +172,13 @@ test("Pi saves a lesson only when asked, or when sure it helps many later sessio
         return (await answer(where)) === "has: true";
     };
 
-    assert.ok(await has("only in two cases: a person asks you to save or remember something"));
+    assert.ok(!(await has("Lessons kept from earlier sessions")), "no lessons yet, no section");
+    assert.ok(await has("Use add only when a person asks you to save or remember something"));
     assert.ok(await has("you are sure it will clearly help in many later sessions here"));
-    assert.ok(
-        await has("On your own, never save a one-off fact, a niche detail, a result of this task"),
-    );
+    assert.ok(await has("Never save a one-off fact, a niche detail, a lesson for a rare case"));
     assert.ok(await has("When unsure, do not save"));
     // The safety rules stay.
-    assert.ok(await has("Never save secrets"));
+    assert.ok(await has("secrets, what AGENTS.md or the code already says"));
     assert.ok(await has("Use scope everywhere only for a person's general preferences"));
     assert.ok(!(await has("when you learn something that will help later sessions")));
     const id = await newSession(app, elsewhere);
@@ -199,7 +198,7 @@ test("Pi saves a lesson only when asked, or when sure it helps many later sessio
         model: { provider: "faux", modelId: "faux-1" },
         thinkingLevel: "off",
     });
-    assert.ok(await has("only in two cases: a person asks you to save or remember something", pip));
+    assert.ok(await has("Use add only when a person asks you to save or remember something", pip));
 });
 
 test("a lesson Pi saves reaches later sessions in the repository and its worktrees, not other folders", async () => {

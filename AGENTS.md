@@ -1,5 +1,7 @@
 # Working on Pi Pocket
 
+In an npm install (inside `node_modules`), read only: to change Pi Pocket, clone the repository.
+
 Pi Pocket is often edited from inside itself, while it runs. [docs/map.md](docs/map.md) says where things are, and [docs/architecture.md](docs/architecture.md) what they rely on. [docs/self-editing.md](docs/self-editing.md) has the whole of what follows, including how to check a change on a throwaway copy (`node test/serve.ts`); [docs/index.md](docs/index.md) lists every guide. Keep editing safe:
 
 - `web/**` changes reload every open browser right away. Keep the app loadable after each save: a syntax error blanks the screen for everyone, including you. Check with `node --check web/<file>.js` after editing.

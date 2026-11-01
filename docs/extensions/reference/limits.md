@@ -51,6 +51,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Pages and sheets that a module opens or closes:** past 300 in 1 s, the module stops. With no task between them, it stops past 1000, or at 5 or more over more than 1 s.
 - **Redraws in a hidden tab:** by a timer of 100 ms, which the browser can make slower.
 - **Notices from `pocket.notify`:** 5 every 5 s for a module, for all its versions together. The app drops the rest.
+- **The text of `pocket.pip.ask`:** 1 to 100,000 characters. Others throw. A send needs a tap just before it: it serves for 5 s and for one send.
 - **Rail buttons of modules:** no limit of their own. A rail with more buttons than room scrolls as a whole, and fades the edge where more is. The folded rail keeps up to a third of the window for its sessions first.
 - **A count on a rail button:** a count past 99, and `Infinity`, shows "99+".
 - **Text on a rail button:** past 24 characters, it is cut to 23 characters and "…". A panel's badge is the same.
@@ -78,6 +79,9 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Saved state of an artifact (`pocket-state-set`):** 16 KB of JSON at most for one value. A schema is 1 to 64 letters, digits, and `. _ : -`.
 - **Saves:** 20 in 10 s for one person and one artifact. Past that, the save fails.
 - **Saved values of a session:** 300 at most, for all its artifacts and people together.
+- **Assets of a version (since 0.26.0):** 200 files at most, 5 MB for one, 20 MB for all. A name is a relative path of 200 characters at most, with no `.` or `..` segment. A group is a lowercase kebab-case slug of 64 characters at most.
+- **A private asset address:** it is valid for 12 hours.
+- **Design:** a tweaks manifest has 40 knobs at most; a page sends 60 messages a second at most; 2 renders run at once and each takes 90 s at most; a design system file is 16 KB at most.
 - **Shares of a session:** 100 at most at once. A share lasts 1 day, 7 days, or 30 days, or until it is ended (`hours` left out).
 
 ## Tool calls
@@ -166,6 +170,17 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Each list in `declares`:** 100 names at most. An extension, tool, hook, or section name is 64 characters at most. A route's path is 200 characters at most. A command, with its scope, is 80 characters at most.
 - **`revoked`:** 50 commits at most, each with a reason of 300 characters at most.
 - **Looks for revoked versions:** two times a day, while extensions from the index are installed.
+
+## Presentations
+
+[Adding to the app](../app.md)
+
+- **Presentations of one module:** 32 at most.
+- **A kind:** `x.<module>.<name>`. `<name>` is 1 to 64 characters: a letter or a digit, then letters, digits, `_`, and `-`.
+- **A label:** one line of 80 characters at most, with no control characters.
+- **A `userPrefix`:** up to 200 characters, at least 3 of them not spaces, and not starting with `[` (the app's own inputs nobody typed do). It cannot start another module's `userPrefix`, or start with one, nor another of the same module's.
+- **`entry.data.summary`:** whitespace collapsed to one line, and past 200 characters cut to 199 and "…".
+- **Modes this browser remembers:** 256 kinds; past that, the one chosen longest ago is forgotten. Each is `open`, `folded`, or `hidden`.
 
 ## Themes
 

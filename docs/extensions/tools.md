@@ -27,6 +27,7 @@ export default function createMyWords() {
 
 - `name` must be different from the name of each other tool ([Names](reference/names.md)). Use a prefix of your own.
 - `description` and `parameters` go to the model with each request. Keep them short and exact.
+- `deferred: true` keeps a tool out of the requests until Pi loads it with `tool_search`, which only the Tool search module offers: while it is off, Pi cannot load the tool. Use it for a tool that few conversations need, or for a large set of tools. `test/prompt-budget.test.ts` keeps Pi Pocket's own prompt and tools at 16,000 characters in a plain session.
 - `parameters` is a TypeBox schema (`Type` from `@earendil-works/pi-ai`). Pi Durable checks the arguments against it before `execute` runs.
 - `execute(args, api, context)` does the work.
 

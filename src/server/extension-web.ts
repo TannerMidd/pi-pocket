@@ -1,9 +1,9 @@
 /**
  * Extensions' web parts. While a module loads, the `web` its default export gets registers its routes (under
- * `/api/x/<module>/`), its browser module (served from `/x/<module>/<rev>/`), and its commands for the message box. They
- * count only once the module installed, and they replace the previous version's in one step, as its extensions do;
- * turning the module off removes them. The browser module loads in the tabs of the people its access lets in, and gets
- * the events the module sends.
+ * `/api/x/<module>/`), its browser module (served from `/x/<module>/<rev>/`), its commands for the message box, and how
+ * its own inputs show. They count only once the module installed, and they replace the previous version's in one step,
+ * as its extensions do; turning the module off removes them. The browser module loads in the tabs of the people its
+ * access lets in, and gets the events the module sends.
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -29,13 +29,22 @@ import type {
     WebHandler,
     WebMethod,
 } from "./host.ts";
-import type { PublicLinks } from "./public-links.ts";
+import {
+    checkPresentation,
+    compilePresentations,
+    EMPTY_PRESENTATIONS,
+    type EntryPresentations,
+    prefixesOverlap,
+    type RegisteredPresentation,
+    samePresentations,
+} from "./entry-presentation.ts";
 import {
     checkSettings,
     type SettingField,
     type SettingValue,
     settingValue,
 } from "./extension-settings.ts";
+import type { PublicLinks } from "./public-links.ts";
 
 /**
  * The version of the extension API: the server's `web` and the app's `pocket`. It goes up only when something modules
@@ -206,6 +215,8 @@ export class WebPart {
     readonly serviceListeners: { module: string; listener: () => void }[] = [];
     readonly settingsListeners: (() => void)[] = [];
     readonly commands: RegisteredCommand[] = [];
+    /** How this module's own inputs show (`web.presentEntry`). Gone when this version goes. */
+    readonly presentations: RegisteredPresentation[] = [];
     /** The tools the module installed with this version: its browser module may describe only their calls. */
     tools: readonly string[] = [];
     readonly disposers: (() => void)[] = [];
@@ -226,7 +237,7 @@ export class WebPart {
         this.title = title;
     }
 
-    /** Whether it added nothing to the app: no routes, browser module, public pages, or commands (cleanups do not count). */
+    /** Whether it added nothing to the app: no routes, browser module, public pages, commands, or presentations (cleanups do not count). */
     get empty(): boolean {
         return (
             this.routes.length === 0 &&
@@ -234,7 +245,8 @@ export class WebPart {
             this.page === undefined &&
             this.service === undefined &&
             this.settings === undefined &&
-            this.commands.length === 0
+            this.commands.length === 0 &&
+            this.presentations.length === 0
         );
     }
 }
@@ -253,6 +265,8 @@ interface Options {
     warn?: (message: string) => void;
     /** The modules' commands changed: tabs must hear the new list. */
     commandsChanged?: () => void;
+    /** How modules show their own inputs changed: open transcripts must project again. */
+    presentationsChanged?: () => void;
     /** Where public links are kept (`public-links.ts`). Without it, `web.links` refuses. */
     links?: PublicLinks;
     /** The owner's values for modules' settings (config.json). Without it, every setting has its default. */
@@ -262,6 +276,8 @@ interface Options {
 export class ExtensionWebs {
     /** The web part of every module that has one, by module name. */
     readonly #parts = new Map<string, WebPart>();
+    /** The installed parts' presentations, compiled once for each change of them (`#notePresentations`). */
+    #presentations: EntryPresentations | undefined;
     readonly #options: Options;
     #watching = false;
     #closed = false;
@@ -284,7 +300,7 @@ export class ExtensionWebs {
         const sealed = (what: string) => {
             if (part.sealed) {
                 throw new Error(
-                    `web.${what}: register routes, the browser module, and commands while the module loads`,
+                    `web.${what}: register routes, the browser module, commands, and presentations while the module loads`,
                 );
             }
         };
@@ -358,6 +374,33 @@ export class ExtensionWebs {
             command: (name, command) => {
                 sealed("command");
                 part.commands.push(this.#checkCommand(part, name, command));
+            },
+            presentEntry: (spec) => {
+                open("presentEntry");
+
+                const registered = checkPresentation(part.module, spec, part.presentations.length);
+
+                if (part.presentations.some((each) => each.kind === registered.kind)) {
+                    throw new Error(`web.presentEntry: ${registered.kind} is registered twice`);
+                }
+
+                const prefix = registered.userPrefix;
+
+                if (
+                    prefix !== undefined &&
+                    part.presentations.some(
+                        (each) =>
+                            each.userPrefix !== undefined &&
+                            prefixesOverlap(each.userPrefix, prefix),
+                    )
+                ) {
+                    throw new Error(
+                        "web.presentEntry: that userPrefix starts, or starts with, one already registered",
+                    );
+                }
+
+                this.#presentationClash(part, registered);
+                part.presentations.push(registered);
             },
             publicPage: (handle) => {
                 open("publicPage");
@@ -660,6 +703,50 @@ export class ExtensionWebs {
         for (const command of part.commands) {
             this.#clash(part, command.name);
         }
+
+        for (const spec of part.presentations) {
+            this.#presentationClash(part, spec);
+        }
+    }
+
+    /** Throw when another module already presents this kind, or matches this prefix. */
+    #presentationClash(part: WebPart, spec: RegisteredPresentation): void {
+        for (const other of this.#parts.values()) {
+            if (other.module === part.module) {
+                continue;
+            }
+
+            for (const each of other.presentations) {
+                if (each.kind === spec.kind) {
+                    throw new Error(
+                        `web.presentEntry: ${other.file} already presents ${spec.kind}`,
+                    );
+                }
+
+                if (
+                    spec.userPrefix !== undefined &&
+                    each.userPrefix !== undefined &&
+                    prefixesOverlap(each.userPrefix, spec.userPrefix)
+                ) {
+                    throw new Error(
+                        `web.presentEntry: ${other.file} already matches messages that userPrefix would`,
+                    );
+                }
+            }
+        }
+    }
+
+    /** Tell listeners when the presentations open transcripts must use have changed. */
+    #notePresentations(
+        before: readonly RegisteredPresentation[],
+        after: readonly RegisteredPresentation[],
+    ): void {
+        const left = compilePresentations([{ presentations: before }]);
+        const right = compilePresentations([{ presentations: after }]);
+
+        if (!samePresentations(left, right)) {
+            this.#options.presentationsChanged?.();
+        }
     }
 
     /** Every installed module's commands, without their handlers. */
@@ -667,6 +754,17 @@ export class ExtensionWebs {
         return [...this.#parts.values()].flatMap((part) =>
             part.commands.map(({ handler: _handler, file: _file, ...info }) => info),
         );
+    }
+
+    /** How every module that is on shows its own inputs. Empty when none do. */
+    presentations(): EntryPresentations {
+        if (this.#presentations === undefined) {
+            const compiled = compilePresentations(this.#parts.values());
+
+            this.#presentations = compiled.byKind.size === 0 ? EMPTY_PRESENTATIONS : compiled;
+        }
+
+        return this.#presentations;
     }
 
     /** One command by its id: the very version a browser chose, never another module's or a newer version's. */
@@ -709,6 +807,7 @@ export class ExtensionWebs {
 
         // Kept even when it added nothing to the app: cleanups it adds later run when it goes.
         this.#parts.set(part.module, part);
+        this.#presentations = undefined;
         this.#rewatch(part);
 
         if (previous !== undefined) {
@@ -722,6 +821,8 @@ export class ExtensionWebs {
         if ((previous?.commands.length ?? 0) > 0 || part.commands.length > 0) {
             this.#options.commandsChanged?.();
         }
+
+        this.#notePresentations(previous?.presentations ?? [], part.presentations);
 
         if (previous?.service !== undefined || part.service !== undefined) {
             this.#serviceChanged(part.module);
@@ -790,6 +891,7 @@ export class ExtensionWebs {
         }
 
         this.#parts.delete(part.module);
+        this.#presentations = undefined;
         void this.#dispose(part);
 
         if (part.client !== undefined) {
@@ -799,6 +901,8 @@ export class ExtensionWebs {
         if (part.commands.length > 0) {
             this.#options.commandsChanged?.();
         }
+
+        this.#notePresentations(part.presentations, []);
 
         if (part.service !== undefined) {
             this.#serviceChanged(part.module);
@@ -1000,6 +1104,7 @@ export class ExtensionWebs {
         );
 
         this.#parts.clear();
+        this.#presentations = undefined;
         this.#staged.clear();
 
         return this.#settled(running);

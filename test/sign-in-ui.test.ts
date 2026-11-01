@@ -226,3 +226,238 @@ test(
         assert.deepEqual(await problems(), []);
     },
 );
+
+test(
+    "the Providers model selector keeps its layout and selection across viewports",
+    real,
+    async () => {
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.me?.role === "owner")`,
+            "signed in",
+        );
+        await page.evaluate(
+            `window.pageErrors = []; addEventListener("error", (event) => window.pageErrors.push(String(event.message))); return "true"`,
+        );
+        await page.evaluate(`
+        const { openSheet, store } = await import("/store.js");
+        localStorage.removeItem("pocket.modelFavorites." + store.state.me.id);
+        const model = store.state.models.find((each) => each.provider === "faux");
+
+        store.set((state) => ({
+            models: [
+                ...state.models,
+                ...Array.from({ length: 40 }, (_, index) => ({
+                    ...model,
+                    id: "fixture-" + index,
+                    name: "Fixture model " + index,
+                })),
+            ],
+        }));
+        openSheet({ type: "providers" });
+
+        return "true";
+    `);
+        await see(
+            `return JSON.stringify(document.querySelector(".subagent-models-list") !== null && document.querySelector(".providers-main") !== null)`,
+            "the Providers model selector",
+        );
+        await settled();
+
+        const desktop = await inPage<{ width: number; height: number; overflow: boolean }>(`
+        const list = document.querySelector(".subagent-models-list").getBoundingClientRect();
+
+        return JSON.stringify({
+            width: list.width,
+            height: list.height,
+            overflow: document.documentElement.scrollWidth > innerWidth,
+        });
+    `);
+
+        assert.ok(desktop.width >= 400, `desktop model list width was ${desktop.width}px`);
+        assert.ok(desktop.height >= 280, `desktop model list height was ${desktop.height}px`);
+        assert.equal(desktop.overflow, false, "desktop has no horizontal overflow");
+
+        const chosen = await inPage<{ text: string; title: string }>(`
+        const chosen = document.querySelector(".subagent-models-chosen");
+
+        return JSON.stringify({ text: chosen.textContent, title: chosen.title });
+    `);
+
+        assert.equal(chosen.text.trim(), "0 for subagents");
+        assert.match(chosen.title, /None allowed/);
+
+        await page.type({ selector: 'input[placeholder="Find a model"]' }, "Fixture model 17");
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".subagent-model").length === 1 && document.querySelector(".subagent-model").textContent.includes("Fixture model 17"))`,
+            "the searched model",
+        );
+
+        await page.setViewport(VIEWPORTS.mobile);
+        await page.evaluate(`
+        const input = document.querySelector('input[placeholder="Find a model"]');
+
+        input.value = "";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+
+        return "true";
+    `);
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".subagent-model").length > 1)`,
+            "the model list on mobile",
+        );
+        const mobile = await inPage<{
+            overflow: boolean;
+            sideTop: number;
+            mainTop: number;
+            minRow: number;
+        }>(`
+        const side = document.querySelector(".providers-side").getBoundingClientRect();
+        const main = document.querySelector(".providers-main").getBoundingClientRect();
+        const rows = [...document.querySelectorAll(".subagent-model")].map((row) => row.getBoundingClientRect().height);
+
+        return JSON.stringify({
+            overflow: document.documentElement.scrollWidth > innerWidth,
+            sideTop: side.top,
+            mainTop: main.top,
+            minRow: Math.min(...rows),
+        });
+    `);
+
+        assert.equal(mobile.overflow, false, "mobile has no horizontal overflow");
+        assert.ok(
+            mobile.sideTop < mobile.mainTop,
+            "mobile keeps the model selector above providers",
+        );
+        assert.ok(mobile.minRow >= 44, `mobile model row height was ${mobile.minRow}px`);
+
+        await page.setViewport(VIEWPORTS.desktop);
+        await settled();
+        await page.click({ selector: '.subagent-model input[value="faux/faux-1"]' });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const toggleState = await inPage<{
+            checked: boolean;
+            allowed: string[];
+            errors: string[];
+        }>(`
+            const { store } = await import("/store.js");
+
+            return JSON.stringify({
+                checked: document.querySelector('.subagent-model input[value="faux/faux-1"]').checked,
+                allowed: store.state.server.subagentModels,
+                errors: store.state.notices.filter((notice) => notice.level === "error").map((notice) => notice.message),
+            });
+        `);
+
+        assert.deepEqual(toggleState, { checked: true, allowed: ["faux/faux-1"], errors: [] });
+        await page.evaluate(
+            `const { closeSheet, openSheet } = await import("/store.js"); closeSheet(); await new Promise((resolve) => setTimeout(resolve, 450)); openSheet({ type: "providers" }); return "true"`,
+        );
+        await see(
+            `return JSON.stringify(document.querySelector('.subagent-model input[value="faux/faux-1"]')?.checked === true)`,
+            "the saved selection after reopening",
+        );
+
+        const favoriteSelector = '.subagent-model:has(input[value="faux/faux-1"]) .model-favorite';
+
+        await page.click({ selector: favoriteSelector });
+        await see(
+            `return JSON.stringify(document.querySelector('${favoriteSelector}')?.getAttribute("aria-pressed") === "true")`,
+            "the model starred",
+        );
+        assert.deepEqual(
+            await inPage<string[]>(
+                `const { store } = await import("/store.js"); return JSON.stringify(JSON.parse(localStorage.getItem("pocket.modelFavorites." + store.state.me.id)))`,
+            ),
+            ["faux/faux-1"],
+            "favorites use the owner's localStorage key",
+        );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector('.subagent-model input[value="faux/faux-1"]').checked)`,
+            ),
+            true,
+            "star does not change the model checkbox",
+        );
+        await page.click({ label: "Favorites" });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".subagent-model").length === 1 && document.querySelector('.subagent-model input[value="faux/faux-1"]') !== null)`,
+            "the Providers favorites filter",
+        );
+        await page.click({ selector: favoriteSelector });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".subagent-model").length === 0 && document.activeElement.matches('.model-filters button[aria-pressed="true"]'))`,
+            "unstar removes the row and focuses the active Favorites filter",
+        );
+        assert.deepEqual(
+            await inPage<string[]>(
+                `return JSON.stringify((await import("/store.js")).store.state.server.subagentModels)`,
+            ),
+            ["faux/faux-1"],
+            "favorites do not change subagent permissions",
+        );
+        await page.click({ label: "All models" });
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector('.subagent-model input[value="faux/faux-1"]').checked)`,
+            ),
+            true,
+            "unstar does not change the model checkbox",
+        );
+        await page.click({ selector: favoriteSelector });
+        await see(
+            `return JSON.stringify(document.querySelector('${favoriteSelector}')?.getAttribute("aria-pressed") === "true")`,
+            "the model starred again",
+        );
+        await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.me?.role === "owner")`,
+            "signed in after reload",
+        );
+        await page.evaluate(
+            `window.pageErrors = []; addEventListener("error", (event) => window.pageErrors.push(String(event.message))); return "true"`,
+        );
+        await page.evaluate(
+            `const { openSheet } = await import("/store.js"); openSheet({ type: "providers" }); return "true"`,
+        );
+        await see(
+            `return JSON.stringify(document.querySelector('.subagent-model:has(input[value="faux/faux-1"]) .model-favorite[aria-pressed="true"]') !== null)`,
+            "the favorite persisted after reload",
+        );
+        await page.evaluate(
+            `const { closeSheet, openSheet } = await import("/store.js"); closeSheet(); await new Promise((resolve) => setTimeout(resolve, 450)); openSheet({ type: "model" }); return "true"`,
+        );
+        await see(
+            `return JSON.stringify(document.querySelector('.model-filters button') !== null)`,
+            "the ModelPicker favorites filter",
+        );
+        await page.click({ label: "Favorites" });
+        await see(
+            `return JSON.stringify(document.querySelectorAll('.pop-menu-row').length === 1 && document.querySelector('.pop-menu-row').getAttribute("title").startsWith("faux/faux-1"))`,
+            "the ModelPicker favorites results",
+        );
+        assert.deepEqual(await problems(), []);
+        await page.evaluate(
+            `const { store } = await import("/store.js"); localStorage.setItem("pocket.modelFavorites." + store.state.me.id, "{"); return "true"`,
+        );
+        await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.me?.role === "owner")`,
+            "signed in with malformed favorites",
+        );
+        await page.evaluate(
+            `window.pageErrors = []; addEventListener("error", (event) => window.pageErrors.push(String(event.message))); const { openSheet } = await import("/store.js"); openSheet({ type: "providers" }); return "true"`,
+        );
+        await see(
+            `return JSON.stringify(document.querySelector('.subagent-model:has(input[value="faux/faux-1"]) .model-favorite[aria-pressed="false"]') !== null)`,
+            "malformed favorites are ignored",
+        );
+        assert.deepEqual(await problems(), []);
+        await app.setSubagentModels(
+            app.config.users.find((user) => user.role === "owner")!,
+            [],
+        );
+        assert.deepEqual(await problems(), []);
+    },
+);

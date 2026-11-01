@@ -8,6 +8,10 @@
  * 4. `skills/` in Pi's folder (`~/.pi/agent/skills/`).
  * 5. `~/.agents/skills/`, for every session.
  *
+ * The `skills` setting works as in Pi: a relative path is from Pi's folder; `-path` and `+path` (exact), and `!pattern`
+ * (a glob) turn skills off or on, and so does a plain glob among the paths. The exclusions count for the settings'
+ * paths and for places 4 and 5, not for the project's own folders (only the project's own settings reach those).
+ *
  * Pi trusts a project when its trust store (`trust.json` in Pi's folder) says so for the folder or one above it, or
  * says nothing and Pi's `defaultProjectTrust` setting is "always". Where it says nothing, the CLI asks when it starts.
  * Pi Pocket asks its owner (`readProjectTrust` says when) and saves the answer in the same store, with the three
@@ -18,19 +22,24 @@
  * The search for `.agents/skills/` stops at the repository's root, as Pi's loading does; Pi's question also counts
  * folders above the root, whose skills it never loads, so Pi Pocket does not ask about those.
  *
- * This follows `addAutoDiscoveredResources` and `collectAncestorAgentsSkillDirs` in `dist/core/package-manager.js`,
+ * This follows `addAutoDiscoveredResources`, `collectAncestorAgentsSkillDirs`, `resolveLocalEntries`, `applyPatterns`,
+ * and `isEnabledByOverrides` in `dist/core/package-manager.js`,
  * `resolveProjectTrusted` in `dist/core/project-trust.js`, and `getProjectTrustOptions` in `dist/core/trust-manager.js`
- * of @earendil-works/pi-coding-agent, which the package does not export: check them when updating Pi.
+ * of @earendil-works/pi-coding-agent, which the package does not export: check them when updating Pi. Pi's
+ * `DefaultPackageManager.resolve` is the one export that applies the setting, but it is async, takes the project's
+ * trust from Pi's own settings object, and loads package skills: Pi Pocket keeps its trust code and its folders.
  * `test/skills.test.ts` checks the skills against Pi's own loader.
  */
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
     CONFIG_DIR_NAME,
     loadSkills,
+    loadSkillsFromDir,
     ProjectTrustStore,
     type Skill,
 } from "@earendil-works/pi-coding-agent";
+import { minimatch } from "minimatch";
 
 /** What, besides the session's folder, says where skills are. */
 export type SkillSources = {
@@ -75,6 +84,65 @@ function projectAgentsFolders(cwd: string, home: string): string[] {
             return folders;
         }
     }
+}
+
+/** The `SKILL.md` files (or skill files) under `path`, a skill folder or file. */
+function skillFilesAt(path: string): string[] {
+    if (!existsSync(path)) {
+        return [];
+    }
+
+    return statSync(path).isDirectory()
+        ? loadSkillsFromDir({ dir: path, source: "path" }).skills.map((each) => each.filePath)
+        : path.endsWith(".md")
+          ? [path]
+          : [];
+}
+
+/** Whether `path` is an override (`!`, `+`, `-`) or a glob, rather than a plain path, among Pi's settings entries. */
+const isPattern = (path: string) => /^[-+!]|[*?]/.test(path);
+
+/**
+ * The files `entries` (Pi's `skills` setting) leave on, as Pi's `applyPatterns` decides, with paths and globs from
+ * `base`. A plain glob includes, `!` excludes, `+` puts an exact path back, and `-` takes an exact path out.
+ */
+function enabledBy(files: string[], entries: string[], base: string, home: string): string[] {
+    const posix = (path: string) => path.split(sep).join("/");
+    const unTilde = (path: string) =>
+        path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path;
+    const withKey = (key: string) =>
+        entries.filter((each) => each.startsWith(key)).map((each) => each.slice(1));
+    const [excludes, forceIn, forceOut] = ["!", "+", "-"].map(withKey) as [
+        string[],
+        string[],
+        string[],
+    ];
+    const includes = entries.filter((each) => !/^[-+!]/.test(each));
+
+    const matches = (file: string, patterns: string[], exact: boolean) => {
+        const skill = basename(file) === "SKILL.md";
+        const places = [file, ...(skill ? [dirname(file)] : [])];
+        const keys = places.flatMap((each) => [posix(relative(base, each)), posix(each)]);
+
+        return patterns.some((pattern) => {
+            const form = posix(unTilde(exact ? pattern.replace(/^\.[/\\]/, "") : pattern));
+
+            return exact
+                ? keys.includes(form)
+                : [...keys, ...places.map((each) => basename(each))].some((key) =>
+                      minimatch(key, form),
+                  );
+        });
+    };
+
+    return files.filter((file) => {
+        let on = includes.length === 0 || matches(file, includes, false);
+
+        on &&= !matches(file, excludes, false);
+        on ||= matches(file, forceIn, true);
+
+        return on && !matches(file, forceOut, true);
+    });
 }
 
 /** The answers Pi's `/trust` offers: trust the folder, trust the folder above it (and so this one too), or not. */
@@ -165,7 +233,7 @@ export function projectDistrusted(cwd: string, sources: SkillSources): boolean {
     );
 }
 
-/** Where a session in `cwd` loads skills from, in order: folders, and the paths in Pi's settings as written. */
+/** Where a session in `cwd` loads skills from, in order: the project's folders, then skill files Pi's settings leave on. */
 export function skillPlaces(cwd: string, sources: SkillSources): string[] {
     const folder = resolve(cwd);
     const own = join(folder, CONFIG_DIR_NAME, "skills");
@@ -176,13 +244,36 @@ export function skillPlaces(cwd: string, sources: SkillSources): string[] {
         hasOwn || agents.length > 0
             ? decides(savedDecision(folder, sources.agentDir), sources)
             : "undecided";
-    const user = [join(sources.agentDir, "skills"), join(sources.home, ".agents", "skills")];
+    // Pi's folder and the home folder's `.agents` are the base of the exclusions for the skills in each.
+    const user: [string, string][] = [
+        [join(sources.agentDir, "skills"), sources.agentDir],
+        [join(sources.home, ".agents", "skills"), join(sources.home, ".agents")],
+    ];
+    const entries = [...sources.settingsPaths];
+    const paths = entries.filter((each) => !isPattern(each));
+    const listed = paths.flatMap((raw) => {
+        const each = raw.trim();
+
+        return skillFilesAt(
+            resolve(
+                sources.agentDir,
+                each.startsWith("~/") ? join(sources.home, each.slice(2)) : each,
+            ),
+        );
+    });
 
     return [
         ...(hasOwn && decision !== "distrusted" ? [own] : []),
         ...(decision === "trusted" ? agents : []),
-        ...sources.settingsPaths,
-        ...user.filter((each) => existsSync(each)),
+        ...enabledBy(listed, entries.filter(isPattern), sources.agentDir, sources.home),
+        ...user.flatMap(([folder, base]) =>
+            enabledBy(
+                skillFilesAt(folder),
+                entries.filter((each) => /^[-+!]/.test(each)),
+                base,
+                sources.home,
+            ),
+        ),
     ];
 }
 

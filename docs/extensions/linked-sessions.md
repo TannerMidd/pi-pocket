@@ -1,6 +1,6 @@
 # Starting and messaging sessions
 
-A tool can start a session from the session that it runs in, and send messages between such sessions. Agent Teams does this ([agent-teams.ts](../../src/server/extensions/agent-teams.ts)). Use `host.linkedSessions`. Its members are in [the host reference](reference/host.md).
+A tool can start a session from the session that it runs in, send messages between such sessions, and stop or archive one. Agent Teams does this ([agent-teams.ts](../../src/server/extensions/agent-teams.ts)). A team or orchestration extension uses the same calls. Use `host.linkedSessions`. Its members are in [the host reference](reference/host.md).
 
 **Experimental** in 0.14: it can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)).
 
@@ -20,7 +20,7 @@ A linked session is an ordinary session. The session list shows it under the ses
 - Without `title`, the title is the first line of the message.
 - `model` is `provider/modelId`. While the owner's list (Menu → Providers → Models for subagents) is empty, it must be the source's model. Once the list has models, it must be one of them, and the source's own model counts only when it is listed. Without `model`, the session uses the source's model if the list is empty or has it. If the list does not have it, the call is refused with an error that names the allowed models: the caller must choose one (the error is a 400 for a human route).
 - `send` refuses a session that runs on a model off the list (a person changed it, or the owner changed the list), when the list is not empty. A message from a linked session to the session that started it is a reply, not work: it goes whatever model that session runs on.
-- `thinking` can be at most the source's level. Without it, the session uses the source's level. Pi Pocket lowers it to the highest level that the model has.
+- `thinking` can be any level, also one above the source's. Without it, the session uses the source's level. Pi Pocket lowers it to the highest level that the model has, or uses the lowest level of the model when it has none that low.
 - When a model cannot be used now, Pi Pocket refuses the call before it makes anything.
 
 ## Starts from a human page
@@ -28,13 +28,13 @@ A linked session is an ordinary session. The session list shows it under the ses
 Since 0.16.0, a [conversation-bound route](routes.md#bind-a-source-conversation) gets `request.linkedSessions.start({ title?, message, model?, thinking?, cwd? }, key)` and `list()`. These methods act as the authenticated person and bound source, not `host.requesterOf(source)`. They have no source-id or actor parameter. They end with the request, so await each start in the handler.
 
 - The same team, source plan, turn, spend, allowed-model, and provider checks apply. No message is added to the source, and its requester is unchanged.
-- Explicit thinking must be supported by the chosen model and no higher than the source's level. It is rejected rather than silently lowered. Omitted thinking inherits with the existing model cap policy. Read `request.conversation.model` and `thinkingLevel`, with `host.modelInfo("provider/modelId")`, to show the effective choices.
+- Explicit thinking must be a level that the chosen model has. It is rejected rather than silently lowered. Omitted thinking inherits the source's level, which Pi Pocket lowers to a level that the model has. Read `request.conversation.model` and `thinkingLevel`, with `host.modelInfo("provider/modelId")`, to show the effective choices.
 - Source folder/model/thinking changes while a start waits cause a 409. Other inherited agent settings are read fresh in the creation transaction. The target cannot be reconfigured to substitute another model, level, or folder before its first message is admitted.
 - Keys share the existing receipt store. Prefix them with the module's name and keep one stable key per logical role start. A receipt made for another clicking person is a 409, never permission to act as that person.
 - `list()` returns `HumanLinkedSession[]`: the existing address and audience-safe metadata, plus a `conversationId` visible to this person. Use `pocket.openConversation(item.conversationId)` or a start's `session` to open it. Do not put these ids in a model transcript. The host's `list(source)` still gives opaque addresses only.
 - The route waits only for initial-message admission, not an answer. The final authorization boundary is when that admission enters Durable's mutation line. A short child-context lease rejects intervening source/target policy changes and rechecks synchronous actor, model, and spend policy there. After admission, later cancellation does not undo work.
 
-Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0"`. `host.linkedSessions` retains its previous requester and thinking-cap behavior.
+Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0"`. `host.linkedSessions` retains its previous requester behavior.
 
 ## Send a message
 
@@ -44,18 +44,34 @@ Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0
 - `send` returns when the session takes the message, not when it answers.
 - The session that gets the message reads it in a fence. Words before it say that another session's agent wrote it, that it is a request and not an order from a person, and which address to reply to.
 
+## Stop a run
+
+`stop(source, { to }, key)` stops the run of the linked session at the address `to`, and withdraws what waits in its queue. Stopping is the safe direction: it needs the same access as `send`, including the turn and room under the spend limit.
+
+- When the session is idle, it has no run to stop: the call only withdraws what waits in its queue.
+- It returns `{ busy }`. `busy` is true when the session was working.
+- Since 0.28.0. An older Pi Pocket has no `stop`, so a module checks for it and sets `minPocket` to `0.28.0` when it needs it.
+
+## Archive a session
+
+`archive(source, { to, archived? }, key)` archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives.
+
+- It returns `{ archived, repeating }`. `archived` says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them.
+- It needs the same access as `send`.
+- Since 0.28.0, with the same check as `stop`.
+
 ## List the sessions
 
 `list(source)` gives the sessions linked to the source, at any distance, that the person whom Pi works for can see.
 
 - Each one has an `address` of the source's own, so no session's id goes into the source's transcript.
-- Each one has its title, folder, and state only when all the people who see the source also see it.
+- Each one has its title, folder, and state only when all the people who see the source also see it. Since 0.28.0 that state includes `failed`: why its last run gave up, the same short line the session list shows, and only while that failure stands. A later run clears it. A run that was stopped is not a failure.
 
 Addresses belong to the session that has them. A fork starts with none, so it leaves the team: the addresses in the history that it copied do not work there.
 
 ## Who it acts for
 
-`start` and `send` act for the person whom Pi works for in the source. They need that person's access and right to steer. To start a session, that person must also have access to all sessions.
+`start`, `send`, `stop`, and `archive` act for the person whom Pi works for in the source. They need that person's access and right to steer. To start a session, that person must also have access to all sessions. `stop` and `archive` reach only a session of this team that the person can see.
 
 Pi Pocket refuses them while the source is in plan mode, past a spend limit, or while another person has the turn. `send` also needs the turn, and room under the spend limit, in the target session.
 
@@ -73,6 +89,6 @@ Pi Pocket keeps a team small. Past these limits ([Limits](reference/limits.md#li
 
 ## Replays
 
-Give a `key` that stays the same when the call runs again: `${api.taskId}:${api.callId}`. A start or a send with a key that Pi Pocket saw before returns what the first call returned. So a replay makes one session, and sends one message. Pi Pocket keeps the record of a key for a limited time, and for a limited number of calls ([limits](reference/limits.md#linked-sessions)).
+Give a `key` that stays the same when the call runs again: `${api.taskId}:${api.callId}`. A call with a key that Pi Pocket saw before returns what the first call returned, and does not act again. So a replay makes one session, sends one message, stops one run, and archives once. A repeated `stop` returns the first call's `{ busy }`. A repeated `archive` returns the first call's `{ archived, repeating }`, not a state someone changed later. Pi Pocket keeps the record of a key for a limited time, and for a limited number of calls ([limits](reference/limits.md#linked-sessions)).
 
 The errors say what is wrong. They do not tell Pi what to do about it: your tool tells Pi that.

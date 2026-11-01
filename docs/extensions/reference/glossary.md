@@ -30,7 +30,7 @@ When people take turns in a session, the person who has the turn is the only per
 
 ### the person Pi works for
 
-The person whose message started Pi's current work in a session. Pi acts for this person, with this person's rights. Code: `host.requesterOf`.
+The person whose message started Pi's current work in a session. Pi acts for this person, with this person's rights. Code: `host.requesterOf`. To know this person's role, use `host.roleOf` with the id (since 0.27.0, experimental).
 
 ## Sessions
 

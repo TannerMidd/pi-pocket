@@ -70,7 +70,7 @@
                 <div class="wrap">
                     <div>
                         <a class="badge" href="https://earendil.com/posts/pi-durable/"
-                            ><b>v0.24.0</b>Built on Pi Durable →</a
+                            ><b>v0.27.0</b>Built on Pi Durable →</a
                         >
                         <h1>Pi, on your phone.<br /><span class="grad">And any browser.</span></h1>
                         <p class="lead">
@@ -86,9 +86,7 @@
                         </div>
                         <div class="install">
                             <span class="prompt">$</span>
-                            <code id="install-cmd"
-                                >git clone https://github.com/TannerMidd/pi-pocket.git</code
-                            >
+                            <code id="install-cmd">npm install -g pi-pocket</code>
                             <button class="copy" type="button" data-copy="#install-cmd">
                                 Copy
                             </button>
@@ -1008,7 +1006,7 @@
                 <div class="wrap">
                     <div class="section-head center reveal">
                         <span class="kicker">Access</span>
-                        <h2>Four ways to connect.</h2>
+                        <h2>Five ways to connect.</h2>
                         <p>
                             The launcher asks how your devices connect, then shows a sign-in link
                             and a QR code for your phone.
@@ -1035,10 +1033,19 @@
                             <h3>Tailscale</h3>
                             <p>Only devices on your tailnet, encrypted by Tailscale.</p>
                         </div>
+                        <div class="mode reveal">
+                            <code>tailscale-serve</code>
+                            <h3>Tailscale Serve</h3>
+                            <p>
+                                https on your own tailnet name, with a certificate Tailscale holds
+                                and nothing public.
+                            </p>
+                        </div>
                     </div>
                     <p class="note">
-                        Push notifications and dictation need https. Pi Pocket also runs on Android:
-                        install it in Termux and keep everything on the phone.
+                        Push notifications and dictation need https, from Cloudflare Tunnel or
+                        Tailscale Serve. Pi Pocket also runs on Android: install it in Termux and
+                        keep everything on the phone.
                     </p>
                 </div>
             </section>
@@ -1107,10 +1114,10 @@
                             aria-labelledby="tab-desktop"
                             tabindex="0"
                         ><span class="c"># Requires Node.js 22.19 or newer</span>
-<span class="p">$ </span>git clone https://github.com/TannerMidd/pi-pocket.git
-<span class="p">$ </span>cd pi-pocket
-<span class="p">$ </span>npm install
-<span class="p">$ </span>npm start</pre>
+<span class="p">$ </span>npm install -g pi-pocket
+<span class="p">$ </span>pi-pocket
+<span class="c"># Or try it once: npx pi-pocket</span>
+<span class="c"># To change its code: git clone, npm install, npm start</span></pre>
                         <pre
                             id="cmd-android"
                             role="tabpanel"

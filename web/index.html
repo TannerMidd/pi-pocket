@@ -118,6 +118,56 @@
                 <div class="boot-caption">starting</div>
             </div>
         </div>
+        <!--
+            A file of the app that does not load (a content blocker, the network) or that fails as it runs stops the app
+            before it can say so, and the boot screen stays up: say it here, until the app's script has run.
+        -->
+        <script>
+            (function () {
+                var fail = function (detail) {
+                    var boot = document.querySelector("#app > .boot");
+
+                    if (!boot) {
+                        return;
+                    }
+
+                    boot.classList.add("failed");
+                    boot.querySelector(".boot-caption").textContent = "could not start";
+
+                    var line = boot.querySelector(".boot-detail") || document.createElement("div");
+
+                    line.className = "boot-detail";
+                    line.textContent = detail;
+                    boot.appendChild(line);
+                };
+                var watch = function (event) {
+                    var target = event.target;
+                    var app =
+                        target &&
+                        target.tagName === "SCRIPT" &&
+                        target.getAttribute("src") === "/app.js";
+
+                    if (event.type === "load") {
+                        if (app) {
+                            removeEventListener("error", watch, true);
+                            document.removeEventListener("load", watch, true);
+                        }
+                    } else if (app) {
+                        fail(
+                            "A file of the app did not load. A content blocker can stop one: " +
+                                "let this address through it, then reload.",
+                        );
+                    } else if (event instanceof ErrorEvent) {
+                        fail(
+                            "A file of the app failed: " + event.message + " Reload to try again.",
+                        );
+                    }
+                };
+
+                addEventListener("error", watch, true);
+                document.addEventListener("load", watch, true);
+            })();
+        </script>
         <script type="module" src="/app.js"></script>
     </body>
 </html>

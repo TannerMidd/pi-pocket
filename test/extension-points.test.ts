@@ -6,6 +6,7 @@ import {
     type App,
     cleanUp,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -239,6 +240,20 @@ export default (host, web) => {
         return { ok: true };
     });
 
+    web.route("POST", "role", (request) => ({ role: host.roleOf(String(request.body.id)) ?? null }));
+
+    web.route("POST", "scroll", async (request) => {
+        const page = await host.browser(Number(request.body.id), { open: true });
+
+        await page.navigate(String(request.body.url));
+
+        const top = (await page.snapshot()).scroll;
+
+        await page.scroll(undefined, 300);
+
+        return { top, down: (await page.snapshot()).scroll };
+    });
+
     return defineExtension({ name: "test-points", tools: [signIn, leak], hooks: [noTypedPasswords] });
 };
 `,
@@ -253,6 +268,10 @@ export default (host, web) => {
             return response.end(
                 `<title>Deep</title><sign-in><template shadowrootmode="open"><label>Password <input type="password"></label></template></sign-in><div id="editor" contenteditable>Some <b>old words</b> here</div>`,
             );
+        }
+
+        if (request.url?.endsWith("tall")) {
+            return response.end(`<title>Tall</title><div style="height:3000px">Tall page</div>`);
         }
 
         // At /covered, a banner lies over the password field, as a cookie banner can.
@@ -457,6 +476,50 @@ test("any tool's result hides the value before it is stored, its details too", a
     assert.doesNotMatch(transcript, new RegExp(SECRET));
 });
 
+test("host.roleOf gives a person's role by id, and nothing for an id that is not a person", async () => {
+    const guest = app.config.addUser("Rae", "guest").user;
+    const viewer = app.config.addUser("Vic", "viewer").user;
+
+    const ask = async (id: string) => {
+        const { createHandler } = await import("../src/server/http.ts");
+        const server = createServer(
+            createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+        );
+
+        await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+
+        try {
+            const response = await fetch(
+                `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/points/role`,
+                {
+                    method: "POST",
+                    headers: {
+                        authorization: `Bearer ${app.config.ownerToken}`,
+                        "x-pocket": "1",
+                        "content-type": "application/json",
+                    },
+                    body: JSON.stringify({ id }),
+                },
+            );
+
+            return ((await response.json()) as { role: string | null }).role;
+        } finally {
+            server.closeAllConnections();
+            server.close();
+        }
+    };
+
+    assert.equal(await ask(owner(app).id), "owner");
+    assert.equal(await ask(guest.id), "guest");
+    assert.equal(await ask(viewer.id), "viewer");
+    assert.equal(await ask("nobody"), null);
+
+    app.config.updateUser(guest.id, { role: "viewer" });
+    assert.equal(await ask(guest.id), "viewer");
+    app.config.removeUser(guest.id);
+    assert.equal(await ask(guest.id), null);
+});
+
 test("an ask's card is answered by the person Pi works for, and its values reach only the extension", async () => {
     const id = await newSession(app);
     const me = owner(app);
@@ -591,6 +654,8 @@ test(
 
 test("a hook can keep Pi's own browser tool from typing into a password field", real, async () => {
     const id = await newSession(app);
+
+    await loadTools(app, id, "browser");
     const { createHandler } = await import("../src/server/http.ts");
     const server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
@@ -631,6 +696,59 @@ test("a hook can keep Pi's own browser tool from typing into a password field", 
                 ),
             "",
         );
+    } finally {
+        server.closeAllConnections();
+        server.close();
+        await app.browsers.close(Number(id));
+    }
+});
+
+test("a snapshot says where the page is scrolled, in CSS pixels", real, async () => {
+    const id = await newSession(app);
+    const { createHandler } = await import("../src/server/http.ts");
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+
+    const scroll = async (path: string) => {
+        const response = await fetch(
+            `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/points/scroll`,
+            {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${app.config.ownerToken}`,
+                    "x-pocket": "1",
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({ id: Number(id), url: `${base}/${path}` }),
+            },
+        );
+        const result = (await response.json()) as {
+            top: { y: number; viewport: number; height: number };
+            down: { y: number; viewport: number; height: number };
+        };
+
+        assert.equal(response.status, 200, JSON.stringify(result));
+
+        return result;
+    };
+
+    try {
+        const tall = await scroll("tall");
+
+        assert.equal(tall.top.y, 0);
+        assert.ok(tall.top.viewport > 0);
+        assert.ok(tall.top.height >= 3000, `the page is ${tall.top.height} tall`);
+        assert.ok(tall.top.y + tall.top.viewport < tall.top.height, "more below");
+        assert.ok(tall.down.y > 0, "scrolled down");
+        assert.equal(tall.down.height, tall.top.height);
+
+        const short = await scroll("");
+
+        assert.ok(short.top.y + short.top.viewport >= short.top.height, "nothing below");
+        assert.equal(short.down.y, 0);
     } finally {
         server.closeAllConnections();
         server.close();

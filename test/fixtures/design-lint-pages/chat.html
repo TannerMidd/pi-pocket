@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Chat</title>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+                font: 15px/1.4 system-ui;
+                background: #e9edf3;
+                color: #111;
+            }
+            header {
+                padding: 12px 16px;
+                background: #fff;
+                border-bottom: 1px solid #d0d6e0;
+                font-weight: 700;
+            }
+            .log {
+                flex: 1;
+                overflow: auto;
+                padding: 16px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .m {
+                max-width: 75%;
+                padding: 10px 14px;
+                border-radius: 16px;
+                background: #fff;
+            }
+            .m.me {
+                align-self: flex-end;
+                background: #1e5de0;
+                color: #fff;
+            }
+            .t {
+                font-size: 12px;
+                color: #5b6272;
+                margin-top: 2px;
+            }
+            .me .t {
+                color: #dbe6ff;
+            }
+            form {
+                display: flex;
+                gap: 8px;
+                padding: 12px;
+                background: #fff;
+            }
+            input {
+                flex: 1;
+                min-height: 44px;
+                border: 1px solid #7b8498;
+                border-radius: 22px;
+                padding: 0 16px;
+                font: inherit;
+            }
+            button {
+                min-height: 44px;
+                min-width: 44px;
+                border: 0;
+                border-radius: 22px;
+                background: #1e5de0;
+                color: #fff;
+            }
+        </style>
+    </head>
+    <body>
+        <header data-pid="h">Team chat</header>
+        <div class="log" data-pid="log">
+            <div class="m">
+                Lunch at 12?
+                <div class="t">10:02</div>
+            </div>
+            <div class="m me">
+                Sure, usual place.
+                <div class="t">10:03</div>
+            </div>
+            <div class="m">
+                Booked.
+                <div class="t">10:04</div>
+            </div>
+        </div>
+        <form data-pid="f">
+            <input aria-label="Message" placeholder="Message" /><button aria-label="Send">
+                &#9654;
+            </button>
+        </form>
+    </body>
+</html>

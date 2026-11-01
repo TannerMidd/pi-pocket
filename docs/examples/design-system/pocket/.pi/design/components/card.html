@@ -1,0 +1,125 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Card",
+        "description": "A tile that groups one thing: a session, a design, a file. It sits on the ground with a hairline border. Selecting it washes it in the accent.",
+        "states": ["default", "hover", "selected", "focus"],
+        "usage": {
+            "do": [
+                "Make the whole card the target when it opens something.",
+                "Put the most important line first, in the primary text color."
+            ],
+            "dont": [
+                "Do not nest a card in a card.",
+                "Do not add a shadow to a card that sits in a list: the border is enough."
+            ]
+        },
+        "tokens": [
+            "border.width.hairline",
+            "border.width.thick",
+            "card.bg",
+            "card.bg-selected",
+            "card.border",
+            "card.border-selected",
+            "card.padding",
+            "card.radius",
+            "card.shadow",
+            "color.border.strong",
+            "color.text.muted",
+            "color.text.primary",
+            "color.text.secondary",
+            "font.family.mono",
+            "font.family.sans",
+            "font.leading.normal",
+            "font.leading.snug",
+            "font.size.lg",
+            "font.size.md",
+            "font.size.xs",
+            "font.weight.semibold",
+            "motion.duration.hover",
+            "motion.ease.standard",
+            "shadow.focus-ring",
+            "space.2"
+        ]
+    }
+</script>
+<style>
+    .pk-card {
+        display: grid;
+        gap: var(--space-2);
+        max-width: 320px;
+        padding: var(--card-padding);
+        border: var(--border-width-hairline) solid var(--card-border);
+        border-radius: var(--card-radius);
+        background: var(--card-bg);
+        color: var(--color-text-secondary);
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-md);
+        line-height: var(--font-leading-normal);
+        transition:
+            background-color var(--motion-duration-hover) var(--motion-ease-standard),
+            border-color var(--motion-duration-hover) var(--motion-ease-standard);
+    }
+
+    .pk-card__title {
+        margin: 0;
+        color: var(--color-text-primary);
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        line-height: var(--font-leading-snug);
+    }
+
+    .pk-card__text {
+        margin: 0;
+    }
+
+    .pk-card__meta {
+        color: var(--color-text-muted);
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-xs);
+    }
+
+    .pk-card:hover,
+    .pk-card.is-hover {
+        border-color: var(--color-border-strong);
+        box-shadow: var(--card-shadow);
+    }
+
+    .pk-card[aria-selected="true"] {
+        border-color: var(--card-border-selected);
+        background: var(--card-bg-selected);
+    }
+
+    .pk-card:focus-visible,
+    .pk-card.is-focus {
+        outline: var(--border-width-thick) solid transparent;
+        box-shadow: var(--shadow-focus-ring);
+    }
+</style>
+<template data-state="default">
+    <article class="pk-card" tabindex="0">
+        <h4 class="pk-card__title">Design mode</h4>
+        <p class="pk-card__text">A canvas beside the chat for Pi's HTML designs.</p>
+        <span class="pk-card__meta">3 versions · 2 comments</span>
+    </article>
+</template>
+<template data-state="hover">
+    <article class="pk-card is-hover" tabindex="0">
+        <h4 class="pk-card__title">Design mode</h4>
+        <p class="pk-card__text">A canvas beside the chat for Pi's HTML designs.</p>
+        <span class="pk-card__meta">3 versions · 2 comments</span>
+    </article>
+</template>
+<template data-state="selected">
+    <article class="pk-card" tabindex="0" aria-selected="true">
+        <h4 class="pk-card__title">Design mode</h4>
+        <p class="pk-card__text">A canvas beside the chat for Pi's HTML designs.</p>
+        <span class="pk-card__meta">3 versions · 2 comments</span>
+    </article>
+</template>
+<template data-state="focus">
+    <article class="pk-card is-focus" tabindex="0">
+        <h4 class="pk-card__title">Design mode</h4>
+        <p class="pk-card__text">A canvas beside the chat for Pi's HTML designs.</p>
+        <span class="pk-card__meta">3 versions · 2 comments</span>
+    </article>
+</template>

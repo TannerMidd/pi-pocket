@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Avatars</title>
+        <style>
+            body {
+                margin: 0;
+                font: 16px/1.5 system-ui;
+                background: #fff;
+                color: #16191f;
+            }
+            .stack {
+                display: flex;
+                padding: 24px;
+            }
+            .av {
+                width: 44px;
+                height: 44px;
+                border-radius: 50%;
+                border: 2px solid #fff;
+                margin-left: -12px;
+                display: grid;
+                place-items: center;
+                font-weight: 700;
+                font-size: 14px;
+            }
+            .av:first-child {
+                margin-left: 0;
+            }
+            .a1 {
+                background: #1d4ed8;
+                color: #fff;
+            }
+            .a2 {
+                background: #b45309;
+                color: #fff;
+            }
+            .a3 {
+                background: #047857;
+                color: #fff;
+            }
+            .tip {
+                position: relative;
+                display: inline-block;
+                margin: 24px;
+            }
+            .tip span {
+                position: absolute;
+                left: 0;
+                bottom: calc(100% + 6px);
+                background: #111827;
+                color: #fff;
+                font-size: 13px;
+                padding: 4px 8px;
+                border-radius: 6px;
+                white-space: nowrap;
+            }
+            .card {
+                position: relative;
+                margin: 16px;
+                border: 1px solid #d9dde4;
+                border-radius: 12px;
+                padding: 16px;
+                max-width: 360px;
+            }
+            .card .badge {
+                position: absolute;
+                top: -10px;
+                right: 12px;
+                background: #be123c;
+                color: #fff;
+                font-size: 12px;
+                padding: 2px 8px;
+                border-radius: 99px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="stack" data-pid="st">
+            <span class="av a1">AB</span><span class="av a2">CD</span><span class="av a3">EF</span>
+        </div>
+        <div class="tip" data-pid="tip">Hover target<span>Tooltip text</span></div>
+        <div class="card" data-pid="card">
+            <span class="badge">Hot</span>
+            <h2 style="margin: 0">Overlays</h2>
+            <p>Absolute badges and tooltips.</p>
+        </div>
+    </body>
+</html>

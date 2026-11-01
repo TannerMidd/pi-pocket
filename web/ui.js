@@ -646,6 +646,8 @@ function fromBase(path) {
     return parts.join("/");
 }
 
+let fileRequests = 0;
+
 /**
  * Open a file (or folder) of the session in the viewer: in the Files tile while it is open, otherwise in a sheet.
  * `path:42` opens it at line 42.
@@ -665,7 +667,8 @@ export function openFile(path) {
         return;
     }
 
-    openSheet({ type: "file", id: target.path, line: target.line });
+    // `n` differs for each request, so asking again for the open file reads it again (`FileView`'s `refresh`).
+    openSheet({ type: "file", id: target.path, line: target.line, n: ++fileRequests });
 }
 
 /**
@@ -1019,6 +1022,7 @@ const ICONS = {
     pip: "M12 20a8 8 0 100-16 8 8 0 000 16zM8.5 11a3.5 3.5 0 013.5-3.5",
     more: "M5 12h.01M12 12h.01M19 12h.01",
     close: "M6 6l12 12M18 6L6 18",
+    reply: "M9 14L4 9l5-5M4 9h10a6 6 0 016 6v4",
     send: "M12 19V5M5 12l7-7 7 7",
     stop: "M7 7h10v10H7z",
     mic: "M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM19 11a7 7 0 01-14 0M12 18v3",

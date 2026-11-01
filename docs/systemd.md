@@ -8,7 +8,7 @@ sudo systemctl enable --now pi-pocket@lan
 
 The modes are `local`, `lan`, `cloudflare`, `tailscale`, and `tailscale-serve`. [Remote access](../README.md#remote-access) explains who can connect in each one.
 
-Enable one instance at a time. Every instance uses the same port and data folder, so two of them would share both.
+Enable one instance at a time. Every instance uses the same port and data folder, and a second launcher on that folder now refuses to start (it names the pid that holds it) rather than adopting the first one's Tailscale Serve mount.
 
 ## Before you start
 
@@ -22,7 +22,7 @@ The access mode also needs its own tools:
 - `lan`: the port open in the firewall (TCP 8787 by default). Plain http.
 - `cloudflare`: `cloudflared` on `PATH`, or in `/var/lib/pi-pocket/bin`. The service has no terminal, so it cannot download it. Run Pi Pocket once in a terminal as the service user, or install it yourself. The quick tunnel address changes each time the launcher starts.
 - `tailscale`: Tailscale connected (`tailscale up`). Listens on the Tailscale address only.
-- `tailscale-serve`: `tailscaled` running, HTTPS certificates enabled in the tailnet, and the service user as its operator: `sudo tailscale set --operator=pi-pocket`. The launcher adds and removes the Serve mapping.
+- `tailscale-serve`: Tailscale 1.52 or newer, `tailscaled` running, HTTPS certificates enabled in the tailnet, and the service user as its operator (`sudo tailscale set --operator=pi-pocket`, unless the service runs as root). The launcher adds the mapping and removes one it made. It also removes one that a crashed run made, which it knows by its receipt (`serve-mount.json` in the data folder). A mapping with no receipt, such as one you made yourself, is left where it is: free it by hand with `tailscale serve --https=443 --set-path=/ off` if you need to.
 
 Provider sign-in does not need a terminal: sign in from the app's Providers sheet after the first start.
 
@@ -100,7 +100,7 @@ sudo systemctl start pi-pocket@lan
 
 If the unit file changed, copy it again and run `sudo systemctl daemon-reload` before starting.
 
-Menu → **Update Pi Pocket** can also update the checkout from the app, when the service user owns it (`sudo chown -R pi-pocket: /opt/pi-pocket`). With the checkout owned by another user, as in the steps above, the sheet only says when a new version is out. An update from the app does not back up the data folder: for a release whose notes have a warning, back it up first, as above.
+Menu → **Update Pi Pocket** can also update the checkout from the app, when the service user owns it (`sudo chown -R pi-pocket: /opt/pi-pocket`). With the checkout owned by another user, as in the steps above, the sheet only says when a new version is out. A global npm install (`npm install -g pi-pocket`) updates from the sheet the same way, when the service user can write the folder that holds the package. An update from the app does not back up the data folder: for a release whose notes have a warning, back it up first, as above.
 
 ## When it does not start
 

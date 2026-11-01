@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Pricing</title>
+        <style>
+            body {
+                margin: 0;
+                font: 16px/1.5 system-ui;
+                background: #f7f7fa;
+                color: #17181c;
+            }
+            h1 {
+                text-align: center;
+                margin: 32px 0 8px;
+            }
+            .sub {
+                text-align: center;
+                color: #4b4f58;
+                margin: 0 0 24px;
+            }
+            .plans {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 16px;
+                max-width: 900px;
+                margin: 0 auto;
+                padding: 0 16px 32px;
+            }
+            .plan {
+                background: #fff;
+                border: 1px solid #d6d8de;
+                border-radius: 14px;
+                padding: 24px;
+            }
+            .plan.pop {
+                border: 2px solid #4338ca;
+                position: relative;
+            }
+            .pop .ribbon {
+                position: absolute;
+                top: -12px;
+                left: 16px;
+                background: #4338ca;
+                color: #fff;
+                font-size: 12px;
+                padding: 2px 10px;
+                border-radius: 99px;
+            }
+            .price {
+                font-size: 36px;
+                font-weight: 800;
+            }
+            ul {
+                padding-left: 20px;
+                color: #3a3d46;
+            }
+            .btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 48px;
+                border-radius: 10px;
+                background: #4338ca;
+                color: #fff;
+                text-decoration: none;
+                font-weight: 600;
+            }
+            .btn.o {
+                background: #fff;
+                color: #4338ca;
+                border: 1px solid #4338ca;
+            }
+        </style>
+    </head>
+    <body>
+        <h1 data-pid="h">Simple pricing</h1>
+        <p class="sub">Cancel any time.</p>
+        <div class="plans" data-pid="plans">
+            <div class="plan" data-pid="free">
+                <h2>Free</h2>
+                <div class="price">$0</div>
+                <ul>
+                    <li>1 project</li>
+                    <li>Community help</li>
+                </ul>
+                <a class="btn o" href="#">Start free</a>
+            </div>
+            <div class="plan pop" data-pid="pro">
+                <span class="ribbon">Popular</span>
+                <h2>Pro</h2>
+                <div class="price">$12</div>
+                <ul>
+                    <li>Unlimited projects</li>
+                    <li>Priority help</li>
+                </ul>
+                <a class="btn" href="#">Go Pro</a>
+            </div>
+        </div>
+    </body>
+</html>

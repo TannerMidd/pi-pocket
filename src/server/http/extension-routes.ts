@@ -8,6 +8,7 @@ import type { User } from "../config.ts";
 import { describe, HttpError } from "../errors.ts";
 import { exposedError, MAX_FILE_BYTES } from "../extension-web.ts";
 import { ExtensionRequest } from "../extension-request.ts";
+import { conversationUsage } from "../conversation-usage.ts";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { ConversationWebRequest, WebSession } from "../host.ts";
 import { type ApiRequest, json, readChecked, readJson, send, SVG_CSP } from "./io.ts";
@@ -112,6 +113,8 @@ export async function extensionRoute(
                           thinkingLevel: agent?.thinkingLevel ?? "off",
                       },
                       linkedSessions: app.linkedSessions.forRequest(id, scope),
+                      conversationUsage: (target?: ConversationId) =>
+                          conversationUsage(app, target ?? id, scope),
                   };
         const input = {
             method: route.method,

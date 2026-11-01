@@ -1,0 +1,155 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Code block",
+        "description": "Code in a reply, with a header that names the language and copies the code. Syntax colors come from the code roles, and each reads at 4.5:1 on the code ground.",
+        "states": ["default", "copied"],
+        "usage": {
+            "do": [
+                "Name the language in the header.",
+                "Keep lines under 80 characters, or let the block scroll sideways."
+            ],
+            "dont": [
+                "Do not wrap code: it changes what it says.",
+                "Do not use ligatures: code shows the characters it has."
+            ]
+        },
+        "tokens": [
+            "border.width.hairline",
+            "border.width.thick",
+            "code-block.bg",
+            "code-block.border",
+            "code-block.head-bg",
+            "code-block.radius",
+            "color.bg.hover",
+            "color.code.function",
+            "color.code.keyword",
+            "color.code.number",
+            "color.code.operator",
+            "color.code.string",
+            "color.code.text",
+            "color.code.type",
+            "color.success.default",
+            "color.text.secondary",
+            "font.family.mono",
+            "font.family.sans",
+            "font.leading.normal",
+            "font.size.sm",
+            "font.size.xs",
+            "font.weight.medium",
+            "radius.row",
+            "shadow.focus-ring",
+            "size.control.sm",
+            "space.1",
+            "space.2",
+            "space.3"
+        ]
+    }
+</script>
+<style>
+    .pk-code {
+        max-width: 420px;
+        overflow: hidden;
+        border: var(--border-width-hairline) solid var(--code-block-border);
+        border-radius: var(--code-block-radius);
+        background: var(--code-block-bg);
+        color: var(--color-code-text);
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-sm);
+        font-variant-ligatures: none;
+        line-height: var(--font-leading-normal);
+    }
+
+    .pk-code__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+        background: var(--code-block-head-bg);
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+    }
+
+    .pk-code__copy {
+        min-height: var(--size-control-sm);
+        padding: 0 var(--space-2);
+        border: 0;
+        border-radius: var(--radius-row);
+        background: transparent;
+        color: inherit;
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-xs);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .pk-code__copy:hover {
+        background: var(--color-bg-hover);
+    }
+
+    .pk-code__copy:focus-visible {
+        outline: var(--border-width-thick) solid transparent;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    .pk-code__copy.is-copied {
+        color: var(--color-success-default);
+    }
+
+    /* The browser gives pre and code its own monospace: take the system's. */
+    .pk-code pre,
+    .pk-code code {
+        font: inherit;
+    }
+
+    .pk-code pre {
+        margin: 0;
+        padding: var(--space-3);
+        overflow-x: auto;
+    }
+
+    .pk-code .kw {
+        color: var(--color-code-keyword);
+    }
+
+    .pk-code .str {
+        color: var(--color-code-string);
+    }
+
+    .pk-code .num {
+        color: var(--color-code-number);
+    }
+
+    .pk-code .fn {
+        color: var(--color-code-function);
+    }
+
+    .pk-code .ty {
+        color: var(--color-code-type);
+    }
+
+    .pk-code .op {
+        color: var(--color-code-operator);
+    }
+</style>
+<template data-state="default">
+    <div class="pk-code">
+        <div class="pk-code__head">
+            <span>typescript</span>
+            <button class="pk-code__copy">Copy</button>
+        </div>
+        <pre><code><span class="kw">const</span> system <span class="op">=</span> <span class="fn">loadDesignSystem</span>(cwd);
+<span class="kw">if</span> (system <span class="op">===</span> <span class="ty">undefined</span>) <span class="kw">return</span> <span class="num">0</span>;
+<span class="fn">log</span>(<span class="str">"tokens"</span>, system.tokens.length);</code></pre>
+    </div>
+</template>
+<template data-state="copied">
+    <div class="pk-code">
+        <div class="pk-code__head">
+            <span>typescript</span>
+            <button class="pk-code__copy is-copied">Copied</button>
+        </div>
+        <pre><code><span class="kw">const</span> system <span class="op">=</span> <span class="fn">loadDesignSystem</span>(cwd);
+<span class="kw">if</span> (system <span class="op">===</span> <span class="ty">undefined</span>) <span class="kw">return</span> <span class="num">0</span>;
+<span class="fn">log</span>(<span class="str">"tokens"</span>, system.tokens.length);</code></pre>
+    </div>
+</template>

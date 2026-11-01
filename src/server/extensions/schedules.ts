@@ -3,7 +3,7 @@
  * to check back on something slow or for a regular job. While this is off, no scheduled message goes out; they wait
  * until it is on again.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { Schedule } from "../docs.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
@@ -86,7 +86,7 @@ export default function createSchedules(host: PocketHost, web: ExtensionWeb) {
             "Send yourself a message in this conversation later, or on repeat: to check back on something slow, or for a regular job. " +
             `Actions: add (when, message), list, cancel (id). ${WHEN_HELP} Clock times are in ${zone}.`,
         parameters: Type.Object({
-            action: Type.Union([Type.Literal("add"), Type.Literal("list"), Type.Literal("cancel")]),
+            action: StringEnum(["add", "list", "cancel"] as const),
             when: Type.Optional(
                 Type.String({
                     description:

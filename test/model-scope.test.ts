@@ -27,7 +27,11 @@ test("scope is optional picker metadata and uses Pi patterns without applying th
     const choices = (await app.hello(owner(app))).models;
 
     assert.deepEqual(scopedIds(choices), ["faux-2"]);
-    assert.equal(choices.length, 3);
+    assert.equal(
+        choices.length,
+        4,
+        "the scripted models: faux-1, faux-2, faux-vision, faux-native",
+    );
     assert.ok(choices.every((model) => !Object.hasOwn(model, "thinkingLevel")));
     assert.equal(app.config.defaultModel, undefined);
 });
@@ -41,7 +45,11 @@ test("a sign-in store that cannot be read leaves the scope out rather than faili
     try {
         const choices = (await app.hello(owner(app))).models;
 
-        assert.equal(choices.length, 3);
+        assert.equal(
+            choices.length,
+            4,
+            "the scripted models: faux-1, faux-2, faux-vision, faux-native",
+        );
     } finally {
         rmSync(auth);
     }

@@ -19,10 +19,10 @@ const served = new Map<string, string>();
 
 after(cleanUp);
 
-function offer(version: string, commit: string) {
+function offer(version: string, commit: string, body = "") {
     const source = `/** Hub clock ${version}. */
 import { defineExtension } from "@earendil-works/pi-durable";
-export default () => defineExtension({ name: "hub-clock" });
+${body}export default () => defineExtension({ name: "hub-clock" });
 `;
     const entry = {
         name: NAME,
@@ -203,6 +203,90 @@ test(
         await see(
             `(await import('/store.js')).store.state.sheet?.type === 'menu'`,
             "Back leaves Extensions after disabling the gallery",
+        );
+    },
+);
+
+test(
+    "Install and turn on asks once, with what its code reaches, and Escape closes only the question",
+    { skip: findBrowser() === undefined ? "no Chromium-based browser on this machine" : false },
+    async (t) => {
+        offer("3.0.0", "3".repeat(40), 'const NOW = "https://time.example.net/now";\n');
+        const app = await openApp(scriptedModel());
+        const server = createServer(
+            createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+        );
+        const browsers = new Browsers({
+            dataDir: mkdtempSync(join(root, "extensions-hub-ask-")),
+            load: async () => undefined,
+            save: () => {},
+        });
+
+        t.after(async () => {
+            await browsers.closeAll({ final: true });
+            server.closeAllConnections();
+            server.close();
+            await app.close();
+        });
+        app.gallery.fetch = async (url) =>
+            served.has(url) ? new Response(served.get(url)) : new Response("", { status: 404 });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+        const page = await browsers.open(1);
+        const inPage = async <T>(script: string): Promise<T> =>
+            JSON.parse(await page.evaluate(script)) as T;
+        const see = (expression: string, what: string) =>
+            until(() => inPage<boolean>(`return JSON.stringify(${expression})`), what);
+        const installed = async () =>
+            (await app.gallery.installed()).items.find((item) => item.name === NAME);
+        const settle = () => new Promise((resolve) => setTimeout(resolve, 450));
+
+        // The test before leaves the gallery off and the extension installed, in the shared data folder.
+        await app.setExtensionEnabled(owner(app), "gallery.ts", true);
+
+        if ((await installed()) !== undefined) {
+            await app.gallery.uninstall(owner(app), NAME);
+        }
+
+        await app.gallery.listing(true);
+
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        const session = await newSession(app);
+
+        await page.navigate(`${base}/s/${session}`);
+        await see(`document.querySelector('.composer') !== null`, "the conversation");
+        await inPage(
+            `(await import('/store.js')).openSheet({ type: 'gallery-entry', id: '${NAME}', tab: 'discover', origin: 'extensions' }); return 'null';`,
+        );
+        await see(
+            `document.querySelector('.ext-row .ext-facts')?.textContent.includes('time.example.net') === true`,
+            "the row's fact from the scan of its code",
+        );
+        await settle();
+        await page.click({ selector: ".extension-hub-detail .ext-actions .primary" });
+        await see(
+            `document.querySelector('.ext-dialog')?.textContent.includes('Talks to time.example.net') === true`,
+            "the question, with what its code reaches",
+        );
+        assert.equal(await installed(), undefined, "asking installs nothing");
+        await page.press("Escape");
+        await see(`document.querySelector('.ext-dialog') === null`, "Escape closes the question");
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector('.extension-hub') !== null)`,
+            ),
+            true,
+            "and leaves the sheet open",
+        );
+        assert.equal(await installed(), undefined);
+        await page.click({ selector: ".extension-hub-detail .ext-actions .primary" });
+        await see(`document.querySelector('.ext-dialog') !== null`, "the question again");
+        await page.click({ selector: ".ext-dialog .primary" });
+        await until(async () => (await installed())?.enabled === true, "installed and turned on");
+        await see(
+            `document.querySelector('.ext-standing')?.textContent.includes('On') === true`,
+            "the entry's standing",
         );
     },
 );

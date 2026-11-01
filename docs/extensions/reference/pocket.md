@@ -276,7 +276,7 @@ messages(options?: MessagesOptions): Promise<MessagePage>;
 
 Since 0.20.0 · Experimental
 
-Reads a page of the people's messages in the session the tab shows, oldest first: Pi's answers, tool calls, and notes are not in it. With no `before`, it is the newest `limit` messages (50 by default, up to 200). The page's `before` is the cursor for the page before it, and null at the start. Read pages until `before` is null to have them all. The messages are those of the transcript: after a New context, the earlier ones are not in it.
+Reads a page of the people's messages in the session the tab shows, oldest first: Pi's answers, tool calls, and notes are not in it. Neither is an input a module stored as its own kind, even while it shows as a message ([`web.presentEntry`](web.md#presententry)). A user message that a module's `userPrefix` presents stays in: it is a message to Pi, as it was before. With no `before`, it is the newest `limit` messages (50 by default, up to 200). The page's `before` is the cursor for the page before it, and null at the start. Read pages until `before` is null to have them all. The messages are those of the transcript: after a New context, the earlier ones are not in it.
 
 The server checks the person's access to the session for each page. A page is from the session that the tab showed when it was asked for (`conversationId`): compare it with the one shown now before you use it. It rejects with an error whose `status` is 409 when its cursor is stale, as after a compaction: read again from the newest. Abort it with `signal`. With no session open, or from a version of the module that is gone, the page is empty. See [`MessagesOptions`](#messagesoptions), [`MessagePage`](#messagepage), and [`MessageInfo`](#messageinfo).
 
@@ -321,6 +321,27 @@ pocket.sheet({
               );
     },
 });
+```
+
+### `entryPresentation`
+
+```ts
+entryPresentation(kind: string, mode: "open" | "folded" | "hidden"): void;
+entryPresentation(kind: string): "open" | "folded" | "hidden" | undefined;
+```
+
+Since 0.28.0 · Experimental
+
+How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is `x.<module>.<name>`. `open` shows the message. `folded` shows one line, which opens to the text: that is also how it shows when this browser has no choice. `hidden` keeps the turn and shows nothing until Find jumps to it. The model still reads the message in full.
+
+With a mode, it sets this browser's choice; the same mode again changes nothing. With the kind alone, it returns the choice, or undefined when there is none yet. A person can choose too: the message sheet of any of these rows has Show, Fold, and Hide for every input of its kind. So set a mode only when there is none, or from a command the person runs, and a person's choice stays theirs. The choice stays in this browser, and its other tabs follow it.
+
+A kind that is not this module's throws, and so does a mode that is not one of those three. This browser remembers a limited number of kinds; past it, the one chosen longest ago is forgotten ([limits](limits.md#presentations)). Where the browser cannot store it, the choice lasts until the tab reloads. On an older app, check for it first.
+
+```js
+if (typeof pocket.entryPresentation === "function" && !pocket.entryPresentation("x.notes.note")) {
+    pocket.entryPresentation("x.notes.note", "hidden");
+}
 ```
 
 ## Routes and events
@@ -499,7 +520,7 @@ sessionAction(spec: SessionActionSpec): Added<SessionActionSpec>;
 
 Since 0.20.0 · Experimental
 
-Adds an action on sessions. It shows in the sheet that a finger held on a row opens, and in the bar under the list while sessions are selected (Ctrl/⌘+click, or Select). Its `run` gets the ids of the sessions, or its sheet gets them as the prop `sessions`. See [`SessionActionSpec`](#sessionactionspec).
+Adds an action on sessions. It shows in the sheet that a finger held on a row opens, in the menu that a right-click on a row opens, and in the bar under the list while sessions are selected (Ctrl/⌘+click, or Select). Its `run` gets the ids of the sessions, or its sheet gets them as the prop `sessions`. See [`SessionActionSpec`](#sessionactionspec).
 
 ### `sessionFilter`
 
@@ -557,6 +578,16 @@ insertText(text: string, options?: { inline?: boolean }): void;
 Since 0.19.0 · Experimental
 
 Puts text into the message box of the session that the tab shows, after what is there: on a new paragraph, or with `inline: true`, after a space. The person sends it, or not: it never sends. A sheet that shows closes, so the box shows. With no session open, it does nothing. Text past 100,000 characters throws.
+
+### `pip`
+
+```ts
+readonly pip: PipApi;
+```
+
+Since 0.26.0 · Experimental
+
+The part of `pocket` that talks to the person's PiP, their assistant. It has one method, `pip.ask`. See [`PipApi`](#pipapi).
 
 ### `arrange`
 
@@ -1094,6 +1125,34 @@ Since 0.20.0 · Experimental
 - `by`: who wrote it: their id and name, when known. A message from before Pi Pocket kept authors has neither.
 - `at`: when it was sent, in milliseconds since 1970 on the server's clock, or null.
 
+### `PipApi`
+
+```ts
+interface PipApi {
+    ask(text: string, options?: { send?: boolean }): Promise<PipAskResult>;
+}
+```
+
+Since 0.26.0 · Experimental
+
+- `ask(text, options)`: gives PiP `text` as the person's own message. PiP sees it as it sees typed text.
+    - The text starts with a line that names the module (`From the extension “Usage”:`), as an artifact's follow-up starts with its source. So the message never reads as a command, and the person and PiP know where it came from.
+    - By default, it opens PiP and puts the text in PiP's message box, after what is there. The person reads it, edits it, and sends it, or not.
+    - With `send: true`, it sends the text at once, but only just after the person tapped or pressed a key (other than Escape) anywhere in the app, as a tap serves an artifact's follow-up; it need not be on the module's own controls. One tap serves for 5 seconds and for one send, so ask only from the person's own action. Without a tap, nothing is sent or drafted, and the answer says why. If PiP cannot take the message (it is not ready, or the send fails), a notice says so and the text waits in the box.
+    - It works for a person who has PiP. For anyone else, and while the app does not know yet, it does not throw: the answer is `{ ok: false, reason }`.
+    - Text that is empty or past 100,000 characters throws, as `insertText` does.
+
+### `PipAskResult`
+
+```ts
+type PipAskResult = { ok: true; sent: boolean } | { ok: false; reason: string };
+```
+
+Since 0.26.0 · Experimental
+
+- `ok: true`: the text went to PiP. `sent` is true when it was sent, and false when it waits in PiP's message box.
+- `ok: false`: nothing happened. `reason` says why, in words for a person: `"PiP is not available"`, `"Sending needs a click or a key press just before"`, or that the module's version is no longer loaded. Do not match on the words: they can change.
+
 ### `ComposerKeySpec`
 
 ```ts
@@ -1165,7 +1224,7 @@ What shows comes in layers, the last one wins: each item's default place, then t
 | Slot       | Ids, in their default order                                                                                                                                        | Fixed                                                                          | Modules' items go           |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------- |
 | `topbar`   | `core:subagents`, `core:changes`, `core:peeks`, `core:files`, `core:browser`, `core:artifacts`, `core:people`, `core:menu`                                         | `core:menu`, last                                                              | after `core:browser`        |
-| `status`   | `core:connection`, `core:here`, `core:speed`, `core:context`, `core:cache`, `core:spend`, `core:guard`                                                             | `core:connection`, `core:guard`                                                | after `core:cache`          |
+| `status`   | `core:connection`, `core:here`, `core:speed`, `core:context`, `core:cache`, `core:spend`, `core:background`, `core:guard`                                          | `core:connection`, `core:guard`                                                | after `core:cache`          |
 | `places`   | `core:files`, `core:changes`, `core:browser`, `core:artifacts`, `core:chat`, `core:find`, `core:launcher` (touch screens), `core:branch`, `core:pip`, `core:peeks` | none                                                                           | last: a tile for each panel |
 | `composer` | `core:places`, `core:attach`, `core:model`, `core:plan`                                                                                                            | none (Send, Stop, the mic, and Steer, Queue and Interrupt are not in the slot) | after `core:plan`           |
 | `reply`    | `core:time`, `core:react`, `core:discuss`, `core:pin`, `core:copy`, `core:more`                                                                                    | `core:more`, last                                                              | before `core:more`          |

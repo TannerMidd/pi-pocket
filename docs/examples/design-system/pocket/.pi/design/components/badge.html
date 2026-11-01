@@ -1,0 +1,112 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Badge",
+        "description": "A small label for a status or a count. Each kind pairs a soft wash with a text color that reads at 4.5:1 on it.",
+        "states": ["neutral", "accent", "success", "warning", "danger"],
+        "usage": {
+            "do": [
+                "Keep the text to one or two words.",
+                "Set counts and branch names in the mono font."
+            ],
+            "dont": [
+                "Do not rely on the color alone: the word says the status.",
+                "Do not put a badge on a badge."
+            ]
+        },
+        "tokens": [
+            "badge.accent.bg",
+            "badge.accent.border",
+            "badge.accent.fg",
+            "badge.danger.bg",
+            "badge.danger.border",
+            "badge.danger.fg",
+            "badge.dot",
+            "badge.neutral.bg",
+            "badge.neutral.border",
+            "badge.neutral.fg",
+            "badge.padding-y",
+            "badge.radius",
+            "badge.success.bg",
+            "badge.success.border",
+            "badge.success.fg",
+            "badge.warning.bg",
+            "badge.warning.border",
+            "badge.warning.fg",
+            "border.width.hairline",
+            "font.family.sans",
+            "font.leading.snug",
+            "font.size.xs",
+            "font.weight.medium",
+            "radius.pill",
+            "space.1",
+            "space.2"
+        ]
+    }
+</script>
+<style>
+    .pk-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: var(--badge-padding-y) var(--space-2);
+        border: var(--border-width-hairline) solid transparent;
+        border-radius: var(--badge-radius);
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-xs);
+        font-weight: var(--font-weight-medium);
+        line-height: var(--font-leading-snug);
+        white-space: nowrap;
+    }
+
+    .pk-badge__dot {
+        width: var(--badge-dot);
+        height: var(--badge-dot);
+        border-radius: var(--radius-pill);
+        background: currentcolor;
+    }
+
+    .pk-badge--neutral {
+        background: var(--badge-neutral-bg);
+        border-color: var(--badge-neutral-border);
+        color: var(--badge-neutral-fg);
+    }
+
+    .pk-badge--accent {
+        background: var(--badge-accent-bg);
+        border-color: var(--badge-accent-border);
+        color: var(--badge-accent-fg);
+    }
+
+    .pk-badge--success {
+        background: var(--badge-success-bg);
+        border-color: var(--badge-success-border);
+        color: var(--badge-success-fg);
+    }
+
+    .pk-badge--warning {
+        background: var(--badge-warning-bg);
+        border-color: var(--badge-warning-border);
+        color: var(--badge-warning-fg);
+    }
+
+    .pk-badge--danger {
+        background: var(--badge-danger-bg);
+        border-color: var(--badge-danger-border);
+        color: var(--badge-danger-fg);
+    }
+</style>
+<template data-state="neutral">
+    <span class="pk-badge pk-badge--neutral">Draft</span>
+</template>
+<template data-state="accent">
+    <span class="pk-badge pk-badge--accent">Beta</span>
+</template>
+<template data-state="success">
+    <span class="pk-badge pk-badge--success"><span class="pk-badge__dot"></span>Passed</span>
+</template>
+<template data-state="warning">
+    <span class="pk-badge pk-badge--warning"><span class="pk-badge__dot"></span>Waiting</span>
+</template>
+<template data-state="danger">
+    <span class="pk-badge pk-badge--danger"><span class="pk-badge__dot"></span>Failed</span>
+</template>

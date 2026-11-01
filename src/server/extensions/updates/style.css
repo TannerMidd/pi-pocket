@@ -118,3 +118,14 @@
     min-height: 40px;
     flex: none;
 }
+
+.updates-badge {
+    display: inline-block;
+    padding: 0 6px;
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    color: var(--warn);
+    font-size: 0.75em;
+    font-weight: 600;
+    vertical-align: middle;
+}

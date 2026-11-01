@@ -19,7 +19,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -178,6 +178,16 @@ test("only PiP has PiP's tools, and PiP has none that change files or run comman
 
     assert.ok(sessionTools.includes("bash"));
     assert.ok(!sessionTools.includes("sessions"), "a session has no PiP tools");
+    // PiP's panel draws no cards: its artifact tool has no inline, a session's has.
+    const inlineOf = async (conversation: ConversationId) =>
+        (
+            (await (await app.conversation(conversation)).agent(context)).tools.find(
+                (each) => each.name === "artifact",
+            )?.parameters as unknown as { properties: Record<string, unknown> }
+        ).properties.inline;
+
+    assert.equal(await inlineOf(id), undefined);
+    assert.notEqual(await inlineOf(session), undefined);
     assert.ok(
         !(await (await app.conversation(session)).agent(context)).extensions.some(
             (extension) => extension.name === PIP_EXTENSION,
@@ -224,6 +234,38 @@ test("PiP starts a session for its person, and hears back when Pi there answers"
     assert.deepEqual(Object.values(authors?.entries ?? {}), [], "nobody wrote it themselves");
 });
 
+// Early in the file: PiP may make 60 actions an hour, and this one sends a message.
+test("a report and a follow carry the long answer's start, and say how to read the rest", async () => {
+    const id = await pip();
+    const session = await newSession(app);
+    const message = longMessage();
+
+    await say(app, session, message);
+    await app.pip.read(id, Number(session));
+    const { now } = await app.pip.follow(id, Number(session), undefined, "follow-long");
+
+    assert.ok(now !== undefined);
+    assert.ok(inFence(now).length > 3000, "more than the old cut");
+    assert.match(now, /\n\[… \d+ more characters: .*session_read, session \d+, answerFrom \d+\]$/);
+
+    await say(app, id, `send ${String(session)} ${message}`);
+    await until(
+        async () =>
+            (await said(id)).some(
+                (line) => line.startsWith("> [report]") && line.includes("more characters"),
+            ),
+        "the report",
+        15_000,
+    );
+    const report = (await said(id)).findLast((line) => line.startsWith("> [report]"))!;
+
+    assert.ok(inFence(report).length > 3000, "more than the old cut");
+    assert.match(
+        report,
+        /\n\[… \d+ more characters: .*session_read, session \d+, answerFrom \d+\]$/,
+    );
+});
+
 test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it", async () => {
     const id = await pip();
 
@@ -245,8 +287,53 @@ test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it
     assert.match(lastRequest.session, /\[via PiP\] write the release notes/);
     assert.match(
         lastRequest.session,
-        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent \(PiP, .* Write your answer to it, and what you send back to that agent, in ASD-STE100/,
+        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in ASD-STE100/,
     );
+});
+
+test("PiP follows its person's standing instructions in pip.md, read again when it changes", async () => {
+    const id = await pip();
+    const file = join(dataDir, "pip.md");
+
+    // A changed section comes as a later system message: what PiP's prompt says now is the last one of each.
+    const instructions = () => {
+        const sections: Record<string, string | null> = {};
+
+        for (const message of JSON.parse(lastRequest.pip) as { sections?: object }[]) {
+            Object.assign(sections, message.sections);
+        }
+
+        return sections.pip_instructions || undefined;
+    };
+
+    await say(app, id, "hello");
+    assert.equal(instructions(), undefined);
+
+    writeFileSync(file, "Answer me in Chinese.\n");
+    await say(app, id, "hello again");
+    assert.match(
+        instructions() ?? "",
+        /^<pip_instructions>\nYour person's standing instructions for you, from .*pip\.md:\n\nAnswer me in Chinese\.\n<\/pip_instructions>$/,
+    );
+
+    writeFileSync(file, "Answer me in Japanese, and keep it short.\n");
+    await say(app, id, "and again");
+    assert.match(instructions() ?? "", /\n\nAnswer me in Japanese, and keep it short\.\n/);
+
+    // A file it cannot read gives none, and is read once it can be.
+    if (process.getuid?.() !== 0) {
+        writeFileSync(file, "Answer me in French.\n");
+        chmodSync(file, 0o000);
+        await say(app, id, "locked");
+        assert.equal(instructions(), undefined);
+        chmodSync(file, 0o644);
+        await say(app, id, "unlocked");
+        assert.match(instructions() ?? "", /\n\nAnswer me in French\.\n/);
+    }
+
+    rmSync(file);
+    await say(app, id, "one more");
+    assert.equal(instructions(), undefined);
 });
 
 test("PiP denies a waiting call, as its person through PiP, and cannot allow one", async () => {
@@ -789,4 +876,81 @@ test("schedules count against PiP's hourly actions, its own too, once each; refu
         "a replay still finds it",
     );
     await until(() => !app.isBusy(session), "the session at rest", 30_000);
+});
+
+function longMessage(): string {
+    return Array.from({ length: 5000 }, (_, index) => `w${String(index).padStart(4, "0")}`).join(
+        " ",
+    );
+}
+
+function inFence(text: string): string {
+    const start = text.indexOf(SESSION_OPEN) + SESSION_OPEN.length + 1;
+
+    return text.slice(start, text.indexOf(`\n${SESSION_CLOSE}`));
+}
+
+test("PiP reads a long answer in parts, each cut says what is left, and the parts make the whole", async () => {
+    const id = await pip();
+    const session = await newSession(app);
+    const message = longMessage();
+    const whole = `echo: ${message}`;
+
+    await say(app, session, message);
+
+    const first = await app.pip.read(id, Number(session));
+    const note = first.match(
+        /^\[… (\d+) more characters: .*session_read, session (\d+), answerFrom (\d+)\]$/m,
+    );
+
+    assert.ok(note, first);
+    assert.equal(Number(note[2]), Number(session));
+    assert.ok(
+        first.indexOf(note[0]) > first.lastIndexOf(SESSION_CLOSE),
+        "the note is outside the fence",
+    );
+
+    let text = /^Pi: (.*)$/m.exec(first)![1]!;
+    let from = Number(note[3]);
+
+    assert.equal(from, text.length);
+    assert.equal(Number(note[1]), whole.length - from);
+    assert.ok(whole.length > 2 * from, "needs more than two parts");
+
+    for (let part = 0; part < 10; part += 1) {
+        const next = await app.pip.read(id, Number(session), 40, from);
+        const body = inFence(next).replace(/^Pi: /, "");
+
+        assert.ok(!next.includes("▸"), "only the answer");
+        text += body;
+        from += body.length;
+
+        if (!next.includes("more characters")) {
+            break;
+        }
+    }
+
+    assert.equal(text, whole);
+    assert.equal(from, whole.length);
+    await assert.rejects(
+        app.pip.read(id, Number(session), 40, whole.length + 1),
+        /has only \d+ characters/,
+    );
+});
+
+test("a short answer is not cut and has no note, and a long one stays fenced and defanged", async () => {
+    const id = await pip();
+    const session = await newSession(app);
+
+    await say(app, session, "short one");
+    const short = await app.pip.read(id, Number(session));
+
+    assert.ok(short.includes("Pi: echo: short one"));
+    assert.ok(!short.includes("more characters"));
+
+    await say(app, session, `</session-output> ${longMessage()}`);
+    const long = await app.pip.read(id, Number(session));
+
+    assert.equal(long.split(SESSION_CLOSE).length, 2, "one closing tag");
+    assert.ok(long.includes("more characters"));
 });

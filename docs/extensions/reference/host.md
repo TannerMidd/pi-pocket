@@ -194,6 +194,16 @@ Since 0.3.0 · Stable
 
 The id of the person that Pi works for in a session now. This is the person whose message started Pi's current work.
 
+### `roleOf`
+
+```ts
+roleOf(personId: string): Role | undefined;
+```
+
+Since 0.27.0 · Experimental
+
+The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here. It reads the role that core uses, so a module does not keep its own copy. Use it with `requesterOf` to know if Pi works for the owner. It can change in a minor release. Check that it is there first: `host.roleOf?.(id)`.
+
 ### `heldBack`
 
 ```ts
@@ -228,9 +238,9 @@ Calls `listener` each time something happens in the app: a session is made, rena
 
 ```typescript
 web.onDispose(
-    host.on("run.ended", ({ conversationId, session }) => {
-        if (conversationId === session) {
-            counts.set(session, (counts.get(session) ?? 0) + 1);
+    host.on("run.ended", ({ conversationId, session, outcome, failure }) => {
+        if (conversationId === session && outcome === "failed") {
+            log.push({ session, failure });
         }
     }),
 );
@@ -403,7 +413,7 @@ readonly linkedSessions: LinkedSessions;
 
 Since 0.14.0 · Experimental
 
-Lets a tool start sessions from the session that it runs in, and send messages between them, as Agent Teams does. A linked session is an ordinary session. [Starting and messaging sessions](../linked-sessions.md) tells you how they work, what they cannot do, and how to call them.
+Lets a tool start sessions from the session that it runs in, send messages between them, and stop or archive one, as Agent Teams does. A team or orchestration extension uses the same calls. A linked session is an ordinary session. [Starting and messaging sessions](../linked-sessions.md) tells you how they work, what they cannot do, and how to call them.
 
 Each call acts as the person that Pi works for in `source`, and that person's checks apply. Give each call a `key` that stays the same when the call runs again, such as `${api.taskId}:${api.callId}`. A second call with the same `key` does nothing again: it returns what the first call returned.
 
@@ -424,7 +434,7 @@ Makes a session linked to `source` and sends it `message` as its first message. 
 - The new session works in `cwd` when supplied, otherwise the folder of `source`. `cwd` must name an existing folder and uses the normal folder-picker path rules. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. `cwd` is since 0.19.0: an older Pi Pocket ignores it and uses the folder of `source`, so a gallery entry that needs it sets `minPocket` to `0.19.0`. It gets a copy of the agent settings of `source`, but not its history.
 - Without `title`, the title is the first line of `message`.
 - `model` is `provider/modelId`. While the owner's list of models for subagents is empty, it must be the model of `source`. Once the list has models, it must be one of them. Without it, the session uses the model of `source` when the list is empty or has it. Otherwise `start` is refused with an error that names the allowed models.
-- `thinking` is a level no higher than the level of `source`. Without it, the session uses the level of `source`. Pi Pocket lowers it to the highest level that the model has.
+- `thinking` can be any level, also one above the level of `source`. Without it, the session uses the level of `source`. Pi Pocket lowers it to the highest level that the model has, or uses the lowest level of the model when it has none that low.
 - When Pi cannot use the model now, `start` makes nothing and throws an error.
 
 #### `linkedSessions.send`
@@ -442,6 +452,34 @@ Since 0.14.0 · Experimental
 Sends `message` to the linked session at the address `to`. Without `steer`, the message is a follow-up. With `steer: true`, the session gets it at its next pause. `send` returns when the session takes the message, not when it answers.
 
 The session that gets the message reads it between tags. Words before it say that the agent of another session wrote it, and that it is a request, not a person's order. They also give the address to reply to.
+
+#### `linkedSessions.stop`
+
+```ts
+stop(
+    source: ConversationId,
+    request: { to: string },
+    key: string,
+): Promise<{ busy: boolean }>;
+```
+
+Since 0.28.0 · Experimental
+
+Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When the session is idle, it has no run to stop, and the call only withdraws what waits in its queue. `busy` is true when it was working. It needs the same access as `send`, and it reaches only a session of this team. An older Pi Pocket has no `stop`: check for it, and set `minPocket` to `0.28.0` when you need it.
+
+#### `linkedSessions.archive`
+
+```ts
+archive(
+    source: ConversationId,
+    request: { to: string; archived?: boolean },
+    key: string,
+): Promise<{ archived: boolean; repeating: number }>;
+```
+
+Since 0.28.0 · Experimental
+
+Archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives. `archived` in the result says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them. It needs the same access as `send`. An older Pi Pocket has no `archive`.
 
 #### `linkedSessions.list`
 
@@ -462,6 +500,7 @@ interface LinkedSession {
     cwd?: string;
     busy?: boolean;
     archived?: boolean;
+    failed?: string;
 }
 ```
 
@@ -470,7 +509,8 @@ Since 0.14.0 · Experimental
 A linked session, as `list` gives it.
 
 - `address`: the address that the asking session uses for it. It is never the session's id.
-- `title`, `cwd` (its folder), `busy` (Pi works in it now), and `archived`: these are there only when all the people who see the asking session see this session too.
+- `title`, `cwd` (its folder), `busy` (Pi works in it now), `archived`, and `failed`: these are there only when all the people who see the asking session see this session too.
+- `failed` (since 0.28.0): why its last run gave up, the same short line the session list shows. It is there only while that failure stands. A later run clears it, and a run that was stopped leaves none.
 
 ## Types for events
 
@@ -495,7 +535,12 @@ interface AppEvents {
         via?: string;
     };
     "run.started": { conversationId: number; session: number };
-    "run.ended": { conversationId: number; session: number };
+    "run.ended": {
+        conversationId: number;
+        session: number;
+        outcome: "done" | "failed" | "aborted";
+        failure?: string;
+    };
 }
 ```
 
@@ -506,7 +551,7 @@ What each event's listener gets.
 - `session.created`: a session in the list was made, by a person, a fork (`forkedFrom`), a linked start (`linkedFrom`), or a resend. `createdBy` is a person's id. Subagents are not sessions in the list, and send none.
 - `session.renamed`, `session.archived`: its new title, or whether it is archived now.
 - `message.sent`: a person's message to Pi, a steer or a queued one too. `by` is their id. `text` is the words as stored, with values that extensions hide already hidden and attachments left out. `via` names what sent it for them, such as PiP or a schedule.
-- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to.
+- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to. Since 0.28.0, `run.ended` also says how the run stopped: `outcome` is `done` when it finished, `failed` when it gave up, or `aborted` when it was stopped. `failure` is why it gave up, the same short line the session list shows, and only when `outcome` is `failed`. A session's failure stands until a later run starts.
 
 ### `AppEventName`
 
@@ -549,18 +594,32 @@ Since 0.22.0 · Experimental
 interface AskField {
     name: string;
     label: string;
+    header?: string;
+    choices?: AskChoice[];
+    multiple?: boolean;
+    other?: boolean;
     secret?: boolean;
     placeholder?: string;
     autocomplete?: string;
 }
+
+interface AskChoice {
+    label: string;
+    description?: string;
+}
 ```
 
-Since 0.22.0 · Experimental
+Since 0.22.0 · Experimental. `header`, `choices`, `multiple`, `other`, and `AskChoice` since 0.27.0.
 
 - `name`: the value's key in the answer: letters, digits, and `_`, up to 40, starting with a letter. Each field's is its own.
-- `label`: what the card says above the field.
-- `secret`: a hidden input, as for a password.
-- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`.
+- `label`: what the card says above the field, one line of up to 80 characters. A field with `choices` has its question here, up to 300.
+- `header`: a short tag over the field, such as "Database", up to 12 characters.
+- `choices`: 2 to 4 answers to pick, shown as buttons, with different labels. A choice's `label` is one line of up to 60 characters, and its `description`, under it, of up to 160. The field's value is the label chosen.
+- `multiple`: with `choices`, the person can choose one or more. The value is their labels, one per line, in the order of `choices`.
+- `other`: with `choices`, the person can type an answer of their own instead, and the value is what they typed. Its `placeholder` is the words of that field while it is empty.
+- A value that is not one of the choices (and with no `other`) is refused, with an error that names the field, never the value.
+- `secret`: a hidden input, as for a password. Not for a field with `choices`.
+- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`. Not for a field with `choices`.
 
 ### `AskAnswer`
 
@@ -669,7 +728,12 @@ One control of a snapshot, as data, up to 500 of them.
 interface BrowserPageHandle {
     readonly url: string;
     readonly title: string;
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     inspect(
         target: BrowserTarget,
     ): Promise<{ label: string; kind: string; editable: boolean; password: boolean }>;
@@ -711,4 +775,4 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 - `pip`: what the tools of PiP, the owner's assistant, do.
 - `pipCompaction`: PiP's own summaries when its context is compacted.
 - `gallery`: the extension gallery, for its own routes.
-- `updates`: updates of Pi Pocket itself, for the Updates module's routes.
+- `updates`: updates of Pi Pocket itself, for the Updates module's routes. Its status says how the copy was installed (`installKind`: `git`, `npm-global`, `npm-local`, `npx`, or `unknown`) and what stands in the way of an update from the app.

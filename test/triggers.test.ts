@@ -8,6 +8,7 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -737,6 +738,8 @@ test("Pi's watch_pr tool watches for whom Pi works for, tells how it goes, and s
     github = freshGithub();
     github.checks = [{ __typename: "CheckRun", name: "test", status: "QUEUED", conclusion: "" }];
     const id = await newSession(app);
+
+    await loadTools(app, id, "watch_pr");
 
     await say(app, id, "watch_pr start");
     const watch = await watchOf(id);

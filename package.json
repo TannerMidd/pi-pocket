@@ -1,8 +1,16 @@
 {
     "name": "pi-pocket",
-    "version": "0.24.0",
+    "version": "0.28.0-beta.4",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
-    "private": true,
+    "keywords": [
+        "pi",
+        "ai",
+        "agent",
+        "coding-agent",
+        "mobile",
+        "multiplayer",
+        "durable"
+    ],
     "type": "module",
     "license": "MIT",
     "author": "Tanner Middleton",
@@ -17,6 +25,18 @@
     "bin": {
         "pi-pocket": "bin/pi-pocket.js"
     },
+    "files": [
+        "bin/",
+        "src/",
+        "web/",
+        "types/",
+        "docs/",
+        "contrib/",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "npm-shrinkwrap.json"
+    ],
     "engines": {
         "node": ">=22.19"
     },
@@ -24,11 +44,14 @@
         "start": "node bin/pi-pocket.js",
         "dev": "node bin/pi-pocket.js --cwd .",
         "check": "tsc --noEmit -p . && node test/types-file.ts && node docs-site/check-reference.mjs",
-        "test": "node --test test/*.test.ts",
+        "test": "node --test --test-concurrency=4 test/*.test.ts",
         "site:publish": "gh workflow run pages.yml",
         "format": "eslint --fix . && prettier --write .",
         "format:check": "prettier --check . && eslint .",
-        "lint": "eslint ."
+        "lint": "eslint .",
+        "prepack": "node -e \"require('node:fs').copyFileSync('package-lock.json', 'npm-shrinkwrap.json')\"",
+        "postpack": "node -e \"require('node:fs').rmSync('npm-shrinkwrap.json', { force: true })\"",
+        "prepublishOnly": "npm run check && npm run lint && npm test"
     },
     "dependencies": {
         "@earendil-works/chord": "1.4.0",
@@ -41,12 +64,13 @@
         "htm": "^3.1.1",
         "jiti": "2.7.0",
         "marked": "^18.1.1",
+        "minimatch": "10.2.6",
         "preact": "^11.0.2",
         "qrcode": "^1.5.4",
         "undici": "8.12.3"
     },
     "overrides": {
-        "undici": "8.12.3"
+        "undici": "$undici"
     },
     "devDependencies": {
         "@stylistic/eslint-plugin": "5.10.0",

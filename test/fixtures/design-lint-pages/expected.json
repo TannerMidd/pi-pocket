@@ -1,0 +1,109 @@
+{
+    "avatars-overlap.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "blog.html": {
+        "mobile-light": ["missing-main:body", "tap-target:art"],
+        "desktop-dark": ["missing-main:body", "tap-target:art"]
+    },
+    "bootstrap.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "chat.html": {
+        "mobile-light": ["input-zoom:f", "missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "dashboard.html": {
+        "mobile-light": ["font-fallback:side"],
+        "desktop-dark": ["font-fallback:side"]
+    },
+    "docs.html": {
+        "mobile-light": ["contrast:code"],
+        "desktop-dark": ["contrast:code"]
+    },
+    "footer-links.html": {
+        "mobile-light": ["missing-main:body", "tap-target:f"],
+        "desktop-dark": ["missing-main:body", "tap-target:f"]
+    },
+    "form.html": {
+        "mobile-light": [
+            "input-zoom:b",
+            "input-zoom:c",
+            "input-zoom:e",
+            "input-zoom:n",
+            "missing-main:body",
+            "tap-target:form"
+        ],
+        "desktop-dark": ["missing-main:body", "tap-target:form"]
+    },
+    "hero-bg.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "kanban.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "light-dark.html": {
+        "mobile-light": [],
+        "desktop-dark": []
+    },
+    "login.html": {
+        "mobile-light": ["overflow:card"],
+        "desktop-dark": []
+    },
+    "marketing-dark.html": {
+        "mobile-light": ["heading-order:grid", "missing-main:body"],
+        "desktop-dark": ["heading-order:grid", "missing-main:body"]
+    },
+    "marketing-light.html": {
+        "mobile-light": ["heading-order:feat", "missing-main:body"],
+        "desktop-dark": ["heading-order:feat", "missing-main:body"]
+    },
+    "nesting.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "newsletter.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "pricing.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "rtl-wizard.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "shop.html": {
+        "mobile-light": [],
+        "desktop-dark": []
+    },
+    "status-table.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "sticky.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "tabs-accordion.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "tailwind.html": {
+        "mobile-light": [],
+        "desktop-dark": []
+    },
+    "theme-attr.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    },
+    "toggles.html": {
+        "mobile-light": ["missing-main:body"],
+        "desktop-dark": ["missing-main:body"]
+    }
+}

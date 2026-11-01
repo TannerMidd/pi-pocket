@@ -1,0 +1,120 @@
+<script type="application/json" id="pocket-component">
+    {
+        "name": "Segmented control",
+        "description": "Picks one of two to five options that are all visible. The selected segment is raised out of its track.",
+        "states": ["default", "hover", "focus", "disabled"],
+        "usage": {
+            "do": [
+                "Keep each label to one short word.",
+                "Use it to switch a view, not to submit a choice."
+            ],
+            "dont": [
+                "Do not use more than five segments.",
+                "Do not use it for an action: use buttons."
+            ]
+        },
+        "tokens": [
+            "border.width.thick",
+            "color.bg.hover",
+            "color.text.disabled",
+            "font.family.sans",
+            "font.size.sm",
+            "font.weight.medium",
+            "motion.duration.hover",
+            "motion.ease.standard",
+            "segmented.fg",
+            "segmented.fg-selected",
+            "segmented.gap",
+            "segmented.radius",
+            "segmented.radius-seg",
+            "segmented.selected",
+            "segmented.track",
+            "shadow.focus-ring",
+            "shadow.hairline",
+            "size.control.md",
+            "size.tap",
+            "space.3"
+        ]
+    }
+</script>
+<style>
+    .pk-segmented {
+        display: inline-flex;
+        gap: var(--segmented-gap);
+        padding: var(--segmented-gap);
+        border-radius: var(--segmented-radius);
+        background: var(--segmented-track);
+        font-family: var(--font-family-sans);
+    }
+
+    .pk-segmented__item {
+        min-height: calc(var(--size-control-md) - 2 * var(--segmented-gap));
+        padding: 0 var(--space-3);
+        border: 0;
+        border-radius: var(--segmented-radius-seg);
+        background: transparent;
+        color: var(--segmented-fg);
+        font-family: inherit;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+        transition: background-color var(--motion-duration-hover) var(--motion-ease-standard);
+    }
+
+    .pk-segmented__item[aria-pressed="true"] {
+        background: var(--segmented-selected);
+        color: var(--segmented-fg-selected);
+        box-shadow: var(--shadow-hairline);
+    }
+
+    .pk-segmented__item:hover:not([aria-pressed="true"]):not(:disabled),
+    .pk-segmented__item.is-hover {
+        background: var(--color-bg-hover);
+        color: var(--segmented-fg-selected);
+    }
+
+    .pk-segmented__item:focus-visible,
+    .pk-segmented__item.is-focus {
+        outline: var(--border-width-thick) solid transparent;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    .pk-segmented__item:disabled {
+        color: var(--color-text-disabled);
+        cursor: not-allowed;
+    }
+
+    @media (pointer: coarse) {
+        .pk-segmented__item {
+            min-height: var(--size-tap);
+        }
+    }
+</style>
+<template data-state="default">
+    <div class="pk-segmented" role="group" aria-label="View">
+        <button class="pk-segmented__item" aria-pressed="true">Chat</button>
+        <button class="pk-segmented__item" aria-pressed="false">Design</button>
+        <button class="pk-segmented__item" aria-pressed="false">Files</button>
+    </div>
+</template>
+<template data-state="hover">
+    <div class="pk-segmented" role="group" aria-label="View">
+        <button class="pk-segmented__item" aria-pressed="true">Chat</button>
+        <button class="pk-segmented__item is-hover" aria-pressed="false">Design</button>
+        <button class="pk-segmented__item" aria-pressed="false">Files</button>
+    </div>
+</template>
+<template data-state="focus">
+    <div class="pk-segmented" role="group" aria-label="View">
+        <button class="pk-segmented__item" aria-pressed="true">Chat</button>
+        <button class="pk-segmented__item is-focus" aria-pressed="false">Design</button>
+        <button class="pk-segmented__item" aria-pressed="false">Files</button>
+    </div>
+</template>
+<template data-state="disabled">
+    <div class="pk-segmented" role="group" aria-label="View">
+        <button class="pk-segmented__item" aria-pressed="true">Chat</button>
+        <button class="pk-segmented__item" aria-pressed="false" disabled>Design</button>
+        <button class="pk-segmented__item" aria-pressed="false" disabled>Files</button>
+    </div>
+</template>
