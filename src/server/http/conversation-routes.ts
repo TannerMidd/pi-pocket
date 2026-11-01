@@ -188,7 +188,7 @@ export async function conversationRoutes(
     }
 
     if (third === "configure" && method === "POST") {
-        await app.commands.configure(id, user, await readJson(request), { signal: api.signal });
+        await app.commands.configure(id, user, await readJson(request));
 
         return json(response, 200, { ok: true });
     }

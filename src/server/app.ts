@@ -1480,7 +1480,6 @@ export class PocketApp {
         }
     }
 
-    /** Where a conversation's commands run: its folder on this machine. */
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void {
         if (
             !/^[a-z][a-z0-9+.-]*$/i.test(scheme) ||
@@ -1546,6 +1545,7 @@ export class PocketApp {
         return canonical;
     }
 
+    /** Where a conversation's commands run: its folder on this machine, or its workspace provider's env. */
     envFor(id: ConversationId): ExecutionEnv {
         return this.#wrapped(id, this.cwdOf(id));
     }

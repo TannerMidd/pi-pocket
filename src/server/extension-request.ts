@@ -47,15 +47,10 @@ export class ExtensionRequest implements RequestActor {
             throw new HttpError(400, "A workspace URI or folder path is required.");
         }
 
-        await this.#app.harness.commit((tx) => this.authorize(tx, true), this.context);
-        const cwd = await this.#app.resolveCwd(request.cwd, this.signal);
-        const user = await this.#app.harness.commit((tx) => this.authorize(tx, true), this.context);
-
-        return this.#app.commands.createSession(
-            user,
-            { cwd, ...(request.title === undefined ? {} : { title: request.title }) },
-            { actor: this, resolvedCwd: cwd },
-        );
+        return this.#app.commands.createSession(this.current(), {
+            cwd: request.cwd,
+            ...(request.title === undefined ? {} : { title: request.title }),
+        });
     }
 
     close = (): void => {

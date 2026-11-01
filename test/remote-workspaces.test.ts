@@ -5,7 +5,6 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { Duplex } from "node:stream";
 import { once } from "node:events";
 import { join } from "node:path";
-import { AgentDoc } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import {
@@ -19,7 +18,6 @@ import {
     until,
     work,
 } from "./helpers.ts";
-import { SessionsDoc } from "../src/server/docs.ts";
 
 const scheme = "testremote";
 const cwd = `${scheme}://box/work`;
@@ -121,171 +119,6 @@ test("workspace provider replacement preserves the current provider and rejects 
     } finally {
         first();
         second();
-        await app.close();
-    }
-});
-
-test("an extension route cannot create a remote session after its client disconnects", async () => {
-    const app = await openApp(scriptedModel());
-    const marker = join(root, `remote-route-resolving-${crypto.randomUUID()}`);
-    const uri = "routecancel://host/work";
-    const source = `/** Tests canceled remote session admission. */
-import { writeFileSync } from "node:fs";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-export default (host, web) => {
-    host.registerWorkspaceProvider("routecancel", {
-        env: () => new NodeExecutionEnv({ cwd: ${JSON.stringify(work)} }),
-        resolveCwd: async (cwd) => {
-            writeFileSync(${JSON.stringify(marker)}, "entered");
-            await new Promise((resolve) => setTimeout(resolve, 150));
-            return cwd;
-        },
-    });
-    web.route("POST", "session", async (request) =>
-        request.createSession({ cwd: request.body.cwd }),
-    );
-};`;
-    const extension = join(app.dataDir, "extensions", "remote-route-cancel.ts");
-
-    writeFileSync(extension, source);
-    await app.setExtensionEnabled(owner(app), "remote-route-cancel.ts", true);
-
-    const socket = new Duplex({
-        read() {},
-        write(_chunk, _encoding, done) {
-            done();
-        },
-    });
-    const request = new IncomingMessage(socket as never);
-
-    request.url = "/api/x/remote-route-cancel/session";
-    request.method = "POST";
-    request.headers = {
-        authorization: `Bearer ${app.config.ownerToken}`,
-        "x-pocket": "1",
-        "content-type": "application/json",
-    };
-    request.push(Buffer.from(JSON.stringify({ cwd: uri })));
-    request.push(null);
-    request.complete = true;
-    const response = new ServerResponse(request);
-
-    response.assignSocket(socket as never);
-    const handle = await import("../src/server/http.ts");
-    const serve = handle.createHandler({
-        app,
-        listen: { host: "127.0.0.1", port: 0 },
-        restart: () => {},
-    });
-    const count = app.sessions().length;
-    const handling = serve(request, response);
-
-    try {
-        await until(() => {
-            try {
-                return readFileSync(marker, "utf8") === "entered";
-            } catch {
-                return false;
-            }
-        }, "the delayed workspace resolution");
-        socket.destroy();
-        await handling;
-        await new Promise((resolve) => setTimeout(resolve, 200));
-
-        assert.equal(app.sessions().length, count);
-    } finally {
-        socket.destroy();
-        await app.close();
-    }
-});
-
-test("configure keeps agent and session cwd together when cancellation follows publication", async () => {
-    const app = await openApp(scriptedModel());
-    const uri = "configurecancel://host/work";
-    const remove = app.registerWorkspaceProvider("configurecancel", {
-        env: () => new NodeExecutionEnv({ cwd: work }),
-        resolveCwd: async () => uri,
-    });
-    const session = await app.commands.createSession(owner(app), { cwd: work });
-    const controller = new AbortController();
-    const unsubscribe = app.harness.subscribeCommits((publication) => {
-        if (
-            publication.changes.some(
-                (change) =>
-                    change.type === "document" &&
-                    change.conversationId === session.id &&
-                    change.value?.cwd === uri,
-            )
-        ) {
-            controller.abort();
-        }
-    });
-
-    try {
-        await assert.rejects(
-            app.commands.configure(
-                session.id,
-                owner(app),
-                { cwd: uri },
-                { signal: controller.signal },
-            ),
-        );
-
-        assert.equal((await app.harness.snapshot(AgentDoc, session.id, context))?.cwd, uri);
-        assert.equal(
-            (await app.harness.snapshot(SessionsDoc, context))?.items[String(session.id)]?.cwd,
-            uri,
-        );
-    } finally {
-        unsubscribe();
-        remove();
-        await app.close();
-    }
-});
-
-test("remote resolution cannot create after cancellation or configure after access revocation", async () => {
-    const app = await openApp(scriptedModel());
-    const uri = "cancelremote://host/work";
-    let entered = Promise.withResolvers<void>();
-    let release = Promise.withResolvers<void>();
-    const remove = app.registerWorkspaceProvider("cancelremote", {
-        env: () => new NodeExecutionEnv({ cwd: work }),
-        resolveCwd: async () => {
-            entered.resolve();
-            await release.promise;
-
-            return uri;
-        },
-    });
-
-    try {
-        const count = app.sessions().length;
-        const controller = new AbortController();
-        const creating = app.commands.createSession(
-            owner(app),
-            { cwd: uri },
-            { signal: controller.signal },
-        );
-
-        await entered.promise;
-        controller.abort();
-        release.resolve();
-        await assert.rejects(creating);
-        assert.equal(app.sessions().length, count);
-        const local = await app.commands.createSession(owner(app), { cwd: work });
-        const { user } = app.config.addUser("Temporary remote driver", "guest");
-
-        entered = Promise.withResolvers<void>();
-        release = Promise.withResolvers<void>();
-        const configuring = app.commands.configure(local.id, user, { cwd: uri });
-
-        await entered.promise;
-        app.config.removeUser(user.id);
-        release.resolve();
-        await assert.rejects(configuring, /access|user|session/i);
-        assert.equal(app.cwdOf(local.id), work);
-    } finally {
-        remove();
         await app.close();
     }
 });
