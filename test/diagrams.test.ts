@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { render as renderPele } from "pele";
 import { renderToString } from "katex";
-import { cleanUp, newSession, openApp, owner, root, scriptedModel, until } from "./helpers.ts";
+import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { cleanUp, newSession, openApp, owner, root, say, scriptedModel, until } from "./helpers.ts";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
@@ -343,3 +344,40 @@ test(
         }
     },
 );
+
+test("a reply drawn before the module registers math draws again", browserAvailable, async (t) => {
+    const route = () => fauxAssistantMessage([fauxText("Result $x^2$")]);
+    const app = await openApp(scriptedModel(route), join(root, "diagrams-late"));
+
+    await app.setExtensionEnabled(owner(app), "diagrams.ts", false);
+
+    const session = await newSession(app);
+    const listen = { host: "127.0.0.1", port: 0 };
+    const server = createServer(createHandler({ app, listen, restart: () => {} }));
+    const dataDir = mkdtempSync(join(root, "diagrams-late-"));
+    const browsers = new Browsers({ dataDir, load: async () => undefined, save: () => {} });
+
+    t.after(async () => {
+        await browsers.closeAll({ final: true });
+        server.closeAllConnections();
+        server.close();
+        await app.close();
+    });
+    await say(app, session, "hi");
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const page = await browsers.open(1);
+    const reply = (inner: string) =>
+        inPage<boolean>(
+            page,
+            `return JSON.stringify(document.querySelector('[data-part="reply"]${inner}') !== null);`,
+        );
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+
+    await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+    await page.navigate(`${base}/s/${session}`);
+    await until(() => reply(""), "the reply");
+    assert.equal(await reply(" .katex"), false);
+    await app.setExtensionEnabled(owner(app), "diagrams.ts", true);
+    await until(() => reply(" .katex"), "the reply's math after the module loads");
+});
