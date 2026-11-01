@@ -266,7 +266,7 @@ test("a partial scan lists a token it did not see as not seen in this scan, not 
     // The fixture has to be a partial scan, or the assertions below hold for the wrong reason.
     assert.match(
         await say(run(dir, { action: "scan" })),
-        /a limit ended the walk early/,
+        /a limit ended the scan early/,
         "the deep file makes the scan partial",
     );
 
@@ -277,6 +277,41 @@ test("a partial scan lists a token it did not see as not seen in this scan, not 
     assert.ok(
         !reply.includes("not in the code now"),
         "the scan left files out, so it cannot say that the code dropped the token",
+    );
+});
+
+test("a file the scan cuts at 200 KB also makes the scan partial", async () => {
+    // The scan reads the first 200 KB of a file, and the plum token sits after the cut: the token is in the code, but
+    // not in this scan. The scan says nothing was dropped unless the cut counts, so the report says it is gone.
+    let css = "";
+
+    for (let at = 0; css.length < 220_000; at++) {
+        css += `.c${at} { color: #123456; margin: 4px 8px }\n`;
+    }
+
+    css += ":root { --plum-500: #7c3aed }\n";
+    assert.ok(Buffer.byteLength(css) > 200_000, "the file is past the 200 KB the scan reads");
+
+    const dir = project({ "src/styles.css": css });
+
+    await say(run(dir, { action: "init", fromScan: true }));
+    await say(
+        run(dir, { action: "set", changes: [{ token: "color.plum.500", value: "#7c3aed" }] }),
+    );
+
+    // The fixture has to be a partial scan, or the assertions below hold for the wrong reason.
+    assert.match(
+        await say(run(dir, { action: "scan" })),
+        /a limit ended the scan early/,
+        "the cut file makes the scan partial",
+    );
+
+    const reply = await say(run(dir, { action: "resync" }));
+
+    assert.match(reply, /1 not seen in this scan\./);
+    assert.ok(
+        !reply.includes("not in the code now"),
+        "the scan cut a file, so it cannot say that the code dropped the token",
     );
 });
 

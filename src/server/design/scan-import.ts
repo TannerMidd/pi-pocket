@@ -26,6 +26,8 @@ interface Found {
     extra: Record<string, Obj>;
     count: number;
     notes: string[];
+    /** True when the token limit left tokens out of the files: the ones after it are not read. */
+    partial: boolean;
 }
 
 export interface Imported extends Found {
@@ -119,6 +121,7 @@ function addFound(into: Imported, found: Found, count: number, files: string[]):
     into.count += count;
     into.files.push(...files);
     into.notes.push(...found.notes);
+    into.partial = into.partial || found.partial;
 }
 
 function addStudio(into: Imported, source: StudioSource, files: string[]): void {
@@ -395,6 +398,7 @@ function studioTokens(input: StudioSource): Found {
         extra: {},
         count: first.flat.size,
         notes,
+        partial: false,
     };
 
     if (dark !== undefined && dark.join("\n") !== light.join("\n")) {
@@ -404,6 +408,9 @@ function studioTokens(input: StudioSource): Found {
     for (const [mode, sets] of extra) {
         result.extra[mode] = changesFrom(first.flat, read(sets), notes, `the ${mode} mode`);
     }
+
+    // A budget that ran out left the tokens after it unread, in this set or in a later one.
+    result.partial = budget.left <= 0;
 
     return result;
 }
@@ -553,6 +560,7 @@ function styleDictionaryTokens(files: SdFile[]): Found {
         extra: {},
         count: first.flat.size,
         notes,
+        partial: false,
     };
 
     if (names.length > 0) {
@@ -570,6 +578,9 @@ function styleDictionaryTokens(files: SdFile[]): Found {
             result.extra[name] = tree;
         }
     }
+
+    // A budget that ran out left the tokens after it unread, in this folder or in a later one.
+    result.partial = budget.left <= 0;
 
     return result;
 }

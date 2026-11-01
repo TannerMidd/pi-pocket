@@ -122,6 +122,34 @@ test("a file past the byte limit is read only to the limit", () => {
     );
 });
 
+test("a token after a limit is left out, and the scan says it is partial", () => {
+    // A token after the byte cut of a file is not read, so a token that the code still has reads as gone.
+    const cut = project({ "a.css": `a{color:#111}${" ".repeat(LIMITS.fileBytes)}b{color:#222}` });
+
+    assert.equal(
+        scanTokens(cut).partial,
+        true,
+        "the file is cut, so the scan read part of the project",
+    );
+
+    // The import reads at most 5000 tokens of a token file: the ones after that are not in the draft.
+    const many: Record<string, { $value: string }> = {};
+
+    for (let at = 0; at <= 5000; at++) {
+        many[`g${at}`] = { $value: "#111" };
+    }
+
+    const scan = scanTokens(project({ "design/tokens.json": JSON.stringify(many) }));
+
+    assert.equal(
+        scan.partial,
+        true,
+        "the last token is left out, so the scan read part of the project",
+    );
+    assert.ok(scan.draft.tokens.g0 !== undefined, "the tokens before the limit are in the draft");
+    assert.equal(scan.draft.tokens.g5000, undefined, "the token after it is not");
+});
+
 test("a tree without style files stops at the entry limit", () => {
     const files: Record<string, string> = {};
 
