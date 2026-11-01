@@ -3130,6 +3130,16 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
             >Retry now</button>`
         }
         ${
+            limit &&
+            !waiting &&
+            canSteer() &&
+            html`<button
+                class="live-retry live-stop"
+                data-part="live-stop"
+                onClick=${() => attempt(actions.abort)}
+            >Stop</button>`
+        }
+        ${
             retry &&
             !waiting &&
             html`<span

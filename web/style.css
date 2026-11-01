@@ -3335,6 +3335,11 @@ pre.diff .del {
         flex: 0 1 auto;
     }
 
+    .live-stop {
+        min-height: 40px;
+        min-width: 40px;
+    }
+
     .live-why {
         flex: 1 1 100%;
     }
