@@ -107,6 +107,7 @@ import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
+import { assessCacheContext, CacheExpiryPilot } from "./cache-expiry-pilot.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
@@ -338,6 +339,7 @@ export class PocketApp {
     readonly limits: LimitGate;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
     readonly cacheKeeper: CacheKeeper;
+    #cacheExpiryPilot?: CacheExpiryPilot;
     readonly schedules = new Schedules(this);
     /** Commands Pi runs in the background, watched until they end (`background.ts`). */
     readonly background = new BackgroundTasks(this);
@@ -745,6 +747,18 @@ export class PocketApp {
         }
 
         this.models = await ModelRuntime.create();
+
+        if (process.env.PI_POCKET_CACHE_EXPIRY_PILOT === "observe") {
+            this.#cacheExpiryPilot = new CacheExpiryPilot({
+                now: this.now,
+                conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
+                assess: (id, model) => assessCacheContext(this, id as ConversationId, model),
+                log: this.#log,
+            });
+            this.#cacheExpiryPilot.install(this.models);
+            this.#log("[cache-expiry-pilot] Observation only: no additional model requests.");
+        }
+
         // Innermost: observe the adapter payload only after the caller and all extension shapers finish.
         this.cacheKeeper.installPayloadObserver(this.models);
         installRequestShaping(this.models, this.#shapers, this.#log);
@@ -3621,6 +3635,7 @@ export class PocketApp {
             clearTimeout(this.#sessionsTimer);
             this.alerts.close();
             this.themes.close();
+            this.#cacheExpiryPilot?.close();
             await this.cacheKeeper.close();
             this.spend.close();
             this.limits.close();
