@@ -473,6 +473,32 @@ test("stop ends a linked session's run and does nothing when it is idle", async 
             busy: true,
         });
         assert.equal(isolated.isBusy(session), false);
+
+        // A stop cut off before the run ended: its retry stops the run, rather than returning the saved receipt.
+        const second = await isolated.linkedSessions.start(
+            origin,
+            { message: "STREAM_A_WHILE" },
+            "h2",
+        );
+        const abort = isolated.commands.abort.bind(isolated.commands);
+
+        await until(() => isolated.isBusy(second.session), "the second run to start");
+        isolated.commands.abort = (async () => {
+            throw new Error("cut off");
+        }) as never;
+        await assert.rejects(
+            isolated.linkedSessions.stop(origin, { to: second.address }, "cut"),
+            /cut off/,
+        );
+        isolated.commands.abort = abort as never;
+        assert.equal(isolated.isBusy(second.session), true);
+        assert.deepEqual(
+            await isolated.linkedSessions.stop(origin, { to: second.address }, "cut"),
+            {
+                busy: true,
+            },
+        );
+        await until(() => !isolated.isBusy(second.session), "the retry to stop the run");
     } finally {
         await isolated.close();
     }
