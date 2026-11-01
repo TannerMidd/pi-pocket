@@ -41,10 +41,16 @@ export interface FigLimits {
     entries: number;
 }
 
+/**
+ * What one file may cost. The value limit is a memory limit: a decoded value is about 70 bytes of heap, and the scan runs its
+ * files in a worker of 256 MB (`WORKER.heapMb` in `scan.ts`), which also holds the rest of the scan. A file of 120 000
+ * variables needs more than 300 MB, so it is a note and not the end of the scan. A design system is far below the limit:
+ * Figma's own Simple Design System is 108 variables in a 274 KB file.
+ */
 export const FIG_LIMITS: FigLimits = {
     file: 20_000_000,
     raw: 100_000_000,
-    values: 5_000_000,
+    values: 1_500_000,
     nodes: 500_000,
     chars: 65_536,
     depth: 32,
