@@ -85,6 +85,8 @@ export interface FigDecoded {
     nodes: Obj[];
     /** The names of the ZIP's entries (`canvas.fig`, `meta.json`, `images/…`), bounded and not read. */
     entries: string[];
+    /** What the file cost to decode: the values the reader made, which is what its limits bound. */
+    values: number;
 }
 
 /** The most chunks a bare container may hold: the schema and the data, with room for a version that adds one. */
@@ -383,6 +385,7 @@ export function decodeFig(
         message,
         nodes,
         entries: opened.entries,
+        values: budget.values,
     };
 }
 

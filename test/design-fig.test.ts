@@ -1631,3 +1631,14 @@ test("the Simple Design System's file: its 7 collections, 108 variables, and its
         assert.ok(token(system, name) !== undefined, `${name} is a token`);
     }
 });
+
+test("the Simple Design System's 274 KB file uses less than half of the value limit", () => {
+    const fig = decodeFig(readFileSync(VARIABLES));
+
+    // The limit is a memory limit, and a design system of real size must not come near it: the largest real file here uses
+    // half of it, and the other half is the room that the reader has for a project that is larger than Figma's own template.
+    assert.ok(
+        fig.values < FIG_LIMITS.values / 2,
+        `${fig.values} of ${FIG_LIMITS.values} values: the file is past half of the limit`,
+    );
+});
