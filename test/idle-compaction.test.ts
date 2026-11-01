@@ -234,7 +234,7 @@ test("concurrent submissions on an idle session share a single compaction", asyn
     }
 });
 
-test("interrupt mode stops active compaction and admits the interrupt message", async () => {
+test("interrupt waits for active compaction and admits the interrupt message", async () => {
     const id = await newSession(app);
 
     await say(app, id, "x".repeat(80_000));
@@ -255,11 +255,25 @@ test("interrupt mode stops active compaction and admits the interrupt message", 
 
     assert.ok(res.submissionId, "interrupt submission admitted");
 
-    // Verify compaction task was aborted by the interrupt
+    // The interrupt must wait for the compaction to complete.
     const taskRecord = await app.harness.getTask(taskId, context);
 
     assert.equal(taskRecord?.state.status, "terminal", "compaction terminated");
-    assert.equal(taskRecord?.state.outcome?.status, "aborted", "compaction aborted");
+    assert.equal(taskRecord?.state.outcome?.status, "completed", "compaction completed");
 
     await app.harness.waitForIdle(context);
+});
+
+test("stop waits for active compaction", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "x".repeat(80_000));
+    const conv = await app.conversation(id);
+    const taskId = await conv.compact(undefined, context);
+
+    await app.commands.abort(id, owner(app));
+
+    const task = await app.harness.getTask(taskId, context);
+
+    assert.equal(task?.state.outcome?.status, "completed", "compaction completed");
 });
