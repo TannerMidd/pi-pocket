@@ -64,9 +64,10 @@ function ownerInstructions(host: PocketHost): () => string | undefined {
             }
         }
 
+        // A person who opens a session PiP worked in finds it in their language, when these name one (#239).
         return seen.text === undefined
             ? undefined
-            : `Your person's standing instructions for you, from ${file}:\n\n${seen.text}`;
+            : `Your person's standing instructions for you, from ${file}:\n\n${seen.text}\n\nWhen these name a language for your answers, write what agents read in that language too, with the same short, plain sentences, and ask each session to answer you in it.`;
     };
 }
 
