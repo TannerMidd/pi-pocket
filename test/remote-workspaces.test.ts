@@ -113,6 +113,13 @@ test("after a restart without its provider, a remote session opens and runs noth
         assert.throws(() => app.envFor(id), /No workspace provider/);
         await say(app, id, "run");
         assert.match((await modelTexts(app, id)).at(-2)!, /No workspace provider/);
+        // A `!` command ends as a failed command with the same reason, not one left running.
+        await app.shell.start(id, owner(app), { command: "pwd" });
+        await until(
+            async () => (await modelTexts(app, id)).some((t) => /could not run/.test(t)),
+            "the failed command",
+        );
+        assert.match((await modelTexts(app, id)).at(-1)!, /No workspace provider/);
     } finally {
         app.detach(tab.client);
         await app.close();
@@ -251,6 +258,12 @@ export default (host, web) => {
         });
 
         assert.equal(upload.status, 400);
+        // The folder picker's Recent holds only folders it can open.
+        const folders = await fetch(`http://127.0.0.1:${port}/api/fs?path=${work}`, {
+            headers: { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1" },
+        });
+
+        assert.ok(!((await folders.json()) as { recent: string[] }).recent.includes(uri));
     } finally {
         server.closeAllConnections();
         server.close();
@@ -288,6 +301,8 @@ test("a remote session refuses what would act on this machine: a task and a file
         const id = await newSession(app, uri);
 
         await assert.rejects(app.background.start(id, { command: "pwd" }), /remote workspaces/);
+        await assert.rejects(app.watches.start(id, owner(app).id), /remote workspaces/);
+        assert.equal((await app.memory.project(id, undefined))?.key, uri);
         await say(app, id, "publish");
         assert.equal(
             (await modelTexts(app, id)).filter((t) => /not on this machine/.test(t)).length,

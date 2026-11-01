@@ -7,7 +7,7 @@
  * `alerts.ts`, provider sign-ins in `providers.ts`, and each conversation's shared live view in `room.ts`.
  */
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
@@ -102,7 +102,7 @@ import { serverBuild } from "./build.ts";
 import { presentedBuild } from "./entry-presentation.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
-import { workspaceScheme } from "./paths.ts";
+import { expandHome, workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
@@ -3498,6 +3498,16 @@ export class PocketApp {
         }
 
         const cwd = this.cwdOf(id);
+
+        // A remote workspace has no project folder here: only Pi's own templates and whole paths.
+        if (this.workspaceScheme(cwd) !== undefined) {
+            return loadPromptTemplates(
+                this.#home,
+                getAgentDir(),
+                paths.filter((path) => isAbsolute(expandHome(path.trim()))),
+                { project: false },
+            );
+        }
 
         // A project told "Don't trust" offers none of its own, as its .pi/skills.
         return loadPromptTemplates(cwd, getAgentDir(), paths, {

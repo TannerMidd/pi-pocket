@@ -22,6 +22,7 @@ import { checkTokensBlock, scanProject, scanReport, scanRoot } from "./scan.ts";
 import type { Draft } from "./scan-scales.ts";
 import type { DesignSystem, SystemChange } from "./system-types.ts";
 import { readDesignFile } from "./tokens-io.ts";
+import { localFolder, REMOTE_DESIGN } from "./files.ts";
 import {
     planResync,
     resyncChange,
@@ -397,6 +398,10 @@ export function designSystemTool(): ToolRegistration {
                 throw new Error(
                     "This session has no working directory, so the design system has no place.",
                 );
+            }
+
+            if (localFolder(cwd) === undefined) {
+                throw new Error(REMOTE_DESIGN);
             }
 
             const change = (value: SystemChange, headline: string) =>

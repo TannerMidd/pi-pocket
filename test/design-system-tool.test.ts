@@ -596,3 +596,23 @@ test("scan: a scan past its time limit is stopped in its worker, and the server'
 
     assert.ok(ticks >= 5, `${ticks} ticks of 20 ms in 300 ms`);
 });
+
+test("a remote workspace URI is refused, not used as a folder here", async () => {
+    const here = project({ "ssh:/host/work/keep.txt": "" });
+    const before = process.cwd();
+
+    process.chdir(here);
+
+    try {
+        for (const action of ["scan", "init", "read"]) {
+            await assert.rejects(
+                run("ssh://host/work", action === "init" ? { action, tokens } : { action }),
+                /not available for remote workspaces/,
+            );
+        }
+
+        assert.equal(existsSync(join(here, "ssh:", "host", "work", ".pi")), false);
+    } finally {
+        process.chdir(before);
+    }
+});
