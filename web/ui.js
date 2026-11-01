@@ -111,7 +111,12 @@ marked.use({
         {
             name: "pocketBlockMath",
             level: "block",
-            start: (src) => (mathOn() ? src.indexOf("$$") : undefined),
+            // Only `$$` at the start of a line: marked cuts the paragraph there, and joins its parts with a line break.
+            start: (src) => {
+                const found = mathOn() ? /\n {0,3}\$\$/.exec(src) : null;
+
+                return found === null ? undefined : found.index + 1;
+            },
             tokenizer(src) {
                 const found = mathOn() && blockMath(src);
 
