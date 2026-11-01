@@ -136,7 +136,7 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
             [Buffer.from("....ftypheic not a photo at all"), /./],
             [photo.subarray(0, 300), /./],
             [huge, /too many pixels/],
-            [unsized, /too many pixels/],
+            [unsized, /size cannot be read/],
         ] as const) {
             writeFileSync(path, bytes);
             await assert.rejects(modelImage(path, "image/heic"), message);

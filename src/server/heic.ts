@@ -66,7 +66,11 @@ export function heicToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
     const pixels = pixelsOf(bytes);
 
     // A HEIF image always has an `ispe` box: with none that can be read, its size is not known.
-    if (pixels === 0 || pixels > MAX_PIXELS) {
+    if (pixels === 0) {
+        return Promise.reject(new Error("the photo's size cannot be read"));
+    }
+
+    if (pixels > MAX_PIXELS) {
         return Promise.reject(new Error("the photo has too many pixels"));
     }
 
