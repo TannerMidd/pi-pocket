@@ -346,8 +346,10 @@ export function RunningBoard() {
 
     // The server's clock, moved on by how long ago it answered: what the timeline and countdowns count from.
     const offset = useRef(0);
+    const measured = useRef(null);
 
-    if (board) {
+    if (board && measured.current !== board) {
+        measured.current = board;
         offset.current = board.now - Date.now();
     }
 
