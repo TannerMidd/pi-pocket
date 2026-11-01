@@ -59,7 +59,7 @@ function tooLong(message: string): void {
     }
 }
 
-type CallOutcome = { busy: boolean } | { archived: boolean; repeating: number };
+type CallOutcome = { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
 type CallRecord = { conversationId?: number; by?: string; at: number; result?: CallOutcome };
 
 /** The record of call `token` in `calls`, made when there is none, the oldest pruned to make room. */
@@ -872,28 +872,37 @@ export class LinkedSessions implements LinkedSessionsApi {
         const app = this.#app;
         const { id, user, token, repeat } = await this.#addressed(source, request.to, key);
 
-        if (repeat !== undefined && "busy" in repeat) {
-            return repeat;
+        if (repeat !== undefined && "busy" in repeat && repeat.stopping !== true) {
+            return { busy: repeat.busy };
         }
 
         await this.#mayAct(source, id, user);
-        // The receipt is stored with the busy state before the run stops. `fresh` says this call took the key: a
-        // repeat finds the stored result and stops nothing else. A key for another session is refused here.
-        const busy = app.isBusy(id);
-        const claimed = await this.#claim(source, token, id, user, { busy });
+        // The receipt is stored with the busy state, marked `stopping`, before the run stops, and marked done after.
+        // A repeat that finds it done stops nothing. One that finds `stopping` (a crash came between) stops again,
+        // which is safe, and finishes it. A key for another session is refused here.
+        const claimed = await this.#claim(source, token, id, user, {
+            busy: app.isBusy(id),
+            stopping: true,
+        });
 
-        if (!claimed.fresh) {
-            if (!("busy" in claimed.result)) {
-                throw new HttpError(409, "This call already did something else.");
-            }
-
-            return { busy: claimed.result.busy };
+        if (!("busy" in claimed.result)) {
+            throw new HttpError(409, "This call already did something else.");
         }
 
-        // The stop a person gets, then awaited, so the caller sees the run stopped. The receipt above already says
-        // whether this run was working, so a repeat stops nothing later.
+        const { busy } = claimed.result;
+
+        if (!claimed.fresh && claimed.result.stopping !== true) {
+            return { busy };
+        }
+
+        // The stop a person gets, then awaited, so the caller sees the run stopped.
         await app.commands.abort(id, user);
         await (await app.conversation(id)).abort(context);
+        await app.harness.commit(async (tx) => {
+            recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now()).result = {
+                busy,
+            };
+        }, context);
 
         return { busy };
     }
