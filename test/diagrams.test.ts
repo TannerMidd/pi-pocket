@@ -187,7 +187,10 @@ test(
                  host.id = ${JSON.stringify(hostId)};
                  const spec = markdown.fenceFor(${JSON.stringify(lang)});
                  render(h(spec.component, { source: ${JSON.stringify(source)}, lang: ${JSON.stringify(lang)}, streaming: ${JSON.stringify(streaming)} }), host);
-                 if (${settleMs}) await new Promise((resolve) => setTimeout(resolve, ${settleMs}));
+                 if (${settleMs}) {
+                     await new Promise((resolve) => setTimeout(resolve, ${settleMs}));
+                 }
+
                  return JSON.stringify(host.textContent.slice(0, 500));`,
                 );
             const hasInPage = (selector: string) =>
@@ -239,6 +242,7 @@ test(
              const elements = [svg, ...svg.querySelectorAll("*")];
              const tags = elements.filter((each) => ["a", "image", "style", "foreignobject"].includes(each.localName.toLowerCase())).length;
              const references = elements.flatMap((each) => [...each.attributes]).filter((each) => ["href", "xlink:href", "src", "xml:base"].includes(each.name.toLowerCase())).length;
+
              return JSON.stringify({ tags, references, attacker: svg.outerHTML.includes("attacker.example"), styled: svg.getAttribute("style")?.includes("max-width") ?? false, themed: getComputedStyle(svg).getPropertyValue("--pele-line").trim() !== "" && getComputedStyle(svg).getPropertyValue("--pele-line").trim() === getComputedStyle(svg).getPropertyValue("--muted").trim() });`,
             );
 

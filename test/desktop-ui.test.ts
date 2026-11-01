@@ -260,6 +260,7 @@ test(
                     const room = ${side === "left" ? "140 - box.left" : "box.right - (innerWidth - 140)"};
                     const bar = document.querySelector(".topbar");
                     const touchesBar = bar.getBoundingClientRect().top <= ${height + 1};
+
                     return JSON.stringify(document.documentElement.dataset.windowControls === ${JSON.stringify(side)} &&
                         strip.dataset.underControls === "bar" &&
                         parseFloat(getComputedStyle(strip).${side === "left" ? "paddingLeft" : "paddingRight"}) >= Math.round(room) &&
@@ -394,6 +395,7 @@ test(
 
         const regions = `
             const region = (selector) => getComputedStyle(document.querySelector(selector)).appRegion;
+
             return JSON.stringify({
                 topbar: region(".topbar"),
                 sessions: region(".sessions-head"),
