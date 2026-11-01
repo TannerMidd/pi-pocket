@@ -126,7 +126,7 @@ function renderMath(katex, source, display) {
         throwOnError: true,
         trust: false,
         maxExpand: 1_000,
-        maxSize: 20,
+        maxSize: 5,
     });
 
     if (html.length > MAX_TEX_OUTPUT_LENGTH) {
