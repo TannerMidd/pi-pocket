@@ -1365,21 +1365,45 @@ test("an enum decodes as the name the schema gives it, and as its number when th
     );
 });
 
-test("an int64 is zigzag-decoded, and a negative value does not come back as its zigzag form", () => {
+test("an int64 is zigzag-decoded, past the numbers that a float holds exactly, and at both ends of its range", () => {
     // kiwi writes a signed 64-bit integer as a zigzag varint, like a signed 32-bit one: -1 is 1, and -3 is 5.
     const defs: Def[] = [
         {
             name: "Big",
             kind: "MESSAGE",
             fields: [
-                ["at", "int64"],
-                ["size", "int64"],
+                ["signed", "int64"],
+                ["unsigned", "uint64"],
             ],
         },
     ];
-    const fig = decodeFig(figOf(defs, "Big", { at: BigInt(-1), size: BigInt(-3) }).outer);
 
-    assert.deepEqual({ ...fig.message }, { at: -1, size: -3 });
+    const read = (signed: bigint, unsigned: bigint) => {
+        const fig = decodeFig(figOf(defs, "Big", { signed, unsigned }).outer);
+
+        return { ...fig.message } as { signed: number | string; unsigned: number | string };
+    };
+
+    assert.deepEqual(read(-1n, 1n), { signed: -1, unsigned: 1 });
+    assert.deepEqual(read(-3n, 3n), { signed: -3, unsigned: 3 });
+    // The largest value that a number holds exactly stays a number, and the one past it is its digits.
+    assert.deepEqual(read(-(2n ** 53n - 1n), 2n ** 53n - 1n), {
+        signed: -Number.MAX_SAFE_INTEGER,
+        unsigned: Number.MAX_SAFE_INTEGER,
+    });
+    assert.deepEqual(read(-(2n ** 53n), 2n ** 53n), {
+        signed: "-9007199254740992",
+        unsigned: "9007199254740992",
+    });
+    // The ends of each type: kiwi's zigzag holds the whole of a signed 64-bit integer, and a uint64 past a number is digits.
+    assert.deepEqual(read(-(2n ** 63n), 2n ** 64n - 1n), {
+        signed: "-9223372036854775808",
+        unsigned: "18446744073709551615",
+    });
+    assert.deepEqual(read(2n ** 63n - 1n, 2n ** 63n - 1n), {
+        signed: "9223372036854775807",
+        unsigned: "9223372036854775807",
+    });
 });
 
 test("the assembly stops at its deadline, and counts what it placed", () => {
