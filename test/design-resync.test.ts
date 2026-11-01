@@ -315,6 +315,43 @@ test("a file the scan cuts at 200 KB also makes the scan partial", async () => {
     );
 });
 
+test("a draft past the engine's token limit makes the plan partial", () => {
+    // The engine keeps the first 5000 tokens of a draft, so a saved token after that point is not gone from the code:
+    // the engine did not read it. The scan read every file, so the draft's own size is the only sign.
+    const dir = project({
+        ".pi/design/tokens.json": JSON.stringify({
+            $extensions: { "com.pi-pocket": { name: "Many", mode: "light" } },
+            color: { $type: "color", v6999: { $value: "#123456" } },
+        }),
+    });
+    const loaded = loadDesignSystemWithRaw(dir);
+
+    assert.ok(loaded !== undefined, "the system loaded");
+
+    const color: Record<string, unknown> = { $type: "color" };
+
+    for (let at = 0; at < 7000; at++) {
+        color[`v${at}`] = { $value: "#123456" };
+    }
+
+    const plan = planResync(loaded.system, { tokens: { color }, modes: {} }, loaded.raw);
+
+    assert.deepEqual(plan.gone, ["color.v6999"], "the engine kept only its first 5000 tokens");
+    assert.equal(plan.partial, true, "so the plan cannot say that the code dropped the token");
+
+    const report = resyncReport({
+        name: "Many",
+        path: ".",
+        files: 1,
+        partial: false,
+        saved: false,
+        plan,
+    });
+
+    assert.match(report, /1 not seen in this scan\./);
+    assert.match(report, /Not seen in this scan \(1\):\n {2}color\.v6999\n/);
+});
+
 test("guidelines and components are not touched", async () => {
     const dir = await saved();
     const specimen = `<script type="application/json" id="pocket-component">{"name":"Button","states":["default"]}</script>
@@ -581,7 +618,8 @@ function splitBrandChild(rootInBase: boolean): void {
         plan.blocked.map((token) => token.token),
         ["color.brand.subtle"],
     );
-    // Before this fix the plan added the child, and this write threw "color.brand is a token, so it cannot hold subtle".
+    // Before this fix the plan added the child, so the assertions above failed. The write runs as well: a plan that is
+    // blocked must apply as it stands, in either direction.
     assert.doesNotThrow(() =>
         writeDesignSystem(
             dir,
@@ -611,6 +649,7 @@ test("the report fences token names and values from the project, and shows at mo
         kept: 0,
         differs: [],
         gone: ["space.\u202e16"],
+        partial: false,
         scanned: 1,
         modesNotAdded: [],
     };

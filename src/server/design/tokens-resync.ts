@@ -14,7 +14,7 @@
  * - A token path that the system has and the scan no longer finds is LISTED as not in the code now, and never deleted. A
  *   path that the engine drops (it fails in a mode) is kept the same way and is not listed: there is no resolved token to
  *   compare with the code. A scan that read only part of the project lists it as not seen in this scan, because a file
- *   that the scan left out may still define it.
+ *   that the scan left out may still define it; so does a draft with more tokens than the engine keeps.
  * - Guidelines and components are never touched.
  *
  * `planResync` is pure. `resyncChange` builds the one `SystemChange` that `writeDesignSystem` applies, so the checks run
@@ -72,6 +72,11 @@ export interface ResyncPlan {
     differs: DifferingToken[];
     /** The tokens the system has and the scan no longer finds, in the system's order. Never deleted. */
     gone: string[];
+    /**
+     * True when the draft that the scan gave declares more tokens than the engine resolved: a token past the engine's
+     * limit is not in `scanned.tokens`, and it is not gone from the code either.
+     */
+    partial: boolean;
     /** How many tokens the scan found. */
     scanned: number;
     /** The modes the code has and the system lacks: resync adds no mode. */
@@ -315,6 +320,10 @@ export function planResync(system: DesignSystem, draft: Draft, raw: RawSystem): 
     });
     const defaultMode = system.modes[0] ?? "light";
     const scanDefault = scanned.modes[0] ?? defaultMode;
+    const drafted = { paths: new Set<string>(), leaves: new Set<string>() };
+
+    pathsIn(draft.tokens, [], drafted);
+
     const declared = declaredPaths(system, raw);
     const existing = declared.paths;
     const resolved = new Map(system.tokens.map((token) => [token.name, token]));
@@ -399,6 +408,8 @@ export function planResync(system: DesignSystem, draft: Draft, raw: RawSystem): 
         kept,
         differs,
         gone: system.tokens.filter((token) => !found.has(token.name)).map((token) => token.name),
+        // The engine keeps only its own number of tokens: a draft with more was not read whole.
+        partial: drafted.paths.size > scanned.tokens.length,
         scanned: scanned.tokens.length,
         modesNotAdded: scanned.modes.filter((mode) => !system.modes.includes(mode)),
     };
@@ -437,7 +448,7 @@ export interface ResyncReportInput {
     path: string;
     /** How many style files the scan read. */
     files: number;
-    /** True when the scan read only part of the project: a token it did not see may still be in the code. */
+    /** True when the scan read only part of the project: a file it left out may still hold a token. */
     partial: boolean;
     /** True when the change was written; false for a dry run. */
     saved: boolean;
@@ -452,8 +463,9 @@ export function resyncReport(input: ResyncReportInput): string {
     const { plan } = input;
     const count = (value: number, one: string, many = `${one}s`) =>
         `${value} ${value === 1 ? one : many}`;
-    // A scan that read only part of the project cannot say that the code dropped a token: it did not see it.
-    const unseen = input.partial ? "not seen in this scan" : "not in the code now";
+    // A scan that did not read or resolve everything cannot say that the code dropped a token: it did not see it.
+    const partial = input.partial || plan.partial;
+    const unseen = partial ? "not seen in this scan" : "not in the code now";
     const lines = [
         `Resync of "${line(input.name)}" with the code in ${line(input.path)}: ${input.saved ? `${plan.added.length} added` : `${plan.added.length} to add`}, ${plan.kept} kept as they are, ${count(plan.differs.length, "differs", "differ")} from the code, ${plan.gone.length} ${unseen}.`,
         `The scan read ${count(input.files, "file")} and found ${count(plan.scanned, "token")}.`,
@@ -489,7 +501,7 @@ export function resyncReport(input: ResyncReportInput): string {
         ),
     );
     list(
-        input.partial ? "Not seen in this scan" : "Not in the code now",
+        partial ? "Not seen in this scan" : "Not in the code now",
         plan.gone.map((token) => token),
     );
     list(
@@ -500,7 +512,7 @@ export function resyncReport(input: ResyncReportInput): string {
     const note = [
         "Not synced: the scan reads the style files only.",
         "Components and guidelines are not touched.",
-        ...(input.partial
+        ...(partial
             ? [
                   "The scan read only part of the project, so a token that it did not see may still be in the code: those are listed as not seen in this scan.",
               ]
