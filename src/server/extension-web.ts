@@ -16,6 +16,7 @@ import {
     watch,
 } from "node:fs";
 import { extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { User } from "./config.ts";
 import { describe } from "./errors.ts";
 import type {
@@ -59,6 +60,7 @@ const METHODS: ReadonlySet<string> = new Set(["GET", "POST", "PUT", "PATCH", "DE
 const ACCESS: ReadonlySet<string> = new Set(["owner", "steer", "view"]);
 /** A module with a web part needs a name that is one part of an address as it is. */
 const MODULE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const TRUSTED_DIAGRAMS_FILE = fileURLToPath(new URL("./extensions/diagrams.ts", import.meta.url));
 const SEGMENT = /^(?::[A-Za-z_][A-Za-z0-9_]*|[A-Za-z0-9._~-]+)$/;
 /** A browser module's file or folder: a name that is one part of an address as it is. */
 const ENTRY = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
@@ -170,6 +172,31 @@ export function mayUse(user: Pick<User, "role" | "sessions">, access: WebAccess)
     return access === "view" || (access === "steer" && user.role === "guest");
 }
 
+/** The only browser module a session-invited user may load. */
+function isTrustedDiagramsClient(part: WebPart): boolean {
+    const client = part.client;
+
+    return (
+        client !== undefined &&
+        part.module === "diagrams" &&
+        join(part.directory, part.file) === TRUSTED_DIAGRAMS_FILE &&
+        client.name === "diagrams" &&
+        client.folder &&
+        client.access === "view"
+    );
+}
+
+/** Session invitations allow the trusted built-in diagrams client, but not extension routes. */
+function mayUseClient(part: WebPart, user: Pick<User, "role" | "sessions">): boolean {
+    const client = part.client;
+
+    return (
+        client !== undefined &&
+        (mayUse(user, client.access) ||
+            (user.sessions !== undefined && isTrustedDiagramsClient(part)))
+    );
+}
+
 /** A module's name, from its file: `server-status.ts` is `server-status`. */
 function moduleName(file: string): string {
     return file.replace(/\.ts$/, "");
@@ -256,8 +283,8 @@ export type RouteMatch =
     { route: Route; part: WebPart; params: Record<string, string> } | { allow: WebMethod[] };
 
 interface Options {
-    /** Browser modules for the people `access` lets in changed: their tabs must hear which to load. */
-    changed?: (access: WebAccess[]) => void;
+    /** Browser modules changed: each affected tab must hear which to load. */
+    changed?: (access: WebAccess[] | "all") => void;
     /** Send a browser module's event to the tabs it loads in (`to`: one person's). */
     deliver?: (part: WebPart, access: WebAccess, event: string, data: unknown, to?: string) => void;
     log?: (message: string) => void;
@@ -950,7 +977,7 @@ export class ExtensionWebs {
         user: Pick<User, "role" | "sessions">,
     ): { module: string; title: string; url: string }[] {
         return [...this.#parts.values()]
-            .filter((part) => part.client !== undefined && mayUse(user, part.client.access))
+            .filter((part) => part.client !== undefined && mayUseClient(part, user))
             .map((part) => ({
                 module: part.module,
                 title: part.title,
@@ -975,7 +1002,7 @@ export class ExtensionWebs {
         if (
             part === undefined ||
             client === undefined ||
-            !mayUse(user, client.access) ||
+            !mayUseClient(part, user) ||
             path.length === 0
         ) {
             return undefined;
@@ -1121,6 +1148,13 @@ export class ExtensionWebs {
 
     /** Tell the tabs of the people who load either part's browser module. */
     #changed(...parts: (WebPart | undefined)[]): void {
+        if (parts.some((part) => part !== undefined && isTrustedDiagramsClient(part))) {
+            // The access filter cannot select session-invited users, so refresh every tab list.
+            this.#options.changed?.("all");
+
+            return;
+        }
+
         const access = parts.flatMap((part) => (part?.client ? [part.client.access] : []));
 
         if (access.length > 0) {

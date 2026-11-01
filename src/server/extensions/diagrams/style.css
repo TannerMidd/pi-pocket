@@ -1,0 +1,42 @@
+.pocket-diagrams-output {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.pocket-diagrams-output > svg {
+    --pele-bg: var(--bg);
+    --pele-fg: var(--text);
+    --pele-muted: var(--muted);
+    --pele-line: var(--muted);
+    --pele-surface: var(--bg);
+    --pele-surface-alt: var(--line);
+    --pele-border: var(--muted);
+    --pele-accent: var(--accent);
+    display: block;
+    height: auto;
+    margin-inline: auto;
+    max-width: 100%;
+}
+
+.pocket-diagrams-source,
+.pocket-diagrams-error {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.md code.pocket-diagrams-math {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    padding: 0;
+    white-space: normal;
+}
+
+.md code.pocket-diagrams-math-display,
+.pocket-diagrams-math-fence {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    text-align: center;
+}

@@ -77,6 +77,8 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     sessionFilter: true,
     sessionSearch: true,
     composerKey: true,
+    fence: true,
+    mathInline: true,
     onConversation: true,
     messages: true,
     reveal: true,
@@ -1020,9 +1022,204 @@ test(
     },
 );
 
+test(
+    "Markdown extension points render, update, and remove their registrations",
+    real,
+    async (t) => {
+        t.after(() => app.setExtensionEnabled(owner(app), "diagrams.ts", true));
+        // Exercise the test renderer, not the built-in renderer that normally takes precedence.
+        await app.setExtensionEnabled(owner(app), "diagrams.ts", false);
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(rail("Meter")), "the meter's browser module");
+
+        const before = await inPage<{ revision: number; math: boolean }>(`
+        const markdown = await import("/markdown-ext.js");
+        return JSON.stringify({ revision: markdown.markdownRevision(), math: markdown.mathOn() });
+    `);
+        const invalid = await withMeter<string>(`
+        try {
+            pocket.fence({ id: "bad-fence", langs: [], component: () => null });
+            return JSON.stringify("accepted");
+        } catch (error) {
+            return JSON.stringify(error.message);
+        }
+    `);
+
+        assert.match(invalid, /langs is a non-empty list/);
+        await withMeter(`
+        globalThis.fenceHandle = pocket.fence({
+            id: "test-fence",
+            langs: ["PI-TEST"],
+            component: ({ source, lang, streaming }) =>
+                pocket.h("output", {
+                    class: "fence-probe",
+                    "data-source": source.trim(),
+                    "data-lang": lang,
+                    "data-streaming": String(streaming),
+                }),
+        });
+        globalThis.mathHandle = pocket.mathInline({
+            id: "test-math",
+            mount(element, source, display) {
+                element.classList.add("math-probe");
+                element.dataset.source = source;
+                element.dataset.display = String(display);
+                element.textContent = "mounted";
+            },
+        });
+        return "null";
+    `);
+
+        const afterAdd = await inPage<number>(`
+        return JSON.stringify((await import("/markdown-ext.js")).markdownRevision());
+    `);
+
+        assert.ok(
+            afterAdd > before.revision,
+            "adding Markdown renderers changes the Markdown revision",
+        );
+
+        const rendered = await withMeter<{
+            source: string | undefined;
+            lang: string | undefined;
+            streaming: string | undefined;
+            mathParsed: boolean;
+            mathMounted: boolean;
+            mathCustom: boolean;
+        }>(`
+        const { render } = await import("preact");
+        const host = globalThis.markdownTestHost ??= document.createElement("div");
+        const fence = String.fromCharCode(96).repeat(3);
+        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(String.fromCharCode(10));
+        document.body.append(host);
+        render(pocket.h(pocket.Markdown, { text }), host);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const block = host.querySelector("output.fence-probe");
+        const math = host.querySelector('code[data-part="inline-math"]');
+
+        return JSON.stringify({
+            source: block?.dataset.source,
+            lang: block?.dataset.lang,
+            streaming: block?.dataset.streaming,
+            mathParsed: math !== null,
+            mathMounted: math?.hasAttribute("data-mounted") ?? false,
+            mathCustom: math?.classList.contains("math-probe") ?? false,
+        });
+    `);
+
+        assert.deepEqual(rendered, {
+            source: "fence-body",
+            lang: "Pi-Test",
+            streaming: "false",
+            mathParsed: true,
+            mathMounted: true,
+            mathCustom: true,
+        });
+
+        const updated = await withMeter<string>(`
+        globalThis.mathHandle.update({
+            mount(element, source) {
+                element.classList.add("math-updated");
+                element.dataset.source = source;
+            },
+        });
+        const { render } = await import("preact");
+        const fence = String.fromCharCode(96).repeat(3);
+        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(String.fromCharCode(10));
+        render(pocket.h(pocket.Markdown, { text }), globalThis.markdownTestHost);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return JSON.stringify(globalThis.markdownTestHost.querySelector(".math-updated")?.dataset.source ?? null);
+    `);
+
+        assert.equal(updated, "x+y", "an updated math renderer remounts existing Markdown");
+
+        await withMeter(`
+        globalThis.fenceHandle.remove();
+        globalThis.mathHandle.remove();
+        return "null";
+    `);
+        const afterRemove = await inPage<number>(`
+        return JSON.stringify((await import("/markdown-ext.js")).markdownRevision());
+    `);
+
+        assert.ok(
+            afterRemove > afterAdd,
+            "removing Markdown renderers changes the Markdown revision",
+        );
+
+        const fallback = await withMeter<{
+            customFence: boolean;
+            defaultFence: string | undefined;
+            math: boolean;
+            mathMounted: boolean;
+        }>(`
+        const { render } = await import("preact");
+        const host = globalThis.markdownTestHost;
+        const fence = String.fromCharCode(96).repeat(3);
+        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(String.fromCharCode(10));
+        render(pocket.h(pocket.Markdown, { text }), host);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const math = host.querySelector('code[data-part="inline-math"]');
+
+        return JSON.stringify({
+            customFence: host.querySelector("output.fence-probe") !== null,
+            defaultFence: host.querySelector('pre[data-lang="Pi-Test"] code')?.textContent,
+            math: (await import("/markdown-ext.js")).mathOn(),
+            mathMounted: math?.hasAttribute("data-mounted") ?? false,
+        });
+    `);
+
+        assert.deepEqual(fallback, {
+            customFence: false,
+            defaultFence: "fence-body",
+            math: before.math,
+            mathMounted: before.math,
+        });
+        await withMeter(`
+        globalThis.markdownTestHost.remove();
+        delete globalThis.markdownTestHost;
+        return "null";
+    `);
+    },
+);
+
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(rail("Meter")), "the meter's rail button");
+
+    const mathBefore = await inPage<boolean>(`
+        return JSON.stringify((await import("/markdown-ext.js")).mathOn());
+    `);
+
+    await withMeter(`
+        pocket.fence({
+            id: "unload-fence",
+            langs: ["unload-test"],
+            component: () => pocket.h("output", { class: "unload-fence" }),
+        });
+        pocket.mathInline({
+            id: "unload-math",
+            mount(element) {
+                element.classList.add("unload-math");
+            },
+        });
+        return "null";
+    `);
+    const rendered = await withMeter<{ registered: boolean; custom: boolean }>(`
+        const { render } = await import("preact");
+        const host = globalThis.markdownUnloadHost ??= document.createElement("div");
+        const fence = String.fromCharCode(96).repeat(3);
+        const text = [fence + "unload-test", "value", fence].join(String.fromCharCode(10));
+        document.body.append(host);
+        render(pocket.h(pocket.Markdown, { text }), host);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return JSON.stringify({
+            registered: (await import("/markdown-ext.js")).fenceFor("unload-test") !== undefined,
+            custom: host.querySelector("output.unload-fence") !== null,
+        });
+    `);
+
+    assert.deepEqual(rendered, { registered: true, custom: true });
     await settled();
     await page.click({ selector: rail("Meter") });
     await until(() => has(".ext-page .meter"), "the page");
@@ -1031,5 +1228,39 @@ test("turning the module off takes away its button and closes its page", real, a
         async () => !(await has(".ext-page")) && !(await has(rail("Meter"))),
         "the page and button gone",
     );
+    const removed = await inPage<{
+        registered: boolean;
+        custom: boolean;
+        fallback: string | undefined;
+        math: boolean;
+    }>(`
+        const { h, render } = await import("preact");
+        const { Markdown } = await import("/ui.js");
+        const host = globalThis.markdownUnloadHost;
+        const fence = String.fromCharCode(96).repeat(3);
+        const text = [fence + "unload-test", "value", fence].join(String.fromCharCode(10));
+        render(h(Markdown, { text }), host);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const markdown = await import("/markdown-ext.js");
+
+        return JSON.stringify({
+            registered: markdown.fenceFor("unload-test") !== undefined,
+            custom: host.querySelector("output.unload-fence") !== null,
+            fallback: host.querySelector('pre[data-lang="unload-test"] code')?.textContent,
+            math: markdown.mathOn(),
+        });
+    `);
+
+    assert.deepEqual(removed, {
+        registered: false,
+        custom: false,
+        fallback: "value",
+        math: mathBefore,
+    });
     assert.equal(await has(rail("Shared")), true);
+    await inPage(`
+        globalThis.markdownUnloadHost.remove();
+        delete globalThis.markdownUnloadHost;
+        return "null";
+    `);
 });
