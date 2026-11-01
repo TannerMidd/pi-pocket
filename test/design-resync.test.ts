@@ -509,6 +509,64 @@ test("a group with $root does not block a new token inside it", () => {
     assert.equal(file(dir, "tokens.json").color.brand.subtle.$value, "#0a0b0c");
 });
 
+/**
+ * A system where one file has `color.brand` as a plain token and the other as a group's `$root`: a write into a path
+ * under it fails on the plain one, whichever file holds it.
+ */
+function splitBrand(rootInBase: boolean): string {
+    const root = { $root: { $value: "#123456" } };
+    const plain = { $value: "#123456" };
+
+    return project({
+        ".pi/design/tokens.json": JSON.stringify({
+            $extensions: { "com.pi-pocket": { name: "Split", mode: "light" } },
+            color: { $type: "color", brand: rootInBase ? root : plain },
+        }),
+        ".pi/design/tokens.dark.json": JSON.stringify({
+            color: { $type: "color", brand: rootInBase ? plain : root },
+        }),
+    });
+}
+
+/** The plan and the write of a system whose code adds `color.brand.subtle`, checked against the budget it gets. */
+function splitBrandChild(rootInBase: boolean): void {
+    const dir = splitBrand(rootInBase);
+    const loaded = loadDesignSystemWithRaw(dir);
+
+    assert.ok(loaded !== undefined, "the system loaded");
+
+    const draft: Draft = {
+        tokens: { color: { $type: "color", brand: { subtle: { $value: "#0a0b0c" } } } },
+        modes: {},
+    };
+    const plan = planResync(loaded.system, draft, loaded.raw);
+
+    assert.deepEqual(plan.added, [], "the plain token in either file is in the way");
+    assert.deepEqual(
+        plan.blocked.map((token) => token.token),
+        ["color.brand.subtle"],
+    );
+    // Before this fix the plan added the child, and this write threw "color.brand is a token, so it cannot hold subtle".
+    assert.doesNotThrow(() =>
+        writeDesignSystem(
+            dir,
+            resyncChange(plan, {
+                path: ".",
+                scannedAt: new Date().toISOString(),
+                tokens: plan.scanned,
+            }),
+        ),
+    );
+}
+
+test("a plain token in a mode file blocks a child of a $root group in tokens.json", () => {
+    splitBrandChild(true);
+});
+
+test("a plain token in tokens.json blocks a child of a $root group in a mode file", () => {
+    splitBrandChild(false);
+});
+
 test("the report fences token names and values from the project, and shows at most 40 lines", () => {
     // A crafted plan: a scan's own values are safe characters, so the hostile ones are put here on purpose.
     const plan: ResyncPlan = {

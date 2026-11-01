@@ -113,12 +113,13 @@ function nodeAt(tree: unknown, path: string[]): Obj | undefined {
 }
 
 /**
- * The token paths that a set of files declares: `paths` holds every one, and `roots` the paths whose token is a group's
- * `$root`, because such a group still holds children of its own.
+ * The token paths that a set of files declares: `paths` holds every one, and `leaves` the ones that a file has as a plain
+ * token. A `$root` path is not a leaf, because its group still holds children. A path that one file has as a plain token
+ * and another as a `$root` is a leaf: a write into the group fails on the file with the plain token.
  */
 interface Declared {
     paths: Set<string>;
-    roots: Set<string>;
+    leaves: Set<string>;
 }
 
 /** Every token path in one raw token file, as the engine collects them: a node with a `$value`, and a group's `$root`. */
@@ -135,12 +136,12 @@ function pathsIn(tree: unknown, path: string[], found: Declared): void {
         if (key === "$root") {
             if (Object.hasOwn(child, "$value")) {
                 found.paths.add(path.join("."));
-                found.roots.add(path.join("."));
             }
         } else if (key.startsWith("$")) {
             continue;
         } else if (Object.hasOwn(child, "$value")) {
             found.paths.add([...path, key].join("."));
+            found.leaves.add([...path, key].join("."));
         } else {
             pathsIn(child, [...path, key], found);
         }
@@ -153,7 +154,7 @@ function pathsIn(tree: unknown, path: string[], found: Declared): void {
  * it as it is instead of writing the scan's token over it.
  */
 function declaredPaths(system: DesignSystem, raw: RawSystem): Declared {
-    const declared: Declared = { paths: new Set(), roots: new Set() };
+    const declared: Declared = { paths: new Set(), leaves: new Set() };
 
     pathsIn(raw.tokens, [], declared);
 
@@ -184,8 +185,8 @@ function groupPaths(names: Iterable<string>): Set<string> {
 }
 
 /**
- * Why a new token path cannot be added, or undefined when it can. A group's `$root` is a token at the group's own path,
- * and the group still holds children, so it is not in the way of one.
+ * Why a new token path cannot be added, or undefined when it can. Only a plain token blocks the path: a group's `$root`
+ * is a token at the group's own path, and the group still holds children, so it is not in the way of one.
  */
 function blocking(declared: Declared, groups: Set<string>, path: string[]): string | undefined {
     const name = path.join(".");
@@ -193,7 +194,7 @@ function blocking(declared: Declared, groups: Set<string>, path: string[]): stri
     for (let at = 1; at < path.length; at++) {
         const parent = path.slice(0, at).join(".");
 
-        if (declared.paths.has(parent) && !declared.roots.has(parent)) {
+        if (declared.leaves.has(parent)) {
             return `the system has a token at ${parent}, so ${name} has no group there`;
         }
     }
