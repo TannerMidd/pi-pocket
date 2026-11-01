@@ -43,6 +43,7 @@ export function mountMath(root) {
         'code[data-part="inline-math"]:not([data-mounted])',
     )) {
         element.dataset.mounted = "";
+        element.dataset.tex = element.textContent ?? "";
 
         try {
             spec.mount(element, element.textContent ?? "", element.dataset.lang === "math-display");

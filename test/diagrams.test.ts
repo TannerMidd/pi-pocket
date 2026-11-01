@@ -380,4 +380,16 @@ test("a reply drawn before the module registers math draws again", browserAvaila
     assert.equal(await reply(" .katex"), false);
     await app.setExtensionEnabled(owner(app), "diagrams.ts", true);
     await until(() => reply(" .katex"), "the reply's math after the module loads");
+    assert.equal(
+        await inPage<string>(
+            page,
+            `const { rangeText } = await import("/quote-text.js");
+             const range = document.createRange();
+
+             range.selectNodeContents(document.querySelector('[data-part="reply"] > *'));
+
+             return JSON.stringify(rangeText(range).trim());`,
+        ),
+        "Result $x^2$",
+    );
 });
