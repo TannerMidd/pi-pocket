@@ -51,12 +51,14 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
+import { removeAvatar, saveAvatar } from "./avatars.ts";
 import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
     type ArtifactMeta,
     ArtifactsDoc,
+    type ArtifactType,
     AuthorsDoc,
     BackgroundDoc,
     type BackgroundTask,
@@ -93,6 +95,7 @@ import { Memory } from "./memory.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { Updates } from "./updates.ts";
 import { pocketPackage, pocketVersion } from "./versions.ts";
+import { serverBuild } from "./build.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
@@ -200,6 +203,26 @@ type SubagentsValue = {
 };
 
 type SubagentsOf = { agents: Record<string, SubagentRecord>; reporting: Set<string> };
+
+/** How many sessions the artifacts overview reads at once. */
+const OVERVIEW_BATCH = 8;
+
+/** One artifact in the artifacts overview: where it is, and which of its versions is the current one. */
+export type ArtifactOverviewEntry = {
+    session: number;
+    sessionTitle: string;
+    id: string;
+    title: string;
+    type: ArtifactType;
+    kind?: "page" | "deck";
+    group?: string;
+    /** The number of the latest version: the one a person sees first. */
+    current: number;
+    /** How many versions there are. */
+    versions: number;
+    size: number;
+    updatedAt: number;
+};
 
 /** One subagent on the subagents board: the subagents bar's view, the session it works in, and the call it waits on. */
 export type SubagentEntry = ReturnType<typeof subagentView> & {
@@ -322,6 +345,11 @@ export class PocketApp {
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
+    /**
+     * This server's code (`serverBuild`): sessions a tab keeps, in its memory or on the device, are good for a server of
+     * the same build, so they last across a restart but not across new code.
+     */
+    readonly build = serverBuild();
     /** Set by the launcher over IPC; undefined when the server runs on its own. */
     access: AccessInfo | undefined;
     harness!: Harness;
@@ -568,6 +596,14 @@ export class PocketApp {
             },
             // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
             commandsChanged: () => this.#websChanged("all"),
+            presentationsChanged: () => {
+                for (const pending of this.#rooms.values()) {
+                    void pending.then(
+                        (room) => room.reproject(),
+                        () => {},
+                    );
+                }
+            },
             log: (line) => this.#log(line),
             // Something about a module only the owner can mend: their tabs, as what it says can name the server's folders.
             warn: (message) => this.ownerNotice("warning", message),
@@ -1523,13 +1559,78 @@ export class PocketApp {
             this.#peopleChanged(client.user.id);
         }
 
-        if (client.conversationId === undefined) {
+        await this.#enter(client);
+    }
+
+    /**
+     * Show a tab another session, or none (the list), on the connection it has (`connection`, the id its `hello`
+     * carried): it leaves the room of the one it showed, and gets what the new one has as a new connection would, with
+     * what it kept of it (`have`). No new connection means no hello, session list, or PiP state again, and nobody sees
+     * this person leave and come back. `switched` goes first: every event of a session after it is the new one's. A switch
+     * numbered `seq` below one already taken arrived late, and is dropped. False when no such connection is open (it
+     * closed, or the server started again): the tab connects again instead.
+     */
+    switchTo(
+        user: User,
+        connection: string,
+        id: ConversationId | undefined,
+        have: Client["have"],
+        seq: number,
+    ): boolean {
+        let found = false;
+
+        for (const client of this.#clients) {
+            if (client.user.id !== user.id || client.connection !== connection) {
+                continue;
+            }
+
+            found = true;
+
+            if (seq <= (client.switchSeq ?? -Infinity)) {
+                continue;
+            }
+
+            client.switchSeq = seq;
+            const previous = client.conversationId;
+
+            if (previous !== undefined) {
+                this.#leaveRoom(client, previous);
+            }
+
+            client.conversationId = id;
+
+            if (have === undefined) {
+                delete client.have;
+            } else {
+                client.have = have;
+            }
+
+            client.send("switched", { seq, conversationId: id ?? null });
+            void this.#enter(client);
+
+            if (id === undefined) {
+                this.#scheduleSessions();
+            }
+        }
+
+        return found;
+    }
+
+    /**
+     * Put a tab in the room of the session it shows (`client.conversationId`), and send it what that session has: its
+     * view, chat, notes, and browser. A later switch while the room opens wins: this one then leaves nothing behind.
+     */
+    async #enter(client: Client): Promise<void> {
+        const visit = (client.visit = (client.visit ?? 0) + 1);
+        const id = client.conversationId;
+
+        if (id === undefined) {
             return;
         }
 
-        if (!this.canSee(client.user, client.conversationId)) {
+        if (!this.canSee(client.user, id)) {
             client.send("missing", {
-                conversationId: client.conversationId,
+                conversationId: id,
                 message: "This session is not shared with you.",
             });
             // Keep the tab for app-wide events only: nothing about that conversation reaches it, and it is not "there".
@@ -1539,11 +1640,23 @@ export class PocketApp {
         }
 
         try {
-            const id = client.conversationId;
             const room = await this.room(id);
 
-            if (!this.#clients.has(client)) {
+            if (!this.#clients.has(client) || client.visit !== visit) {
                 this.releaseRoom(room);
+
+                return;
+            }
+
+            // The person's access can change while the room opens (`setAccess` evicts only tabs already there): asked
+            // again now, as nothing of the session has gone yet.
+            if (!this.canSee(client.user, id)) {
+                this.releaseRoom(room);
+                client.conversationId = undefined;
+                client.send("missing", {
+                    conversationId: id,
+                    message: "This session is no longer shared with you.",
+                });
 
                 return;
             }
@@ -1568,10 +1681,9 @@ export class PocketApp {
             room.pushPresence();
             this.#scheduleSessions();
         } catch (error) {
-            client.send("missing", {
-                conversationId: client.conversationId,
-                message: describe(error),
-            });
+            if (client.visit === visit) {
+                client.send("missing", { conversationId: id, message: describe(error) });
+            }
         }
     }
 
@@ -1866,6 +1978,26 @@ export class PocketApp {
         }
     }
 
+    /** Set (bytes) or clear (undefined) someone's picture; everyone's lists show it at once. */
+    setAvatar(user: User, bytes: Buffer | undefined): void {
+        if (bytes === undefined) {
+            removeAvatar(this.dataDir, user.id);
+            this.config.updateUser(user.id, { avatar: undefined });
+        } else {
+            saveAvatar(this.dataDir, user.id, bytes);
+            this.config.updateUser(user.id, { avatar: Date.now() });
+        }
+
+        this.#peopleChanged();
+
+        for (const pending of this.#rooms.values()) {
+            void pending.then(
+                (room) => room.has(user.id) && room.pushPresence(),
+                () => {},
+            );
+        }
+    }
+
     /** Someone came, went, or changed: remember when they were last here and tell everyone. */
     #peopleChanged(userId?: string): void {
         if (userId !== undefined && this.config.userById(userId) !== undefined) {
@@ -1900,6 +2032,7 @@ export class PocketApp {
                 id: each.id,
                 name: each.name,
                 role: each.role,
+                ...(each.avatar === undefined ? {} : { avatar: each.avatar }),
                 online: this.#online(each.id),
                 ...(each.lastSeen === undefined ? {} : { lastSeen: each.lastSeen }),
                 ...(each.sessions === undefined || scope !== undefined
@@ -2256,6 +2389,14 @@ export class PocketApp {
                 refreshModels: user.role === "owner",
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
                 peeks: true,
+                // Tells the web app it may show another session on the connection it has (`POST /api/switch`).
+                switches: true,
+                // Sessions tabs keep are good for servers of this build (`have`).
+                build: this.build,
+                // Whether a browser may keep sessions on the device (IndexedDB), for every tab and across reloads:
+                // `PI_POCKET_SESSION_CACHE=off` keeps them in each tab's memory only, and has browsers drop what they
+                // kept on the device.
+                deviceCache: process.env.PI_POCKET_SESSION_CACHE !== "off",
                 // This server's clock: peek tiles compare the browser's looks with when runs ended here.
                 now: Date.now(),
                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
@@ -2508,7 +2649,9 @@ export class PocketApp {
         const agent = (room.value?.docs["pi.agent"] ?? {}) as AgentState;
         const forkedFrom = meta?.forkedFrom;
         const root = this.rootOf(room.id);
-        const budget = this.#sessions[String(root)]?.budget;
+        const subagent = meta === undefined && room.parent !== undefined;
+        // A subagent shows what it cost itself: the session's spend and limit are on the session.
+        const budget = subagent ? undefined : this.#sessions[String(root)]?.budget;
 
         return {
             id: room.id,
@@ -2532,10 +2675,11 @@ export class PocketApp {
             ...(forkedFrom === undefined ? {} : { forkedFrom }),
             // The session's spend with its subagents', and its limit, with what counts against it.
             spend: {
-                spent:
-                    budget === undefined
-                        ? this.spend.sessionSpent(root)
-                        : this.spend.budgetSpent(root),
+                spent: subagent
+                    ? this.spend.conversationSpent(room.id)
+                    : budget === undefined
+                      ? this.spend.sessionSpent(root)
+                      : this.spend.budgetSpent(root),
                 ...(budget === undefined ? {} : { budget }),
             },
             ...(meta?.worktree === undefined
@@ -2769,6 +2913,7 @@ export class PocketApp {
 
     #forget(userId: string): void {
         this.config.removeUser(userId);
+        removeAvatar(this.dataDir, userId);
         this.pushStore?.removeUser(userId);
 
         // Their open tabs end now; reconnecting fails, so they land on the sign-in screen.
@@ -2820,6 +2965,70 @@ export class PocketApp {
                 this.#sendBoard(client, this.subagents(user));
             }
         }
+    }
+
+    /**
+     * Every artifact in the sessions this person can see, for the artifacts overview: one entry for each, with its
+     * current (latest) version and how many versions it has. Archived sessions are left out. Newest first.
+     */
+    async artifactOverview(user: User): Promise<ArtifactOverviewEntry[]> {
+        const one = async (
+            session: string,
+            meta: SessionMeta,
+        ): Promise<ArtifactOverviewEntry[]> => {
+            const id = Number(session) as unknown as ConversationId;
+
+            // A PiP is its owner's assistant, and kept out of the session list.
+            if (meta.archived === true || meta.pip !== undefined || !this.canSee(user, id)) {
+                return [];
+            }
+
+            try {
+                const index = await this.harness.snapshot(ArtifactsDoc, id, context);
+                const entries: ArtifactOverviewEntry[] = [];
+
+                for (const [artifact, item] of Object.entries(index?.items ?? {})) {
+                    const current = item.versions.at(-1);
+
+                    if (current === undefined) {
+                        continue;
+                    }
+
+                    entries.push({
+                        session: Number(session),
+                        sessionTitle: meta.title ?? "",
+                        id: artifact,
+                        title: item.title,
+                        type: item.type,
+                        ...(item.kind === undefined ? {} : { kind: item.kind }),
+                        ...(item.group === undefined ? {} : { group: item.group }),
+                        current: current.version,
+                        versions: item.versions.length,
+                        size: current.size,
+                        updatedAt: current.createdAt,
+                    });
+                }
+
+                return entries;
+            } catch (error) {
+                // One session's broken artifacts must not hide the others'.
+                console.error(`Artifacts of session ${session} could not be read:`, error);
+
+                return [];
+            }
+        };
+
+        const sessions = Object.entries(this.#sessions);
+        const found: ArtifactOverviewEntry[] = [];
+
+        // A few sessions at a time: a person with many sessions does not make the server read all of them at once.
+        for (let from = 0; from < sessions.length; from += OVERVIEW_BATCH) {
+            const batch = sessions.slice(from, from + OVERVIEW_BATCH);
+
+            found.push(...(await Promise.all(batch.map(([id, meta]) => one(id, meta)))).flat());
+        }
+
+        return found.sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     async artifactBody(id: ConversationId, artifact: string, version?: number) {

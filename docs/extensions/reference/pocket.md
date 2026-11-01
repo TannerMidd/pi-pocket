@@ -276,7 +276,7 @@ messages(options?: MessagesOptions): Promise<MessagePage>;
 
 Since 0.20.0 · Experimental
 
-Reads a page of the people's messages in the session the tab shows, oldest first: Pi's answers, tool calls, and notes are not in it. With no `before`, it is the newest `limit` messages (50 by default, up to 200). The page's `before` is the cursor for the page before it, and null at the start. Read pages until `before` is null to have them all. The messages are those of the transcript: after a New context, the earlier ones are not in it.
+Reads a page of the people's messages in the session the tab shows, oldest first: Pi's answers, tool calls, and notes are not in it. Neither is an input a module stored as its own kind, even while it shows as a message ([`web.presentEntry`](web.md#presententry)). A user message that a module's `userPrefix` presents stays in: it is a message to Pi, as it was before. With no `before`, it is the newest `limit` messages (50 by default, up to 200). The page's `before` is the cursor for the page before it, and null at the start. Read pages until `before` is null to have them all. The messages are those of the transcript: after a New context, the earlier ones are not in it.
 
 The server checks the person's access to the session for each page. A page is from the session that the tab showed when it was asked for (`conversationId`): compare it with the one shown now before you use it. It rejects with an error whose `status` is 409 when its cursor is stale, as after a compaction: read again from the newest. Abort it with `signal`. With no session open, or from a version of the module that is gone, the page is empty. See [`MessagesOptions`](#messagesoptions), [`MessagePage`](#messagepage), and [`MessageInfo`](#messageinfo).
 
@@ -321,6 +321,27 @@ pocket.sheet({
               );
     },
 });
+```
+
+### `entryPresentation`
+
+```ts
+entryPresentation(kind: string, mode: "open" | "folded" | "hidden"): void;
+entryPresentation(kind: string): "open" | "folded" | "hidden" | undefined;
+```
+
+Since 0.28.0 · Experimental
+
+How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is `x.<module>.<name>`. `open` shows the message. `folded` shows one line, which opens to the text: that is also how it shows when this browser has no choice. `hidden` keeps the turn and shows nothing until Find jumps to it. The model still reads the message in full.
+
+With a mode, it sets this browser's choice; the same mode again changes nothing. With the kind alone, it returns the choice, or undefined when there is none yet. A person can choose too: the message sheet of any of these rows has Show, Fold, and Hide for every input of its kind. So set a mode only when there is none, or from a command the person runs, and a person's choice stays theirs. The choice stays in this browser, and its other tabs follow it.
+
+A kind that is not this module's throws, and so does a mode that is not one of those three. This browser remembers a limited number of kinds; past it, the one chosen longest ago is forgotten ([limits](limits.md#presentations)). Where the browser cannot store it, the choice lasts until the tab reloads. On an older app, check for it first.
+
+```js
+if (typeof pocket.entryPresentation === "function" && !pocket.entryPresentation("x.notes.note")) {
+    pocket.entryPresentation("x.notes.note", "hidden");
+}
 ```
 
 ## Routes and events

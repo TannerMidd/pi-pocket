@@ -178,7 +178,7 @@ test("the board shows a sub-tile for each subagent at work, with what it does", 
     await settled();
     await page.click({ selector: ".rail-agents" });
     await see(
-        `return JSON.stringify((await import("/store.js")).store.state.board === true)`,
+        `return JSON.stringify((await import("/store.js")).store.state.board === "subagents")`,
         "the board",
     );
     await see(
@@ -204,7 +204,7 @@ test("the board shows a sub-tile for each subagent at work, with what it does", 
             .click();
     `);
     await see(
-        `return JSON.stringify(document.querySelector(".board-detail-name")?.textContent === "slow" && (await import("/store.js")).store.state.board === true)`,
+        `return JSON.stringify(document.querySelector(".board-detail-name")?.textContent === "slow" && (await import("/store.js")).store.state.board === "subagents")`,
         "the selected subagent's detail, on the board",
     );
 
@@ -302,5 +302,100 @@ test(
             `return JSON.stringify((await import("/store.js")).store.state.sheet?.type === "model")`,
             "the model sheet",
         );
+    },
+);
+
+test(
+    "Running now is a board in the conversation's place: a timeline, the sessions with what runs and what is scheduled, and Cancel",
+    real,
+    async () => {
+        const id = await started(0);
+        const schedule = await app.commands.schedule(id, owner(app), {
+            when: "every 2h look at the queue",
+            zone: "UTC",
+        });
+
+        await page.setViewport(VIEWPORTS.desktop);
+        await settled();
+        await page.click({ selector: ".rail-running" });
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.board === "running" && document.querySelector(".running-board") !== null)`,
+            "the Running now board",
+        );
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".rb-timeline .rb-pin.repeat").length > 1)`,
+            "the repeat's times on the timeline",
+        );
+        await says(".rb-sched", /look at the queue.*every 2 hours/);
+
+        // A schedule picked shows at the side, with its next times; Cancel ends it.
+        await settled();
+        await page.click({ selector: ".rb-sched" });
+        await says("[data-part='running-schedule'] .rb-message", /look at the queue/);
+        assert.ok(
+            (await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll("[data-part='running-schedule'] .rb-upcoming span").length)`,
+            )) > 1,
+        );
+        await settled();
+        await page.click({ selector: "[data-part='running-schedule'] .button.danger" });
+        await see(
+            `return JSON.stringify(document.querySelector(".rb-sched") === null)`,
+            "the schedule gone",
+        );
+        assert.equal(
+            (await app.schedules.list(id)).some((each) => each.id === schedule.id),
+            false,
+        );
+
+        // Esc goes back to the conversation; the old sheet's name opens the board too.
+        await page.evaluate(
+            `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return "true"`,
+        );
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.board === false)`,
+            "the board closed",
+        );
+        await page.evaluate(
+            `(await import("/store.js")).openSheet({ type: "running" }); return "true"`,
+        );
+        await see(
+            `return JSON.stringify((await import("/store.js")).store.state.board === "running" && (await import("/store.js")).store.state.sheet === null)`,
+            "the board, for the old sheet",
+        );
+    },
+);
+
+test(
+    "Running now: a repeat past its last time listed goes on as a dashed line, and only its first time is a tab stop",
+    real,
+    async () => {
+        const id = await newSession(app);
+        const schedule = await app.commands.schedule(id, owner(app), {
+            when: "every 30m check the build",
+            zone: "UTC",
+        });
+
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/s/${id}`);
+        await settled();
+        await page.click({ selector: ".rail-running" });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".rb-timeline .rb-pin.repeat").length > 1)`,
+            "the repeat's times on the timeline",
+        );
+        // The server lists 24 times, 12 hours of them: the 7-day range goes on past the last one.
+        await page.click({ selector: ".rb-range button:last-child" });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".rb-timeline .rb-pin-tail").length === 1)`,
+            "the dashed line after the last time",
+        );
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".rb-timeline button.rb-pin:not([tabindex='-1'])").length)`,
+            ),
+            1,
+        );
+        await app.schedules.cancel(id, schedule.id);
     },
 );

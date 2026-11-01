@@ -2,6 +2,7 @@
 // a theme folder's own, or "Follow desktop": the Omarchy theme this machine runs), tiled windows, motion, text size,
 // density, and the sidebar's shape. Saved per browser. index.html applies the last look before the first paint from
 // `pocket.themeCache`, the theme's stylesheets included, so a reload never flashes another look.
+import { applyIcons, reportIconsAs } from "./app-icon.js";
 import { THEMES } from "./themes.js";
 import { onSafeModeEnd, safeMode } from "./safe-mode.js";
 import { api, store } from "./store.js";
@@ -61,6 +62,11 @@ const DEFAULTS = {
     sidebar: "open",
     /** The open sidebar's width, its borders, the rail, and the list's: a 254px list. */
     sidebarWidth: 312,
+    /**
+     * How sessions are switched: false for the sidebar's list; true for tabs, a strip of the numbered sessions above the
+     * conversation (`session-tabs.js`), which Appearance pairs with the folded sidebar.
+     */
+    sessionTabs: false,
     /** How the session list groups: "priority" (by what needs you), "recent" (by day), or "folder". */
     group: "recent",
     /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). Off until turned on. */
@@ -75,6 +81,13 @@ const DEFAULTS = {
      * thought alone in its group still follows Show thinking. Off until turned on.
      */
     foldActivity: false,
+    /** A Reply button by words selected in one of Pi's replies, which quotes them in the next message. On by default. */
+    quoteReply: true,
+    /**
+     * Going back to a session that changed while this tab was away: wait behind the loading screen until its updates
+     * come, then show it whole. Off, the tab's copy of it shows at once and the updates slide in (`holdsFor` in store.js).
+     */
+    waitForUpdates: false,
     /** This browser's own layout of each slot (`slots.js`): `{ [slot]: { order: [ids], hidden: { [id]: boolean } } }`. */
     layout: {},
 };
@@ -633,6 +646,7 @@ export function apply() {
     Object.assign(root.dataset, attrs);
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", vars["--o-bg"]);
     document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", attrs.mode);
+    applyIcons(vars);
     // In safe mode, or before the list, the theme's stylesheets stay as the cache has them, for the next load.
     const css = sheets === null || safeMode() ? (cached.css ?? []) : sheets;
     const fonts = sheets === null || safeMode() ? (cached.fonts ?? []) : (lookOf()?.fonts ?? []);
@@ -829,6 +843,7 @@ export function startTheme() {
 
         stop();
         checkDesktop({ animate: false });
+        reportIconsAs(state.me.role === "owner");
     });
 }
 

@@ -61,8 +61,10 @@ The host's members do not change while modules reload. A new member comes only a
 - `api`, `module`, `route`, `conversationRoute` (since 0.16.0), `client`, `command`, `send`, `error`, and `onDispose`.
 - `provide`, `use`, `onService`, `settings`, `setting`, and `onSettings` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md)).
 - `publicPage` and `links` (experimental, since 0.22.0): pages at `/l/<token>` for anyone with a module's link, what a page handler gets (`PublicPageRequest`), and what its answer does ([Public pages](../public-pages.md)).
+- `presentEntry` (experimental, since 0.28.0), with `PresentEntry`: how an input this module sends shows in the transcript. The model still reads that message in full ([Adding to the app](../app.md)).
 - What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`), and what its answer does.
 - A conversation-bound request's `conversation` metadata and human `linkedSessions.start` / `list`, with their authenticated-actor, receipt, and admission checks (since 0.16.0).
+- `ConversationWebRequest.conversationUsage`, with `UsageTotals` and `ConversationUsage` (experimental, since 0.28.0): read-only usage for a visible conversation and its visible descendants.
 - The route paths, the methods, the `access` values (`owner`, `steer`, `view`), and the `X-Pocket` header that every call to a route must have.
 
 ### 5. A command's `ctx` and result
@@ -163,6 +165,8 @@ Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `hos
 Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskResult`.
 
 Since 0.27.0, `host.roleOf(personId)` is experimental, and so is the `scroll` field of `host.browser`'s `snapshot()`.
+
+Since 0.28.0, `web.presentEntry` and `pocket.entryPresentation` are experimental, with `PresentEntry`; so is `ConversationWebRequest.conversationUsage`, with `UsageTotals` and `ConversationUsage`. A module names how an input it sends shows. The model still reads that message in full. Since then too, `pocket.messages` leaves out an input stored as a module's own kind: before, such an input was not a message in the transcript at all.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
 

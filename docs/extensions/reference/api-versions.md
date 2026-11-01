@@ -88,3 +88,4 @@ Each member in the reference has its own Since line. These parts came together:
 | A person's role: `host.roleOf` (experimental)                                                                                                                     | 0.27.0 |
 | The page's scroll position: `scroll` in the `host.browser` snapshot (experimental)                                                                                | 0.27.0 |
 | Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0 |
+| Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0 |

@@ -171,6 +171,17 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **`revoked`:** 50 commits at most, each with a reason of 300 characters at most.
 - **Looks for revoked versions:** two times a day, while extensions from the index are installed.
 
+## Presentations
+
+[Adding to the app](../app.md)
+
+- **Presentations of one module:** 32 at most.
+- **A kind:** `x.<module>.<name>`. `<name>` is 1 to 64 characters: a letter or a digit, then letters, digits, `_`, and `-`.
+- **A label:** one line of 80 characters at most, with no control characters.
+- **A `userPrefix`:** up to 200 characters, at least 3 of them not spaces, and not starting with `[` (the app's own inputs nobody typed do). It cannot start another module's `userPrefix`, or start with one, nor another of the same module's.
+- **`entry.data.summary`:** whitespace collapsed to one line, and past 200 characters cut to 199 and "…".
+- **Modes this browser remembers:** 256 kinds; past that, the one chosen longest ago is forgotten. Each is `open`, `folded`, or `hidden`.
+
 ## Themes
 
 [Themes](../themes.md)

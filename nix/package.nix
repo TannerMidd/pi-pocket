@@ -15,6 +15,8 @@
   chromium,
   makeFontsConf,
   dejavu_fonts,
+  fontconfig,
+  util-linux,
 }:
 let
   package = lib.importJSON ../package.json;
@@ -75,7 +77,12 @@ stdenv.mkDerivation {
   dontStrip = true;
 
   doCheck = true;
-  nativeCheckInputs = runtimePackages;
+  nativeCheckInputs =
+    runtimePackages
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      (lib.getBin fontconfig)
+      (lib.getBin util-linux)
+    ];
   checkPhase = ''
     runHook preCheck
     ${lib.optionalString stdenv.hostPlatform.isLinux ''

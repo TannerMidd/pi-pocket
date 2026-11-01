@@ -1,6 +1,6 @@
 {
     "name": "pi-pocket",
-    "version": "0.27.0",
+    "version": "0.28.0-beta.3",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
     "keywords": [
         "pi",
@@ -64,12 +64,13 @@
         "htm": "^3.1.1",
         "jiti": "2.7.0",
         "marked": "^18.1.1",
+        "minimatch": "10.2.6",
         "preact": "^11.0.2",
         "qrcode": "^1.5.4",
         "undici": "8.12.3"
     },
     "overrides": {
-        "undici": "8.12.3"
+        "undici": "$undici"
     },
     "devDependencies": {
         "@stylistic/eslint-plugin": "5.10.0",

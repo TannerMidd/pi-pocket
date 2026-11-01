@@ -20,6 +20,7 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { InboxDoc } from "@earendil-works/pi-durable";
 import {
     BACKGROUND_MARKER,
     type BackgroundTask,
@@ -35,12 +36,19 @@ import { runningNow } from "../src/server/running.ts";
 
 const skip = existsSync("/proc/self/stat") ? false : "no /proc on this machine";
 
-/** Pi runs the background tool as the last message asks: `bg <json args>`. */
-const route: FauxResponseStep = (request) => {
+/** Pi runs the background tool as the last message asks: `bg <json args>`. A message starting "hold" keeps the run
+ * open for a moment, so a task can end while Pi works. */
+const route: FauxResponseStep = async (request) => {
     const { role, text } = lastText(request as never);
 
     if (role === "toolResult") {
         return fauxAssistantMessage([fauxText(`tool said: ${text}`)]);
+    }
+
+    if (text.startsWith("hold ")) {
+        await new Promise((resolve) => setTimeout(resolve, Number(text.slice(5)) * 1000));
+
+        return fauxAssistantMessage([fauxText(`held: ${text}`)]);
     }
 
     // With more than one person on the server, a message starts with whom it is from.
@@ -214,6 +222,90 @@ test(
     },
 );
 
+test("tasks that end together cost Pi one message, and a card each", { skip }, async () => {
+    const id = await session();
+    const first = await app.background.start(id, { command: "echo one; exit 1" });
+    const second = await app.background.start(id, { command: "echo two; exit 2" });
+
+    // One message for both: a task that ends while another's message is gathered goes with it.
+    await until(async () => {
+        const messages = (await userTexts(id)).filter((text) => text.includes("[background] Task"));
+        const both =
+            messages.length === 1 &&
+            messages[0]!.includes(`[background] Task ${first.id} `) &&
+            messages[0]!.includes(`[background] Task ${second.id} `);
+
+        return both;
+    }, "Pi's one message about both tasks");
+
+    const message = (await userTexts(id)).find((text) => text.includes("[background] Task"))!;
+
+    // Each task keeps its own head, command, and output, one after the other, so the app shows a card each.
+    assert.equal(message.match(/\[background\] Task /g)?.length, 2, "both tasks, once each");
+    assert.equal(message.match(/Command: /g)?.length, 2, "a command each");
+    assert.match(message, /\\n\\n\[background\] Task /, "a blank line between them");
+    assert.match(message, /exited with code 1/);
+    assert.match(message, /exited with code 2/);
+
+    await until(() => !app.isBusy(id), "Pi to answer the message");
+});
+
+test("a task told before 0.28 is not told again when the next one ends", { skip }, async () => {
+    const id = await session();
+    const old = await app.background.start(id, { command: "echo old" });
+    const told = async (taskId: string) =>
+        (await items(id)).find((item) => item.id === taskId)?.toldAt !== undefined;
+
+    await until(() => told(old.id), "the first message");
+    await until(() => !app.isBusy(id), "Pi to answer it");
+    // As 0.27 stored a task it told: no mark either way.
+    await app.harness.commit(async (tx) => {
+        delete (await tx.doc(BackgroundDoc, id)).items[old.id]!.toldAt;
+    }, context);
+
+    const fresh = await app.background.start(id, { command: "echo fresh" });
+
+    await until(() => told(fresh.id), "the second message");
+    assert.equal(
+        (await userTexts(id)).filter((text) => text.includes(`[background] Task ${old.id} `))
+            .length,
+        1,
+    );
+    await until(() => !app.isBusy(id), "Pi to answer it");
+});
+
+test(
+    "a task that ends while Pi works joins that run, rather than starting another",
+    { skip },
+    async () => {
+        const id = await session();
+
+        // A run that holds on for a second, so the task ends while it works.
+        await app.commands.submit(id, owner(app), {
+            text: "hold 1",
+            requestId: crypto.randomUUID(),
+        });
+        await until(() => app.isBusy(id), "the run to start");
+        const item = await app.background.start(id, { command: "echo done; exit 0" });
+
+        await until(
+            async () =>
+                ((await app.harness.snapshot(InboxDoc, id, context))?.items ?? []).length > 0,
+            "the notice to wait for the run's pause",
+        );
+        const queued = (await app.harness.snapshot(InboxDoc, id, context))!.items;
+
+        assert.equal(queued.length, 1, "one message");
+        assert.equal(queued[0]!.mode, "steer", "it joins the run rather than waits for another");
+
+        await until(
+            async () => (await userTexts(id)).some((text) => text.includes(item.id)),
+            "Pi's message about it",
+        );
+        await until(() => !app.isBusy(id), "Pi to answer the message");
+    },
+);
+
 test(
     "a call's read stays the same when run again, whatever reads came between",
     { skip },
@@ -274,6 +366,174 @@ test(
             assert.equal((await app.background.read(id, item.id))?.text, "[the key] y");
         } finally {
             remove();
+        }
+    },
+);
+
+test("a look from a byte inside a hidden value shows none of it", { skip }, async () => {
+    const id = await session();
+    const remove = app.hidden.add({ value: "SECRETVALUE123", label: "the key" });
+
+    try {
+        const item = await app.background.start(id, {
+            command: "printf 'a SECRETVALUE123 b\\n'",
+            notify: false,
+        });
+
+        await until(async () => (await one(id)).status !== "running", "the end");
+
+        // A viewer chooses where a look starts: from inside the value, it starts where the value does.
+        for (const from of [3, 8]) {
+            const look = await app.background.output(id, item.id, { from });
+
+            assert.equal(look?.text, "[the key] b\n", `from ${from}`);
+        }
+
+        // An ended task's last bytes that only look like a value's start show once, not again from the end.
+        const ends = await app.background.start(id, {
+            command: "printf 'ordinary SEC'",
+            notify: false,
+        });
+
+        await until(
+            async () => (await items(id)).every((each) => each.status !== "running"),
+            "its end",
+        );
+        const look = await app.background.output(id, ends.id);
+
+        assert.equal(look?.text, "ordinary SEC");
+        assert.equal((await app.background.output(id, ends.id, { from: look!.to }))?.text, "");
+    } finally {
+        remove();
+    }
+});
+
+test(
+    "a look in Background moves nothing Pi reads, and goes on from where the last look ended",
+    { skip },
+    async () => {
+        const id = await session();
+        const item = await app.background.start(id, { command: "seq 1 300", notify: false });
+
+        await until(async () => (await one(id)).status !== "running", "the end");
+
+        const first = await app.background.output(id, item.id);
+
+        assert.equal(first?.from, 0);
+        assert.equal(first?.skipped, 0);
+        assert.match(first!.text, /^1\n2\n/);
+        assert.match(first!.text, /299\n300\n$/);
+        // A person watching takes nothing from Pi: what it reads next stays where it was.
+        assert.equal((await one(id)).read, 0);
+        assert.equal((await app.background.read(id, item.id))?.text, first!.text);
+        // Then the look goes on from there, with nothing new.
+        const next = await app.background.output(id, item.id, { from: first!.to });
+
+        assert.equal(next?.text, "");
+        assert.equal(next?.from, first!.to);
+        assert.equal(next?.to, first!.to);
+    },
+);
+
+test(
+    "a look that fell behind shows the end of the log, and says what it passed over",
+    { skip },
+    async () => {
+        const id = await session();
+        const item = await app.background.start(id, { command: "seq 1 4000", notify: false });
+
+        await until(async () => (await one(id)).status !== "running", "the end");
+
+        const whole = await app.background.output(id, item.id);
+        const part = await app.background.output(id, item.id, { chars: 2000 });
+
+        assert.ok(part!.skipped > 0, "it passed bytes over");
+        assert.ok(part!.text.length <= 2000);
+        assert.equal(part!.to, whole!.to, "up to the end");
+        assert.match(part!.text, /4000\n$/);
+        // From a byte the sheet kept, it goes on from there.
+        const on = await app.background.output(id, item.id, { from: part!.from, chars: 2000 });
+
+        assert.equal(on?.skipped, 0);
+        assert.equal(on?.from, part!.from);
+    },
+);
+
+test(
+    "a look at a running task waits for a whole character, then shows the rest",
+    { skip },
+    async () => {
+        const id = await session();
+        const item = await app.background.start(id, {
+            command:
+                "printf 'x \\303'; while [ ! -f go-look ]; do sleep 0.05; done; printf '\\251 y'",
+            notify: false,
+        });
+        let look = await app.background.output(id, item.id);
+
+        await until(async () => {
+            look = await app.background.output(id, item.id);
+
+            return look?.text === "x ";
+        }, "x, without half of é");
+        writeFileSync(join(item.cwd, "go-look"), "");
+        await until(async () => (await one(id)).status !== "running", "the end");
+
+        const rest = await app.background.output(id, item.id, { from: look!.to });
+
+        assert.equal(rest?.text, "é y");
+    },
+);
+
+test(
+    "the routes give a session's background tasks and their output to anyone who may see it",
+    { skip },
+    async () => {
+        const id = await session();
+        const item = await app.background.start(id, {
+            command: "echo hello; sleep 300",
+            notify: false,
+        });
+
+        await until(
+            async () => (await app.background.output(id, item.id))?.text === "hello\n",
+            "output",
+        );
+
+        const { createServer } = await import("node:http");
+        const { createHandler } = await import("../src/server/http.ts");
+        const server = createServer(
+            createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+        );
+
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+        try {
+            const port = (server.address() as { port: number }).port;
+            const get = (token: string, path: string) =>
+                fetch(`http://127.0.0.1:${port}/api/c/${String(id)}/${path}`, {
+                    headers: { authorization: `Bearer ${token}`, "x-pocket": "1" },
+                });
+            const viewer = app.config.addUser("Watcher", "viewer");
+            const list = await get(viewer.token, "background");
+
+            assert.equal(list.status, 200);
+            const tasks = ((await list.json()) as { tasks: { id: string; command: string }[] })
+                .tasks;
+
+            assert.equal(tasks[0]?.id, item.id);
+            assert.match(tasks[0]?.command ?? "", /echo hello/);
+
+            const output = await get(viewer.token, `background/${item.id}/output`);
+
+            assert.equal(output.status, 200);
+            assert.equal(((await output.json()) as { text: string }).text, "hello\n");
+            // Watching is not reading: Pi still gets all of it.
+            assert.equal((await one(id)).read, 0);
+            assert.equal((await get(viewer.token, "background/999999/output")).status, 404);
+        } finally {
+            server.close();
+            await app.background.stop(id, item.id);
         }
     },
 );
@@ -984,6 +1244,42 @@ test("a log that fails is told, not hidden behind the command's code", { skip },
         remove();
     }
 });
+
+test(
+    "a look where the oldest segments went starts at what is left, and counts it",
+    { skip },
+    async () => {
+        const id = await session();
+        const sizes = app.background.sizes;
+        const was = sizes.segment;
+
+        sizes.segment = 100;
+
+        try {
+            const item = await app.background.start(id, {
+                command: "seq 1 1000",
+                notify: false,
+            });
+
+            await until(async () => (await one(id)).status !== "running", "the end");
+
+            // The first 300 bytes go with their segments, and the look asks from the very start.
+            const { rmSync } = await import("node:fs");
+
+            for (const name of segments(id, item.id).slice(0, 3)) {
+                rmSync(join(dataDir, "background", String(id), name));
+            }
+
+            const look = await app.background.output(id, item.id, { from: 0 });
+
+            assert.ok((look?.from ?? 0) >= 300, "it starts at what is left");
+            assert.ok((look?.skipped ?? 0) >= 300, "and says how much it did not show");
+            assert.doesNotMatch(look!.text, /^1\n2\n/, "not the start of the output");
+        } finally {
+            sizes.segment = was;
+        }
+    },
+);
 
 test("a part whose segments are all gone is counted whole", { skip }, async () => {
     const id = await session();

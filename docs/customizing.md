@@ -1,6 +1,6 @@
 # Changing how Pi works, without code
 
-Most changes that people ask for need no code: "always use pnpm", "review the way we do it here", "never touch the migrations". Pi Pocket reads the same files as Pi. So what you write for Pi works here too, and the other way round. Pi's own documentation tells all about each file; the system prompt gives its path.
+Most changes that people ask for need no code: "always use pnpm", "review the way we do it here", "never touch the migrations". Pi Pocket reads the same files as Pi, except Pi's extensions ([below](#pis-extensions-and-packages)). So what you write for Pi works here too, and the other way round. Pi's own documentation tells all about each file; the system prompt gives its path.
 
 ## Instructions for one session
 
@@ -22,6 +22,14 @@ Pi Pocket loads context files as Pi does:
 Pi's `configuration.md` gives the full list of names, with `AGENTS.override.md`. Pi Pocket reads the files again at most 30 seconds after they change. The next request has them.
 
 Keep the files short and true. They go with each request, and a rule that Pi cannot obey is worse than no rule.
+
+## PiP's instructions
+
+PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP, such as the language of its answers, in `pip.md` in Pi Pocket's data folder: `~/.pi-pocket/pip.md`, unless `--data` or `PI_POCKET_DIR` names another folder (since 0.28.0).
+
+- PiP gets the file with each message. When the file changes, the next message has the new text.
+- Only PiP reads it: sessions, subagents, and Pi's terminal app do not.
+- A session that PiP messages still answers PiP in Simplified Technical English. PiP answers you as the file says.
 
 ## Skills: procedures that Pi follows on request
 
@@ -54,7 +62,18 @@ Use a template for a message that people send often. Use a skill for steps that 
 
 ## Models and providers
 
-People sign in to providers in Menu → **Providers**, and pick a model for each session with the model chip in the message box. Pi Pocket uses Pi's sign-ins (`~/.pi/agent/auth.json`) and Pi's list of models. To add a model or a provider that Pi does not know, follow Pi's `models.md` and `custom-provider.md`.
+People sign in to providers in Menu → **Providers**, and pick a model for each session with the model chip in the message box. Pi Pocket uses Pi's sign-ins (`~/.pi/agent/auth.json`) and Pi's list of models. To add a model or a provider that Pi does not know, add it to `models.json` as Pi's `models.md` says. A provider that needs code comes as a Pi Pocket drop-in that calls `host.registerModelProvider` ([host.md](extensions/reference/host.md#registermodelprovider)), not as a Pi extension: see [Pi's extensions and packages](#pis-extensions-and-packages).
+
+**A Claude subscription.** Sign in to Anthropic with it in Providers. Then turn on **Claude subscription billing** in Menu → Extensions → Installed → **Built in**, so that requests count against the plan. It is off by default, and it asks before it turns on. Without it, Anthropic can bill the requests as extra usage, and refuse them when that is used up.
+
+> [!WARNING]
+> **Using a Claude subscription in Pi Pocket is at your own risk.** Anthropic's terms and its help pages disagree on it:
+>
+> - Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) forbid accessing its services "through automated or non-human means, whether through a bot, script, or otherwise", except with an Anthropic API key or where Anthropic explicitly permits it.
+> - Its help pages say that third-party apps can use your subscription limits. Yet its servers often bill such requests as extra usage.
+> - Claude subscription billing makes Pi Pocket's requests look like Claude Code's.
+>
+> Anthropic can change how it counts these requests, refuse them, or act on an account it finds using them. An Anthropic API key, or a model from another provider, has none of these risks.
 
 Models are the person's choice, never Pi's:
 
@@ -128,6 +147,10 @@ These are in the app, not in files. Tell the person where they are. Do not chang
 - **Lancet Guard and approvals** (Menu → Extensions): when the guard is on, risky commands wait for a person to allow them. "Approvals need someone else" makes that person another than the one who asked.
 
 See [features.md](features.md) for each of them.
+
+## Pi's extensions and packages
+
+Pi Pocket reads Pi's sign-ins, models, settings, skills, prompt templates, and AGENTS.md files, but not Pi's extensions. It does not load `~/.pi/agent/extensions/`, the `extensions` setting, or the packages of the `packages` setting in Pi's `settings.json`. Pi Pocket runs on Pi Durable, and its extensions are of another kind ([extensions.md](extensions.md)). For something that a Pi package gives, look in Menu → Extensions: under **Built in**, and in **Discover**.
 
 ## When this is not enough
 

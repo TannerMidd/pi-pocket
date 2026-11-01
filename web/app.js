@@ -31,6 +31,7 @@ import {
 } from "./peeks.js";
 import { closePip, openPip, PipHost, pipAvailable, togglePip } from "./pip.js";
 import { Drawer, RailNav, ResizeHandle, SessionList, toSessions } from "./sessions.js";
+import { SessionTabs } from "./session-tabs.js";
 // Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
 import "./rich.js";
 import { takeShare } from "./share.js";
@@ -40,6 +41,7 @@ import { defineItem, slotItems } from "./slots.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { SignIn } from "./signin.js";
 import { openSubagents } from "./subagents.js";
+import { RunningBoard } from "./running-board.js";
 import { SubagentsBoard } from "./subagents-board.js";
 import {
     actions,
@@ -534,12 +536,14 @@ function App() {
         </aside>
         <div class=${`pane window ${placed ? "boarded" : ""}`} data-part="pane">
             ${
-                board
-                    ? html`<${SubagentsBoard} />`
-                    : page
-                      ? html`<${ExtensionPage} key=${`${state.page.module}:${state.page.id}`} />`
-                      : inConversation
-                        ? html`<${Topbar} />
+                board === "running"
+                    ? html`<${RunningBoard} />`
+                    : board
+                      ? html`<${SubagentsBoard} />`
+                      : page
+                        ? html`<${ExtensionPage} key=${`${state.page.module}:${state.page.id}`} />`
+                        : inConversation
+                          ? html`${prefs().sessionTabs && html`<${SessionTabs} />`}<${Topbar} />
                     ${
                         peeking &&
                         tiles.length > 0 &&
@@ -552,7 +556,7 @@ function App() {
                         !state.missing &&
                         html`<${Composer} key=${state.conversationId} />`
                     }`
-                        : html`<div class="home-list" data-part="home-list">
+                          : html`<div class="home-list" data-part="home-list">
                           <${RailNav} />
                           <${SessionList} />
                       </div>
@@ -585,7 +589,7 @@ function App() {
         <${Drawer} />
         <${PipHost} />
         <${Sheets} />
-        <${QuoteReplyButton} />
+        ${prefs().quoteReply && html`<${QuoteReplyButton} />`}
         <${LauncherHost} />
         <${Notices} />
     </div>`;

@@ -1059,6 +1059,41 @@ export interface WebSession {
 }
 
 /**
+ * Committed usage counters, not estimates of the next request.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface UsageTotals {
+    /** Stored assistant responses; excludes requests with no response entry. */
+    readonly requests: number;
+    /** Uncached input tokens reported by providers. */
+    readonly input: number;
+    /** Input tokens read from a prompt cache. */
+    readonly cacheRead: number;
+    /** Input tokens written to a prompt cache. */
+    readonly cacheWrite: number;
+    /** Output tokens, including reasoning when the provider includes it. */
+    readonly output: number;
+    /** Reported reasoning tokens; absent when none were reported. Do not add to output. */
+    readonly reasoning?: number;
+    /** Estimated cost in US dollars, as core records it. */
+    readonly cost: number;
+    /** Input + cacheRead + cacheWrite of the newest stored assistant response. */
+    readonly lastPrompt: number;
+}
+
+/**
+ * Own usage and sums for visible conversations started from the source, at any depth.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface ConversationUsage {
+    readonly own: UsageTotals;
+    /** Excludes the source. lastPrompt sums each child's lastPrompt; count includes unused children. */
+    readonly children: UsageTotals & { readonly count: number };
+}
+
+/**
  * A request whose named path parameter resolved to an authorized conversation.
  * @since 0.16.0
  */
@@ -1079,6 +1114,13 @@ export interface ConversationWebRequest extends WebRequest {
      * @since 0.16.0
      */
     readonly linkedSessions: HumanLinkedSessions;
+    /**
+     * Read committed usage for the bound source (or a visible conversation id) and its visible descendants.
+     * Ends with this request. No text, entries, or session ids are returned.
+     * @since 0.28.0
+     * @experimental
+     */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**
@@ -1292,8 +1334,35 @@ export type PublicPageHandler = (
 ) => PublicPageAnswer | Promise<PublicPageAnswer>;
 
 /**
- * What a module adds to the app: the second argument of its default export. Register routes, the browser module, and
- * commands while the module loads. They go when this version of the module goes.
+ * How a module's own input shows in the transcript, while the module is on. Nothing here is stored. The model still
+ * reads the message in full.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface PresentEntry {
+    /**
+     * The stored kind, `x.<module>.<name>`.
+     * @since 0.28.0
+     * @experimental
+     */
+    kind: string;
+    /**
+     * The one line the transcript shows.
+     * @since 0.28.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Matches the start of a user message only when nobody wrote that message.
+     * @since 0.28.0
+     * @experimental
+     */
+    userPrefix?: string;
+}
+
+/**
+ * What a module adds to the app: the second argument of its default export. Register routes, the browser module,
+ * commands, and presentations while the module loads. They go when this version of the module goes.
  * @since 0.14.0
  */
 export interface Web {
@@ -1338,6 +1407,14 @@ export interface Web {
      * @since 0.14.0
      */
     command(name: string, command: Command): void;
+    /**
+     * Says how an input this module sends shows in the transcript, while the module is on. The model still reads
+     * the message in full. `kind` is `x.<module>.<name>`. An optional `userPrefix` matches only a user message
+     * nobody wrote.
+     * @since 0.28.0
+     * @experimental
+     */
+    presentEntry(spec: PresentEntry): void;
     /**
      * Sends an event to the browser module: to everyone it loads for, or to the person `to`. It never throws.
      * @since 0.14.0
@@ -2598,6 +2675,22 @@ export interface Pocket {
      * @experimental
      */
     reveal(id: string): Promise<boolean>;
+    /**
+     * How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is
+     * `x.<module>.<name>`. `open` shows the message, `folded` one line, and `hidden` keeps the turn without
+     * the text until Find. The same mode again changes nothing. The choice stays in this browser, and a person
+     * can change it on any of those rows.
+     * @since 0.28.0
+     * @experimental
+     */
+    entryPresentation(kind: string, mode: "open" | "folded" | "hidden"): void;
+    /**
+     * This browser's choice for one of this module's inputs, or undefined when there is none yet (the rows are
+     * folded then). Set a mode only when there is none, so a person's choice stays theirs.
+     * @since 0.28.0
+     * @experimental
+     */
+    entryPresentation(kind: string): "open" | "folded" | "hidden" | undefined;
     /**
      * Calls one of the module's routes: a GET without `body`, a POST with it.
      * @since 0.14.0

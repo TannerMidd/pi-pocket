@@ -1,6 +1,7 @@
 // People's avatars: their initials in a color of the theme, the same color for the same person everywhere; and the
 // colors of folders, which mark their sessions the same way.
 
+import { store } from "./store.js";
 import { html } from "./ui.js";
 
 // The theme's own colors, so people keep their colors in every theme and each one fits it.
@@ -69,6 +70,45 @@ export function initials(name) {
     return (first[0] + (words.length > 1 ? words[1][0] : (first[1] ?? ""))).toUpperCase();
 }
 
+/** The address of a person's picture, or undefined without one. Its version keeps a changed picture from showing stale. */
+export function avatarSrc(person) {
+    // Presence and a few other lists carry no picture: the people list is where its version is.
+    const version =
+        person?.avatar ?? store.state.users.find((each) => each.id === person?.id)?.avatar;
+
+    return version ? `/api/avatar/${encodeURIComponent(person.id)}?v=${version}` : undefined;
+}
+
+/** A picture file as the small square PNG that is sent: its middle, cropped, at 192px. */
+export async function avatarBlob(file, side = 192) {
+    const bitmap = await createImageBitmap(file);
+    const crop = Math.min(bitmap.width, bitmap.height);
+    const canvas = document.createElement("canvas");
+
+    canvas.width = canvas.height = side;
+    canvas
+        .getContext("2d")
+        .drawImage(
+            bitmap,
+            (bitmap.width - crop) / 2,
+            (bitmap.height - crop) / 2,
+            crop,
+            crop,
+            0,
+            0,
+            side,
+            side,
+        );
+    bitmap.close?.();
+
+    return await new Promise((resolve, reject) =>
+        canvas.toBlob(
+            (blob) => (blob ? resolve(blob) : reject(new Error("That picture could not be read"))),
+            "image/png",
+        ),
+    );
+}
+
 export function Avatar({ person, size = 24 }) {
     const state = person.typing ? "typing" : person.away ? "away" : "";
     const title = person.typing
@@ -77,11 +117,15 @@ export function Avatar({ person, size = 24 }) {
           ? `${person.name} (away)`
           : person.name;
 
+    const src = avatarSrc(person);
+    // Initials grow with a big avatar; small ones keep the stylesheet's size.
+    const font = size > 30 ? `;font-size:${Math.round(size * 0.4)}px` : "";
+
     return html`<span
         class=${`avatar ${state}`}
-        style=${`--who:${personColor(person.id)};width:${size}px;height:${size}px`}
+        style=${`--who:${personColor(person.id)};width:${size}px;height:${size}px${font}`}
         title=${title}
     >
-        ${initials(person.name)}
+        ${src ? html`<img class="avatar-img" src=${src} alt="" />` : initials(person.name)}
     </span>`;
 }

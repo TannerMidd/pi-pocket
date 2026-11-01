@@ -1,8 +1,8 @@
 # web
 
-`web` is the second argument of a module's default export. With it, a module adds to the app what a tool cannot: routes on the server, a browser module, and commands for the message box. [Adding to the app](../app.md) tells you how the parts work together.
+`web` is the second argument of a module's default export. With it, a module adds to the app what a tool cannot: routes on the server, a browser module, commands for the message box, and how its own inputs show. [Adding to the app](../app.md) tells you how the parts work together.
 
-Register routes, the browser module, and commands while the module loads. After that, these calls throw. What you register goes when this version of the module goes: an edit replaces it, or the owner turns the module off.
+Register routes, the browser module, commands, and presentations while the module loads. After that, these calls throw. What you register goes when this version of the module goes: an edit replaces it, or the owner turns the module off.
 
 The types are `Web` and the types that it uses, in [types/pocket.d.ts](../../../types/pocket.d.ts).
 
@@ -93,6 +93,26 @@ Adds the command `/name` to the message box, for the people who can run it. The 
 - [Names](names.md#commands) gives the rules for `name`.
 - [Command context](command-context.md) gives the fields of `command` and what its handler gets and returns.
 - [Slash commands](../commands.md) tells you who can run a command, how a run is kept, and how a person stops it.
+
+### `presentEntry`
+
+```ts
+presentEntry(spec: PresentEntry): void;
+```
+
+Since 0.28.0 · Experimental
+
+Says how an input this module sends shows in the transcript, while the module is on. The model still reads the message in full. Nothing registered here is stored.
+
+- `kind` is `x.<module>.<name>`: this module's name, then a name of letters, digits, `_` and `-`.
+- `label` is one short line ([limits](limits.md#presentations)).
+- `userPrefix`, when set, matches a user message that starts with it only when nobody wrote that message. A message a person sent stays theirs. It is a few characters at least, and cannot start with `[`: the app's own inputs nobody typed (subagent reports, linked sessions, schedules) do ([limits](limits.md#presentations)).
+- A module registers a limited number of presentations ([limits](limits.md#presentations)). Two modules cannot share a kind, and no prefix can start another one.
+- Turning the module off, or a load that fails, drops the registration. Open transcripts show the change at once, as do rows whose author becomes known.
+- An input stored as the module's own kind cannot be sent again from its message sheet, and [`pocket.messages`](pocket.md#messages) leaves it out: it is not a person's message to Pi. A user message that `userPrefix` matched stays one.
+- Each browser chooses how these inputs show: a person picks Show, Fold, or Hide in a row's message sheet, and a browser module can read or set that choice for its own kinds with [`pocket.entryPresentation`](pocket.md#entrypresentation).
+
+The module puts a short `summary` string on the entry's data when it submits. The transcript shows `label`, or `label · summary` when that string is there. See [`PresentEntry`](#presententry).
 
 ### `publicPage`
 
@@ -287,12 +307,89 @@ interface ConversationWebRequest extends WebRequest {
         readonly thinkingLevel: ModelThinkingLevel;
     };
     readonly linkedSessions: HumanLinkedSessions;
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 ```
 
 Since 0.16.0 · Stable
 
 Authoritative source metadata, plus request-lifetime human linked-session capabilities. An omitted `model` means the source has none. Metadata is a snapshot, not a promise that settings cannot change. A start rejects a source model, thinking level, or folder changed while it waits.
+
+### `ConversationWebRequest.conversationUsage`
+
+```ts
+conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
+```
+
+Since 0.28.0 · Experimental
+
+A server-side member of `ConversationWebRequest`, available only inside a `web.conversationRoute` handler. Without an id, it reads the bound source. An id can select another visible conversation, including a subagent. It returns committed usage only, with no entries, text, session ids, or write capability.
+
+Use a GET conversation route with `access: "view"` for a status item:
+
+```typescript
+web.conversationRoute(
+    "GET",
+    "usage/:source",
+    async (request) => {
+        if (typeof request.conversationUsage !== "function") {
+            throw web.error(503, "Usage needs Pi Pocket 0.28.0 and a server restart.");
+        }
+
+        return request.conversationUsage();
+    },
+    { conversation: "source", access: "view" },
+);
+```
+
+The route checks its source and the signed-in person before the handler runs. The member checks them again when called and before returning. A target id requires visibility too. Missing conversations and PiP conversations are refused. Descendant sums and counts include only conversations the person can still see. A retained callback fails after the handler returns or the browser disconnects. There is no actor override. Do not broadcast the result to other people or keep it in a shared document: their visibility can differ.
+
+This addition does not change route access: people invited to one session still cannot use extension web routes. Viewers with access to all sessions can read through a GET route; no steering, turn, or spend check applies to this read. A gallery entry that needs this member sets `minPocket` to `0.28.0`.
+
+Each call reads usage documents and scans stored entries. It also reads the in-memory conversation tree. Cost grows with the stored history, including tool output, of the selected conversation and its descendants, not just their active context. Poll sparingly, not on each streamed token. The result is not an atomic snapshot: work can commit between the ledger and history reads or between conversations.
+
+### `UsageTotals`
+
+```ts
+interface UsageTotals {
+    readonly requests: number;
+    readonly input: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    readonly output: number;
+    readonly reasoning?: number;
+    readonly cost: number;
+    readonly lastPrompt: number;
+}
+```
+
+Since 0.28.0 · Experimental
+
+- `requests`: the number of stored assistant responses owned by this conversation, including error or aborted responses. Pi's own retry after an error stores a response of its own, so it counts. Requests with no assistant entry, such as compaction attempts and cache-keeper warm requests, are not counted.
+- `input`: reported uncached input tokens, summed across requests.
+- `cacheRead`: reported input tokens read from a prompt cache.
+- `cacheWrite`: reported input tokens written to a prompt cache, including any 1-hour subset. That subset is not added twice.
+- `output`: reported output tokens, including any separately reported reasoning tokens.
+- `reasoning`: the sum of separately reported reasoning tokens. It is absent when none were reported, and can be 0 when a provider reports 0. Do not add it to `output`.
+- `cost`: estimated US dollars from core's usage ledger, not a provider invoice. It includes model and tool usage, as core's spend does.
+- `lastPrompt`: `input + cacheRead + cacheWrite` of the newest stored assistant response that reports any of them, by entry id: a failed request with no usage leaves the one before. It is 0 without such a response. It measures the last request, not the next request's context after a reset or compaction.
+
+Token and cost totals come from core's `pi.usage` ledger. They include compaction and auxiliary requests recorded there, even when those requests have no response entry. Tool-reported usage counts too. A fork starts its own ledger; inherited responses do not count toward `requests` or `lastPrompt`. Old responses still count after a compaction or reset. A number that a provider does not report contributes 0; reasoning stays absent until one provider reports it. A conversation with no usage returns zeros and no reasoning field. Results are independent copies; changing a result changes no stored data. A call reads only the entries that came since the last call for the same conversation, so a module can ask often.
+
+### `ConversationUsage`
+
+```ts
+interface ConversationUsage {
+    readonly own: UsageTotals;
+    readonly children: UsageTotals & { readonly count: number };
+}
+```
+
+Since 0.28.0 · Experimental
+
+`own` covers only the selected conversation. `children` sums every visible conversation it started, at any depth: subagents, linked sessions, and their descendants. It excludes the selected conversation, its ancestors, siblings, and forks. Archived descendants still count. Each conversation counts once, including one with no usage. `children.count` is their count, and `children.lastPrompt` is the sum of each descendant's `lastPrompt`, not the newest prompt across the family. No descendants gives zeros and count 0.
+
+Requested by @Haichiu in #195.
 
 ### `HumanLinkedSessions`
 
@@ -400,6 +497,20 @@ type PublicPageHandler = (
 Since 0.22.0 · Experimental
 
 Draws a public page. A `POST` to a link with `uses` counts one before the handler runs. A handler that throws, or answers with a status of 400 or more, gives it back.
+
+### `PresentEntry`
+
+```ts
+interface PresentEntry {
+    kind: string;
+    label: string;
+    userPrefix?: string;
+}
+```
+
+Since 0.28.0 · Experimental
+
+What [`presentEntry`](#presententry) registers. `kind` is the stored kind. `label` is the line the transcript shows. `userPrefix` matches the start of a user message that nobody wrote.
 
 ### `PublicPageAnswer`
 

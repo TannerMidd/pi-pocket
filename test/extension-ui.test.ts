@@ -80,6 +80,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     onConversation: true,
     messages: true,
     reveal: true,
+    entryPresentation: true,
     insertText: true,
     pip: true,
     arrange: true,

@@ -11,10 +11,11 @@
  *
  * The watch is a durable task: it looks every second whether any process of the group still runs (a leader that is
  * gone is no end while a child it left runs on), and when none does, tells Pi in the session, with the exit code and
- * the end of the output, as schedules send their messages. Stopping the task (Pi's tool, or Running now) stops the
- * group, and any process with its marker that left it: politely, then by force. A sweep, apart from the watches, keeps
- * each log under its limit. The background extension (`extensions/background.ts`) installs the task and gives Pi its
- * tool; while it is off, the watches wait.
+ * the end of the output. The tasks that ended together go as one message, steered into the run in flight as a
+ * subagent's report is, so they cost Pi one turn rather than one each and the answer it was writing keeps its place.
+ * Stopping the task (Pi's tool, or Running now) stops the group, and any process with its marker that left it:
+ * politely, then by force. A sweep, apart from the watches, keeps each log under its limit. The background extension
+ * (`extensions/background.ts`) installs the task and gives Pi its tool; while it is off, the watches wait.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -35,6 +36,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
     type ConversationId,
     defineTask,
+    LiveDoc,
     type Task,
     type TaskRuntime,
 } from "@earendil-works/pi-durable";
@@ -66,6 +68,13 @@ const MAX_COMMAND = 4000;
 /** How much a read gives Pi, and how much of the end of the output Pi's message holds. */
 const READ_CHARS = 20_000;
 const TELL_CHARS = 3000;
+/** How long a message waits, in a session that is idle, for the tasks that end a moment after its own. */
+const GATHER_MS = 2_000;
+/** How much of a task's output one look in Background shows, and at most how much it asks for. */
+const WATCH_CHARS = 20_000;
+const WATCH_CHARS_MAX = 200_000;
+/** How far into what a look in Background passes over it looks for a line's start, so no line shows cut in two. */
+const WATCH_LINE = 4096;
 /** Terminal escape codes (colors, cursor moves): some tools print them even when nobody reads a terminal. */
 const ANSI = /\u001b\[[0-9;?]*[A-Za-z]/g;
 
@@ -449,6 +458,8 @@ export class BackgroundTasks {
                     if (stored?.status === "running" || stored?.status === "starting") {
                         stored.status = "stopped";
                         stored.endedAt = this.#app.now();
+                        // Stopped, not ended of itself: Pi did it, or someone here, so no message about it is needed.
+                        stored.notify = false;
                     }
 
                     pruned = this.#prune(doc.items);
@@ -525,17 +536,19 @@ export class BackgroundTasks {
 
     /**
      * Bytes `from` to `to` of a task's output, from the segments there are, and how many of them are gone with the
-     * segments a sweep removed (at its start: a sweep removes the oldest).
+     * segments a sweep removed (at its start: a sweep removes the oldest). `began` is where the bytes that are there
+     * start, which is past `from` after a sweep: `to` when nothing is left of them.
      */
     #span(
         conversationId: ConversationId,
         item: BackgroundTask,
         from: number,
         to: number,
-    ): { bytes: Buffer; gone: number } {
+    ): { bytes: Buffer; gone: number; began: number } {
         const parts: Buffer[] = [];
         let at = from;
         let gone = 0;
+        let began = to;
 
         for (const segment of this.#segments(conversationId, item)) {
             const end = segment.start + segment.size;
@@ -547,6 +560,10 @@ export class BackgroundTasks {
             if (segment.start > at) {
                 gone += segment.start - at;
                 at = segment.start;
+            }
+
+            if (parts.length === 0) {
+                began = at;
             }
 
             const part = readBytes(
@@ -564,7 +581,7 @@ export class BackgroundTasks {
             gone += to - at;
         }
 
-        return { bytes: Buffer.concat(parts), gone };
+        return { bytes: Buffer.concat(parts), gone, began };
     }
 
     #exitFile(conversationId: ConversationId, id: string): string {
@@ -787,6 +804,10 @@ export class BackgroundTasks {
         stored.status = codes === undefined ? "lost" : "exited";
         stored.endedAt = Math.min(codes?.at ?? Infinity, this.#app.now());
 
+        if (stored.notify) {
+            stored.untold = true;
+        }
+
         if (left.length > 0) {
             stored.left = left;
         }
@@ -880,18 +901,102 @@ export class BackgroundTasks {
         return true;
     }
 
-    /** Tell Pi the task ended, once: the request id is the task's. */
+    /**
+     * Tell Pi the tasks that ended, once: every task that ended and was not told goes as one message, so tasks that end
+     * together cost Pi one message and one turn rather than one each. It is a steer, as a subagent's report is: a task
+     * is the work of the run that started it, so its end joins that run at its next pause instead of waiting to start
+     * another, and the answer Pi was writing keeps its place.
+     */
     async #tell(id: string, runtime: Runtime, context: Context): Promise<void> {
         const app = this.#app;
         const conversationId = runtime.conversationId;
-        const item = await this.#stored(conversationId, id);
         const conversation = await runtime.conversation(conversationId, context);
 
-        if (item === undefined || conversation === undefined) {
+        if (conversation === undefined) {
             return runtime.commit(() => finished, context);
         }
 
-        // Not while a spend limit holds Pi back, nor for someone who can no longer steer here: Pi finds out with list.
+        // A session that is idle would start a turn for the first task alone, and tasks started together often end a
+        // moment apart: it waits that moment for theirs. A busy session takes them at its next pause, and tasks that
+        // end meanwhile join them there.
+        const live = await runtime.snapshot(LiveDoc, conversationId, context);
+
+        if (live?.run === undefined) {
+            const signals = [runtime.signal, context.abortSignal].filter(
+                (signal): signal is AbortSignal => signal !== undefined,
+            );
+            const signal = signals.length === 0 ? undefined : AbortSignal.any(signals);
+
+            await wait(GATHER_MS, signal);
+            signal?.throwIfAborted();
+        }
+
+        const items = (await runtime.snapshot(BackgroundDoc, conversationId, context))?.items ?? {};
+        // This watch's own task goes too when it ended before 0.28 marked tasks `untold`: its message was never sent.
+        const ended = Object.values(items)
+            .filter(
+                (item) =>
+                    item.notify &&
+                    item.endedAt !== undefined &&
+                    item.toldAt === undefined &&
+                    (item.untold === true || item.id === id),
+            )
+            .sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+
+        // Not while a spend limit holds Pi back, nor for someone who can no longer steer here: those wait unread.
+        const told = ended.filter((item) => this.#askable(conversationId, item));
+        const unasked = ended.filter((item) => !told.includes(item));
+        // This watch's own task must be in the batch: another watch that tells first takes it, and this one then has
+        // nothing to say. Only what is sent is marked below, so a batch this watch leaves alone is still to come.
+        const sent = told.some((item) => item.id === id) ? told : [];
+
+        if (sent.length > 0) {
+            const ids = sent.map((item) => item.id);
+            const person = sent.every((item) => item.requestedBy === sent[0]?.requestedBy)
+                ? sent[0]?.requestedBy
+                : undefined;
+            const key = `background-batch-${ids.join("+")}`;
+            const requestId =
+                person === undefined ? `background:${ids.join("+")}` : requestFor(person, key);
+
+            // Under one request id for the batch: a watch a crash stopped before it marked the tasks sends the same
+            // batch again under the same id, and Pi Durable places it once.
+            await conversation.submit(
+                {
+                    type: "input",
+                    content: sent.map((item) => this.#message(conversationId, item)).join("\n\n"),
+                    whenBusy: "steer",
+                    requestId,
+                },
+                context,
+            );
+        }
+
+        // Marked once the message is sent: a crash between the two can say an end twice at worst, never none, and the
+        // same request id keeps a retry of the same batch from saying it twice.
+        await runtime.commit(async (tx) => {
+            const doc = await tx.doc(BackgroundDoc, conversationId);
+            const at = app.now();
+
+            for (const item of [...sent, ...unasked]) {
+                const stored = doc.items[item.id];
+
+                if (stored !== undefined) {
+                    stored.toldAt = at;
+                    delete stored.untold;
+                }
+            }
+
+            return finished;
+        }, context);
+    }
+
+    /**
+     * Whether Pi may be told about this task: it works for someone who may still steer here, and the session is not
+     * past a spend limit. One that is not is never told, as before: Pi finds out with `list`.
+     */
+    #askable(conversationId: ConversationId, item: BackgroundTask): boolean {
+        const app = this.#app;
         const person =
             item.requestedBy === undefined ? undefined : app.config.userById(item.requestedBy);
         const mayAsk =
@@ -899,27 +1004,8 @@ export class BackgroundTasks {
             (person !== undefined &&
                 person.role !== "viewer" &&
                 app.canSee(person, conversationId));
-        const held = app.spend.heldBack(conversationId, mayAsk ? item.requestedBy : undefined);
 
-        if (mayAsk && held === undefined) {
-            const key = `background-${String(runtime.taskId)}`;
-            const requestId =
-                item.requestedBy === undefined
-                    ? `background:${String(runtime.taskId)}`
-                    : requestFor(item.requestedBy, key);
-
-            await conversation.submit(
-                {
-                    type: "input",
-                    content: this.#message(conversationId, item),
-                    whenBusy: "followUp",
-                    requestId,
-                },
-                context,
-            );
-        }
-
-        await runtime.commit(() => finished, context);
+        return mayAsk && app.spend.heldBack(conversationId, item.requestedBy) === undefined;
     }
 
     /** Pi's message about a task that ended: how, its command quoted, and the end of its output fenced, as data. */
@@ -1376,21 +1462,7 @@ export class BackgroundTasks {
         }
 
         const end = this.#end(conversationId, item);
-        let to = end;
-
-        if (item.status === "running" || item.status === "starting") {
-            // Enough for the longest value that can be hidden, in its longest UTF-8.
-            const last = this.#span(
-                conversationId,
-                item,
-                Math.max(item.read, end - 4 * 4096),
-                end,
-            ).bytes;
-            const open = openTail(last);
-            const text = last.subarray(0, last.length - open).toString();
-
-            to = end - open - Buffer.byteLength(text.slice(this.#safeRaw(conversationId, text)));
-        }
+        const to = this.#settled(conversationId, item, end);
 
         const range = (await pin?.({ from: item.read, to: Math.max(item.read, to) })) ?? {
             from: item.read,
@@ -1423,6 +1495,106 @@ export class BackgroundTasks {
             item: { ...this.#current(conversationId, item), read: Math.max(item.read, range.to) },
             text,
             skipped,
+        };
+    }
+
+    /**
+     * Where a running task's output can be shown up to: not into half of a character, or half of a value its command
+     * hides, which a look could then show in part.
+     */
+    #settled(conversationId: ConversationId, item: BackgroundTask, end: number): number {
+        if (item.status !== "running" && item.status !== "starting") {
+            return end;
+        }
+
+        // Enough for the longest value that can be hidden, in its longest UTF-8.
+        const last = this.#span(conversationId, item, Math.max(0, end - 4 * 4096), end).bytes;
+        const open = openTail(last);
+        const text = last.subarray(0, last.length - open).toString();
+
+        return end - open - Buffer.byteLength(text.slice(this.#safeRaw(conversationId, text)));
+    }
+
+    /**
+     * What a task printed from `from` on, for a person watching it in Background. It moves nothing: where Pi reads next
+     * stays as it is, so a look never takes output away from Pi. Without `from`, the end of the output, up to `chars`;
+     * with one, what came since, and no more than that. `skipped` counts the bytes not shown: dropped with the oldest
+     * segments by the sweep, or passed over because there was more than one look shows.
+     */
+    async output(
+        conversationId: ConversationId,
+        id: string,
+        options: { from?: number; chars?: number } = {},
+    ): Promise<
+        | { item: BackgroundTask; text: string; from: number; to: number; skipped: number }
+        | undefined
+    > {
+        const item = await this.#stored(conversationId, id);
+
+        if (item === undefined) {
+            return undefined;
+        }
+
+        const asked = Math.floor(options.chars ?? WATCH_CHARS) || WATCH_CHARS;
+        const chars = Math.min(Math.max(asked, 1000), WATCH_CHARS_MAX);
+        // Room for what `chars` characters take in UTF-8, at most.
+        const window = Math.max(chars * 4, 4096);
+        const end = this.#settled(conversationId, item, this.#end(conversationId, item));
+        const since =
+            options.from !== undefined && Number.isFinite(options.from)
+                ? Math.min(Math.max(Math.floor(options.from), 0), end)
+                : Math.max(0, end - window);
+        // A look that fell behind starts where the window begins: what it missed is skipped, and said so.
+        let start = Math.max(since, Math.max(0, end - window));
+
+        // A start the client chose can be inside a hidden value, and the rest of it alone is not replaced: go back to
+        // where that value begins, as `#settled` stops before one. Not from the end, where nothing follows: an ended
+        // task's last bytes can look like a value's start, and they were shown already.
+        if (start > 0 && start < end) {
+            const before = this.#span(
+                conversationId,
+                item,
+                Math.max(0, start - 4 * 4096),
+                start,
+            ).bytes;
+            const open = openTail(before);
+            const prefix = before.subarray(0, before.length - open).toString();
+
+            start -= open + Buffer.byteLength(prefix.slice(this.#safeRaw(conversationId, prefix)));
+        }
+
+        const { bytes, began } = this.#span(conversationId, item, start, end);
+        // From partway in, the first whole line after it, so no line shows cut in two and no hidden value in part.
+        let head = closingHead(bytes);
+
+        if (start > since && head < bytes.length) {
+            const line = bytes.indexOf(0x0a, head);
+
+            if (line >= 0 && line - head < WATCH_LINE) {
+                head = line + 1;
+            }
+        }
+
+        let text = this.#clean(conversationId, bytes.subarray(head).toString());
+        // The first byte it shows: everything before it is passed over, or gone with the segments a sweep removed.
+        let at = Math.min(began + head, end);
+
+        if (text.length > chars) {
+            // The end of what it shows, from a line's start: the look after this one goes on from there whole.
+            const cut = text.length - chars;
+            const line = text.indexOf("\n", cut);
+            const from = line >= 0 && line - cut < WATCH_LINE ? line + 1 : cut;
+
+            at += Buffer.byteLength(text.slice(0, from));
+            text = text.slice(from);
+        }
+
+        return {
+            item: this.#current(conversationId, item),
+            text,
+            from: at,
+            to: end,
+            skipped: Math.max(0, at - since),
         };
     }
 

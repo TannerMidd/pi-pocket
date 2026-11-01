@@ -19,7 +19,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -178,6 +178,16 @@ test("only PiP has PiP's tools, and PiP has none that change files or run comman
 
     assert.ok(sessionTools.includes("bash"));
     assert.ok(!sessionTools.includes("sessions"), "a session has no PiP tools");
+    // PiP's panel draws no cards: its artifact tool has no inline, a session's has.
+    const inlineOf = async (conversation: ConversationId) =>
+        (
+            (await (await app.conversation(conversation)).agent(context)).tools.find(
+                (each) => each.name === "artifact",
+            )?.parameters as unknown as { properties: Record<string, unknown> }
+        ).properties.inline;
+
+    assert.equal(await inlineOf(id), undefined);
+    assert.notEqual(await inlineOf(session), undefined);
     assert.ok(
         !(await (await app.conversation(session)).agent(context)).extensions.some(
             (extension) => extension.name === PIP_EXTENSION,
@@ -279,6 +289,51 @@ test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it
         lastRequest.session,
         /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in ASD-STE100/,
     );
+});
+
+test("PiP follows its person's standing instructions in pip.md, read again when it changes", async () => {
+    const id = await pip();
+    const file = join(dataDir, "pip.md");
+
+    // A changed section comes as a later system message: what PiP's prompt says now is the last one of each.
+    const instructions = () => {
+        const sections: Record<string, string | null> = {};
+
+        for (const message of JSON.parse(lastRequest.pip) as { sections?: object }[]) {
+            Object.assign(sections, message.sections);
+        }
+
+        return sections.pip_instructions || undefined;
+    };
+
+    await say(app, id, "hello");
+    assert.equal(instructions(), undefined);
+
+    writeFileSync(file, "Answer me in Chinese.\n");
+    await say(app, id, "hello again");
+    assert.match(
+        instructions() ?? "",
+        /^<pip_instructions>\nYour person's standing instructions for you, from .*pip\.md:\n\nAnswer me in Chinese\.\n<\/pip_instructions>$/,
+    );
+
+    writeFileSync(file, "Answer me in Japanese, and keep it short.\n");
+    await say(app, id, "and again");
+    assert.match(instructions() ?? "", /\n\nAnswer me in Japanese, and keep it short\.\n/);
+
+    // A file it cannot read gives none, and is read once it can be.
+    if (process.getuid?.() !== 0) {
+        writeFileSync(file, "Answer me in French.\n");
+        chmodSync(file, 0o000);
+        await say(app, id, "locked");
+        assert.equal(instructions(), undefined);
+        chmodSync(file, 0o644);
+        await say(app, id, "unlocked");
+        assert.match(instructions() ?? "", /\n\nAnswer me in French\.\n/);
+    }
+
+    rmSync(file);
+    await say(app, id, "one more");
+    assert.equal(instructions(), undefined);
 });
 
 test("PiP denies a waiting call, as its person through PiP, and cannot allow one", async () => {
