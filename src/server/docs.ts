@@ -693,6 +693,20 @@ export const ShellRequestsDoc = defineDoc<{ items: Record<string, number> }>({
 });
 
 /**
+ * Why a session's last run failed, in the same short line the session list shows. A later run clears it when that run
+ * starts, so a process that starts again still knows a run that gave up. A stop is not a failure and writes nothing.
+ */
+export const RunFailureDoc = defineDoc<{ text?: string }>({
+    kind: "pocket.run-failure",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({}),
+});
+
+/**
  * PiP's follows (`pip.ts`), by the key of the tool call that made each, so a call run again finds the follow it made.
  * `doneAt` marks one that reported (or was stopped); it stays a day, then goes.
  */

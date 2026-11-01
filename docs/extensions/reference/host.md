@@ -216,9 +216,9 @@ Calls `listener` each time something happens in the app: a session is made, rena
 
 ```typescript
 web.onDispose(
-    host.on("run.ended", ({ conversationId, session }) => {
-        if (conversationId === session) {
-            counts.set(session, (counts.get(session) ?? 0) + 1);
+    host.on("run.ended", ({ conversationId, session, outcome, failure }) => {
+        if (conversationId === session && outcome === "failed") {
+            log.push({ session, failure });
         }
     }),
 );
@@ -478,6 +478,7 @@ interface LinkedSession {
     cwd?: string;
     busy?: boolean;
     archived?: boolean;
+    failed?: string;
 }
 ```
 
@@ -486,7 +487,8 @@ Since 0.14.0 · Experimental
 A linked session, as `list` gives it.
 
 - `address`: the address that the asking session uses for it. It is never the session's id.
-- `title`, `cwd` (its folder), `busy` (Pi works in it now), and `archived`: these are there only when all the people who see the asking session see this session too.
+- `title`, `cwd` (its folder), `busy` (Pi works in it now), `archived`, and `failed`: these are there only when all the people who see the asking session see this session too.
+- `failed` (since 0.28.0): why its last run gave up, the same short line the session list shows. It is there only while that failure stands. A later run clears it, and a run that was stopped leaves none.
 
 ## Types for events
 
@@ -511,7 +513,12 @@ interface AppEvents {
         via?: string;
     };
     "run.started": { conversationId: number; session: number };
-    "run.ended": { conversationId: number; session: number };
+    "run.ended": {
+        conversationId: number;
+        session: number;
+        outcome: "done" | "failed" | "aborted";
+        failure?: string;
+    };
 }
 ```
 
@@ -522,7 +529,7 @@ What each event's listener gets.
 - `session.created`: a session in the list was made, by a person, a fork (`forkedFrom`), a linked start (`linkedFrom`), or a resend. `createdBy` is a person's id. Subagents are not sessions in the list, and send none.
 - `session.renamed`, `session.archived`: its new title, or whether it is archived now.
 - `message.sent`: a person's message to Pi, a steer or a queued one too. `by` is their id. `text` is the words as stored, with values that extensions hide already hidden and attachments left out. `via` names what sent it for them, such as PiP or a schedule.
-- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to.
+- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to. Since 0.28.0, `run.ended` also says how the run stopped: `outcome` is `done` when it finished, `failed` when it gave up, or `aborted` when it was stopped. `failure` is why it gave up, the same short line the session list shows, and only when `outcome` is `failed`. A session's failure stands until a later run starts.
 
 ### `AppEventName`
 
