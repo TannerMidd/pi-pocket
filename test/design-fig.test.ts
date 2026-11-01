@@ -1,7 +1,7 @@
 // `minimal.fig` and `variables.fig` are real exports (both MIT, see `fixtures/design/SOURCES.md`).
 // Every other file is built here, by an encoder of the format.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -770,6 +770,29 @@ test("empty structs and padding buy no decoded values", () => {
     refused(padded, /the bytes it has read \(\d{1,3}\) can hold/);
 });
 
+test("the reader's other limits: a text, a ZIP's files, a schema, the time, the file size", () => {
+    const named = (name: string) =>
+        oneMode(variable(guid(1, 2), name, "COLOR", [[LIGHT, paint("#111111")]]));
+    const zip = zipOf("canvas.fig", Buffer.from("x"), 1);
+    const schema: number[] = [];
+    const big = join(project({}), "big.fig");
+
+    zip.writeUInt16LE(FIG_LIMITS.entries + 1, zip.length - 12);
+    varUint(schema, 12_001);
+    writeFileSync(big, container());
+    truncateSync(big, FIG_LIMITS.file + 1);
+
+    assert.equal(decodeFig(named("x".repeat(FIG_LIMITS.chars))).nodes.length, 2);
+    refused(named("x".repeat(FIG_LIMITS.chars + 1)), /a text longer than 65536 characters/);
+    refused(zip, /a ZIP of 4001 files/);
+    refused(
+        container(deflateRawSync(Buffer.from(schema)), deflateRawSync(Buffer.from([0]))),
+        /claims 12001 definitions/,
+    );
+    assert.throws(() => decodeFig(manyModes(1, 3000), FIG_LIMITS, Date.now() - 1), /took longer/);
+    assert.throws(() => readFigBytes(big), /20000001 bytes, more than the 20000000/);
+});
+
 test("one decompression budget covers the whole file, not each step of it", () => {
     const inner = figOf(DEFS, "Message", {
         nodeChanges: [{ guid: guid(0, 0), name: "Document", type: "DOCUMENT" }],
@@ -952,6 +975,10 @@ test("Figma files past the 4 that a scan reads make it partial", () => {
 test("a .fig past the 5000-token import budget makes the scan partial", () => {
     assert.equal(scanTokens(project({ "max.fig": manyModes(1, 5000) })).partial, false);
     assert.equal(scanTokens(project({ "over.fig": manyModes(1, 5001) })).partial, true);
+
+    const shared = { "a.fig": manyModes(1, 2500), "b.fig": manyModes(1, 2501, (i) => `B${i}`) };
+
+    assert.equal(scanTokens(project(shared)).partial, true);
 });
 
 test("resync after a .fig that cannot be read says its tokens are not seen, not gone", async () => {
