@@ -112,10 +112,19 @@ function nodeAt(tree: unknown, path: string[]): Obj | undefined {
     return isObject(node) && Object.hasOwn(node, "$value") ? node : undefined;
 }
 
+/**
+ * The token paths that a set of files declares: `paths` holds every one, and `roots` the paths whose token is a group's
+ * `$root`, because such a group still holds children of its own.
+ */
+interface Declared {
+    paths: Set<string>;
+    roots: Set<string>;
+}
+
 /** Every token path in one raw token file, as the engine collects them: a node with a `$value`, and a group's `$root`. */
-function pathsIn(tree: unknown, path: string[] = [], found = new Set<string>()): Set<string> {
+function pathsIn(tree: unknown, path: string[], found: Declared): void {
     if (!isObject(tree)) {
-        return found;
+        return;
     }
 
     for (const [key, child] of Object.entries(tree)) {
@@ -125,18 +134,17 @@ function pathsIn(tree: unknown, path: string[] = [], found = new Set<string>()):
 
         if (key === "$root") {
             if (Object.hasOwn(child, "$value")) {
-                found.add(path.join("."));
+                found.paths.add(path.join("."));
+                found.roots.add(path.join("."));
             }
         } else if (key.startsWith("$")) {
             continue;
         } else if (Object.hasOwn(child, "$value")) {
-            found.add([...path, key].join("."));
+            found.paths.add([...path, key].join("."));
         } else {
             pathsIn(child, [...path, key], found);
         }
     }
-
-    return found;
 }
 
 /**
@@ -144,18 +152,20 @@ function pathsIn(tree: unknown, path: string[] = [], found = new Set<string>()):
  * token that fails in a mode is left out of `system.tokens`, and it must still count as one the system has: resync keeps
  * it as it is instead of writing the scan's token over it.
  */
-function declaredPaths(system: DesignSystem, raw: RawSystem): Set<string> {
-    const paths = pathsIn(raw.tokens);
+function declaredPaths(system: DesignSystem, raw: RawSystem): Declared {
+    const declared: Declared = { paths: new Set(), roots: new Set() };
+
+    pathsIn(raw.tokens, [], declared);
 
     for (const tree of raw.modes.values()) {
-        pathsIn(tree, [], paths);
+        pathsIn(tree, [], declared);
     }
 
     for (const token of system.tokens) {
-        paths.add(token.name);
+        declared.paths.add(token.name);
     }
 
-    return paths;
+    return declared;
 }
 
 /** Every group path of a set of token names: a new token may become a token there, but never take the group's name. */
@@ -173,14 +183,17 @@ function groupPaths(names: Iterable<string>): Set<string> {
     return groups;
 }
 
-/** Why a new token path cannot be added, or undefined when it can. */
-function blocking(existing: Set<string>, groups: Set<string>, path: string[]): string | undefined {
+/**
+ * Why a new token path cannot be added, or undefined when it can. A group's `$root` is a token at the group's own path,
+ * and the group still holds children, so it is not in the way of one.
+ */
+function blocking(declared: Declared, groups: Set<string>, path: string[]): string | undefined {
     const name = path.join(".");
 
     for (let at = 1; at < path.length; at++) {
         const parent = path.slice(0, at).join(".");
 
-        if (existing.has(parent)) {
+        if (declared.paths.has(parent) && !declared.roots.has(parent)) {
             return `the system has a token at ${parent}, so ${name} has no group there`;
         }
     }
@@ -301,7 +314,8 @@ export function planResync(system: DesignSystem, draft: Draft, raw: RawSystem): 
     });
     const defaultMode = system.modes[0] ?? "light";
     const scanDefault = scanned.modes[0] ?? defaultMode;
-    const existing = declaredPaths(system, raw);
+    const declared = declaredPaths(system, raw);
+    const existing = declared.paths;
     const resolved = new Map(system.tokens.map((token) => [token.name, token]));
     const groups = groupPaths(existing);
     const found = new Set(scanned.tokens.map((token) => token.name));
@@ -334,7 +348,7 @@ export function planResync(system: DesignSystem, draft: Draft, raw: RawSystem): 
             continue;
         }
 
-        const why = blocking(existing, groups, token.path);
+        const why = blocking(declared, groups, token.path);
 
         if (why !== undefined) {
             blocked.push({ token: token.name, why });

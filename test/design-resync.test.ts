@@ -458,6 +458,57 @@ test("a token whose reference the plan cannot add is blocked too, so the write g
     assert.doesNotThrow(() => writeDesignSystem(dir, change));
 });
 
+test("a group with $root does not block a new token inside it", () => {
+    // color.brand.$root is a token at color.brand, and the group still holds children: a write accepts
+    // color.brand.subtle, so the plan must add it instead of calling color.brand a leaf.
+    const dir = project({
+        ".pi/design/tokens.json": JSON.stringify({
+            $extensions: { "com.pi-pocket": { name: "Root", mode: "light" } },
+            color: { $type: "color", brand: { $root: { $value: "#123456" } } },
+        }),
+    });
+    const loaded = loadDesignSystemWithRaw(dir);
+
+    assert.ok(loaded !== undefined, "the system saved");
+    assert.deepEqual(
+        loaded.system.tokens.map((token) => token.name),
+        ["color.brand"],
+        "$root is the token at the group's own path",
+    );
+
+    const draft: Draft = {
+        tokens: {
+            color: {
+                $type: "color",
+                brand: { $root: { $value: "#123456" }, subtle: { $value: "#0a0b0c" } },
+            },
+        },
+        modes: {},
+    };
+    const plan = planResync(loaded.system, draft, loaded.raw);
+
+    assert.deepEqual(plan.blocked, [], "no token is in the way");
+    assert.deepEqual(
+        plan.added.map((token) => token.token),
+        ["color.brand.subtle"],
+        "the new child is added",
+    );
+    assert.deepEqual(plan.gone, [], "and the group's own token is still in the code");
+
+    const change = resyncChange(plan, {
+        path: ".",
+        scannedAt: new Date().toISOString(),
+        tokens: plan.scanned,
+    });
+
+    assert.doesNotThrow(
+        () => writeDesignSystem(dir, change),
+        "a write accepts the plan as it stands",
+    );
+    assert.equal(file(dir, "tokens.json").color.brand.$root.$value, "#123456", "$root stays");
+    assert.equal(file(dir, "tokens.json").color.brand.subtle.$value, "#0a0b0c");
+});
+
 test("the report fences token names and values from the project, and shows at most 40 lines", () => {
     // A crafted plan: a scan's own values are safe characters, so the hostile ones are put here on purpose.
     const plan: ResyncPlan = {
