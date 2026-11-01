@@ -346,7 +346,7 @@ test(
 );
 
 test("a reply drawn before the module registers math draws again", browserAvailable, async (t) => {
-    const route = () => fauxAssistantMessage([fauxText("Result $x^2$")]);
+    const route = () => fauxAssistantMessage([fauxText("Result $x^2$ and echo $$ is the PID")]);
     const app = await openApp(scriptedModel(route), join(root, "diagrams-late"));
 
     await app.setExtensionEnabled(owner(app), "diagrams.ts", false);
@@ -390,6 +390,6 @@ test("a reply drawn before the module registers math draws again", browserAvaila
 
              return JSON.stringify(rangeText(range).trim());`,
         ),
-        "Result $x^2$",
+        "Result $x^2$ and echo $$ is the PID",
     );
 });
