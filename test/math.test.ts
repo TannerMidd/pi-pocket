@@ -16,6 +16,8 @@ test("inline math respects delimiters and escapes", () => {
     assert.equal(inlineMath("$5 and $10 or $x$"), null);
     assert.equal(inlineMath("$ x$"), null);
     assert.equal(inlineMath("$x $"), null);
+    assert.equal(inlineMath("$x$5"), null);
+    assert.ok(inlineMath("$x$ 5"));
     assert.equal(inlineMath("$x\n\ny$"), null);
     assert.equal(inlineMath(`$${"x".repeat(MATH_LIMIT + 1)}$`), null);
 });
