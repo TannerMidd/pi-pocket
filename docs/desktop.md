@@ -99,7 +99,7 @@ On `<html>`, `data-window-controls` is `left` (macOS), `right` (Windows, Linux),
 The bridge is only as safe as the app that offers it. An app must:
 
 - put it only in the top frame of the server's origin, and take it away when that frame goes elsewhere;
-- check, in its main process, the frame and origin of every call that comes from the page;
+- check, in its main process, the frame and origin of every call that comes from the page: the sender frame's own origin (`senderFrame.origin`), not its `url`, because the server's origin also serves sandboxed artifact pages, whose origin is opaque;
 - give the page no Node.js, and keep its sandbox and context isolation on.
 
 Pi Pocket gives the bridge nothing that the page could not do over the API itself: the notifications are the person's own, and an approval's answer goes through the same route and checks as a tap in the app.
