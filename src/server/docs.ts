@@ -108,7 +108,10 @@ export const LinkedSessionCallsDoc = defineDoc<{
             conversationId?: number;
             by?: string;
             at: number;
-            /** What a stop or an archive returned, so a repeat gives that and changes nothing again. `stopping`: the stop has not finished. */
+            /**
+             * What a stop or an archive returned, so a repeat gives that and changes nothing again. `stopping`: the stop
+             * has not finished.
+             */
             result?:
                 { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
         }
