@@ -300,7 +300,6 @@ function sanitize(html, fold) {
 
     // `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
     for (const code of fragment.querySelectorAll("code")) {
-        // Code in a line of words, for themes; a code block is `code-block`.
         const math = mathMarkers?.get(code.textContent ?? "");
 
         if (math !== undefined && !code.closest("pre")) {
@@ -310,6 +309,7 @@ function sanitize(html, fold) {
             continue;
         }
 
+        // Code in a line of words, for themes; a code block is `code-block`.
         if (!code.closest("pre")) {
             code.dataset.part = "inline-code";
         }
