@@ -1112,7 +1112,7 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
                 <${Icon} name="close" size=${16} />
             </button>
         </div>
-        ${schedule.held && html`<div class="rb-held">Held: ${schedule.held}. It goes out when that changes.</div>`}
+        ${schedule.held && html`<div class="rb-held">Held: ${schedule.held}. At its time it is cancelled, unless that changes first.</div>`}
         <pre class="rb-message">${schedule.text}</pre>
         <dl class="rb-facts">
             <dt>Repeats</dt>
