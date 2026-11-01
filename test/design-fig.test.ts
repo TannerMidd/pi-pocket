@@ -12,12 +12,15 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync, zstdCompressSync } from "node:zlib";
+import { findBrowser } from "../src/server/browser/discovery.ts";
 import { decodeFig, readFigBytes } from "../src/server/design/scan-fig-container.ts";
 import { figTokens } from "../src/server/design/scan-fig.ts";
 import { assemble } from "../src/server/design/scan-tree.ts";
 import { FIG_LIMITS, FigError } from "../src/server/design/scan-fig-kiwi.ts";
 import {
+    isOneFigFile,
     readFacts,
+    scanProject,
     scanReport,
     scanRoot,
     scanTokens,
@@ -28,6 +31,8 @@ import { buildSystem } from "../src/server/design/tokens-model.ts";
 
 const MINIMAL = fileURLToPath(new URL("./fixtures/design/minimal.fig", import.meta.url));
 const dirs: string[] = [];
+
+const browser = findBrowser();
 
 after(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
@@ -239,6 +244,23 @@ function varInt(out: number[], value: number): void {
     varUint(out, value < 0 ? (~value << 1) | 1 : value << 1);
 }
 
+/** A 64-bit integer: 7 bits a byte, and the top bit says another byte follows. */
+function varUint64(out: number[], value: bigint): void {
+    let left = value;
+
+    do {
+        const byte = Number(left & BigInt(127));
+
+        left >>= BigInt(7);
+        out.push(left === BigInt(0) ? byte : byte | 128);
+    } while (left !== BigInt(0));
+}
+
+/** The zigzag form of a signed 64-bit integer: the low bit is the sign. */
+function varInt64(out: number[], value: bigint): void {
+    varUint64(out, (value << BigInt(1)) ^ (value >> BigInt(63)));
+}
+
 function text(out: number[], value: string): void {
     out.push(...Buffer.from(value, "utf8"), 0);
 }
@@ -302,6 +324,10 @@ function writeValue(out: number[], defs: Def[], type: string, value: unknown): v
         float(out, Number(value));
     } else if (native === 5) {
         text(out, String(value));
+    } else if (native === 6) {
+        varInt64(out, BigInt(value as bigint));
+    } else if (native === 7) {
+        varUint64(out, BigInt(value as bigint));
     } else {
         const def = defs.find((each) => each.name === type);
 
@@ -1137,6 +1163,42 @@ a{color:var(--brand);border-radius:var(--radius);padding:var(--gap)}`,
     assert.equal(token(system, "space.base")?.modes.light?.literal, "8px");
 });
 
+/** A MATLAB figure: a file named `.fig` that is no Figma file, as a project of 450 of them held beside its stylesheet. */
+function matlabFigure(): Buffer {
+    return Buffer.concat([
+        Buffer.from(
+            "MATLAB 7.3 MAT-file, Platform: MACI64, Created on: Thu Jan  1 00:00:00 2026 HDF5 schema 1.00 .",
+            "latin1",
+        ),
+        Buffer.alloc(512, 0),
+    ]);
+}
+
+test("450 files named .fig that are no Figma files do not take the place of the stylesheet", () => {
+    const dir = project({
+        ...Object.fromEntries(
+            Array.from({ length: 450 }, (_, index): [string, Buffer] => [
+                `plots/p${String(index).padStart(3, "0")}.fig`,
+                matlabFigure(),
+            ]),
+        ),
+        "brand.css":
+            ":root{--bg:#ffffff;--ink:#111111;--brand:#ff5500}body{background:var(--bg);color:var(--ink)}a{color:var(--brand)}",
+    });
+    const scan = scanTokens(dir);
+    const report = scanReport(scan);
+
+    // A `.fig` ranks over a `.css`, so 450 of them push `brand.css` past the limit of 400 files, and the report says that the
+    // project has no style files at all. Only a Figma file is a style file, and the 450 are notes naming each one.
+    assert.deepEqual(scan.files, ["brand.css"]);
+    assert.doesNotMatch(report, /found no style files/);
+    assert.match(
+        report,
+        /it is not a Figma file: its first bytes are "MATL" and not "fig-kiwi": plots\/p000\.fig/,
+    );
+    assert.equal(token(load(scan), "color.accent.default")?.modes.light?.hex, "#ff5500");
+});
+
 test("a .fig with variables is a token source of its own, over the stylesheets", () => {
     const dir = project({
         "design.fig": designFile(),
@@ -1277,6 +1339,23 @@ test("an enum decodes as the name the schema gives it, and as its number when th
         decodeFig(enumFile(9)).nodes.map((node) => ({ ...node })),
         [{ type: 9, name: "x" }],
     );
+});
+
+test("an int64 is zigzag-decoded, and a negative value does not come back as its zigzag form", () => {
+    // kiwi writes a signed 64-bit integer as a zigzag varint, like a signed 32-bit one: -1 is 1, and -3 is 5.
+    const defs: Def[] = [
+        {
+            name: "Big",
+            kind: "MESSAGE",
+            fields: [
+                ["at", "int64"],
+                ["size", "int64"],
+            ],
+        },
+    ];
+    const fig = decodeFig(figOf(defs, "Big", { at: BigInt(-1), size: BigInt(-3) }).outer);
+
+    assert.deepEqual({ ...fig.message }, { at: -1, size: -3 });
 });
 
 test("the assembly stops at its deadline, and counts what it placed", () => {
@@ -1431,6 +1510,51 @@ test("one deadline covers every Figma file of the scan, and a file it cannot rea
     // With time to spare, both files are read.
     assert.equal(readFacts(dir, undefined, Date.now() + 60_000).figs.length, 2);
 });
+
+test("a .fig too large for the scan's memory is a note that names it, and the stylesheet is still read", async () => {
+    // The scan reads its files in a worker of 256 MB. This file of 100 000 variables cost about 500 MB: the whole scan
+    // stopped, the stylesheet with it, and the message named no file.
+    const dir = project({
+        "big.fig": manyModes(1, 100_000),
+        "theme.css":
+            ":root{--bg:#ffffff;--ink:#111111;--brand:#ff5500}body{background:var(--bg);color:var(--ink)}a{color:var(--brand)}",
+    });
+    const scan = await scanProject(dir, { render: false });
+    const note = scan.skipped.find((each) => each.path === "big.fig");
+
+    assert.ok(note !== undefined, "the file is a note, and not the end of the scan");
+    assert.match(note!.why, /could not be read: it holds more than 1500000 values/);
+    // The stylesheet beside it drafts the tokens, and the report names the file that was left out.
+    assert.deepEqual(scan.files, ["theme.css"]);
+    assert.match(scanReport(scan), /big\.fig/);
+    assert.equal(token(load(scan), "color.accent.default")?.modes.light?.hex, "#ff5500");
+});
+
+test("a folder named like a Figma file is not one file: the render pass is not skipped for it", () => {
+    const dir = project({
+        "brand.fig/one.fig": designFile(),
+        "brand.fig/theme.css": ":root{--brand:#ff5500}",
+    });
+
+    // A `.fig` in the folder is one file; the folder itself is a folder, and the walk takes it as one.
+    assert.equal(isOneFigFile(join(dir, "brand.fig")), false);
+    assert.equal(isOneFigFile(join(dir, "brand.fig", "one.fig")), true);
+});
+
+test(
+    "a folder named like a Figma file has its pages rendered",
+    { skip: browser === undefined, timeout: 120_000 },
+    async () => {
+        const dir = project({
+            "brand.fig/index.html": `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>:root{--brand:#ff5500}body{background:#ffffff;color:#111111;font-family:Inter, sans-serif}h1{color:var(--brand);padding:8px}</style><h1>Brand</h1>`,
+            "brand.fig/theme.css": ":root{--brand:#ff5500;--gap:8px}",
+        });
+        const scan = await scanProject(join(dir, "brand.fig"));
+
+        // The name alone stopped the browser pass, and the page was never rendered: a folder of that name is a folder.
+        assert.match(scan.inferred.sources.join("\n"), /Rendered: index\.html shown in a browser/);
+    },
+);
 
 test("a folder named like a Figma file is a folder, and the files in it are read", () => {
     const dir = project({ "brand.fig/theme.css": ":root{--brand:#ff5500}" });
