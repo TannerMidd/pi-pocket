@@ -16,7 +16,14 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    realpathSync,
+    unlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { after, before, mock, test } from "node:test";
@@ -440,6 +447,26 @@ test("a big pasted image goes to the model at most 2000 pixels a side", async ()
 
     assert.equal(image.mimeType, "image/png");
     assert.equal(image.data.readUInt32BE(20), 2000, "its height, from the PNG header");
+});
+
+test("a HEIC attachment reaches the model as a JPEG, and its line says so", async () => {
+    const id = await newSession();
+
+    await app.commands.configure(id, owner(), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+    const heic = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
+    const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+
+    writeFileSync(path, heic);
+    await say(id, "look", [{ path, name: "photo.heic", mime: "image/heic", size: heic.length }]);
+    const history = await app.transcripts.history(id, Number.MAX_SAFE_INTEGER);
+    const user = history.findLast((entry) => entry.kind === "user")!;
+    const image = (await app.transcripts.entryImage(id, user.id, 0))!;
+
+    assert.match(user.text, /bytes\) \[Image: shown to you as JPEG\.\]$/);
+    assert.equal(image.mimeType, "image/jpeg");
+    assert.deepEqual(readFileSync(path), heic, "the original stays in uploads");
 });
 
 test("long polling delivers the stream's events, resends until acknowledged, and waits for new ones", async () => {

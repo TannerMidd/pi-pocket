@@ -33,6 +33,22 @@ function safeName(name: string): string {
     return base === "" || base.startsWith(".") ? `upload${base}` : base.slice(0, 120);
 }
 
+/**
+ * An upload's type: what the browser said, or the one its name gives when the browser said nothing useful. A HEIC
+ * photo can arrive as `application/octet-stream` from a browser that does not know it.
+ */
+export function uploadMime(name: string, header: string | undefined): string {
+    const declared = String(header ?? "")
+        .split(";")[0]!
+        .trim();
+    const mime =
+        declared === "" || declared === "application/octet-stream"
+            ? TYPES[extname(name).toLowerCase()]
+            : declared;
+
+    return (mime ?? "application/octet-stream").split(";")[0]!.trim();
+}
+
 export async function conversationRoutes(
     api: ApiRequest,
     id: ConversationId,
@@ -807,14 +823,10 @@ export async function conversationRoutes(
             throw new HttpError(400, "The upload stopped before it finished");
         }
 
-        const mime =
-            String(request.headers["content-type"] ?? "") ||
-            TYPES[extname(name).toLowerCase()] ||
-            "application/octet-stream";
         const attachment: Attachment = {
             path: file,
             name,
-            mime: mime.split(";")[0]!.trim(),
+            mime: uploadMime(name, request.headers["content-type"]),
             size,
         };
 

@@ -432,7 +432,7 @@ function attachedFiles(block) {
     }
 
     return block.split("\n").flatMap((line) => {
-        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)$/.exec(line);
+        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)(?: \[Image: .*)?$/.exec(line);
 
         if (!suffix) {
             return [];

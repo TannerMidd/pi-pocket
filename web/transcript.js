@@ -146,8 +146,8 @@ const SKILL = /^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?
 /** An @mention of a file or folder in a message, as the message box writes it. */
 const MENTION = /(^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g;
 
-/** One line of the attachment list the server adds to a message: `- path (name, mime, size bytes)`. */
-const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)$/;
+/** One line of the attachment list the server adds: `- path (name, mime, size bytes)`, then an optional note. */
+const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)(?: \[Image: .*)?$/;
 
 function parseAttachments(block) {
     return block
