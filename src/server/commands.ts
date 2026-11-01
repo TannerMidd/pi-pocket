@@ -93,7 +93,7 @@ export type Attachment = { path: string; name: string; mime: string; size: numbe
 
 // A name can hold " (", so the path is the part that ends with "-name".
 function attachedFile(line: string, uploads: string): Attachment[] {
-    const tail = /, ([^,]+), (\d+) bytes\)$/.exec(line);
+    const tail = /, ([^,]+), (\d+) bytes\)(?: \[Image: .*)?$/.exec(line);
 
     if (!line.startsWith("- ") || tail === null) {
         return [];
@@ -139,6 +139,8 @@ const IMAGE_MIME: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
 };
 const MAX_TITLE = 120;
 /** A title as stored: one line, so it cannot pass for more lines where it is quoted (PiP's lists, reports). */
@@ -781,10 +783,28 @@ export class Commands {
 
         app.spend.check(user, id);
 
-        const lines = attachments.map(
-            (file) =>
-                `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`,
+        // Most were made ready as they were uploaded (`model-images.ts`); the rest are made side by side, in their order.
+        const images = model.input.includes("image")
+            ? attachments.filter((file) => forModel(file.mime, file.size))
+            : [];
+        const made = await Promise.allSettled(
+            images.map((file) => modelImage(file.path, file.mime)),
         );
+        // What differs between a file and the image the model gets goes on the file's line.
+        const notes = new Map<Attachment, string>();
+
+        made.forEach((result, index) => {
+            if (result.status === "fulfilled" && result.value.note !== undefined) {
+                notes.set(images[index]!, result.value.note);
+            }
+        });
+
+        const lines = attachments.map((file) => {
+            const note = notes.get(file);
+            const line = `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`;
+
+            return note === undefined ? line : `${line} ${note}`;
+        });
         // The heading whole, with files alone too: what reads the message splits it there.
         const written =
             lines.length === 0 ? text : `${text}${ATTACHMENTS_HEADING}${lines.join("\n")}`;
@@ -804,17 +824,9 @@ export class Commands {
             ),
         ];
 
-        // Most were made ready as they were uploaded (`model-images.ts`); the rest are made side by side, in their order.
-        const images = model.input.includes("image")
-            ? attachments.filter((file) => forModel(file.mime, file.size))
-            : [];
-        const made = await Promise.allSettled(
-            images.map((file) => modelImage(file.path, file.mime)),
-        );
-
         made.forEach((result, index) => {
             if (result.status === "fulfilled") {
-                parts.push(result.value);
+                parts.push(result.value.image);
             } else {
                 app.notice(
                     "warning",
@@ -1088,7 +1100,7 @@ export class Commands {
 
                 if (mime !== undefined) {
                     if (images && statSync(file).size <= MAX_INLINE_IMAGE) {
-                        parts.push(await modelImage(file, mime));
+                        parts.push((await modelImage(file, mime)).image);
                     }
 
                     continue;

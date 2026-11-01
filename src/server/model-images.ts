@@ -6,10 +6,17 @@
 import { statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
+import { formatDimensionNote, resizeImage } from "@earendil-works/pi-coding-agent";
+import { HEIC_TYPES, heicToJpeg } from "./heic.ts";
 
 /** Attached images that also go to the model itself, when it takes images. */
-export const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+export const IMAGE_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    ...HEIC_TYPES,
+]);
 export const MAX_INLINE_IMAGE = 5 * 1024 * 1024;
 
 /** How many prepared images are kept: each holds up to about 4.5 MB of base64, mostly well under 1 MB. */
@@ -22,8 +29,11 @@ const AT_ONCE = 2;
 /** Uploads made ready ahead of a send wait at most this many deep; one past it is made when its message goes. */
 const AHEAD = 24;
 
+/** An image for the model, and the note for its attachment line when the model gets something other than the file. */
+export type ModelImage = { image: ImageContent; note?: string };
+
 /** A prepared image, with the file's stamp before it was read: a file changed since is read again. */
-const prepared = new Map<string, { stamp: string; made: Promise<ImageContent> }>();
+const prepared = new Map<string, { stamp: string; made: Promise<ModelImage> }>();
 let running = 0;
 const queue: (() => void)[] = [];
 
@@ -64,17 +74,41 @@ const stampOf = (info: { mtimeMs: number; size: number }) => `${info.mtimeMs}:${
 
 /**
  * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
- * a conversation holds many, and then every request fails until they leave its context.
+ * a conversation holds many, and then every request fails until they leave its context. A HEIC or HEIF photo is made
+ * JPEG first. The note says what differs from the file, in the words of Pi's read tool: the format, then the size.
  */
-function make(path: string, mimeType: string, first: boolean): Promise<ImageContent> {
+function make(path: string, mimeType: string, first: boolean): Promise<ModelImage> {
     return inTurn(async () => {
-        const image = await resizeImage(await readFile(path), mimeType);
+        let bytes: Uint8Array = await readFile(path);
+        let type = mimeType;
+
+        if (HEIC_TYPES.has(mimeType)) {
+            bytes = await heicToJpeg(bytes);
+            type = "image/jpeg";
+        }
+
+        const image = await resizeImage(bytes, type);
 
         if (image === null) {
             throw new Error("it could not be made small enough for the model");
         }
 
-        return { type: "image", mimeType: image.mimeType, data: image.data };
+        const notes: string[] = [];
+
+        if (image.mimeType !== mimeType) {
+            notes.push(`[Image: shown to you as ${image.mimeType.split("/")[1]!.toUpperCase()}.]`);
+        }
+
+        const size = formatDimensionNote(image);
+
+        if (size !== undefined) {
+            notes.push(size);
+        }
+
+        return {
+            image: { type: "image", mimeType: image.mimeType, data: image.data },
+            note: notes.length === 0 ? undefined : notes.join(" "),
+        };
     }, first);
 }
 
@@ -103,7 +137,7 @@ export function prepareModelImage(path: string, mimeType: string, size: number):
 }
 
 /** An attached image as the model gets it: the one prepared at upload while its file is unchanged, or made now. */
-export async function modelImage(path: string, mimeType: string): Promise<ImageContent> {
+export async function modelImage(path: string, mimeType: string): Promise<ModelImage> {
     const entry = prepared.get(path);
 
     if (entry !== undefined) {
