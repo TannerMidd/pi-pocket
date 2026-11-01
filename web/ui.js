@@ -482,7 +482,13 @@ function markdownParts(
     base = null,
     breaks = true,
 ) {
-    const key = `${markdownRevision()}\u0000${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
+    const key = [
+        markdownRevision(),
+        conversationId ?? "",
+        base ?? "",
+        breaks ? "br" : "",
+        text,
+    ].join("\u0000");
     let out = markdownCache.get(key);
 
     if (out !== undefined) {
@@ -581,7 +587,9 @@ export function Markdown({
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = `${markdownRevision()}\u0000${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+        const settings = [markdownRevision(), conversationId ?? "", base ?? "", breaks].join(
+            "\u0000",
+        );
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -628,7 +636,12 @@ const drawPart = (part, key, streaming) => {
     const extension = part.kind === "extension" ? fenceFor(part.lang) : undefined;
 
     if (extension !== undefined) {
-        return html`<${extension.component} key=${key} source=${part.source} lang=${part.lang} streaming=${streaming} />`;
+        return html`<${extension.component}
+            key=${key}
+            source=${part.source}
+            lang=${part.lang}
+            streaming=${streaming}
+        />`;
     }
 
     return part.kind === undefined || part.kind === "extension" || RichBlock === null
