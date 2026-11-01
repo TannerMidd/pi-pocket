@@ -18,7 +18,7 @@ const remove = host.registerWorkspaceProvider("ssh", {
 web.onDispose(remove);
 ```
 
-The provider must keep the `ssh` scheme in the canonical address. The resolver receives an abort signal. It should stop work when that signal aborts. The `env` method must return promptly. It can defer network work until execution.
+The provider must keep the `ssh` scheme in the canonical address. The resolver can receive an abort signal. It should stop work when that signal aborts. In 0.28, session creation and settings do not pass one yet. The `env` method must return promptly. It can defer network work until execution.
 
 Use `request.createSession({ cwd })` from an owner-only route to start a session. Only the owner can start a session on a workspace address, or move one there: Pi Pocket refuses a guest in session creation, in a session's settings, and in a linked session's folder. The provider remains responsible for validating the remote host and path. Pi Pocket blocks its local file and Git actions for non-local workspace addresses. Worktrees are not supported for remote workspaces. The system prompt leaves out this machine's AGENTS.md files and skills: the provider's module adds the remote project's context.
 

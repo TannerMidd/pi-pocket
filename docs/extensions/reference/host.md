@@ -182,7 +182,7 @@ Since 0.28.0 · Experimental
 
 Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd` returns the canonical address. It must keep the same scheme. Pi Pocket stores that address and refuses to use the local machine when no provider is active. The returned disposer removes only its own registration. See [Execution environments for workspaces](../workspaces.md).
 
-`WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. Pi Pocket passes an abort signal while it resolves a requested workspace.
+`WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. `signal` is optional: in 0.28, session creation and settings do not pass one yet.
 
 ### `requesterOf`
 
