@@ -18,6 +18,7 @@ import { useBack } from "./back.js";
 import { parseKeys, setBoxKeys } from "./box-keys.js";
 import { describersChanged, setCallDescriber } from "./calls.js";
 import { jumpToEntry } from "./chat.js";
+import { markdownChanged, setFences, setMath } from "./markdown-ext.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
     api,
@@ -75,7 +76,11 @@ const KINDS = [
     "sessionFilter",
     "sessionSearch",
     "composerKey",
+    "fence",
+    "mathInline",
 ];
+const MARKDOWN_KINDS = new Set(["fence", "mathInline"]);
+const FENCE_LANG = /^[\w+#.-]{1,24}$/;
 /** What a rail button, menu row, launcher action, or status item can open: one of the module's own. */
 const OPENS = ["page", "sheet", "panel"];
 /** The event core sends a module's tabs when the owner changes its settings (`app.setExtensionSettings`). */
@@ -103,6 +108,29 @@ let order = [];
 
 const liveRecord = (record) =>
     record !== undefined && !record.gone && !record.dead && modules.get(record.module) === record;
+
+function markdownSpecOf(kind, matches = () => true) {
+    for (const module of order) {
+        const record = modules.get(module);
+
+        if (!liveRecord(record)) {
+            continue;
+        }
+
+        for (const spec of record.adds[kind].values()) {
+            if (matches(spec)) {
+                return spec;
+            }
+        }
+    }
+
+    return undefined;
+}
+
+setFences((lang) =>
+    markdownSpecOf("fence", (spec) => spec.langs.some((each) => each.toLowerCase() === lang)),
+);
+setMath(() => markdownSpecOf("mathInline"));
 
 // ─── Drawing again, within bounds ────────────────────────────────────────────
 
@@ -384,7 +412,17 @@ export function onExtensionsGone(listener) {
 
 /** Load what the server lists, and unload what it no longer does or lists at a new address (a new version). */
 function sync(list, known = true) {
-    order = list.map((each) => each.module);
+    const nextOrder = list.map((each) => each.module);
+    const orderChanged =
+        order.length !== nextOrder.length ||
+        order.some((module, index) => module !== nextOrder[index]);
+
+    order = nextOrder;
+
+    if (orderChanged) {
+        markdownChanged();
+    }
+
     const wanted = new Map(safeMode() ? [] : list.map((each) => [each.module, each]));
 
     for (const record of [...modules.values()]) {
@@ -555,8 +593,14 @@ function unload(record) {
 
 /** Take away what a browser module added, and run its cleanups, last first. */
 function teardown(record) {
+    const hadMarkdown = record.adds.fence.size > 0 || record.adds.mathInline.size > 0;
+
     for (const kind of KINDS) {
         record.adds[kind].clear();
+    }
+
+    if (hadMarkdown) {
+        markdownChanged();
     }
 
     record.arrangements.clear();
@@ -612,6 +656,32 @@ function check(kind, spec) {
 
     if (!isId(spec.id)) {
         throw new Error(`${name}: an id is up to 64 letters, digits, and . _ : -`);
+    }
+
+    if (kind === "fence") {
+        if (
+            !Array.isArray(spec.langs) ||
+            spec.langs.length === 0 ||
+            !spec.langs.every((lang) => typeof lang === "string" && FENCE_LANG.test(lang))
+        ) {
+            throw new Error(
+                `${name} ${spec.id}: langs is a non-empty list of code fence languages`,
+            );
+        }
+
+        if (typeof spec.component !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a component to show`);
+        }
+
+        return;
+    }
+
+    if (kind === "mathInline") {
+        if (typeof spec.mount !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a mount function`);
+        }
+
+        return;
     }
 
     // Chips on session rows and words for the session search are only a function the session list calls.
@@ -850,6 +920,11 @@ function pocketFor(record) {
                 current = before;
             } else {
                 record.adds[kind].set(current.id, current);
+
+                if (MARKDOWN_KINDS.has(kind)) {
+                    markdownChanged();
+                }
+
                 redraw();
             }
         }
@@ -876,6 +951,11 @@ function pocketFor(record) {
                 check(kind, next);
                 current = next;
                 record.adds[kind].set(current.id, current);
+
+                if (MARKDOWN_KINDS.has(kind)) {
+                    markdownChanged();
+                }
+
                 redraw();
             },
             remove() {
@@ -883,6 +963,11 @@ function pocketFor(record) {
 
                 if (live() && record.adds[kind].get(current.id) === current) {
                     record.adds[kind].delete(current.id);
+
+                    if (MARKDOWN_KINDS.has(kind)) {
+                        markdownChanged();
+                    }
+
                     redraw();
                 }
             },
@@ -1137,6 +1222,8 @@ function pocketFor(record) {
         sessionFilter: (spec) => add("sessionFilter", spec),
         sessionSearch: (spec) => add("sessionSearch", spec),
         composerKey: (spec) => add("composerKey", spec),
+        fence: (spec) => add("fence", spec),
+        mathInline: (spec) => add("mathInline", spec),
         /** Put text into the message box, after what is there, for the person to send: never sent by itself. */
         insertText(text, options) {
             tick(record);
