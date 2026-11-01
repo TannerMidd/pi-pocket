@@ -1,10 +1,6 @@
-// A desktop app around Pi Pocket (such as Pi Pocket GUI, an Electron wrapper) gives the page `window.pocketHost`: a
-// generic, versioned bridge to what a browser tab cannot do (native notifications, the tray, the window's state). In a
-// browser there is none, and every caller does as before. docs/desktop.md describes the bridge.
-//
-// This module imports nothing, so that `store.js` and the modules that import it can all use it.
+// `window.pocketHost`: the bridge a desktop app gives the page (docs/desktop.md). This module imports nothing, so that
+// `store.js` and the modules that import it can all use it.
 
-/** The bridge version this code speaks. A host of a newer version still offers version 1's calls. */
 const VERSION = 1;
 
 const offered = globalThis.pocketHost;
@@ -21,11 +17,6 @@ export const host =
 
 const capabilities = new Set(Array.isArray(host?.capabilities) ? host.capabilities : []);
 
-/**
- * Whether the host offers this: "menu" (items for the app's menu), "badge" (a count on its icon), "notify" (native
- * notifications, and their clicks), "visibility" (whether its window shows), "pinned" (the pinned sessions, for its
- * tray), "open" (it asks the page to open a session).
- */
 export const hostCan = (capability) => capabilities.has(capability);
 
 /** Call the host, and never let it break the page: a host is another program, of another version. */
@@ -43,7 +34,6 @@ export function callHost(name, ...args) {
     }
 }
 
-/** Listeners by event type: "visibility" ({ visible }), "open" ({ url }), "approve" ({ id, allow }). */
 const listeners = new Map();
 
 callHost("subscribe", (event) => {
@@ -56,7 +46,6 @@ callHost("subscribe", (event) => {
     }
 });
 
-/** Hear one type of the host's events. Returns the way to stop. */
 export function onHost(type, listener) {
     const set = listeners.get(type) ?? new Set();
 
@@ -78,7 +67,6 @@ export function pageVisible() {
     return !hostCan("visibility") || callHost("visible") !== false;
 }
 
-/** Hear the page become visible or hidden, by either measure. */
 export function onPageVisibility(listener) {
     document.addEventListener("visibilitychange", listener);
     const stop = onHost("visibility", listener);
