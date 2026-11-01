@@ -1,7 +1,7 @@
 /**
- * HEIC and HEIF photos as JPEG, which models and browsers read. The decoder is WebAssembly and takes a second or
- * more, so it runs in a worker of its own (`heic-worker.ts`) with a time and a memory limit: a huge or broken file
- * stops there and the server goes on.
+ * HEIC and HEIF photos as JPEG, which models and browsers read. The decoder is WebAssembly and
+ * takes a second or more, so it runs in a worker of its own (`heic-worker.ts`) with a time and a
+ * memory limit: a huge or broken file stops there and the server goes on.
  */
 import { Worker } from "node:worker_threads";
 
@@ -10,10 +10,16 @@ export const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-seque
 
 /** The longest a conversion runs, and the most memory (in MB) of the worker's own heap. */
 const LIMIT = { ms: 30_000, heapMb: 512 };
-/** The most pixels a photo may have: decoded, 4 bytes each (64 million is 256 MB), so a tiny file cannot ask for more. */
+/**
+ * The most pixels a photo may have: decoded, 4 bytes each (64 million is 256 MB), so a tiny file
+ * cannot ask for more.
+ */
 const MAX_PIXELS = 64_000_000;
 
-/** The bytes of every top-level `meta` box of a HEIF file, which hold its `ispe` boxes (and not the image data). */
+/**
+ * The bytes of every top-level `meta` box of a HEIF file, which hold its `ispe` boxes (and not the
+ * image data).
+ */
 function metaOf(view: Buffer): Buffer {
     const found: Buffer[] = [];
     let at = 0;
@@ -41,7 +47,10 @@ function metaOf(view: Buffer): Buffer {
     return Buffer.concat(found);
 }
 
-/** The most pixels any `ispe` (image spatial extent) box in the `meta` box names: a width and a height, 32 bits each. */
+/**
+ * The most pixels any `ispe` (image spatial extent) box in the `meta` box names: a width and a
+ * height, 32 bits each.
+ */
 function pixelsOf(bytes: Uint8Array): number {
     const view = metaOf(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length));
     let most = 0;
@@ -59,14 +68,19 @@ function pixelsOf(bytes: Uint8Array): number {
 let last: Promise<unknown> = Promise.resolve();
 
 /**
- * A HEIC or HEIF file converted to JPEG. It fails for a broken file, a photo too big, or a conversion too slow. One
- * runs at a time: the memory of the decoder (WebAssembly, so outside the heap limit) is about 1 GB for 64 million pixels.
+ * A HEIC or HEIF file converted to JPEG. It fails for a broken file, a photo too big, or a
+ * conversion too slow. One runs at a time: the memory of the decoder (WebAssembly, so outside the
+ * heap limit) is about 1 GB for 64 million pixels.
  */
 export function heicToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
     const pixels = pixelsOf(bytes);
 
     // A HEIF image always has an `ispe` box: with none that can be read, its size is not known.
-    if (pixels === 0 || pixels > MAX_PIXELS) {
+    if (pixels === 0) {
+        return Promise.reject(new Error("the photo's size cannot be read"));
+    }
+
+    if (pixels > MAX_PIXELS) {
         return Promise.reject(new Error("the photo has too many pixels"));
     }
 

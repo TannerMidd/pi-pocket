@@ -2112,8 +2112,9 @@ export class PocketApp {
     }
 
     /**
-     * Send a notification to this person's desktop apps, over their live connections: Web Push cannot reach them. Each
-     * connected one gets it; the app shows one per tag. Returns how many got it.
+     * Send a notification to this person's desktop apps, over their live connections: Web Push
+     * cannot reach them. Each connected one gets it; the app shows one per tag. Returns how many
+     * got it.
      */
     notifyDesktops(userId: string, message: DesktopMessage): number {
         // Web Push clips; a desktop app takes the same, and the whole call for an approval.

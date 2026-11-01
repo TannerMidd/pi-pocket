@@ -239,11 +239,63 @@ export default (host, web) => {
         assert.equal(app.sessions().length, before);
         const answer = await call(app.config.ownerToken, "owner", uri);
 
+        const { id } = (await answer.json()) as { id: number };
+
         assert.equal(answer.status, 200);
-        assert.equal(app.cwdOf(((await answer.json()) as { id: number }).id as never), uri);
+        assert.equal(app.cwdOf(id as never), uri);
+        // An upload to it is refused: the file would land on this machine, not there.
+        const upload = await fetch(`http://127.0.0.1:${port}/api/c/${id}/upload?name=a.txt`, {
+            method: "POST",
+            body: "x",
+            headers: { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1" },
+        });
+
+        assert.equal(upload.status, 400);
     } finally {
         server.closeAllConnections();
         server.close();
+        await app.close();
+    }
+});
+
+test("a remote session refuses what would act on this machine: a task and a file", async () => {
+    const page = join(root, "server-only.html");
+    const app = await openApp(
+        scriptedModel((request) => {
+            const { messages } = request as { messages: { role: string }[] };
+
+            return messages.at(-1)?.role === "toolResult"
+                ? fauxAssistantMessage([fauxText("done")])
+                : fauxAssistantMessage(
+                      [
+                          fauxToolCall("artifact", { id: "a", title: "A", path: page }),
+                          fauxToolCall("artifact", {
+                              id: "b",
+                              title: "B",
+                              content: "x",
+                              assets: [{ name: "a.txt", path: page }],
+                          }),
+                      ],
+                      { stopReason: "toolUse" },
+                  );
+        }),
+    );
+    const remove = app.registerWorkspaceProvider("ssh", provider());
+
+    writeFileSync(page, "<p>server</p>");
+
+    try {
+        const id = await newSession(app, uri);
+
+        await assert.rejects(app.background.start(id, { command: "pwd" }), /remote workspaces/);
+        await say(app, id, "publish");
+        assert.equal(
+            (await modelTexts(app, id)).filter((t) => /not on this machine/.test(t)).length,
+            2,
+        );
+        await assert.rejects(app.artifactBody(id, "a"), /No such artifact/);
+    } finally {
+        remove();
         await app.close();
     }
 });

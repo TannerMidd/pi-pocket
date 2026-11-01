@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { forModel, imageWork, modelImage, prepareModelImage } from "../src/server/model-images.ts";
+import { heicToJpeg } from "../src/server/heic.ts";
 
 // A 1×1 PNG, and a 2×2 blue one.
 const PNG = Buffer.from(
@@ -121,7 +122,8 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
         // The photo with no `ispe` box that can be read: its size is not known.
         const unsized = Buffer.from(photo.toString("latin1").replaceAll("ispe", "xxxx"), "latin1");
 
-        // The same photo, with the bytes `ispe` and a huge size in a box after it, as they could be in its data.
+        // The same photo, with the bytes `ispe` and a huge size in a box after it, as they could be
+        // in its data.
         const free = Buffer.alloc(28);
 
         free.writeUInt32BE(28, 0);
@@ -135,7 +137,7 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
             [Buffer.from("....ftypheic not a photo at all"), /./],
             [photo.subarray(0, 300), /./],
             [huge, /too many pixels/],
-            [unsized, /too many pixels/],
+            [unsized, /size cannot be read/],
         ] as const) {
             writeFileSync(path, bytes);
             await assert.rejects(modelImage(path, "image/heic"), message);
@@ -143,4 +145,15 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
+});
+
+test("HEIC photos convert one at a time, as the decoder's memory is outside the heap", async () => {
+    const photo = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
+    const ports = () => process.getActiveResourcesInfo().filter((n) => n === "MessagePort").length;
+    let most = 0;
+    const timer = setInterval(() => (most = Math.max(most, ports())), 1);
+
+    await Promise.all([heicToJpeg(photo), heicToJpeg(photo), heicToJpeg(photo)]);
+    clearInterval(timer);
+    assert.equal(most, 1);
 });

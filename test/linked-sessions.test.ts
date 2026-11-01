@@ -602,3 +602,20 @@ test("a key that already acted on one linked session is refused for another befo
     assert.notEqual(app.sessionMeta(second.session)?.archived, true);
     assert.equal(app.sessionMeta(first.session)?.archived, true);
 });
+
+test("a view names a linked session's peer only to someone who can see that peer", async () => {
+    const id = await source();
+    const { session: target } = await start(id);
+    const [origin] = await app.linkedSessions.list(target);
+    const guest = app.config.addUser("Target only", "guest", [String(target)]).user;
+    const views = [fakeTab(target, owner(app)), fakeTab(target, guest)];
+
+    for (const tab of views) {
+        await app.attach(tab.client);
+        await until(() => tab.field("linkedPeers") !== undefined, "the view");
+        app.detach(tab.client);
+    }
+
+    assert.deepEqual(views[0]!.field("linkedPeers"), { [origin!.address]: id });
+    assert.deepEqual(views[1]!.field("linkedPeers"), {});
+});

@@ -52,8 +52,9 @@ export function createHandler(options: HttpOptions) {
 
             response.setHeader("x-content-type-options", "nosniff");
 
-            // What a desktop app around Pi Pocket asks before it signs in: that this is Pi Pocket, and which version of
-            // the host bridge its page speaks (`web/host.js`, docs/desktop.md). No version of Pi Pocket, ever.
+            // What a desktop app around Pi Pocket asks before it signs in: that this is Pi Pocket,
+            // and which version of the host bridge its page speaks (`web/host.js`,
+            // docs/desktop.md). No version of Pi Pocket, ever.
             if (path === "/api/pocket/info" && request.method === "GET") {
                 return json(response, 200, { name: "pi-pocket", bridge: DESKTOP_BRIDGE });
             }

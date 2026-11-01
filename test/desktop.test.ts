@@ -1,5 +1,5 @@
-// The desktop host bridge's server side: `/api/pocket/info`, and notifications sent to desktop apps over their live
-// connections (`desktop-notify`), with the same rules as Web Push.
+// The desktop host bridge's server side: `/api/pocket/info`, and notifications sent to desktop apps
+// over their live connections (`desktop-notify`), with the same rules as Web Push.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
@@ -142,7 +142,8 @@ test("an approval reaches a desktop app with the whole call, and whether its per
 
         assert.equal(message?.urgency, "high");
         assert.equal(message?.approval?.id, request.id);
-        // Too long for Allow from a phone's notification, but the owner may allow it, and the app gets all of it.
+        // Too long for Allow from a phone's notification, but the owner may allow it, and the app
+        // gets all of it.
         assert.equal(message?.approval?.allow, false);
         assert.equal(message?.approval?.may, true);
         assert.equal(message?.approval?.call, `bash: ${long}`);

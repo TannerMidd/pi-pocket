@@ -172,6 +172,8 @@ Since 0.28.0, `web.presentEntry` and `pocket.entryPresentation` are experimental
 
 Since 0.28.0, `host.registerWorkspaceProvider`, `WorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` are experimental: [Execution environments for workspaces](../workspaces.md).
 
+Since 0.28.0, `pocket.fence` and `pocket.mathInline` are experimental, with `FenceSpec`, `MathInlineSpec`, and `FenceProps`.
+
 Since 0.28.0, `run.ended` carries `outcome` (`done`, `failed`, or `aborted`) and, when the run gave up, `failure`: the same short line the session list shows. `LinkedSession.failed` carries that line for a linked session's last run, with the same audience rule as its title, and only while the failure stands. Both are experimental.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.

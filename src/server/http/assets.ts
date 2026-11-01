@@ -29,7 +29,10 @@ export const VENDOR: Record<string, string> = {
     "katex.mjs": vendor("katex", "dist", "katex.mjs"),
 };
 
-/** KaTeX's stylesheet, and its fonts: its rules name them as `fonts/KaTeX_*.woff2`, which resolves to `/vendor/fonts/`. */
+/**
+ * KaTeX's stylesheet, and its fonts: its rules name them as `fonts/KaTeX_*.woff2`, which resolves
+ * to `/vendor/fonts/`.
+ */
 export const KATEX_CSS = vendor("katex", "dist", "katex.min.css");
 export const KATEX_FONT = /^KaTeX_[A-Za-z0-9-]+\.woff2$/;
 export const katexFont = (name: string) => vendor("katex", "dist", "fonts", name);

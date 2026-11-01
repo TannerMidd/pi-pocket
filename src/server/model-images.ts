@@ -29,7 +29,10 @@ const AT_ONCE = 2;
 /** Uploads made ready ahead of a send wait at most this many deep; one past it is made when its message goes. */
 const AHEAD = 24;
 
-/** An image for the model, and the note for its attachment line when the model gets something other than the file. */
+/**
+ * An image for the model, and the note for its attachment line when the model gets something other
+ * than the file.
+ */
 export type ModelImage = { image: ImageContent; note?: string };
 
 /** A prepared image, with the file's stamp before it was read: a file changed since is read again. */
@@ -74,8 +77,9 @@ const stampOf = (info: { mtimeMs: number; size: number }) => `${info.mtimeMs}:${
 
 /**
  * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
- * a conversation holds many, and then every request fails until they leave its context. A HEIC or HEIF photo is made
- * JPEG first. The note says what differs from the file: the format, then the size in the words of Pi's read tool.
+ * a conversation holds many, and then every request fails until they leave its context. A HEIC or
+ * HEIF photo is made JPEG first. The note says what differs from the file: the format, then the
+ * size in the words of Pi's read tool.
  */
 function make(path: string, mimeType: string, first: boolean): Promise<ModelImage> {
     return inTurn(async () => {

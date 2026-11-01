@@ -1,7 +1,8 @@
 /**
  * Push notifications: who hears about what, and when. Pi finished, Pi needs approval, mentions, and chat messages go
- * to the people who take part in a session, unless they are looking at it or turned that kind off. Each goes through
- * Web Push to their subscribed devices, and over the live connection to their desktop apps (`notifyDesktops`).
+ * to the people who take part in a session, unless they are looking at it or turned that kind off.
+ * Each goes through Web Push to their subscribed devices, and over the live connection to their
+ * desktop apps (`notifyDesktops`).
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -35,8 +36,9 @@ export class Alerts {
     }
 
     /**
-     * Push to one person about a conversation, unless they cannot see it, turned that kind off, or are looking at it.
-     * `call` is an approval's whole call, for desktop apps, which show it as their settings say.
+     * Push to one person about a conversation, unless they cannot see it, turned that kind off, or
+     * are looking at it. `call` is an approval's whole call, for desktop apps, which show it as
+     * their settings say.
      */
     async push(
         userId: string,
@@ -265,7 +267,9 @@ export class Alerts {
         }
     }
 
-    /** Nobody can get a notification: push is off on this server, and no desktop app is connected. */
+    /**
+     * Nobody can get a notification: push is off on this server, and no desktop app is connected.
+     */
     #quiet(): boolean {
         return this.#app.pushStore === undefined && !this.#app.hasDesktops();
     }
