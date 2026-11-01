@@ -289,6 +289,11 @@ test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it
         lastRequest.session,
         /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in ASD-STE100/,
     );
+    // A session answers PiP in the language PiP asks for, when pip.md names one (#239).
+    assert.match(
+        lastRequest.session,
+        /When that agent asks for its answers in another language, write them in that language/,
+    );
 });
 
 test("PiP follows its person's standing instructions in pip.md, read again when it changes", async () => {
@@ -313,7 +318,7 @@ test("PiP follows its person's standing instructions in pip.md, read again when 
     await say(app, id, "hello again");
     assert.match(
         instructions() ?? "",
-        /^<pip_instructions>\nYour person's standing instructions for you, from .*pip\.md:\n\nAnswer me in Chinese\.\n<\/pip_instructions>$/,
+        /^<pip_instructions>\nYour person's standing instructions for you, from .*pip\.md:\n\nAnswer me in Chinese\.\n\nWhen these name a language for your answers, write what agents read in that language too, .*\n<\/pip_instructions>$/,
     );
 
     writeFileSync(file, "Answer me in Japanese, and keep it short.\n");
