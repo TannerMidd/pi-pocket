@@ -118,6 +118,6 @@ The [full list](docs/features.md#limitations) has the details.
 
 ## Credits and license
 
-Inspired by [Mario Zechner's demo](https://x.com/badlogicgames/status/2106452296087302173) of his own Pi app. Pi Pocket is an independent project, not affiliated with Earendil. The bundled fonts keep their own licenses, which are beside them in [web/fonts/](web/fonts/).
+Inspired by [Mario Zechner's demo](https://x.com/badlogicgames/status/2106452296087302173) of his own Pi app. Pi Pocket is an independent project, not affiliated with Earendil. The bundled fonts keep their own licenses, which are beside them in [web/fonts/](web/fonts/). Dependencies keep their own licenses too; one is not MIT: HEIC photos are decoded with [libheif-js](https://github.com/catdad-experiments/libheif-js) (LGPL-3.0), installed as an ordinary npm package that you can replace.
 
 [MIT](LICENSE). To report a security problem, see [SECURITY.md](SECURITY.md).
