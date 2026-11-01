@@ -32,7 +32,7 @@ import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
 import { loadDesignSystem } from "../design/tokens.ts";
 import { assetName, assetType } from "../http/artifact-assets.ts";
-import { expandHome } from "../paths.ts";
+import { expandHome, workspaceScheme } from "../paths.ts";
 
 export const MAX_BYTES = 2_000_000;
 export const MAX_ASSET_BYTES = 5_000_000;
@@ -314,6 +314,11 @@ async function publish(
 
             type = inferred;
             const agent = await api.agent(context);
+
+            if (workspaceScheme(agent.cwd ?? "") !== undefined) {
+                throw new Error("A remote session's files are not on this machine: give content.");
+            }
+
             const path = resolve(agent.cwd ?? process.cwd(), expandHome(args.path));
 
             content = await readArtifact(path);
@@ -383,6 +388,13 @@ async function publish(
                 }
 
                 const agent = await api.agent(context);
+
+                if (workspaceScheme(agent.cwd ?? "") !== undefined) {
+                    throw new Error(
+                        "A remote session's files are not on this machine: give content.",
+                    );
+                }
+
                 const path = resolve(agent.cwd ?? process.cwd(), expandHome(entry.path));
 
                 bytes = await readFileBytes(path, MAX_ASSET_BYTES);

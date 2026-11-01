@@ -247,3 +247,45 @@ export default (host, web) => {
         await app.close();
     }
 });
+
+test("a remote session refuses what would act on this machine: a task and a file", async () => {
+    const page = join(root, "server-only.html");
+    const app = await openApp(
+        scriptedModel((request) => {
+            const { messages } = request as { messages: { role: string }[] };
+
+            return messages.at(-1)?.role === "toolResult"
+                ? fauxAssistantMessage([fauxText("done")])
+                : fauxAssistantMessage(
+                      [
+                          fauxToolCall("artifact", { id: "a", title: "A", path: page }),
+                          fauxToolCall("artifact", {
+                              id: "b",
+                              title: "B",
+                              content: "x",
+                              assets: [{ name: "a.txt", path: page }],
+                          }),
+                      ],
+                      { stopReason: "toolUse" },
+                  );
+        }),
+    );
+    const remove = app.registerWorkspaceProvider("ssh", provider());
+
+    writeFileSync(page, "<p>server</p>");
+
+    try {
+        const id = await newSession(app, uri);
+
+        await assert.rejects(app.background.start(id, { command: "pwd" }), /remote workspaces/);
+        await say(app, id, "publish");
+        assert.equal(
+            (await modelTexts(app, id)).filter((t) => /not on this machine/.test(t)).length,
+            2,
+        );
+        await assert.rejects(app.artifactBody(id, "a"), /No such artifact/);
+    } finally {
+        remove();
+        await app.close();
+    }
+});

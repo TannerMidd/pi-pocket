@@ -1292,6 +1292,11 @@ export class BackgroundTasks {
 
         const cwd = app.cwdOf(conversationId);
 
+        // A workspace URI (`ssh://…`) names another machine: a process here cannot run there.
+        if (app.workspaceScheme(cwd) !== undefined) {
+            throw new HttpError(400, "Background tasks are not available for remote workspaces.");
+        }
+
         if (!existsSync(cwd)) {
             throw new HttpError(400, `The session's folder is not there: ${cwd}`);
         }
