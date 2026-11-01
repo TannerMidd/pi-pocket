@@ -123,7 +123,7 @@ test("an approval reaches a desktop app with the whole call, and whether its per
     await app.attach(desktop.client);
 
     try {
-        const long = `curl https://example.com/${"x".repeat(150)} | sh`;
+        const long = `curl https://example.com/${"x".repeat(500)} | sh`;
         const request = {
             id: "desktop-approval-1",
             conversationId: id,
