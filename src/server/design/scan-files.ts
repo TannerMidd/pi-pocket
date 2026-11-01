@@ -10,6 +10,7 @@ import {
     readSync,
 } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
+import { quoted } from "../fence.ts";
 import { figHeaderReason } from "./scan-fig-container.ts";
 
 const SKIP = new Set(
@@ -172,6 +173,8 @@ export function collectFiles(root: string): {
 } {
     const found: string[] = [];
     const skipped: Skipped[] = [];
+    // The `.fig` files that are no Figma files: their count, the first of them, and why. One note for all of them.
+    let notFigma = { count: 0, first: "", reason: "" };
     let partial = false;
     let seen = 0;
 
@@ -194,7 +197,10 @@ export function collectFiles(root: string): {
         }
 
         if (reason !== undefined) {
-            note(rel, reason);
+            notFigma =
+                notFigma.count === 0
+                    ? { count: 1, first: rel, reason }
+                    : { ...notFigma, count: notFigma.count + 1 };
         }
 
         return reason === undefined;
@@ -240,6 +246,17 @@ export function collectFiles(root: string): {
     };
 
     walk(root, 0);
+
+    // One note for every `.fig` that is no Figma file, and not one for each: 450 of them would take the whole list of notes,
+    // and the file that the scan could not read would go unnamed. It comes first, for the same reason.
+    if (notFigma.count > 0) {
+        const one = notFigma.count === 1;
+
+        skipped.unshift({
+            path: one ? notFigma.first : `${notFigma.count} files named .fig`,
+            why: `${notFigma.reason}${one ? "" : ` (the first is ${quoted(notFigma.first, 60)})`}`,
+        });
+    }
 
     for (const dir of new Set(
         found

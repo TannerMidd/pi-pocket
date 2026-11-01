@@ -1189,14 +1189,38 @@ test("450 files named .fig that are no Figma files do not take the place of the 
     const report = scanReport(scan);
 
     // A `.fig` ranks over a `.css`, so 450 of them push `brand.css` past the limit of 400 files, and the report says that the
-    // project has no style files at all. Only a Figma file is a style file, and the 450 are notes naming each one.
+    // project has no style files at all. Only a Figma file is a style file, and the 450 become one note.
     assert.deepEqual(scan.files, ["brand.css"]);
     assert.doesNotMatch(report, /found no style files/);
+    // One note for the 450, with the count and the first path: a note for each would fill the list of 40.
     assert.match(
         report,
-        /it is not a Figma file: its first bytes are "MATL" and not "fig-kiwi": plots\/p000\.fig/,
+        /it is not a Figma file: its first bytes are "MATL" and not "fig-kiwi" \(the first is “plots\/p000\.fig”\): 450 files named \.fig/,
     );
     assert.equal(token(load(scan), "color.accent.default")?.modes.light?.hex, "#ff5500");
+});
+
+test("a note about a Figma file that could not be read survives 450 files named .fig", async () => {
+    const dir = project({
+        "big.fig": manyModes(1, 100_000),
+        ...Object.fromEntries(
+            Array.from({ length: 450 }, (_, index): [string, Buffer] => [
+                `plots/p${String(index).padStart(3, "0")}.fig`,
+                matlabFigure(),
+            ]),
+        ),
+        "theme.css": ":root{--bg:#ffffff;--ink:#111111}body{background:var(--bg);color:var(--ink)}",
+    });
+    const scan = await scanProject(dir, { render: false });
+    const many = scan.skipped.find((each) => each.path === "450 files named .fig");
+    const note = scan.skipped.find((each) => each.path === "big.fig");
+
+    // A note for each of the 450 filled the whole list of notes, and the file that the scan could not read went unnamed.
+    assert.ok(many !== undefined, "the 450 files are one note");
+    assert.match(many!.why, /it is not a Figma file: its first bytes are "MATL".*plots\/p000\.fig/);
+    assert.ok(note !== undefined, "the Figma file that could not be read is named");
+    assert.match(note!.why, /could not be read: it holds more than 1500000 values/);
+    assert.match(scanReport(scan), /big\.fig/);
 });
 
 test("a .fig with variables is a token source of its own, over the stylesheets", () => {

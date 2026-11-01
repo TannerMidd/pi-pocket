@@ -130,7 +130,9 @@ export function readFacts(
     let bytes = 0;
 
     facts.partial = partial;
-    facts.skipped = skipped;
+    // The notes of the Figma files come first, and the walk's after them: a project of 450 files named `.fig` (or of a
+    // minified build) must not take the place of the one Figma file that the scan could not read.
+    facts.skipped = [];
 
     // Figma files first: a `.fig` holds the design's own variables and styles, not a build of them.
     const found = one === undefined ? files.filter((rel) => isFigFile(rel)) : [];
@@ -143,6 +145,14 @@ export function readFacts(
 
     for (const fig of figs) {
         readFigInto(facts, fig.rel, fig.path, figUntil);
+    }
+
+    for (const item of skipped) {
+        if (facts.skipped.length >= 40) {
+            break;
+        }
+
+        facts.skipped.push(item);
     }
 
     // A design has one or two Figma files; a folder of many is a download folder, and only the best were read.
