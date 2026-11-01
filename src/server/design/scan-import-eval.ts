@@ -59,7 +59,13 @@ const textOr = (value: unknown, fallback: string | undefined) =>
 // Keys that would reach an object's prototype.
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export function flatten(tree: Obj, into: Map<string, Entry>, budget: { left: number }): void {
+/** What a token file may give: the tokens still allowed, and true once a token was left out because they ran out. */
+export interface Budget {
+    left: number;
+    over: boolean;
+}
+
+export function flatten(tree: Obj, into: Map<string, Entry>, budget: Budget): void {
     const visit = (node: Obj, path: string[], inherited: string | undefined, depth: number) => {
         if (depth > LIMITS.depth) {
             return;
@@ -71,13 +77,14 @@ export function flatten(tree: Obj, into: Map<string, Entry>, budget: { left: num
         for (const [rawKey, child] of Object.entries(node)) {
             const key = segment(rawKey);
 
-            if (
-                rawKey.startsWith("$") ||
-                key === "" ||
-                UNSAFE_KEYS.has(key) ||
-                !isObject(child) ||
-                budget.left <= 0
-            ) {
+            if (rawKey.startsWith("$") || key === "" || UNSAFE_KEYS.has(key) || !isObject(child)) {
+                continue;
+            }
+
+            // A token past the budget is left out, and the scan must say that it did not read it.
+            if (budget.left <= 0) {
+                budget.over = true;
+
                 continue;
             }
 

@@ -150,6 +150,20 @@ test("a token after a limit is left out, and the scan says it is partial", () =>
     assert.equal(scan.draft.tokens.g5000, undefined, "the token after it is not");
 });
 
+test("a token file of exactly the token limit drops nothing, so the scan is whole", () => {
+    // The import reads at most 5000 tokens; a file of exactly 5000 uses the last one and leaves nothing out.
+    const many: Record<string, { $value: string }> = {};
+
+    for (let at = 0; at < 5000; at++) {
+        many[`g${at}`] = { $value: "#111" };
+    }
+
+    const scan = scanTokens(project({ "design/tokens.json": JSON.stringify(many) }));
+
+    assert.equal(scan.partial, false, "the last token is read, so the scan read the whole file");
+    assert.ok(scan.draft.tokens.g4999 !== undefined, "the last token is in the draft");
+});
+
 test("a tree without style files stops at the entry limit", () => {
     const files: Record<string, string> = {};
 

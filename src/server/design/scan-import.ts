@@ -1,6 +1,7 @@
 import { parseColor } from "./color.ts";
 import { isGroup, isObject, type Obj } from "./scan-import-convert.ts";
 import {
+    type Budget,
     changesBetween,
     DARK,
     type Entry,
@@ -351,7 +352,7 @@ function pickModes(
     return { light: light ?? [], dark, extra };
 }
 
-function readMode(budget: { left: number }, roots: Obj[]): Mode {
+function readMode(budget: Budget, roots: Obj[]): Mode {
     const entries = new Map<string, Entry>();
 
     for (const root of roots) {
@@ -383,7 +384,7 @@ function studioTokens(input: StudioSource): Found {
         `Tokens Studio sets: the default mode is ${light.join(" + ") || "none"}${dark === undefined ? "" : `; the dark mode is ${dark.join(" + ")}`}${extra.map(([mode, sets]) => `; ${mode} is ${sets.join(" + ")}`).join("")}.`,
     );
 
-    const budget = { left: LIMITS.tokens };
+    const budget: Budget = { left: LIMITS.tokens, over: false };
 
     const read = (list: string[]) =>
         readMode(
@@ -409,8 +410,8 @@ function studioTokens(input: StudioSource): Found {
         result.extra[mode] = changesFrom(first.flat, read(sets), notes, `the ${mode} mode`);
     }
 
-    // A budget that ran out left the tokens after it unread, in this set or in a later one.
-    result.partial = budget.left <= 0;
+    // Only a token that the budget left out makes the scan partial: a set of exactly the budget is whole.
+    result.partial = budget.over;
 
     return result;
 }
@@ -519,7 +520,7 @@ function inferType(path: string[], value: unknown, node: Obj): string | undefine
 
 function styleDictionaryTokens(files: SdFile[]): Found {
     const notes: string[] = [];
-    const budget = { left: LIMITS.tokens };
+    const budget: Budget = { left: LIMITS.tokens, over: false };
     const base: Obj[] = [];
     const modes = new Map<string, Obj[]>();
 
@@ -579,8 +580,8 @@ function styleDictionaryTokens(files: SdFile[]): Found {
         }
     }
 
-    // A budget that ran out left the tokens after it unread, in this folder or in a later one.
-    result.partial = budget.left <= 0;
+    // Only a token that the budget left out makes the scan partial: a folder of exactly the budget is whole.
+    result.partial = budget.over;
 
     return result;
 }
