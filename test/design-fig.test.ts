@@ -599,10 +599,7 @@ test("variables of one name get a number each, and the names do not grow", () =>
 
     assert.equal(names.length, 2000);
     assert.ok(names.includes("color.base-2000"));
-    assert.deepEqual(
-        names.filter((name) => !/^color\.base(?:-\d+)?$/.test(name)),
-        [],
-    );
+    assert.equal(names.filter((name) => !/^color\.base(?:-\d+)?$/.test(name)).length, 0);
 });
 
 test("an enum decodes as the name the schema gives it, and as its number when it has none", () => {
@@ -801,8 +798,10 @@ test("the assembly stops at its deadline, and indexes its groups once", () => {
     }));
     const late = { until: Date.now(), read: 0, stopped: false };
 
-    assert.deepEqual(assemble(entries, new Map(), late), {});
-    assert.deepEqual(late, { until: late.until, read: 0, stopped: true });
+    // Counts, not the trees: a failed deepEqual of 20 000 tokens fills the memory with its diff.
+    assert.equal(Object.keys(assemble(entries, new Map(), late)).length, 0);
+    assert.equal(late.read, 0);
+    assert.equal(late.stopped, true);
 
     const all = { until: Number.POSITIVE_INFINITY, read: 0, stopped: false };
     const ms = cpuMs(() => assemble(entries, new Map(), all));
