@@ -1578,7 +1578,7 @@ test("a .fig too large for the scan's memory is a note that names it, and the st
     assert.equal(token(load(scan), "color.accent.default")?.modes.light?.hex, "#ff5500");
 });
 
-test("a folder named like a Figma file is not one file: the render pass is not skipped for it", () => {
+test("isOneFigFile: a folder named like a Figma file is not one file", () => {
     const dir = project({
         "brand.fig/one.fig": designFile(),
         "brand.fig/theme.css": ":root{--brand:#ff5500}",
