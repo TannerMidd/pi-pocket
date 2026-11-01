@@ -143,6 +143,8 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `prompt`                                        | A person's message                                                                                            |
 | `prompt-head`, `author-mark`, `prompt-author`   | Its head: who sent it and when; their initials; their name                                                    |
 | `prompt-text`                                   | What it says (its skill chip, words, and files)                                                               |
+| `linked-head`, `linked-mark`, `linked-name`     | A linked session's message (`data-from` `linked`): its head, square mark, session name (since 0.28.0)         |
+| `linked-open`, `linked-body`, `linked-more`     | Its Open button, its text as Markdown, and Show all on a long one (since 0.28.0)                              |
 | `presented-input`, `presented-head`             | An extension's input (`web.presentEntry`), folded: its card and the line that opens it (since 0.28.0)         |
 | `presented-chevron`, `presented-tag`            | That line's chevron; the input's label in its head, when shown open (since 0.28.0)                            |
 | `presented-more`                                | The button beside that line that opens its message sheet (since 0.28.0)                                       |
