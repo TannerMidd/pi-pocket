@@ -140,6 +140,9 @@ export default function createPrompt(host: PocketHost) {
     };
 
     const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
+    // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote machine's.
+    const local = (input: PromptInput) =>
+        !/^(?![a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(input.agent.cwd ?? "");
 
     return defineExtension({
         name: "pocket-prompt",
@@ -147,8 +150,12 @@ export default function createPrompt(host: PocketHost) {
             section("preamble", () => PREAMBLE, { tag: false }),
             section("guidelines", () => GUIDELINES),
             section("pocket_docs", () => docs(host.dataDir)),
-            section("project_context", (input) => load(cwdOf(input)).context),
-            section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
+            section("project_context", (input) =>
+                local(input) ? load(cwdOf(input)).context : undefined,
+            ),
+            section("skills", (input) => (local(input) ? load(cwdOf(input)).skills : undefined), {
+                tag: false,
+            }),
             section("environment", (input) => {
                 const base = `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`;
 

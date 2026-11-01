@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Duplex } from "node:stream";
 import { once } from "node:events";
 import { join } from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { cleanUp, openApp, owner, scriptedModel, work } from "./helpers.ts";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { cleanUp, newSession, openApp, owner, root, say, scriptedModel, work } from "./helpers.ts";
 
 after(cleanUp);
 
@@ -209,6 +211,37 @@ test("only the owner can start or move a session to a workspace URI", async () =
 
         await assert.rejects(app.commands.configure(local.id, user, { cwd: uri }), /owner/i);
         assert.equal(app.cwdOf(local.id), work);
+    } finally {
+        remove();
+        await app.close();
+    }
+});
+
+test("a remote session's prompt has no AGENTS.md from this machine", async () => {
+    const remote = join(root, "remote-prompt");
+    let sections: string[] = [];
+
+    mkdirSync(remote, { recursive: true });
+    writeFileSync(join(remote, "AGENTS.md"), "LOCAL-ONLY-MARKER");
+    const app = await openApp(
+        scriptedModel((request) => {
+            const messages = (request as { messages: { sections?: Record<string, string> }[] })
+                .messages;
+
+            sections = messages.flatMap((message) => Object.values(message.sections ?? {}));
+
+            return fauxAssistantMessage([fauxText("ok")]);
+        }),
+    );
+    const remove = app.registerWorkspaceProvider("ssh", {
+        env: () => new NodeExecutionEnv({ cwd: remote }),
+        resolveCwd: async (cwd) => cwd,
+    });
+
+    try {
+        await say(app, await newSession(app, "ssh://host/work"), "hello");
+        assert.ok(sections.length > 0, "the request has sections");
+        assert.ok(!sections.some((text) => text.includes("LOCAL-ONLY-MARKER")));
     } finally {
         remove();
         await app.close();
