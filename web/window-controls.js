@@ -1,54 +1,25 @@
-// The window's own buttons (close, minimize, zoom) over the page. A desktop app that runs Pi Pocket up to its window's
-// top edge, or Pi Pocket installed as an app with its title bar hidden, says where they are through the Window Controls
-// Overlay (navigator.windowControlsOverlay). Only what is under them makes room, and only as much as they take: a bar
-// there (the conversation's top bar, a panel's, a viewer's) keeps its contents beside them; a window without one (the
-// sidebar, an extension's page) starts below them. The rest of the layout keeps its whole height. Tiled, the window
-// whose bar is under them has its corner cut around them, so its border does not run under them. In a browser tab
-// there are none, and nothing changes. docs/desktop.md describes it.
-//
-// On <html>: data-window-controls, "left", "right", or "none" (set before the app's first paint, so a desktop app can
-// tell that the page makes its own room), and --controls-h, how far down the buttons reach. What makes room gets
-// data-under-controls, "bar" or "push", and --controls-room: the bar's padding on the buttons' side, or how far the
-// window's top moves down. The window cut around them gets data-controls-notch, and --notch-w and --notch-h: the cut.
-//
-// What is under the buttons is read from the layout, before the frame that shows a change: a window, a bar, or a
-// panel that opens has its room in its first frame. A window that pops in is measured where it lands, not where its
-// animation has it.
+// Room for the window's own buttons (Window Controls Overlay) over the page. docs/desktop.md describes it.
 
 const overlay = navigator.windowControlsOverlay;
 const root = document.documentElement;
 
-/** Bars along a window's top: they keep clear of the buttons sideways, and the window can be dragged by them. */
 const BARS =
     ".tabstrip, .topbar, .viewer-head, .lightbox-bar, .board-head, .files-bar, .ext-panel-bar, .browser-bar, .people-head";
-
-/** Without a bar, the window (or the drawer, or the phone's home list) starts below the buttons. */
 const PUSHED = ".drawer, .home-list, .layout > .window";
-
-/** What, added, removed, or changed, can change what is under the buttons. */
 const LAYOUT = `${BARS}, .drawer, .home-list, .layout, .window`;
-
-/** How far the cut stays from the buttons, beside them and below them. */
 const NOTCH_GAP = 6;
 
-/** What makes room now: element → { kind, room }. */
 let marked = new Map();
 
-/** A bar's own padding on the buttons' side, from before it made room: it never gets less. */
 const ownPadding = new WeakMap();
 
-/** The tiled window cut around the buttons, and its cut: { element, w, h }, or null. */
 let notched = null;
-
 let drag = null;
 let resizes = null;
 let frame = 0;
 let timer = 0;
 
-/**
- * Where `element` is laid out in the window, without transforms: a window that pops in (scaled) or slides in
- * (translated) is where it lands. `getBoundingClientRect` would give where its animation has it in this frame.
- */
+// Laid out without transforms: `getBoundingClientRect` gives where a popping or sliding window's animation has it.
 function layoutBox(element) {
     let left = 0;
     let top = 0;
@@ -107,7 +78,6 @@ function mark(next) {
     marked = next;
 }
 
-/** Cut `next.element`'s corner (style.css draws it), and no other window's. */
 function notch(next) {
     const same = notched !== null && notched.element === next?.element;
 
@@ -146,7 +116,6 @@ function clear() {
     drag?.remove();
 }
 
-/** How much room `element` makes, measured as if it made none. */
 function roomOf(element, bar, side, reach, height) {
     const box = layoutBox(element);
     const style = getComputedStyle(element);
@@ -164,7 +133,6 @@ function roomOf(element, bar, side, reach, height) {
         return Math.max(covered, ownPadding.get(element) ?? 0);
     }
 
-    // Tiled, a window moves down by its margin (the tiles' gap stays above it), else by its padding.
     const moved = marked.get(element)?.kind === "push" ? parseFloat(style.marginTop) || 0 : 0;
 
     return height - (box.top - moved);
@@ -193,7 +161,6 @@ function notchOf(bar, side, reach, height) {
         : null;
 }
 
-/** Where the buttons are: { side, reach, height }, or null when there are none over the page. */
 function controls() {
     const rect = overlay?.visible ? overlay.getTitlebarAreaRect() : null;
     const height = rect === null ? 0 : Math.round(rect.y + rect.height);
@@ -202,7 +169,6 @@ function controls() {
         return null;
     }
 
-    // The buttons are where the title bar's area is not: on its left (macOS) or its right (Windows, Linux).
     const left = Math.max(0, Math.round(rect.x));
     const right = Math.max(0, Math.round(innerWidth - rect.x - rect.width));
     const side = left >= right ? "left" : "right";
@@ -232,8 +198,7 @@ function update() {
         root.style.setProperty("--controls-h", `${height}px`);
     }
 
-    // Everything shown that reaches under the buttons and makes room, in the order of the page. What floats over the
-    // app (a sheet's scrim, the launcher) makes none, so the window under it keeps its room while it shows.
+    // What floats over the app (a sheet's scrim, the launcher) makes no room, so the window under it keeps its.
     const next = new Map();
 
     for (const element of document.querySelectorAll(`${BARS}, ${PUSHED}`)) {
@@ -261,7 +226,6 @@ function update() {
         }
     }
 
-    // A window with a bar (or the phone's home list) under the buttons makes room there; it does not also move down.
     for (const [element, { kind }] of next) {
         if (
             kind === "push" &&
@@ -273,7 +237,6 @@ function update() {
 
     mark(next);
 
-    // The topmost tiled window with a bar under the buttons: the last in the page, as the page stacks them.
     let cut = null;
 
     for (const [element, { kind }] of next) {
@@ -282,7 +245,6 @@ function update() {
 
     notch(cut);
 
-    // To move the window by: the strip beside the buttons, over the windows that start below them.
     let width = reach;
 
     for (const [element, { kind }] of next) {

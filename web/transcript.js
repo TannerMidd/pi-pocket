@@ -180,7 +180,7 @@ function EntryImages({ entryId, count, label }) {
  */
 function MessageExtras({ entry, attachments }) {
     const files = attachments ? parseAttachments(attachments) : [];
-    const pictures = files.filter((file) => file.path && file.mime.startsWith("image/"));
+    const pictures = files.filter((file) => file.path && /^image\/(?!heic|heif)/.test(file.mime));
     const others = files.filter((file) => !pictures.includes(file));
 
     return html`

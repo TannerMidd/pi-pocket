@@ -1076,20 +1076,10 @@ kbd {
     display: none;
 }
 
-/*
- * The window's own buttons over the page, in a desktop app or an installed app with its title bar hidden
- * (`window-controls.js`): only what is under them makes room. A bar keeps its contents beside them, and the window can
- * be dragged by it; a window without one starts below them, tiled by its margin (the tiles' gap stays above it), else
- * by its padding, in its own color. Inline, so the app's own room (`--controls-room`) wins over a theme's padding.
- */
 [data-under-controls="bar"] {
     app-region: drag;
 }
 
-/*
- * With the window's buttons over the page, the page is the window's title bar: every window's top bar moves the window
- * by its empty room, as a title bar does, not only the bar under the buttons. The sidebar's is its list's head.
- */
 :root:is([data-window-controls="left"], [data-window-controls="right"])
     :is(
         .tabstrip,
@@ -1106,17 +1096,14 @@ kbd {
     app-region: drag;
 }
 
-/*
- * The session's title takes only its text's width, so the top bar's room beside it moves the window too. The title
- * opens its menu: its button lies over its text, and a desktop app reads drag regions in the page's order, so the
- * text after the button would take it back for dragging. The whole title is not for dragging.
- */
+/* The title's button lies over its text, and a desktop app reads drag regions in page order: the whole title is no-drag. */
 :root:is([data-window-controls="left"], [data-window-controls="right"]) .topbar > .title {
     flex: 0 1 auto;
     margin-right: auto;
     app-region: no-drag;
 }
 
+/* The app's own room (`--controls-room`) wins over a theme's padding. */
 :root[data-window-controls="left"] [data-under-controls="bar"] {
     padding-left: var(--controls-room) !important;
 }
@@ -1125,7 +1112,6 @@ kbd {
     padding-right: var(--controls-room) !important;
 }
 
-/* What is in a bar takes clicks and keys; the bar's empty room moves the window. */
 :root:is([data-window-controls="left"], [data-window-controls="right"])
     :is(
         button,
@@ -1152,10 +1138,7 @@ kbd {
     height: auto;
 }
 
-/*
- * Tiled, the window whose bar runs under the buttons is cut around them: its border (and its focus ring) goes down,
- * around the buttons, and back up its side, instead of under them. A browser without corner-shape keeps the corner.
- */
+/* A browser without corner-shape keeps the corner. */
 @supports (corner-shape: notch) {
     :root[data-tiling="on"][data-window-controls="right"] .layout > [data-controls-notch] {
         border-top-right-radius: var(--notch-w) var(--notch-h);
@@ -1168,7 +1151,6 @@ kbd {
     }
 }
 
-/* The strip beside the buttons, over what starts below them: to move the window by. Under every layer of the app. */
 .window-drag {
     position: fixed;
     top: 0;

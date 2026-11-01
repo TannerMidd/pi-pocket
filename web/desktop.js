@@ -1,6 +1,4 @@
-// What Pi Pocket gives a desktop app it runs in (`web/host.js`): the server's notifications, which the app shows as
-// native ones; the count of sessions that need you, for its icon; the pinned sessions and their states, for its tray;
-// and sessions it asks the page to open. In a browser this module does nothing. docs/desktop.md describes it.
+// The desktop app side of `web/host.js`: notifications, badge, tray, and links. docs/desktop.md describes it.
 import { callHost, host, hostCan, onHost } from "./host.js";
 import { openPip } from "./pip.js";
 import { sessionMark } from "./sessions.js";
@@ -9,7 +7,6 @@ import { actions, attempt, navigate, notify, onDesktopNotify, store } from "./st
 /** The longest list of pinned sessions the host gets: a tray menu shows a few. */
 const MAX_PINNED = 20;
 
-/** Open what a notification or the host points at: a session (`/s/12`), PiP (`/?pip=1`), or the list. */
 export function openAddress(address) {
     let url;
 
@@ -48,7 +45,6 @@ if (host !== null) {
     }
 
     if (hostCan("pinned")) {
-        // What a pin's square depends on: the list, the pins, marked unread, and what this browser has seen.
         let from = null;
         let pinnedSent = "";
 
@@ -97,7 +93,6 @@ if (host !== null) {
     }
 }
 
-/** The host's items for the app menu: a "Desktop" group, such as "Server settings…". */
 export function hostMenuItems() {
     if (!hostCan("menu")) {
         return [];

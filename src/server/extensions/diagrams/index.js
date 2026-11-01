@@ -134,7 +134,11 @@ function renderMath(katex, source, display) {
         throw new Error("Math output exceeds the limit.");
     }
 
-    return DOMPurify.sanitize(html, { RETURN_TRUSTED_TYPE: false });
+    return DOMPurify.sanitize(html, {
+        RETURN_TRUSTED_TYPE: false,
+        ADD_TAGS: ["semantics", "annotation"],
+        ADD_ATTR: ["encoding"],
+    });
 }
 
 export default function (pocket) {
@@ -283,6 +287,8 @@ export default function (pocket) {
             className: "pocket-diagrams-math-fence",
             role: "math",
             "aria-label": `${label} expression`,
+            "data-tex": result.source,
+            "data-lang": "math-display",
             dangerouslySetInnerHTML: { __html: result.html },
         });
     }

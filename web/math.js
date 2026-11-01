@@ -1,14 +1,11 @@
-// Where math starts and ends in markdown: `$x^2$` in a line of words, `$$…$$` on lines of its own. The rules are
-// pandoc's, so that prices stay text: "$5 and $10" holds no math, as the second `$` has a space before it. No imports, so
-// Node tests it.
+// Where math starts and ends in markdown. The rules are pandoc's, so that prices stay text: "$5 and $10" holds no math.
+// No imports, so Node tests it.
 
-/** The longest math taken as math: a longer one stays as written. */
 export const MATH_LIMIT = 20_000;
 
 /**
  * Math in a line, at the start of `src`: `$…$`, or `$$…$$` (shown as a block). The opening `$` has no space after it; the
  * closing one has no space before it and no digit after it; `\$` does not close it, and it stays in one paragraph.
- * `{ raw, text, display }`, or null.
  */
 export function inlineMath(src) {
     if (src[0] !== "$") {
@@ -44,10 +41,6 @@ export function inlineMath(src) {
     return null;
 }
 
-/**
- * Math on lines of its own, at the start of `src`: `$$` and the lines up to the next `$$`, or all in one line. `{ raw,
- * text }`, or null.
- */
 export function blockMath(src) {
     const found =
         /^ {0,3}\$\$[ \t]*\n([\s\S]+?)\n {0,3}\$\$[ \t]*(?:\n|$)/.exec(src) ??

@@ -187,7 +187,10 @@ test(
                  host.id = ${JSON.stringify(hostId)};
                  const spec = markdown.fenceFor(${JSON.stringify(lang)});
                  render(h(spec.component, { source: ${JSON.stringify(source)}, lang: ${JSON.stringify(lang)}, streaming: ${JSON.stringify(streaming)} }), host);
-                 if (${settleMs}) await new Promise((resolve) => setTimeout(resolve, ${settleMs}));
+                 if (${settleMs}) {
+                     await new Promise((resolve) => setTimeout(resolve, ${settleMs}));
+                 }
+
                  return JSON.stringify(host.textContent.slice(0, 500));`,
                 );
             const hasInPage = (selector: string) =>
@@ -239,6 +242,7 @@ test(
              const elements = [svg, ...svg.querySelectorAll("*")];
              const tags = elements.filter((each) => ["a", "image", "style", "foreignobject"].includes(each.localName.toLowerCase())).length;
              const references = elements.flatMap((each) => [...each.attributes]).filter((each) => ["href", "xlink:href", "src", "xml:base"].includes(each.name.toLowerCase())).length;
+
              return JSON.stringify({ tags, references, attacker: svg.outerHTML.includes("attacker.example"), styled: svg.getAttribute("style")?.includes("max-width") ?? false, themed: getComputedStyle(svg).getPropertyValue("--pele-line").trim() !== "" && getComputedStyle(svg).getPropertyValue("--pele-line").trim() === getComputedStyle(svg).getPropertyValue("--muted").trim() });`,
             );
 
@@ -346,7 +350,7 @@ test(
 );
 
 test("a reply drawn before the module registers math draws again", browserAvailable, async (t) => {
-    const route = () => fauxAssistantMessage([fauxText("Result $x^2$")]);
+    const route = () => fauxAssistantMessage([fauxText("Result $x^2$ and echo $$ is the PID")]);
     const app = await openApp(scriptedModel(route), join(root, "diagrams-late"));
 
     await app.setExtensionEnabled(owner(app), "diagrams.ts", false);
@@ -380,4 +384,16 @@ test("a reply drawn before the module registers math draws again", browserAvaila
     assert.equal(await reply(" .katex"), false);
     await app.setExtensionEnabled(owner(app), "diagrams.ts", true);
     await until(() => reply(" .katex"), "the reply's math after the module loads");
+    assert.equal(
+        await inPage<string>(
+            page,
+            `const { rangeText } = await import("/quote-text.js");
+             const range = document.createRange();
+
+             range.selectNodeContents(document.querySelector('[data-part="reply"] > *'));
+
+             return JSON.stringify(rangeText(range).trim());`,
+        ),
+        "Result $x^2$ and echo $$ is the PID",
+    );
 });

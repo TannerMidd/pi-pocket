@@ -29,3 +29,29 @@ export function splitQuote(text) {
 
     return { passage, rest: match[2] };
 }
+
+/** The text of a selected range, as it was written: math as its TeX, a diagram as "[diagram]". */
+export function rangeText(range) {
+    const box = document.createElement("div");
+
+    box.style.cssText = "position:fixed;left:-9999px;top:0;width:600px";
+    box.append(range.cloneContents());
+
+    for (const each of box.querySelectorAll("[data-tex]")) {
+        const mark = each.dataset.lang === "math-display" ? "$$" : "$";
+
+        each.replaceWith(`${mark}${each.dataset.tex}${mark}`);
+    }
+
+    for (const each of box.querySelectorAll(".pocket-diagrams-output")) {
+        each.replaceWith("[diagram]");
+    }
+
+    document.body.append(box);
+
+    const text = box.innerText;
+
+    box.remove();
+
+    return text;
+}

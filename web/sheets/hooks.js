@@ -86,7 +86,7 @@ function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
                 ? html`<div class="field">
                     <div class="label">What Pi should do with each post</div>
                     <textarea
-                        aria-label="What Pi should do with each post"
+                        aria-label=${`Edit the prompt of ${hook.name}`}
                         rows="4"
                         maxlength="2000"
                         ref=${field}
