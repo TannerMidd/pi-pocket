@@ -10,6 +10,7 @@ import {
     readSync,
 } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
+import { figHeaderReason } from "./scan-fig-container.ts";
 
 const SKIP = new Set(
     `node_modules .git dist build out coverage .next .nuxt .svelte-kit .cache .turbo
@@ -29,6 +30,11 @@ export interface Skipped {
 }
 
 const DOT_STYLE_FOLDERS = new Set([".storybook", ".vitepress", ".vuepress", ".docusaurus"]);
+
+/** The bytes of a `.fig` that tell whether it is a Figma file: its container's header, or a ZIP's. */
+const HEADER_BYTES = 8;
+
+const FIG = /\.fig$/i;
 
 const STYLE =
     /\.(?:css|scss|less|pcss|postcss|html?|vue|svelte|astro|mdx|tsx|jsx|ts|js|mjs|cjs|mts|cts)$/i;
@@ -175,6 +181,25 @@ export function collectFiles(root: string): {
         }
     };
 
+    /** Whether a `.fig` is a Figma file: the walk reads its header, and a file that is not is no style file. */
+    const isFigma = (path: string, rel: string): boolean => {
+        let reason: string | undefined;
+
+        try {
+            reason = figHeaderReason(readBytes(path, HEADER_BYTES));
+        } catch (error) {
+            note(rel, `could not be read: ${(error as Error).message}`);
+
+            return false;
+        }
+
+        if (reason !== undefined) {
+            note(rel, reason);
+        }
+
+        return reason === undefined;
+    };
+
     const walk = (dir: string, depth: number) => {
         for (const entry of sortedEntries(dir)) {
             if (found.length >= LIMITS.candidates || ++seen > LIMITS.entries) {
@@ -204,6 +229,11 @@ export function collectFiles(root: string): {
             } else if (entry.isSymbolicLink() && !hidden) {
                 note(rel, "a link, not followed");
             } else if (entry.isFile() && wanted(rel, entry.name)) {
+                // A `.fig` is a style file only when its header says it is a Figma file: MATLAB writes a `.fig` too.
+                if (FIG.test(entry.name) && !isFigma(path, rel)) {
+                    continue;
+                }
+
                 found.push(rel);
             }
         }
@@ -245,6 +275,11 @@ export function collectFiles(root: string): {
 
 /** Reads no more than `limit` bytes and never follows a link. */
 export function readHead(path: string, limit: number = LIMITS.fileBytes): string {
+    return readBytes(path, limit).toString("utf8");
+}
+
+/** The first bytes of a file, never through a link, and never more than it holds. */
+function readBytes(path: string, limit: number): Buffer {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
 
     try {
@@ -262,7 +297,7 @@ export function readHead(path: string, limit: number = LIMITS.fileBytes): string
             size += read;
         }
 
-        return buffer.subarray(0, size).toString("utf8");
+        return buffer.subarray(0, size);
     } finally {
         closeSync(fd);
     }

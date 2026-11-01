@@ -43,6 +43,13 @@ export interface TokenScan {
 // A Figma `.fig` file, whose name says so.
 export const isFigFile = (path: string): boolean => /\.fig$/i.test(path);
 
+/**
+ * Whether a path is one `.fig` file: a folder named `x.fig` is a folder, and it is walked (and rendered) as one.
+ */
+export function isOneFigFile(path: string): boolean {
+    return isFigFile(path) && statSync(path).isFile();
+}
+
 // `..` itself or a `../` start, not a folder named `..x`.
 const leaves = (inside: string) =>
     inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside);
@@ -115,7 +122,7 @@ export function readFacts(
 
     // The path may be one `.fig` file: then it is the whole of what is read, and there is no folder to walk. A folder may be
     // named `x.fig` too, and it is a folder to walk, not one file to read.
-    const one = isFigFile(root) && statSync(root).isFile() ? basename(root) : undefined;
+    const one = isOneFigFile(root) ? basename(root) : undefined;
     const { files, partial, skipped } =
         one === undefined
             ? collectFiles(root)
@@ -320,7 +327,7 @@ export async function scanProject(
 
     left -= Date.now() - started;
 
-    if (options.render === false || process.env.PI_SCAN_RENDER === "0" || isFigFile(root)) {
+    if (options.render === false || process.env.PI_SCAN_RENDER === "0" || isOneFigFile(root)) {
         return first;
     }
 

@@ -35,6 +35,36 @@ const EOCD = 0x06054b50;
 const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
 
+/** One line, and no character that a report's fence could take for a tag. */
+const oneLine = (text: string): string => text.replace(/[^\x20-\x7e]/g, "?");
+
+/**
+ * Why a file's first bytes are not a Figma file's, or `undefined` when they are. A `.fig` is a Figma file by its header and
+ * nothing else: MATLAB writes a `.fig` too, and a folder of those is no design. 8 bytes are enough for both a container's
+ * header and a ZIP's, and the walk reads no more than that to decide whether to read the file.
+ */
+export function figHeaderReason(bytes: Buffer): string | undefined {
+    if (bytes.length === 0) {
+        return "the file is empty";
+    }
+
+    // A ZIP holds the file's layers in its `canvas.fig`, and a Figma file may be one.
+    if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) {
+        return undefined;
+    }
+
+    return headerReason(bytes);
+}
+
+/** `undefined` when the bytes start with one of Figma's container headers, else the reason for a person. */
+function headerReason(bytes: Buffer): string | undefined {
+    const header = bytes.subarray(0, 8).toString("latin1");
+
+    return HEADERS.has(header)
+        ? undefined
+        : `it is not a Figma file: its first bytes are "${oneLine(header.slice(0, 4))}" and not "fig-kiwi"`;
+}
+
 // --- The container --------------------------------------------------------------------------------------------------
 
 /** One entry of a ZIP's central directory. */
@@ -62,12 +92,10 @@ const MAX_CHUNKS = 8;
 
 /** The chunks that hold the schema and the data, from a bare container. */
 function kiwiChunks(bytes: Buffer, limits: FigLimits): { version: number; chunks: Buffer[] } {
-    const header = bytes.subarray(0, 8).toString("latin1");
+    const reason = headerReason(bytes);
 
-    if (!HEADERS.has(header)) {
-        return fail(
-            `it is not a Figma file: its first bytes are "${header.slice(0, 4).replace(/[^\x20-\x7e]/g, "?")}" and not "fig-kiwi"`,
-        );
+    if (reason !== undefined) {
+        return fail(reason);
     }
 
     if (bytes.length < 12) {
