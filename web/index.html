@@ -126,7 +126,9 @@
             (function () {
                 var fail = function (detail) {
                     var boot = document.querySelector("#app > .boot");
-                    if (!boot) return;
+                    if (!boot) {
+                        return;
+                    }
                     boot.classList.add("failed");
                     boot.querySelector(".boot-caption").textContent = "could not start";
                     var line = boot.querySelector(".boot-detail") || document.createElement("div");
