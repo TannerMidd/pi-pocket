@@ -1076,6 +1076,121 @@ kbd {
     display: none;
 }
 
+/*
+ * The window's own buttons over the page, in a desktop app or an installed app with its title bar hidden
+ * (`window-controls.js`): only what is under them makes room. A bar keeps its contents beside them, and the window can
+ * be dragged by it; a window without one starts below them, tiled by its margin (the tiles' gap stays above it), else
+ * by its padding, in its own color. Inline, so the app's own room (`--controls-room`) wins over a theme's padding.
+ */
+[data-under-controls="bar"] {
+    app-region: drag;
+}
+
+/*
+ * With the window's buttons over the page, the page is the window's title bar: every window's top bar moves the window
+ * by its empty room, as a title bar does, not only the bar under the buttons. The sidebar's is its list's head.
+ */
+:root:is([data-window-controls="left"], [data-window-controls="right"])
+    :is(
+        .tabstrip,
+        .topbar,
+        .viewer-head,
+        .lightbox-bar,
+        .board-head,
+        .files-bar,
+        .ext-panel-bar,
+        .browser-bar,
+        .people-head,
+        .sessions-head
+    ) {
+    app-region: drag;
+}
+
+/*
+ * The session's title takes only its text's width, so the top bar's room beside it moves the window too. The title
+ * opens its menu: its button lies over its text, and a desktop app reads drag regions in the page's order, so the
+ * text after the button would take it back for dragging. The whole title is not for dragging.
+ */
+:root:is([data-window-controls="left"], [data-window-controls="right"]) .topbar > .title {
+    flex: 0 1 auto;
+    margin-right: auto;
+    app-region: no-drag;
+}
+
+:root[data-window-controls="left"] [data-under-controls="bar"] {
+    padding-left: var(--controls-room) !important;
+}
+
+:root[data-window-controls="right"] [data-under-controls="bar"] {
+    padding-right: var(--controls-room) !important;
+}
+
+/* What is in a bar takes clicks and keys; the bar's empty room moves the window. */
+:root:is([data-window-controls="left"], [data-window-controls="right"])
+    :is(
+        button,
+        a,
+        input,
+        select,
+        textarea,
+        label,
+        summary,
+        [role="button"],
+        [tabindex],
+        [contenteditable]
+    ) {
+    app-region: no-drag;
+}
+
+[data-under-controls="push"] {
+    padding-top: var(--controls-room) !important;
+}
+
+:root[data-tiling="on"] .layout > [data-under-controls="push"] {
+    padding-top: 0 !important;
+    margin-top: var(--controls-room);
+    height: auto;
+}
+
+/*
+ * Tiled, the window whose bar runs under the buttons is cut around them: its border (and its focus ring) goes down,
+ * around the buttons, and back up its side, instead of under them. A browser without corner-shape keeps the corner.
+ */
+@supports (corner-shape: notch) {
+    :root[data-tiling="on"][data-window-controls="right"] .layout > [data-controls-notch] {
+        border-top-right-radius: var(--notch-w) var(--notch-h);
+        corner-top-right-shape: superellipse(-5);
+    }
+
+    :root[data-tiling="on"][data-window-controls="left"] .layout > [data-controls-notch] {
+        border-top-left-radius: var(--notch-w) var(--notch-h);
+        corner-top-left-shape: superellipse(-5);
+    }
+}
+
+/* The strip beside the buttons, over what starts below them: to move the window by. Under every layer of the app. */
+.window-drag {
+    position: fixed;
+    top: 0;
+    width: var(--drag-w);
+    height: var(--controls-h);
+    app-region: drag;
+    pointer-events: none;
+}
+
+:root[data-window-controls="left"] .window-drag {
+    left: 0;
+}
+
+:root[data-window-controls="right"] .window-drag {
+    right: 0;
+}
+
+/* Something over the app (a sheet's scrim, the launcher, a viewer, PiP) takes clicks under the strip too. */
+:is(.overlay, .launcher-overlay, .viewer, .lightbox, .pip-panel, .notices, .sheet-host > *) {
+    app-region: no-drag;
+}
+
 /* ─── Top bar ──────────────────────────────────────────────── */
 
 /*

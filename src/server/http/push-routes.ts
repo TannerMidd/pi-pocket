@@ -74,12 +74,15 @@ export async function pushRoutes(api: ApiRequest, action: string | undefined): P
     }
 
     if (action === "test") {
-        const sent = await store.notify(user.id, {
+        const test = {
             title: "Pi Pocket",
             body: `Notifications work on this device, ${user.name}.`,
             url: "/",
             tag: "test",
-        });
+        };
+        const sent =
+            (await store.notify(user.id, test)) +
+            app.notifyDesktops(user.id, { ...test, urgency: "normal" });
 
         if (sent === 0) {
             throw new HttpError(
