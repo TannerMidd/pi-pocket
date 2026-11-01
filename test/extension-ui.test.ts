@@ -1090,7 +1090,8 @@ test(
         const { render } = await import("preact");
         const host = globalThis.markdownTestHost ??= document.createElement("div");
         const fence = String.fromCharCode(96).repeat(3);
-        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(String.fromCharCode(10));
+        const newline = String.fromCharCode(10);
+        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(newline);
         document.body.append(host);
         render(pocket.h(pocket.Markdown, { text }), host);
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1125,10 +1126,13 @@ test(
         });
         const { render } = await import("preact");
         const fence = String.fromCharCode(96).repeat(3);
-        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(String.fromCharCode(10));
+        const newline = String.fromCharCode(10);
+        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(newline);
         render(pocket.h(pocket.Markdown, { text }), globalThis.markdownTestHost);
         await new Promise((resolve) => setTimeout(resolve, 20));
-        return JSON.stringify(globalThis.markdownTestHost.querySelector(".math-updated")?.dataset.source ?? null);
+        const updated = globalThis.markdownTestHost.querySelector(".math-updated");
+
+        return JSON.stringify(updated?.dataset.source ?? null);
     `);
 
         assert.equal(updated, "x+y", "an updated math renderer remounts existing Markdown");
@@ -1156,7 +1160,8 @@ test(
         const { render } = await import("preact");
         const host = globalThis.markdownTestHost;
         const fence = String.fromCharCode(96).repeat(3);
-        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(String.fromCharCode(10));
+        const newline = String.fromCharCode(10);
+        const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(newline);
         render(pocket.h(pocket.Markdown, { text }), host);
         await new Promise((resolve) => setTimeout(resolve, 20));
         const math = host.querySelector('code[data-part="inline-math"]');
