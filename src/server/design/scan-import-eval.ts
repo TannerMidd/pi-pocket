@@ -81,14 +81,14 @@ export function flatten(tree: Obj, into: Map<string, Entry>, budget: Budget): vo
                 continue;
             }
 
-            // A token past the budget is left out, and the scan must say that it did not read it.
-            if (budget.left <= 0) {
-                budget.over = true;
-
-                continue;
-            }
-
             if ("$value" in child || "value" in child) {
+                // A token past the budget is left out, and the scan must say that it did not read it.
+                if (budget.left <= 0) {
+                    budget.over = true;
+
+                    continue;
+                }
+
                 const type = textOr(child.$type, textOr(child.type, own));
 
                 budget.left -= 1;

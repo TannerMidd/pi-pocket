@@ -124,21 +124,20 @@ function readFacts(root: string, rendered?: Rendered): Facts {
             continue;
         }
 
-        if (text.length >= limit - 2000) {
-            try {
-                const size = lstatSync(full).size;
+        // The size on disk, not the text's length: a file of multibyte text is cut with fewer characters than bytes.
+        try {
+            const size = lstatSync(full).size;
 
-                if (size > limit) {
-                    // The rest of the file is not read, so a token after the cut may be in the code still.
-                    facts.partial = true;
-                    skip(
-                        facts,
-                        rel,
-                        `too large: read the first ${Math.round(limit / 1000)} KB of ${Math.round(size / 1000)} KB`,
-                    );
-                }
-            } catch {}
-        }
+            if (size > limit) {
+                // The rest of the file is not read, so a token after the cut may be in the code still.
+                facts.partial = true;
+                skip(
+                    facts,
+                    rel,
+                    `too large: read the first ${Math.round(limit / 1000)} KB of ${Math.round(size / 1000)} KB`,
+                );
+            }
+        } catch {}
 
         // Minified text is a build, not the design: it would only add a library's values.
         if (!rel.endsWith(".json") && isMinified(text)) {
