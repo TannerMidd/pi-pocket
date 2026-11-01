@@ -102,25 +102,28 @@ function convertInWorker(bytes: Uint8Array): Promise<Uint8Array> {
             workerData: { bytes },
             resourceLimits: { maxOldGenerationSizeMb: LIMIT.heapMb },
         });
-        const timer = setTimeout(() => {
-            reject(stopped);
-            void worker.terminate();
-        }, LIMIT.ms);
+        let outcome: { jpeg: Uint8Array } | { error: Error } | undefined;
+        const timer = setTimeout(() => void worker.terminate(), LIMIT.ms);
 
         worker.once("message", (reply: { jpeg?: Uint8Array; error?: string }) => {
-            if (reply.jpeg === undefined) {
-                reject(new Error(reply.error ?? "it is not a photo that can be converted"));
-            } else {
-                resolve(reply.jpeg);
-            }
+            outcome =
+                reply.jpeg === undefined
+                    ? { error: new Error(reply.error ?? "it is not a photo that can be converted") }
+                    : { jpeg: reply.jpeg };
+            void worker.terminate();
         });
-        worker.once("error", (error: Error & { code?: string }) =>
-            reject(error.code === "ERR_WORKER_OUT_OF_MEMORY" ? stopped : error),
-        );
-        // The first of these settles the promise: a worker that ends with no answer was stopped.
+        worker.once("error", (error: Error & { code?: string }) => {
+            outcome = { error: error.code === "ERR_WORKER_OUT_OF_MEMORY" ? stopped : error };
+        });
+        // Settled only once the worker is gone, so the next conversion never runs beside it.
         worker.once("exit", () => {
             clearTimeout(timer);
-            reject(stopped);
+
+            if (outcome !== undefined && "jpeg" in outcome) {
+                resolve(outcome.jpeg);
+            } else {
+                reject(outcome?.error ?? stopped);
+            }
         });
     });
 }

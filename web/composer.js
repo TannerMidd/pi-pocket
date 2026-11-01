@@ -133,7 +133,9 @@ function loadAttached(id) {
             name: attachment.name,
             size: attachment.size,
             state: "done",
-            preview: attachment.mime?.startsWith("image/") ? fileUrl(attachment.path) : null,
+            preview: /^image\/(?!heic|heif)/.test(attachment.mime ?? "")
+                ? fileUrl(attachment.path)
+                : null,
             attachment,
         }));
     } catch {
@@ -906,7 +908,9 @@ export function Composer() {
                 name: attachment.name,
                 size: attachment.size,
                 state: "done",
-                preview: attachment.mime.startsWith("image/") ? fileUrl(attachment.path) : null,
+                preview: /^image\/(?!heic|heif)/.test(attachment.mime)
+                    ? fileUrl(attachment.path)
+                    : null,
                 attachment,
             })),
             ...list,

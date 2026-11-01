@@ -491,7 +491,8 @@ function Item({ item, last, busy, conversationId }) {
             const [text, block] = splitAttachments(body);
             // Uploaded pictures also remain readable when the chosen model cannot take inline images.
             const files = attachedFiles(block);
-            const pictures = files.filter((file) => file.mime.startsWith("image/"));
+            // A browser cannot show a HEIC photo: it goes as a file.
+            const pictures = files.filter((file) => /^image\/(?!heic|heif)/.test(file.mime));
             const others = files.filter((file) => !pictures.includes(file));
 
             return html`<div class="pip-you">
