@@ -124,6 +124,7 @@ function renderMath(katex, source, display) {
     const html = katex.renderToString(source, {
         displayMode: display,
         throwOnError: true,
+        strict: "ignore",
         trust: false,
         maxExpand: 1_000,
         maxSize: 5,
