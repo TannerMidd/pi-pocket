@@ -13,9 +13,37 @@ const LIMIT = { ms: 30_000, heapMb: 512 };
 /** The most pixels a photo may have: decoded, 4 bytes each (64 million is 256 MB), so a tiny file cannot ask for more. */
 const MAX_PIXELS = 64_000_000;
 
-/** The most pixels any `ispe` (image spatial extent) box of a HEIF file names: a width and a height, 32 bits each. */
+/** The bytes of every top-level `meta` box of a HEIF file, which hold its `ispe` boxes (and not the image data). */
+function metaOf(view: Buffer): Buffer {
+    const found: Buffer[] = [];
+    let at = 0;
+
+    while (at + 16 <= view.length) {
+        const size = view.readUInt32BE(at);
+        const end =
+            size === 0
+                ? view.length
+                : size === 1
+                  ? at + Number(view.readBigUInt64BE(at + 8))
+                  : at + size;
+
+        if (view.toString("latin1", at + 4, at + 8) === "meta") {
+            found.push(view.subarray(at, end));
+        }
+
+        if (end <= at) {
+            break;
+        }
+
+        at = end;
+    }
+
+    return Buffer.concat(found);
+}
+
+/** The most pixels any `ispe` (image spatial extent) box in the `meta` box names: a width and a height, 32 bits each. */
 function pixelsOf(bytes: Uint8Array): number {
-    const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+    const view = metaOf(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length));
     let most = 0;
 
     for (let at = view.indexOf("ispe"); at !== -1; at = view.indexOf("ispe", at + 4)) {

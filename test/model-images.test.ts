@@ -121,6 +121,16 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
         // The photo with no `ispe` box that can be read: its size is not known.
         const unsized = Buffer.from(photo.toString("latin1").replaceAll("ispe", "xxxx"), "latin1");
 
+        // The same photo, with the bytes `ispe` and a huge size in a box after it, as they could be in its data.
+        const free = Buffer.alloc(28);
+
+        free.writeUInt32BE(28, 0);
+        free.write("freeispe", 4, "latin1");
+        free.writeUInt32BE(40000, 16);
+        free.writeUInt32BE(40000, 20);
+        writeFileSync(path, Buffer.concat([photo, free]));
+        assert.equal((await modelImage(path, "image/heic")).image.mimeType, "image/jpeg");
+
         for (const [bytes, message] of [
             [Buffer.from("....ftypheic not a photo at all"), /./],
             [photo.subarray(0, 300), /./],
