@@ -161,6 +161,21 @@ test(
         item.run();
     `);
         assert.deepEqual(await inPage(`return JSON.stringify(desktopTest.invoked)`), ["settings"]);
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "menu" })`);
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelectorAll(".sheet .group-title").length > 0)`,
+                ),
+            "the menu",
+        );
+        const groups = await inPage<string[]>(
+            `return JSON.stringify([...document.querySelectorAll(".sheet .group-title")].map((each) => each.textContent.trim()))`,
+        );
+
+        assert.equal(groups.at(-1), "Desktop", "the desktop app's items come last, below App");
+        assert.equal(groups.at(-2), "App");
+        await page.evaluate(`(await import("/store.js")).closeSheet()`);
         assert.equal(
             await inPage(`return JSON.stringify(desktopTest.pinned.at(-1)[0].state)`),
             "seen",

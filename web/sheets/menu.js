@@ -538,18 +538,6 @@ export function MenuSheet({ places = true }) {
                 )}
             </div>`
         }
-        ${(() => {
-            // The desktop app this page runs in adds its own items, such as its server settings (`desktop.js`).
-            const desktop = hostMenuItems();
-
-            return (
-                desktop.length > 0 &&
-                html`<div class="group">
-                    <div class="group-title">Desktop</div>
-                    ${desktop.map((each) => item(each.label, each.run, each.hint))}
-                </div>`
-            );
-        })()}
         <div class="group">
             <div class="group-title">App</div>
             ${item("Appearance", () => openSheet({ type: "appearance" }), lookLabel())}
@@ -591,5 +579,17 @@ export function MenuSheet({ places = true }) {
             }
             ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
         </div>
+        ${(() => {
+            // The desktop app this page runs in adds its own items at the end, below App, such as its server settings (`desktop.js`).
+            const desktop = hostMenuItems();
+
+            return (
+                desktop.length > 0 &&
+                html`<div class="group">
+                    <div class="group-title">Desktop</div>
+                    ${desktop.map((each) => item(each.label, each.run, each.hint))}
+                </div>`
+            );
+        })()}
     <//>`;
 }

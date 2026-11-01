@@ -24,7 +24,7 @@ window.pocketHost = {
     apiVersion: 1,
     capabilities: ["menu", "badge", "notify", "visibility", "pinned", "open"],
 
-    menuItems(), // [{ id, label, hint? }]: items for the app menu's Desktop group
+    menuItems(), // [{ id, label, hint? }]: items for the menu's Desktop group, at its end
     invoke(id), // one of them was chosen; false when it could not be done
     setBadge(count), // sessions that need you, as the home-screen icon counts them
     notify(message), // a notification for the app to show (below)
@@ -40,7 +40,7 @@ window.pocketHost = {
 
 | Capability   | What Pi Pocket does                                                                                                                                                                                                                                                                                                                          |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `menu`       | Shows `menuItems()` in a **Desktop** group at the top of the menu's App part. Choosing one calls `invoke(id)`. Pi Pocket GUI offers **Server settings…**.                                                                                                                                                                                    |
+| `menu`       | Shows `menuItems()` in a **Desktop** group at the end of the menu, below its App part. Choosing one calls `invoke(id)`. Pi Pocket GUI offers **Server settings…**.                                                                                                                                                                           |
 | `badge`      | Calls `setBadge(count)` instead of the Badging API whenever the count changes.                                                                                                                                                                                                                                                               |
 | `notify`     | Opens its event stream with `host=notify`. The server then sends this connection every notification it would push to the person (`desktop-notify`), and the page passes each to `notify(message)`.                                                                                                                                           |
 | `visibility` | Reads `visible()` with the page's own visibility: the page counts as hidden while either says so. It tells the server (`POST /api/visibility`), so the server knows the person is away and lets notifications through, and seen marks and peek tiles wait as they do in a hidden tab.                                                        |
