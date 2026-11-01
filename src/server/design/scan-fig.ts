@@ -43,6 +43,8 @@ export interface FigTokens {
     extra: Record<string, Obj>;
     /** How many tokens were read. */
     count: number;
+    /** True when the time ended the read: a variable or a style after the cut is not in the tokens. */
+    partial: boolean;
     /** What was read, what was not, and what was left out: one line for the report (untrusted text). */
     line: string;
 }
@@ -466,6 +468,7 @@ export function figTokens(
         dark: dropTypes(fill(darkChanges)),
         extra,
         count: progress.read,
+        partial: stopped,
         line: notes.join(" ").slice(0, 1200),
     };
 }
@@ -481,6 +484,9 @@ export function readFigInto(
     until: number = Date.now() + FIG_TIME_MS,
 ): void {
     if (Date.now() >= until) {
+        // A file that was not read may still define tokens: resync must not call them gone.
+        facts.partial = true;
+
         if (facts.skipped.length < 40) {
             facts.skipped.push({
                 path: file,
@@ -506,6 +512,8 @@ export function readFigInto(
                   ? error.message.replace(/\s+/g, " ").slice(0, 160)
                   : "unknown";
 
+        facts.partial = true;
+
         if (facts.skipped.length < 40) {
             facts.skipped.push({ path: file, why: `could not be read: ${reason}` });
         }
@@ -513,6 +521,7 @@ export function readFigInto(
         return;
     }
 
+    facts.partial ||= tokens.partial;
     facts.figs.push(tokens.line);
     facts.files.push(file);
     addFigImport(facts.imported, tokens);

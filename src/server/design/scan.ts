@@ -159,6 +159,10 @@ export function readFacts(
     // A design has one or two Figma files; a folder of many is a download folder, and only the best were read.
     const extraFigs = found.length - figs.length;
 
+    if (extraFigs > 0) {
+        facts.partial = true;
+    }
+
     if (extraFigs > 0 && facts.skipped.length < 40) {
         facts.skipped.push({
             path: `${extraFigs} Figma files`,
