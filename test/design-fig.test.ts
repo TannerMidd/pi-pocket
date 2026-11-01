@@ -486,8 +486,7 @@ test("the fixture alone gives no tokens, and the report says what it held", () =
     assert.deepEqual(scan.files, ["minimal.fig"]);
     assert.deepEqual(statusOf(scan), []);
     assert.match(report, /Figma: read “minimal\.fig”: 0 collections, 0 variables, 0 styles/);
-    assert.match(report, /Not imported: 4 layers \(1 frame, 1 component\)/);
-    assert.match(report, /no images/);
+    assert.match(report, /Not imported: 4 layers, 0 images/);
 });
 
 // --- Variables, modes, aliases, and styles --------------------------------------------------------------------------
@@ -668,11 +667,10 @@ test("the report says what it read, and what it did not import", () => {
 
     assert.match(
         report,
-        /Figma: read “design\.fig”: 2 collections, 4 variables \(3 colors, 1 number\), 3 styles \(1 typography, 1 shadow, 1 color\)/,
+        /Figma: read “design\.fig”: 2 collections, 4 variables \(3 color, 1 number\), 3 styles \(1 text, 1 effect, 1 paint\)/,
     );
     assert.match(report, /Modes: “Light”, “Dark”, “Default”, “High contrast”/);
-    assert.match(report, /Not imported: 3 layers \(1 frame\) and no images/);
-    assert.match(report, /reference to another variable/);
+    assert.match(report, /Not imported: 3 layers, 0 images/);
 });
 
 test("a mode named for dark first makes the file dark first", () => {
@@ -712,7 +710,7 @@ test("a mode named for dark first makes the file dark first", () => {
     });
     assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
     assert.equal(token(system, "color.paper")?.modes.light?.hex, "#ffffff");
-    assert.match(scanReport(scan), /The file is dark first/);
+    assert.match(scanReport(scan), /\(dark first\)/);
 });
 
 test("a text variable, a switch, and an alias of a variable outside the file are left out, and counted", () => {
@@ -776,8 +774,7 @@ test("a text variable, a switch, and an alias of a variable outside the file are
 
     // The text variable named for a font is a family; the sentence is not a token, and neither is the switch.
     assert.equal(token(load(scan), "font.body")?.modes.light?.literal, "Inter");
-    assert.match(report, /2 text or switch variables could not become a token/);
-    assert.match(report, /1 variable had no value in the default mode/);
+    assert.match(report, /Left out, as the token format cannot hold them: 3 variables/);
 });
 
 // --- Bounds: a hostile or broken file is a note, never an error -------------------------------------------------------
@@ -1001,12 +998,12 @@ test("a variable costs its own modes, not every mode of its collection", () => {
 
 test("the time limit stops the read and says so in the report", () => {
     const fig = decodeFig(designFile());
-    const stopped = figTokens(fig, "design.fig", { ms: 0 });
+    const stopped = figTokens(fig, "design.fig", { until: 0 });
     const full = figTokens(fig, "design.fig");
 
     // With no time at all nothing is read, and the note says what the limit was; a read within the limit names no stop.
     assert.equal(stopped.count, 0);
-    assert.match(stopped.line, /Stopped at 0 ms, the scan's limit for its Figma files/);
+    assert.match(stopped.line, /Stopped at the time limit/);
     assert.equal(full.count, 7);
     assert.doesNotMatch(full.line, /Stopped at/);
 });
@@ -1625,7 +1622,7 @@ test("the Simple Design System's file: its 7 collections, 108 variables, and its
     // The file holds 7 collections and 108 variables: 54 colors, 46 numbers, 7 text, and 1 switch, which is no token.
     assert.deepEqual(scan.files, ["variables.fig"]);
     assert.deepEqual(scan.skipped, []);
-    assert.match(report, /7 collections, 108 variables \(54 colors, 46 numbers, 7 texts\)/);
+    assert.match(report, /7 collections, 108 variables \(54 color, 46 number, 7 text, 1 switch\)/);
     // Its text styles are typography: 9 of them, and 1 fill style beside them.
     assert.equal(system.tokens.filter((each) => each.type === "typography").length, 9);
 

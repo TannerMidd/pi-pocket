@@ -92,8 +92,7 @@ export function importTokens(into: Imported, file: string, source: string): void
     }
 }
 
-// A group of the default tree that a later source adds to (a path that is there stays as it is).
-export function addTo(target: Obj, source: Obj): void {
+function addTo(target: Obj, source: Obj): void {
     for (const [key, value] of Object.entries(source)) {
         const have = target[key];
 
@@ -111,7 +110,7 @@ interface StudioSource {
     themes: unknown[];
 }
 
-function addFound(into: Imported, found: Found, count: number, files: string[]): void {
+export function addFound(into: Imported, found: Found, count: number, files: string[]): void {
     addTo(into.default, found.default);
     addTo(into.dark, found.dark);
 

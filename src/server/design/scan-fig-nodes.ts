@@ -352,10 +352,10 @@ const STYLES = {
     FILL: [paintOf, "color"],
 } as const;
 
-/** `left` counts the styles that make no token, by kind. */
-export function stylesOf(nodes: Obj[]): { styles: FigStyle[]; left: Map<string, number> } {
+/** `left` counts the styles that make no token. */
+export function stylesOf(nodes: Obj[]): { styles: FigStyle[]; left: number } {
     const styles: FigStyle[] = [];
-    const left = new Map<string, number>();
+    let left = 0;
 
     for (const node of nodes) {
         const kind = asText(node.styleType).toUpperCase();
@@ -369,9 +369,7 @@ export function stylesOf(nodes: Obj[]): { styles: FigStyle[]; left: Map<string, 
         const token = style?.[0](node);
 
         if (style === undefined || token === undefined) {
-            const key = kind.toLowerCase() || "other";
-
-            left.set(key, (left.get(key) ?? 0) + 1);
+            left += 1;
 
             continue;
         }
