@@ -47,7 +47,7 @@ test("workspace providers fail closed and preserve registration ownership", asyn
         assert.equal(app.envFor(session.id), env2);
         second();
         assert.throws(() => app.envFor(session.id), /provider/i);
-        await assert.rejects(app.resolveCwd("removed://host/path"), /provider/i);
+        await assert.rejects(app.resolveCwd("removed://host/path"), { status: 400 });
     } finally {
         first();
         second();

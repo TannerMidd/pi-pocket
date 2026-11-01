@@ -1530,15 +1530,21 @@ export class PocketApp {
 
         const registration = this.#workspaceProviders.get(scheme)?.at(-1);
 
+        // 400, not 503: an unknown scheme and a provider module that is off look the same here, and only the owner
+        // can fix either one. A retry does not help.
         if (registration === undefined) {
-            throw new Error(`No workspace provider is registered for URI scheme ${scheme}`);
+            throw new HttpError(
+                400,
+                `No workspace provider is registered for URI scheme ${scheme}`,
+            );
         }
 
         signal?.throwIfAborted();
         const canonical = await registration.provider.resolveCwd(cwd, signal);
 
         if (this.#workspaceProviders.get(scheme)?.at(-1)?.token !== registration.token) {
-            throw new Error(
+            throw new HttpError(
+                409,
                 `Workspace provider ${scheme} changed while resolving the workspace URI`,
             );
         }
