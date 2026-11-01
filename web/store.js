@@ -3,7 +3,7 @@ import { onRoute, pushRoute } from "./back.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
 import { fitClock, moment } from "./clock.js";
-import { fingerprint } from "./fingerprint.js";
+import { fingerprint } from "./text-hash.js";
 import * as disk from "./session-cache.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */

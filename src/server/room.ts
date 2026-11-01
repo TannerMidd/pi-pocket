@@ -65,7 +65,7 @@ import {
     turnStart,
 } from "./projection.ts";
 import { describeRepeat } from "./when.ts";
-import { fingerprint } from "../../web/fingerprint.js";
+import { fingerprint } from "../../web/text-hash.js";
 
 const context = BACKGROUND_CONTEXT;
 
