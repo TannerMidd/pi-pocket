@@ -301,7 +301,6 @@ test(
             "the conversation's top bar",
         );
 
-        // On the left, the sidebar is under the buttons. It has no bar: it starts below them, and is not cut.
         await page.evaluate(`
         overlayTest.visible = true;
         overlayTest.side = "left";
@@ -318,8 +317,6 @@ test(
             "the sidebar starts below left window controls",
         );
 
-        // On the right, the conversation's top bar is: its window is cut around them. A window cut on the left is
-        // the same, mirrored.
         await page.evaluate(`
         overlayTest.side = "right";
         overlayTest.dispatchEvent(new Event("geometrychange"));
@@ -340,7 +337,6 @@ test(
             "the window under right window controls is cut around them",
         );
 
-        // The subagents board takes the conversation's place: its bar makes room before the frame that shows it.
         const frames = await inPage<string[]>(`
             const seen = [];
             const look = () => {
@@ -408,7 +404,6 @@ test(
             });
         `;
 
-        // In a browser tab there is no window to move: nothing is a drag region.
         const tab = await inPage<Record<string, string | boolean>>(regions);
 
         assert.equal(tab.topbar, "none");
