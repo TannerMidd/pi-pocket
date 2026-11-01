@@ -250,6 +250,34 @@ test("tasks that end together cost Pi one message, and a card each", { skip }, a
     await until(() => !app.isBusy(id), "Pi to answer the message");
 });
 
+test("a task in a batch a crash cut off goes in no other batch (#254)", { skip }, async () => {
+    const id = await session();
+    const first = await app.background.start(id, { command: "echo first" });
+    const told = async (taskId: string) =>
+        (await items(id)).find((item) => item.id === taskId)?.toldAt !== undefined;
+
+    await until(() => told(first.id), "the first message");
+    await until(() => !app.isBusy(id), "Pi to answer it");
+    // As a crash leaves it: the batch saved and sent, the task not yet marked.
+    await app.harness.commit(async (tx) => {
+        const stored = (await tx.doc(BackgroundDoc, id)).items[first.id]!;
+
+        delete stored.toldAt;
+        stored.untold = true;
+        stored.batch = `background:${first.id}`;
+    }, context);
+
+    const second = await app.background.start(id, { command: "echo second" });
+
+    await until(() => told(second.id), "the second message");
+    assert.equal(
+        (await userTexts(id)).filter((text) => text.includes(`[background] Task ${first.id} `))
+            .length,
+        1,
+    );
+    await until(() => !app.isBusy(id), "Pi to answer it");
+});
+
 test("a task told before 0.28 is not told again when the next one ends", { skip }, async () => {
     const id = await session();
     const old = await app.background.start(id, { command: "echo old" });

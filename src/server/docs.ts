@@ -541,6 +541,8 @@ export type BackgroundTask = {
      * `toldAt`) is not told again.
      */
     untold?: true;
+    /** The request id of the message that tells it, saved before that message is sent, until it is told. */
+    batch?: string;
     /** Whether Pi gets a message when it ends: false for one Pi stopped itself, which needs no message. */
     notify: boolean;
     /** Whom Pi worked for when it started the command: its message goes out as their work. */
