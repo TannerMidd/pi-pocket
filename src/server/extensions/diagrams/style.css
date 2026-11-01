@@ -24,7 +24,7 @@
     overflow-x: auto;
 }
 
-.pocket-diagrams-math {
+.md code.pocket-diagrams-math {
     background: transparent;
     border: 0;
     color: inherit;
@@ -33,7 +33,7 @@
     white-space: normal;
 }
 
-.pocket-diagrams-math-display,
+.md code.pocket-diagrams-math-display,
 .pocket-diagrams-math-fence {
     display: block;
     max-width: 100%;
