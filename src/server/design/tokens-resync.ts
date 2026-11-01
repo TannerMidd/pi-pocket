@@ -13,7 +13,8 @@
  *   there.
  * - A token path that the system has and the scan no longer finds is LISTED as not in the code now, and never deleted. A
  *   path that the engine drops (it fails in a mode) is kept the same way and is not listed: there is no resolved token to
- *   compare with the code.
+ *   compare with the code. A scan that read only part of the project lists it as not seen in this scan, because a file
+ *   that the scan left out may still define it.
  * - Guidelines and components are never touched.
  *
  * `planResync` is pure. `resyncChange` builds the one `SystemChange` that `writeDesignSystem` applies, so the checks run
@@ -421,6 +422,8 @@ export interface ResyncReportInput {
     path: string;
     /** How many style files the scan read. */
     files: number;
+    /** True when the scan read only part of the project: a token it did not see may still be in the code. */
+    partial: boolean;
     /** True when the change was written; false for a dry run. */
     saved: boolean;
     plan: ResyncPlan;
@@ -434,8 +437,10 @@ export function resyncReport(input: ResyncReportInput): string {
     const { plan } = input;
     const count = (value: number, one: string, many = `${one}s`) =>
         `${value} ${value === 1 ? one : many}`;
+    // A scan that read only part of the project cannot say that the code dropped a token: it did not see it.
+    const unseen = input.partial ? "not seen in this scan" : "not in the code now";
     const lines = [
-        `Resync of "${line(input.name)}" with the code in ${line(input.path)}: ${input.saved ? `${plan.added.length} added` : `${plan.added.length} to add`}, ${plan.kept} kept as they are, ${count(plan.differs.length, "differs", "differ")} from the code, ${plan.gone.length} not in the code now.`,
+        `Resync of "${line(input.name)}" with the code in ${line(input.path)}: ${input.saved ? `${plan.added.length} added` : `${plan.added.length} to add`}, ${plan.kept} kept as they are, ${count(plan.differs.length, "differs", "differ")} from the code, ${plan.gone.length} ${unseen}.`,
         `The scan read ${count(input.files, "file")} and found ${count(plan.scanned, "token")}.`,
     ];
     const blocks: string[] = [];
@@ -469,7 +474,7 @@ export function resyncReport(input: ResyncReportInput): string {
         ),
     );
     list(
-        "Not in the code now",
+        input.partial ? "Not seen in this scan" : "Not in the code now",
         plan.gone.map((token) => token),
     );
     list(
@@ -480,7 +485,12 @@ export function resyncReport(input: ResyncReportInput): string {
     const note = [
         "Not synced: the scan reads the style files only.",
         "Components and guidelines are not touched.",
-        "A token that people made by hand is listed as not in the code now, and it is kept; a value that people changed is listed as differing, and it is kept too.",
+        ...(input.partial
+            ? [
+                  "The scan read only part of the project, so a token that it did not see may still be in the code: those are listed as not seen in this scan.",
+              ]
+            : []),
+        `A token that people made by hand is listed as ${unseen}, and it is kept; a value that people changed is listed as differing, and it is kept too.`,
         "resync never deletes or rewrites a token.",
         ...(plan.modesNotAdded.length === 0
             ? []

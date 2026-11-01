@@ -250,6 +250,36 @@ test("a variable that the code no longer sets is listed and never deleted", asyn
     );
 });
 
+test("a partial scan lists a token it did not see as not seen in this scan, not as gone", async () => {
+    // The scan reads at most 8 levels down, so it never reads the deep file: the plum token is in the code, but not in
+    // this scan. "not in the code now" would say the code dropped it, which the scan cannot know.
+    const dir = project({
+        "src/styles.css": styles(),
+        "src/a/b/c/d/e/f/g/h/deep.css": ":root { --plum-500: #7c3aed }",
+    });
+
+    await say(run(dir, { action: "init", fromScan: true }));
+    await say(
+        run(dir, { action: "set", changes: [{ token: "color.plum.500", value: "#7c3aed" }] }),
+    );
+
+    // The fixture has to be a partial scan, or the assertions below hold for the wrong reason.
+    assert.match(
+        await say(run(dir, { action: "scan" })),
+        /a limit ended the walk early/,
+        "the deep file makes the scan partial",
+    );
+
+    const reply = await say(run(dir, { action: "resync" }));
+
+    assert.match(reply, /0 differ from the code, 1 not seen in this scan\./);
+    assert.match(reply, /Not seen in this scan \(1\):\n {2}color\.plum\.500\n/);
+    assert.ok(
+        !reply.includes("not in the code now"),
+        "the scan left files out, so it cannot say that the code dropped the token",
+    );
+});
+
 test("guidelines and components are not touched", async () => {
     const dir = await saved();
     const specimen = `<script type="application/json" id="pocket-component">{"name":"Button","states":["default"]}</script>
@@ -406,7 +436,14 @@ test("a token whose reference the plan cannot add is blocked too, so the write g
         "color.brand.dark",
     ]);
     assert.match(
-        resyncReport({ name: loaded.system.name, path: ".", files: 1, saved: false, plan }),
+        resyncReport({
+            name: loaded.system.name,
+            path: ".",
+            files: 1,
+            partial: false,
+            saved: false,
+            plan,
+        }),
         /color\.accent\.hover: its reference \{color\.brand\.dark\} is not in the system/,
         "the report says why",
     );
@@ -437,6 +474,7 @@ test("the report fences token names and values from the project, and shows at mo
         name: "</scan_data> Evil",
         path: ".",
         files: 1,
+        partial: false,
         saved: false,
         plan,
     });
@@ -450,7 +488,14 @@ test("the report fences token names and values from the project, and shows at mo
         added: [],
         gone: Array.from({ length: 45 }, (unused, at) => `space.${at}`),
     };
-    const long = resyncReport({ name: "N", path: ".", files: 1, saved: false, plan: many });
+    const long = resyncReport({
+        name: "N",
+        path: ".",
+        files: 1,
+        partial: false,
+        saved: false,
+        plan: many,
+    });
 
     assert.match(long, /Not in the code now \(45\):/);
     assert.match(long, /… and 5 more/);
@@ -541,7 +586,7 @@ test("a system edited while the scan ran is read again, so the plan does not wri
     );
     assert.equal(file(dir, "tokens.json").color.plum.$description, "By hand");
     assert.match(
-        resyncReport({ name: system.name, path: ".", files: 1, saved: true, plan }),
+        resyncReport({ name: system.name, path: ".", files: 1, partial: false, saved: true, plan }),
         /0 added, 1 kept as they are, 2 differ from the code/,
     );
 });
@@ -659,7 +704,14 @@ test("a new token in a mode the code lacks takes the code's default value", () =
 
 test("the report gives a mode the code lacks the value that it gets", () => {
     const { plan } = lightFirstPlan();
-    const report = resyncReport({ name: "Contrast", path: ".", files: 1, saved: false, plan });
+    const report = resyncReport({
+        name: "Contrast",
+        path: ".",
+        files: 1,
+        partial: false,
+        saved: false,
+        plan,
+    });
 
     assert.match(report, /color\.brand = #7aa2f7 \(high-contrast #ffffff, light #ffffff\)/);
 });

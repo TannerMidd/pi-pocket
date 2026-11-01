@@ -521,6 +521,7 @@ export function designSystemTool(): ToolRegistration {
                         name: current.name,
                         path,
                         files: scan.files.length,
+                        partial: scan.partial,
                         saved: args.apply === true,
                         plan,
                     });
