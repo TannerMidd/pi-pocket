@@ -20,6 +20,7 @@ import { ChatDoc, type Lesson, MemoryDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { INVISIBLE_CLASS } from "./fence.ts";
 import { git } from "./git.ts";
+import { workspaceScheme } from "./paths.ts";
 import { snippet } from "./projection.ts";
 
 const context: Context = BACKGROUND_CONTEXT;
@@ -95,6 +96,11 @@ const ordered = (lessons: Lesson[]) =>
 
 /** The project a folder belongs to: its repository's shared git folder, or the folder itself. */
 async function projectOf(cwd: string): Promise<Project> {
+    // A workspace URI names a folder on another machine: it is its own project, with no git here.
+    if (workspaceScheme(cwd) !== undefined) {
+        return { key: cwd, name: named(basename(cwd), cwd) };
+    }
+
     const folder = await realpath(cwd).catch(() => resolve(cwd));
     const common = await git(folder, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .catch(() => git(folder, ["rev-parse", "--git-common-dir"]))

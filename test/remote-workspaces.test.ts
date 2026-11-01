@@ -288,6 +288,8 @@ test("a remote session refuses what would act on this machine: a task and a file
         const id = await newSession(app, uri);
 
         await assert.rejects(app.background.start(id, { command: "pwd" }), /remote workspaces/);
+        await assert.rejects(app.watches.start(id, owner(app).id), /remote workspaces/);
+        assert.equal((await app.memory.project(id, undefined))?.key, uri);
         await say(app, id, "publish");
         assert.equal(
             (await modelTexts(app, id)).filter((t) => /not on this machine/.test(t)).length,

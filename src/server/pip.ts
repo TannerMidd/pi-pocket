@@ -1146,7 +1146,11 @@ export class Pip {
         folders.add(app.defaultCwd);
 
         for (const folder of [clone, ...[...folders].slice(0, 200)]) {
-            if (existsSync(folder) && sameRepo(await this.#origin(folder), info.repo)) {
+            if (
+                app.workspaceScheme(folder) === undefined &&
+                existsSync(folder) &&
+                sameRepo(await this.#origin(folder), info.repo)
+            ) {
                 return (
                     await git(folder, ["rev-parse", "--show-toplevel"]).catch(() => folder)
                 ).trim();

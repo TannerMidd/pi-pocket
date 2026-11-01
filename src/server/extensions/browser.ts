@@ -9,9 +9,10 @@ import { awaitWithContext } from "@earendil-works/chord/context";
 import { type ImageContent, StringEnum, type TextContent, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
-import { displayUrl, normalizeUrl } from "../browser/urls.ts";
+import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
 import { presetOf, viewportFrom } from "../browser/viewport.ts";
 import type { PocketHost } from "../host.ts";
+import { workspaceScheme } from "../paths.ts";
 
 const ACTIONS = [
     "navigate",
@@ -212,6 +213,10 @@ export default function createBrowser(host: PocketHost) {
                         throw new Error(
                             `"${args.url}" is not an address the browser opens: give an http(s) URL, host:port, or a file path.`,
                         );
+                    }
+
+                    if (url.startsWith("file:") && workspaceScheme(cwd) !== undefined) {
+                        throw new Error(REMOTE_FILES);
                     }
 
                     const result = await run(
