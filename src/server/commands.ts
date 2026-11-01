@@ -344,6 +344,7 @@ export class Commands {
     readonly #app: PocketApp;
     /** In-flight idle compaction tasks by conversation ID, so concurrent submissions share the same compaction. */
     readonly #activeCompaction = new Map<ConversationId, Promise<void>>();
+    readonly #pendingIdle = new Map<ConversationId, Set<() => void>>();
     /**
      * Follows a person's message to a failed subagent to its end and settles the failure by it (`settle`): a task of the
      * parent's, beside its work, so a restart before the run ends still settles it, as the subagent's reports do Pi's
@@ -898,18 +899,46 @@ export class Commands {
 
         // Idle compaction: only for fresh direct messages, and never when interrupting a running conversation.
         if (!known && request.mode !== "interrupt" && via === undefined) {
-            await this.#compactAfterPause(id, user);
+            let stopped = false;
+            let cancel!: () => void;
+            const cancelled = new Promise<void>((resolve) => {
+                cancel = () => {
+                    stopped = true;
+                    resolve();
+                };
+            });
+            const pending = this.#pendingIdle.get(id) ?? new Set<() => void>();
 
-            // Re-check deduplication: if a duplicate retry raced and was admitted while we waited for compaction,
-            // return its submission immediately to prevent duplicate side effects or double submission.
-            existing = await app.harness.commit(
-                (tx) => tx.submissionByRequest(id, requestId),
-                context,
-            );
-            known = app.pip.ownerOf(id) === undefined && existing !== undefined;
+            pending.add(cancel);
+            this.#pendingIdle.set(id, pending);
 
-            if (known && existing !== undefined) {
-                return { submissionId: existing.id, requestId };
+            try {
+                await Promise.race([this.#compactAfterPause(id, user), cancelled]);
+
+                if (!stopped) {
+                    existing = await app.harness.commit(
+                        (tx) => tx.submissionByRequest(id, requestId),
+                        context,
+                    );
+                }
+
+                if (stopped) {
+                    admission?.afterSubmit();
+
+                    throw new HttpError(409, "Message stopped; your draft was kept.");
+                }
+
+                known = app.pip.ownerOf(id) === undefined && existing !== undefined;
+
+                if (known && existing !== undefined) {
+                    return { submissionId: existing.id, requestId };
+                }
+            } finally {
+                pending.delete(cancel);
+
+                if (pending.size === 0) {
+                    this.#pendingIdle.delete(id);
+                }
             }
         }
 
@@ -1292,11 +1321,18 @@ export class Commands {
 
         app.requireSee(user, id);
         app.requireSteer(user);
+
+        for (const cancel of this.#pendingIdle.get(id) ?? []) {
+            cancel();
+        }
+
         const conversation = await app.conversation(id);
 
-        // Do not abort idle compaction: wait for it to complete.
+        // A stopped message must not cancel the compaction it was waiting for.
         if (this.#activeCompaction.has(id) || app.isCompacting(id)) {
-            await this.#waitForIdleCompaction(id);
+            await this.#discardReports(id);
+
+            return;
         }
 
         const busy = app.isBusy(id);

@@ -11,6 +11,7 @@ import {
     scriptedModel,
 } from "./helpers.ts";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { InboxDoc } from "@earendil-works/pi-durable";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -46,6 +47,11 @@ test("a message after an idle hour compacts first; a prompt one does not", async
     clock += 61 * 60 * 1000;
     await say(app, id, "back again");
     assert.notEqual(await head(id), before, "an idle hour compacts the context");
+    assert.equal(
+        (await app.harness.snapshot(InboxDoc, id, context))?.items.length ?? 0,
+        0,
+        "the sent message no longer appears in the inbox",
+    );
 });
 
 test("a small context is left as it is", async () => {
@@ -265,7 +271,7 @@ test("interrupt waits for active compaction and admits the interrupt message", a
 });
 
 for (const action of ["interrupt", "stop"] as const) {
-    test(`${action} waits when idle compaction has not started its task`, async () => {
+    test(`${action} during idle compaction before task creation`, async () => {
         const id = await newSession(app);
 
         await say(app, id, "x".repeat(80_000));
@@ -273,8 +279,10 @@ for (const action of ["interrupt", "stop"] as const) {
         const original = app.conversation.bind(app);
         let entered!: () => void;
         let release!: () => void;
+        let finished!: () => void;
         const beforeTask = new Promise<void>((resolve) => (entered = resolve));
         const gate = new Promise<void>((resolve) => (release = resolve));
+        const afterTask = new Promise<void>((resolve) => (finished = resolve));
         let taskId:
             Awaited<ReturnType<Awaited<ReturnType<typeof original>>["compact"]>> | undefined;
         let abortedBeforeCompletion = false;
@@ -294,6 +302,7 @@ for (const action of ["interrupt", "stop"] as const) {
                     const receipt = await app.harness.waitForTask(taskId, context);
 
                     completed = receipt.state.outcome.status === "completed";
+                    finished();
 
                     return taskId;
                 };
@@ -309,10 +318,13 @@ for (const action of ["interrupt", "stop"] as const) {
         };
 
         try {
-            const pending = app.commands.submit(id, owner(app), {
-                text: "message before compaction",
-                requestId: crypto.randomUUID(),
-            });
+            const requestId = crypto.randomUUID();
+            const pending = app.commands
+                .submit(id, owner(app), { text: "message before compaction", requestId })
+                .then(
+                    (submission) => ({ submission, error: undefined }),
+                    (error: unknown) => ({ submission: undefined, error }),
+                );
 
             await beforeTask;
             let settled = false;
@@ -330,16 +342,38 @@ for (const action of ["interrupt", "stop"] as const) {
 
             // Give the operation time to reach the wait while task creation is held.
             await new Promise((resolve) => setTimeout(resolve, 50));
-            assert.equal(settled, false, "the operation waits for compaction");
+            assert.equal(settled, action === "stop", "Stop returns without cancelling compaction");
             assert.equal(abortedBeforeCompletion, false);
             release();
-            const [submission] = await Promise.all([pending, operation]);
+            const [result] = await Promise.all([pending, operation]);
 
-            assert.ok(submission.submissionId, "the pending message is admitted after compaction");
+            await afterTask;
+            await app.harness.waitForIdle(context);
             assert.ok(taskId !== undefined, "the idle compaction task started");
             assert.equal(completed, true, "the compaction task completed");
             assert.equal(abortedBeforeCompletion, false, "abort did not cancel compaction");
-            await app.harness.waitForIdle(context);
+
+            if (action === "stop") {
+                assert.match(String(result.error), /Message stopped/);
+                const submitted = await app.harness.commit(
+                    (tx) => tx.submissionByRequest(id, requestId),
+                    context,
+                );
+
+                assert.equal(
+                    submitted,
+                    undefined,
+                    "Stop prevents the pending message from being sent",
+                );
+            } else {
+                assert.ok(result.submission?.submissionId, "the pending message is sent");
+            }
+
+            assert.equal(
+                (await app.harness.snapshot(InboxDoc, id, context))?.items.length ?? 0,
+                0,
+                "no sent or stopped message remains in the inbox",
+            );
         } finally {
             release();
             app.conversation = original;
@@ -347,7 +381,7 @@ for (const action of ["interrupt", "stop"] as const) {
     });
 }
 
-test("stop waits for active compaction", async () => {
+test("stop does not abort active compaction", async () => {
     const id = await newSession(app);
 
     await say(app, id, "x".repeat(80_000));
@@ -355,6 +389,7 @@ test("stop waits for active compaction", async () => {
     const taskId = await conv.compact(undefined, context);
 
     await app.commands.abort(id, owner(app));
+    await app.harness.waitForTask(taskId, context);
 
     const task = await app.harness.getTask(taskId, context);
 
