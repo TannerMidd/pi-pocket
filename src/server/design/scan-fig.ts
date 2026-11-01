@@ -14,7 +14,6 @@ import { type FigDecoded, decodeFig, readFigBytes } from "./scan-fig-container.t
 import { FIG_LIMITS, FigError } from "./scan-fig-kiwi.ts";
 import {
     FONT_NAME,
-    RESERVED,
     type FigVariable,
     type Named,
     typeOf,
@@ -30,6 +29,7 @@ import {
 import { type Imported, addTo } from "./scan-import.ts";
 import { assemble, type Progress, dropTypes, hoistTypes, rewrite } from "./scan-tree.ts";
 import { type Obj } from "./scan-colors.ts";
+import { RESERVED } from "./tokens-base.ts";
 
 /** The tokens of one `.fig`, and what the report says about it. */
 export interface FigTokens {
