@@ -84,8 +84,15 @@ export function bindHost(mode: AccessMode): string {
     return "127.0.0.1";
 }
 
-/** Where the server listens: `--host` when it is given, with any mode, as in 0.27; else the mode's own address. */
+/**
+ * Where the server listens: `--host` when it is given, with any mode, as in 0.27; else the mode's own address. The one
+ * exception is `tailscale-serve`, which `--help` says always listens on loopback because tailscaled reaches it there.
+ */
 export function listenHost(mode: AccessMode | "custom", host: string | undefined): string {
+    if (mode === "tailscale-serve") {
+        return "127.0.0.1";
+    }
+
     return host ?? (mode === "custom" ? "127.0.0.1" : bindHost(mode));
 }
 
