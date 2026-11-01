@@ -414,3 +414,162 @@ test("a session that started others shows what counts against its limit: theirs 
 
     assert.equal(row?.spent, 0.75);
 });
+
+const stop = (id: ConversationId, to: string, key: string = crypto.randomUUID()) =>
+    app.linkedSessions.stop(id, { to }, key);
+const archive = (
+    id: ConversationId,
+    to: string,
+    archived?: boolean,
+    key: string = crypto.randomUUID(),
+) => app.linkedSessions.archive(id, { to, ...(archived === undefined ? {} : { archived }) }, key);
+
+test("stop ends a linked session's run and does nothing when it is idle", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1 && !app.isBusy(target), "the first answer");
+    assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
+    assert.deepEqual(await stop(id, address, "idle-once"), { busy: false });
+
+    // Far longer than the wait below: stop has to end the run, because it does not finish by itself.
+    const hanging = scriptedModel((request) => {
+        const { text } = lastText(request as never);
+
+        if (text.includes("STREAM_A_WHILE")) {
+            return fauxAssistantMessage([fauxText("word ".repeat(80_000))]);
+        }
+
+        return fauxAssistantMessage([fauxText("Done.")]);
+    });
+    const isolated = await openApp(hanging, join(root, "stop-data"));
+
+    try {
+        const origin = await newSession(isolated);
+
+        await say(isolated, origin, "hello");
+        const { session, address: to } = await isolated.linkedSessions.start(
+            origin,
+            { message: "STREAM_A_WHILE" },
+            "hang",
+        );
+
+        await until(() => isolated.isBusy(session), "the run to start");
+        const started = Date.now();
+
+        assert.deepEqual(await isolated.linkedSessions.stop(origin, { to }, "stop-once"), {
+            busy: true,
+        });
+        await until(() => !isolated.isBusy(session), "the run to stop");
+        assert.ok(
+            Date.now() - started < 8_000,
+            "the run stopped, rather than streaming to its end",
+        );
+        // The same key stops nothing again, and still says the first call found it working.
+        assert.deepEqual(await isolated.linkedSessions.stop(origin, { to }, "stop-once"), {
+            busy: true,
+        });
+        assert.equal(isolated.isBusy(session), false);
+    } finally {
+        await isolated.close();
+    }
+});
+
+test("archive hides a linked session and a repeat does not bring it back", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1, "the first message");
+    const first = await archive(id, address, undefined, "archive-once");
+
+    assert.deepEqual(first, { archived: true, repeating: 0 });
+    assert.equal(app.sessionMeta(target)?.archived, true);
+    assert.equal(
+        (await app.linkedSessions.list(id)).find((each) => each.address === address)?.archived,
+        true,
+    );
+    // Someone brings it back. The repeated key still returns the first result and leaves it back.
+    await app.commands.updateSession(target, owner(app), { archived: false });
+    assert.deepEqual(await archive(id, address, undefined, "archive-once"), first);
+    assert.equal(app.sessionMeta(target)?.archived, false);
+
+    assert.deepEqual(await archive(id, address, false, "unarchive"), {
+        archived: false,
+        repeating: 0,
+    });
+    await archive(id, address, true, "hide");
+    assert.deepEqual(await archive(id, address, false, "show"), { archived: false, repeating: 0 });
+    assert.equal(app.sessionMeta(target)?.archived, false);
+});
+
+test("a linked session cannot stop or archive a session outside its team", async () => {
+    const id = await source();
+    const other = await source();
+    const { session: target, address } = await start(id);
+    const stranger = await start(other);
+
+    await until(async () => (await sent(target)) === 1, "the first message");
+    const [child] = await app.linkedSessions.list(id);
+
+    // The address belongs to the source. The linked session does not have it, and neither does another team.
+    await assert.rejects(stop(target, address), /No linked session has that address/);
+    await assert.rejects(archive(target, address), /No linked session has that address/);
+    await assert.rejects(stop(other, child!.address), /No linked session has that address/);
+    await assert.rejects(archive(other, child!.address), /No linked session has that address/);
+    await assert.rejects(stop(id, stranger.address), /No linked session has that address/);
+    await assert.rejects(archive(id, stranger.address), /No linked session has that address/);
+    assert.notEqual(app.sessionMeta(target)?.archived, true);
+    assert.notEqual(app.sessionMeta(stranger.session)?.archived, true);
+    assert.notEqual(app.sessionMeta(other)?.archived, true);
+});
+
+test("stop and archive are refused in plan mode, past a spend limit, or without the turn", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1 && !app.isBusy(target), "the first answer");
+
+    const refused = async (why: RegExp) => {
+        await assert.rejects(stop(id, address), why);
+        await assert.rejects(archive(id, address), why);
+        assert.notEqual(app.sessionMeta(target)?.archived, true);
+    };
+
+    await app.commands.setPlan(id, owner(app), true);
+    await refused(/plan mode/);
+    await app.commands.setPlan(id, owner(app), false);
+
+    await app.spend.setSessionBudget(owner(app), id, 0.01);
+    await recordCost(app, id, 0.02);
+    await until(() => app.spend.sessionSpent(id) === 0.02, "the spend");
+    await refused(/spend limit/);
+    await app.spend.setSessionBudget(owner(app), id, null);
+
+    const driver = app.config.addUser("Stop driver", "guest").user;
+
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, id), { on: true, driver: driver.id, asks: [] });
+    }, context);
+    await refused(/driving/);
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, id), { on: false, driver: undefined, asks: [] });
+    }, context);
+
+    // The source is free, but someone else holds the wheel in the linked session: stop and archive wait, as send does.
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, target), { on: true, driver: driver.id, asks: [] });
+    }, context);
+    await refused(/driving/);
+});
+
+test("a key that already acted on one linked session is refused for another before anything changes", async () => {
+    const id = await source();
+    const first = await start(id);
+    const second = await start(id);
+
+    await archive(id, first.address, true, "one-key");
+    await assert.rejects(archive(id, second.address, true, "one-key"), /another linked session/);
+    await assert.rejects(stop(id, second.address, "one-key"), /another linked session/);
+    assert.notEqual(app.sessionMeta(second.session)?.archived, true);
+    assert.equal(app.sessionMeta(first.session)?.archived, true);
+});

@@ -102,7 +102,16 @@ export const LinkedSessionRelayDoc = defineDoc<{ sent: number }>({
  * 30 days, and the newest 1000, as `shell.ts` keeps its requests. (Not a document family: those cannot be pruned.)
  */
 export const LinkedSessionCallsDoc = defineDoc<{
-    items: Record<string, { conversationId?: number; by?: string; at: number }>;
+    items: Record<
+        string,
+        {
+            conversationId?: number;
+            by?: string;
+            at: number;
+            /** What a stop or an archive returned, so a repeat gives that and changes nothing again. */
+            result?: { busy: boolean } | { archived: boolean; repeating: number };
+        }
+    >;
 }>({
     kind: "pocket.linked-session-calls",
     version: 1,

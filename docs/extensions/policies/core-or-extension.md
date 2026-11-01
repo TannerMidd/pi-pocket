@@ -54,7 +54,7 @@ Ask these questions in this order. The first "yes" gives the answer.
 
 ### Linked sessions and Agent Teams
 
-- **Core: linked sessions** (`linked-sessions.ts`, `host.linkedSessions`). Core starts a linked session, carries messages, and lists the sessions. It acts with the rights of the person Pi works for. It refuses work in plan mode. It counts the cost of the team against the budget of the top session. It stops a team at its [limits](../reference/limits.md#linked-sessions) of sessions, and of messages with no message from a person. It uses keys, so a replay acts once. It gives sessions addresses, so no session ID goes into a transcript.
+- **Core: linked sessions** (`linked-sessions.ts`, `host.linkedSessions`). Core starts a linked session, carries messages, lists the sessions, and stops or archives one of the team. It acts with the rights of the person Pi works for. It refuses work in plan mode. It counts the cost of the team against the budget of the top session. It stops a team at its [limits](../reference/limits.md#linked-sessions) of sessions, and of messages with no message from a person. It uses keys, so a replay acts once. It gives sessions addresses, so no session ID goes into a transcript.
 - **Extension: Agent Teams** (`extensions/agent-teams.ts` and `agent-teams.js`). The `team` tool, its words to Pi, and how its calls show. It is off by default. At run time it uses only `host` and `web`, as a drop-in does.
 - **Why:** pull request #84 first put Agent Teams in core. In 0.14 the mechanism stayed in core, because it decides permissions, stored data, and spend (C1 to C3). The workflow became a built-in extension (C6, C7). Another team workflow can use the same linked sessions.
 

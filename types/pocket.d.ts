@@ -862,6 +862,24 @@ export interface LinkedSessions {
         key: string,
     ): Promise<void>;
     /**
+     * Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When it is idle,
+     * this changes nothing. `busy` says whether it was working.
+     * @since 0.28.0
+     * @experimental
+     */
+    stop(source: ConversationId, request: { to: string }, key: string): Promise<{ busy: boolean }>;
+    /**
+     * Archives the linked session at the address `to`, or brings it back when `archived` is false. `archived` says
+     * whether it is archived now. `repeating` is how many of its repeating schedules keep running.
+     * @since 0.28.0
+     * @experimental
+     */
+    archive(
+        source: ConversationId,
+        request: { to: string; archived?: boolean },
+        key: string,
+    ): Promise<{ archived: boolean; repeating: number }>;
+    /**
      * The sessions linked to `source`, at any distance, that the person Pi works for there can see.
      * @since 0.14.0
      * @experimental
