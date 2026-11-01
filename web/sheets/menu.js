@@ -580,7 +580,8 @@ export function MenuSheet({ places = true }) {
             ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
         </div>
         ${(() => {
-            // The desktop app this page runs in adds its own items at the end, below App, such as its server settings (`desktop.js`).
+            // The desktop app this page runs in adds its own items at the end, below App, such as its server
+            // settings (`desktop.js`).
             const desktop = hostMenuItems();
 
             return (
