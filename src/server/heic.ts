@@ -27,12 +27,29 @@ function pixelsOf(bytes: Uint8Array): number {
     return most;
 }
 
-/** A HEIC or HEIF file converted to JPEG. It fails for a broken file, a photo too big, or a conversion too slow. */
+/** The end of the last conversion that was asked for: the next one starts after it. */
+let last: Promise<unknown> = Promise.resolve();
+
+/**
+ * A HEIC or HEIF file converted to JPEG. It fails for a broken file, a photo too big, or a conversion too slow. One
+ * runs at a time: the memory of the decoder (WebAssembly, so outside the heap limit) is about 1 GB for 64 million pixels.
+ */
 export function heicToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
     if (pixelsOf(bytes) > MAX_PIXELS) {
         return Promise.reject(new Error("the photo has too many pixels"));
     }
 
+    const done = last.then(
+        () => convertInWorker(bytes),
+        () => convertInWorker(bytes),
+    );
+
+    last = done;
+
+    return done;
+}
+
+function convertInWorker(bytes: Uint8Array): Promise<Uint8Array> {
     const stopped = new Error("the photo took too much time or memory to convert");
 
     return new Promise((resolve, reject) => {
