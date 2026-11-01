@@ -283,7 +283,7 @@ export function figTokens(
         ),
     ].filter((name) => name !== "");
     const layers = nodes.filter(
-        (node) => !["VARIABLE", "VARIABLE_SET", "STYLE"].includes(String(node.type)),
+        (node) => !["VARIABLE", "VARIABLE_SET", "STYLE"].includes(node.type as string),
     ).length;
     const images = decoded.entries.filter((entry) => entry.startsWith("images/")).length;
     const leftOut = [
