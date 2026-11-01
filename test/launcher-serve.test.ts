@@ -193,7 +193,6 @@ test("a mount of ours at / is ours however its loopback target is spelled", () =
     assert.deepEqual(portState(ours("http://localhost:8787"), NAME, 443, LOCAL_PORT), address);
     assert.deepEqual(portState(ours("localhost:8787"), NAME, 443, LOCAL_PORT), address);
     assert.deepEqual(portState(ours("127.0.0.1:8787"), NAME, 443, LOCAL_PORT), address);
-    assert.deepEqual(portState(ours("http://[::1]:8787"), NAME, 443, LOCAL_PORT), address);
 
     // A target on another port or another host is not ours to take; a stale one like that is what removeStaleServe
     // clears when the server moves to a new --port.
@@ -226,7 +225,8 @@ test("only a loopback target on our own port counts as this server", () => {
     assert.equal(sameLocalTarget("http://localhost:8787", LOCAL_PORT), true);
     assert.equal(sameLocalTarget("localhost:8787", LOCAL_PORT), true);
     assert.equal(sameLocalTarget("127.0.0.1:8787", LOCAL_PORT), true);
-    assert.equal(sameLocalTarget("http://[::1]:8787", LOCAL_PORT), true);
+    // Serve mode listens on 127.0.0.1 alone: a mount at [::1] would reach nothing (#254).
+    assert.equal(sameLocalTarget("http://[::1]:8787", LOCAL_PORT), false);
     assert.equal(sameLocalTarget("::1:8787", LOCAL_PORT), false);
     assert.equal(sameLocalTarget("http://127.0.0.1:9999", LOCAL_PORT), false);
     assert.equal(sameLocalTarget("http://localhost:9999", LOCAL_PORT), false);

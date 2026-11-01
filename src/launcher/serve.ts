@@ -193,7 +193,8 @@ export function portState(
 
 /**
  * Whether `proxy` is a proxy target on this machine's own loopback at exactly `port`. Serve records a target as written,
- * so `localhost:8787`, `127.0.0.1:8787` and `http://[::1]:8787` all name the same local server as `http://127.0.0.1:8787`.
+ * so `localhost:8787` and `127.0.0.1:8787` name the same local server as `http://127.0.0.1:8787`. `[::1]` does not:
+ * Serve mode listens on 127.0.0.1 alone, so a mount at `[::1]` reaches nothing.
  */
 export function sameLocalTarget(proxy: unknown, port: number): boolean {
     if (typeof proxy !== "string") {
@@ -639,7 +640,7 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** The hosts that name this machine itself; `URL` keeps the brackets on an IPv6 literal. */
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
 
 /** The node's name without Tailscale's trailing dot. */
 function tailnetHost(dnsName: string): string | undefined {
