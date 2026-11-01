@@ -1,121 +1,166 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { IncomingMessage, ServerResponse } from "node:http";
-import { Duplex } from "node:stream";
-import { once } from "node:events";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { createHandler } from "../src/server/http.ts";
 import {
     cleanUp,
     context,
     fakeTab,
+    modelTexts,
+    newSession,
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     until,
     work,
 } from "./helpers.ts";
 
-const scheme = "testremote";
-const cwd = `${scheme}://box/work`;
-const MODULE = `/** Tests remote workspace isolation. */
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-export default (host, web) => {
-    const remote = ${JSON.stringify("REMOTE_ROOT")};
-    const unregister = host.registerWorkspaceProvider("testremote", {
-        env: () => new NodeExecutionEnv({ cwd: remote }),
-        resolveCwd: async (value) => value === "testremote://box/work" ? value : (() => { throw new Error("Unknown workspace"); })(),
-    });
-    web.onDispose(unregister);
-    web.route("POST", "session", async (request) => {
-        const { cwd, title } = request.body;
-        const session = await request.createSession({ cwd, ...(title === undefined ? {} : { title }) });
-        return { id: session.id };
-    });
-};`;
-
 after(cleanUp);
 
-test("a remote conversation opens without local Git metadata, even with its provider offline", async () => {
-    const app = await openApp(scriptedModel());
-    const uri = "viewremote://host/work";
-    const remove = app.registerWorkspaceProvider("viewremote", {
-        env: () => new NodeExecutionEnv({ cwd: work }),
-        resolveCwd: async () => uri,
+const uri = "ssh://host/work";
+const remote = join(root, "remote");
+const provider = (env: () => ExecutionEnv = () => new NodeExecutionEnv({ cwd: remote })) => ({
+    env,
+    resolveCwd: async (cwd: string) => cwd,
+});
+
+mkdirSync(remote, { recursive: true });
+writeFileSync(join(remote, "AGENTS.md"), "LOCAL-ONLY-MARKER");
+
+/** A model that runs `command` with bash for each message (`sleep` for WAIT); it keeps the prompt sections. */
+function runs(command: string, sections: string[] = []) {
+    return scriptedModel((request) => {
+        const { messages } = request as {
+            messages: { role: string; content: unknown; sections?: Record<string, string> }[];
+        };
+        const asked = JSON.stringify(messages.findLast((message) => message.role === "user"));
+
+        sections.push(...messages.flatMap((message) => Object.values(message.sections ?? {})));
+
+        return messages.at(-1)?.role === "toolResult"
+            ? fauxAssistantMessage([fauxText("done")])
+            : fauxAssistantMessage(
+                  [
+                      fauxToolCall("bash", {
+                          command: asked.includes("WAIT") ? "sleep 30" : command,
+                      }),
+                  ],
+                  { stopReason: "toolUse" },
+              );
     });
-    const { id } = await app.commands.createSession(owner(app), { cwd: uri });
+}
+
+test("a URI cwd runs in its provider, without local AGENTS.md; a local cwd stays", async () => {
+    const sections: string[] = [];
+    const app = await openApp(runs("pwd", sections));
+    const remove = app.registerWorkspaceProvider("ssh", provider());
+
+    try {
+        const id = await newSession(app, uri);
+
+        await say(app, id, "run");
+        assert.ok((await modelTexts(app, id)).some((text) => text.includes(`${remote}\\n`)));
+        assert.ok(sections.length > 0);
+        assert.ok(!sections.some((text) => text.includes("LOCAL-ONLY-MARKER")));
+        // An edit takes a queued message back to the composer: in a remote session too.
+        await app.commands.submit(id, owner(app), { text: "WAIT", requestId: "wait-1" });
+        await until(() => app.isBusy(id), "the long run");
+        const queued = await app.commands.submit(id, owner(app), {
+            text: "queued",
+            mode: "followUp",
+            requestId: "wait-2",
+        });
+
+        assert.equal(
+            (await app.commands.editQueued(id, owner(app), Number(queued.submissionId))).text,
+            "queued",
+        );
+        await app.commands.abort(id, owner(app));
+        assert.ok(app.envFor(await newSession(app)) instanceof NodeExecutionEnv);
+    } finally {
+        remove();
+        await app.close();
+    }
+});
+
+test("after a restart without its provider, a remote session opens and runs nothing", async () => {
+    const first = await openApp(scriptedModel());
+    const remove = first.registerWorkspaceProvider("ssh", provider());
+    const id = await newSession(first, uri);
+
+    remove();
+    await first.close();
+    const app = await openApp(runs("pwd"), first.dataDir);
     const tab = fakeTab(id, owner(app));
 
     try {
-        remove();
         await app.attach(tab.client);
-        assert.equal(
-            tab.last("missing"),
-            undefined,
-            "opening the remote conversation must not fail",
-        );
-        await until(() => tab.last("view") !== undefined, "the remote conversation view");
+        await until(() => tab.last("view") !== undefined, "the remote session's view");
+        assert.equal(tab.last("missing"), undefined);
         assert.equal(tab.field("branch"), null);
-        assert.equal(
-            (tab.last("view")!.conversation as { inRepository: boolean }).inRepository,
-            false,
-        );
+        assert.equal(app.cwdOf(id), uri);
         assert.equal(app.workspace.head(id), undefined);
-        assert.equal(app.workspace.inRepository(uri), false);
-        await assert.rejects(app.workspace.branches(id, owner(app)), /remote workspaces/i);
-        await assert.rejects(app.workspace.changes(id, owner(app)), /remote workspaces/i);
-        await assert.rejects(
-            app.workspace.switchBranch(id, owner(app), { name: "main" }),
-            /remote workspaces/i,
-        );
+        assert.throws(() => app.workspace.conversationPath(id, "secret"), /remote workspaces/);
+        await assert.rejects(app.workspace.changes(id, owner(app)), /remote workspaces/);
+        await assert.rejects(app.workspace.branches(id, owner(app)), /remote workspaces/);
+        assert.throws(() => app.envFor(id), /No workspace provider/);
+        await say(app, id, "run");
+        assert.match((await modelTexts(app, id)).at(-2)!, /No workspace provider/);
     } finally {
         app.detach(tab.client);
-        remove();
         await app.close();
     }
 });
 
-test("workspace provider replacement preserves the current provider and rejects stale resolution", async () => {
+test("the last provider wins; a disposer removes its own; a stale answer fails", async () => {
     const app = await openApp(scriptedModel());
-    const uri = "replacement://host/work";
-    const firstEnv = new NodeExecutionEnv({ cwd: work });
-    const secondEnv = new NodeExecutionEnv({ cwd: root });
-    const first = app.registerWorkspaceProvider("replacement", {
-        env: () => firstEnv,
-        resolveCwd: async () => uri,
-    });
-    const second = app.registerWorkspaceProvider("replacement", {
-        env: () => secondEnv,
-        resolveCwd: async () => uri,
-    });
+    const [env1, env2] = [{ cwd: uri }, { cwd: uri }] as ExecutionEnv[];
+    const first = app.registerWorkspaceProvider(
+        "ssh",
+        provider(() => env1!),
+    );
+    const second = app.registerWorkspaceProvider(
+        "ssh",
+        provider(() => env2!),
+    );
 
     try {
-        const session = await app.commands.createSession(owner(app), { cwd: uri });
+        const { id } = await app.commands.createSession(owner(app), { cwd: uri });
 
         first();
-        assert.equal(app.envFor(session.id), secondEnv);
+        assert.equal(app.envFor(id), env2);
         second();
-        assert.throws(() => app.envFor(session.id), /provider/i);
-        const entered = Promise.withResolvers<void>();
+        assert.throws(() => app.envFor(id), /No workspace provider/);
+        await assert.rejects(app.resolveCwd(uri), { status: 400 });
+
+        for (const path of ["C:\\work", "D:", "c:foo", "ssh:host"]) {
+            assert.equal(app.workspaceScheme(path), undefined, path);
+        }
+
         const release = Promise.withResolvers<void>();
-        const remove = app.registerWorkspaceProvider("replacement", {
-            env: () => firstEnv,
-            resolveCwd: async () => {
-                entered.resolve();
-                await release.promise;
-
-                return uri;
-            },
+        const slow = app.registerWorkspaceProvider("ssh", {
+            env: () => env1!,
+            resolveCwd: async () => (await release.promise, uri),
         });
-        const resolving = app.resolveCwd(uri);
+        const pending = app.resolveCwd(uri);
 
-        await entered.promise;
-        remove();
+        slow();
         release.resolve();
-        await assert.rejects(resolving, /changed|provider/i);
+        await assert.rejects(pending, /changed/);
+        const wrong = app.registerWorkspaceProvider("ssh", {
+            env: () => env1!,
+            resolveCwd: async () => "file:///tmp/work",
+        });
+
+        await assert.rejects(app.resolveCwd(uri), /invalid canonical/);
+        wrong();
     } finally {
         first();
         second();
@@ -123,154 +168,82 @@ test("workspace provider replacement preserves the current provider and rejects 
     }
 });
 
-test("remote workspaces isolate tools, persist, fail closed, and preserve local sessions", async () => {
-    const modelCalls = [
-        [fauxToolCall("write", { path: "created.txt", content: "remote-write" })],
-        [fauxToolCall("read", { path: "created.txt" })],
-        [
-            fauxToolCall("edit", {
-                path: "created.txt",
-                oldText: "remote-write",
-                newText: "remote-edit",
-            }),
-        ],
-        [
-            fauxToolCall("bash", {
-                command: [
-                    "printf remote-bash > bash.txt",
-                    "git init -q",
-                    "git add created.txt",
-                    "git -c user.name=Test -c user.email=test@example.com commit -qm 'Remote fixture'",
-                    "git switch -qc remote-branch",
-                    "git rev-parse --show-toplevel > git-root.txt",
-                    "git branch --show-current > git-branch.txt",
-                    "git status --porcelain > git-status.txt",
-                ].join(" && "),
-            }),
-        ],
-        [fauxToolCall("bash", { command: "printf local-leak > forbidden.txt" })],
-    ];
-    let nextCall = 0;
-    const model = scriptedModel(() => {
-        const calls = modelCalls[nextCall++];
-
-        return calls === undefined
-            ? fauxAssistantMessage([])
-            : fauxAssistantMessage(calls, { stopReason: "toolUse" });
-    });
-    let app = await openApp(model);
-    const remoteRoot = join(root, "remote-fixture");
-
-    mkdirSync(remoteRoot, { recursive: true });
-    const extFile = join(app.dataDir, "extensions", "remote-workspaces.ts");
-
-    writeFileSync(extFile, MODULE.replace("REMOTE_ROOT", remoteRoot));
-    await app.setExtensionEnabled(owner(app), "remote-workspaces.ts", true);
-
-    const call = async (token: string, route: string, body?: unknown) => {
-        const chunks: Buffer[] = [];
-        const socket = new Duplex({
-            read() {},
-            write(chunk, _encoding, done) {
-                chunks.push(Buffer.from(chunk));
-                done();
-            },
-        });
-        const request = new IncomingMessage(socket as never);
-
-        request.url = `/api/x/remote-workspaces/${route}`;
-        request.method = body === undefined ? "GET" : "POST";
-        request.headers = {
-            authorization: `Bearer ${token}`,
-            "x-pocket": "1",
-            "content-type": "application/json",
-        };
-
-        if (body !== undefined) {
-            request.push(Buffer.from(JSON.stringify(body)));
-        }
-
-        request.push(null);
-        request.complete = true;
-        const response = new ServerResponse(request);
-
-        response.assignSocket(socket as never);
-        const finished = once(response, "finish");
-
-        await (
-            await import("../src/server/http.ts")
-        ).createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} })(
-            request,
-            response,
-        );
-        await finished;
-        const raw = Buffer.concat(chunks).toString();
-
-        return { status: response.statusCode, text: raw.split("\r\n\r\n").at(-1) ?? "" };
-    };
+test("only the owner can start, move, or link a session to a workspace URI", async () => {
+    const app = await openApp(scriptedModel());
+    const remove = app.registerWorkspaceProvider("ssh", provider());
 
     try {
-        const created = await call(app.config.ownerToken, "session", { cwd, title: "Remote root" });
+        const { user } = app.config.addUser("Guest", "guest");
+        const before = app.sessions().length;
 
-        assert.equal(created.status, 200);
-        const id = JSON.parse(created.text).id;
-
-        assert.ok(id);
-        assert.equal(app.cwdOf(id), cwd);
-
-        app.config.lastModel ??= { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
-        await app.commands.configure(id, owner(app), {
-            model: { provider: "faux", modelId: "faux-1" },
-            thinkingLevel: "off",
-        });
-
-        for (const instruction of ["write", "read", "edit", "bash"]) {
-            const { submissionId } = await app.commands.submit(id, owner(app), {
-                text: instruction,
-                requestId: crypto.randomUUID(),
-            });
-
-            await (await app.harness.submission(submissionId, context))!.wait(context);
-        }
-
-        assert.equal(readFileSync(join(remoteRoot, "created.txt"), "utf8"), "remote-edit");
-        assert.equal(readFileSync(join(remoteRoot, "bash.txt"), "utf8"), "remote-bash");
-        assert.equal(readFileSync(join(remoteRoot, "git-root.txt"), "utf8").trim(), remoteRoot);
-        assert.equal(
-            readFileSync(join(remoteRoot, "git-branch.txt"), "utf8").trim(),
-            "remote-branch",
-        );
-        assert.match(readFileSync(join(remoteRoot, "git-status.txt"), "utf8"), /bash\.txt/);
-        assert.equal((await import("node:fs")).existsSync(join(work, ".git")), false);
-        assert.equal((await import("node:fs")).existsSync(join(work, "created.txt")), false);
-        assert.equal((await import("node:fs")).existsSync(join(work, "bash.txt")), false);
-
-        await app.close();
-        app = await openApp(model, app.dataDir);
-        assert.equal(app.cwdOf(id), cwd);
-        const guest = app.config.addUser("Remote guest", "guest");
-
-        assert.equal((await call(guest.token, "session", { cwd })).status, 404);
-
-        await app.setExtensionEnabled(owner(app), "remote-workspaces.ts", false);
-        assert.throws(() => app.envFor(id), /workspace|provider|remote|directory/i);
-        const { submissionId } = await app.commands.submit(id, owner(app), {
-            text: "Attempt a command without its provider",
-            requestId: crypto.randomUUID(),
+        await assert.rejects(app.commands.createSession(user, { cwd: uri }), /owner/);
+        assert.equal(app.sessions().length, before);
+        const id = await newSession(app);
+        const { submissionId } = await app.commands.submit(id, user, {
+            text: "hello",
+            requestId: "guest-1",
         });
 
         await (await app.harness.submission(submissionId, context))!.wait(context);
-        assert.ok(nextCall > 8, "the session attempted the scripted command after reopening");
-        assert.equal((await import("node:fs")).existsSync(join(work, "forbidden.txt")), false);
-        assert.equal((await import("node:fs")).existsSync(join(work, "bash.txt")), false);
-
-        const local = await app.commands.createSession(owner(app), { cwd: work });
-
-        assert.equal(app.cwdOf(local.id), work);
-        const localEnv = app.envFor(local.id);
-
-        assert.ok(localEnv instanceof NodeExecutionEnv);
+        await assert.rejects(app.commands.configure(id, user, { cwd: uri }), /owner/);
+        assert.equal(app.cwdOf(id), work);
+        await assert.rejects(
+            app.linkedSessions.start(id, { message: "go", cwd: uri }, "guest-link"),
+            /owner/,
+        );
     } finally {
+        remove();
+        await app.close();
+    }
+});
+
+test("a route starts a session with request.createSession only on an owner route", async () => {
+    const app = await openApp(scriptedModel());
+
+    writeFileSync(
+        join(app.dataDir, "extensions", "workspace-route.ts"),
+        `/** Starts sessions. */
+export default (host, web) => {
+    web.onDispose(host.registerWorkspaceProvider("ssh", {
+        env: () => ({ cwd: ${JSON.stringify(uri)} }),
+        resolveCwd: async (cwd) => cwd,
+    }));
+    const start = (request) => request.createSession({ cwd: request.body.cwd });
+    web.route("POST", "owner", start);
+    web.route("POST", "steer", start, { access: "steer" });
+};`,
+    );
+    await app.setExtensionEnabled(owner(app), "workspace-route.ts", true);
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const call = (token: string, route: string, cwd: string) =>
+        fetch(`http://127.0.0.1:${port}/api/x/workspace-route/${route}`, {
+            method: "POST",
+            headers: {
+                authorization: `Bearer ${token}`,
+                "x-pocket": "1",
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({ cwd }),
+        });
+
+    try {
+        const guest = app.config.addUser("Guest", "guest");
+        const before = app.sessions().length;
+
+        assert.equal((await call(guest.token, "steer", work)).status, 403);
+        assert.equal(app.sessions().length, before);
+        const answer = await call(app.config.ownerToken, "owner", uri);
+
+        assert.equal(answer.status, 200);
+        assert.equal(app.cwdOf(((await answer.json()) as { id: number }).id as never), uri);
+    } finally {
+        server.closeAllConnections();
+        server.close();
         await app.close();
     }
 });
