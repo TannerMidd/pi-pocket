@@ -239,8 +239,18 @@ export default (host, web) => {
         assert.equal(app.sessions().length, before);
         const answer = await call(app.config.ownerToken, "owner", uri);
 
+        const { id } = (await answer.json()) as { id: number };
+
         assert.equal(answer.status, 200);
-        assert.equal(app.cwdOf(((await answer.json()) as { id: number }).id as never), uri);
+        assert.equal(app.cwdOf(id as never), uri);
+        // An upload to it is refused: the file would land on this machine, not there.
+        const upload = await fetch(`http://127.0.0.1:${port}/api/c/${id}/upload?name=a.txt`, {
+            method: "POST",
+            body: "x",
+            headers: { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1" },
+        });
+
+        assert.equal(upload.status, 400);
     } finally {
         server.closeAllConnections();
         server.close();
