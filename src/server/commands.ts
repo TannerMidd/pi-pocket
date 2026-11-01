@@ -797,7 +797,8 @@ export class Commands {
 
         app.spend.check(user, id);
 
-        // Most were made ready as they were uploaded (`model-images.ts`); the rest are made side by side, in their order.
+        // Most were made ready as they were uploaded (`model-images.ts`); the rest are made side by
+        // side, in their order.
         const images = model.input.includes("image")
             ? attachments.filter((file) => forModel(file.mime, file.size))
             : [];

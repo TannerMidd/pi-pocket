@@ -1,4 +1,5 @@
-// A worker of its own: a large or broken photo does not hold up the server, and the worker can be stopped.
+// A worker of its own: a large or broken photo does not hold up the server, and the worker can be
+// stopped.
 import { parentPort, workerData } from "node:worker_threads";
 import convert from "heic-convert";
 

@@ -34,8 +34,9 @@ function safeName(name: string): string {
 }
 
 /**
- * An upload's type: what the browser said, or the one its name gives when the browser said nothing useful. A HEIC
- * photo can arrive as `application/octet-stream` from a browser that does not know it.
+ * An upload's type: what the browser said, or the one its name gives when the browser said nothing
+ * useful. A HEIC photo can arrive as `application/octet-stream` from a browser that does not know
+ * it.
  */
 export function uploadMime(name: string, header: string | undefined): string {
     const declared = String(header ?? "")

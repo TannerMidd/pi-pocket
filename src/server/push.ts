@@ -50,9 +50,10 @@ export type PushMessage = {
 };
 export type Urgency = "very-low" | "low" | "normal" | "high";
 /**
- * A notification as a desktop app gets it over its live connection (`desktop-notify`, `PocketApp.notifyDesktops`):
- * the push message, its urgency, and for an approval the whole call and whether this person may allow it, so that the
- * app decides how much of it to show and whether to offer Allow (docs/desktop.md).
+ * A notification as a desktop app gets it over its live connection (`desktop-notify`,
+ * `PocketApp.notifyDesktops`): the push message, its urgency, and for an approval the whole call
+ * and whether this person may allow it, so that the app decides how much of it to show and whether
+ * to offer Allow (docs/desktop.md).
  */
 export type DesktopMessage = PushMessage & {
     urgency: Urgency;
