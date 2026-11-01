@@ -19,6 +19,7 @@ import {
     variablesOf,
 } from "./scan-fig-nodes.ts";
 import { type Imported, addFound } from "./scan-import.ts";
+import { LIMITS as TOKEN_LIMITS } from "./scan-import-eval.ts";
 import { assemble, type Progress, dropTypes, hoistTypes, rewrite } from "./scan-tree.ts";
 import { type Obj } from "./scan-colors.ts";
 import { RESERVED } from "./tokens-base.ts";
@@ -141,13 +142,14 @@ function fill(from: Map<string, Obj>, renamed: Map<string, string>): Obj {
     return out;
 }
 
-/** `until` is the deadline of all the scan's Figma files. */
+/** `until`: the deadline of all the scan's Figma files; `max`: the tokens left in the budget. */
 export function figTokens(
     decoded: FigDecoded,
     file: string,
-    options: { until?: number } = {},
+    options: { until?: number; max?: number } = {},
 ): FigTokens {
     const until = options.until ?? Date.now() + FIG_TIME_MS;
+    const max = options.max ?? TOKEN_LIMITS.tokens;
     const { nodes } = decoded;
     const collections = collectionsOf(nodes);
     const modes = modesOf(collections);
@@ -155,7 +157,7 @@ export function figTokens(
     const named = new Map<string, Shaped>();
     const taken = new Set<string>();
     const next = new Map<string, number>();
-    let stop = false;
+    let stop: "time" | "tokens" | undefined;
     let seen = 0;
 
     // Every path first: an alias names another variable's path.
@@ -166,8 +168,10 @@ export function figTokens(
             resolved === "FLOAT" ||
             (resolved === "STRING" && FONT_NAME.test(variable.name));
 
-        if (Date.now() >= until) {
-            stop = true;
+        const late = Date.now() >= until;
+
+        if (late || (token && named.size >= max)) {
+            stop = late ? "time" : "tokens";
 
             break;
         }
@@ -237,9 +241,9 @@ export function figTokens(
     const { styles, left } = stylesOf(nodes);
 
     for (const style of styles) {
-        if (Date.now() >= until) {
-            stop = true;
+        stop ??= Date.now() >= until ? "time" : entries.length >= max ? "tokens" : undefined;
 
+        if (stop !== undefined) {
             break;
         }
 
@@ -250,7 +254,7 @@ export function figTokens(
     const progress: Progress = { until, read: 0, stopped: false };
     const tokens = rewrite(assemble(entries, renamed, progress), renamed) as Obj;
 
-    stop ||= progress.stopped;
+    stop ??= progress.stopped ? "time" : undefined;
 
     const darkFirst =
         collections.size > 0 &&
@@ -325,8 +329,13 @@ export function figTokens(
         );
     }
 
-    if (stop) {
-        notes.push(`Stopped at the time limit (${FIG_TIME_MS} ms): ${progress.read} tokens read.`);
+    if (stop !== undefined) {
+        const limit =
+            stop === "time"
+                ? `the time limit (${FIG_TIME_MS} ms)`
+                : `${TOKEN_LIMITS.tokens} tokens`;
+
+        notes.push(`Stopped at ${limit}: ${progress.read} tokens read.`);
     }
 
     return {
@@ -335,7 +344,7 @@ export function figTokens(
         dark: dropTypes(fill(darkChanges, renamed)),
         extra,
         count: progress.read,
-        partial: stop,
+        partial: stop !== undefined,
         line: notes.join(" ").slice(0, 1200),
     };
 }
@@ -365,7 +374,10 @@ export function readFigInto(
     try {
         const decoded = decodeFig(readFigBytes(path), { ...FIG_LIMITS, ms: FIG_TIME_MS }, until);
 
-        tokens = figTokens(decoded, file, { until });
+        tokens = figTokens(decoded, file, {
+            until,
+            max: TOKEN_LIMITS.tokens - facts.imported.count,
+        });
     } catch (error) {
         const reason =
             error instanceof FigError

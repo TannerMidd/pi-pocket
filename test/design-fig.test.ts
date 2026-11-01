@@ -1424,6 +1424,11 @@ test("the assembly stops at its deadline, and counts what it placed", () => {
     assert.equal(all.stopped, false);
 });
 
+test("a .fig past the 5000-token import budget makes the scan partial", () => {
+    assert.equal(scanTokens(project({ "max.fig": manyModes(1, 5000) })).partial, false);
+    assert.equal(scanTokens(project({ "over.fig": manyModes(1, 5001) })).partial, true);
+});
+
 test("20 000 variables are assembled in one pass, not in a walk of every path for each", () => {
     const dir = project({ "many.fig": manyModes(1, 20_000) });
     const before = process.cpuUsage();
