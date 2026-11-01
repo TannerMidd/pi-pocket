@@ -251,6 +251,7 @@ Answers the requests of a route. The value that it returns goes back as JSON, an
 
 ```ts
 interface WebRequest {
+    createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     readonly method: WebMethod;
     readonly params: Readonly<Record<string, string>>;
     readonly query: URLSearchParams;
@@ -278,6 +279,7 @@ What a handler gets.
 - Document operations recheck the current person. Retaining a request, its context, or a callback does not extend its lifetime: commits after disconnect or handler return are refused, and an unfinished callback rolls back. Await all writes before returning. These APIs are for module documents, not core's internal documents or a way to start model work.
 - An unbound catalog save has no source plan, turn, or spend checks. A bound commit also requires the source's current steering and turn rights.
 - Since 0.20.0 (experimental), `sessions()` gives the sessions that the person who asked can see now, as their session list shows them, archived ones too. See [`WebSession`](#websession). Use it to check the ids that a browser sends, and to keep data about sessions from people who cannot see them. Each call reads the list again.
+- Since 0.28.0 (experimental), `createSession` starts an ordinary session on owner-only routes. It refuses anyone but the owner. See [Execution environments for workspaces](../workspaces.md).
 
 ### `WebSession`
 

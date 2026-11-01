@@ -96,6 +96,10 @@ A module split into parts keeps its name for the part others import, with the re
 | `reveal.ts`               | Ctrl+click on a path (`/api/c/:id/reveal`, the owner's): shows it in the file manager of the machine the server runs on, selected in its folder (FileManager1 over D-Bus, else `xdg-open`; `open -R`; `explorer /select,`)                                                                                                                                                                                                                                                                                                                      |
 | `linked-sessions.ts`      | Linked sessions (`LinkedSessions`, `host.linkedSessions` as `LinkedSessionsApi` in `host.ts`): starting a session from another and sending its first message, with a record of the call that makes a repeat find the first; the addresses each session knows its linked ones by; messages between them, sent once, as the person Pi works for, through `Commands.submit`; stopping a run and archiving a session of the team (`stop`, `archive`, since 0.28.0); and a team's bounds (one level; since 0.19.0, no count of sessions or messages) |
 
+### Workspace providers
+
+`PocketApp.registerWorkspaceProvider` selects an execution environment from the stored workspace URI (`ssh://…`); absent providers fail closed. Only the owner can use a workspace URI. Owner-only extension requests can create sessions through `request.createSession`. Local Files/Git actions and Pocket-managed worktrees reject remote workspaces. A provider, such as SSH sessions, is a drop-in extension outside the core package ([Execution environments for workspaces](extensions/workspaces.md)).
+
 ### A conversation's folder and history
 
 | File                                   | Owns                                                                                                                                                                                               |

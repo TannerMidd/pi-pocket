@@ -11,6 +11,7 @@ import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-work
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
+import { workspaceScheme } from "../paths.ts";
 
 const PREAMBLE = `You are Pi, a coding agent running inside Pi Pocket: a durable, multiplayer web app built on Pi Durable. People talk to you from a browser, often a phone, and several people can share one conversation. When more than one person uses this server, each message starts with [from: Name].
 
@@ -140,6 +141,8 @@ export default function createPrompt(host: PocketHost) {
     };
 
     const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
+    // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote's.
+    const local = (input: PromptInput) => workspaceScheme(input.agent.cwd ?? "") === undefined;
 
     return defineExtension({
         name: "pocket-prompt",
@@ -147,8 +150,12 @@ export default function createPrompt(host: PocketHost) {
             section("preamble", () => PREAMBLE, { tag: false }),
             section("guidelines", () => GUIDELINES),
             section("pocket_docs", () => docs(host.dataDir)),
-            section("project_context", (input) => load(cwdOf(input)).context),
-            section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
+            section("project_context", (input) =>
+                local(input) ? load(cwdOf(input)).context : undefined,
+            ),
+            section("skills", (input) => (local(input) ? load(cwdOf(input)).skills : undefined), {
+                tag: false,
+            }),
             section("environment", (input) => {
                 const base = `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`;
 

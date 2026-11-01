@@ -47,6 +47,10 @@ The native extension loader registers one scoped resolve hook for drop-in import
 
 Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose functions call into the app lazily, and `web`, through which they add routes and a browser module to the app. `ExtensionWebs` (`extension-web.ts`) keeps what each module's version added, which the loader commits once the module installed and removes with it, running its cleanups. The HTTP layer parses a request, checks it, calls a part, and writes the answer; it holds no state of its own beyond invites and the event streams' pollers.
 
+## Workspace execution providers
+
+`PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Only the owner can use a workspace URI. The provider's module, a drop-in outside the core package, owns host-key trust, connections, remote project context, and cleanup. Files/Git actions and managed worktrees remain local-only.
+
 ## Favorite folders
 
 `FolderFavoritesDoc` (`pocket.folder-favorites`) stores each person's ordered favorite working folders in SQLite. `folder-favorites.ts` reads and changes only the signed-in person's list; explicit star/unstar operations run inside one harness transaction, so concurrent devices do not overwrite unrelated changes. The commit coordinator sends each connected client only its person's list as a `folder-favorites` event. `hello.folderFavorites` supplies the initial list and refreshes it on reconnect. The folder picker shows only what the server committed, so a failed save leaves its list as it was.

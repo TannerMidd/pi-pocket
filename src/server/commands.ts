@@ -402,9 +402,16 @@ export class Commands {
 
         const given = optionalText(request.title, "title");
         const title = (given === undefined ? undefined : oneLine(given)) || undefined;
-        const folder = app.workspace.checkDirectory(
-            optionalText(request.cwd, "cwd") ?? app.defaultCwd,
-        );
+        const requested = optionalText(request.cwd, "cwd") ?? app.defaultCwd;
+
+        app.requireWorkspaceOwner(user, requested);
+        const remote = app.workspaceScheme(requested) !== undefined;
+
+        if (remote && request.worktree === true) {
+            throw new HttpError(400, "Remote workspaces do not support worktrees.");
+        }
+
+        const folder = await app.resolveCwd(requested);
         const now = Date.now();
 
         return this.#inPlace(
@@ -413,7 +420,10 @@ export class Commands {
             title ?? basename(folder),
             async ({ cwd, worktree }) => {
                 // An internal caller about to apply a person's explicit model keeps its previous starting pair.
-                const initial = this.#defaultModel(undefined, projectDefaults ? cwd : undefined);
+                const initial = this.#defaultModel(
+                    undefined,
+                    projectDefaults && !remote ? cwd : undefined,
+                );
                 const conversation = await app.harness.createConversation(
                     {
                         ownership: { kind: "ownerless" },
@@ -532,6 +542,10 @@ export class Commands {
         app.requireSee(user, id);
         await app.requireDriver(id, user);
         const worktree = app.sessionMeta(id)?.worktree;
+
+        if (app.workspaceScheme(app.cwdOf(id)) !== undefined) {
+            throw new HttpError(400, "Remote workspaces do not support worktrees.");
+        }
 
         if (worktree === undefined) {
             throw new HttpError(404, "This session has no worktree");
@@ -1573,6 +1587,10 @@ export class Commands {
             );
         }
 
+        if (request.cwd !== undefined) {
+            app.requireWorkspaceOwner(user, request.cwd);
+        }
+
         const conversation = await app.conversation(id);
         const current = await app.agentState(id);
         const ref = request.model ?? current?.model;
@@ -1590,8 +1608,7 @@ export class Commands {
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
-        const cwd =
-            request.cwd === undefined ? undefined : app.workspace.checkDirectory(request.cwd);
+        const cwd = request.cwd === undefined ? undefined : await app.resolveCwd(request.cwd);
 
         const change = {
             ...(request.model === undefined

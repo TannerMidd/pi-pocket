@@ -19,6 +19,7 @@ export const SIDEBAR = [
             ["docs/extensions/hooks.md", "Hooks"],
             ["docs/extensions/host.md", "Using the host"],
             ["docs/extensions/linked-sessions.md", "Starting and messaging sessions"],
+            ["docs/extensions/workspaces.md", "Execution environments for workspaces"],
             ["docs/extensions/app.md", "Adding to the app"],
             ["docs/extensions/routes.md", "Routes"],
             ["docs/extensions/public-pages.md", "Public pages"],
