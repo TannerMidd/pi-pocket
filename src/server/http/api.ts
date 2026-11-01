@@ -668,10 +668,12 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             dirs.sort((a, b) => a.name.localeCompare(b.name));
-            const recent = [...new Set(app.sessions(user).map((session) => session.cwd))].slice(
-                0,
-                8,
-            );
+            // A workspace URI is not a folder the picker can open: its provider's module starts sessions there.
+            const local = app
+                .sessions(user)
+                .map((session) => session.cwd)
+                .filter((cwd) => app.workspaceScheme(cwd) === undefined);
+            const recent = [...new Set(local)].slice(0, 8);
 
             return json(response, 200, {
                 path,

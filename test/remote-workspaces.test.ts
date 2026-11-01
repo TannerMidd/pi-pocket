@@ -258,6 +258,12 @@ export default (host, web) => {
         });
 
         assert.equal(upload.status, 400);
+        // The folder picker's Recent holds only folders it can open.
+        const folders = await fetch(`http://127.0.0.1:${port}/api/fs?path=${work}`, {
+            headers: { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1" },
+        });
+
+        assert.ok(!((await folders.json()) as { recent: string[] }).recent.includes(uri));
     } finally {
         server.closeAllConnections();
         server.close();
