@@ -2737,6 +2737,7 @@ function replyDeps(item, actions) {
         view.conversation?.id,
         reactions === undefined ? "" : JSON.stringify(reactions),
         (view.pins ?? []).some((pin) => pin.entryId === entry.id),
+        markdownRevision(),
         // The actions under it: the app's and extensions', as arranged (`slots.js`).
         actions,
     ];
