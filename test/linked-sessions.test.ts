@@ -222,6 +222,9 @@ test("someone who cannot see the origin learns nothing of it and cannot reach it
     await (await app.harness.submission(submissionId, context))!.wait(context);
     assert.deepEqual(await app.linkedSessions.list(target), []);
     await assert.rejects(send(target, origin.address), /not linked/);
+    await assert.rejects(stop(target, origin.address), /not linked/);
+    await assert.rejects(archive(target, origin.address), /not linked/);
+    assert.notEqual(app.sessionMeta(id)?.archived, true);
 });
 
 test("linked sessions exchange more than 10 turns, and no message count stops them", async () => {
