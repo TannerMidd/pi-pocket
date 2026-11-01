@@ -929,6 +929,10 @@ export class LinkedSessions implements LinkedSessionsApi {
                 throw new HttpError(409, "This call already refers to another linked session.");
             }
 
+            if (record.result !== undefined && !("archived" in record.result)) {
+                throw new HttpError(409, "This call already did something else.");
+            }
+
             if (record.result !== undefined && "archived" in record.result) {
                 return {
                     result: {
@@ -1039,7 +1043,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             }
 
             if (record.result !== undefined) {
-                return { fresh: false, result: structuredClone(record.result) };
+                return { fresh: false, result: { ...record.result } as CallOutcome };
             }
 
             record.conversationId = Number(target);

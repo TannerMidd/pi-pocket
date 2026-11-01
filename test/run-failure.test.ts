@@ -259,3 +259,43 @@ test("a limit the provider then clears is not a failure", async () => {
     assert.equal(row(app, id).failed, undefined);
     assert.equal(await stored(app, id), undefined);
 });
+
+test("a later queued input does not hide a failed run after a restart", async () => {
+    let release!: () => void;
+    let entered = false;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const dir = join(root, "run-failure-queued");
+    const app = await openApp(
+        scriptedModel(async () => {
+            entered = true;
+            await gate;
+
+            return fauxAssistantMessage([], {
+                stopReason: "error",
+                errorMessage: "Invalid request: unsupported parameter temperature",
+            });
+        }),
+        dir,
+    );
+
+    open.push(app);
+    const id = await newSession(app);
+
+    await app.commands.submit(id, owner(app), { text: "first", requestId: "queue-first" });
+    await until(() => entered, "the first request");
+    await app.commands.submit(id, owner(app), { text: "queued", requestId: "queue-later" });
+    release();
+    await until(() => row(app, id).failed === true, "the failure");
+    const failure = row(app, id).failure;
+
+    await until(async () => (await stored(app, id)) === failure, "the stored line");
+    await app.close();
+    open.pop();
+    const again = await openApp(scriptedModel(route), dir);
+
+    open.push(again);
+    assert.equal(again.isBusy(id), false);
+    assert.equal(row(again, id).failure, failure);
+});

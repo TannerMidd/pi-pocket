@@ -48,7 +48,7 @@ Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0
 
 `stop(source, { to }, key)` stops the run of the linked session at the address `to`, and withdraws what waits in its queue. Stopping is the safe direction: it needs the same access as `send`, including the turn and room under the spend limit.
 
-- When the session is idle, the call changes nothing.
+- When the session is idle, it has no run to stop: the call only withdraws what waits in its queue.
 - It returns `{ busy }`. `busy` is true when the session was working.
 - Since 0.28.0. An older Pi Pocket has no `stop`, so a module checks for it and sets `minPocket` to `0.28.0` when it needs it.
 

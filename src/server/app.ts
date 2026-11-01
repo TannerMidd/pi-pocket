@@ -2721,7 +2721,13 @@ export class PocketApp {
                 context,
             );
 
-            record = page.items.find((each) => each.type === "input");
+            // A queued input, or one withdrawn from the queue, never joined a run. One a run gave up on may have no entry.
+            record = page.items.find(
+                (each) =>
+                    each.type === "input" &&
+                    (each.entry !== undefined ||
+                        (each.status === "unanswered" && FAILED_RUN.has(each.reason))),
+            );
             cursor = record === undefined ? page.next : undefined;
         } while (cursor !== undefined);
 

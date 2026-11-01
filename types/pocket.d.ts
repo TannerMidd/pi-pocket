@@ -880,7 +880,7 @@ export interface LinkedSessions {
     ): Promise<void>;
     /**
      * Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When it is idle,
-     * this changes nothing. `busy` says whether it was working.
+     * it has no run to stop, and the call only withdraws the queue. `busy` says whether it was working.
      * @since 0.28.0
      * @experimental
      */

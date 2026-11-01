@@ -443,7 +443,7 @@ stop(
 
 Since 0.28.0 · Experimental
 
-Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When the session is idle, this changes nothing. `busy` is true when it was working. It needs the same access as `send`, and it reaches only a session of this team. An older Pi Pocket has no `stop`: check for it, and set `minPocket` to `0.28.0` when you need it.
+Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When the session is idle, it has no run to stop, and the call only withdraws what waits in its queue. `busy` is true when it was working. It needs the same access as `send`, and it reaches only a session of this team. An older Pi Pocket has no `stop`: check for it, and set `minPocket` to `0.28.0` when you need it.
 
 #### `linkedSessions.archive`
 
