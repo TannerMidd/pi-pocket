@@ -666,9 +666,16 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(".composer"), "the conversation");
     await inPage(
-        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed", show: "built-in" }); return "null";`,
+        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
     );
     await until(() => has('.switch[aria-label="Lancet Guard: on"]'), "the guard switch");
+    // Built in is the first section, open: its switches show without a tap.
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify(document.querySelector(".extension-management.hub > .ext-section")?.matches("section.ext-builtins") === true)`,
+        ),
+        true,
+    );
     await settled();
     await inPage(
         `document.querySelector('.switch[aria-label="Lancet Guard: on"]').focus(); return "null";`,

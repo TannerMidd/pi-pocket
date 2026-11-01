@@ -228,7 +228,6 @@ function sheetBody(sheet) {
                       selected=${sheet.type === "gallery-entry" ? sheet.id : null}
                       tab=${sheet.tab ?? "discover"}
                       origin=${sheet.origin ?? (sheet.type === "gallery" ? "gallery" : "extensions")}
-                      show=${sheet.show ?? null}
                       Management=${ExtensionsContent}
                   />`
                 : sheet.type === "extensions"

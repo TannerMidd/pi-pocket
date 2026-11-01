@@ -433,7 +433,6 @@ export function ExtensionsContent({
     before = null,
     beforeCount = 0,
     between = null,
-    show = null,
 }) {
     const { me } = store.state;
     const owner = me?.role === "owner";
@@ -445,7 +444,6 @@ export function ExtensionsContent({
     const [confirmOn, setConfirmOn] = useState(null);
     // The rows opened to show their settings and details, by file.
     const [open, setOpen] = useState(new Set());
-    const [builtInOpen, setBuiltInOpen] = useState(show === "built-in");
     const guardCancel = useRef(null);
     const guardSwitch = useRef(null);
     // What the gallery installed, by module file: read after the list, and never in the way of it.
@@ -736,6 +734,17 @@ export function ExtensionsContent({
         return html`<div class="extension-management hub">
             <${SafeMode} />
             ${problem && html`<div class="error-box">${problem}</div>`}
+            ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
+            ${
+                builtIn.length > 0 &&
+                html`<section class="ext-section ext-builtins">
+                    <div class="ext-section-head">
+                        <h3 class="ext-section-title">Built in <span>${builtIn.length}</span></h3>
+                        <span class="muted small">${on} on, ${builtIn.length - on} off</span>
+                    </div>
+                    <div class="ext-list">${builtIn.map(row)}</div>
+                </section>`
+            }
             ${
                 (beforeCount > 0 || yours.length > 0) &&
                 html`<section class="ext-section">
@@ -745,22 +754,6 @@ export function ExtensionsContent({
                 </section>`
             }
             ${between}
-            ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
-            ${
-                builtIn.length > 0 &&
-                html`<details
-                    class="ext-section ext-builtins"
-                    open=${builtInOpen || needle !== "" || builtIn.some((module) => module.error)}
-                    onToggle=${(event) => setBuiltInOpen(event.currentTarget.open)}
-                >
-                    <summary>
-                        <h3 class="ext-section-title">Built in <span>${builtIn.length}</span></h3>
-                        <span class="muted small">${on} on, ${builtIn.length - on} off</span>
-                        <${Icon} name="down" size=${14} />
-                    </summary>
-                    <div class="ext-list">${builtIn.map(row)}</div>
-                </details>`
-            }
             ${
                 data &&
                 needle &&

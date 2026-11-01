@@ -44,7 +44,7 @@ test(
         await page.navigate(`${base}/s/${id}`);
         await see(`document.querySelector(".composer") !== null`, "the session");
         await page.evaluate(
-            `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed", show: "built-in" }); return "null"`,
+            `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null"`,
         );
         await see(`document.querySelector(${JSON.stringify(toggle)}) !== null`, "its switch");
         assert.equal(

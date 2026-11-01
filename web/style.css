@@ -19060,37 +19060,12 @@ textarea.notes {
     margin: 12px 16px 0;
 }
 
-.ext-builtins > summary {
+/* Built in comes first, open: its count of what is on beside the title. */
+.ext-section-head {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 8px;
     padding-right: 16px;
-    list-style: none;
-    cursor: pointer;
-}
-
-.ext-builtins > summary::-webkit-details-marker {
-    display: none;
-}
-
-.ext-builtins > summary .ext-section-title {
-    padding-bottom: 14px;
-}
-
-.ext-builtins > summary > .icon {
-    margin-left: auto;
-    color: var(--muted);
-    transition: rotate var(--t-hover) var(--ease-out);
-}
-
-.ext-builtins[open] > summary > .icon {
-    rotate: 180deg;
-}
-
-@media (hover: hover) {
-    .ext-builtins > summary:hover {
-        background: var(--hover);
-    }
 }
 
 .ext-intro {
