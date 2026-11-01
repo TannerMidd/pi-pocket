@@ -83,6 +83,57 @@ function snapshot(dir: string, prefix = "", out: Record<string, string> = {}) {
 const file = (dir: string, name: string) =>
     JSON.parse(readFileSync(join(dir, ".pi/design", name), "utf8"));
 
+/** A dark-first system with a light and a high-contrast mode: the code below has neither of those two defaults. */
+function darkFirst(): string {
+    return project({
+        ".pi/design/tokens.json": JSON.stringify({
+            $extensions: { "com.pi-pocket": { name: "Contrast", mode: "dark" } },
+            color: { $type: "color", bg: { page: { $value: "#0b0d12" } } },
+        }),
+        ".pi/design/tokens.light.json": JSON.stringify({
+            color: { $type: "color", bg: { page: { $value: "#ffffff" } } },
+        }),
+        ".pi/design/tokens.high-contrast.json": JSON.stringify({
+            color: { $type: "color", bg: { page: { $value: "#ffffff" } } },
+        }),
+    });
+}
+
+/** The code that `darkFirst` is saved from: a light default mode, a dark mode, and no high-contrast mode. */
+const lightFirst: Draft = {
+    tokens: {
+        color: {
+            $type: "color",
+            bg: { page: { $value: "#ffffff" } },
+            brand: { $value: "#ffffff" },
+        },
+    },
+    modes: {
+        dark: {
+            color: {
+                $type: "color",
+                bg: { page: { $value: "#0b0d12" } },
+                brand: { $value: "#7aa2f7" },
+            },
+        },
+    },
+};
+
+/** A system saved from `lightFirst` and the plan of a resync with it, or a failed assertion. */
+function lightFirstPlan() {
+    const dir = darkFirst();
+    const loaded = loadDesignSystemWithRaw(dir);
+
+    assert.ok(loaded !== undefined, "the system loaded");
+
+    const plan = planResync(loaded.system, lightFirst, loaded.raw);
+    const added = plan.added.find((token) => token.token === "color.brand");
+
+    assert.ok(added !== undefined, "the code's new token is added");
+
+    return { dir, plan, added };
+}
+
 test("a dry run reports what the code added and saves nothing", async () => {
     const dir = await saved();
     const before = snapshot(dir);
@@ -588,6 +639,79 @@ test("a mode the code does not have is compared with the code's default value", 
             scan: "#3b82f6",
         },
     ]);
+});
+
+test("a new token in a mode the code lacks takes the code's default value", () => {
+    // The system's default mode is dark, and it has a high-contrast mode. The code's default mode is light and it has
+    // no high-contrast mode, so the code's value there is its own default (#ffffff), not the system's dark #7aa2f7.
+    const { added } = lightFirstPlan();
+
+    assert.deepEqual(added.modes, [
+        { mode: "high-contrast", value: "#ffffff", css: "#ffffff" },
+        { mode: "light", value: "#ffffff", css: "#ffffff" },
+    ]);
+    assert.equal(
+        added.node.$value,
+        "#7aa2f7",
+        "the token itself holds the value for the system's dark default",
+    );
+});
+
+test("the report gives a mode the code lacks the value that it gets", () => {
+    const { plan } = lightFirstPlan();
+    const report = resyncReport({ name: "Contrast", path: ".", files: 1, saved: false, plan });
+
+    assert.match(report, /color\.brand = #7aa2f7 \(high-contrast #ffffff, light #ffffff\)/);
+});
+
+test("apply writes that value into the mode file, and the mode reads it", () => {
+    const { dir, plan } = lightFirstPlan();
+
+    writeDesignSystem(
+        dir,
+        resyncChange(plan, {
+            path: ".",
+            scannedAt: new Date().toISOString(),
+            tokens: plan.scanned,
+        }),
+    );
+
+    // No brand node here gives undefined, so this fails: the mode file has no value of its own.
+    assert.equal(file(dir, "tokens.high-contrast.json").color?.brand?.$value, "#ffffff");
+
+    const brand = loadDesignSystem(dir)?.tokens.find((token) => token.name === "color.brand");
+
+    assert.equal(
+        brand?.modes["high-contrast"]?.hex,
+        "#ffffff",
+        "the mode reads the code's default value, not the system's dark one",
+    );
+});
+
+test("after that write, a second resync finds nothing that differs", () => {
+    const { dir, plan } = lightFirstPlan();
+
+    writeDesignSystem(
+        dir,
+        resyncChange(plan, {
+            path: ".",
+            scannedAt: new Date().toISOString(),
+            tokens: plan.scanned,
+        }),
+    );
+
+    const again = loadDesignSystemWithRaw(dir);
+
+    assert.ok(again !== undefined, "the system loaded again");
+
+    const second = planResync(again.system, lightFirst, again.raw);
+
+    assert.deepEqual(second.added, [], "no token is added twice");
+    assert.deepEqual(
+        second.differs,
+        [],
+        "the mode holds the code's default value, so nothing differs",
+    );
 });
 
 test("an I/O error partway through the write leaves the earlier files written, as the tool says", async () => {

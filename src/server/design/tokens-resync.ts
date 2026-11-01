@@ -9,7 +9,8 @@
  *   listed when the two differ.
  * - A token path that the scan finds and the system lacks is ADDED, with the scan's type, value, and tier. When the
  *   system's default mode is not the scan's own, the token is still the scan's default node: only its value comes from
- *   the scan's value for that mode.
+ *   the scan's value for that mode. A mode of the system that the code has no value for takes the scan's default value
+ *   there.
  * - A token path that the system has and the scan no longer finds is LISTED as not in the code now, and never deleted. A
  *   path that the engine drops (it fails in a mode) is kept the same way and is not listed: there is no resolved token to
  *   compare with the code.
@@ -258,14 +259,20 @@ function planAdded(
     const others: AddedToken["modes"] = [];
 
     for (const mode of modes) {
-        const other = mode === scanDefault ? node : nodeAt(draft.modes[mode] ?? {}, token.path);
+        // A mode the code lacks holds the code's default value, as in the compare path above.
+        const other =
+            mode === scanDefault ? node : (nodeAt(draft.modes[mode] ?? {}, token.path) ?? node);
 
         // A mode that the code sets the same way needs no override of its own.
-        if (other === undefined || JSON.stringify(other.$value) === JSON.stringify(own.$value)) {
+        if (JSON.stringify(other.$value) === JSON.stringify(own.$value)) {
             continue;
         }
 
-        others.push({ mode, value: other.$value, css: reads(token.modes[mode]) });
+        others.push({
+            mode,
+            value: other.$value,
+            css: reads(token.modes[mode] ?? token.modes[scanDefault]),
+        });
     }
 
     return {
