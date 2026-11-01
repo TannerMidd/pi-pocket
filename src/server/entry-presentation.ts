@@ -2,6 +2,7 @@
  * How a module asks the transcript to show an input it sends: one line, which opens to the text. The registration
  * lives only while the module is on. The model still reads the message in full. Nothing here is stored.
  */
+import { createHash } from "node:crypto";
 
 /** Presentations one module may register. */
 export const PRESENTATION_LIMIT = 32;
@@ -211,6 +212,25 @@ export function presentationLine(
 /** One PiP line: `▸ Label: summary`, never the message. */
 export function presentationPip(label: string, summary: string | undefined): string {
     return `▸ ${presentationLine(label, summary, ": ")}`;
+}
+
+/**
+ * `build` with the presentations of the modules that are on: a session a tab kept shows its inputs as they were
+ * presented then, so it is good only while they stay the same. The build alone when no module presents any.
+ */
+export function presentedBuild(build: string, presentations: EntryPresentations): string {
+    if (presentations.byKind.size === 0) {
+        return build;
+    }
+
+    const specs = [...presentations.byKind.values()]
+        .map(({ kind, label, userPrefix }) => [kind, label, userPrefix ?? null])
+        .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+
+    return createHash("sha256")
+        .update(JSON.stringify([build, specs]))
+        .digest("hex")
+        .slice(0, build.length);
 }
 
 /** Whether two registries would present the same rows. */

@@ -98,6 +98,7 @@ import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } 
 import { Updates } from "./updates.ts";
 import { pocketPackage, pocketVersion } from "./versions.ts";
 import { serverBuild } from "./build.ts";
+import { presentedBuild } from "./entry-presentation.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
@@ -361,11 +362,15 @@ export class PocketApp {
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
+    readonly #code = serverBuild();
+
     /**
-     * This server's code (`serverBuild`): sessions a tab keeps, in its memory or on the device, are good for a server of
-     * the same build, so they last across a restart but not across new code.
+     * This server's code (`serverBuild`) and how its modules present inputs: sessions a tab keeps, in its memory or on
+     * the device, are good for a server of the same build, so they last across a restart but not across new code.
      */
-    readonly build = serverBuild();
+    get build(): string {
+        return presentedBuild(this.#code, this.webs.presentations());
+    }
     /** Set by the launcher over IPC; undefined when the server runs on its own. */
     access: AccessInfo | undefined;
     harness!: Harness;
@@ -613,6 +618,9 @@ export class PocketApp {
             // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
             commandsChanged: () => this.#websChanged("all"),
             presentationsChanged: () => {
+                // A new build in `hello`: what tabs kept shows the inputs as presented before.
+                this.#websChanged("all");
+
                 for (const pending of this.#rooms.values()) {
                     void pending.then(
                         (room) => room.reproject(),
