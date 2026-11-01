@@ -4,10 +4,10 @@ Both files are real Figma exports, kept as the exporter wrote them (no editor, n
 Figma makes and not only on files this repository builds. Each is here under its project's MIT licence, and the licence text
 is below.
 
-| File            |  Bytes | From                                                                                                                                                                             |
-| --------------- | -----: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `minimal.fig`   |    528 | [JimLiu/baoyu-design](https://github.com/JimLiu/baoyu-design), `skills/baoyu-design/agents/tests/fixtures/minimal.fig`                                                           |
-| `variables.fig` | 274351 | [Figma's Simple Design System](https://github.com/figma/sds) (SDS), the template that the Figma app gives: a local copy saved from it, with its images and its thumbnail removed |
+| File            |  Bytes | From                                                                                                                                                                                                                               |
+| --------------- | -----: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `minimal.fig`   |    528 | [JimLiu/baoyu-design](https://github.com/JimLiu/baoyu-design), [`archive/baoyu-design/agents/tests/fixtures/minimal.fig`](https://github.com/JimLiu/baoyu-design/blob/main/archive/baoyu-design/agents/tests/fixtures/minimal.fig) |
+| `variables.fig` | 274351 | [Figma's Simple Design System](https://github.com/figma/sds) (SDS), the template that the Figma app gives: a local copy saved from it, with its images and its thumbnail removed                                                   |
 
 `minimal.fig` holds layers only (a document, a canvas, a frame, and a component), and no variables: it proves the
 container, the schema, the message, and the one value form that is easy to get wrong (a float).
