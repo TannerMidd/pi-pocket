@@ -4,8 +4,8 @@ import { quoteReply } from "./store.js";
 import { html, Icon } from "./ui.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
-const WIDTH = 92;
-const HEIGHT = 36;
+const WIDTH = 84;
+const HEIGHT = 32;
 
 function selected() {
     const selection = getSelection();
@@ -44,7 +44,8 @@ function selected() {
     const first = rects[0];
     const last = rects[rects.length - 1];
     const below = coarse || first.top < HEIGHT + 12;
-    const top = below ? last.bottom + 10 : first.top - HEIGHT - 8;
+    // On a touch screen the system's selection handle hangs under the last line: sit below it.
+    const top = below ? last.bottom + (coarse ? 26 : 8) : first.top - HEIGHT - 8;
     const anchor = below ? last.right : first.left;
     const left = Math.max(8, Math.min(anchor - (below ? WIDTH : 0), innerWidth - WIDTH - 8));
 

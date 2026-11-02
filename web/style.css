@@ -20479,6 +20479,7 @@ pre.gallery-code {
     }
 }
 
+/* Over a selection in Pi's answer: a small popover, like the reaction picker. */
 .quote-reply-button {
     position: fixed;
     z-index: 70;
@@ -20486,20 +20487,40 @@ pre.gallery-code {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-width: 92px;
-    height: 36px;
-    padding: 0 12px;
-    border: 1px solid var(--hair-2);
-    border-radius: 999px;
-    background: var(--card);
+    min-width: 84px;
+    height: 32px;
+    padding: 0 12px 0 10px;
+    border: 0;
+    border-radius: var(--r-card);
+    background: var(--panel);
     color: var(--text);
     font: inherit;
     font-size: 13px;
-    font-weight: 600;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+    font-weight: 500;
+    box-shadow: var(--pop);
     cursor: pointer;
     -webkit-user-select: none;
     user-select: none;
+    animation: pop 0.2s var(--ease-out);
+}
+
+.quote-reply-button .icon {
+    color: var(--muted);
+}
+
+.quote-reply-button:hover,
+.quote-reply-button:active {
+    background: var(--card-2);
+}
+
+.quote-reply-button:hover .icon,
+.quote-reply-button:active .icon {
+    color: var(--accent);
+}
+
+.quote-reply-button:focus-visible {
+    outline: 2px solid var(--accent-line);
+    outline-offset: 2px;
 }
 
 .quote-strip {
