@@ -2,7 +2,7 @@
 
 An extension can start an ordinary session, the same kind a person gets from New session. Use `host.sessions.start`. Its shape is in [the host reference](reference/host.md).
 
-**Experimental, since 0.29.0.** It can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)). A module for an older server checks that `host.sessions` is there, and a gallery entry that needs it sets `minPocket` to `0.29.0`.
+**Experimental, since 0.28.0.** It can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)). A module for an older server checks that `host.sessions` is there, and a gallery entry that needs it sets `minPocket` to `0.28.0`.
 
 ## What the call does
 

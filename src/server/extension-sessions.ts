@@ -42,7 +42,7 @@ export class ExtensionSessions implements SessionsApi {
     /**
      * Start an ordinary session for the person Pi works for in `source`, like New session.
      *
-     * @experimental In 0.29.
+     * @experimental In 0.28.
      */
     async start(
         source: ConversationId,

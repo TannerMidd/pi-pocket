@@ -106,7 +106,7 @@ export interface SessionsApi {
     /**
      * Start an ordinary session for the person Pi works for in `source`, like New session.
      *
-     * @experimental In 0.29.
+     * @experimental In 0.28.
      */
     start(
         source: ConversationId,
@@ -520,7 +520,7 @@ export interface PocketHost {
      * person Pi works for in the source. A call repeated with its key returns the first session and sends its message
      * once.
      *
-     * @experimental In 0.29: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     * @experimental In 0.28: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     readonly sessions: SessionsApi;
     /** The conversation's current working folder or workspace URI. @experimental @since 0.28.0 */

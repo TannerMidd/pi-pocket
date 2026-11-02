@@ -411,7 +411,7 @@ What `fetchPublic` takes besides the address.
 readonly sessions: Sessions;
 ```
 
-Since 0.29.0 · Experimental
+Since 0.28.0 · Experimental
 
 Lets an extension start an ordinary session, the same kind a person gets from New session. [Starting an ordinary session](../sessions.md) tells you who it acts for, what it checks, and what the new session is.
 
@@ -427,7 +427,7 @@ start(
 ): Promise<{ session: ConversationId }>;
 ```
 
-Since 0.29.0 · Experimental
+Since 0.28.0 · Experimental
 
 Makes a top-level session and, when `message` is given, sends that text as its first message. It returns the new session's id.
 
