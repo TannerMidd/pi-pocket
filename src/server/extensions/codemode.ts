@@ -37,7 +37,6 @@ import { TOOL_SEARCH_TOOL_NAME } from "@earendil-works/pi-durable/tool-search";
 import { CodemodeStoreDoc } from "../docs.ts";
 import { describe } from "../errors.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
-import { DEFERRED_TOOLS } from "./tool-search.ts";
 
 export const CODEMODE_TOOL = "codemode";
 /** Output budget of a script, in estimated tokens (4 characters each), unless its options line sets another. */
@@ -247,21 +246,18 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
     // Modules reload into the running server before its host changes: until a restart, Only hides nothing.
     const toolNames = host.toolNames as PocketHost["toolNames"] | undefined;
 
-    /** Only mode: each other tool is for scripts alone. The names come at each resolve, so later modules count too. */
-    const hide = () => {
-        const names = toolNames?.() ?? [];
-        const waiting = names.includes(TOOL_SEARCH_TOOL_NAME) ? DEFERRED_TOOLS : [];
-
-        return names
-            .filter((name) => !DECLARED.has(name) && !waiting.includes(name))
+    /**
+     * Only mode: each other tool is for scripts alone, also one that waits for tool search or that a conversation
+     * loaded. The names come at each resolve, so later modules count too.
+     */
+    const hide = () =>
+        (toolNames?.() ?? [])
+            .filter((name) => !DECLARED.has(name))
             .map((name) =>
                 wrapTool({ name } as ToolRegistration, (tool) =>
-                    tool.callers === undefined && tool.deferred !== true
-                        ? { ...tool, callers: ["tools"] }
-                        : tool,
+                    tool.callers === undefined ? { ...tool, callers: ["tools"] } : tool,
                 ),
             );
-    };
 
     const codemode = defineTool({
         name: CODEMODE_TOOL,
@@ -510,11 +506,15 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
         sections: [
             section("codemode", ({ agent }) => {
                 if (only() && agent.tools.some((tool) => tool.name === CODEMODE_TOOL)) {
+                    const search = agent.tools.some((tool) => tool.name === TOOL_SEARCH_TOOL_NAME);
+
                     return listing(
+                        // A tool that waits shows in the tool search section, where there is one.
                         agent.callable.filter(
                             (tool) =>
                                 tool.name !== CODEMODE_TOOL &&
-                                tool.callers?.includes("model") === false,
+                                tool.callers?.includes("model") === false &&
+                                (tool.deferred !== true || !search),
                         ),
                     );
                 }

@@ -49,15 +49,27 @@ const DEFERRED: Record<string, { use: string; section?: string; note?: string }>
     ask_someone: { use: "draft a question for someone outside this chat" },
 };
 
-/** Tools that wait for a search: codemode's Only mode leaves them waiting. */
-export const DEFERRED_TOOLS = Object.keys(DEFERRED);
-
 const sections = new Map<string, string[]>();
 
 for (const [name, { section: key }] of Object.entries(DEFERRED)) {
     if (key !== undefined) {
         sections.set(key, [...(sections.get(key) ?? []), name]);
     }
+}
+
+type Lists = "tools" | "callable" | "deferred";
+
+/** Tools that wait for a search. Codemode's Only mode leaves them for scripts alone, and they still wait. */
+function waitingOf(agent: Record<Lists, readonly ToolRegistration[]>): ToolRegistration[] {
+    const searched = agent.tools.some((tool) => tool.name === TOOL_SEARCH_TOOL_NAME);
+
+    return [
+        ...agent.deferred,
+        ...agent.callable.filter(
+            (tool) =>
+                searched && tool.deferred === true && tool.callers?.includes("model") === false,
+        ),
+    ];
 }
 
 export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) {
@@ -90,7 +102,7 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
     };
 
     const explain = async (names: string[], api: ToolExecutionApi<never>, context: Context) => {
-        const waiting = (await api.agent(context)).deferred;
+        const waiting = waitingOf(await api.agent(context));
 
         return names
             .map((name) => {
@@ -119,7 +131,8 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
             const names = String(args.query)
                 .split(/[\s,]+/)
                 .filter(Boolean);
-            const waiting = (await api.agent(context)).deferred.map((tool) => tool.name);
+            const agent = await api.agent(context);
+            const waiting = waitingOf(agent).map((tool) => tool.name);
             const result =
                 names.length > 0 && names.every((name) => waiting.includes(name))
                     ? ({
@@ -134,7 +147,7 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
                       } as Awaited<ReturnType<typeof search.execute>>)
                     : await search.execute(
                           { ...args, limit: args.limit ?? SEARCH_LIMIT } as never,
-                          api,
+                          { ...api, agent: async () => ({ ...agent, deferred: waitingOf(agent) }) },
                           context,
                       );
             const loaded = (result.details as { loaded?: string[] } | undefined)?.loaded ?? [];
@@ -159,16 +172,18 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
         name: "pocket-tool-search",
         tools: [exact],
         sections: [
-            section("deferred_tools", ({ agent }) =>
-                agent.deferred.length === 0
+            section("deferred_tools", ({ agent }) => {
+                const waiting = waitingOf(agent);
+
+                return waiting.length === 0
                     ? undefined
-                    : `Load a tool before you use it: ${TOOL_SEARCH_TOOL_NAME} with its name as the query. Waiting:\n${agent.deferred
+                    : `Load a tool before you use it: ${TOOL_SEARCH_TOOL_NAME} with its name as the query. Waiting:\n${waiting
                           .map(
                               (tool) =>
                                   `- ${tool.name}: ${DEFERRED[tool.name]?.use ?? tool.description.split(".")[0]}`,
                           )
-                          .join("\n")}`,
-            ),
+                          .join("\n")}`;
+            }),
         ],
         wraps: [
             ...Object.keys(DEFERRED).map((name) =>

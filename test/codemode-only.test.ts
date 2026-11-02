@@ -4,6 +4,7 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -90,11 +91,15 @@ test("Only mode declares codemode, tool search, and the tools with cards, and li
     assert.match(sections.codemode!, /## read\n.*\nParameters \(JSON Schema\): \{/);
     assert.match(sections.codemode!, /## late_tool\nLate echo/, "a drop-in installed later");
     assert.match(sections.deferred_tools!, /- browser:/, "waiting tools still wait");
+    assert.doesNotMatch(sections.codemode!, /\bbrowser\b/, "a waiting tool is not listed");
 });
 
-test("in Only mode, a script calls a hidden tool, and a loaded tool goes through codemode", async () => {
+test("in Only mode, a script calls a hidden tool, and a tool that waits goes through codemode", async () => {
     mode("only");
     const id = await newSession(app);
+
+    // Loaded before a switch to Only, as in On mode: it waits again.
+    await loadTools(app, id, "browser");
 
     // Plan mode lets a read-only tool run, also one that only scripts call.
     await app.harness.commit(async (tx) => void ((await tx.doc(PlanDoc, id)).on = true), context);
