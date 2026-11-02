@@ -278,7 +278,7 @@ test("PiP writes what agents read in its person's language, ASD-STE100 in Englis
     // In the person's language, with no pip.md: in English, ASD-STE100.
     assert.match(
         lastRequest.pip,
-        /Write what agents read in your person's language: the language of their messages to you/,
+        /Write what agents read in your person's language: the language they write to you in \(not the language of reports, webhook posts, or GitHub events\)/,
     );
     assert.match(lastRequest.pip, /In English, write ASD-STE100 \(Simplified Technical English\)/);
     assert.match(lastRequest.pip, /It does not cover your answers to your person/);
@@ -291,7 +291,7 @@ test("PiP writes what agents read in its person's language, ASD-STE100 in Englis
     assert.match(lastRequest.session, /\[via PiP\] write the release notes/);
     assert.match(
         lastRequest.session,
-        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in the language of its message after the marker\. In English, use ASD-STE100/,
+        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in the language that agent wrote in \(for a linked session, the text between the <linked-session-message> tags\), not the language of the marker or the notes around it\. In English, use ASD-STE100/,
     );
 });
 

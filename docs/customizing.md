@@ -32,7 +32,7 @@ PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP
 
 ## The language agents write in
 
-Since 0.28.0, agents write to each other in the language of the person they work for: PiP to the sessions it starts or messages, a session to its linked sessions and its subagents, and each answer back. A session you open later, that PiP or another session worked in, reads in your language, with no setting. In English they write Simplified Technical English (ASD-STE100); in another language, the same short, plain style. Their answers to you follow your own messages, as before. To choose another language for PiP's messages to sessions, say so in `pip.md`.
+Since 0.28.0, agents write to each other in the language of the person they work for: PiP to the sessions it starts or messages, a session to its linked sessions and its subagents, and each answer back. A session you open later, that PiP or another session worked in, reads in your language, with no setting. PiP takes the language from your messages to it, and for a watch, a webhook, or a schedule from the instructions you gave it. In English they write Simplified Technical English (ASD-STE100); in another language, the same short, plain style. Their answers to you follow your own messages, as before. To choose another language for PiP's messages to sessions, say so in `pip.md`.
 
 ## Skills: procedures that Pi follows on request
 
