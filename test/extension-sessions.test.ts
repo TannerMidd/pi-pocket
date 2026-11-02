@@ -128,18 +128,26 @@ test("a repeat returns the first session, as the first person, though a check no
     assert.equal((await told(session, "only once")).length, 1);
 });
 
-test("two starts at once with the same key make one session", async () => {
+test("two starts at once with the same key make one session and send its message once", async () => {
     const id = await source();
     const count = app.sessions().length;
     const request = { title: "Raced", cwd: work, message: "once between them" };
+    const other = app.config.addUser("Racer", "guest").user;
+    const requesterOf = app.attribution.requesterOf.bind(app.attribution);
+    let reads = 0;
+
+    // Someone else writes between the two calls: the second one reads them as the requester.
+    app.attribution.requesterOf = (source) => (reads++ === 1 ? other.id : requesterOf(source));
     const [first, second] = await Promise.all([
         app.extensionSessions.start(id, request, "raced"),
         app.extensionSessions.start(id, request, "raced"),
-    ]);
+    ]).finally(() => (app.attribution.requesterOf = requesterOf));
 
     assert.equal(first.session, second.session);
     assert.equal(app.sessions().length, count + 1);
     await until(async () => (await told(first.session, "between")).length > 0, "the message");
+    // A second message would run after the first: wait until nothing runs.
+    await until(() => !app.isBusy(first.session), "the session at rest");
     assert.equal((await told(first.session, "between")).length, 1);
 });
 

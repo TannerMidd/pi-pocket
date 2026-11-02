@@ -79,6 +79,7 @@ export class ExtensionSessions implements SessionsApi {
 
         // A repeat returns the session the first call made, even when a check below would refuse a new call now.
         let session = previous?.conversationId as ConversationId | undefined;
+        let sender = user;
 
         if (session === undefined) {
             const chosen = await this.#chosen(request.model, request.thinking);
@@ -92,16 +93,20 @@ export class ExtensionSessions implements SessionsApi {
                         throw error;
                     }
 
-                    return (
-                        ((await recorded())?.conversationId as ConversationId | undefined) ??
-                        error.session
-                    );
+                    const winner = await recorded();
+
+                    // The message is the winner's: a call that wrote meanwhile does not send it again.
+                    sender =
+                        (winner?.by === undefined ? undefined : app.config.userById(winner.by)) ??
+                        user;
+
+                    return (winner?.conversationId as ConversationId | undefined) ?? error.session;
                 },
             );
         }
 
         if (request.message !== undefined) {
-            await this.#message(session, user, request.message, token);
+            await this.#message(session, sender, request.message, token);
         }
 
         return { session };
