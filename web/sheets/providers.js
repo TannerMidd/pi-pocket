@@ -235,13 +235,29 @@ function LimitWait() {
     </div>`;
 }
 
+/** Where a sign-in's key comes from, in words. */
+const SOURCES = { models_json_key: "key in models.json", models_json_command: "key command" };
+/** Where an endpoint's key is, in words. */
+const ENDPOINT_KEYS = {
+    stored: "key stored",
+    file: "key in models.json",
+    none: "no key",
+    missing: "no key set",
+};
+
+const modelCount = (n) => `${n} ${n === 1 ? "model" : "models"}`;
+
 /** A provider row's line under its name: its sign-in and its models, or what the row adds. */
-function aboutOf(provider) {
+function aboutOf(provider, endpoint) {
     if (provider.about) {
         return provider.about;
     }
 
-    const account = provider.label || provider.source;
+    if (endpoint !== undefined && !provider.needsSignIn) {
+        return `${endpoint.baseUrl} · ${ENDPOINT_KEYS[endpoint.key]} · ${modelCount(provider.models)}`;
+    }
+
+    const account = provider.label || SOURCES[provider.source] || provider.source;
     const signIn = provider.needsSignIn
         ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions " +
           "on its models fail, and PiP and subagents on other models do not use them"
@@ -249,7 +265,7 @@ function aboutOf(provider) {
           ? `signed in${account ? ` · ${account}` : ""}`
           : "not configured";
 
-    return `${signIn} · ${provider.models} models`;
+    return `${signIn} · ${modelCount(provider.models)}`;
 }
 
 /** How long a panel under a row takes to close: `.provider-panel.closing` in style.css. */
@@ -427,7 +443,12 @@ export function ProvidersSheet() {
                         : provider.configured && html` <span class="ok">✓</span>`
                 }
             </div>
-            <div class="muted small">${aboutOf(provider)}</div>
+            <div class="muted small">
+                ${aboutOf(
+                    provider,
+                    custom.list?.find((endpoint) => endpoint.id === provider.id),
+                )}
+            </div>
             ${
                 provider.needsSignIn &&
                 html`<div class="muted small mono provider-why">${provider.needsSignIn}</div>`
