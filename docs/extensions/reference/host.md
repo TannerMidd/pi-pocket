@@ -184,6 +184,20 @@ Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd`
 
 `WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. `signal` is optional: in 0.28, session creation and settings do not pass one yet.
 
+### `registerPiSessionCompanion`
+
+```ts
+registerPiSessionCompanion(companion: PiSessionCompanion): () => void;
+```
+
+Since 0.28.0 · Experimental
+
+Registers a file that an extension keeps beside Pi's session files, to carry it into sessions continued from Pi. When the owner looks at one of Pi's sessions, Pi Pocket looks for `<session file><suffix>` beside it and lists the `label` of each one there. When the owner continues the session, Pi Pocket writes the copy, then calls `continued` of each companion found, in turn, before the session opens. Pi Pocket never reads, copies, or changes the file. The extension reads it and keeps what it needs in its own place. The returned disposer removes only this registration. See [Files that come with Pi's sessions](../pi-session-companions.md).
+
+`PiSessionCompanion` has `suffix` (a dot, then up to 64 letters, digits, dots, dashes, or underscores), `label`, and `continued(input: PiSessionContinued): Promise<string | void> | string | void`. `continued` has one minute. A string it returns is shown to the person. An error it throws, or a time out, is shown as `<label>: <message>`, and the session continues without it.
+
+`PiSessionContinued` has `conversationId`, `piFile` (Pi's session file), `companion` (the file beside it), and `entries`: the new session's context, in order, as its first request sends it. Each item is `{ from?: string; id: EntryId; message: Message }`. `id` is the entry here, and `from` is the id of the entry of Pi's that it copies. A message made here, such as the result for a tool call that never finished, has no `from`. Messages that a Pi compaction summarized are not in `entries`.
+
 ### `requesterOf`
 
 ```ts

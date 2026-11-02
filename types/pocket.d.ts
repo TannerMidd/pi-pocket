@@ -14,11 +14,12 @@
  * fails when this file and Pi Pocket's code do not agree.
  */
 import type { Context } from "@earendil-works/chord";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type {
     ConversationId,
     DocumentReader,
+    EntryId,
     Extension,
     ModelRef,
     TaskId,
@@ -109,6 +110,67 @@ export interface WorkspaceProvider {
 }
 
 /**
+ * A file an extension keeps beside Pi's session files, and how it carries it into a session continued from Pi. Pi
+ * Pocket looks for `<session file><suffix>` beside each session file Pi lists, shows the person it is there, and gives
+ * `continued` its path once the copy is written. Pi Pocket never reads the file itself.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface PiSessionCompanion {
+    /**
+     * What follows the session file's name, as `.notes.md`: a dot, then up to 64 letters, digits, dots, dashes, or
+     * underscores.
+     * @since 0.28.0
+     * @experimental
+     */
+    suffix: string;
+    /**
+     * What the preview calls it, in words for people.
+     * @since 0.28.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Carries the file into the new session. It runs once the copy is written, before the person sees the session,
+     * for up to a minute. A string it returns is shown to the person. An error it throws is shown too, and the session
+     * continues without the file.
+     * @since 0.28.0
+     * @experimental
+     */
+    continued(input: PiSessionContinued): Promise<string | void> | string | void;
+}
+
+/**
+ * What `continued` of a {@link PiSessionCompanion} gets.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface PiSessionContinued {
+    /** @since 0.28.0 @experimental */
+    conversationId: ConversationId;
+    /**
+     * Pi's session file.
+     * @since 0.28.0
+     * @experimental
+     */
+    piFile: string;
+    /**
+     * The companion file beside it.
+     * @since 0.28.0
+     * @experimental
+     */
+    companion: string;
+    /**
+     * The new session's context, in order, as its first request sends it: each message, the entry it is from, and the
+     * id of Pi's entry that entry copies. A message made here (a result for a tool call that never finished) has no
+     * `from`. One of Pi's entries can give more than one message.
+     * @since 0.28.0
+     * @experimental
+     */
+    entries: readonly { from?: string; id: EntryId; message: Message }[];
+}
+
+/**
  * What the app gives a module: the first argument of its default export. The host stays the same while modules reload.
  * It changes only when the server restarts.
  * @since 0.1.0
@@ -186,6 +248,12 @@ export interface Host {
      * @experimental
      */
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
+    /**
+     * Registers a file to carry into sessions continued from Pi. Returns how to remove it again.
+     * @since 0.28.0
+     * @experimental
+     */
+    registerPiSessionCompanion(companion: PiSessionCompanion): () => void;
     /**
      * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.

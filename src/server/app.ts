@@ -877,6 +877,7 @@ export class PocketApp {
                 this.#registerModelProvider(provider, config),
             registerWorkspaceProvider: (scheme, provider) =>
                 this.registerWorkspaceProvider(scheme, provider),
+            registerPiSessionCompanion: (companion) => this.piSessions.registerCompanion(companion),
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);
 

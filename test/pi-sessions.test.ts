@@ -28,7 +28,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createHandler } from "../src/server/http.ts";
-import { PiSessionError, readPiSession } from "../src/server/pi-sessions.ts";
+import {
+    type PiSessionCompanion,
+    PiSessionError,
+    readPiSession,
+} from "../src/server/pi-sessions.ts";
 
 /** The messages of the newest request to the model. */
 let requested: Message[] = [];
@@ -283,6 +287,78 @@ test("a session larger than one commit (images make big ones) continues whole", 
 
     assert.deepEqual(await pocketContext(id), piContext(path));
     assert.equal(app.sessionMeta(id)?.fromPi?.count, 18);
+});
+
+test("an extension's file beside Pi's session comes along: listed, then given the copy's context", async () => {
+    const path = save(rich(), "companion");
+    const calls: Parameters<PiSessionCompanion["continued"]>[0][] = [];
+    const stops = [
+        app.piSessions.registerCompanion({
+            suffix: ".state.json",
+            label: "Its state",
+            continued: (input) => {
+                calls.push(input);
+
+                return "State carried over.";
+            },
+        }),
+        app.piSessions.registerCompanion({
+            suffix: ".broken",
+            label: "Broken state",
+            continued: () => {
+                throw new Error("cannot read it");
+            },
+        }),
+        app.piSessions.registerCompanion({
+            suffix: ".absent",
+            label: "Not there",
+            continued: () => assert.fail("no file, no call"),
+        }),
+    ];
+
+    try {
+        assert.throws(
+            () => app.piSessions.registerCompanion({ suffix: "/../x", label: "x", continued() {} }),
+            /Invalid/,
+        );
+        writeFileSync(`${path}.state.json`, "{}");
+        writeFileSync(`${path}.broken`, "");
+
+        assert.deepEqual((await app.piSessions.preview(owner(app), path)).companions, [
+            "Its state",
+            "Broken state",
+        ]);
+        const { id, notes } = await app.commands.continuePiSession(owner(app), path);
+
+        assert.deepEqual(notes, ["State carried over.", "Broken state: cannot read it"]);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0]!.conversationId, id);
+        assert.equal(calls[0]!.piFile, path);
+        assert.equal(calls[0]!.companion, `${path}.state.json`);
+        // The messages the first request sends, each with the entry of Pi's it copies.
+        assert.deepEqual(
+            calls[0]!.entries.map((entry) => entry.message),
+            await pocketContext(id),
+        );
+        const piIds = new Set(
+            parseSessionEntries(readFileSync(path, "utf8"))
+                .slice(1)
+                .map((entry) => (entry as SessionEntry).id),
+        );
+
+        assert.ok(
+            calls[0]!.entries.every((entry) => entry.from === undefined || piIds.has(entry.from)),
+        );
+        assert.ok(calls[0]!.entries.filter((entry) => entry.from !== undefined).length > 4);
+        // The file is only read by the extension: as it was.
+        assert.equal(readFileSync(`${path}.state.json`, "utf8"), "{}");
+    } finally {
+        for (const stop of stops) {
+            stop();
+        }
+    }
+
+    assert.deepEqual((await app.piSessions.preview(owner(app), path)).companions, []);
 });
 
 test("a preview reads only the file's end: the last messages of the current branch, whole characters", async () => {

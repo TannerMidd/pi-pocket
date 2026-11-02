@@ -13,8 +13,9 @@
  * not there (a stray one, or one whose call a context edit took out), Pi Durable leaves it out, as providers refuse it.
  */
 import { createReadStream } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import type { Context } from "@earendil-works/chord";
 import type { Message } from "@earendil-works/pi-ai";
 import {
     buildSessionProjection,
@@ -496,19 +497,24 @@ export function piSessionOf(file: FileEntries): PiSession {
 
 /**
  * Write a Pi session's copy into a new conversation, from its `init`: its messages, then where it came from. One
- * commit, so a copy is whole or not there at all (a big one too: its text is held once already). Returns the entry
- * written here for each of Pi's entries that became one.
+ * commit, so a copy is whole or not there at all (a big one too: its text is held once already). Returns, for each
+ * entry written that copies one of Pi's, the id of Pi's.
  */
 export async function writePiSession(
     tx: Tx,
     id: ConversationId,
     session: PiSession,
     data: FromPiData,
-): Promise<Map<string, EntryId>> {
+): Promise<Map<EntryId, string>> {
     const made = new Map<string, EntryId>();
+    const copies = new Map<EntryId, string>();
 
     for (const entry of session.entries) {
-        await writeEntry(tx, id, entry, made);
+        const written = await writeEntry(tx, id, entry, made);
+
+        if (entry.from !== undefined) {
+            copies.set(written, entry.from);
+        }
     }
 
     const edits: ContextEdit[] = session.edits.flatMap(({ target, messages }) => {
@@ -532,16 +538,16 @@ export async function writePiSession(
         ...(edits.length === 0 ? {} : { edits }),
     });
 
-    return made;
+    return copies;
 }
 
-/** Write one entry of the copy. */
+/** Write one entry of the copy; returns its id. */
 async function writeEntry(
     tx: Tx,
     id: ConversationId,
     entry: PiEntry,
     made: Map<string, EntryId>,
-): Promise<void> {
+): Promise<EntryId> {
     const written =
         entry.kind === "compaction"
             ? await tx.appendEntry(CompactionEntry, id, {
@@ -562,6 +568,8 @@ async function writeEntry(
     if (entry.from !== undefined && !made.has(entry.from)) {
         made.set(entry.from, written.id);
     }
+
+    return written.id;
 }
 
 /** A session's title as `pi -r` shows it: its name, or the first line of what it was first asked. */
@@ -583,11 +591,158 @@ export type PiSessionSummary = {
 };
 
 /** Finding Pi's sessions, and reading one, for the owner. */
+/**
+ * What an extension keeps beside Pi's session files, and how it carries it into a session continued here: Pi Pocket
+ * looks for `<session file><suffix>` beside the file Pi lists, shows the person it is there, and, once the copy is
+ * written, gives `continued` its path and the copy's context. It never reads the file itself.
+ */
+export type PiSessionCompanion = {
+    /** What follows the session file's name, as `.notes.md`: a dot, then letters, digits, dots, dashes, or underscores. */
+    suffix: string;
+    /** What the preview calls it, in words for people. */
+    label: string;
+    /**
+     * Carry the file into the session: it runs once the copy is written, before the person sees the session. What it
+     * returns, if anything, is shown to the person; what it throws is too, and the session continues without it.
+     */
+    continued(input: PiSessionContinued): Promise<string | void> | string | void;
+};
+
+/** What `continued` of a companion gets. */
+export type PiSessionContinued = {
+    conversationId: ConversationId;
+    /** Pi's session file. */
+    piFile: string;
+    /** The companion file beside it. */
+    companion: string;
+    /**
+     * The new session's context, as its first request sends it: each message, the entry here it is from, and the entry
+     * of Pi's that entry copies (none for one made here, as a result for a call that never finished).
+     */
+    entries: readonly { from?: string; id: EntryId; message: Message }[];
+};
+
+/** How long a companion's `continued` may take before the session opens without it. */
+const COMPANION_TIMEOUT_MS = 60_000;
+const COMPANION_SUFFIX = /^\.[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 export class PiSessions {
     readonly #app: PocketApp;
+    readonly #companions: { token: symbol; companion: PiSessionCompanion }[] = [];
 
     constructor(app: PocketApp) {
         this.#app = app;
+    }
+
+    /** Register a companion; returns how to remove it again. */
+    registerCompanion(companion: PiSessionCompanion): () => void {
+        if (
+            typeof companion?.suffix !== "string" ||
+            !COMPANION_SUFFIX.test(companion.suffix) ||
+            typeof companion.label !== "string" ||
+            companion.label.trim() === "" ||
+            typeof companion.continued !== "function"
+        ) {
+            throw new Error("Invalid Pi session companion");
+        }
+
+        const token = Symbol(companion.suffix);
+
+        this.#companions.push({ token, companion });
+
+        return () => {
+            const index = this.#companions.findIndex((each) => each.token === token);
+
+            if (index >= 0) {
+                this.#companions.splice(index, 1);
+            }
+        };
+    }
+
+    /** The registered companions whose file is beside `path`, each with that file. */
+    async #companionsOf(path: string): Promise<{ companion: PiSessionCompanion; file: string }[]> {
+        const found = await Promise.all(
+            this.#companions.map(async ({ companion }) => {
+                const file = `${path}${companion.suffix}`;
+                const info = await stat(file).catch(() => undefined);
+
+                return info?.isFile() === true ? [{ companion, file }] : [];
+            }),
+        );
+
+        return found.flat();
+    }
+
+    /** The labels of the companions beside one of Pi's sessions, for its preview. */
+    async #companionLabels(path: string): Promise<string[]> {
+        return [
+            ...new Set((await this.#companionsOf(path)).map(({ companion }) => companion.label)),
+        ];
+    }
+
+    /**
+     * Give each companion beside `path` the continued session: in turn, each within its time. Returns what they say
+     * for the person, a line each; one that fails or takes too long says so, and the others still run.
+     */
+    async carryCompanions(
+        path: string,
+        conversationId: ConversationId,
+        copies: ReadonlyMap<EntryId, string>,
+        context: Context,
+    ): Promise<string[]> {
+        const found = await this.#companionsOf(path);
+
+        if (found.length === 0) {
+            return [];
+        }
+
+        const conversation = await this.#app.harness.conversation(conversationId, context);
+        const view = await conversation!.context(context);
+        // The context's messages, each with its entry: what each entry contributes, in order, as the request sends it.
+        const entries: PiSessionContinued["entries"] = view.entries.flatMap((entry, index) =>
+            (view.contributions[index] ?? []).map((message) => ({
+                id: entry.id,
+                message,
+                ...(copies.has(entry.id) ? { from: copies.get(entry.id)! } : {}),
+            })),
+        );
+        const said: string[] = [];
+
+        for (const { companion, file } of found) {
+            let timer: NodeJS.Timeout | undefined;
+
+            try {
+                const answer = await Promise.race([
+                    Promise.resolve(
+                        companion.continued({
+                            conversationId,
+                            piFile: path,
+                            companion: file,
+                            entries,
+                        }),
+                    ),
+                    new Promise<never>((_, reject) => {
+                        timer = setTimeout(
+                            () => reject(new Error("it took too long")),
+                            COMPANION_TIMEOUT_MS,
+                        );
+                    }),
+                ]);
+
+                if (typeof answer === "string" && answer.trim() !== "") {
+                    said.push(answer.trim());
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+
+                this.#app.log(`Pi session companion ${companion.suffix} failed: ${message}`);
+                said.push(`${companion.label}: ${message}`);
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        return said;
     }
 
     /**
@@ -772,6 +927,7 @@ export class PiSessions {
             model: model === null ? null : `${model.provider}/${model.modelId}`,
             modelHere,
             last,
+            companions: await this.#companionLabels(path),
             ...(pocket === undefined
                 ? {}
                 : { pocket: { id: pocket.id, behind: info.messageCount > pocket.count } }),
