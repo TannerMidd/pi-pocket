@@ -71,7 +71,7 @@ test("the team tool and the linked message tell Pi to answer once and stop when 
     assert.match(target, /stop when the work is done/);
 });
 
-test("agents write to each other in ASD-STE100: team messages, replies, and subagent tasks", async () => {
+test("agents write to each other in their person's language, ASD-STE100 in English: team messages, replies, and subagent tasks (#239)", async () => {
     const id = await newSession(app);
 
     requests.length = 0;
@@ -89,21 +89,27 @@ test("agents write to each other in ASD-STE100: team messages, replies, and suba
     const all = requests.join("\n");
 
     // The source: its team messages, and its tasks for subagents.
-    assert.match(all, /in ASD-STE100 \(Simplified Technical English\) at about 80% adherence/);
-    assert.match(all, /Write messages in ASD-STE100, as the guidelines say for agents/);
     assert.match(
         all,
-        /Write each message to a subagent \(spawn and send\) in ASD-STE100, as the guidelines say/,
+        /In English, use ASD-STE100 \(Simplified Technical English\) at about 80% adherence/,
     );
-    assert.match(all, /ask for the report in it too/);
-    assert.match(all, /ask for answers in it too/);
-    // The linked session: the message asks for the reply in ASD-STE100, under a marker its prompt names.
+    assert.match(
+        all,
+        /Write messages in the language of the person you work for \(in ASD-STE100 when it is English\)/,
+    );
+    assert.match(
+        all,
+        /Write each message to a subagent \(spawn and send\) in the language of the person you work for \(in ASD-STE100 when it is English\)/,
+    );
+    assert.match(all, /ask for the report in that language too/);
+    assert.match(all, /ask for answers in that language too/);
+    // The linked session: the message asks for the reply in its own language, under a marker its prompt names.
     const target = (await modelTexts(app, started.id as never)).join("\n");
 
     assert.match(target, /\[via linked session session-[^\]]+\] Message from linked session/);
     assert.match(
         target,
-        /Write any reply to that address in ASD-STE100 \(Simplified Technical English\)/,
+        /Write any reply to that address in the language of the message below: in ASD-STE100 \(Simplified Technical English\) when it is English/,
     );
     // The linked session's own requests (those with its message) carry the rule for that marker.
     const own = requests.filter((each) => each.includes("<linked-session-message>")).join("\n");

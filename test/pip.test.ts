@@ -266,7 +266,7 @@ test("a report and a follow carry the long answer's start, and say how to read t
     );
 });
 
-test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it", async () => {
+test("PiP writes what agents read in its person's language, ASD-STE100 in English, and a session answers PiP in it (#239)", async () => {
     const id = await pip();
 
     await say(app, id, "start write the release notes");
@@ -275,24 +275,23 @@ test("PiP writes what agents read in ASD-STE100, and a session answers PiP in it
         "the session's request",
     );
 
-    assert.match(lastRequest.pip, /Write to agents in ASD-STE100 \(Simplified Technical English\)/);
-    assert.match(lastRequest.pip, /It does not cover your answers to your person/);
-    // PiP asks each session to answer it in ASD-STE100, and a session answers a message through PiP so.
+    // In the person's language, with no pip.md: in English, ASD-STE100.
     assert.match(
         lastRequest.pip,
-        /In each task, ask the session to write its answers to you in ASD-STE100 too/,
+        /Write what agents read in your person's language: the language of their messages to you/,
     );
-    assert.doesNotMatch(lastRequest.session, /Write to agents in ASD-STE100/);
+    assert.match(lastRequest.pip, /In English, write ASD-STE100 \(Simplified Technical English\)/);
+    assert.match(lastRequest.pip, /It does not cover your answers to your person/);
+    assert.match(
+        lastRequest.pip,
+        /In each task, ask the session to answer you in the same language and style/,
+    );
+    assert.doesNotMatch(lastRequest.session, /Write what agents read/);
     // The session sees the marker that its rule names.
     assert.match(lastRequest.session, /\[via PiP\] write the release notes/);
     assert.match(
         lastRequest.session,
-        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in ASD-STE100/,
-    );
-    // A session answers PiP in the language PiP asks for, when pip.md names one (#239).
-    assert.match(
-        lastRequest.session,
-        /When that agent asks for its answers in another language, write them in that language/,
+        /A message with the marker \\"\[via PiP\]\\" or \\"\[via linked session …\]\\" at its start .* comes from another agent\. Write your answer to it, and what you send back to that agent, in the language of its message after the marker\. In English, use ASD-STE100/,
     );
 });
 
@@ -318,7 +317,7 @@ test("PiP follows its person's standing instructions in pip.md, read again when 
     await say(app, id, "hello again");
     assert.match(
         instructions() ?? "",
-        /^<pip_instructions>\nYour person's standing instructions for you, from .*pip\.md:\n\nAnswer me in Chinese\.\n\nWhen these name a language for your answers, write what agents read in that language too, .*\n<\/pip_instructions>$/,
+        /^<pip_instructions>\nYour person's standing instructions for you, from .*pip\.md:\n\nAnswer me in Chinese\.\n<\/pip_instructions>$/,
     );
 
     writeFileSync(file, "Answer me in Japanese, and keep it short.\n");
