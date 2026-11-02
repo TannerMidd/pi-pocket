@@ -6,6 +6,7 @@
  * What people ask of Pi lives in `commands.ts`, the people's side of a session in `collab.ts`, push notifications in
  * `alerts.ts`, provider sign-ins in `providers.ts`, and each conversation's shared live view in `room.ts`.
  */
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -3737,7 +3738,16 @@ export function installRequestShaping(
     const stream = models.streamSimple.bind(models);
 
     models.streamSimple = (model, context, options) => {
-        if (shapers.length === 0) {
+        const mistralCacheKey =
+            model.provider === "mistral" &&
+            model.api === "openai-completions" &&
+            /^https:\/\/api\.mistral\.ai(?:\/|$)/.test(model.baseUrl) &&
+            options?.cacheRetention !== "none" &&
+            options?.sessionId
+                ? createHash("sha256").update(options.sessionId).digest("hex")
+                : undefined;
+
+        if (shapers.length === 0 && !mistralCacheKey) {
             return stream(model, context, options);
         }
 
@@ -3747,6 +3757,15 @@ export function installRequestShaping(
                 const asked = await options?.onPayload?.(payload, payloadModel);
                 let next = asked ?? payload;
                 let shaped = asked;
+
+                if (mistralCacheKey && next && typeof next === "object" && !Array.isArray(next)) {
+                    const request = next as Record<string, unknown>;
+
+                    if (request.prompt_cache_key === undefined) {
+                        next = { ...request, prompt_cache_key: mistralCacheKey };
+                        shaped = next;
+                    }
+                }
 
                 for (const shape of [...shapers]) {
                     try {

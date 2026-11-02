@@ -21,6 +21,15 @@ Their observations have no expiry timer. Missing cache usage can mean a miss or 
 Other providers, proxies, missing metadata, unsupported payloads, disabled caches, and zero cache usage produce no timer.
 A cached system prompt alone does not qualify. Nothing polls the provider for an expiry timestamp.
 
+### Provider evidence
+
+- [OpenAI API](https://developers.openai.com/api/docs/guides/prompt-caching): GPT-5.6 and later document a 30-minute minimum by default or 12 hours for an explicitly selected Responses API setting, with different write prices. Older models have different, best-effort retention. Neither proves a hit. These API rules do not establish a Codex subscription deadline.
+- [Gemini API](https://ai.google.dev/gemini-api/docs/generate-content/caching): the one-hour default applies to explicitly created cache resources, not implicit caching or Gemini Bridge.
+- [Mistral](https://docs.mistral.ai/studio/conversations/advanced/prompt-caching) documents session keys for Chat Completions, not an expiry. The standard Conversations adapter already supplies a key. Native Chat Completions requests with a session get a stable key if the adapter and caller have not supplied one; this does not apply to proxies or disabled retention.
+- An [independent small-sample study](https://gist.github.com/monperrus/9784f52d5144975fd11be7f642c4a8fc) observed Mistral through OpenRouter, not the native endpoint. Its results do not establish a native deadline.
+
+[Codex propagates its cache key to remote compaction](https://github.com/openai/codex/pull/21249). Pi Durable's standalone summarizer currently uses a different prompt and disables retention, so copying the key alone cannot make that summary reuse the conversation prefix.
+
 The estimated expiry starts at request dispatch, not response completion.
 The pilot makes one diagnostic decision at 90% of the TTL: 4 minutes 30 seconds or 54 minutes.
 This is an inferred deadline, not a provider guarantee. It can underestimate expiry conservatively.
