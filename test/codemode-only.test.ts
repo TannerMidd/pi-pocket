@@ -63,13 +63,13 @@ const mode = (value: string) => app.setExtensionSettings(owner(app), "codemode",
 before(async () => {
     mkdirSync(join(root, "data", "extensions"), { recursive: true });
     app = await openApp(model);
-    // A drop-in that the owner turns on later: its tool must follow the mode too.
+    // A drop-in that the owner turns on later, too long for the budget: it must follow the mode too.
     writeFileSync(
         join(root, "data", "extensions", "late.ts"),
         `/** Late: for tests. */
 export default () => ({ name: "late", tools: [{
     name: "late_tool",
-    description: "Late echo",
+    description: "Late echo. " + "Long. ".repeat(2000),
     parameters: { type: "object", properties: { text: { type: "string" } } },
     annotations: { readOnlyHint: true },
     execute: async (args) => ({ output: [{ type: "text", text: "late:" + args.text }] }),
@@ -100,7 +100,8 @@ test("Only mode declares codemode, tool search, and the tools with cards, and li
     assert.deepEqual(declared.sort(), ["artifact", "ask", "codemode", "memory", "tool_search"]);
     assert.match(sections.codemode!, /^<codemode>\nYour other tools are not declared/);
     assert.match(sections.codemode!, /## read\n.*\nParameters \(JSON Schema\): \{/);
-    assert.match(sections.codemode!, /## late_tool\nLate echo/, "a drop-in installed later");
+    // Past the budget, a drop-in installed later is listed by name.
+    assert.match(sections.codemode!, /\nAlso callable, not listed: late_tool\n/);
     assert.match(sections.deferred_tools!, /- browser:/, "waiting tools still wait");
     assert.doesNotMatch(sections.codemode!, /\bbrowser\b/, "a waiting tool is not listed");
 });
