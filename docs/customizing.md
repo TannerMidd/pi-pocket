@@ -80,7 +80,7 @@ People sign in to providers in Menu → **Providers**, and pick a model for each
 
 Models are the person's choice, never Pi's:
 
-- A subagent runs on its session's model, unless the owner allows models under **Subagent models**, at the top of the Providers sheet. By default, there are none. Once some are allowed, subagents and linked sessions run only on those: on the session's model when it is one of them and Pi names none, else on a model Pi chooses from them (Pi must name one when the session's is not among them).
+- A subagent runs on its session's model, unless the owner allows models under **Subagent models** in the Providers sheet (a pane on the right on wide screens, at the top on phones). By default, there are none. Once some are allowed, subagents and linked sessions run only on those: on the session's model when it is one of them and Pi names none, else on a model Pi chooses from them (Pi must name one when the session's is not among them).
 - PiP gives a model only when its person named it.
 
 Instructions, skills, and `AGENTS.md` cannot change this. Tell the person where the setting is instead.

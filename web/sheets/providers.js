@@ -91,11 +91,11 @@ function SubagentModels({ names }) {
 
     return html`<div class="subagent-models">
         <div class="subagent-models-heading">
-            <div class="label">Models</div>
+            <div class="label">Subagent models</div>
+            <${RefreshModelsButton} />
             <span class="small subagent-models-chosen" title=${summary} aria-live="polite">
                 ${chosen.length} for subagents
             </span>
-            <${RefreshModelsButton} />
         </div>
         <${RefreshModelsStatus} />
         <p class="muted small">
@@ -504,7 +504,7 @@ export function ProvidersSheet() {
         <div class="providers-layout">
             ${
                 owner &&
-                html`<aside class="providers-side" aria-label="Models">
+                html`<aside class="providers-side" aria-label="Subagent models">
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
