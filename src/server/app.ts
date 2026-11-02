@@ -109,6 +109,7 @@ import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
+import { CustomProviders } from "./custom-providers.ts";
 import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
@@ -334,6 +335,8 @@ export class PocketApp {
     readonly collab = new Collab(this);
     readonly alerts = new Alerts(this);
     readonly providers = new Providers(this);
+    /** OpenAI-compatible endpoints the owner adds in the Providers sheet, kept in Pi's `models.json`. */
+    readonly customProviders = new CustomProviders(this);
     /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
     readonly limits: LimitGate;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */

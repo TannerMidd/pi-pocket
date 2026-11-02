@@ -7936,6 +7936,46 @@ div.group-head {
     justify-content: flex-end;
 }
 
+/* OpenAI-compatible endpoints: their list, and the form that adds or edits one. */
+.custom-endpoints {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.custom-endpoint-models-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.custom-endpoint-models {
+    display: flex;
+    flex-direction: column;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    background: var(--bg);
+}
+
+.custom-endpoint-model.check {
+    min-height: 40px;
+    margin: 0;
+    padding: 0 12px;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.custom-endpoint-model + .custom-endpoint-model {
+    border-top: 1px solid var(--hair);
+}
+
+.custom-endpoint-buttons {
+    justify-content: flex-end;
+}
+
 /* What a provider said when it would not renew a sign-in. */
 .provider-why {
     overflow-wrap: anywhere;

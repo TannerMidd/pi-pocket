@@ -54,7 +54,7 @@ Use a template for a message that people send often. Use a skill for steps that 
 
 ## Models and providers
 
-People sign in to providers in Menu → **Providers**, and pick a model for each session with the model chip in the message box. Pi Pocket uses Pi's sign-ins (`~/.pi/agent/auth.json`) and Pi's list of models. To add a model or a provider that Pi does not know, follow Pi's `models.md` and `custom-provider.md`.
+People sign in to providers in Menu → **Providers**, and pick a model for each session with the model chip in the message box. Pi Pocket uses Pi's sign-ins (`~/.pi/agent/auth.json`) and Pi's list of models. To add an OpenAI-compatible endpoint (LM Studio, Ollama, vLLM, a proxy), the owner taps **Add OpenAI-compatible endpoint** in Providers: a name, a base URL, an API key (or **No key**), and models picked from the endpoint's list (**Find models**) or typed by hand. Pi Pocket writes the endpoint into Pi's `models.json`, which it makes, with its folder, when missing, and keeps the key in `auth.json`. **Edit** and **Remove** change it later. A `models.json` with comments, or one Pi refuses, is left alone. For other providers, or the fields the form does not set (headers, compat, costs), follow Pi's `models.md` and `custom-provider.md`; the form keeps them when it edits the endpoint.
 
 Models are the person's choice, never Pi's:
 

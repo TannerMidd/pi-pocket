@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 import { RefreshModels } from "../model-refresh.js";
+import { CustomProviders } from "./custom-providers.js";
 
 /** Models past this many get a box to find them by. */
 const MODEL_SEARCH_AT = 8;
@@ -326,6 +327,7 @@ export function ProvidersSheet() {
                         <button class="button" onClick=${() => setQuery("")}>Clear search</button>
                     </div>`
                 }
+                ${owner && needle === "" && html`<${CustomProviders} onChanged=${load} />`}
                 ${groups.map(
                     ([title, each]) => html`<section class="provider-group" key=${title}>
                         <h3 class="provider-group-head">
