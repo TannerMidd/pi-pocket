@@ -53,7 +53,7 @@ const INLINE_BUDGET = 3_000 * CHARS_PER_TOKEN;
  * call's details, and a script's nested call keeps its details to itself.
  */
 const DECLARED = new Set([CODEMODE_TOOL, TOOL_SEARCH_TOOL_NAME, "artifact", "ask", "memory"]);
-const ONLY_GUIDE = `Your other tools are not declared. Call them only from a codemode script: \`await tools.<name>({ ...args })\`. Use one script to batch independent calls (Promise.allSettled), chain them, or filter large output.`;
+const ONLY_GUIDE = `Your other tools are not declared. Call them only from a codemode script: \`await tools.<name>({ ...args })\`. Where this prompt says to use a tool, call it from a script. Use one script to batch independent calls (Promise.allSettled), chain them, or filter large output.`;
 
 const DESCRIPTION = `Run JavaScript that calls your other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level \`await\` and \`return\` work. No Node, file system, network, or timers.
 - \`await tools.<name>({ ...args })\` takes the same arguments as calling the tool directly, resolves to its text output, and rejects with an Error when the call fails or is blocked. Calls still running when the script ends are cancelled.
