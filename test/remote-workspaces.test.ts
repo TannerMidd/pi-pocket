@@ -209,6 +209,11 @@ test("only the owner can start, move, or link a session to a workspace URI", asy
             app.linkedSessions.start(shared, { message: "go" }, "guest-link-2"),
             /owner/,
         );
+        await assert.rejects(app.commands.fork(shared, user, {}), /owner/);
+        const page = await (await app.conversation(shared)).entries({}, 9, undefined, context);
+        const entryId = Number(page.items.find((entry) => entry.kind === "pi.user")!.id);
+
+        await assert.rejects(app.commands.resend(shared, user, { entryId }), /owner/);
         assert.equal(app.sessions().length, count);
     } finally {
         remove();
