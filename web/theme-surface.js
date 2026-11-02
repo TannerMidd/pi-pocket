@@ -182,6 +182,7 @@ export const PARTS = [
     "home-colors",
     "home-color",
     "home-actions",
+    "home-menu",
     "home-heading",
     "home-recent",
     "home-recent-row",

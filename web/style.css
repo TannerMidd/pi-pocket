@@ -6800,11 +6800,20 @@ div.group-head {
     flex-direction: column;
     gap: 28px;
     padding: 40px;
+    position: relative;
 }
 
 .splash > * {
     width: min(640px, 100%);
     flex: none;
+}
+
+/* The menu (App items only, with no session open), where a session's top bar keeps it. */
+.splash > .splash-menu {
+    position: absolute;
+    top: calc(env(safe-area-inset-top) + 3px + 6px * var(--space-y));
+    right: calc(10px + var(--inset-r));
+    width: 40px;
 }
 
 .fetch {
