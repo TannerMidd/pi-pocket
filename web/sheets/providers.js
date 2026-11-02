@@ -311,6 +311,14 @@ export function ProvidersSheet() {
         ],
     ].filter(([, each]) => each.length > 0);
 
+    // Where sign-ins live, said once: beside Signed in, or the first group when nothing is signed in.
+    const noteGroup = (groups.find(([title]) => title === "Signed in") ??
+        groups.find(([title]) => title === "Not configured") ??
+        groups[0])?.[0];
+    const note = html`<p class="providers-note">
+        Shared with Pi · <span class="mono">~/.pi/agent/auth.json</span>${owner ? "" : " · only the owner can change them"}
+    </p>`;
+
     // A sign-in opens under its provider's row; one whose row is not shown (a search hides it) opens above the list.
     const authInList = auth !== null && list.some((provider) => provider.id === auth.providerId);
     const formFor = (provider) =>
@@ -444,9 +452,6 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${auth && !authInList && html`<${AuthDialog} inline=${true} />`}
-                <p class="providers-note">
-                    Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
-                </p>
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
@@ -467,9 +472,12 @@ export function ProvidersSheet() {
                 }
                 ${groups.map(
                     ([title, each]) => html`<section class="provider-group" key=${title}>
-                        <h3 class="provider-group-head">
-                            ${title} <span class="muted">${each.length}</span>
-                        </h3>
+                        <div class="provider-group-top">
+                            <h3 class="provider-group-head">
+                                ${title} <span class="muted">${each.length}</span>
+                            </h3>
+                            ${title === noteGroup && note}
+                        </div>
                         <div class="sheet-list">${each.map(row)}</div>
                     </section>`,
                 )}

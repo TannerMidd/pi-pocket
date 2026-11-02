@@ -7827,12 +7827,27 @@ div.group-head {
     flex-shrink: 0;
 }
 
-/* A quiet aside about where sign-ins live, tucked against the search box. */
+/* A group's title, with a quiet aside about where sign-ins live at its right end. */
+.provider-group-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    margin: 0 2px;
+}
+
+.provider-group-top .provider-group-head {
+    margin: 0;
+}
+
 .providers-note {
-    margin: 0 2px -8px;
+    margin: 0 0 0 auto;
+    min-width: 0;
     font-size: 12px;
     font-style: italic;
     color: var(--faint);
+    overflow-wrap: anywhere;
 }
 
 .providers-note .mono {
