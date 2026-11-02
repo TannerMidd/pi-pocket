@@ -29,6 +29,9 @@ test("inline math does not close on a $ that has a letter or a digit after it", 
     assert.ok(inlineMath("$a+b$"));
     assert.ok(inlineMath("$x$, and"));
     assert.ok(inlineMath("$y$)"));
+    // Scripts written without spaces: Chinese, Japanese.
+    assert.ok(inlineMath("$z$为实数"));
+    assert.ok(inlineMath("$x$です"));
 });
 
 test("display math supports one or more lines", () => {
