@@ -328,7 +328,9 @@ export default function createPlan(_host: PocketHost) {
                     // HookApi omits agent, but ToolTask supplies its phase runtime and codemode preserves it.
                     // Use that same resolved snapshot, not the live registry: wrappers and reloads can differ.
                     const runtime = api as typeof api & Partial<Pick<ToolExecutionApi, "agent">>;
-                    const tool = (await runtime.agent?.(context))?.tools.find(
+                    const agent = await runtime.agent?.(context);
+                    // Codemode's Only mode leaves a tool callable but not offered: its hint counts too.
+                    const tool = [...(agent?.tools ?? []), ...(agent?.callable ?? [])].find(
                         (tool) => tool.name === call.name,
                     ) as { annotations?: ToolAnnotations } | undefined;
                     // A built-in tool's hint can only come from a wrap, which the owner never sees as read-only.

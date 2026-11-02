@@ -2,6 +2,7 @@
 // still call them.
 import {
     cleanUp,
+    context,
     lastText,
     newSession,
     openApp,
@@ -15,6 +16,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { PlanDoc } from "../src/server/docs.ts";
 
 type System = { role: string; sections?: Record<string, string>; toolsAdded?: { name: string }[] };
 
@@ -57,6 +59,7 @@ export default () => ({ name: "late", tools: [{
     name: "late_tool",
     description: "Late echo",
     parameters: { type: "object", properties: { text: { type: "string" } } },
+    annotations: { readOnlyHint: true },
     execute: async (args) => ({ output: [{ type: "text", text: "late:" + args.text }] }),
 }] });
 `,
@@ -93,6 +96,8 @@ test("in Only mode, a script calls a hidden tool, and a loaded tool goes through
     mode("only");
     const id = await newSession(app);
 
+    // Plan mode lets a read-only tool run, also one that only scripts call.
+    await app.harness.commit(async (tx) => void ((await tx.doc(PlanDoc, id)).on = true), context);
     await say(app, id, "run a script");
     assert.match(result, /^Script completed[\s\S]*late:hi/);
 
