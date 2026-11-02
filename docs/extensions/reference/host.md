@@ -415,7 +415,7 @@ Since 0.28.0 · Experimental
 
 Lets an extension start an ordinary session, the same kind a person gets from New session. [Starting an ordinary session](../sessions.md) tells you who it acts for, what it checks, and what the new session is.
 
-The call acts as the person that Pi works for in `source`, and that person's checks apply. Give it a `key` that stays the same when the call runs again. A second call with the same `key` returns the session the first call made, and sends its message once.
+The call acts as the person that Pi works for in `source`, and that person's checks apply. Give it a `key` that stays the same when the call runs again. A second call with the same `key` returns the session the first call made, and sends its message once. It acts for the person of the first call, and it does not check the model, the folder, or the spend limit again. A `key` of `linkedSessions.start` never finds a session of this API.
 
 #### `sessions.start`
 
@@ -436,6 +436,7 @@ Makes a top-level session and, when `message` is given, sends that text as its f
 - `thinking` is any level. Pi Pocket lowers it to the highest level the model has, or uses the model's lowest when it has none that low. Without it, the session keeps the thinking level it started with.
 - The new session has no `linkedFrom`. It is its own row in the session list, and it can start linked sessions of its own.
 - A source past its spend limit, a person invited to one session, and a PiP source are refused, and nothing is made.
+- A blank `message` is refused, and nothing is made. A `message` is also refused when the session gets no model: no `model` and no default model.
 
 ## Linked sessions
 

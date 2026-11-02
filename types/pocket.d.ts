@@ -944,8 +944,8 @@ export interface LinkedSessions {
 export interface Sessions {
     /**
      * Starts an ordinary session, like New session, in `cwd` or the server's default folder. `model` is
-     * `provider/modelId`. `thinking` is any level, lowered to one the model has. With `message`, that text is the session's first
-     * message, sent once for this `key`, as the person wrote it.
+     * `provider/modelId`. `thinking` is any level, lowered to one the model has. With `message`, that text is
+     * the session's first message, sent once for this `key`, as the person wrote it.
      * @since 0.28.0
      * @experimental
      */
