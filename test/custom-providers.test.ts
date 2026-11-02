@@ -115,6 +115,11 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
     // A saved endpoint's discovery uses its stored key.
     await app.customProviders.discover({ baseUrl, id: "home-llm" });
     assert.equal(seenAuth, "Bearer sk-secret");
+    // Not to another address: there the key must be typed again.
+    await assert.rejects(
+        app.customProviders.discover({ baseUrl: "http://127.0.0.1:1/v1", id: "home-llm" }),
+        (error: unknown) => error instanceof HttpError && error.status === 400,
+    );
 });
 
 test("an edit keeps what it does not change; no key uses the placeholder; removing takes the key too", async () => {

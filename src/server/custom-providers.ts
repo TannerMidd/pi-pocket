@@ -335,12 +335,18 @@ export class CustomProviders {
                 ? input.apiKey.trim()
                 : undefined;
 
-        if (
-            key === undefined &&
-            typeof input.id === "string" &&
-            this.list().some((each) => each.id === input.id)
-        ) {
-            const auth = await this.#app.models.getAuth(input.id).catch(() => undefined);
+        const saved =
+            key === undefined && typeof input.id === "string"
+                ? this.list().find((each) => each.id === input.id)
+                : undefined;
+
+        if (saved !== undefined && saved.key !== "none") {
+            // The saved key goes only where it was saved for: a new address needs the key typed again.
+            if (new URL(saved.baseUrl).origin !== new URL(baseUrl).origin) {
+                throw new HttpError(400, "The URL changed. Enter the API key again to ask it.");
+            }
+
+            const auth = await this.#app.models.getAuth(saved.id).catch(() => undefined);
 
             key = auth?.auth.apiKey;
             Object.assign(headers, auth?.auth.headers ?? {});
