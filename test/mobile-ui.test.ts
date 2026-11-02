@@ -738,7 +738,7 @@ async function noPip(): Promise<void> {
     await page.evaluate(`
         (await import("/pip.js")).closePip();
         sessionStorage.removeItem("pocket.pip");
-        localStorage.removeItem("pocket.pip.draft");
+        (await import("/person-storage.js")).personStorage.set("pip.draft", null);
     `);
     await until(
         async () =>
@@ -756,7 +756,7 @@ test(
         await fresh();
         await page.setViewport(VIEWPORTS.desktop);
         await page.evaluate(`
-        localStorage.setItem("pocket.pip.draft", "a draft");
+        (await import("/person-storage.js")).personStorage.set("pip.draft", "a draft");
         const fetched = window.fetch;
         window.fetch = (url, init) =>
             String(url).endsWith("/submit") ? Promise.reject(new TypeError("offline")) : fetched(url, init);

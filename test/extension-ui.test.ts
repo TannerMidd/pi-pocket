@@ -939,7 +939,7 @@ test(
         );
         // The submit goes nowhere: the test is about what the app sends, not about PiP's answer.
         await page.evaluate(`
-            localStorage.removeItem("pocket.pip.draft");
+            (await import("/person-storage.js")).personStorage.set("pip.draft", null);
             globalThis.submitted = [];
             const fetched = window.fetch;
             window.fetch = (url, init) => {

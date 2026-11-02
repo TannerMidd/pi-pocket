@@ -29,7 +29,7 @@ test("a session left just before signing out is not saved on the device after", 
     try {
         const [first, second] = [await newSession(app), await newSession(app)];
 
-        await say(app, first, "private words");
+        await say(app, first, "session words");
         await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
         const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
         const page = await browsers.open(1);
@@ -40,7 +40,7 @@ test("a session left just before signing out is not saved on the device after", 
         await until(
             async () =>
                 await inPage<boolean>(
-                    `return JSON.stringify(document.body.textContent.includes("private words"))`,
+                    `return JSON.stringify(document.body.textContent.includes("session words"))`,
                 ),
             "the session",
         );
@@ -62,7 +62,10 @@ test("a session left just before signing out is not saved on the device after", 
             return "null";
         `);
         await until(
-            async () => await inPage<boolean>(`return JSON.stringify(location.pathname === "/")`),
+            async () =>
+                inPage<boolean>(`return JSON.stringify(document.readyState === "complete" &&
+                    new URL(performance.getEntriesByType("navigation")[0].name).pathname === "/" &&
+                    (await import("/store.js")).store.state.me === null)`).catch(() => false),
             "signed out",
         );
 
@@ -99,7 +102,7 @@ test("files attached to a draft are this person's, and go with their sign-out", 
         const inPage = async <T>(script: string) => JSON.parse(await page.evaluate(script)) as T;
         const kept = () =>
             inPage<string[]>(
-                `return JSON.stringify(Object.keys(localStorage).filter((key) => key.startsWith("pocket.attached.")))`,
+                `return JSON.stringify(Object.keys(localStorage).filter((key) => /^pocket\\.person\\..*:attached\\./.test(key)))`,
             );
 
         await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
@@ -114,7 +117,7 @@ test("files attached to a draft are this person's, and go with their sign-out", 
         await inPage(`
             const data = new DataTransfer();
 
-            data.items.add(new File(["private notes"], "notes.txt", { type: "text/plain" }));
+            data.items.add(new File(["attached notes"], "notes.txt", { type: "text/plain" }));
             const picker = document.querySelector(".composer input[type=file]");
 
             picker.files = data.files;
@@ -124,11 +127,14 @@ test("files attached to a draft are this person's, and go with their sign-out", 
         `);
         await until(async () => (await kept()).length === 1, "the file kept with the draft");
         // Under the person's own id, so another one signed in on this browser does not get it.
-        assert.deepEqual(await kept(), [`pocket.attached.${app.config.users[0]!.id}.${id}`]);
+        assert.deepEqual(await kept(), [`pocket.person.${app.config.users[0]!.id}:attached.${id}`]);
 
         await inPage(`void (await import("/store.js")).signOut(); return "null"`);
         await until(
-            async () => await inPage<boolean>(`return JSON.stringify(location.pathname === "/")`),
+            async () =>
+                inPage<boolean>(`return JSON.stringify(document.readyState === "complete" &&
+                    new URL(performance.getEntriesByType("navigation")[0].name).pathname === "/" &&
+                    (await import("/store.js")).store.state.me === null)`).catch(() => false),
             "signed out",
         );
         assert.deepEqual(await kept(), []);
