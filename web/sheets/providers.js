@@ -2,13 +2,10 @@
 // sign-in uses to ask for a code or a key.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
-import { html, Icon, Loader, Sheet } from "../ui.js";
+import { html, Icon, Loader, MODEL_SEARCH_AT, Sheet } from "../ui.js";
 import { RefreshModelsButton, RefreshModelsStatus } from "../model-refresh.js";
 import { favoriteModels, setModelFavorite } from "../model-favorites.js";
 import { EndpointForm, removeCustomProvider, useCustomProviders } from "./custom-providers.js";
-
-/** Models past this many get a box to find them by. */
-const MODEL_SEARCH_AT = 8;
 
 /** This tab's changes to the models for subagents, one after another: their answers come back in the order sent. */
 let saving = Promise.resolve();
@@ -238,6 +235,23 @@ function LimitWait() {
     </div>`;
 }
 
+/** A provider row's line under its name: its sign-in and its models, or what the row adds. */
+function aboutOf(provider) {
+    if (provider.about) {
+        return provider.about;
+    }
+
+    const account = provider.label || provider.source;
+    const signIn = provider.needsSignIn
+        ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions " +
+          "on its models fail, and PiP and subagents on other models do not use them"
+        : provider.configured
+          ? `signed in${account ? ` · ${account}` : ""}`
+          : "not configured";
+
+    return `${signIn} · ${provider.models} models`;
+}
+
 /** How long a panel under a row takes to close: `.provider-panel.closing` in style.css. */
 const PANEL_CLOSE_MS = 180;
 
@@ -336,6 +350,9 @@ export function ProvidersSheet() {
                   adds: true,
                   models: 0,
                   words: "custom endpoint local self-hosted ollama lm studio vllm llama.cpp proxy",
+                  about:
+                      "Any server with the OpenAI API (Ollama, LM Studio, vLLM, a proxy): " +
+                      "a URL, a key, and its models",
               },
           ]
         : [];
@@ -368,8 +385,9 @@ export function ProvidersSheet() {
     const noteGroup = (groups.find(([title]) => title === "Signed in") ??
         groups.find(([title]) => title === "Not configured") ??
         groups[0])?.[0];
+    const noteMore = owner ? "" : " · only the owner can change them";
     const note = html`<p class="providers-note">
-        Shared with Pi · <span class="mono">~/.pi/agent/auth.json</span>${owner ? "" : " · only the owner can change them"}
+        Shared with Pi · <span class="mono">~/.pi/agent/auth.json</span>${noteMore}
     </p>`;
 
     // A sign-in opens under its provider's row; one whose row is not shown (a search hides it) opens above the list.
@@ -409,15 +427,7 @@ export function ProvidersSheet() {
                         : provider.configured && html` <span class="ok">✓</span>`
                 }
             </div>
-            ${
-                provider.adds
-                    ? html`<div class="muted small">
-                          Any server with the OpenAI API (Ollama, LM Studio, vLLM, a proxy): a URL, a key, and its models
-                      </div>`
-                    : html`<div class="muted small">
-                ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
-                    </div>`
-            }
+            <div class="muted small">${aboutOf(provider)}</div>
             ${
                 provider.needsSignIn &&
                 html`<div class="muted small mono provider-why">${provider.needsSignIn}</div>`

@@ -76,6 +76,8 @@ export function RefreshModelsStatus() {
         ${loading && html`<p class="muted">Checking configured providers…</p>`}
         ${error && html`<p class="warn">Could not refresh models: ${error}</p>`}
         ${result && html`<p class="muted">${completion(result)}</p>`}
-        ${result?.errors.map(({ provider, message }) => html`<p class="warn">${provider}: ${message}</p>`)}
+        ${result?.errors.map(
+            ({ provider, message }) => html`<p class="warn">${provider}: ${message}</p>`,
+        )}
     </div>`;
 }

@@ -10,12 +10,10 @@ import {
     formatTokens,
     html,
     Icon,
+    MODEL_SEARCH_AT,
     popAnchor,
     scrimPress,
 } from "../ui.js";
-
-/** Models past this many get a search box in the picker. */
-const MODEL_SEARCH_AT = 8;
 
 /** Over the message box the picker is 330px wide; on a phone, the width `popAnchor` gives. */
 const widthOf = (anchor) =>

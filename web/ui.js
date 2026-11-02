@@ -201,6 +201,8 @@ const localImage = (src) =>
     /^\/a\/\d+\//.test(src) ||
     /^data:image\//i.test(src);
 
+/** Model lists past this many get a box to find a model by. */
+export const MODEL_SEARCH_AT = 8;
 /** Code blocks past this size show without colors: coloring them would hold up the conversation. */
 export const COLOR_LIMIT = 200_000;
 /** Code blocks longer than this many lines fold to their first lines, once they are written whole. */

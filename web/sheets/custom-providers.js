@@ -1,12 +1,10 @@
-// OpenAI-compatible endpoints in the Providers sheet: the "OpenAI Compatible" row adds one with a URL and a key, its
-// models picked from what the endpoint lists (GET /models) or typed by hand; each endpoint's own row edits or removes it. The server keeps each in
-// Pi's models.json, and its key in Pi's sign-ins.
+// OpenAI-compatible endpoints in the Providers sheet: the "OpenAI Compatible" row adds one with a
+// URL and a key, its models picked from what the endpoint lists (GET /models) or typed by hand;
+// each endpoint's own row edits or removes it. The server keeps each in Pi's models.json, and its
+// key in Pi's sign-ins.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, notify } from "../store.js";
-import { html, Icon } from "../ui.js";
-
-/** Models past this many get a box to find them by. */
-const MODEL_SEARCH_AT = 8;
+import { html, Icon, MODEL_SEARCH_AT } from "../ui.js";
 
 /** The form that adds an endpoint (`editing` undefined) or changes one. */
 export function EndpointForm({ editing, onDone, onCancel }) {
@@ -114,8 +112,14 @@ export function EndpointForm({ editing, onDone, onCancel }) {
         baseUrl.trim() !== "" &&
         (noKey || apiKey.trim() !== "" || editing !== undefined) &&
         busy === "";
+    const keepsKey = editing && editing.key !== "none" && editing.key !== "missing";
+    const findLabel =
+        busy === "discover" ? "Asking…" : listed === null ? "Find models" : "Find again";
 
-    return html`<section class="auth-inline custom-endpoint-form" aria-label=${editing ? `Edit ${editing.name}` : "Add an OpenAI-compatible endpoint"}>
+    return html`<section
+        class="auth-inline custom-endpoint-form"
+        aria-label=${editing ? `Edit ${editing.name}` : "Add an OpenAI-compatible endpoint"}
+    >
         <div class="auth-inline-head">
             <strong>${editing ? `Edit ${editing.name}` : "OpenAI-compatible endpoint"}</strong>
             <button class="icon-button" aria-label="Close" onClick=${onCancel}>
@@ -146,7 +150,7 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             </label>
             <label class="field">
                 <span class="label">
-                    API key${editing && editing.key !== "none" && editing.key !== "missing" ? " (empty keeps the saved one)" : ""}
+                    API key${keepsKey ? " (empty keeps the saved one)" : ""}
                 </span>
                 <input
                     type="password"
@@ -174,7 +178,7 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                         onClick=${discover}
                     >
                         <${Icon} name="reload" size=${14} />
-                        ${busy === "discover" ? "Asking…" : listed === null ? "Find models" : "Find again"}
+                        ${findLabel}
                     </button>
                 </div>
                 ${
@@ -191,7 +195,11 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                 }
                 ${
                     rows.length > 0 &&
-                    html`<div class="custom-endpoint-models" role="group" aria-label="Models to add">
+                    html`<div
+                        class="custom-endpoint-models"
+                        role="group"
+                        aria-label="Models to add"
+                    >
                         ${shown.map(
                             (id) => html`<label class="check custom-endpoint-model" key=${id}>
                                 <input
@@ -214,7 +222,11 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                         onInput=${(event) => setTyped(event.currentTarget.value)}
                         onKeyDown=${(event) => event.key === "Enter" && addTyped()}
                     />
-                    <button class="button small" disabled=${typed.trim() === ""} onClick=${addTyped}>
+                    <button
+                        class="button small"
+                        disabled=${typed.trim() === ""}
+                        onClick=${addTyped}
+                    >
                         Add
                     </button>
                 </div>
@@ -251,7 +263,8 @@ export function useCustomProviders(owner) {
 export function removeCustomProvider(endpoint, done) {
     return (
         confirm(
-            `Remove ${endpoint.name}? Its models leave Pi's models.json, and its key leaves Pi's sign-ins.`,
+            `Remove ${endpoint.name}? Its models leave Pi's models.json, ` +
+                "and its key leaves Pi's sign-ins.",
         ) &&
         attempt(async () => {
             await api(`custom-providers/${encodeURIComponent(endpoint.id)}`, undefined, {
