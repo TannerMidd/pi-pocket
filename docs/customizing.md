@@ -25,11 +25,14 @@ Keep the files short and true. They go with each request, and a rule that Pi can
 
 ## PiP's instructions
 
-PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP, such as the language of its answers, in `pip.md` in Pi Pocket's data folder: `~/.pi-pocket/pip.md`, unless `--data` or `PI_POCKET_DIR` names another folder (since 0.28.0). When it names a language, PiP also writes to the sessions it starts or messages in that language and asks them to answer in it, so a session PiP worked in reads in your language when you open it. Without one, they use Simplified Technical English.
+PiP has no project, so it does not read AGENTS.md files. Write the rules for PiP in `pip.md` in Pi Pocket's data folder: `~/.pi-pocket/pip.md`, unless `--data` or `PI_POCKET_DIR` names another folder (since 0.28.0).
 
 - PiP gets the file with each message. When the file changes, the next message has the new text.
 - Only PiP reads it: sessions, subagents, and Pi's terminal app do not.
-- A session that PiP messages still answers PiP in Simplified Technical English. PiP answers you as the file says.
+
+## The language agents write in
+
+Since 0.28.0, agents write to each other in the language of the person they work for: PiP to the sessions it starts or messages, a session to its linked sessions and its subagents, and each answer back. A session you open later, that PiP or another session worked in, reads in your language, with no setting. In English they write Simplified Technical English (ASD-STE100); in another language, the same short, plain style. Their answers to you follow your own messages, as before. To choose another language for PiP's messages to sessions, say so in `pip.md`.
 
 ## Skills: procedures that Pi follows on request
 
