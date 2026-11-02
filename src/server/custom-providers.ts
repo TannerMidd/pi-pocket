@@ -155,40 +155,31 @@ export function idFor(name: string, taken: (id: string) => boolean): string {
     return id;
 }
 
-/** The ids of an endpoint's models, from an OpenAI `/models` answer (or the shapes close to it). */
+/** The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows. */
 export function parseModelList(body: unknown): CustomModel[] {
-    const list = Array.isArray(body)
-        ? body
-        : Array.isArray((body as Json | null)?.data)
-          ? ((body as Json).data as unknown[])
-          : Array.isArray((body as Json | null)?.models)
-            ? ((body as Json).models as unknown[])
-            : undefined;
+    const list = (body as Json | null)?.data;
 
-    if (list === undefined) {
+    if (!Array.isArray(list)) {
         throw new Error("The answer has no list of models.");
     }
 
-    const models: CustomModel[] = [];
+    const models = new Map<string, CustomModel>();
 
-    for (const each of list) {
-        const entry = (typeof each === "string" ? { id: each } : each) as Json | null;
-        const id = entry?.id ?? entry?.model ?? entry?.name;
+    for (const entry of list as (Json | null)[]) {
+        const id = entry?.id;
+        const window = entry?.max_model_len;
 
-        if (typeof id !== "string" || id === "" || id.length > MAX_ID) {
-            continue;
+        if (typeof id === "string" && id !== "" && id.length <= MAX_ID) {
+            models.set(id, {
+                id,
+                ...(typeof window === "number" && window >= 1
+                    ? { contextWindow: Math.floor(window) }
+                    : {}),
+            });
         }
-
-        const window = [entry?.context_length, entry?.max_model_len, entry?.context_window].find(
-            (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
-        ) as number | undefined;
-
-        models.push({ id, ...(window === undefined ? {} : { contextWindow: Math.floor(window) }) });
     }
 
-    return [...new Map(models.map((model) => [model.id, model])).values()]
-        .sort((a, b) => a.id.localeCompare(b.id))
-        .slice(0, MAX_MODELS);
+    return [...models.values()].sort((a, b) => a.id.localeCompare(b.id)).slice(0, MAX_MODELS);
 }
 
 export class CustomProviders {

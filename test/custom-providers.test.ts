@@ -38,7 +38,7 @@ before(async () => {
                 JSON.stringify({
                     object: "list",
                     data: [
-                        { id: "qwen-big", object: "model", context_length: 131072 },
+                        { id: "qwen-big", object: "model", max_model_len: 131072 },
                         { id: "llama-small", object: "model" },
                     ],
                 }),
@@ -62,7 +62,7 @@ after(async () => {
     cleanUp();
 });
 
-test("ids come from the name and skip ones that are taken; model lists are read in their usual shapes", () => {
+test("ids come from the name and skip ones that are taken; model lists are read as OpenAI sends them", () => {
     assert.equal(
         idFor("My LM Studio!", () => false),
         "my-lm-studio",
@@ -75,7 +75,6 @@ test("ids come from the name and skip ones that are taken; model lists are read 
         parseModelList({ data: [{ id: "b" }, { id: "a", max_model_len: 4096 }, { id: "b" }] }),
         [{ id: "a", contextWindow: 4096 }, { id: "b" }],
     );
-    assert.deepEqual(parseModelList({ models: [{ name: "x" }] }), [{ id: "x" }]);
     assert.throws(() => parseModelList({ nope: 1 }));
 });
 
