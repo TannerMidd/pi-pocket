@@ -1195,6 +1195,50 @@ test(
     },
 );
 
+test(
+    "a fence renderer that throws shows its source, and the rest of the reply renders",
+    real,
+    async () => {
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(rail("Meter")), "the meter's browser module");
+
+        const shown = await withMeter<{
+            error: boolean;
+            source: string | undefined;
+            after: boolean;
+        }>(`
+        const handle = pocket.fence({
+            id: "throwing-fence",
+            langs: ["throw-test"],
+            component: () => {
+                throw new Error("bad source");
+            },
+        });
+        const { render } = await import("preact");
+        const host = document.createElement("div");
+        const fence = String.fromCharCode(96).repeat(3);
+        const text = [fence + "throw-test", "the source", fence, "", "after the fence"].join(
+            String.fromCharCode(10),
+        );
+        document.body.append(host);
+        render(pocket.h(pocket.Markdown, { text }), host);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const result = {
+            error: /bad source/.test(host.querySelector(".error-box")?.textContent ?? ""),
+            source: host.querySelector("pre code")?.textContent,
+            after: (host.textContent ?? "").includes("after the fence"),
+        };
+        render(null, host);
+        host.remove();
+        handle.remove();
+
+        return JSON.stringify(result);
+    `);
+
+        assert.deepEqual(shown, { error: true, source: "the source", after: true });
+    },
+);
+
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(rail("Meter")), "the meter's rail button");
