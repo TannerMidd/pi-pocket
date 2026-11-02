@@ -223,6 +223,16 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
         "a key or No key is required",
     );
 
+    // Another server's change while this save checks its file is not undone.
+    const saving = app.customProviders.create({ name: "Late", baseUrl, noKey: true, models: [] });
+    const theirs = '{"providers":{"theirs":{}}}';
+
+    await new Promise((resolve) => setImmediate(resolve));
+    writeFileSync(modelsFile, theirs);
+    await assert.rejects(saving, /changed meanwhile/);
+    assert.equal(readFileSync(modelsFile, "utf8"), theirs);
+    writeFileSync(modelsFile, empty);
+
     // A models.json that links to another file stays a link, and that file changes.
     const target = join(root, "dotfiles-models.json");
 

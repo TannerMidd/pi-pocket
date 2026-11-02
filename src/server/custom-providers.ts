@@ -137,6 +137,15 @@ function modelsOf(value: unknown): CustomModel[] {
     return [...seen.values()];
 }
 
+/** The text of models.json as it is now; undefined when there is none. */
+function rawModels(): string | undefined {
+    try {
+        return readFileSync(modelsPath(), "utf8");
+    } catch {
+        return undefined;
+    }
+}
+
 /** A provider id from its name: lowercase words joined by `-`, not one Pi already has. */
 export function idFor(name: string, taken: (id: string) => boolean): string {
     const base =
@@ -145,7 +154,7 @@ export function idFor(name: string, taken: (id: string) => boolean): string {
             .normalize("NFKD")
             .replace(/[^a-z0-9]+/g, "-")
             .replace(/^-+|-+$/g, "")
-            .slice(0, 40) || "openai-compatible";
+            .slice(0, 40) || "endpoint";
     let id = base;
 
     for (let n = 2; taken(id); n++) {
@@ -186,6 +195,8 @@ export class CustomProviders {
     readonly #app: PocketApp;
     /** Changes, one after another: each reads the file the one before wrote. */
     #queue: Promise<unknown> = Promise.resolve();
+    /** The file's text when the change in progress read it. */
+    #seen: string | undefined;
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -466,6 +477,7 @@ export class CustomProviders {
 
     /** `models.json` as Pi Pocket may rewrite it: plain JSON that Pi accepts, or a new one. */
     async #editable(): Promise<Json> {
+        this.#seen = rawModels();
         const config = this.#read();
 
         if (config === undefined) {
@@ -542,6 +554,13 @@ export class CustomProviders {
             rmSync(temp, { force: true });
 
             throw new HttpError(400, `Pi did not accept the endpoint: ${refused}`);
+        }
+
+        // Another server or Pi changed the file since it was read: writing now would undo that change.
+        if (rawModels() !== this.#seen) {
+            rmSync(temp, { force: true });
+
+            throw new HttpError(409, "models.json changed meanwhile. Try again.");
         }
 
         renameSync(temp, path);
