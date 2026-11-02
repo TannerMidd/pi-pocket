@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 
-/** About 4,000 tokens. Raise it only on purpose, in the pull request that needs more. */
-const LIMIT = 16_000;
+/**
+ * About 4,000 tokens: tool schemas and this plain prose run at about 2.75 characters a token (Anthropic's count, Claude
+ * Opus 5.5), not 4. Raise it only on purpose, in the pull request that needs more.
+ */
+const LIMIT = 11_000;
 /** Pi's own tools, and the owner's AGENTS.md and skills: not Pi Pocket's to count. */
 const NOT_OURS = new Set(["read", "bash", "edit", "write", "project_context", "skills"]);
 
@@ -38,7 +41,7 @@ test("a new session's sections and tool schemas fit the prompt budget", async ()
     const names = ours.map(([name]) => name);
 
     // A change in the request's shape must fail here, not pass with nothing counted.
-    for (const name of ["preamble", "guidelines", "artifacts", "artifact", "subagent"]) {
+    for (const name of ["preamble", "guidelines", "artifacts", "artifact", "deferred_tools"]) {
         assert.ok(names.includes(name), `the first request has ${name}`);
     }
 

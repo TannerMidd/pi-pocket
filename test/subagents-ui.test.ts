@@ -11,6 +11,7 @@ import {
     root,
     scriptedModel,
     until,
+    offerSubagents,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -126,6 +127,7 @@ before(async () => {
 
     model = scriptedModel(route);
     app = await openApp(model);
+    offerSubagents(app);
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );

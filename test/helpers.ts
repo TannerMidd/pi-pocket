@@ -155,6 +155,22 @@ export async function loadTools(app: App, id: ConversationId, ...names: string[]
     );
 }
 
+/**
+ * Offer `subagent` in each session that `app` starts from now on, as if Pi had loaded it: it waits for tool search
+ * (`tool-search.ts`), and the scripted Pi of these tests calls it at once.
+ */
+export function offerSubagents(app: App): void {
+    const create = app.commands.createSession.bind(app.commands);
+
+    app.commands.createSession = async (...args: Parameters<typeof create>) => {
+        const created = await create(...args);
+
+        await loadTools(app, created.id, "subagent");
+
+        return created;
+    };
+}
+
 /** Send a message as the owner and wait for Pi's answer. */
 export async function say(
     app: App,

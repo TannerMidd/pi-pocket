@@ -9,6 +9,7 @@ import {
     root,
     scriptedModel,
     until,
+    offerSubagents,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -49,6 +50,7 @@ let calls = 0;
 
 before(async () => {
     app = await openApp(scriptedModel(route), join(root, "priority-data"));
+    offerSubagents(app);
 });
 
 after(async () => {

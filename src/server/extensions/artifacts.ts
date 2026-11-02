@@ -210,19 +210,18 @@ function applyEdits(
 }
 
 /** The bullet about `inline`, for sessions whose tool has it. */
-const INLINE_GUIDE = `- inline: true shows the page as a card in your reply, for a small interactive piece the person uses right there (a calculator, a chart, a form); without it the person opens the artifact, for a whole page, a game, Markdown, or SVG. Its result says which version it made: after an update, say what changed and do not repeat the page. Only a call you make directly shows a card, not one inside codemode. An id used with inline stays HTML: use a new id for Markdown or SVG. Write its page for a narrow column with no fixed height: the card grows up to 900 px, then scrolls.
+const INLINE_GUIDE = `- inline: true shows the page as a card in your reply, for a small piece the person uses right there (a calculator, a chart, a form). Write it for a narrow column with no fixed height: the card grows up to 900 px, then scrolls. Without inline, the person opens it: for a whole page, a game, Markdown, or SVG. Only a call you make directly shows a card, not one inside codemode. An inline id stays HTML: use a new id for Markdown or SVG. Its result says which version it made: after an update, say what changed and do not repeat the page.
 `;
 
 export const BRIDGE_GUIDE = join(APP_ROOT, "src", "server", "guides", "artifact-bridge.md");
 
-const guide = (
-    inline: boolean,
-) => `Use the artifact tool for results the user should see rendered rather than read as text: interactive demos, games, visualizations, charts, diagrams, formatted reports. Not for plain answers or project files (write those with write).
-- HTML artifacts open in a sandboxed frame on the user's device (often a phone) and cannot reach this app, its cookies, or the parent page. Make them self-contained, responsive (a viewport meta tag), and touch-friendly, with visible loading and error states (window.onerror).
-- Load libraries from a CDN with full URLs (https://esm.sh, https://cdn.jsdelivr.net). For ES modules that import bare specifiers (three.js addons import "three"), add an import map.
-- For a page that puts a message in the person's message box ("Ask Pi about this") or keeps its state across reloads and devices, read ${BRIDGE_GUIDE} first.
-- For small fixes, send edits instead of the whole content.
-${inline ? INLINE_GUIDE : ""}- To publish an existing local file without repeating it, give path. Everyone who can see the conversation can open the copy.`;
+const guide = (inline: boolean) =>
+    `Use the artifact tool for results to see rendered, not read: demos, games, charts, diagrams, reports; not for plain answers or project files.
+- HTML runs in a sandboxed frame on the user's device (often a phone), with no access to this app. Make it self-contained, responsive (a viewport meta tag), and touch-friendly, with loading and error states (window.onerror).
+- Load libraries from a CDN by full URL (https://esm.sh, https://cdn.jsdelivr.net); bare specifiers need an import map.
+- For a page that puts a message in the person's message box or keeps its state across reloads and devices, read ${BRIDGE_GUIDE} first.
+- Send edits for small fixes. Give path to publish a local file without repeating it; everyone in the conversation can open the copy.
+${inline ? INLINE_GUIDE : ""}`.trimEnd();
 
 type Exec = ToolRegistration["execute"];
 
@@ -580,16 +579,14 @@ const bundleParameters = {
                     description:
                         "Relative path in the bundle, up to 200 characters, with no . or .. segment.",
                 }),
-                path: Type.Optional(
-                    Type.String({ description: "A local file to copy (binary allowed)." }),
-                ),
+                path: Type.Optional(Type.String({ description: "A local file, binary too." })),
                 content: Type.Optional(
                     Type.String({ description: "UTF-8 text, instead of path." }),
                 ),
             }),
             {
                 description:
-                    "Files the page loads by relative URL (images, fonts, data, scripts, pages), added or replaced by name; earlier ones stay. Up to 5 MB each, 20 MB per version.",
+                    "Files the page loads by relative URL, added or replaced by name; earlier ones stay. Up to 5 MB each, 20 MB per version.",
             },
         ),
     ),
@@ -600,7 +597,7 @@ const bundleParameters = {
         Type.String({ description: "Group variations under one kebab-case slug." }),
     ),
     kind: Type.Optional(
-        StringEnum(["page", "deck"] as const, { description: "page or deck (a slide deck)." }),
+        StringEnum(["page", "deck"] as const, { description: "deck: a slide deck." }),
     ),
     id: Type.String({ description: "Stable kebab-case id; reuse it for a new version." }),
     title: Type.String({ description: "Short title." }),
@@ -653,7 +650,7 @@ const LEGACY_INLINE = "artifact_inline";
 
 /** What the artifact tool says it does where no reply draws a card. */
 const VIEWER_ONLY =
-    "Publish an HTML page, Markdown document, or SVG image that the user opens in the app's artifact viewer. The same id publishes a new version. Give exactly one of content, edits, or path (up to 2,000,000 bytes).";
+    "Publish an HTML page, Markdown, or SVG to the artifact viewer. The same id makes a new version. Give one of content, edits, or path (up to 2 MB).";
 
 /** The artifact tool without `inline`, for a session whose panel draws no cards (PiP's). */
 export function withoutInline(tool: ToolRegistration): ToolRegistration {
@@ -674,26 +671,21 @@ export default function createArtifacts(_host: PocketHost) {
     const artifact = defineTool({
         name: "artifact",
         description:
-            "Publish an HTML page, Markdown document, or SVG image that the user opens in the app's artifact viewer, or (inline: true, HTML only) show a page as a card in your reply. The same id publishes a new version. Give exactly one of content, edits, or path (up to 2,000,000 bytes); inline takes content or edits.",
+            "Publish an HTML page, Markdown, or SVG to the artifact viewer, or (inline: true, HTML only) as a card in your reply. The same id makes a new version. Give one of content, edits, or path (up to 2 MB); inline takes content or edits.",
         parameters: Type.Object({
-            inline: Type.Optional(
-                Type.Boolean({
-                    description:
-                        "Show the HTML page as a card in your reply, where the person uses it right there.",
-                }),
-            ),
+            inline: Type.Optional(Type.Boolean()),
             ...bundleParameters,
             type: Type.Optional(
                 StringEnum(["html", "markdown", "svg"] as const, {
                     description:
-                        "Default: html, or from a new path's extension. A path cannot change an existing type.",
+                        "Default: html, or a new path's extension. A path cannot change it.",
                 }),
             ),
             content: Type.Optional(Type.String({ description: "The whole new version." })),
             path: Type.Optional(
                 Type.String({
                     description:
-                        "A local UTF-8 file to copy as this version (a snapshot, not a live link, without the files beside it): absolute, ~/…, or relative to the session folder.",
+                        "A local UTF-8 file to copy (a snapshot, without the files beside it): absolute, ~/…, or relative to the session folder.",
                 }),
             ),
         }),

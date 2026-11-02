@@ -11,7 +11,7 @@ import type { Pip } from "../pip.ts";
 import { DEFAULT_SCHEDULE_LIMITS, SCHEDULED_PREFIX, SCHEDULES_EXTENSION } from "../schedules.ts";
 import { describeMoment, describeRepeat, WHEN_HELP } from "../when.ts";
 
-const GUIDE = `Messages that start with "${SCHEDULED_PREFIX.trim()}" were set up earlier, by a person or by you with the schedule tool, and arrive at their time. Nobody may be watching when one arrives: do the work, then end with a short summary that stands on its own.`;
+const GUIDE = `A message that starts with "${SCHEDULED_PREFIX.trim()}" was set up earlier, by a person or by you, and arrives at its time. Nobody may be watching: do the work, then end with a short summary that stands on its own.`;
 
 export default function createSchedules(host: PocketHost, web: ExtensionWeb) {
     const defaults = DEFAULT_SCHEDULE_LIMITS;
