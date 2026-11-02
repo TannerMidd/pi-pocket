@@ -311,6 +311,9 @@ function RowPanel({ open, children }) {
     </div>`;
 }
 
+/** The endpoint form's value while it adds one: no endpoint id has a colon. */
+const ADDING = ":add";
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -329,7 +332,7 @@ export function ProvidersSheet() {
     }, [auth]);
     const owner = me?.role === "owner";
     const custom = useCustomProviders(owner);
-    // The endpoint form: "new", an endpoint's id, or null when closed.
+    // The endpoint form: ADDING, an endpoint's id, or null when closed.
     const [endpointForm, setEndpointForm] = useState(null);
     const customIds = new Set((custom.list ?? []).map((endpoint) => endpoint.id));
 
@@ -411,7 +414,7 @@ export function ProvidersSheet() {
     const formFor = (provider) =>
         endpointForm !== null &&
         (endpointForm === provider.id ||
-            (endpointForm === "new" && provider.id === "openai-compatible"));
+            (endpointForm === ADDING && provider.id === "openai-compatible"));
     const isOpen = (provider) => auth?.providerId === provider.id || formFor(provider);
 
     // A row, and under it, inside the list, what its buttons opened: its sign-in, or the endpoint form.
@@ -461,8 +464,8 @@ export function ProvidersSheet() {
                     provider.adds &&
                     html`<button
                         class="button small"
-                        aria-expanded=${endpointForm === "new"}
-                        onClick=${() => openEndpointForm("new")}
+                        aria-expanded=${endpointForm === ADDING}
+                        onClick=${() => openEndpointForm(ADDING)}
                     >
                         Add
                     </button>`
