@@ -826,6 +826,36 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, await app.providers.modelRefresh.refresh());
         }
 
+        // OpenAI-compatible endpoints, in Pi's models.json: the owner's alone, as they hold keys and decide models.
+        if (first === "custom-providers") {
+            requireOwner(user);
+            const providers = app.customProviders;
+
+            if (second === undefined && method === "GET") {
+                return json(response, 200, providers.list());
+            }
+
+            if (second === undefined && method === "POST") {
+                return json(response, 200, await providers.create(await readJson(request)));
+            }
+
+            if (second === "discover" && third === undefined && method === "POST") {
+                return json(response, 200, {
+                    models: await providers.discover(await readJson(request)),
+                });
+            }
+
+            if (second !== undefined && third === undefined && method === "PUT") {
+                return json(response, 200, await providers.update(second, await readJson(request)));
+            }
+
+            if (second !== undefined && third === undefined && method === "DELETE") {
+                await providers.remove(second);
+
+                return json(response, 200, { ok: true });
+            }
+        }
+
         // For the owner, each subscription's sign-in is asked afresh first (three seconds at most; a mark found later
         // comes with the models): one that can no longer be renewed shows as needing sign-in. Others see what was last
         // found, so nobody else makes the server ask providers.

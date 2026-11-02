@@ -8502,6 +8502,34 @@ div.group-head {
     flex-shrink: 0;
 }
 
+/* A group's title, with a quiet aside about where sign-ins live at its right end. */
+.provider-group-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    margin: 0 2px;
+}
+
+.provider-group-top .provider-group-head {
+    margin: 0;
+}
+
+.providers-note {
+    margin: 0 0 0 auto;
+    min-width: 0;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--faint);
+    overflow-wrap: anywhere;
+}
+
+.providers-note .mono {
+    font-style: normal;
+    font-size: 11px;
+}
+
 .provider-group {
     display: flex;
     flex-direction: column;
@@ -8601,19 +8629,137 @@ div.group-head {
     justify-content: flex-end;
 }
 
+/*
+ * What a provider's buttons open, under its row and inside the list: its sign-in, or the endpoint form. The row and the
+ * panel share one tint, so they read as one item; the panel grows open and shrinks closed.
+ */
+.provider-item {
+    display: flex;
+    flex-direction: column;
+    /* Opened, it scrolls to the top of the list, clear of the sticky search box. */
+    scroll-margin-top: 64px;
+}
+
+.provider {
+    transition: background-color 180ms ease;
+}
+
+.provider.open,
+.provider-panel {
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg);
+}
+
+.provider-panel {
+    display: grid;
+    grid-template-rows: 1fr;
+    animation: provider-panel-open 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.provider-panel.closing {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    animation: provider-panel-close 180ms ease-in;
+}
+
+@keyframes provider-panel-open {
+    from {
+        grid-template-rows: 0fr;
+        opacity: 0;
+    }
+}
+
+@keyframes provider-panel-close {
+    from {
+        grid-template-rows: 1fr;
+        opacity: 1;
+    }
+}
+
+.provider-panel-clip {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.provider-panel-body {
+    margin: 0 16px;
+    padding: 14px 0 16px;
+    border-top: 1px solid var(--accent-line);
+}
+
+/* Inside a row's panel, a sign-in or a form has no card of its own: the panel is its card. */
+.provider-panel .auth-inline {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+}
+
+.provider-panel .auth-inline-head {
+    margin-bottom: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .provider,
+    .provider-panel,
+    .provider-panel.closing {
+        transition: none;
+        animation: none;
+    }
+}
+
+.custom-endpoint-models-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.custom-endpoint-models {
+    display: flex;
+    flex-direction: column;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    background: var(--bg);
+}
+
+.custom-endpoint-model.check {
+    min-height: 40px;
+    margin: 0;
+    padding: 0 12px;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.custom-endpoint-model + .custom-endpoint-model {
+    border-top: 1px solid var(--hair);
+}
+
+.custom-endpoint-buttons {
+    justify-content: flex-end;
+}
+
 /* What a provider said when it would not renew a sign-in. */
 .provider-why {
     overflow-wrap: anywhere;
 }
 
-/* Shared refresh feedback stays visible after a request and wraps provider messages as plain text. */
-.model-refresh {
-    margin-block: 0.5rem;
-    min-width: 0;
+/* Refresh sits in the Models heading; its feedback stays under the heading and wraps provider messages as plain text. */
+.model-refresh-button[aria-busy="true"] svg {
+    animation: model-refresh-turn 0.9s linear infinite;
 }
 
-.model-refresh .button.model-refresh-button {
-    min-height: 40px;
+@keyframes model-refresh-turn {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .model-refresh-button[aria-busy="true"] svg {
+        animation: none;
+    }
 }
 
 .model-refresh-status {
@@ -8621,6 +8767,10 @@ div.group-head {
     overflow-y: auto;
     overflow-wrap: anywhere;
     overscroll-behavior: contain;
+}
+
+.model-refresh-status:empty {
+    display: none;
 }
 
 .model-refresh-status p {
@@ -8661,6 +8811,7 @@ div.group-head {
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 8px;
+    margin-block: -8px;
 }
 
 .subagent-models-heading .label {

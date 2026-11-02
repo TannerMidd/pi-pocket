@@ -3,8 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
-import { RefreshModels } from "../model-refresh.js";
+import { RefreshModelsButton, RefreshModelsStatus } from "../model-refresh.js";
 import { favoriteModels, setModelFavorite } from "../model-favorites.js";
+import { EndpointForm, removeCustomProvider, useCustomProviders } from "./custom-providers.js";
 
 /** Models past this many get a box to find them by. */
 const MODEL_SEARCH_AT = 8;
@@ -97,7 +98,9 @@ function SubagentModels({ names }) {
             <span class="small subagent-models-chosen" title=${summary} aria-live="polite">
                 ${chosen.length} for subagents
             </span>
+            <${RefreshModelsButton} />
         </div>
+        <${RefreshModelsStatus} />
         <p class="muted small">
             <strong>Checkbox:</strong> models subagents and linked sessions may use. With none checked, they use the
             session's model. <strong>Star:</strong> only a shortcut in your model picker; it changes no permission.
@@ -133,7 +136,7 @@ function SubagentModels({ names }) {
             <span><${Icon} name="check" size=${13} />${" "}Allowed for subagents</span>
             <span>Favorite${" "}<${Icon} name="star" size=${13} /></span>
         </div>
-        <div class="subagent-models-list" role="group" aria-label="Models for subagents">
+        <div class="subagent-models-list" role="group" aria-label="Subagent models">
             ${
                 groups.size === 0 &&
                 html`<p class="muted small">
@@ -235,6 +238,49 @@ function LimitWait() {
     </div>`;
 }
 
+/** How long a panel under a row takes to close: `.provider-panel.closing` in style.css. */
+const PANEL_CLOSE_MS = 180;
+
+/**
+ * A panel that opens under a provider's row, inside the list: it grows open, and shrinks closed before it goes, still
+ * showing what it showed. With reduced motion it comes and goes at once.
+ */
+function RowPanel({ open, children }) {
+    const kept = useRef(null);
+    const [, redraw] = useState(0);
+
+    if (open) {
+        kept.current = children;
+    }
+
+    useEffect(() => {
+        if (open || kept.current === null) {
+            return undefined;
+        }
+
+        const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const timer = setTimeout(
+            () => {
+                kept.current = null;
+                redraw((n) => n + 1);
+            },
+            still ? 0 : PANEL_CLOSE_MS,
+        );
+
+        return () => clearTimeout(timer);
+    }, [open]);
+
+    if (kept.current === null) {
+        return null;
+    }
+
+    return html`<div class=${`provider-panel ${open ? "" : "closing"}`}>
+        <div class="provider-panel-clip">
+            <div class="provider-panel-body">${open ? children : kept.current}</div>
+        </div>
+    </div>`;
+}
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -252,6 +298,18 @@ export function ProvidersSheet() {
         }
     }, [auth]);
     const owner = me?.role === "owner";
+    const custom = useCustomProviders(owner);
+    // The endpoint form: "new", an endpoint's id, or null when closed.
+    const [endpointForm, setEndpointForm] = useState(null);
+    const customIds = new Set((custom.list ?? []).map((endpoint) => endpoint.id));
+
+    const openEndpointForm = (id) => setEndpointForm((was) => (was === id ? null : id));
+
+    const endpointSaved = () => {
+        setEndpointForm(null);
+        custom.load();
+        load();
+    };
 
     const login = (provider, type, button) => {
         loginButton.current = button;
@@ -268,10 +326,26 @@ export function ProvidersSheet() {
             load();
         });
     const needle = query.trim().toLowerCase();
-    const list = (providers ?? [])
+    // Not a provider of Pi's: the row that adds an OpenAI-compatible endpoint, which becomes one.
+    const addRow = owner
+        ? [
+              {
+                  id: "openai-compatible",
+                  name: "OpenAI Compatible",
+                  configured: false,
+                  adds: true,
+                  models: 0,
+                  words: "custom endpoint local self-hosted ollama lm studio vllm llama.cpp proxy",
+              },
+          ]
+        : [];
+    const list = [...(providers === null ? [] : addRow), ...(providers ?? [])]
         .filter(
             (provider) =>
-                needle === "" || `${provider.id} ${provider.name}`.toLowerCase().includes(needle),
+                needle === "" ||
+                `${provider.id} ${provider.name} ${provider.words ?? ""}`
+                    .toLowerCase()
+                    .includes(needle),
         )
         .sort(
             (a, b) =>
@@ -290,7 +364,42 @@ export function ProvidersSheet() {
         ],
     ].filter(([, each]) => each.length > 0);
 
-    const row = (provider) => html`<div class="provider" key=${provider.id}>
+    // Where sign-ins live, said once: beside Signed in, or the first group when nothing is signed in.
+    const noteGroup = (groups.find(([title]) => title === "Signed in") ??
+        groups.find(([title]) => title === "Not configured") ??
+        groups[0])?.[0];
+    const note = html`<p class="providers-note">
+        Shared with Pi · <span class="mono">~/.pi/agent/auth.json</span>${owner ? "" : " · only the owner can change them"}
+    </p>`;
+
+    // A sign-in opens under its provider's row; one whose row is not shown (a search hides it) opens above the list.
+    const authInList = auth !== null && list.some((provider) => provider.id === auth.providerId);
+    const formFor = (provider) =>
+        endpointForm !== null &&
+        (endpointForm === provider.id ||
+            (endpointForm === "new" && provider.id === "openai-compatible"));
+    const isOpen = (provider) => auth?.providerId === provider.id || formFor(provider);
+
+    // A row, and under it, inside the list, what its buttons opened: its sign-in, or the endpoint form.
+    const row = (provider) => html`<div class="provider-item" key=${provider.id}>
+        ${providerRow(provider)}
+        <${RowPanel} open=${isOpen(provider)}>
+            ${
+                auth?.providerId === provider.id
+                    ? html`<${AuthDialog} inline=${true} />`
+                    : formFor(provider) &&
+                      html`<${EndpointForm}
+                          key=${endpointForm}
+                          editing=${custom.list?.find((endpoint) => endpoint.id === endpointForm)}
+                          onDone=${endpointSaved}
+                          onCancel=${() => setEndpointForm(null)}
+                      />`
+            }
+        <//>
+    </div>`;
+    const providerRow = (
+        provider,
+    ) => html`<div class=${`provider ${isOpen(provider) ? "open" : ""}`}>
         <div class="provider-info">
             <div class="provider-name">
                 ${provider.name}
@@ -300,9 +409,15 @@ export function ProvidersSheet() {
                         : provider.configured && html` <span class="ok">✓</span>`
                 }
             </div>
-            <div class="muted small">
+            ${
+                provider.adds
+                    ? html`<div class="muted small">
+                          Any server with the OpenAI API (Ollama, LM Studio, vLLM, a proxy): a URL, a key, and its models
+                      </div>`
+                    : html`<div class="muted small">
                 ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
-            </div>
+                    </div>`
+            }
             ${
                 provider.needsSignIn &&
                 html`<div class="muted small mono provider-why">${provider.needsSignIn}</div>`
@@ -311,6 +426,36 @@ export function ProvidersSheet() {
         ${
             owner &&
             html`<div class="provider-actions">
+                ${
+                    provider.adds &&
+                    html`<button
+                        class="button small"
+                        aria-expanded=${endpointForm === "new"}
+                        onClick=${() => openEndpointForm("new")}
+                    >
+                        Add
+                    </button>`
+                }
+                ${
+                    customIds.has(provider.id) &&
+                    html`<button
+                            class="button small"
+                            aria-expanded=${endpointForm === provider.id}
+                            onClick=${() => openEndpointForm(provider.id)}
+                        >
+                            Edit
+                        </button>
+                        <button
+                            class="button small ghost"
+                            onClick=${() =>
+                                removeCustomProvider(
+                                    custom.list.find((endpoint) => endpoint.id === provider.id),
+                                    endpointSaved,
+                                )}
+                        >
+                            Remove
+                        </button>`
+                }
                 ${
                     provider.oauth &&
                     html`<button
@@ -322,6 +467,7 @@ export function ProvidersSheet() {
                 }
                 ${
                     provider.apiKey &&
+                    !customIds.has(provider.id) &&
                     html`<button
                         class="button small"
                         onClick=${(event) => login(provider, "api_key", event.currentTarget)}
@@ -345,9 +491,6 @@ export function ProvidersSheet() {
         onClose=${closeSheet}
         className=${`providers-sheet ${owner ? "with-side" : ""}`}
     >
-        <p class="muted small">
-            Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
-        </p>
         <div class="providers-layout">
             ${
                 owner &&
@@ -360,8 +503,8 @@ export function ProvidersSheet() {
                 </aside>`
             }
             <div class="providers-main">
-                ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
-                ${owner && html`<${RefreshModels} /><${LimitWait} />`}
+                ${auth && !authInList && html`<${AuthDialog} inline=${true} />`}
+                ${owner && html`<${LimitWait} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
@@ -382,9 +525,12 @@ export function ProvidersSheet() {
                 }
                 ${groups.map(
                     ([title, each]) => html`<section class="provider-group" key=${title}>
-                        <h3 class="provider-group-head">
-                            ${title} <span class="muted">${each.length}</span>
-                        </h3>
+                        <div class="provider-group-top">
+                            <h3 class="provider-group-head">
+                                ${title} <span class="muted">${each.length}</span>
+                            </h3>
+                            ${title === noteGroup && note}
+                        </div>
                         <div class="sheet-list">${each.map(row)}</div>
                     </section>`,
                 )}
@@ -409,7 +555,13 @@ function AuthFrame({ title, onClose, inline, focusKey, children }) {
                 card?.querySelector("a[href], button:not(:disabled)");
 
             (control ?? ref.current)?.focus({ preventScroll: true });
-            ref.current?.scrollIntoView({ block: "nearest" });
+            // Under its row, the row comes to the top with it; above the list, it only needs to show.
+            const item = ref.current?.closest(".provider-item");
+
+            (item ?? ref.current)?.scrollIntoView({
+                block: item ? "start" : "nearest",
+                behavior: item ? "smooth" : "auto",
+            });
         }
     }, [inline, focusKey]);
     useEffect(() => {
