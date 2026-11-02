@@ -54,7 +54,7 @@ export function validateSource(text) {
         throw new Error("Extended node definitions, including image nodes, are not supported.");
     }
 
-    if (/%%\s*\{/.test(text) || /^\s*---(?:\r?\n|$)/.test(text)) {
+    if (/%%\s*\{/.test(text) || /^\s*---(?:[\r\n]|$)/.test(text)) {
         throw new Error("Mermaid configuration directives and front matter are not supported.");
     }
 }

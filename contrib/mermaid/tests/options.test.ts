@@ -76,6 +76,7 @@ test("source limits cannot be changed by message configuration", () => {
         '%% {init: {"htmlLabels": true}}%%\ngraph TD; A-->B',
         "---\nconfig:\n  securityLevel: loose\n---\ngraph TD; A-->B",
         " \r\n---\r\nconfig: {}\r\n---",
+        "---\rconfig: {}\r---\rgraph TD; A-->B",
     ]) {
         assert.throws(() => validateSource(source), /directives and front matter/);
     }
