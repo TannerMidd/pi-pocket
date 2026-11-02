@@ -27,6 +27,7 @@ import type { FetchPublic } from "./public-fetch.ts";
 import type { BrowserControl } from "./browser/page.ts";
 import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
@@ -45,6 +46,11 @@ export interface LinkedSession {
     cwd?: string;
     busy?: boolean;
     archived?: boolean;
+    /**
+     * Why its last run failed, the same short line the session list shows, only while that failure stands and only when
+     * everyone who sees the asking session sees this one too. A later run clears it.
+     */
+    failed?: string;
 }
 
 /**
@@ -73,6 +79,20 @@ export interface LinkedSessionsApi {
         request: { to: string; message: string; steer?: boolean },
         key: string,
     ): Promise<void>;
+    /**
+     * Stop the run of the linked session at address `to`, and withdraw what waits in its queue. Idle is a no-op.
+     * Returns whether it was working.
+     */
+    stop(source: ConversationId, request: { to: string }, key: string): Promise<{ busy: boolean }>;
+    /**
+     * Archive the linked session at address `to`, or bring it back when `archived` is false. Returns whether it is
+     * archived now, and how many of its repeating schedules keep running.
+     */
+    archive(
+        source: ConversationId,
+        request: { to: string; archived?: boolean },
+        key: string,
+    ): Promise<{ archived: boolean; repeating: number }>;
     /** The sessions linked to `source`, at any distance, that the person Pi works for there sees. */
     list(source: ConversationId): Promise<LinkedSession[]>;
 }
@@ -340,6 +360,12 @@ export type CommandInfo = Omit<ExtensionCommand, "handler"> & { id: string; name
  */
 export type ModelRequestShaper = (payload: unknown, model: Model<Api>) => unknown | undefined;
 
+/** An execution environment provider for a workspace URI scheme. */
+export interface WorkspaceProvider {
+    env(cwd: string): ExecutionEnv;
+    resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+}
+
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
 export interface PocketHost {
     readonly guard: LancetGuard;
@@ -384,6 +410,8 @@ export interface PocketHost {
      * that is not the last one changes nothing.
      */
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
+    /** @experimental @since 0.28.0 */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
     /**
      * Shape the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. Returns how to stop shaping. Only the modules
@@ -463,6 +491,8 @@ export interface PocketHost {
      * @experimental In 0.14: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     readonly linkedSessions: LinkedSessionsApi;
+    /** The conversation's current working folder or workspace URI. @experimental @since 0.28.0 */
+    cwdOf(conversationId: ConversationId): string;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
@@ -551,6 +581,8 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** A request to a module's route, as its handler gets it. */
 export interface WebRequest {
+    /** @experimental @since 0.28.0 */
+    createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     readonly method: WebMethod;
     /** The path's `:name` parts, by name. */
     readonly params: Readonly<Record<string, string>>;
@@ -579,6 +611,24 @@ export interface WebSession {
     readonly updatedAt: number;
 }
 
+/** Committed usage counters. Experimental, since 0.28.0. */
+export interface UsageTotals {
+    requests: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+    reasoning?: number;
+    cost: number;
+    lastPrompt: number;
+}
+
+/** A source's own usage and the sum for its visible descendants. Experimental, since 0.28.0. */
+export interface ConversationUsage {
+    readonly own: Readonly<UsageTotals>;
+    readonly children: Readonly<UsageTotals> & { readonly count: number };
+}
+
 /** A route request whose named path parameter resolved to a visible conversation. */
 export interface ConversationWebRequest extends WebRequest {
     readonly conversation: {
@@ -589,6 +639,8 @@ export interface ConversationWebRequest extends WebRequest {
         readonly thinkingLevel: ModelThinkingLevel;
     };
     readonly linkedSessions: HumanLinkedSessions;
+    /** Read the source's usage and visible descendants. Experimental, since 0.28.0. */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**
@@ -663,10 +715,23 @@ export type PublicPageHandler = (
 ) => PublicPageAnswer | Promise<PublicPageAnswer>;
 
 /**
+ * How a module's own input shows in the transcript, while the module is on. Nothing here is stored. The model still
+ * reads the message in full.
+ */
+export interface PresentEntry {
+    /** `x.<module>.<name>`, the stored kind this presentation is for. */
+    kind: string;
+    /** The one line the transcript shows. */
+    label: string;
+    /** Matches the start of a user message only when nobody wrote that message. */
+    userPrefix?: string;
+}
+
+/**
  * A module's own part of the app, the second argument of its default export: routes under `/api/x/<module>/`, a browser
- * module that adds to the app's screens, events from here to that browser module, and commands for the message box.
- * Routes, the browser module, and commands are registered while the module loads; they go with it when it reloads or
- * is turned off.
+ * module that adds to the app's screens, events from here to that browser module, commands for the message box, and
+ * how its own inputs show. Routes, the browser module, commands, and presentations are registered while the module
+ * loads; they go with it when it reloads or is turned off.
  */
 export interface ExtensionWeb {
     /** The version of this API (`POCKET_API` in `extension-web.ts`). */
@@ -709,6 +774,11 @@ export interface ExtensionWeb {
      * module, as routes do. `scope: "conversation"` is for whoever may drive the session; `"global"` is the owner's.
      */
     command(name: string, command: ExtensionCommand): void;
+    /**
+     * How an input this module sends shows in the transcript, while the module is on. `kind` is `x.<module>.<name>`.
+     * An optional `userPrefix` matches only a user message nobody wrote.
+     */
+    presentEntry(spec: PresentEntry): void;
     /**
      * Draw the module's public pages: what anyone with one of its links (`web.links`) sees, with no sign-in, at
      * `/l/<token>`. GET shows the page; a form on it posts back to the same address. One handler for each module.

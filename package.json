@@ -1,6 +1,6 @@
 {
     "name": "pi-pocket",
-    "version": "0.27.0",
+    "version": "0.28.0-beta.5",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
     "keywords": [
         "pi",
@@ -61,15 +61,19 @@
         "@earendil-works/pi-durable": "1.4.0",
         "@earendil-works/pi-mcp": "1.4.0",
         "dompurify": "^3.4.17",
+        "heic-convert": "^2.1.0",
         "htm": "^3.1.1",
         "jiti": "2.7.0",
+        "katex": "^0.19.1",
         "marked": "^18.1.1",
+        "minimatch": "10.2.6",
+        "pele": "^1.13.0",
         "preact": "^11.0.2",
         "qrcode": "^1.5.4",
         "undici": "8.12.3"
     },
     "overrides": {
-        "undici": "8.12.3"
+        "undici": "$undici"
     },
     "devDependencies": {
         "@stylistic/eslint-plugin": "5.10.0",

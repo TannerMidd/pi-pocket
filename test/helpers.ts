@@ -18,6 +18,8 @@ export const root = mkdtempSync(join(tmpdir(), "pi-pocket-test-"));
 // Isolate from the real Pi install: its auth, settings, skills, and Lancet Guard.
 process.env.PI_CODING_AGENT_DIR = join(root, "agent");
 process.env.PI_POCKET_GUARD = "off";
+// And from the real data folder, for code that reads its default rather than the app's own `dataDir`.
+process.env.PI_POCKET_DIR = join(root, "pocket");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 /** The folder test sessions work in. */
 export const work = join(root, "work");

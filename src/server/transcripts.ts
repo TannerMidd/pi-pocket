@@ -14,10 +14,13 @@ import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { AuthorsDoc } from "./docs.ts";
 import { transcriptMarkdown } from "./export.ts";
+import { presentationOptions } from "./entry-presentation.ts";
 import { homePath } from "./paths.ts";
 import { type ClientEntry, projectEntry } from "./projection.ts";
 
 const context = BACKGROUND_CONTEXT;
+
+type AuthorMap = Readonly<Record<string, string>>;
 
 export class Transcripts {
     readonly #app: PocketApp;
@@ -62,7 +65,9 @@ export class Transcripts {
     async fullEntry(id: ConversationId, entryId: number): Promise<ClientEntry | undefined> {
         const entry = await this.visibleEntry(id, entryId);
 
-        return entry === undefined ? undefined : projectEntry(entry, true);
+        return entry === undefined
+            ? undefined
+            : this.#project(entry, true, await this.#authors(id));
     }
 
     /**
@@ -103,9 +108,28 @@ export class Transcripts {
         }, context);
     }
 
+    /** Who wrote which entry here. A prefix matches only an id that is absent. */
+    async #authors(id: ConversationId): Promise<AuthorMap> {
+        return (await this.#app.harness.snapshot(AuthorsDoc, id, context))?.entries ?? {};
+    }
+
+    /** One stored entry as browsers get it, using the presentations that are on now. */
+    #project(entry: EntryRecord, full: boolean, authors: AuthorMap): ClientEntry | undefined {
+        return projectEntry(
+            entry,
+            full,
+            presentationOptions(
+                this.#app.webs.presentations(),
+                authors,
+                entry.id as unknown as number,
+            ),
+        );
+    }
+
     /** Entries before the active context: what compaction or a reset hid from the model. Oldest first. */
     async history(id: ConversationId, before: number, limit = 400): Promise<ClientEntry[]> {
         const conversation = await this.#app.conversation(id);
+        const authors = await this.#authors(id);
         const out: ClientEntry[] = [];
         let cursor: Cursor | undefined;
 
@@ -118,7 +142,7 @@ export class Transcripts {
             );
 
             for (const entry of page.items) {
-                const projected = projectEntry(entry);
+                const projected = this.#project(entry, false, authors);
 
                 if (projected !== undefined) {
                     out.push(projected);
@@ -146,6 +170,7 @@ export class Transcripts {
         full: boolean,
     ): Promise<{ entries: ClientEntry[]; last: number }> {
         const conversation = await this.#app.conversation(id);
+        const authors = await this.#authors(id);
         const query = after > 0 ? { minEntryId: (after + 1) as unknown as EntryId } : {};
         const entries: ClientEntry[] = [];
         let last = after;
@@ -156,7 +181,7 @@ export class Transcripts {
 
             for (const entry of page.items) {
                 last = Math.max(last, entry.id as unknown as number);
-                const projected = projectEntry(entry, full);
+                const projected = this.#project(entry, full, authors);
 
                 if (projected !== undefined) {
                     entries.push(projected);

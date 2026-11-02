@@ -39,6 +39,7 @@ A drop-in extension stays when Pi Pocket updates, and the owner can turn it off 
 - [extensions/themes.md](extensions/themes.md): how to make a theme, which changes how the app looks and is laid out. Every token and part is in [extensions/reference/theme-surface.md](extensions/reference/theme-surface.md).
 - [extensions/policies/](extensions/policies/index.md): the rules for extensions and changes to Pi Pocket: what belongs in core, the public API and how it changes, the security model for authors, and the gallery's review.
 - [self-editing.md](self-editing.md): how to change Pi Pocket's code while it runs, check the change, and undo a change that breaks it.
+- [desktop.md](desktop.md): the host bridge, for a desktop app (an Electron or Tauri wrapper) that shows Pi Pocket in a window: `/api/pocket/info`, `window.pocketHost`, and notifications without Web Push.
 - [docker.md](docker.md): running Pi Pocket in a container, with extensions, themes, Pi's folder, and the workspace mounted from the host.
 - [systemd.md](systemd.md): running Pi Pocket as a systemd service, with a template unit whose instance name is the access mode.
 - [map.md](map.md): where each part of the code is, and how to add the usual things.

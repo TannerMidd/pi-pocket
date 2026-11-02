@@ -432,7 +432,7 @@ function attachedFiles(block) {
     }
 
     return block.split("\n").flatMap((line) => {
-        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)$/.exec(line);
+        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)(?: \[Image: .*)?$/.exec(line);
 
         if (!suffix) {
             return [];
@@ -491,7 +491,8 @@ function Item({ item, last, busy, conversationId }) {
             const [text, block] = splitAttachments(body);
             // Uploaded pictures also remain readable when the chosen model cannot take inline images.
             const files = attachedFiles(block);
-            const pictures = files.filter((file) => file.mime.startsWith("image/"));
+            // A browser cannot show a HEIC photo: it goes as a file.
+            const pictures = files.filter((file) => /^image\/(?!heic|heif)/.test(file.mime));
             const others = files.filter((file) => !pictures.includes(file));
 
             return html`<div class="pip-you">
@@ -538,7 +539,7 @@ function Item({ item, last, busy, conversationId }) {
         return line && html`<div class="pip-event"><span>${line}</span></div>`;
     }
 
-    // A page it showed in a reply (`artifact_inline`): in this panel, a line like its other work.
+    // A page it showed in a reply (an old `artifact_inline` call): in this panel, a line like its other work.
     if (item.type === "inline") {
         return html`<div class="pip-steps">
             <span class="pip-tick"><${Icon} name="check" size=${10} /></span>
@@ -1099,7 +1100,13 @@ function PipPanel({ leaving, scrim }) {
             }
             ${pending.map(
                 (item) => html`<div class="pip-you pending" key=${`pending-${item.id}`}>
-                    <div>${(item.text ?? "").replace(FROM, "")}</div>
+                    <div>
+                        ${
+                            typeof item.label === "string" && item.label !== ""
+                                ? `▸ ${item.label}${item.summary ? `: ${item.summary}` : ""}`
+                                : (item.text ?? "").replace(FROM, "")
+                        }
+                    </div>
                     <div class="pip-pending-line">
                         <span>${pendingWhen(item, busy)}</span>
                         <button

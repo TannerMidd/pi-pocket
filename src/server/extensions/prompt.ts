@@ -11,6 +11,7 @@ import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-work
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
+import { workspaceScheme } from "../paths.ts";
 
 const PREAMBLE = `You are Pi, a coding agent running inside Pi Pocket: a durable, multiplayer web app built on Pi Durable. People talk to you from a browser, often a phone, and several people can share one conversation. When more than one person uses this server, each message starts with [from: Name].
 
@@ -21,7 +22,7 @@ const GUIDELINES = `- Keep replies short and easy to read on a small screen. Lea
 - Show file paths clearly when you work with files.
 - To show an image file from this machine, embed it: ![short description](/absolute/or/relative/path.png). Files the user attaches are saved on the server; the message lists their paths.
 - Before running something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
-- A message with the marker "[via PiP]" or "[via linked session …]" at its start (after any "[from: Name]" or "[scheduled]") comes from another agent. Write your answer to it, and what you send back to that agent, in ASD-STE100 (Simplified Technical English) at about 80% adherence: short sentences (25 words or fewer), one idea each, main point first, active voice, simple tenses, articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals, one word for one thing, names of commands, files, and identifiers exact in backticks, every fact kept. Answer messages without the marker as usual, also later in the same session.`;
+- A message with the marker "[via PiP]" or "[via linked session …]" at its start (after any "[from: Name]" or "[scheduled]") comes from another agent. Write your answer to it, and what you send back to that agent, in the language that agent wrote in (for a linked session, the text between the <linked-session-message> tags), not the language of the marker or the notes around it. In English, use ASD-STE100 (Simplified Technical English) at about 80% adherence: short sentences (25 words or fewer), one idea each, main point first, active voice, simple tenses, articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals, one word for one thing, names of commands, files, and identifiers exact in backticks, every fact kept. In another language, keep the same short, plain style. Answer messages without the marker as usual, also later in the same session.`;
 
 /**
  * Where Pi Pocket's documentation for agents is, as Pi's prompt says where Pi's is: to read only when it is
@@ -140,6 +141,8 @@ export default function createPrompt(host: PocketHost) {
     };
 
     const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
+    // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote's.
+    const local = (input: PromptInput) => workspaceScheme(input.agent.cwd ?? "") === undefined;
 
     return defineExtension({
         name: "pocket-prompt",
@@ -147,8 +150,12 @@ export default function createPrompt(host: PocketHost) {
             section("preamble", () => PREAMBLE, { tag: false }),
             section("guidelines", () => GUIDELINES),
             section("pocket_docs", () => docs(host.dataDir)),
-            section("project_context", (input) => load(cwdOf(input)).context),
-            section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
+            section("project_context", (input) =>
+                local(input) ? load(cwdOf(input)).context : undefined,
+            ),
+            section("skills", (input) => (local(input) ? load(cwdOf(input)).skills : undefined), {
+                tag: false,
+            }),
             section("environment", (input) => {
                 const base = `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`;
 

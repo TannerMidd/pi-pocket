@@ -18,6 +18,8 @@ import { useBack } from "./back.js";
 import { parseKeys, setBoxKeys } from "./box-keys.js";
 import { describersChanged, setCallDescriber } from "./calls.js";
 import { jumpToEntry } from "./chat.js";
+import { modulePresentationMode, setPresentationMode } from "./entry-presentation.js";
+import { markdownChanged, setFences, setMath } from "./markdown-ext.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
     api,
@@ -75,7 +77,11 @@ const KINDS = [
     "sessionFilter",
     "sessionSearch",
     "composerKey",
+    "fence",
+    "mathInline",
 ];
+const MARKDOWN_KINDS = new Set(["fence", "mathInline"]);
+const FENCE_LANG = /^[\w+#.-]{1,24}$/;
 /** What a rail button, menu row, launcher action, or status item can open: one of the module's own. */
 const OPENS = ["page", "sheet", "panel"];
 /** The event core sends a module's tabs when the owner changes its settings (`app.setExtensionSettings`). */
@@ -103,6 +109,33 @@ let order = [];
 
 const liveRecord = (record) =>
     record !== undefined && !record.gone && !record.dead && modules.get(record.module) === record;
+
+function markdownSpecOf(kind, matches = () => true) {
+    for (const module of order) {
+        const record = modules.get(module);
+
+        if (!liveRecord(record)) {
+            continue;
+        }
+
+        for (const spec of record.adds[kind].values()) {
+            if (matches(spec)) {
+                return spec;
+            }
+        }
+    }
+
+    return undefined;
+}
+
+setFences((lang) => {
+    const spec = markdownSpecOf("fence", (each) =>
+        each.langs.some((one) => one.toLowerCase() === lang),
+    );
+
+    return spec === undefined ? undefined : { ...spec, component: framedFence(spec) };
+});
+setMath(() => markdownSpecOf("mathInline"));
 
 // ─── Drawing again, within bounds ────────────────────────────────────────────
 
@@ -384,7 +417,17 @@ export function onExtensionsGone(listener) {
 
 /** Load what the server lists, and unload what it no longer does or lists at a new address (a new version). */
 function sync(list, known = true) {
-    order = list.map((each) => each.module);
+    const nextOrder = list.map((each) => each.module);
+    const orderChanged =
+        order.length !== nextOrder.length ||
+        order.some((module, index) => module !== nextOrder[index]);
+
+    order = nextOrder;
+
+    if (orderChanged) {
+        markdownChanged();
+    }
+
     const wanted = new Map(safeMode() ? [] : list.map((each) => [each.module, each]));
 
     for (const record of [...modules.values()]) {
@@ -441,7 +484,7 @@ function sync(list, known = true) {
         notify(
             "warning",
             "Extensions' browser parts are off in this tab, and so is the theme. Menu → Extensions turns them back on.",
-            () => openSheet({ type: "extensions", tab: "installed", show: "built-in" }),
+            () => openSheet({ type: "extensions", tab: "installed" }),
         );
     }
 
@@ -555,8 +598,14 @@ function unload(record) {
 
 /** Take away what a browser module added, and run its cleanups, last first. */
 function teardown(record) {
+    const hadMarkdown = record.adds.fence.size > 0 || record.adds.mathInline.size > 0;
+
     for (const kind of KINDS) {
         record.adds[kind].clear();
+    }
+
+    if (hadMarkdown) {
+        markdownChanged();
     }
 
     record.arrangements.clear();
@@ -612,6 +661,32 @@ function check(kind, spec) {
 
     if (!isId(spec.id)) {
         throw new Error(`${name}: an id is up to 64 letters, digits, and . _ : -`);
+    }
+
+    if (kind === "fence") {
+        if (
+            !Array.isArray(spec.langs) ||
+            spec.langs.length === 0 ||
+            !spec.langs.every((lang) => typeof lang === "string" && FENCE_LANG.test(lang))
+        ) {
+            throw new Error(
+                `${name} ${spec.id}: langs is a non-empty list of code fence languages`,
+            );
+        }
+
+        if (typeof spec.component !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a component to show`);
+        }
+
+        return;
+    }
+
+    if (kind === "mathInline") {
+        if (typeof spec.mount !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a mount function`);
+        }
+
+        return;
     }
 
     // Chips on session rows and words for the session search are only a function the session list calls.
@@ -850,6 +925,11 @@ function pocketFor(record) {
                 current = before;
             } else {
                 record.adds[kind].set(current.id, current);
+
+                if (MARKDOWN_KINDS.has(kind)) {
+                    markdownChanged();
+                }
+
                 redraw();
             }
         }
@@ -876,6 +956,11 @@ function pocketFor(record) {
                 check(kind, next);
                 current = next;
                 record.adds[kind].set(current.id, current);
+
+                if (MARKDOWN_KINDS.has(kind)) {
+                    markdownChanged();
+                }
+
                 redraw();
             },
             remove() {
@@ -883,6 +968,11 @@ function pocketFor(record) {
 
                 if (live() && record.adds[kind].get(current.id) === current) {
                     record.adds[kind].delete(current.id);
+
+                    if (MARKDOWN_KINDS.has(kind)) {
+                        markdownChanged();
+                    }
+
                     redraw();
                 }
             },
@@ -1049,6 +1139,23 @@ function pocketFor(record) {
 
             return jumpToEntry(entryId, { quiet: true });
         },
+        /**
+         * How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is
+         * `x.<module>.<name>`. With a mode, it sets it: `open` is the message, `folded` is one line, and `hidden` keeps
+         * the turn and shows nothing until Find. The same mode again changes nothing. Without one, it returns this
+         * browser's choice, or undefined when there is none yet (the row is folded then).
+         */
+        entryPresentation(kind, ...mode) {
+            tick(record);
+
+            if (mode.length === 0) {
+                return modulePresentationMode(kind, { module: record.module });
+            }
+
+            setPresentationMode(kind, mode[0], { module: record.module });
+
+            return undefined;
+        },
         /** Open through the app's normal navigation; the server checks access on connection. */
         openConversation: (id) => {
             tick(record);
@@ -1137,6 +1244,8 @@ function pocketFor(record) {
         sessionFilter: (spec) => add("sessionFilter", spec),
         sessionSearch: (spec) => add("sessionSearch", spec),
         composerKey: (spec) => add("composerKey", spec),
+        fence: (spec) => add("fence", spec),
+        mathInline: (spec) => add("mathInline", spec),
         /** Put text into the message box, after what is there, for the person to send: never sent by itself. */
         insertText(text, options) {
             tick(record);
@@ -2303,11 +2412,16 @@ fromExtensions(
  * thrown (an empty string, nothing at all) counts.
  */
 class Guard extends Component {
-    state = { failed: false, message: "" };
+    state = { failed: false, message: "", reset: this.props.reset };
 
     constructor(props) {
         super(props);
         guards++;
+    }
+
+    // A Guard with `reset` tries again when it changes; one with a `fallback` shows it under the failure.
+    static getDerivedStateFromProps({ reset }, state) {
+        return reset === state.reset ? null : { failed: false, message: "", reset };
     }
 
     componentWillUnmount() {
@@ -2319,8 +2433,11 @@ class Guard extends Component {
         this.setState({ failed: true, message: reason(error) });
     }
 
-    render({ children, name }, { failed, message }) {
-        return failed ? html`<div class="error-box">${name} failed: ${message}</div>` : children;
+    render({ children, name, fallback }, { failed, message }) {
+        return failed
+            ? html`<div class="error-box">${name} failed: ${message}</div>
+                  ${fallback}`
+            : children;
     }
 }
 
@@ -2529,6 +2646,26 @@ options[RENDER_HOOK] = (vnode) => {
 /** Between the Guard and an extension's component: what goes wrong in it, however Preact takes it, stays under the Guard. */
 function Drawn({ component, props }) {
     return h(component, props);
+}
+
+/** A fence's component in a Guard that shows its source if it fails, and tries again when the source changes. */
+const framedFences = new WeakMap();
+
+function framedFence(spec) {
+    if (!framedFences.has(spec.component)) {
+        const Framed = (props) =>
+            html`<${Guard}
+                name=${`Fence ${spec.id}`}
+                reset=${props.source}
+                fallback=${html`<pre data-lang=${props.lang}><code>${props.source}</code></pre>`}
+            >
+                <${Drawn} component=${spec.component} props=${props} />
+            <//>`;
+
+        framedFences.set(spec.component, Framed);
+    }
+
+    return framedFences.get(spec.component);
 }
 
 /** Each extension component's number, for its Guard's key: a new component starts with a new Guard. */

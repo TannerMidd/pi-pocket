@@ -74,14 +74,17 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 
 Choose a mode in the launcher, or pass `--access`:
 
-| Mode         | Who can connect      | Notes                                                    |
-| ------------ | -------------------- | -------------------------------------------------------- |
-| `local`      | This machine         | `127.0.0.1`; bring your own tunnel to port 8787          |
-| `lan`        | Your local network   | Plain http                                               |
-| `cloudflare` | Anyone with the link | Free https quick tunnel, no account; needs `cloudflared` |
-| `tailscale`  | Your tailnet         | Tailscale address only                                   |
+| Mode              | Who can connect      | Notes                                                      |
+| ----------------- | -------------------- | ---------------------------------------------------------- |
+| `local`           | This machine         | `127.0.0.1`; bring your own tunnel to port 8787            |
+| `lan`             | Your local network   | Plain http                                                 |
+| `cloudflare`      | Anyone with the link | Free https quick tunnel, no account; needs `cloudflared`   |
+| `tailscale`       | Your tailnet         | Plain http on the tailnet address                          |
+| `tailscale-serve` | Your tailnet         | https at the tailnet name; needs `tailscale` 1.52 or newer |
 
-Other options: `--port` (8787), `--cwd`, `--data` (`~/.pi-pocket`), `--host`, and `-y` to reuse the last access choice. `npm start -- --help` lists them all. `PI_POCKET_BROWSER` and `PI_POCKET_BROWSER_ARGS` pick the built-in browser and its flags when Chromium or Chrome is not found by itself. `PI_POCKET_PROMPT_DATE=1` puts today's date in Pi's system prompt; it is left out by default, so the prompt cache does not start over when the date changes. `PI_POCKET_CACHE_KEEPER=off` turns off the prompt cache keeper, which keeps a model's prompt cache warm while a run waits on a tool call ([features](docs/features.md)).
+`tailscale-serve` needs the `tailscale` command on your `PATH`, signed in, with MagicDNS and HTTPS certificates enabled in the tailnet, and, when the launcher does not run as root, that user as tailscaled's operator (`sudo tailscale set --operator=$USER`). It serves port 443 at the machine's tailnet name, and a server restart keeps the address. When the launcher quits it takes down the mount it made; one it found already in place is left where it is. Without the command the launcher says so and stops rather than falling back to this device only when nobody is there to pick another mode. `--host` cannot be combined with it: serve always listens on `127.0.0.1` and lets tailscaled reach it. For another tunnel (ngrok), choose `local` and point it at port 8787.
+
+Other options: `--port` (8787), `--cwd`, `--data` (`~/.pi-pocket`), `--host`, and `-y` to reuse the last access choice. `--host` overrides the address a named mode would listen on, and one launcher runs per data folder (a second one says which pid holds it). `npm start -- --help` lists them all. `PI_POCKET_BROWSER` and `PI_POCKET_BROWSER_ARGS` pick the built-in browser and its flags when Chromium or Chrome is not found by itself. `PI_POCKET_PROMPT_DATE=1` puts today's date in Pi's system prompt; it is left out by default, so the prompt cache does not start over when the date changes. `PI_POCKET_SESSION_CACHE=off` keeps browsers from saving the sessions they open on the device (IndexedDB), so that they keep them in each tab's memory only; it is on by default. `PI_POCKET_CACHE_KEEPER=off` turns off the prompt cache keeper, which keeps a model's prompt cache warm while a run waits on a tool call ([features](docs/features.md)).
 
 > [!WARNING]
 > Anyone who can steer a session can make Pi run commands on this machine, as you. That reaches your files, Pi Pocket's own settings and tokens, and its code. Invite only people you would trust at your keyboard. View-only users cannot make Pi act. [SECURITY.md](SECURITY.md) says what is protected and what is not.
@@ -115,6 +118,6 @@ The [full list](docs/features.md#limitations) has the details.
 
 ## Credits and license
 
-Inspired by [Mario Zechner's demo](https://x.com/badlogicgames/status/2106452296087302173) of his own Pi app. Pi Pocket is an independent project, not affiliated with Earendil. The bundled fonts keep their own licenses, which are beside them in [web/fonts/](web/fonts/).
+Inspired by [Mario Zechner's demo](https://x.com/badlogicgames/status/2106452296087302173) of his own Pi app. Pi Pocket is an independent project, not affiliated with Earendil. The bundled fonts keep their own licenses, which are beside them in [web/fonts/](web/fonts/). Dependencies keep their own licenses too; one is not MIT: HEIC photos are decoded with [libheif-js](https://github.com/catdad-experiments/libheif-js) (LGPL-3.0), installed as an ordinary npm package that you can replace.
 
 [MIT](LICENSE). To report a security problem, see [SECURITY.md](SECURITY.md).

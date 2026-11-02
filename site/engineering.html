@@ -164,7 +164,7 @@
                                 <p>
                                     Runs the server as a child and restarts it when the app asks
                                     (exit code 75) or after a crash. Keeps the tunnel up: this
-                                    device, LAN, Cloudflare, or Tailscale.
+                                    device, LAN, Cloudflare, Tailscale, or Tailscale Serve.
                                 </p>
                             </div>
                             <div class="layer">
@@ -585,6 +585,10 @@
                         <span class="tag"><b>browser/</b> the built-in browser's profile</span>
                         <span class="tag"><b>repos/</b> clones PiP makes of repositories</span>
                         <span class="tag"><b>launcher.json</b> the launcher's access choice</span>
+                        <span class="tag"
+                            ><b>serve-mount.json</b> the Serve mount the launcher made</span
+                        >
+                        <span class="tag"><b>launcher.lock</b> one launcher per data folder</span>
                         <span class="tag"
                             ><b>bin/</b> <code>cloudflared</code>, when the launcher downloads
                             it</span

@@ -493,3 +493,25 @@ test("reports taken out of the queue by something other than a person go again, 
     );
     assert.deepEqual(await delivered(id), { "again-a": 1, "again-b": 1 });
 });
+
+test("a subagent's conversation shows what it cost itself, not its session's spend or limit", async () => {
+    slow = { thrifty: 3 };
+    const id = await orchestrate({ spawn: ["thrifty"], rounds: 0, sleep: 0 });
+
+    await until(
+        async () =>
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.thrifty !== undefined,
+        "the subagent",
+    );
+    const child = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.thrifty!
+        .conversationId;
+
+    await recordCost(app, id, 2);
+    await recordCost(app, child, 0.5);
+    await app.spend.setSessionBudget(owner(app), id, 10);
+    await until(() => app.spend.conversationSpent(child) === 0.5, "the subagent's cost");
+
+    assert.deepEqual(app.conversationInfo(await app.room(child)).spend, { spent: 0.5 });
+    assert.equal(app.conversationInfo(await app.room(id)).spend.budget, 10);
+    slow = {};
+});

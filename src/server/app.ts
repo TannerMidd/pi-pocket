@@ -7,7 +7,7 @@
  * `alerts.ts`, provider sign-ins in `providers.ts`, and each conversation's shared live view in `room.ts`.
  */
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
@@ -37,6 +37,7 @@ import {
     ProviderDoc,
     type Registry,
     type Storage,
+    type SubmissionRecord,
     UsageDoc,
     type UsageState,
 } from "@earendil-works/pi-durable";
@@ -51,12 +52,14 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
+import { removeAvatar, saveAvatar } from "./avatars.ts";
 import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
     type ArtifactMeta,
     ArtifactsDoc,
+    type ArtifactType,
     AuthorsDoc,
     BackgroundDoc,
     type BackgroundTask,
@@ -66,6 +69,7 @@ import {
     DecisionsDoc,
     FolderFavoritesDoc,
     MemoryDoc,
+    RunFailureDoc,
     type SessionMeta,
     SessionsDoc,
     SpendDoc,
@@ -86,6 +90,7 @@ import {
     type ModelRequestShaper,
     type PocketHost,
     type WebAccess,
+    type WorkspaceProvider,
 } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
@@ -93,8 +98,11 @@ import { Memory } from "./memory.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { Updates } from "./updates.ts";
 import { pocketPackage, pocketVersion } from "./versions.ts";
+import { serverBuild } from "./build.ts";
+import { presentedBuild } from "./entry-presentation.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
+import { expandHome, workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
@@ -109,7 +117,7 @@ import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
-import { PushStore } from "./push.ts";
+import { type DesktopMessage, PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
@@ -176,6 +184,20 @@ const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
 
 /** The session list goes to every tab on each change: these bound what it carries. */
 const FAILURE_TEXT = 120;
+
+/** The short failure line the session list and extensions share, or none when the run did not fail. */
+function failureText(
+    status: string,
+    reason: string | undefined,
+    detail: unknown,
+): string | undefined {
+    if (status !== "unanswered" || reason === undefined || !FAILED_RUN.has(reason)) {
+        return undefined;
+    }
+
+    return whyUnanswered(reason, detail).slice(0, FAILURE_TEXT);
+}
+
 const ASK_SUBJECT = 200;
 const ASK_REASON = 200;
 const FAILED_AGENTS = 5;
@@ -200,6 +222,26 @@ type SubagentsValue = {
 };
 
 type SubagentsOf = { agents: Record<string, SubagentRecord>; reporting: Set<string> };
+
+/** How many sessions the artifacts overview reads at once. */
+const OVERVIEW_BATCH = 8;
+
+/** One artifact in the artifacts overview: where it is, and which of its versions is the current one. */
+export type ArtifactOverviewEntry = {
+    session: number;
+    sessionTitle: string;
+    id: string;
+    title: string;
+    type: ArtifactType;
+    kind?: "page" | "deck";
+    group?: string;
+    /** The number of the latest version: the one a person sees first. */
+    current: number;
+    /** How many versions there are. */
+    versions: number;
+    size: number;
+    updatedAt: number;
+};
 
 /** One subagent on the subagents board: the subagents bar's view, the session it works in, and the call it waits on. */
 export type SubagentEntry = ReturnType<typeof subagentView> & {
@@ -322,6 +364,15 @@ export class PocketApp {
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
+    readonly #code = serverBuild();
+
+    /**
+     * This server's code (`serverBuild`) and how its modules present inputs: sessions a tab keeps, in its memory or on
+     * the device, are good for a server of the same build, so they last across a restart but not across new code.
+     */
+    get build(): string {
+        return presentedBuild(this.#code, this.webs.presentations());
+    }
     /** Set by the launcher over IPC; undefined when the server runs on its own. */
     access: AccessInfo | undefined;
     harness!: Harness;
@@ -395,7 +446,11 @@ export class PocketApp {
     #websAll = false;
     readonly #clients = new Set<Client>();
     readonly #rooms = new Map<ConversationId, Promise<Room>>();
-    readonly #envs = new Map<string, NodeExecutionEnv>();
+    readonly #envs = new Map<string, ExecutionEnv>();
+    readonly #workspaceProviders = new Map<
+        string,
+        { token: symbol; provider: WorkspaceProvider }[]
+    >();
     readonly #busy = new Set<ConversationId>();
     /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
     readonly #endedAt = new Map<ConversationId, number>();
@@ -568,6 +623,17 @@ export class PocketApp {
             },
             // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
             commandsChanged: () => this.#websChanged("all"),
+            presentationsChanged: () => {
+                // A new build in `hello`: what tabs kept shows the inputs as presented before.
+                this.#websChanged("all");
+
+                for (const pending of this.#rooms.values()) {
+                    void pending.then(
+                        (room) => room.reproject(),
+                        () => {},
+                    );
+                }
+            },
             log: (line) => this.#log(line),
             // Something about a module only the owner can mend: their tabs, as what it says can name the server's folders.
             warn: (message) => this.ownerNotice("warning", message),
@@ -803,6 +869,8 @@ export class PocketApp {
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
             registerModelProvider: (provider, config) =>
                 this.#registerModelProvider(provider, config),
+            registerWorkspaceProvider: (scheme, provider) =>
+                this.registerWorkspaceProvider(scheme, provider),
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);
 
@@ -832,6 +900,7 @@ export class PocketApp {
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
+            cwdOf: (conversationId) => this.cwdOf(conversationId),
             schedules: this.schedules,
             background: this.background,
             goals: this.goals,
@@ -987,6 +1056,16 @@ export class PocketApp {
                     this.#busy.add(id);
                 }
 
+                if (this.#sessions[String(id)] !== undefined) {
+                    // The settled submission is what lasted. The failure line is written after it, so a crash can leave
+                    // that line missing or stale: this puts it back, or clears it when a run is still going.
+                    const failure = await this.#failureOf(storage, id, live);
+
+                    if (failure !== undefined) {
+                        this.#failed.set(id, failure);
+                    }
+                }
+
                 // A compaction that resumes asks the model too: it may wait for a limit.
                 if ((live?.compactions?.length ?? 0) > 0) {
                     this.#compacting.add(id);
@@ -1025,6 +1104,23 @@ export class PocketApp {
     #committed(publication: CommitPublication): void {
         let sessionsChanged = false;
         let alreadyPaid = false;
+        // How each run in this commit stopped, read before the live document ends it: both land here, in either order.
+        const failedNow = new Map<ConversationId, string>();
+        const abortedNow = new Set<ConversationId>();
+
+        for (const change of publication.changes) {
+            if (change.type !== "submission") {
+                continue;
+            }
+
+            const text = failureText(change.value.status, change.value.reason, change.value.detail);
+
+            if (text !== undefined) {
+                failedNow.set(change.value.conversationId, text);
+            } else if (change.value.status === "unanswered" && change.value.reason === "aborted") {
+                abortedNow.add(change.value.conversationId);
+            }
+        }
 
         // Auxiliary requests pay their captured person in the same commit as usage, in either document order.
         // A commit with both documents must pay every usage change. Normal spend counts never change UsageDoc.
@@ -1068,7 +1164,7 @@ export class PocketApp {
 
         for (const change of publication.changes) {
             if (change.type === "document") {
-                if (this.#documentCommitted(change)) {
+                if (this.#documentCommitted(change, failedNow, abortedNow)) {
                     sessionsChanged = true;
                 }
             } else if (change.type === "submission") {
@@ -1088,19 +1184,16 @@ export class PocketApp {
                 }
 
                 // Its run failed: the commit that settles it ends the run too, so the list hears of both at once.
+                // The line is stored too, so the next process still knows; a new run clears that record.
+                const text = failedNow.get(change.value.conversationId);
+
                 if (
-                    change.value.status === "unanswered" &&
-                    FAILED_RUN.has(change.value.reason) &&
+                    text !== undefined &&
                     this.#sessions[String(change.value.conversationId)] !== undefined &&
                     !this.#failed.has(change.value.conversationId)
                 ) {
-                    this.#failed.set(
-                        change.value.conversationId,
-                        whyUnanswered(change.value.reason, change.value.detail).slice(
-                            0,
-                            FAILURE_TEXT,
-                        ),
-                    );
+                    this.#failed.set(change.value.conversationId, text);
+                    this.#storeRunFailure(change.value.conversationId, text);
                     sessionsChanged = true;
                 }
             }
@@ -1132,7 +1225,11 @@ export class PocketApp {
     }
 
     /** A document changed: the views that show it update. True when the session list changed too. */
-    #documentCommitted(change: Extract<DocumentCommitChange, { type: "document" }>): boolean {
+    #documentCommitted(
+        change: Extract<DocumentCommitChange, { type: "document" }>,
+        failedNow: ReadonlyMap<ConversationId, string>,
+        abortedNow: ReadonlySet<ConversationId>,
+    ): boolean {
         const kind = change.record.kind;
         const id = change.conversationId;
         let sessionsChanged = false;
@@ -1160,12 +1257,21 @@ export class PocketApp {
 
             if (busy !== this.#busy.has(id)) {
                 const session = Number(this.rootOf(id));
+                const failure = busy ? undefined : (failedNow.get(id) ?? this.#failed.get(id));
+                const outcome =
+                    failure !== undefined ? "failed" : abortedNow.has(id) ? "aborted" : "done";
 
                 // For extensions (`host.on`): PiP's runs are its person's alone.
                 if (this.#sessions[String(session)]?.pip === undefined) {
                     this.events.emit(busy ? "run.started" : "run.ended", {
                         conversationId: Number(id),
                         session,
+                        ...(busy
+                            ? {}
+                            : {
+                                  outcome,
+                                  ...(failure === undefined ? {} : { failure }),
+                              }),
                     });
                 }
 
@@ -1173,6 +1279,7 @@ export class PocketApp {
                     this.#busy.add(id);
                     // A new run starts over: whether it fails is its own to say.
                     this.#failed.delete(id);
+                    this.#storeRunFailure(id, undefined);
 
                     if (this.#sessions[String(id)] !== undefined) {
                         this.#movedUp(id, Date.now());
@@ -1374,7 +1481,85 @@ export class PocketApp {
         }
     }
 
-    /** Where a conversation's commands run: its folder on this machine. */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void {
+        if (
+            !/^[a-z][a-z0-9+.-]+$/i.test(scheme) ||
+            typeof provider?.env !== "function" ||
+            typeof provider?.resolveCwd !== "function"
+        ) {
+            throw new Error("Invalid workspace provider registration");
+        }
+
+        const key = scheme.toLowerCase();
+        const token = Symbol(key);
+        const registrations = this.#workspaceProviders.get(key) ?? [];
+
+        registrations.push({ token, provider });
+        this.#workspaceProviders.set(key, registrations);
+
+        return () => {
+            const live = this.#workspaceProviders.get(key);
+            const index = live?.findIndex((entry) => entry.token === token) ?? -1;
+
+            if (index >= 0) {
+                live!.splice(index, 1);
+
+                if (live!.length === 0) {
+                    this.#workspaceProviders.delete(key);
+                }
+            }
+        };
+    }
+
+    workspaceScheme(cwd: string): string | undefined {
+        return workspaceScheme(cwd);
+    }
+
+    /** A workspace URI reaches a provider's machines and keys: they are the owner's. */
+    requireWorkspaceOwner(user: User, cwd: string): void {
+        if (user.role !== "owner" && this.workspaceScheme(cwd.trim()) !== undefined) {
+            throw new HttpError(403, "Only the owner can use a remote workspace.");
+        }
+    }
+
+    async resolveCwd(cwd: string, signal?: AbortSignal): Promise<string> {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme === undefined) {
+            return this.workspace.checkDirectory(cwd);
+        }
+
+        const registration = this.#workspaceProviders.get(scheme)?.at(-1);
+
+        // 400, not 503: an unknown scheme and a provider module that is off look the same here.
+        // Only the owner can fix either one, and a retry does not help.
+        if (registration === undefined) {
+            throw new HttpError(
+                400,
+                `No workspace provider is registered for URI scheme ${scheme}`,
+            );
+        }
+
+        signal?.throwIfAborted();
+        const canonical = await registration.provider.resolveCwd(cwd, signal);
+
+        if (this.#workspaceProviders.get(scheme)?.at(-1)?.token !== registration.token) {
+            throw new HttpError(
+                409,
+                `Workspace provider ${scheme} changed while resolving the workspace URI`,
+            );
+        }
+
+        signal?.throwIfAborted();
+
+        if (typeof canonical !== "string" || this.workspaceScheme(canonical) !== scheme) {
+            throw new Error(`Workspace provider ${scheme} returned an invalid canonical URI`);
+        }
+
+        return canonical;
+    }
+
+    /** Where a conversation's commands run: its folder here, or its workspace provider's env. */
     envFor(id: ConversationId): ExecutionEnv {
         return this.#wrapped(id, this.cwdOf(id));
     }
@@ -1384,7 +1569,19 @@ export class PocketApp {
         return wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden);
     }
 
-    #env(cwd: string): NodeExecutionEnv {
+    #env(cwd: string): ExecutionEnv {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme !== undefined) {
+            const provider = this.#workspaceProviders.get(scheme)?.at(-1)?.provider;
+
+            if (provider === undefined) {
+                throw new Error(`No workspace provider is registered for URI scheme ${scheme}`);
+            }
+
+            return provider.env(cwd);
+        }
+
         let env = this.#envs.get(cwd);
 
         if (env === undefined) {
@@ -1523,13 +1720,78 @@ export class PocketApp {
             this.#peopleChanged(client.user.id);
         }
 
-        if (client.conversationId === undefined) {
+        await this.#enter(client);
+    }
+
+    /**
+     * Show a tab another session, or none (the list), on the connection it has (`connection`, the id its `hello`
+     * carried): it leaves the room of the one it showed, and gets what the new one has as a new connection would, with
+     * what it kept of it (`have`). No new connection means no hello, session list, or PiP state again, and nobody sees
+     * this person leave and come back. `switched` goes first: every event of a session after it is the new one's. A switch
+     * numbered `seq` below one already taken arrived late, and is dropped. False when no such connection is open (it
+     * closed, or the server started again): the tab connects again instead.
+     */
+    switchTo(
+        user: User,
+        connection: string,
+        id: ConversationId | undefined,
+        have: Client["have"],
+        seq: number,
+    ): boolean {
+        let found = false;
+
+        for (const client of this.#clients) {
+            if (client.user.id !== user.id || client.connection !== connection) {
+                continue;
+            }
+
+            found = true;
+
+            if (seq <= (client.switchSeq ?? -Infinity)) {
+                continue;
+            }
+
+            client.switchSeq = seq;
+            const previous = client.conversationId;
+
+            if (previous !== undefined) {
+                this.#leaveRoom(client, previous);
+            }
+
+            client.conversationId = id;
+
+            if (have === undefined) {
+                delete client.have;
+            } else {
+                client.have = have;
+            }
+
+            client.send("switched", { seq, conversationId: id ?? null });
+            void this.#enter(client);
+
+            if (id === undefined) {
+                this.#scheduleSessions();
+            }
+        }
+
+        return found;
+    }
+
+    /**
+     * Put a tab in the room of the session it shows (`client.conversationId`), and send it what that session has: its
+     * view, chat, notes, and browser. A later switch while the room opens wins: this one then leaves nothing behind.
+     */
+    async #enter(client: Client): Promise<void> {
+        const visit = (client.visit = (client.visit ?? 0) + 1);
+        const id = client.conversationId;
+
+        if (id === undefined) {
             return;
         }
 
-        if (!this.canSee(client.user, client.conversationId)) {
+        if (!this.canSee(client.user, id)) {
             client.send("missing", {
-                conversationId: client.conversationId,
+                conversationId: id,
                 message: "This session is not shared with you.",
             });
             // Keep the tab for app-wide events only: nothing about that conversation reaches it, and it is not "there".
@@ -1539,11 +1801,23 @@ export class PocketApp {
         }
 
         try {
-            const id = client.conversationId;
             const room = await this.room(id);
 
-            if (!this.#clients.has(client)) {
+            if (!this.#clients.has(client) || client.visit !== visit) {
                 this.releaseRoom(room);
+
+                return;
+            }
+
+            // The person's access can change while the room opens (`setAccess` evicts only tabs already there): asked
+            // again now, as nothing of the session has gone yet.
+            if (!this.canSee(client.user, id)) {
+                this.releaseRoom(room);
+                client.conversationId = undefined;
+                client.send("missing", {
+                    conversationId: id,
+                    message: "This session is no longer shared with you.",
+                });
 
                 return;
             }
@@ -1568,10 +1842,9 @@ export class PocketApp {
             room.pushPresence();
             this.#scheduleSessions();
         } catch (error) {
-            client.send("missing", {
-                conversationId: client.conversationId,
-                message: describe(error),
-            });
+            if (client.visit === visit) {
+                client.send("missing", { conversationId: id, message: describe(error) });
+            }
         }
     }
 
@@ -1838,6 +2111,41 @@ export class PocketApp {
         return false;
     }
 
+    /**
+     * Send a notification to this person's desktop apps, over their live connections: Web Push
+     * cannot reach them. Each connected one gets it; the app shows one per tag. Returns how many
+     * got it.
+     */
+    notifyDesktops(userId: string, message: DesktopMessage): number {
+        // Web Push clips; a desktop app takes the same, and the whole call for an approval.
+        message = {
+            ...message,
+            title: message.title.slice(0, 200),
+            body: message.body.slice(0, 1000),
+        };
+        let sent = 0;
+
+        for (const client of this.#clients) {
+            if (client.user.id === userId && client.desktop === true) {
+                client.send("desktop-notify", message);
+                sent += 1;
+            }
+        }
+
+        return sent;
+    }
+
+    /** Whether any desktop app that shows notifications is connected now. */
+    hasDesktops(): boolean {
+        for (const client of this.#clients) {
+            if (client.desktop === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** Is this person looking at this conversation right now, in a visible tab? */
     watching(userId: string, id: ConversationId): boolean {
         for (const client of this.#clients) {
@@ -1856,6 +2164,26 @@ export class PocketApp {
     /** Change someone's name: shown at once on their messages, in the people lists, and on their avatar. */
     rename(user: User, name: string): void {
         this.config.updateUser(user.id, { name });
+        this.#peopleChanged();
+
+        for (const pending of this.#rooms.values()) {
+            void pending.then(
+                (room) => room.has(user.id) && room.pushPresence(),
+                () => {},
+            );
+        }
+    }
+
+    /** Set (bytes) or clear (undefined) someone's picture; everyone's lists show it at once. */
+    setAvatar(user: User, bytes: Buffer | undefined): void {
+        if (bytes === undefined) {
+            removeAvatar(this.dataDir, user.id);
+            this.config.updateUser(user.id, { avatar: undefined });
+        } else {
+            saveAvatar(this.dataDir, user.id, bytes);
+            this.config.updateUser(user.id, { avatar: Date.now() });
+        }
+
         this.#peopleChanged();
 
         for (const pending of this.#rooms.values()) {
@@ -1900,6 +2228,7 @@ export class PocketApp {
                 id: each.id,
                 name: each.name,
                 role: each.role,
+                ...(each.avatar === undefined ? {} : { avatar: each.avatar }),
                 online: this.#online(each.id),
                 ...(each.lastSeen === undefined ? {} : { lastSeen: each.lastSeen }),
                 ...(each.sessions === undefined || scope !== undefined
@@ -2256,6 +2585,14 @@ export class PocketApp {
                 refreshModels: user.role === "owner",
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
                 peeks: true,
+                // Tells the web app it may show another session on the connection it has (`POST /api/switch`).
+                switches: true,
+                // Sessions tabs keep are good for servers of this build (`have`).
+                build: this.build,
+                // Whether a browser may keep sessions on the device (IndexedDB), for every tab and across reloads:
+                // `PI_POCKET_SESSION_CACHE=off` keeps them in each tab's memory only, and has browsers drop what they
+                // kept on the device.
+                deviceCache: process.env.PI_POCKET_SESSION_CACHE !== "off",
                 // This server's clock: peek tiles compare the browser's looks with when runs ended here.
                 now: Date.now(),
                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
@@ -2493,6 +2830,82 @@ export class PocketApp {
         return this.#endedAt.get(id);
     }
 
+    /**
+     * The failure line a session should show after a restart. A run still going clears a line a crash left behind. An
+     * idle session takes the line of its run's newest settled input, which the run's own commit stored, and writes a line
+     * that disagrees back. Undefined when there is nothing to show.
+     */
+    async #failureOf(
+        storage: Storage,
+        id: ConversationId,
+        live: { run?: unknown } | null | undefined,
+    ): Promise<string | undefined> {
+        const stored = (await this.harness.snapshot(RunFailureDoc, id, context))?.text;
+
+        if (live?.run !== undefined) {
+            if (stored !== undefined) {
+                this.#storeRunFailure(id, undefined);
+            }
+
+            return undefined;
+        }
+
+        // The newest settled input is the last run's: submission ids grow with each commit. Notes and other writes
+        // after it are skipped. A run that gave up leaves every one of its inputs unanswered, so that input still says so.
+        let record: SubmissionRecord | undefined;
+        let cursor: Cursor | undefined;
+
+        do {
+            const page = await storage.scanSubmissions(
+                { conversationId: id, order: "descending" },
+                64,
+                cursor,
+                context,
+            );
+
+            // A queued input, or one withdrawn from the queue, never joined a run. One a run gave up on may have no entry.
+            record = page.items.find(
+                (each) =>
+                    each.type === "input" &&
+                    (each.entry !== undefined ||
+                        (each.status === "unanswered" && FAILED_RUN.has(each.reason))),
+            );
+            cursor = record === undefined ? page.next : undefined;
+        } while (cursor !== undefined);
+
+        const text =
+            record?.status === "unanswered"
+                ? failureText(record.status, record.reason, record.detail)
+                : undefined;
+
+        if (text !== stored) {
+            this.#storeRunFailure(id, text);
+        }
+
+        return text;
+    }
+
+    /** Keep or clear a session's failure line, so the next process still knows. A listener may not commit. */
+    #storeRunFailure(id: ConversationId, text: string | undefined): void {
+        if (this.#sessions[String(id)] === undefined) {
+            return;
+        }
+
+        setImmediate(() => {
+            this.harness
+                .commit(async (tx) => {
+                    const record = await tx.doc(RunFailureDoc, id);
+
+                    if (text === undefined) {
+                        delete record.text;
+                    } else {
+                        record.text = text;
+                    }
+                }, context)
+                .catch((error: unknown) => this.log(`run failure not stored: ${describe(error)}`));
+        });
+    }
+
     async conversationTitle(id: ConversationId): Promise<string> {
         const meta = this.#sessions[String(id)];
 
@@ -2508,7 +2921,9 @@ export class PocketApp {
         const agent = (room.value?.docs["pi.agent"] ?? {}) as AgentState;
         const forkedFrom = meta?.forkedFrom;
         const root = this.rootOf(room.id);
-        const budget = this.#sessions[String(root)]?.budget;
+        const subagent = meta === undefined && room.parent !== undefined;
+        // A subagent shows what it cost itself: the session's spend and limit are on the session.
+        const budget = subagent ? undefined : this.#sessions[String(root)]?.budget;
 
         return {
             id: room.id,
@@ -2532,10 +2947,11 @@ export class PocketApp {
             ...(forkedFrom === undefined ? {} : { forkedFrom }),
             // The session's spend with its subagents', and its limit, with what counts against it.
             spend: {
-                spent:
-                    budget === undefined
-                        ? this.spend.sessionSpent(root)
-                        : this.spend.budgetSpent(root),
+                spent: subagent
+                    ? this.spend.conversationSpent(room.id)
+                    : budget === undefined
+                      ? this.spend.sessionSpent(root)
+                      : this.spend.budgetSpent(root),
                 ...(budget === undefined ? {} : { budget }),
             },
             ...(meta?.worktree === undefined
@@ -2769,6 +3185,7 @@ export class PocketApp {
 
     #forget(userId: string): void {
         this.config.removeUser(userId);
+        removeAvatar(this.dataDir, userId);
         this.pushStore?.removeUser(userId);
 
         // Their open tabs end now; reconnecting fails, so they land on the sign-in screen.
@@ -2820,6 +3237,79 @@ export class PocketApp {
                 this.#sendBoard(client, this.subagents(user));
             }
         }
+    }
+
+    /**
+     * Every artifact in the sessions this person can see, for the artifacts overview: one entry for each, with its
+     * current (latest) version and how many versions it has. Archived sessions are left out. Newest first.
+     */
+    async artifactOverview(user: User): Promise<ArtifactOverviewEntry[]> {
+        const one = async (
+            session: string,
+            meta: SessionMeta,
+        ): Promise<ArtifactOverviewEntry[]> => {
+            const id = Number(session) as unknown as ConversationId;
+
+            // A PiP is its owner's assistant, and kept out of the session list.
+            if (meta.archived === true || meta.pip !== undefined || !this.canSee(user, id)) {
+                return [];
+            }
+
+            try {
+                const index = await this.harness.snapshot(ArtifactsDoc, id, context);
+                const entries: ArtifactOverviewEntry[] = [];
+
+                for (const [artifact, item] of Object.entries(index?.items ?? {})) {
+                    const current = item.versions.at(-1);
+
+                    if (current === undefined) {
+                        continue;
+                    }
+
+                    entries.push({
+                        session: Number(session),
+                        sessionTitle: meta.title ?? "",
+                        id: artifact,
+                        title: item.title,
+                        type: item.type,
+                        ...(item.kind === undefined ? {} : { kind: item.kind }),
+                        ...(item.group === undefined ? {} : { group: item.group }),
+                        current: current.version,
+                        versions: item.versions.length,
+                        size: current.size,
+                        updatedAt: current.createdAt,
+                    });
+                }
+
+                return entries;
+            } catch (error) {
+                // One session's broken artifacts must not hide the others'.
+                console.error(`Artifacts of session ${session} could not be read:`, error);
+
+                return [];
+            }
+        };
+
+        const sessions = Object.entries(this.#sessions);
+        const found: ArtifactOverviewEntry[] = [];
+
+        // A few sessions at a time: a person with many sessions does not make the server read all of them at once.
+        for (let from = 0; from < sessions.length; from += OVERVIEW_BATCH) {
+            const batch = sessions.slice(from, from + OVERVIEW_BATCH);
+
+            found.push(...(await Promise.all(batch.map(([id, meta]) => one(id, meta)))).flat());
+        }
+
+        // The person as they are now: a share removed while this ran takes its entries out.
+        const now = this.config.userById(user.id);
+
+        return found
+            .filter(
+                (entry) =>
+                    now !== undefined &&
+                    this.canSee(now, entry.session as unknown as ConversationId),
+            )
+            .sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
     async artifactBody(id: ConversationId, artifact: string, version?: number) {
@@ -2937,6 +3427,10 @@ export class PocketApp {
 
     /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
     skills(cwd: string): Skill[] {
+        if (this.workspaceScheme(cwd) !== undefined) {
+            return [];
+        }
+
         return loadSessionSkills(cwd, this.#skillSources());
     }
 
@@ -2949,7 +3443,13 @@ export class PocketApp {
             throw new HttpError(403, "Only the owner decides which projects Pi trusts.");
         }
 
-        return readProjectTrust(this.cwdOf(id), this.#skillSources());
+        const cwd = this.cwdOf(id);
+
+        if (this.workspaceScheme(cwd) !== undefined) {
+            throw new HttpError(400, "Project trust is not available for remote workspaces.");
+        }
+
+        return readProjectTrust(cwd, this.#skillSources());
     }
 
     /** The owner's answer to "trust this project?", saved where Pi's CLI keeps its own, as its `/trust` does. */
@@ -2998,6 +3498,16 @@ export class PocketApp {
         }
 
         const cwd = this.cwdOf(id);
+
+        // A remote workspace has no project folder here: only Pi's own templates and whole paths.
+        if (this.workspaceScheme(cwd) !== undefined) {
+            return loadPromptTemplates(
+                this.#home,
+                getAgentDir(),
+                paths.filter((path) => isAbsolute(expandHome(path.trim()))),
+                { project: false },
+            );
+        }
 
         // A project told "Don't trust" offers none of its own, as its .pi/skills.
         return loadPromptTemplates(cwd, getAgentDir(), paths, {

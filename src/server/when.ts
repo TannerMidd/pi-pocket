@@ -51,19 +51,33 @@ export function knownZone(zone: string): boolean {
     }
 }
 
+/** One formatter per zone: making one costs far more than using it, and a repeat's next times use it hundreds of times. */
+const clocks = new Map<string, Intl.DateTimeFormat>();
+
+function clockIn(zone: string): Intl.DateTimeFormat {
+    let format = clocks.get(zone);
+
+    if (format === undefined) {
+        format = new Intl.DateTimeFormat("en-US", {
+            timeZone: zone,
+            hourCycle: "h23",
+            year: "numeric",
+            month: "numeric",
+            day: "numeric",
+            hour: "numeric",
+            minute: "numeric",
+            second: "numeric",
+            weekday: "short",
+        });
+        clocks.set(zone, format);
+    }
+
+    return format;
+}
+
 /** The wall clock in `zone` at a moment: its date, time, and day of the week. */
 function wallClock(at: number, zone: string) {
-    const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: zone,
-        hourCycle: "h23",
-        year: "numeric",
-        month: "numeric",
-        day: "numeric",
-        hour: "numeric",
-        minute: "numeric",
-        second: "numeric",
-        weekday: "short",
-    }).formatToParts(new Date(at));
+    const parts = clockIn(zone).formatToParts(new Date(at));
     const part = (type: string) => parts.find((each) => each.type === type)?.value ?? "";
 
     return {

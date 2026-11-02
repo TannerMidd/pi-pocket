@@ -46,6 +46,7 @@ const ORDER = [
     "prompt.ts",
     "artifacts.ts",
     "browser.ts",
+    "diagrams.ts",
     "subagents.ts",
     "agent-teams.ts",
     "schedules.ts",
@@ -85,6 +86,7 @@ const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
     "artifacts.ts": "Artifacts",
     "browser.ts": "Browser",
+    "diagrams.ts": "Diagrams",
     "subagents.ts": "Subagents",
     "agent-teams.ts": "Agent Teams",
     "schedules.ts": "Scheduled messages",
@@ -120,6 +122,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "edit",
     "bash",
     "artifact",
+    // Not a tool since 0.28.0, but kept: old sessions hold its calls, and a drop-in must not take the name (`legacyInline`).
     "artifact_inline",
     "browser",
     "subagent",

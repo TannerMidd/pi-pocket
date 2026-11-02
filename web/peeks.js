@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { AgentTile } from "./agent-tile.js";
 import { folderColor } from "./avatar.js";
 import { describeCall } from "./calls.js";
+import { onPageVisibility, pageVisible } from "./host.js";
 import { finishedUnseen, markSeen, seenSince } from "./seen.js";
 import {
     actions,
@@ -42,7 +43,7 @@ const RETRY_MS = [1000, 3000, 10_000];
 
 PEEK_WIDE.addEventListener("change", () => store.set({}));
 
-const hidden = () => document.visibilityState === "hidden";
+const hidden = () => !pageVisible();
 
 store.set({ peeks: {} });
 
@@ -282,8 +283,8 @@ function sendScreen() {
     );
 }
 
-// Each connection to the server starts without tiles (a session switch reconnects, as does a restart): say again
-// which are on screen.
+// Each connection to the server starts without tiles (a reconnect or a restart; a session switch keeps the connection):
+// say again which are on screen.
 store.subscribe((state) => {
     if (state.streamId !== lastStream) {
         lastStream = state.streamId;
@@ -291,7 +292,7 @@ store.subscribe((state) => {
     }
 });
 
-document.addEventListener("visibilitychange", () => {
+onPageVisibility(() => {
     settle(hidden() ? 0 : SETTLE_MS);
 });
 
@@ -456,6 +457,14 @@ function PeekLine({ line }) {
             return html`<div class="peek-line cmd">
                 <span class="peek-mark">${">_"}</span>
                 <span class="peek-text">${line.command}${" "}<${Status} status=${line.status} /></span>
+            </div>`;
+        case "presented":
+            // An input an extension presents: its label and summary, as the transcript's folded line.
+            return html`<div class="peek-line presented">
+                <span class="peek-mark">›</span>
+                <span class="peek-text">
+                    <b>${line.label}</b>${line.summary && html` · ${line.summary}`}
+                </span>
             </div>`;
         case "note":
             return html`<div class="peek-line faint">
@@ -630,7 +639,7 @@ function AgentRows({ agents, compact }) {
                 title="See them all on the subagents board"
                 onClick=${() =>
                     store.set({
-                        board: true,
+                        board: "subagents",
                         drawer: false,
                         page: null,
                         boardFocus: more[0].conversationId,

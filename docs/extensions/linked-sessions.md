@@ -1,6 +1,6 @@
 # Starting and messaging sessions
 
-A tool can start a session from the session that it runs in, and send messages between such sessions. Agent Teams does this ([agent-teams.ts](../../src/server/extensions/agent-teams.ts)). Use `host.linkedSessions`. Its members are in [the host reference](reference/host.md).
+A tool can start a session from the session that it runs in, send messages between such sessions, and stop or archive one. Agent Teams does this ([agent-teams.ts](../../src/server/extensions/agent-teams.ts)). A team or orchestration extension uses the same calls. Use `host.linkedSessions`. Its members are in [the host reference](reference/host.md).
 
 **Experimental** in 0.14: it can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)).
 
@@ -44,18 +44,34 @@ Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0
 - `send` returns when the session takes the message, not when it answers.
 - The session that gets the message reads it in a fence. Words before it say that another session's agent wrote it, that it is a request and not an order from a person, and which address to reply to.
 
+## Stop a run
+
+`stop(source, { to }, key)` stops the run of the linked session at the address `to`, and withdraws what waits in its queue. Stopping is the safe direction: it needs the same access as `send`, including the turn and room under the spend limit.
+
+- When the session is idle, it has no run to stop: the call only withdraws what waits in its queue.
+- It returns `{ busy }`. `busy` is true when the session was working.
+- Since 0.28.0. An older Pi Pocket has no `stop`, so a module checks for it and sets `minPocket` to `0.28.0` when it needs it.
+
+## Archive a session
+
+`archive(source, { to, archived? }, key)` archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives.
+
+- It returns `{ archived, repeating }`. `archived` says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them.
+- It needs the same access as `send`.
+- Since 0.28.0, with the same check as `stop`.
+
 ## List the sessions
 
 `list(source)` gives the sessions linked to the source, at any distance, that the person whom Pi works for can see.
 
 - Each one has an `address` of the source's own, so no session's id goes into the source's transcript.
-- Each one has its title, folder, and state only when all the people who see the source also see it.
+- Each one has its title, folder, and state only when all the people who see the source also see it. Since 0.28.0 that state includes `failed`: why its last run gave up, the same short line the session list shows, and only while that failure stands. A later run clears it. A run that was stopped is not a failure.
 
 Addresses belong to the session that has them. A fork starts with none, so it leaves the team: the addresses in the history that it copied do not work there.
 
 ## Who it acts for
 
-`start` and `send` act for the person whom Pi works for in the source. They need that person's access and right to steer. To start a session, that person must also have access to all sessions.
+`start`, `send`, `stop`, and `archive` act for the person whom Pi works for in the source. They need that person's access and right to steer. To start a session, that person must also have access to all sessions. `stop` and `archive` reach only a session of this team that the person can see.
 
 Pi Pocket refuses them while the source is in plan mode, past a spend limit, or while another person has the turn. `send` also needs the turn, and room under the spend limit, in the target session.
 
@@ -73,6 +89,6 @@ Pi Pocket keeps a team small. Past these limits ([Limits](reference/limits.md#li
 
 ## Replays
 
-Give a `key` that stays the same when the call runs again: `${api.taskId}:${api.callId}`. A start or a send with a key that Pi Pocket saw before returns what the first call returned. So a replay makes one session, and sends one message. Pi Pocket keeps the record of a key for a limited time, and for a limited number of calls ([limits](reference/limits.md#linked-sessions)).
+Give a `key` that stays the same when the call runs again: `${api.taskId}:${api.callId}`. A call with a key that Pi Pocket saw before returns what the first call returned, and does not act again. So a replay makes one session, sends one message, stops one run, and archives once. A repeated `stop` returns the first call's `{ busy }`. A repeated `archive` returns the first call's `{ archived, repeating }`, not a state someone changed later. Pi Pocket keeps the record of a key for a limited time, and for a limited number of calls ([limits](reference/limits.md#linked-sessions)).
 
 The errors say what is wrong. They do not tell Pi what to do about it: your tool tells Pi that.

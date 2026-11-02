@@ -98,7 +98,7 @@ Routes and the browser module are for the owner alone, unless their `access` say
 | `"steer"`           | The owner, and guests who can steer every session    |
 | `"view"`            | The owner, guests, and viewers who see every session |
 
-- A person invited to one session never may use them: these parts belong to the whole app.
+- A person invited to one session never may use them: these parts belong to the whole app. The one exception is the built-in Diagrams browser module, which draws Mermaid and math in their replies. They get its browser module and no routes.
 - Each route checks its own `access`. So a browser module for everyone can have a route for the owner alone.
 - `access` is the same for each method. A `POST` route open to `"view"` lets viewers change something through it, though they cannot steer a session. Give a route that changes things `"owner"` or `"steer"`.
 - A browser module runs with the rights of the person whose tab loads it. So it can do nothing in a guest's tab that the guest cannot do.

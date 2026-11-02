@@ -25,12 +25,22 @@ const TAB_KEY = "pocket.filesTab";
 const WIDTH_KEY = "pocket.filesWidth";
 /** Tree and viewer side by side from this width of the tile; one at a time below it. */
 const SIDE_BY_SIDE = 600;
+/** A workspace URI (`ssh://host/path`), as `workspaceScheme` in `src/server/paths.ts` reads it. */
+const isWorkspaceUri = (cwd) => /^[a-z][a-z0-9+.-]+:\/\//i.test(cwd ?? "");
 
-/** The tile is for people who can steer: the viewer reads files as Pi would. */
-export const filesAvailable = () => canSteer() && store.state.conversationId !== null;
+/** The tile is for people who can steer: the viewer reads local files as Pi would. */
+export const filesAvailable = () =>
+    canSteer() &&
+    store.state.conversationId !== null &&
+    !isWorkspaceUri(store.state.view.agent?.cwd) &&
+    !isWorkspaceUri(store.state.view.conversation?.cwd);
 
 /** Show or hide the tile. It takes the Browser and People panels' place. */
 export function setFilesOpen(open, tab) {
+    if (open && !filesAvailable()) {
+        return;
+    }
+
     if (open) {
         sessionStorage.setItem(OPEN_KEY, "1");
         sessionStorage.removeItem("pocket.browser");
@@ -669,7 +679,11 @@ function FilesTab({ changes, covering }) {
     </div>`;
 }
 
-export function FilesPanel({ leaving = false }) {
+export function FilesPanel(props) {
+    return filesAvailable() ? html`<${FilesPanelContent} ...${props} />` : null;
+}
+
+function FilesPanelContent({ leaving = false }) {
     const { filesTab, view, server } = store.state;
     const root = view.agent?.cwd ?? view.conversation?.cwd ?? "";
     const { changes } = useChanges(true);

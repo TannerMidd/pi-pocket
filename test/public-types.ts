@@ -11,6 +11,7 @@ import type {
     ExtensionModule,
     ExtensionWeb,
     LinkedSession as RealLinkedSession,
+    LinkedSessionsApi as RealLinkedSessions,
     PocketHost,
     AppEvents as RealAppEvents,
     SettingField as RealSettingField,
@@ -37,6 +38,7 @@ import type {
     HumanLinkedSessions,
     Host,
     LinkedSession,
+    LinkedSessions,
     Module,
     AppEvents,
     SettingField,
@@ -139,6 +141,8 @@ export const settingField = (real: RealSettingField): SettingField => real;
 export const settingFieldBack = (types: SettingField): RealSettingField => types;
 export const linked = (real: RealLinkedSession): LinkedSession => real;
 export const linkedBack = (types: LinkedSession): RealLinkedSession => types;
+export const links = (real: RealLinkedSessions): LinkedSessions => real;
+export const linksBack = (types: LinkedSessions): RealLinkedSessions => types;
 
 /** A module written against the public types is one the loader takes. */
 export const module = (types: Module): ExtensionModule => types;

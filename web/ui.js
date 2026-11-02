@@ -7,6 +7,8 @@ import { Component, createContext, h } from "preact";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useDragToClose } from "./gestures.js";
 import { highlight, langOf } from "./highlight.js";
+import { blockMath, inlineMath } from "./math.js";
+import { fenceFor, markdownRevision, mathOn, mountMath } from "./markdown-ext.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
 
 export const html = htm.bind(h);
@@ -93,7 +95,47 @@ const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[
 /** A fence's language as it may be kept: a short name of safe characters, or nothing. */
 const FENCE_NAME = /^[\w+#.-]{1,24}$/;
 
+// Markers are unpredictable and exist only for one parse, so reply HTML cannot impersonate math.
+let mathMarkers = null;
+
+function mathMarker(text, display) {
+    const marker = `pocket-math-${[...crypto.getRandomValues(new Uint32Array(4))].join("-")}`;
+
+    mathMarkers?.set(marker, { text, display });
+
+    return `<code>${marker}</code>`;
+}
+
 marked.use({
+    extensions: [
+        {
+            name: "pocketBlockMath",
+            level: "block",
+            // Only `$$` at the start of a line: marked cuts the paragraph there, and joins its parts with a line break.
+            start: (src) => {
+                const found = mathOn() ? /\n {0,3}\$\$/.exec(src) : null;
+
+                return found === null ? undefined : found.index + 1;
+            },
+            tokenizer(src) {
+                const found = mathOn() && blockMath(src);
+
+                return found ? { type: "pocketBlockMath", ...found } : undefined;
+            },
+            renderer: (token) => `<p>${mathMarker(token.text, true)}</p>`,
+        },
+        {
+            name: "pocketInlineMath",
+            level: "inline",
+            start: (src) => (mathOn() ? src.indexOf("$") : undefined),
+            tokenizer(src) {
+                const found = mathOn() && inlineMath(src);
+
+                return found ? { type: "pocketInlineMath", ...found } : undefined;
+            },
+            renderer: (token) => mathMarker(token.text, token.display),
+        },
+    ],
     renderer: {
         // Task list boxes as characters: the sanitizer drops form controls.
         checkbox: ({ checked }) => (checked ? "☑ " : "☐ "),
@@ -204,7 +246,7 @@ function codeBlock(pre, fold) {
     const code = pre.querySelector("code") ?? pre;
     const wrap = document.createElement("div");
     const copy = document.createElement("button");
-    const kind = richKind(name, source);
+    const kind = fenceFor(name) ? "extension" : richKind(name, source);
 
     // The highlighter's output is the source, escaped, in spans of its own: nothing from the reply becomes markup.
     if (lang && source.length <= COLOR_LIMIT) {
@@ -258,6 +300,15 @@ function sanitize(html, fold) {
 
     // `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
     for (const code of fragment.querySelectorAll("code")) {
+        const math = mathMarkers?.get(code.textContent ?? "");
+
+        if (math !== undefined && !code.closest("pre")) {
+            code.textContent = math.text;
+            code.dataset.part = "inline-math";
+            code.dataset.lang = math.display ? "math-display" : "math-inline";
+            continue;
+        }
+
         // Code in a line of words, for themes; a code block is `code-block`.
         if (!code.closest("pre")) {
             code.dataset.part = "inline-code";
@@ -431,7 +482,13 @@ function markdownParts(
     base = null,
     breaks = true,
 ) {
-    const key = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
+    const key = [
+        markdownRevision(),
+        conversationId ?? "",
+        base ?? "",
+        breaks ? "br" : "",
+        text,
+    ].join("\u0000");
     let out = markdownCache.get(key);
 
     if (out !== undefined) {
@@ -459,9 +516,12 @@ function renderParts(text, conversationId, base, breaks, fold) {
     rendering = conversationId ?? null;
     linkBase = base;
 
+    mathMarkers = new Map();
+
     try {
         return partsOf(sanitize(marked.parse(text, { async: false, breaks }), fold));
     } finally {
+        mathMarkers = null;
         rendering = null;
         linkBase = null;
     }
@@ -521,10 +581,15 @@ export function Markdown({
     conversationId = currentConversation(),
 }) {
     const live = useRef(null);
+    const root = useRef(null);
+
+    useEffect(() => mountMath(root.current));
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+        const settings = [markdownRevision(), conversationId ?? "", base ?? "", breaks].join(
+            "\u0000",
+        );
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -532,7 +597,11 @@ export function Markdown({
 
         const blocks = liveBlocks(text, conversationId, base, breaks, live.current.kept);
 
-        return html`<div class=${`md ${className}`}>
+        return html`<div
+            key=${markdownRevision()}
+            ref=${root}
+            class=${`md ${className}`}
+        >
             ${blocks.flatMap(({ key, parts }) =>
                 parts
                     .filter((part) => part.kind !== undefined || part.html.trim() !== "")
@@ -546,25 +615,43 @@ export function Markdown({
 
     if (parts.length === 1 && parts[0].kind === undefined) {
         return html`<div
+            key=${markdownRevision()}
+            ref=${root}
             class=${`md ${className}`}
             dangerouslySetInnerHTML=${{ __html: parts[0].html }}
         ></div>`;
     }
 
-    return html`<div class=${`md ${className}`}>
+    return html`<div
+        key=${markdownRevision()}
+        ref=${root}
+        class=${`md ${className}`}
+    >
         ${parts.map((part, index) => drawPart(part, index, !cache))}
     </div>`;
 }
 
 /** One part of rendered markdown (`partsOf`): a run of HTML, or a code block that shows more than code. */
-const drawPart = (part, key, streaming) =>
-    part.kind === undefined || RichBlock === null
+const drawPart = (part, key, streaming) => {
+    const extension = part.kind === "extension" ? fenceFor(part.lang) : undefined;
+
+    if (extension !== undefined) {
+        return html`<${extension.component}
+            key=${key}
+            source=${part.source}
+            lang=${part.lang}
+            streaming=${streaming}
+        />`;
+    }
+
+    return part.kind === undefined || part.kind === "extension" || RichBlock === null
         ? html`<div
               key=${key}
               class="md-part"
               dangerouslySetInnerHTML=${{ __html: part.html }}
           ></div>`
         : html`<${RichBlock} key=${key} ...${part} streaming=${streaming} />`;
+};
 
 /** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
 const FILE_TYPES = new Set(

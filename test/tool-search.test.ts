@@ -15,6 +15,7 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { findBrowser } from "../src/server/browser/discovery.ts";
 import { SubagentsDoc } from "../src/server/docs.ts";
 
 let app: App;
@@ -200,7 +201,11 @@ test("on any other model, a search leaves the tool list alone and the tool is ca
     assert.ok(callable.includes("browser"), "a script can call it");
 });
 
-test("on that route, a screenshot taken by a script reaches the model", async () => {
+test("on that route, a screenshot taken by a script reaches the model", async (t) => {
+    if (findBrowser() === undefined) {
+        return t.skip("no Chromium-based browser on this machine");
+    }
+
     const id = await newSession(app);
 
     await app.commands.configure(id, owner(app), {

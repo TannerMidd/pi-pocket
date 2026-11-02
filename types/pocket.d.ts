@@ -24,6 +24,7 @@ import type {
     TaskId,
     Tx,
 } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { ComponentType, Fragment, FunctionComponent, h, VNode } from "preact";
 import type {
     useCallback,
@@ -94,6 +95,18 @@ export interface Module {
 }
 
 // ─── The host ────────────────────────────────────────────────────────────────
+
+/**
+ * An execution provider for one workspace URI scheme.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface WorkspaceProvider {
+    /** @experimental @since 0.28.0 */
+    env(cwd: string): ExecutionEnv;
+    /** @experimental @since 0.28.0 */
+    resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+}
 
 /**
  * What the app gives a module: the first argument of its default export. The host stays the same while modules reload.
@@ -168,6 +181,12 @@ export interface Host {
      */
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
     /**
+     * Registers an execution provider for a workspace URI scheme.
+     * @since 0.28.0
+     * @experimental
+     */
+    registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
+    /**
      * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.
      * @since 0.18.0
@@ -181,6 +200,12 @@ export interface Host {
      * @since 0.3.0
      */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /**
+     * The conversation's current working folder or workspace URI.
+     * @since 0.28.0
+     * @experimental
+     */
+    cwdOf(conversationId: ConversationId): string;
     /**
      * The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here.
      * @since 0.27.0
@@ -331,11 +356,28 @@ export interface AppEvents {
      */
     "run.started": { conversationId: number; session: number };
     /**
-     * Pi stopped working in a conversation.
+     * Pi stopped working in a conversation. `outcome` says how: `done` when the run finished, `failed` when it gave up,
+     * or `aborted` when it was stopped. `failure` is why, the same short line the session list shows, and only when
+     * `outcome` is `failed`.
      * @since 0.22.0
      * @experimental
      */
-    "run.ended": { conversationId: number; session: number };
+    "run.ended": {
+        conversationId: number;
+        session: number;
+        /**
+         * How the run stopped: it finished, it gave up, or it was stopped.
+         * @since 0.28.0
+         * @experimental
+         */
+        outcome: "done" | "failed" | "aborted";
+        /**
+         * Why it gave up, only when `outcome` is `failed`.
+         * @since 0.28.0
+         * @experimental
+         */
+        failure?: string;
+    };
 }
 
 /**
@@ -862,6 +904,24 @@ export interface LinkedSessions {
         key: string,
     ): Promise<void>;
     /**
+     * Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When it is idle,
+     * it has no run to stop, and the call only withdraws the queue. `busy` says whether it was working.
+     * @since 0.28.0
+     * @experimental
+     */
+    stop(source: ConversationId, request: { to: string }, key: string): Promise<{ busy: boolean }>;
+    /**
+     * Archives the linked session at the address `to`, or brings it back when `archived` is false. `archived` says
+     * whether it is archived now. `repeating` is how many of its repeating schedules keep running.
+     * @since 0.28.0
+     * @experimental
+     */
+    archive(
+        source: ConversationId,
+        request: { to: string; archived?: boolean },
+        key: string,
+    ): Promise<{ archived: boolean; repeating: number }>;
+    /**
      * The sessions linked to `source`, at any distance, that the person Pi works for there can see.
      * @since 0.14.0
      * @experimental
@@ -905,6 +965,13 @@ export interface LinkedSession {
      * @experimental
      */
     archived?: boolean;
+    /**
+     * Why its last run failed, the same short line the session list shows, only while that failure stands and with the
+     * same condition as `title`. A later run clears it.
+     * @since 0.28.0
+     * @experimental
+     */
+    failed?: string;
 }
 
 /**
@@ -967,6 +1034,12 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * @since 0.14.0
  */
 export interface WebRequest {
+    /**
+     * Creates a session from an owner-only route.
+     * @since 0.28.0
+     * @experimental
+     */
+    createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     /**
      * The request's method.
      * @since 0.14.0
@@ -1059,6 +1132,41 @@ export interface WebSession {
 }
 
 /**
+ * Committed usage counters, not estimates of the next request.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface UsageTotals {
+    /** Stored assistant responses; excludes requests with no response entry. */
+    readonly requests: number;
+    /** Uncached input tokens reported by providers. */
+    readonly input: number;
+    /** Input tokens read from a prompt cache. */
+    readonly cacheRead: number;
+    /** Input tokens written to a prompt cache. */
+    readonly cacheWrite: number;
+    /** Output tokens, including reasoning when the provider includes it. */
+    readonly output: number;
+    /** Reported reasoning tokens; absent when none were reported. Do not add to output. */
+    readonly reasoning?: number;
+    /** Estimated cost in US dollars, as core records it. */
+    readonly cost: number;
+    /** Input + cacheRead + cacheWrite of the newest stored assistant response. */
+    readonly lastPrompt: number;
+}
+
+/**
+ * Own usage and sums for visible conversations started from the source, at any depth.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface ConversationUsage {
+    readonly own: UsageTotals;
+    /** Excludes the source. lastPrompt sums each child's lastPrompt; count includes unused children. */
+    readonly children: UsageTotals & { readonly count: number };
+}
+
+/**
  * A request whose named path parameter resolved to an authorized conversation.
  * @since 0.16.0
  */
@@ -1079,6 +1187,13 @@ export interface ConversationWebRequest extends WebRequest {
      * @since 0.16.0
      */
     readonly linkedSessions: HumanLinkedSessions;
+    /**
+     * Read committed usage for the bound source (or a visible conversation id) and its visible descendants.
+     * Ends with this request. No text, entries, or session ids are returned.
+     * @since 0.28.0
+     * @experimental
+     */
+    conversationUsage(conversationId?: ConversationId): Promise<ConversationUsage>;
 }
 
 /**
@@ -1292,8 +1407,35 @@ export type PublicPageHandler = (
 ) => PublicPageAnswer | Promise<PublicPageAnswer>;
 
 /**
- * What a module adds to the app: the second argument of its default export. Register routes, the browser module, and
- * commands while the module loads. They go when this version of the module goes.
+ * How a module's own input shows in the transcript, while the module is on. Nothing here is stored. The model still
+ * reads the message in full.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface PresentEntry {
+    /**
+     * The stored kind, `x.<module>.<name>`.
+     * @since 0.28.0
+     * @experimental
+     */
+    kind: string;
+    /**
+     * The one line the transcript shows.
+     * @since 0.28.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Matches the start of a user message only when nobody wrote that message.
+     * @since 0.28.0
+     * @experimental
+     */
+    userPrefix?: string;
+}
+
+/**
+ * What a module adds to the app: the second argument of its default export. Register routes, the browser module,
+ * commands, and presentations while the module loads. They go when this version of the module goes.
  * @since 0.14.0
  */
 export interface Web {
@@ -1338,6 +1480,14 @@ export interface Web {
      * @since 0.14.0
      */
     command(name: string, command: Command): void;
+    /**
+     * Says how an input this module sends shows in the transcript, while the module is on. The model still reads
+     * the message in full. `kind` is `x.<module>.<name>`. An optional `userPrefix` matches only a user message
+     * nobody wrote.
+     * @since 0.28.0
+     * @experimental
+     */
+    presentEntry(spec: PresentEntry): void;
     /**
      * Sends an event to the browser module: to everyone it loads for, or to the person `to`. It never throws.
      * @since 0.14.0
@@ -2312,6 +2462,32 @@ export interface CallSummary {
 }
 
 /**
+ * A code fence renderer for one or more languages.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface FenceSpec {
+    /** The registration's id in the module. */
+    id: string;
+    /** Code fence languages that this component draws. Matching ignores case. */
+    langs: string[];
+    /** What the app renders for matching code fences. */
+    component: ComponentType<FenceProps>;
+}
+
+/**
+ * Sets an inline or display math renderer.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface MathInlineSpec {
+    /** The registration's id in the module. */
+    id: string;
+    /** Mounts math into a code element, with its source and whether it is display math. */
+    mount(element: HTMLElement, source: string, display: boolean): void;
+}
+
+/**
  * How the calls of one of the module's tools show in transcripts and peek tiles. Each function gets a copy of the
  * call's arguments.
  * @since 0.14.0
@@ -2350,7 +2526,7 @@ export interface ToolCallSpec<A = Record<string, unknown>> {
 }
 
 /**
- * What `rail`, `menu`, `launcher`, `page`, and `sheet` return.
+ * What `rail`, `menu`, `launcher`, `page`, `sheet`, `fence`, and `mathInline` return.
  * @since 0.14.0
  */
 export interface Added<S> {
@@ -2410,6 +2586,20 @@ export interface MarkdownProps {
      * @since 0.14.0
      */
     text: string;
+}
+
+/**
+ * The props of a `pocket.fence` component.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface FenceProps {
+    /** The code text from the fence. */
+    source: string;
+    /** The language label from the fence. */
+    lang: string;
+    /** Whether the Markdown is still streaming. */
+    streaming: boolean;
 }
 
 /**
@@ -2599,6 +2789,22 @@ export interface Pocket {
      */
     reveal(id: string): Promise<boolean>;
     /**
+     * How this browser shows one of this module's inputs (`web.presentEntry` on the server). `kind` is
+     * `x.<module>.<name>`. `open` shows the message, `folded` one line, and `hidden` keeps the turn without
+     * the text until Find. The same mode again changes nothing. The choice stays in this browser, and a person
+     * can change it on any of those rows.
+     * @since 0.28.0
+     * @experimental
+     */
+    entryPresentation(kind: string, mode: "open" | "folded" | "hidden"): void;
+    /**
+     * This browser's choice for one of this module's inputs, or undefined when there is none yet (the rows are
+     * folded then). Set a mode only when there is none, so a person's choice stays theirs.
+     * @since 0.28.0
+     * @experimental
+     */
+    entryPresentation(kind: string): "open" | "folded" | "hidden" | undefined;
+    /**
      * Calls one of the module's routes: a GET without `body`, a POST with it.
      * @since 0.14.0
      */
@@ -2718,6 +2924,18 @@ export interface Pocket {
      * @experimental
      */
     composerKey(spec: ComposerKeySpec): Added<ComposerKeySpec>;
+    /**
+     * Draws matching code fences with a Preact component.
+     * @since 0.28.0
+     * @experimental
+     */
+    fence(spec: FenceSpec): Added<FenceSpec>;
+    /**
+     * Sets the inline and display math renderer.
+     * @since 0.28.0
+     * @experimental
+     */
+    mathInline(spec: MathInlineSpec): Added<MathInlineSpec>;
     /**
      * Puts text into the message box, after what is there, for the person to send. It never sends.
      * @since 0.19.0

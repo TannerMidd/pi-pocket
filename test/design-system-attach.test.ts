@@ -14,7 +14,7 @@ let app: Awaited<ReturnType<typeof openApp>>;
 let conversation: ConversationId;
 let calls = 0;
 const host = { fetchPublic: createPublicFetch() } as PocketHost;
-const [artifact, inline] = createArtifacts(host).tools!;
+const [artifact] = createArtifacts(host).tools!;
 
 const page = (links: string) =>
     `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">${links}<h1 data-pid="t">Hi</h1>`;
@@ -178,14 +178,15 @@ test("a new version refreshes the snapshot; a version that no longer links keeps
     assert.deepEqual(await names("refresh", 3), ["ds/tokens.css"]);
 });
 
-test("artifact_inline attaches too, and a replayed call finds the version it made", async () => {
+test("an inline artifact attaches too, and a replayed call finds the version it made", async () => {
     const args = {
+        inline: true,
         id: "inline-ds",
         title: "Inline",
         content: page('<link rel="stylesheet" href="ds/tokens.css">'),
     };
-    const first = await publish(inline, args, "replay-1");
-    const again = await publish(inline, args, "replay-1");
+    const first = await publish(artifact, args, "replay-1");
+    const again = await publish(artifact, args, "replay-1");
 
     assert.match(first, /version 1/);
     assert.match(first, /Attached ds\/tokens\.css/);

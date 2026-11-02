@@ -46,15 +46,18 @@ test("the first command that works wins; a path that is not there is a 404", asy
 
     const ran: Command[] = [];
 
+    // Linux has a second command to fall back on; a Mac or Windows has the one, which must work.
+    const fallback = revealCommands(file, false).length > 1;
+
     const failFirst = async (command: Command) => {
         ran.push(command);
 
-        return ran.length > 1;
+        return !fallback || ran.length > 1;
     };
 
     if (hasDesktop()) {
         await reveal(file, failFirst);
-        assert.equal(ran.length, process.platform === "linux" ? 2 : 1);
+        assert.equal(ran.length, fallback ? 2 : 1);
         await assert.rejects(
             reveal(file, async () => false),
             { status: 409 },

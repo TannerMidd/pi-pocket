@@ -1006,7 +1006,7 @@
                 <div class="wrap">
                     <div class="section-head center reveal">
                         <span class="kicker">Access</span>
-                        <h2>Four ways to connect.</h2>
+                        <h2>Five ways to connect.</h2>
                         <p>
                             The launcher asks how your devices connect, then shows a sign-in link
                             and a QR code for your phone.
@@ -1033,10 +1033,19 @@
                             <h3>Tailscale</h3>
                             <p>Only devices on your tailnet, encrypted by Tailscale.</p>
                         </div>
+                        <div class="mode reveal">
+                            <code>tailscale-serve</code>
+                            <h3>Tailscale Serve</h3>
+                            <p>
+                                https on your own tailnet name, with a certificate Tailscale holds
+                                and nothing public.
+                            </p>
+                        </div>
                     </div>
                     <p class="note">
-                        Push notifications and dictation need https. Pi Pocket also runs on Android:
-                        install it in Termux and keep everything on the phone.
+                        Push notifications and dictation need https, from Cloudflare Tunnel or
+                        Tailscale Serve. Pi Pocket also runs on Android: install it in Termux and
+                        keep everything on the phone.
                     </p>
                 </div>
             </section>

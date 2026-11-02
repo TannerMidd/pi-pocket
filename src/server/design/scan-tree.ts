@@ -114,11 +114,19 @@ export function nodeFor(category: Category, text: string, colorText?: string): O
     }
 }
 
+export interface Progress {
+    until: number;
+    read: number;
+    stopped: boolean;
+}
+
 export function assemble(
     entries: { path: string[]; node: Obj }[],
     renamed: Map<string, string>,
+    progress?: Progress,
 ): Obj {
     const paths = new Set(entries.map((entry) => entry.path.join(".")));
+    // Indexed once: asking every path about every entry is quadratic (40 000 variables took 27 s).
     const groups = new Set<string>();
 
     for (const other of paths) {
@@ -130,6 +138,12 @@ export function assemble(
     const root: Obj = {};
 
     for (const entry of entries) {
+        if (progress !== undefined && Date.now() >= progress.until) {
+            progress.stopped = true;
+
+            break;
+        }
+
         const name = entry.path.join(".");
         let path = entry.path;
 
@@ -146,6 +160,10 @@ export function assemble(
         }
 
         node[path.at(-1)!] = entry.node;
+
+        if (progress !== undefined) {
+            progress.read += 1;
+        }
     }
 
     return root;

@@ -18,13 +18,12 @@ import { PlanDoc } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
 import { BUILT_IN_TOOLS } from "../reload.ts";
 
-const PLANNING = `Plan mode is on. Read and explore, then propose a plan; change nothing yet. You can use read, artifact, artifact_inline, the browser to look at pages (not to click, type, or run scripts in them), and bash for simple read-only commands such as ls, cat, grep, find, and git status/log/diff/show, without redirects, globs, variables, or command substitution, and tools marked read-only. Subagents inherit plan mode and can explore under the same restrictions. Writing, editing, and other commands are blocked until a person approves the plan. End your answer with the plan as a short numbered list.`;
+const PLANNING = `Plan mode is on. Read and explore, then propose a plan; change nothing yet. You can use read, artifact, the browser to look at pages (not to click, type, or run scripts in them), and bash for simple read-only commands such as ls, cat, grep, find, and git status/log/diff/show, without redirects, globs, variables, or command substitution, and tools marked read-only. Subagents inherit plan mode and can explore under the same restrictions. Writing, editing, and other commands are blocked until a person approves the plan. End your answer with the plan as a short numbered list.`;
 
 /** Tools that change nothing, or whose own calls are checked in plan mode (codemode's, and a subagent's in its own plan mode). */
 const ALWAYS_ALLOWED = new Set([
     "read",
     "artifact",
-    "artifact_inline",
     "design_preview",
     "tool_search",
     "codemode",

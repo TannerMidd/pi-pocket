@@ -86,6 +86,7 @@ const OWN_TOOLS = new Set([
     "schedule",
     "memory",
     "artifact",
+    // Not a tool since 0.28.0: PiP's earlier notes still hold its results.
     "artifact_inline",
 ]);
 
@@ -179,7 +180,7 @@ ${source}
 Write the notes for the conversation above. If it starts with earlier notes, keep what still holds and fold the newer messages into them. Use these headings, with a few short lines under each, and "(none)" when there is nothing:
 
 ## ${name}'s preferences
-What ${name} told PiP to do or not to do, and how they like things done, in their words where short.
+What ${name} told PiP to do or not to do, and how they like things done, in their words where short, and the language they write to PiP in.
 
 ## Open threads
 Requests not done yet, questions waiting for an answer, and what PiP said it would do later.

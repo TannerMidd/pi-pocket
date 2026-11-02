@@ -680,6 +680,31 @@ export function AppearanceSheet() {
                 <//>`
             }
             <${SettingRow}
+                title="Switch sessions with"
+                detail="Tabs: a strip above the session, one segment for each of the first nine sessions. Choosing Tabs folds the sidebar to its rail, and Sidebar unfolds it"
+            >
+                <div class="segmented">
+                    ${[
+                        [false, "Sidebar"],
+                        [true, "Tabs"],
+                    ].map(
+                        ([value, label]) =>
+                            html`<button
+                                class=${Boolean(p.sessionTabs) === value ? "on" : ""}
+                                aria-pressed=${Boolean(p.sessionTabs) === value}
+                                onClick=${() =>
+                                    Boolean(p.sessionTabs) !== value &&
+                                    setPrefs({
+                                        sessionTabs: value,
+                                        sidebar: value ? "rail" : "open",
+                                    })}
+                            >
+                                ${label}
+                            </button>`,
+                    )}
+                </div>
+            <//>
+            <${SettingRow}
                 title="Sidebar"
                 detail="Folded, it shows numbered sessions like workspaces"
             >
@@ -790,6 +815,26 @@ export function AppearanceSheet() {
                     on=${p.foldActivity}
                     label="Keep activity folded"
                     onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
+                />
+            <//>
+            <${SettingRow}
+                title="Reply to a passage"
+                detail="Select words in one of Pi's replies, and a Reply button by them quotes them in your next message"
+            >
+                <${Switch}
+                    on=${p.quoteReply}
+                    label="Reply to a passage"
+                    onChange=${() => setPrefs({ quoteReply: !p.quoteReply })}
+                />
+            <//>
+            <${SettingRow}
+                title="Wait for updates"
+                detail="Going back to a session that changed while you were away: show it once its updates have come, instead of your last copy at once with the updates sliding in"
+            >
+                <${Switch}
+                    on=${p.waitForUpdates}
+                    label="Wait for updates"
+                    onChange=${() => setPrefs({ waitForUpdates: !p.waitForUpdates })}
                 />
             <//>
         </div>

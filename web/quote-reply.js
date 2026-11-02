@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { rangeText } from "./quote-text.js";
 import { quoteReply } from "./store.js";
 import { html, Icon } from "./ui.js";
 
@@ -22,15 +23,15 @@ function selected() {
             : range.endContainer;
     const from = within(range.startContainer);
     const to = within(end) ?? (within(range.commonAncestorContainer) ? from : null);
-    const text = selection.toString().trim();
 
     // Whoever cannot write to Pi has no message box to put the quote in.
-    if (
-        !from ||
-        from !== to ||
-        text === "" ||
-        !document.querySelector('[data-part="composer"] textarea')
-    ) {
+    if (!from || from !== to || !document.querySelector('[data-part="composer"] textarea')) {
+        return null;
+    }
+
+    const text = rangeText(range).trim();
+
+    if (text === "") {
         return null;
     }
 

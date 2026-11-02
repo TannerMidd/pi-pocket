@@ -54,6 +54,7 @@ interface Poller {
 
 function newClient(url: URL, user: User, send: Client["send"]): Client {
     const raw = url.searchParams.get("c");
+    const have = keptPart(url.searchParams.get("have"));
 
     return {
         id: (url.searchParams.get("tab") ?? randomUUID()).slice(0, 64),
@@ -62,10 +63,29 @@ function newClient(url: URL, user: User, send: Client["send"]): Client {
         conversationId: raw === null || raw === "" ? undefined : conversationId(raw),
         // What the tab's code understands of updates: none named is older code.
         protocol: Number(url.searchParams.get("p")) || 1,
+        ...(url.searchParams.get("host") === "notify" ? { desktop: true } : {}),
         sentEntries: new Set(),
         orderKey: "",
+        ...(have === undefined ? {} : { have }),
         send,
     };
+}
+
+/**
+ * What a tab kept of the session it opens (`Client.have`), from `have=<from>.<count>.<key>.<build>`: undefined when
+ * it names none, or not in that form. `Room.push` checks it against the session.
+ */
+export function keptPart(text: string | null): Client["have"] {
+    const match = /^(\d{1,9})\.(\d{1,9})\.([0-9a-z]{1,16})\.([0-9a-f]{1,16})$/.exec(text ?? "");
+
+    return match === null
+        ? undefined
+        : {
+              from: Number(match[1]),
+              count: Number(match[2]),
+              key: match[3]!,
+              build: match[4]!,
+          };
 }
 
 /** The event routes of one HTTP handler, with their own pollers. */
