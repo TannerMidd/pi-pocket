@@ -44,6 +44,7 @@ import {
     Markdown,
     PlaceTile,
     railState,
+    setCodeBlockRenderers,
     Sheet,
     Spinner,
     Switch,
@@ -75,6 +76,7 @@ const KINDS = [
     "sessionFilter",
     "sessionSearch",
     "composerKey",
+    "codeBlock",
 ];
 /** What a rail button, menu row, launcher action, or status item can open: one of the module's own. */
 const OPENS = ["page", "sheet", "panel"];
@@ -265,6 +267,7 @@ function flush() {
     }
 
     due = false;
+    syncCodeBlocks();
     store.set((state) => ({ extensionsRev: state.extensionsRev + 1 }));
 }
 
@@ -1193,6 +1196,57 @@ function pocketFor(record) {
                 },
             });
         },
+        /** Experimental fenced-code renderer, owned by this module version and keyed by language. */
+        codeBlock(spec) {
+            tick(record);
+
+            let current = codeBlockOf(spec);
+            const items = record.adds.codeBlock;
+
+            if (live()) {
+                const before = items.get(current.language);
+
+                if (sameSpec(before, current)) {
+                    current = before;
+                } else {
+                    items.set(current.language, current);
+                    redraw();
+                }
+            }
+
+            return Object.freeze({
+                update(patch) {
+                    tick(record);
+
+                    if (typeof patch !== "object" || patch === null) {
+                        throw new Error("pocket.codeBlock: update takes an object");
+                    }
+
+                    if (!live() || items.get(current.language) !== current) {
+                        return;
+                    }
+
+                    const next = codeBlockOf({ ...current, ...patch });
+
+                    if (sameSpec(current, next)) {
+                        return;
+                    }
+
+                    items.delete(current.language);
+                    current = next;
+                    items.set(current.language, current);
+                    redraw();
+                },
+                remove() {
+                    tick(record);
+
+                    if (live() && items.get(current.language) === current) {
+                        items.delete(current.language);
+                        redraw();
+                    }
+                },
+            });
+        },
         /** How calls of one of its tools show: in a line in transcripts and peek tiles, and in a group's summary. */
         toolCall(spec) {
             tick(record);
@@ -1353,6 +1407,79 @@ function pocketFor(record) {
 }
 
 // ─── Tool calls: how a module's own tools show ───────────────────────────────
+
+/** A renderer's public spec, read once and normalized before it is kept. */
+function codeBlockOf(spec) {
+    if (typeof spec !== "object" || spec === null) {
+        throw new Error("pocket.codeBlock: give it an object");
+    }
+
+    const { language, component } = spec;
+
+    if (typeof language !== "string" || !/^[\w+#.-]{1,24}$/.test(language)) {
+        throw new Error("pocket.codeBlock: language is 1–24 letters, digits, or _ + # . -");
+    }
+
+    if (typeof component !== "function") {
+        throw new Error("pocket.codeBlock: give it a component function or class");
+    }
+
+    return { language: language.toLowerCase(), component };
+}
+
+let selectedCodeBlocks = new Map();
+const codeBlockComponents = new WeakMap();
+
+/** The first module in server order wins. Publish only changes, so unrelated extension updates keep Markdown cached. */
+function syncCodeBlocks() {
+    const selected = new Map();
+
+    for (const name of order) {
+        const record = modules.get(name);
+
+        if (!liveRecord(record)) {
+            continue;
+        }
+
+        for (const spec of record.adds.codeBlock.values()) {
+            if (!selected.has(spec.language)) {
+                selected.set(spec.language, { record, spec });
+            }
+        }
+    }
+
+    if (
+        selected.size === selectedCodeBlocks.size &&
+        [...selected].every(([language, { record, spec }]) => {
+            const before = selectedCodeBlocks.get(language);
+
+            return before?.record === record && before?.spec === spec;
+        })
+    ) {
+        return;
+    }
+
+    selectedCodeBlocks = selected;
+    const renderers = new Map();
+
+    for (const [language, { record, spec }] of selected) {
+        let component = codeBlockComponents.get(spec);
+
+        if (component === undefined) {
+            component = function CodeBlock(props) {
+                return html`<${Guard} key=${props.text} name=${`${record.title} code block`}>
+                    <${Drawn} component=${spec.component} props=${props} />
+                <//>`;
+            };
+
+            codeBlockComponents.set(spec, component);
+        }
+
+        renderers.set(language, component);
+    }
+
+    setCodeBlockRenderers(renderers);
+}
 
 /**
  * A copy of what `pocket.toolCall` was given, once it holds; null from a server that does not say which tools are the

@@ -1952,6 +1952,18 @@ kbd {
     color: var(--muted);
 }
 
+/* Core keeps source access outside an extension's fenced-code component and its error boundary. */
+.md-code-renderer {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.md-code-source > summary {
+    min-height: 40px;
+    padding: 8px 0;
+    cursor: pointer;
+}
+
 /* A code block: a bar with its file or language and Copy, then the code. */
 .code {
     position: relative;

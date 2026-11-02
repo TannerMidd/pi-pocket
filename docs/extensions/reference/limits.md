@@ -57,6 +57,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Text on a rail button:** past 24 characters, it is cut to 23 characters and "…". A panel's badge is the same.
 - **Text of a status item:** past 40 characters, `text` and `short` are cut to 39 characters and "…".
 - **Swipe back on a page:** on touch screens up to 699 px wide.
+- **A `pocket.codeBlock` language:** 1–24 ASCII letters, digits, or `_`, `+`, `#`, `.`, and `-`. Registrations have no count or source-size limit of their own; a renderer must bound expensive work on untrusted source.
 
 ## The session list and message boxes
 

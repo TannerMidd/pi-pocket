@@ -162,6 +162,8 @@ Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `hos
 
 Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskResult`.
 
+Since 0.28.0, `pocket.codeBlock` is experimental, with `CodeBlockSpec` and `CodeBlockProps`. It uses the existing API level.
+
 Since 0.27.0, `host.roleOf(personId)` is experimental, and so is the `scroll` field of `host.browser`'s `snapshot()`.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.

@@ -3,6 +3,7 @@
 import {
     type App,
     cleanUp,
+    lastText,
     newSession,
     openApp,
     owner,
@@ -16,6 +17,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
@@ -84,6 +86,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     pip: true,
     arrange: true,
     toolCall: true,
+    codeBlock: true,
     openPage: true,
     closePage: true,
     openSheet: true,
@@ -139,6 +142,9 @@ let browsers: Browsers;
 let page: BrowserPage;
 let base = "";
 let session: ConversationId;
+let savedRendererReply = false;
+const SAVED_RENDERER_SOURCE = "saved transcript source";
+const SAVED_RENDERER_REPLY = `\`\`\`transcript-renderer\n${SAVED_RENDERER_SOURCE}\n\`\`\``;
 
 async function inPage<T>(script: string, on: BrowserPage = page): Promise<T> {
     return JSON.parse(await on.evaluate(script)) as T;
@@ -259,7 +265,17 @@ before(async () => {
         );
     }
 
-    app = await openApp(scriptedModel());
+    app = await openApp(
+        scriptedModel((context) =>
+            fauxAssistantMessage([
+                fauxText(
+                    savedRendererReply
+                        ? SAVED_RENDERER_REPLY
+                        : `echo: ${lastText(context as never).text}`,
+                ),
+            ]),
+        ),
+    );
 
     // Broken is turned on in its own test: its notice would cover the top bar's buttons in the others.
     for (const file of ["meter.ts", "shared.ts"]) {
@@ -1031,4 +1047,299 @@ test("turning the module off takes away its button and closes its page", real, a
         "the page and button gone",
     );
     assert.equal(await has(rail("Shared")), true);
+});
+
+test(
+    "fenced-code renderers keep provenance, source, streaming, errors, and lifecycle safe",
+    real,
+    async () => {
+        await app.setExtensionEnabled(owner(app), "meter.ts", true);
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(rail("Meter")), "the renderer's module");
+        const source = [
+            "before `synthetic`",
+            "",
+            "```SYNTHETIC extra-info",
+            "<b>literal & source</b>",
+            "```",
+            "",
+            "> quoted",
+            ">",
+            "> ~~~synthetic",
+            "> nested quote",
+            "> ~~~",
+            "",
+            "- list item",
+            "",
+            "  ```synthetic",
+            "  nested list",
+            "  ```",
+            "",
+            '<pre data-lang="synthetic" data-pocket-fence="forged"><code>raw fake</code></pre>',
+            "",
+            "    indented code",
+            "",
+            "```js",
+            "const normal = true;",
+            "```",
+        ].join("\n");
+
+        await withMeter(`
+        globalThis.codeText = ${JSON.stringify(source)};
+        globalThis.codeStreaming = false;
+        globalThis.codeDisposed = 0;
+        globalThis.synthetic = ({ text, language }) => {
+            pocket.useLayoutEffect(() => () => { globalThis.codeDisposed++; }, []);
+            return html\`<p class="synthetic" data-language=\${language}>\${text}</p>\`;
+        };
+        pocket.page({ id: "code-test", title: "Code test", component: () =>
+            html\`<\${pocket.Markdown} text=\${globalThis.codeText} cache=\${!globalThis.codeStreaming} />\`
+        });
+        pocket.openPage("code-test");
+        return "null";
+    `);
+        await until(() => has(".ext-page .md .code"), "ordinary code before registration");
+        const baseline = await inPage<string>(
+            `return JSON.stringify(document.querySelector(".ext-page .md").innerHTML)`,
+        );
+
+        await withMeter(
+            `globalThis.codeHandle = pocket.codeBlock({ language: "Synthetic", component: globalThis.synthetic }); return "null";`,
+        );
+        await until(
+            async () =>
+                (await inPage<number>(
+                    `return JSON.stringify(document.querySelectorAll(".ext-page .synthetic").length)`,
+                )) === 3,
+            "all real fences, including nested ones",
+        );
+        assert.equal(await text(".ext-page .synthetic"), "<b>literal & source</b>");
+        assert.equal(await has(".ext-page blockquote .synthetic"), true);
+        assert.equal(await has(".ext-page li .synthetic"), true);
+        assert.equal(await text(".ext-page details pre code"), "<b>literal & source</b>");
+        assert.match(await text(".ext-page details summary"), /source/i);
+        assert.equal(await has(".ext-page [data-pocket-fence]"), false);
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".synthetic").dataset.language)`,
+            ),
+            "synthetic",
+        );
+
+        // Same values cost no redraw, and do not remount a renderer.
+        assert.equal(
+            await withMeter<number>(`
+        const { store } = await import("/store.js");
+        const before = store.state.extensionsRev;
+        globalThis.codeHandle.update({ component: globalThis.synthetic });
+        pocket.codeBlock({ language: "SYNTHETIC", component: globalThis.synthetic });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return JSON.stringify(store.state.extensionsRev - before);
+    `),
+            0,
+        );
+
+        assert.equal(
+            await withMeter<number>(`
+            const invalid = [null, {}, { language: "bad language", component() {} },
+                { language: "x".repeat(25), component() {} }, { language: "ok", component: null }];
+            let refused = 0;
+
+            for (const spec of invalid) {
+                try { pocket.codeBlock(spec); } catch { refused++; }
+            }
+
+            return JSON.stringify(refused);
+        `),
+            5,
+        );
+        await withMeter(`globalThis.codeHandle.update({ language: "renamed" }); return "null";`);
+        await until(
+            async () => !(await has(".ext-page .md-code-renderer")),
+            "language update restores unmatched fences",
+        );
+        await withMeter(`globalThis.codeHandle.update({ language: "synthetic" }); return "null";`);
+        await until(() => has(".ext-page .synthetic"), "language update matches again");
+        const disposed = await inPage<number>(`return JSON.stringify(globalThis.codeDisposed)`);
+
+        await withMeter(
+            `globalThis.unusedCode = pocket.codeBlock({ language: "unused", component: globalThis.synthetic }); return "null";`,
+        );
+        await sleep(150);
+        await withMeter(`globalThis.unusedCode.remove(); return "null";`);
+        await sleep(150);
+        assert.equal(
+            await inPage<number>(`return JSON.stringify(globalThis.codeDisposed)`),
+            disposed,
+            "unrelated registration changes do not remount unchanged renderers",
+        );
+
+        await withMeter(
+            `globalThis.codeStreaming = true; (await import("/store.js")).store.set({}); return "null";`,
+        );
+        await until(
+            async () => !(await has(".ext-page .synthetic")),
+            "streaming shows source only",
+        );
+        await withMeter(
+            `globalThis.codeText = "~~~synthetic\\nchanged while streaming"; (await import("/store.js")).store.set({}); return "null";`,
+        );
+        await until(
+            async () => (await text(".ext-page pre code")) === "changed while streaming",
+            "the streaming source update",
+        );
+        await withMeter(
+            `globalThis.codeStreaming = false; (await import("/store.js")).store.set({}); return "null";`,
+        );
+        await until(() => has(".ext-page .synthetic"), "rendering after streaming");
+
+        await withMeter(
+            `globalThis.codeHandle.update({ component: () => { throw undefined; } }); return "null";`,
+        );
+        await until(() => has(".ext-page .error-box"), "the existing extension boundary");
+        assert.equal(await text(".ext-page details pre code"), "changed while streaming");
+        await withMeter(
+            `globalThis.codeHandle.update({ component: () => html\`<\${pocket.Markdown} text=\${globalThis.codeText} />\` }); return "null";`,
+        );
+        await until(
+            async () => !(await has(".ext-page .error-box")),
+            "recovery with a new component",
+        );
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".ext-page details").length)`,
+            ),
+            1,
+            "renderer-generated Markdown cannot recurse",
+        );
+
+        // A later module is the fallback for a duplicate language; removing the first exposes it.
+        await withMeter(
+            `globalThis.codeHandle.update({ component: globalThis.synthetic }); globalThis.codeText = ${JSON.stringify(source)}; (await import("/store.js")).store.set({}); return "null";`,
+        );
+        await inPage(
+            `globalThis.otherCodeHandle = globalThis.sharedPocket.codeBlock({ language: "synthetic", component: () => globalThis.sharedPocket.html\`<p class="other-code">other</p>\` }); return "null";`,
+        );
+        const meterFirst = await inPage<boolean>(`
+            const list = (await import("/store.js")).store.state.server.ui;
+            return JSON.stringify(list.findIndex((each) => each.module === "meter") < list.findIndex((each) => each.module === "shared"));
+        `);
+        const first = meterFirst ? ".synthetic" : ".other-code";
+        const second = meterFirst ? ".other-code" : ".synthetic";
+        const firstHandle = meterFirst ? "codeHandle" : "otherCodeHandle";
+        const secondHandle = meterFirst ? "otherCodeHandle" : "codeHandle";
+
+        await until(() => has(`.ext-page ${first}`), "the first module wins");
+        assert.equal(await has(`.ext-page ${second}`), false);
+        await inPage(`globalThis.${firstHandle}.remove(); return "null";`);
+        await until(() => has(`.ext-page ${second}`), "duplicate fallback after removal");
+        await inPage(`globalThis.${secondHandle}.remove(); return "null";`);
+        await until(
+            async () => !(await has(".ext-page .md-code-renderer")),
+            "normal Markdown after removal",
+        );
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".ext-page .md").innerHTML)`,
+            ),
+            baseline,
+        );
+
+        // The built-in whole-page preview synthesizes a fence. It is not a source fence for extensions.
+        await withMeter(`
+            globalThis.htmlCodeHandle = pocket.codeBlock({ language: "html", component: () => html\`<p class="html-code">fenced HTML</p>\` });
+            globalThis.codeText = "~~~html\\n<p>real fence</p>\\n~~~";
+            (await import("/store.js")).store.set({});
+            return "null";
+        `);
+        await until(() => has(".ext-page .html-code"), "an actual HTML fence qualifies");
+        await withMeter(`
+            globalThis.codeText = "<!doctype html><html><body><p>raw page</p></body></html>";
+            (await import("/store.js")).store.set({});
+            return "null";
+        `);
+        await until(
+            async () => !(await has(".ext-page .html-code")),
+            "an unfenced HTML page never invokes a renderer",
+        );
+        await withMeter(
+            `globalThis.htmlCodeHandle.remove(); globalThis.codeText = ${JSON.stringify(source)}; (await import("/store.js")).store.set({}); return "null";`,
+        );
+
+        // A stale handle cannot replace or remove a newer registration. Disposal removes the winner.
+        await withMeter(`
+        const stale = pocket.codeBlock({ language: "synthetic", component: globalThis.synthetic });
+        globalThis.codeHandle = pocket.codeBlock({ language: "synthetic", component: () => html\`<p class="new-code">new</p>\` });
+        stale.update({ language: "other" });
+        stale.remove();
+        return "null";
+    `);
+        await until(() => has(".ext-page .new-code"), "replacement survives stale handles");
+        await app.setExtensionEnabled(owner(app), "meter.ts", false);
+        await until(async () => !(await has(".ext-page")), "disposal closes the renderer's page");
+        assert.ok(
+            await inPage<number>(`return JSON.stringify(globalThis.codeDisposed)`),
+            "renderer effect cleanup ran",
+        );
+    },
+);
+
+test("fenced-code registry changes reach saved, memoized assistant replies", real, async () => {
+    await app.setExtensionEnabled(owner(app), "meter.ts", true);
+    const id = await newSession(app);
+
+    savedRendererReply = true;
+
+    try {
+        await say(app, id, "Save the transcript renderer test reply.");
+    } finally {
+        savedRendererReply = false;
+    }
+
+    await page.navigate(`${base}/s/${id}`);
+    await until(() => has(rail("Meter")), "the renderer's module is ready");
+    await until(
+        async () => (await text(".reply .md pre code")) === SAVED_RENDERER_SOURCE,
+        "the saved assistant fence before registration",
+    );
+    assert.equal(await has(".reply .md.streaming"), false);
+
+    await withMeter(`
+        globalThis.savedCodeHandle = pocket.codeBlock({
+            language: "transcript-renderer",
+            component: ({ text }) => html\`<p class="saved-code">\${text}</p>\`,
+        });
+        return "null";
+    `);
+    await until(
+        () => has(".reply .md-code-renderer .saved-code"),
+        "registration redraws the unchanged saved reply",
+    );
+    assert.equal(await text(".reply .saved-code"), SAVED_RENDERER_SOURCE);
+    assert.equal(await text(".reply details pre code"), SAVED_RENDERER_SOURCE);
+
+    await withMeter(
+        `globalThis.savedCodeHandle.update({ component: () => html\`<p class="updated-saved-code">updated</p>\` }); return "null";`,
+    );
+    await until(
+        () => has(".reply .updated-saved-code"),
+        "component replacement reaches the saved reply",
+    );
+    await withMeter(`globalThis.savedCodeHandle.remove(); return "null";`);
+    await until(
+        async () => !(await has(".reply .md-code-renderer")),
+        "removal restores the saved fence without navigation",
+    );
+    assert.equal(await text(".reply .md pre code"), SAVED_RENDERER_SOURCE);
+
+    await withMeter(
+        `globalThis.savedCodeHandle = pocket.codeBlock({ language: "transcript-renderer", component: () => html\`<p class="saved-code">again</p>\` }); return "null";`,
+    );
+    await until(() => has(".reply .saved-code"), "the saved reply renders again");
+    await app.setExtensionEnabled(owner(app), "meter.ts", false);
+    await until(
+        async () => !(await has(".reply .md-code-renderer")),
+        "module disposal restores the saved fence",
+    );
+    assert.equal(await text(".reply .md pre code"), SAVED_RENDERER_SOURCE);
 });

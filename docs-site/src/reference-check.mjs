@@ -102,6 +102,8 @@ export const PAGES = {
         "Arrangement",
         "PageProps",
         "SheetProps",
+        "CodeBlockSpec",
+        "CodeBlockProps",
         "ToolCallSpec",
         "CallSummary",
         "Added",
