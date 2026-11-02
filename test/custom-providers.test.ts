@@ -182,6 +182,21 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
     );
     assert.equal(readFileSync(modelsFile, "utf8"), refused);
 
+    // Nor does Pi Pocket write one Pi would refuse (a context window floored to 0).
+    const empty = '{"providers":{}}';
+
+    writeFileSync(modelsFile, empty);
+    await assert.rejects(
+        app.customProviders.create({
+            name: "Half",
+            baseUrl,
+            noKey: true,
+            models: [{ id: "half", contextWindow: 0.5 }],
+        }),
+        /contextWindow/,
+    );
+    assert.equal(readFileSync(modelsFile, "utf8"), empty);
+
     await assert.rejects(
         app.customProviders.create({ name: "X", baseUrl, models: [] }),
         /API key/,

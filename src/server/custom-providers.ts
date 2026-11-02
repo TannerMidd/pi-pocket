@@ -8,7 +8,7 @@
  * (which Pi reads) or one that Pi refuses is left alone, with a message, so a hand-made file never loses anything.
  * Fields it does not manage (headers, compat, a model's metadata) are kept as they are.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -245,7 +245,7 @@ export class CustomProviders {
                 ...(key === NO_KEY ? { apiKey: NO_KEY } : {}),
                 models: models.map(entryOf),
             };
-            this.#write(config);
+            await this.#write(config);
             await this.#applied(id);
 
             if (key !== undefined && key !== NO_KEY) {
@@ -297,7 +297,7 @@ export class CustomProviders {
                 delete entry.apiKey;
             }
 
-            this.#write(config);
+            await this.#write(config);
             await this.#applied(id);
 
             if (key === NO_KEY) {
@@ -322,7 +322,7 @@ export class CustomProviders {
             }
 
             delete providers[id];
-            this.#write(config);
+            await this.#write(config);
             await this.#forgetKey(id);
             await this.#applied(id);
         });
@@ -454,7 +454,11 @@ export class CustomProviders {
 
     /** `models.json` as Pi Pocket may rewrite it: plain JSON that Pi accepts, or a new one. */
     async #editable(): Promise<Json> {
-        const config = this.#read() ?? { providers: {} };
+        const config = this.#read();
+
+        if (config === undefined) {
+            return { providers: {} };
+        }
 
         if (
             typeof config.providers !== "object" ||
@@ -464,22 +468,8 @@ export class CustomProviders {
             throw new HttpError(409, "models.json has no providers object. Fix it by hand first.");
         }
 
-        if (existsSync(this.#path())) {
-            const checked = await ModelRuntime.create({
-                modelsPath: this.#path(),
-                refreshOnCreate: false,
-            });
-
-            if (
-                /Failed to (?:load|parse) models.json|Invalid models.json schema/.test(
-                    checked.getError() ?? "",
-                )
-            ) {
-                throw new HttpError(
-                    409,
-                    "Pi cannot read models.json as it is. Fix it by hand first.",
-                );
-            }
+        if ((await refusal(this.#path())) !== undefined) {
+            throw new HttpError(409, "Pi cannot read models.json as it is. Fix it by hand first.");
         }
 
         return config;
@@ -519,14 +509,26 @@ export class CustomProviders {
         }
     }
 
-    /** Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing. */
-    #write(config: Json): void {
+    /**
+     * Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing. A file
+     * Pi would refuse is not written: Pi then loads none of its providers.
+     */
+    async #write(config: Json): Promise<void> {
         const path = this.#path();
         const temp = `${path}.${String(process.pid)}.tmp`;
 
         mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
         writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
         chmodSync(temp, 0o600);
+
+        const refused = await refusal(temp);
+
+        if (refused !== undefined) {
+            rmSync(temp, { force: true });
+
+            throw new HttpError(400, `Pi did not accept the endpoint: ${refused}`);
+        }
+
         renameSync(temp, path);
     }
 
@@ -571,6 +573,24 @@ export class CustomProviders {
 
         return found;
     }
+}
+
+/** What Pi says when it refuses a `models.json` file, by the field it refuses; undefined when Pi reads the file. */
+async function refusal(path: string): Promise<string | undefined> {
+    const runtime = await ModelRuntime.create({ modelsPath: path, refreshOnCreate: false });
+    const error = runtime.getError() ?? "";
+
+    if (!/Failed to (?:load|parse) models.json|Invalid models.json schema/.test(error)) {
+        return undefined;
+    }
+
+    // Not the parser's own words: they can quote the file, and a hand-made key with it.
+    return (
+        error
+            .split("\n")
+            .find((line) => line.startsWith("  - "))
+            ?.slice(4) ?? "the file is not valid"
+    );
 }
 
 function entryOf(model: CustomModel): Json {
