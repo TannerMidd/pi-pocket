@@ -1,6 +1,6 @@
 {
     "name": "pi-pocket",
-    "version": "0.28.0-beta.4",
+    "version": "0.28.0-beta.5",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
     "keywords": [
         "pi",
