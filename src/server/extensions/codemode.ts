@@ -49,8 +49,11 @@ const MEMORY_LIMIT_BYTES = 256 * 1024 * 1024;
 const MAX_NESTED_IMAGES = 4;
 /** How much of the request the Only listing can take: Pi's default `codemode.inlineBudget`, 3,000 tokens. */
 const INLINE_BUDGET = 3_000 * CHARS_PER_TOKEN;
-/** Declared in Only mode too: tool search loads waiting tools, and an artifact's card shows only for a direct call. */
-const DECLARED = new Set([CODEMODE_TOOL, TOOL_SEARCH_TOOL_NAME, "artifact"]);
+/**
+ * Declared in Only mode too: tool search loads waiting tools. The cards of `artifact`, `ask`, and `memory` read their
+ * call's details, and a script's nested call keeps its details to itself.
+ */
+const DECLARED = new Set([CODEMODE_TOOL, TOOL_SEARCH_TOOL_NAME, "artifact", "ask", "memory"]);
 const ONLY_GUIDE = `Your other tools are not declared. Call them only from a codemode script: \`await tools.<name>({ ...args })\`. Use one script to batch independent calls (Promise.allSettled), chain them, or filter large output.`;
 
 const DESCRIPTION = `Run JavaScript that calls your other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level \`await\` and \`return\` work. No Node, file system, network, or timers.

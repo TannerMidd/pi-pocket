@@ -79,13 +79,13 @@ test("On mode declares every tool and keeps the short codemode section", async (
     assert.match(sections.codemode!, /^<codemode>\nUse codemode to batch/);
 });
 
-test("Only mode declares codemode, tool search, and artifact, and lists the other tools", async () => {
+test("Only mode declares codemode, tool search, and the tools with cards, and lists the others", async () => {
     mode("only");
     await say(app, await newSession(app), "hello");
     await app.setExtensionEnabled(owner(app), "late.ts", true);
     await say(app, await newSession(app), "hello");
 
-    assert.deepEqual(declared.sort(), ["artifact", "codemode", "tool_search"]);
+    assert.deepEqual(declared.sort(), ["artifact", "ask", "codemode", "memory", "tool_search"]);
     assert.match(sections.codemode!, /^<codemode>\nYour other tools are not declared/);
     assert.match(sections.codemode!, /## read\n.*\nParameters \(JSON Schema\): \{/);
     assert.match(sections.codemode!, /## late_tool\nLate echo/, "a drop-in installed later");
