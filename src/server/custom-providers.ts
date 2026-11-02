@@ -268,8 +268,24 @@ export class CustomProviders {
                 entry.name = text(input.name, "a name", MAX_NAME);
             }
 
+            const key = this.#keyInput(input, false);
+
             if (input.baseUrl !== undefined) {
-                entry.baseUrl = baseUrlOf(input.baseUrl);
+                const baseUrl = baseUrlOf(input.baseUrl);
+
+                // The saved key goes only where it was saved for, as in `discover`.
+                if (
+                    key === undefined &&
+                    entry.apiKey !== NO_KEY &&
+                    new URL(String(entry.baseUrl)).origin !== new URL(baseUrl).origin
+                ) {
+                    throw new HttpError(
+                        400,
+                        "The URL changed. Enter the API key again, or choose No key.",
+                    );
+                }
+
+                entry.baseUrl = baseUrl;
             }
 
             if (input.models !== undefined) {
@@ -284,8 +300,6 @@ export class CustomProviders {
                     (model) => before.get(model.id) ?? entryOf(model),
                 );
             }
-
-            const key = this.#keyInput(input, false);
 
             if (key === NO_KEY) {
                 entry.apiKey = NO_KEY;
