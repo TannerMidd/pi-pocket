@@ -73,6 +73,13 @@ export default () => ({ name: "late", tools: [{
     parameters: { type: "object", properties: { text: { type: "string" } } },
     annotations: { readOnlyHint: true },
     execute: async (args) => ({ output: [{ type: "text", text: "late:" + args.text }] }),
+}, {
+    name: "inner_tool",
+    description: "Only for scripts.",
+    parameters: { type: "object", properties: {} },
+    deferred: true,
+    callers: ["tools"],
+    execute: async () => ({ output: [{ type: "text", text: "inner" }] }),
 }] });
 `,
     );
@@ -133,4 +140,11 @@ test("in Only mode, a subagent given a tool that only scripts call also gets cod
     await until(() => child !== undefined, "the subagent's first request");
 
     assert.deepEqual(child, ["codemode"]);
+});
+
+test("in On mode, a waiting tool that only scripts call is not offered to tool search", async () => {
+    mode("on");
+    await say(app, await newSession(app), "hello");
+
+    assert.doesNotMatch(sections.deferred_tools ?? "", /inner_tool/);
 });

@@ -30,7 +30,7 @@ Sections render before each request. Pi Pocket sends again only the sections tha
 
 ## A section for one tool
 
-A section about a tool shows while `input.agent.tools` has the tool. In codemode's Only mode, scripts alone call most tools, so also check `input.agent.callable` for the tool.
+A section about a tool shows while `input.agent.tools` has the tool. In codemode's Only mode, scripts alone call most tools, so also show it when `input.agent.callable` has the tool with `callers` that leave out `"model"`, as `browser.ts` does.
 
 ## A section for one session
 

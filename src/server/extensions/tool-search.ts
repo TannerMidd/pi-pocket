@@ -60,8 +60,11 @@ for (const [name, { section: key }] of Object.entries(DEFERRED)) {
 type Lists = "tools" | "callable" | "deferred";
 
 /** Tools that wait for a search. Codemode's Only mode leaves them for scripts alone, and they still wait. */
-function waitingOf(agent: Record<Lists, readonly ToolRegistration[]>): ToolRegistration[] {
-    const searched = agent.tools.some((tool) => tool.name === TOOL_SEARCH_TOOL_NAME);
+function waitingOf(
+    agent: Record<Lists, readonly ToolRegistration[]>,
+    only: boolean,
+): ToolRegistration[] {
+    const searched = only && agent.tools.some((tool) => tool.name === TOOL_SEARCH_TOOL_NAME);
 
     return [
         ...agent.deferred,
@@ -75,6 +78,8 @@ function waitingOf(agent: Record<Lists, readonly ToolRegistration[]>): ToolRegis
 export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) {
     const base = createToolSearchExtension();
     const search = base.tools![0]!;
+    const only = () =>
+        (web?.use("codemode") as { only?: () => boolean } | undefined)?.only?.() === true;
 
     // For a model without mid-conversation tool changes, a new tool would rewrite the prompt cache: Pi calls it
     // through codemode instead, so the tool list never changes. In codemode's Only mode, every tool goes that way.
@@ -91,10 +96,8 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
                         }
                       | undefined);
 
-        const only = (web?.use("codemode") as { only?: () => boolean } | undefined)?.only?.();
-
         return (
-            (only === true ||
+            (only() ||
                 compat?.supportsMidConvoSystemMessages !== true ||
                 compat?.supportsMidConvoToolChanges !== true) &&
             agent.tools.some((tool) => tool.name === "codemode")
@@ -102,7 +105,7 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
     };
 
     const explain = async (names: string[], api: ToolExecutionApi<never>, context: Context) => {
-        const waiting = waitingOf(await api.agent(context));
+        const waiting = waitingOf(await api.agent(context), only());
 
         return names
             .map((name) => {
@@ -132,7 +135,7 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
                 .split(/[\s,]+/)
                 .filter(Boolean);
             const agent = await api.agent(context);
-            const waiting = waitingOf(agent).map((tool) => tool.name);
+            const waiting = waitingOf(agent, only()).map((tool) => tool.name);
             const result =
                 names.length > 0 && names.every((name) => waiting.includes(name))
                     ? ({
@@ -147,7 +150,10 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
                       } as Awaited<ReturnType<typeof search.execute>>)
                     : await search.execute(
                           { ...args, limit: args.limit ?? SEARCH_LIMIT } as never,
-                          { ...api, agent: async () => ({ ...agent, deferred: waitingOf(agent) }) },
+                          {
+                              ...api,
+                              agent: async () => ({ ...agent, deferred: waitingOf(agent, only()) }),
+                          },
                           context,
                       );
             const loaded = (result.details as { loaded?: string[] } | undefined)?.loaded ?? [];
@@ -173,7 +179,7 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
         tools: [exact],
         sections: [
             section("deferred_tools", ({ agent }) => {
-                const waiting = waitingOf(agent);
+                const waiting = waitingOf(agent, only());
 
                 return waiting.length === 0
                     ? undefined
