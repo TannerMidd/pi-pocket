@@ -590,6 +590,43 @@ test("a text variable, a switch, and an alias of a variable outside the file are
     assert.match(scanReport(scan), /Left out, as the token format cannot hold them: 3 variables/);
 });
 
+test("a renamed token keeps its alias in the dark and the other mode trees", () => {
+    const brand = guid(1, 2);
+    const fig = decodeFig(
+        figFile({
+            nodeChanges: [
+                modeSet(COLORS, [
+                    [LIGHT, "Light"],
+                    [DARK, "Dark"],
+                    [CONTRAST, "Contrast"],
+                ]),
+                variable(brand, "Colors/Brand", "COLOR", [
+                    [LIGHT, paint("#111111")],
+                    [DARK, paint("#222222")],
+                    [CONTRAST, paint("#333333")],
+                ]),
+                variable(guid(1, 3), "Colors/Brand/Primary", "COLOR", [[LIGHT, paint("#444444")]]),
+                variable(guid(1, 4), "Colors/Text", "COLOR", [
+                    [LIGHT, paint("#ffffff")],
+                    [DARK, { alias: { guid: brand } }],
+                    [CONTRAST, { alias: { guid: brand } }],
+                ]),
+            ],
+        }),
+    );
+    const tokens = figTokens(fig, "rename.fig");
+
+    assert.equal(
+        ((tokens.dark.color as Record<string, unknown>).text as Record<string, unknown>).$value,
+        "{color.brand.default}",
+    );
+    assert.equal(
+        ((tokens.extra.contrast?.color as Record<string, unknown>).text as Record<string, unknown>)
+            .$value,
+        "{color.brand.default}",
+    );
+});
+
 test("variables of one name get a number each, and the names do not grow", () => {
     const names = load(
         scanTokens(project({ "names.fig": manyModes(1, 2000, () => "Colors/Base") })),

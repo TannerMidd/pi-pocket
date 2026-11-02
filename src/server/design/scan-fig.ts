@@ -136,7 +136,7 @@ function fill(from: Map<string, Obj>, renamed: Map<string, string>): Obj {
             at = at[key] as Obj;
         }
 
-        at[path.at(-1)!] = node;
+        at[path.at(-1)!] = rewrite(node, renamed) as Obj;
     }
 
     return out;
