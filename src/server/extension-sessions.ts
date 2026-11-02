@@ -13,6 +13,17 @@ import { clientKey, ownRequest } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
 
+/** Thrown inside the creation commit when a repeat already recorded this call, so that commit writes nothing. */
+class AlreadyStarted extends Error {
+    readonly session: ConversationId;
+
+    constructor(session: ConversationId) {
+        super("This call already started a session.");
+        this.name = "AlreadyStarted";
+        this.session = session;
+    }
+}
+
 export class ExtensionSessions implements SessionsApi {
     readonly #app: PocketApp;
 
@@ -53,12 +64,27 @@ export class ExtensionSessions implements SessionsApi {
         app.spend.check(user, source);
 
         const token = callKey(source, key);
-        const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
-            ?.items[token];
+
+        const recorded = async (): Promise<ConversationId | undefined> => {
+            const receipt = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
+                ?.items[token];
+
+            return receipt?.conversationId === undefined
+                ? undefined
+                : (receipt.conversationId as unknown as ConversationId);
+        };
+
+        const previous = await recorded();
+        // A repeat that lost the race aborts its own creation and returns the session the winner recorded.
         const session =
-            previous?.conversationId === undefined
-                ? await this.#create(source, user, request, chosen, token)
-                : (previous.conversationId as unknown as ConversationId);
+            previous ??
+            (await this.#create(source, user, request, chosen, token).catch(async (error) => {
+                if (!(error instanceof AlreadyStarted)) {
+                    throw error;
+                }
+
+                return (await recorded()) ?? error.session;
+            }));
 
         if (request.message !== undefined) {
             await this.#message(session, user, request.message, token);
@@ -143,7 +169,8 @@ export class ExtensionSessions implements SessionsApi {
                         });
                     }
 
-                    session = await this.#receipt(tx, source, made, user, token, now);
+                    await this.#receipt(tx, source, made, user, token, now);
+                    session = made;
                 },
             },
         );
@@ -151,7 +178,7 @@ export class ExtensionSessions implements SessionsApi {
         return session ?? id;
     }
 
-    /** Record this call, or return the session a repeat of this commit already recorded. */
+    /** Record this call. A repeat of this commit already has a record: abort, so this commit writes nothing. */
     async #receipt(
         tx: Tx,
         source: ConversationId,
@@ -159,17 +186,15 @@ export class ExtensionSessions implements SessionsApi {
         user: User,
         token: string,
         now: number,
-    ): Promise<ConversationId> {
+    ): Promise<void> {
         const calls = await tx.doc(LinkedSessionCallsDoc, source);
         const receipt = calls.items[token];
 
         if (receipt?.conversationId !== undefined) {
-            return receipt.conversationId as unknown as ConversationId;
+            throw new AlreadyStarted(receipt.conversationId as unknown as ConversationId);
         }
 
         calls.items[token] = { conversationId: Number(made), by: user.id, at: now };
-
-        return made;
     }
 
     /** Send the first message as the person wrote it, once: a submission already stored for this key is the first. */

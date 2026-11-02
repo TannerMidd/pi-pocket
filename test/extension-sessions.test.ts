@@ -119,6 +119,31 @@ test("a repeat with the same key returns the same session and does not send the 
     );
 });
 
+test("two starts at once with the same key make one session", async () => {
+    const id = await source();
+    const count = app.sessions().length;
+    const request = { title: "Raced", cwd: work, message: "once between them" };
+    const [first, second] = await Promise.all([
+        app.extensionSessions.start(id, request, "raced"),
+        app.extensionSessions.start(id, request, "raced"),
+    ]);
+
+    assert.equal(first.session, second.session);
+    assert.equal(app.sessions().length, count + 1);
+    await until(
+        async () =>
+            (await modelTexts(app, first.session)).some((text) =>
+                text.includes("once between them"),
+            ),
+        "the one message",
+    );
+    assert.equal(
+        (await modelTexts(app, first.session)).filter((text) => text.includes("once between them"))
+            .length,
+        1,
+    );
+});
+
 test("an unknown model, or a folder that does not exist, is refused and leaves no session", async () => {
     const id = await source();
     const count = app.sessions().length;
