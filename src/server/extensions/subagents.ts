@@ -962,10 +962,17 @@ export default function createSubagents(host: PocketHost) {
                 action === "spawn"
                     ? await chosenModel(host, (args as { model?: unknown }).model, parent.model)
                     : undefined;
-            // Tools that wait for a search (`tool-search.ts`) can be asked for too: the subagent is offered them.
+            // Tools that wait for a search (`tool-search.ts`) can be asked for too: the subagent is offered them. So can
+            // tools that only scripts call (codemode's Only mode): the subagent gets codemode with them.
             const parentTools =
                 action === "spawn" && args.tools !== undefined
-                    ? [...parent.tools, ...parent.deferred]
+                    ? [
+                          ...new Map(
+                              [...parent.tools, ...parent.deferred, ...parent.callable].map(
+                                  (tool) => [tool.name, tool],
+                              ),
+                          ).values(),
+                      ]
                     : [];
             const tools =
                 args.tools === undefined
@@ -981,6 +988,16 @@ export default function createSubagents(host: PocketHost) {
 
                           return found;
                       });
+            const codemode = parentTools.find((tool) => tool.name === "codemode");
+
+            if (
+                codemode !== undefined &&
+                tools?.some((tool) => tool.callers?.includes("model") === false) === true &&
+                !tools.includes(codemode)
+            ) {
+                tools.push(codemode);
+            }
+
             // Every tool given that waits for a search, also one this session loaded: the subagent has no search.
             const waiting = (tools ?? []).filter((tool) => tool.deferred === true);
             // TypeBox infers no type from a union built from a list; the schema itself checks the value.

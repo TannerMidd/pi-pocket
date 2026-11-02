@@ -601,6 +601,8 @@ export interface PocketHost {
         Updates,
         "status" | "check" | "apply" | "subscribe" | "setBeta" | "beta"
     >;
+    /** The names of the tools that the modules that are on install now, built-in and drop-in. */
+    toolNames(): string[];
 }
 
 /**

@@ -31,10 +31,13 @@ import {
     type ToolHooks,
     type ToolRegistration,
     ToolTask,
+    wrapTool,
 } from "@earendil-works/pi-durable";
+import { TOOL_SEARCH_TOOL_NAME } from "@earendil-works/pi-durable/tool-search";
 import { CodemodeStoreDoc } from "../docs.ts";
 import { describe } from "../errors.ts";
-import type { PocketHost } from "../host.ts";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
+import { DEFERRED_TOOLS } from "./tool-search.ts";
 
 export const CODEMODE_TOOL = "codemode";
 /** Output budget of a script, in estimated tokens (4 characters each), unless its options line sets another. */
@@ -44,6 +47,11 @@ const CHARS_PER_TOKEN = 4;
 const MAX_NESTED_CHARS = 1_000_000;
 const MEMORY_LIMIT_BYTES = 256 * 1024 * 1024;
 const MAX_NESTED_IMAGES = 4;
+/** How much of the request the Only listing can take: Pi's default `codemode.inlineBudget`, 3,000 tokens. */
+const INLINE_BUDGET = 3_000 * CHARS_PER_TOKEN;
+/** Declared in Only mode too: tool search loads waiting tools, and an artifact's card shows only for a direct call. */
+const DECLARED = new Set([CODEMODE_TOOL, TOOL_SEARCH_TOOL_NAME, "artifact"]);
+const ONLY_GUIDE = `Your other tools are not declared. Call them only from a codemode script: \`await tools.<name>({ ...args })\`. Use one script to batch independent calls (Promise.allSettled), chain them, or filter large output.`;
 
 const DESCRIPTION = `Run JavaScript that calls your other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level \`await\` and \`return\` work. No Node, file system, network, or timers.
 - \`await tools.<name>({ ...args })\` takes the same arguments as calling the tool directly, resolves to its text output, and rejects with an Error when the call fails or is blocked. Calls still running when the script ends are cancelled.
@@ -182,7 +190,73 @@ async function budget(
     };
 }
 
-export default function createCodemode(_host: PocketHost) {
+/** The Only section: each tool that only scripts can call, smallest first within the budget as Pi does, then names. */
+function listing(tools: readonly ToolRegistration[]): string | undefined {
+    if (tools.length === 0) {
+        return undefined;
+    }
+
+    const entries = tools.map(
+        (tool) =>
+            `## ${tool.name}\n${tool.description}\nParameters (JSON Schema): ${JSON.stringify(tool.parameters)}`,
+    );
+    const shown = new Set<string>();
+    let left = INLINE_BUDGET;
+
+    for (const entry of [...entries].sort((a, b) => a.length - b.length)) {
+        if (entry.length > left) {
+            break;
+        }
+
+        left -= entry.length;
+        shown.add(entry);
+    }
+
+    const rest = tools.filter((_, at) => !shown.has(entries[at]!)).map((tool) => tool.name);
+
+    return [
+        ONLY_GUIDE,
+        ...entries.filter((entry) => shown.has(entry)),
+        ...(rest.length === 0 ? [] : [`Also callable, not listed: ${rest.join(", ")}`]),
+    ].join("\n\n");
+}
+
+export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
+    web?.settings([
+        {
+            name: "mode",
+            label: "Mode",
+            description:
+                "On: Pi calls its tools directly or from scripts. Only: Pi calls them only from scripts, and each request is smaller.",
+            type: "choice",
+            default: "on",
+            choices: [
+                { value: "on", label: "On" },
+                { value: "only", label: "Only" },
+            ],
+        },
+    ]);
+    const only = () => web?.setting("mode") === "only";
+
+    // Tool search asks it, to send the tools it loads through codemode.
+    web?.provide({ only });
+
+    /** Only mode: each other tool is for scripts alone. The names come at each resolve, so later modules count too. */
+    const hide = () => {
+        const names = host.toolNames();
+        const waiting = names.includes(TOOL_SEARCH_TOOL_NAME) ? DEFERRED_TOOLS : [];
+
+        return names
+            .filter((name) => !DECLARED.has(name) && !waiting.includes(name))
+            .map((name) =>
+                wrapTool({ name } as ToolRegistration, (tool) =>
+                    tool.callers === undefined && tool.deferred !== true
+                        ? { ...tool, callers: ["tools"] }
+                        : tool,
+                ),
+            );
+    };
+
     const codemode = defineTool({
         name: CODEMODE_TOOL,
         description: DESCRIPTION,
@@ -424,8 +498,21 @@ export default function createCodemode(_host: PocketHost) {
     return defineExtension({
         name: "pocket-codemode",
         tools: [codemode],
+        get wraps() {
+            return only() ? hide() : [];
+        },
         sections: [
             section("codemode", ({ agent }) => {
+                if (only() && agent.tools.some((tool) => tool.name === CODEMODE_TOOL)) {
+                    return listing(
+                        agent.callable.filter(
+                            (tool) =>
+                                tool.name !== CODEMODE_TOOL &&
+                                tool.callers?.includes("model") === false,
+                        ),
+                    );
+                }
+
                 const names = agent.tools
                     .map((tool) => tool.name)
                     .filter((name) => name !== CODEMODE_TOOL);

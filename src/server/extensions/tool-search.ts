@@ -15,6 +15,7 @@ import {
     wrapSection,
     wrapTool,
 } from "@earendil-works/pi-durable";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 
 const SEARCH_LIMIT = 2;
 
@@ -48,6 +49,9 @@ const DEFERRED: Record<string, { use: string; section?: string; note?: string }>
     ask_someone: { use: "draft a question for someone outside this chat" },
 };
 
+/** Tools that wait for a search: codemode's Only mode leaves them waiting. */
+export const DEFERRED_TOOLS = Object.keys(DEFERRED);
+
 const sections = new Map<string, string[]>();
 
 for (const [name, { section: key }] of Object.entries(DEFERRED)) {
@@ -56,12 +60,12 @@ for (const [name, { section: key }] of Object.entries(DEFERRED)) {
     }
 }
 
-export default function createToolSearch() {
+export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) {
     const base = createToolSearchExtension();
     const search = base.tools![0]!;
 
     // For a model without mid-conversation tool changes, a new tool would rewrite the prompt cache: Pi calls it
-    // through codemode instead, so the tool list never changes.
+    // through codemode instead, so the tool list never changes. In codemode's Only mode, every tool goes that way.
     const throughCodemode = async (api: ToolExecutionApi<never>, context: Context) => {
         const agent = await api.agent(context);
         const ref = agent.model;
@@ -75,8 +79,11 @@ export default function createToolSearch() {
                         }
                       | undefined);
 
+        const only = (web?.use("codemode") as { only?: () => boolean } | undefined)?.only?.();
+
         return (
-            (compat?.supportsMidConvoSystemMessages !== true ||
+            (only === true ||
+                compat?.supportsMidConvoSystemMessages !== true ||
                 compat?.supportsMidConvoToolChanges !== true) &&
             agent.tools.some((tool) => tool.name === "codemode")
         );

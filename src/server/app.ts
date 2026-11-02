@@ -920,6 +920,11 @@ export class PocketApp {
             updates: this.updates,
             text: Object.freeze({ quoted, defang }),
             thinkingLevels: THINKING_LEVELS,
+            toolNames: () =>
+                registry
+                    .snapshot()
+                    .tools()
+                    .map(({ tool }) => tool.name),
         };
 
         this.#registry = registry;
