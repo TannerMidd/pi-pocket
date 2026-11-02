@@ -98,6 +98,17 @@ export function Splash() {
     let line = 0;
 
     return html`<div class="splash" data-part="home" ref=${splash}>
+        <button
+            class="icon-button splash-menu"
+            data-part="home-menu"
+            aria-label="Menu"
+            title="Menu"
+            aria-haspopup="dialog"
+            aria-expanded=${store.state.sheet?.type === "menu"}
+            onClick=${() => openSheet({ type: "menu" })}
+        >
+            <${Icon} name="more" />
+        </button>
         <div class="fetch" data-part="home-facts">
             <pre class="fetch-logo" data-part="home-logo" aria-hidden="true">${LOGO}</pre>
             <div class="fetch-info">
