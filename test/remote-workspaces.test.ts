@@ -198,6 +198,18 @@ test("only the owner can start, move, or link a session to a workspace URI", asy
             app.linkedSessions.start(id, { message: "go", cwd: uri }, "guest-link"),
             /owner/,
         );
+        // The owner's remote session, shared: a guest steers it, but starts nothing from its folder.
+        const shared = await newSession(app, uri);
+        const asked = await app.commands.submit(shared, user, { text: "hi", requestId: "g-2" });
+
+        await (await app.harness.submission(asked.submissionId, context))!.wait(context);
+        const count = app.sessions().length;
+
+        await assert.rejects(
+            app.linkedSessions.start(shared, { message: "go" }, "guest-link-2"),
+            /owner/,
+        );
+        assert.equal(app.sessions().length, count);
     } finally {
         remove();
         await app.close();

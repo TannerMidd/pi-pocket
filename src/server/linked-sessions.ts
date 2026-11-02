@@ -586,7 +586,11 @@ export class LinkedSessions implements LinkedSessionsApi {
     ): Promise<string> {
         // A blank field (an empty form input) is no folder, not the home folder.
         if (cwd === undefined || (typeof cwd === "string" && cwd.trim() === "")) {
-            return agent.cwd ?? this.#app.cwdOf(source);
+            const inherited = agent.cwd ?? this.#app.cwdOf(source);
+
+            this.#app.requireWorkspaceOwner(user, inherited);
+
+            return inherited;
         }
 
         if (typeof cwd !== "string") {
