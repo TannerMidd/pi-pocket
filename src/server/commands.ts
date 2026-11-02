@@ -2238,6 +2238,9 @@ export class Commands {
             throw new HttpError(400, "Only sessions can be forked");
         }
 
+        // The fork works in this session's folder: a remote one is the owner's to start sessions in.
+        app.requireWorkspaceOwner(user, app.cwdOf(id));
+
         // A fork would carry PiP's tools and none of PiP: they act as PiP's person, which a fork is not.
         if (app.sessionMeta(id)?.pip !== undefined) {
             throw new HttpError(400, "PiP's conversation cannot be forked. Start fresh instead.");
