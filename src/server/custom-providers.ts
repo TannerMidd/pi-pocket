@@ -536,8 +536,7 @@ export class CustomProviders {
     /** Pi's runtime reads the provider again: its models come, change, or go, and every tab gets them. */
     async #applied(id: string): Promise<void> {
         const models = this.#app.models;
-
-        await models.refresh({ allowNetwork: false, providers: [id] });
+        const { errors } = await models.refresh({ allowNetwork: false, providers: [id] });
         const problem = (models.getError() ?? "")
             .split("\n")
             .find((line) => line.startsWith(`Provider "${id}":`));
@@ -546,6 +545,11 @@ export class CustomProviders {
 
         if (problem !== undefined) {
             throw new HttpError(400, `Pi did not accept the endpoint: ${problem}`);
+        }
+
+        // Not the error itself, which can come from the sign-in store.
+        if (errors.has(id)) {
+            throw new HttpError(500, "Pi could not load the endpoint. Try Refresh models.");
         }
     }
 
