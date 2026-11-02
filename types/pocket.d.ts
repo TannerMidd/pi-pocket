@@ -268,6 +268,12 @@ export interface Host {
      */
     readonly linkedSessions: LinkedSessions;
     /**
+     * Starts an ordinary top-level session, the same kind New session makes, for the person Pi works for in the source.
+     * @since 0.29.0
+     * @experimental
+     */
+    readonly sessions: Sessions;
+    /**
      * Makes text from other places safe for Pi to read.
      * @since 0.14.0
      */
@@ -927,6 +933,33 @@ export interface LinkedSessions {
      * @experimental
      */
     list(source: ConversationId): Promise<LinkedSession[]>;
+}
+
+/**
+ * Ordinary sessions an extension starts. Each call acts as the person Pi works for in `source`, with that person's
+ * checks. A call again with the same `key` returns the session the first call made, and sends its message once.
+ * @since 0.29.0
+ * @experimental
+ */
+export interface Sessions {
+    /**
+     * Starts an ordinary session, like New session, in `cwd` or the server's default folder. `model` is
+     * `provider/modelId`. `thinking` is any level, lowered to one the model has. With `message`, that text is the session's first
+     * message, sent once for this `key`, as the person wrote it.
+     * @since 0.29.0
+     * @experimental
+     */
+    start(
+        source: ConversationId,
+        request: {
+            title?: string;
+            cwd?: string;
+            model?: string;
+            thinking?: string;
+            message?: string;
+        },
+        key: string,
+    ): Promise<{ session: ConversationId }>;
 }
 
 /**

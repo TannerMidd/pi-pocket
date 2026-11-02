@@ -24,6 +24,7 @@ This page is the map. Read all of it, then only the pages that your task needs.
 | Check or change Pi's tool calls and answers                     | [Hooks](extensions/hooks.md)                                                                                    |
 | Use the app's services, and work with older servers             | [Using the host](extensions/host.md)                                                                            |
 | Start sessions, and send messages between them                  | [Starting and messaging sessions](extensions/linked-sessions.md)                                                |
+| Start an ordinary session, like New session                     | [Starting an ordinary session](extensions/sessions.md)                                                          |
 | Add to the app: routes, a browser module, commands              | [Adding to the app](extensions/app.md)                                                                          |
 | Name how an input this module sends shows in the transcript     | [Adding to the app](extensions/app.md), [`web.presentEntry`](extensions/reference/web.md#presententry)          |
 | Answer requests on the server, and say who may use them         | [Routes](extensions/routes.md)                                                                                  |

@@ -97,6 +97,30 @@ export interface LinkedSessionsApi {
     list(source: ConversationId): Promise<LinkedSession[]>;
 }
 
+/**
+ * Ordinary sessions that an extension starts (`extension-sessions.ts`). Each call acts as the person Pi works for in
+ * `source`, with their checks. A call again with the same `key` returns the session the first made, and sends its
+ * message once.
+ */
+export interface SessionsApi {
+    /**
+     * Start an ordinary session for the person Pi works for in `source`, like New session.
+     *
+     * @experimental In 0.29.
+     */
+    start(
+        source: ConversationId,
+        request: {
+            title?: string;
+            cwd?: string;
+            model?: string;
+            thinking?: string;
+            message?: string;
+        },
+        key: string,
+    ): Promise<{ session: ConversationId }>;
+}
+
 /** Human-facing linked sessions, bound to the signed-in person and source of one route request. */
 export interface HumanLinkedSession extends LinkedSession {
     conversationId: ConversationId;
@@ -491,6 +515,14 @@ export interface PocketHost {
      * @experimental In 0.14: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     readonly linkedSessions: LinkedSessionsApi;
+    /**
+     * Ordinary sessions an extension starts (`extension-sessions.ts`): a top-level session, like New session, for the
+     * person Pi works for in the source. A call repeated with its key returns the first session and sends its message
+     * once.
+     *
+     * @experimental In 0.29: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    readonly sessions: SessionsApi;
     /** The conversation's current working folder or workspace URI. @experimental @since 0.28.0 */
     cwdOf(conversationId: ConversationId): string;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */

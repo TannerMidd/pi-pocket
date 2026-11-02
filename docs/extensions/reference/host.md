@@ -403,6 +403,40 @@ What `fetchPublic` takes besides the address.
 - `maxBytes`: the size of the body at most, after it is decoded.
 - `timeoutMs`: the time for the whole request at most, the body included.
 
+## Ordinary sessions
+
+### `sessions`
+
+```ts
+readonly sessions: Sessions;
+```
+
+Since 0.29.0 · Experimental
+
+Lets an extension start an ordinary session, the same kind a person gets from New session. [Starting an ordinary session](../sessions.md) tells you who it acts for, what it checks, and what the new session is.
+
+The call acts as the person that Pi works for in `source`, and that person's checks apply. Give it a `key` that stays the same when the call runs again. A second call with the same `key` returns the session the first call made, and sends its message once.
+
+#### `sessions.start`
+
+```ts
+start(
+    source: ConversationId,
+    request: { title?: string; cwd?: string; model?: string; thinking?: string; message?: string },
+    key: string,
+): Promise<{ session: ConversationId }>;
+```
+
+Since 0.29.0 · Experimental
+
+Makes a top-level session and, when `message` is given, sends that text as its first message. It returns the new session's id.
+
+- The new session works in `cwd` when supplied, otherwise the server's default folder. `cwd` must name an existing folder and uses the normal folder-picker path rules. A missing folder is refused before a session is made.
+- `model` is `provider/modelId`. It must be a model known here whose provider can be used now. Without it, the session starts on the model a new session would get. The owner's list of models for subagents does not apply.
+- `thinking` is any level. Pi Pocket lowers it to the highest level the model has, or uses the model's lowest when it has none that low. Without it, the session keeps the thinking level it started with.
+- The new session has no `linkedFrom`. It is its own row in the session list, and it can start linked sessions of its own.
+- A source past its spend limit, a person invited to one session, and a PiP source are refused, and nothing is made.
+
 ## Linked sessions
 
 ### `linkedSessions`

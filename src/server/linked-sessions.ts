@@ -86,7 +86,7 @@ function recordOf(
 }
 
 /** Stable across restarts, short enough that Commands.submit preserves the entire request key. */
-function callKey(source: ConversationId, key: string): string {
+export function callKey(source: ConversationId, key: string): string {
     return createHash("sha256").update(`${source}:${key}`).digest("hex");
 }
 

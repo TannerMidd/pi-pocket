@@ -28,6 +28,7 @@ const HEADED = new Map([
     ["BrowserModule", ""],
     ["SafeText", "text."],
     ["LinkedSessions", "linkedSessions."],
+    ["Sessions", "sessions."],
 ]);
 
 /** Which types each page describes. */
@@ -38,6 +39,7 @@ export const PAGES = {
         "PublicFetchInit",
         "LinkedSessions",
         "LinkedSession",
+        "Sessions",
         "AskRequest",
         "AskField",
         "AskAnswer",
