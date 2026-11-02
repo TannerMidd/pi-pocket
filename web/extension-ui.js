@@ -128,9 +128,13 @@ function markdownSpecOf(kind, matches = () => true) {
     return undefined;
 }
 
-setFences((lang) =>
-    markdownSpecOf("fence", (spec) => spec.langs.some((each) => each.toLowerCase() === lang)),
-);
+setFences((lang) => {
+    const spec = markdownSpecOf("fence", (each) =>
+        each.langs.some((one) => one.toLowerCase() === lang),
+    );
+
+    return spec === undefined ? undefined : { ...spec, component: framedFence(spec) };
+});
 setMath(() => markdownSpecOf("mathInline"));
 
 // ─── Drawing again, within bounds ────────────────────────────────────────────
@@ -2408,11 +2412,16 @@ fromExtensions(
  * thrown (an empty string, nothing at all) counts.
  */
 class Guard extends Component {
-    state = { failed: false, message: "" };
+    state = { failed: false, message: "", reset: this.props.reset };
 
     constructor(props) {
         super(props);
         guards++;
+    }
+
+    // A Guard with `reset` tries again when it changes; one with a `fallback` shows it under the failure.
+    static getDerivedStateFromProps({ reset }, state) {
+        return reset === state.reset ? null : { failed: false, message: "", reset };
     }
 
     componentWillUnmount() {
@@ -2424,8 +2433,11 @@ class Guard extends Component {
         this.setState({ failed: true, message: reason(error) });
     }
 
-    render({ children, name }, { failed, message }) {
-        return failed ? html`<div class="error-box">${name} failed: ${message}</div>` : children;
+    render({ children, name, fallback }, { failed, message }) {
+        return failed
+            ? html`<div class="error-box">${name} failed: ${message}</div>
+                  ${fallback}`
+            : children;
     }
 }
 
@@ -2634,6 +2646,26 @@ options[RENDER_HOOK] = (vnode) => {
 /** Between the Guard and an extension's component: what goes wrong in it, however Preact takes it, stays under the Guard. */
 function Drawn({ component, props }) {
     return h(component, props);
+}
+
+/** A fence's component in a Guard that shows its source if it fails, and tries again when the source changes. */
+const framedFences = new WeakMap();
+
+function framedFence(spec) {
+    if (!framedFences.has(spec.component)) {
+        const Framed = (props) =>
+            html`<${Guard}
+                name=${`Fence ${spec.id}`}
+                reset=${props.source}
+                fallback=${html`<pre data-lang=${props.lang}><code>${props.source}</code></pre>`}
+            >
+                <${Drawn} component=${spec.component} props=${props} />
+            <//>`;
+
+        framedFences.set(spec.component, Framed);
+    }
+
+    return framedFences.get(spec.component);
 }
 
 /** Each extension component's number, for its Guard's key: a new component starts with a new Guard. */
