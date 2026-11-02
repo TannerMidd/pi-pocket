@@ -14,6 +14,7 @@ import {
     root,
     scriptedModel,
     until,
+    offerSubagents,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -99,6 +100,7 @@ let app: App;
 
 before(async () => {
     app = await openApp(scriptedModel(route), join(root, "subagents-data"));
+    offerSubagents(app);
 });
 
 // What the scripted model does starts plain in every test, however the one before ended.
@@ -200,6 +202,8 @@ test("a report reaches an idle parent at once, and the parent answers it", async
 test("reports waiting in the parent's queue across a restart arrive once", async () => {
     const data = join(root, "subagents-restart");
     let first: App | undefined = await openApp(scriptedModel(route), data);
+
+    offerSubagents(first);
     const id = await orchestrate({ spawn: names(3, "r"), rounds: 1, sleep: 3 }, first);
 
     try {
@@ -210,6 +214,7 @@ test("reports waiting in the parent's queue across a restart arrive once", async
         // app steps aside meanwhile: one app per data folder in the process.
         await app.close();
         app = await openApp(scriptedModel(route), data);
+        offerSubagents(app);
         await until(
             async () => Object.keys(await delivered(id)).length === 3 && !app.isBusy(id),
             "the reports after the restart",
@@ -221,6 +226,7 @@ test("reports waiting in the parent's queue across a restart arrive once", async
         // Closed already if the test failed after it stepped aside.
         await app.close().catch(() => {});
         app = await openApp(scriptedModel(route), join(root, "subagents-data"));
+        offerSubagents(app);
     }
 });
 

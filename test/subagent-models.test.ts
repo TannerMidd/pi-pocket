@@ -3,7 +3,17 @@
 // model no longer allowed gets no more work. With a list, a subagent or a linked session runs only on a listed model:
 // the session's own when that is listed and none is named, else the one named, which is required when the session's is not listed. A subagent its model failed is reported as such, and Pi is told to stop
 // and tell the user rather than try another model.
-import { type App, cleanUp, context, lastText, openApp, owner, until, work } from "./helpers.ts";
+import {
+    type App,
+    cleanUp,
+    context,
+    lastText,
+    openApp,
+    owner,
+    until,
+    work,
+    offerSubagents,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -97,6 +107,7 @@ let app: App;
 
 before(async () => {
     app = await openApp(faux);
+    offerSubagents(app);
 });
 
 after(async () => {

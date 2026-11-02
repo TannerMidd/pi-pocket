@@ -55,7 +55,7 @@ export default function createMemory(host: PocketHost) {
             action: StringEnum(["add", "update", "remove", "list"] as const),
             text: Type.Optional(
                 Type.String({
-                    description: `add, update: the lesson, one or two sentences (${String(MAX_LESSON)} characters at most)`,
+                    description: `add, update: the lesson (${String(MAX_LESSON)} characters at most)`,
                 }),
             ),
             scope: Type.Optional(

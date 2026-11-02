@@ -12,6 +12,7 @@ import {
     say,
     scriptedModel,
     until,
+    offerSubagents,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -73,6 +74,7 @@ before(async () => {
     mkdirSync(join(repo, "node_modules"));
     writeFileSync(join(repo, "node_modules", "big.js"), "ignored\n");
     app = await openApp(scriptedModel(route));
+    offerSubagents(app);
 });
 
 after(async () => {

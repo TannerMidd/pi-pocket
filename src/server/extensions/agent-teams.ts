@@ -198,12 +198,14 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
                     `${GUIDE}\n${models(
                         host,
                         agent.model,
-                        // Offered, or for scripts alone (codemode's Only mode).
+                        // Whether the subagents section, with its list, shows: offered, or for scripts alone
+                        // (codemode's Only mode), but not while it waits for tool search, which hides the section.
                         agent.tools.some((tool) => tool.name === "subagent") ||
                             agent.callable.some(
                                 (tool) =>
                                     tool.name === "subagent" &&
-                                    tool.callers?.includes("model") === false,
+                                    tool.callers?.includes("model") === false &&
+                                    tool.deferred !== true,
                             ),
                     )}`,
             ),

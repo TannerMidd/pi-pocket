@@ -9,6 +9,7 @@ import {
     say,
     scriptedModel,
     until,
+    offerSubagents,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
@@ -35,6 +36,7 @@ before(async () => {
     });
 
     app = await openApp(model);
+    offerSubagents(app);
     await app.setExtensionEnabled(owner(app), "agent-teams.ts", true);
 });
 after(async () => {

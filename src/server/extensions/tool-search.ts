@@ -7,6 +7,7 @@ import {
     TOOL_SEARCH_TOOL_NAME,
 } from "@earendil-works/pi-durable/tool-search";
 import {
+    type Agent,
     defineExtension,
     type PromptSection,
     section,
@@ -22,7 +23,11 @@ const SEARCH_LIMIT = 2;
 /** What the design guide's section would say, for the codemode route, where the section never shows. */
 const DESIGN_NOTE = `Before you make or change a design, read ${DESIGN_GUIDE}. Check each design with design_preview at mobile and desktop sizes before you reply. design_system read gives a summary of the project's design system.`;
 
-const DEFERRED: Record<string, { use: string; section?: string; note?: string }> = {
+/**
+ * The tools that wait. `section`: the prompt section that waits with them. `note`: what that section would say, for
+ * the codemode route, where it never shows; `guide`: the module that provides it (`web.provide({ guide })`) instead.
+ */
+const DEFERRED: Record<string, { use: string; section?: string; note?: string; guide?: string }> = {
     browser: {
         use: "open and test web pages in a real browser",
         section: "browser",
@@ -36,18 +41,25 @@ const DEFERRED: Record<string, { use: string; section?: string; note?: string }>
     schedule: { use: "send yourself a message later" },
     watch_pr: { use: "watch a pull request's checks" },
     design_preview: {
-        use: "make, change, or check a design (read its guide first)",
+        use: "make, change, or check a design",
         section: "design_mode",
         note: DESIGN_NOTE,
     },
     design_export: { use: "export a design", section: "design_mode", note: DESIGN_NOTE },
     design_system: {
-        use: "read or write the project's design system",
+        use: "read or write the design system",
         section: "design_mode",
         note: DESIGN_NOTE,
     },
     ask_someone: { use: "draft a question for someone outside this chat" },
+    subagent: {
+        use: "hand work to background helpers",
+        section: "subagents",
+        guide: "subagents",
+    },
 };
+
+type Guide = { guide?: (model: Agent["model"]) => Promise<string> };
 
 const sections = new Map<string, string[]>();
 
@@ -105,15 +117,25 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
     };
 
     const explain = async (names: string[], api: ToolExecutionApi<never>, context: Context) => {
-        const waiting = waitingOf(await api.agent(context), only());
+        const agent = await api.agent(context);
+        const waiting = waitingOf(agent, only());
 
-        return names
-            .map((name) => {
+        const noteOf = async (name: string) => {
+            const { note, guide } = DEFERRED[name] ?? {};
+            const from = guide === undefined ? undefined : (web?.use(guide) as Guide | undefined);
+
+            return (await from?.guide?.(agent.model)) ?? note ?? "";
+        };
+
+        const parts = await Promise.all(
+            names.map(async (name) => {
                 const tool = waiting.find((each) => each.name === name)!;
 
-                return `## ${name}\nCall it from a codemode script: await tools.${name}({ ...args })\n${tool.description}\n${DEFERRED[name]?.note ?? ""}\nParameters (JSON Schema): ${JSON.stringify(tool.parameters)}`;
-            })
-            .join("\n\n");
+                return `## ${name}\nCall it from a codemode script: await tools.${name}({ ...args })\n${tool.description}\n${await noteOf(name)}\nParameters (JSON Schema): ${JSON.stringify(tool.parameters)}`;
+            }),
+        );
+
+        return parts.join("\n\n");
     };
 
     // A query that is only names of waiting tools loads exactly those: a BM25 search for "browser" also matches every
@@ -121,7 +143,7 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
     const exact: ToolRegistration = {
         ...search,
         description:
-            "Load tools that wait (deferred_tools lists them) before you use them. The query is their names (`browser`, or `browser, background`) or words to search for.",
+            "Loads waiting tools (deferred_tools lists them). The query: their names (`browser, background`) or words to search for.",
         parameters: Type.Object({
             query: Type.String({ description: "Names of waiting tools, or words to search for." }),
             limit: Type.Optional(
