@@ -171,6 +171,7 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
         (error: unknown) => error instanceof HttpError && error.status === 409,
     );
     assert.equal(readFileSync(modelsFile, "utf8"), commented);
+    assert.deepEqual(app.customProviders.list(), [], "the sheet still opens");
 
     const refused = JSON.stringify({ providers: { bad: { models: [{ id: 5 }] } } });
 

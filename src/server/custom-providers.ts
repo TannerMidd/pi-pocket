@@ -196,7 +196,16 @@ export class CustomProviders {
 
     /** The endpoints in `models.json` that this sheet manages: OpenAI-compatible, with a base URL, not built in. */
     list(): CustomProvider[] {
-        const providers = (this.#read()?.providers ?? {}) as Record<string, Json>;
+        let config: Json | undefined;
+
+        // A file Pi Pocket does not rewrite (comments, trailing commas) has no endpoints to edit here.
+        try {
+            config = this.#read();
+        } catch {
+            return [];
+        }
+
+        const providers = (config?.providers ?? {}) as Record<string, Json>;
 
         return Object.entries(providers)
             .filter(([id, entry]) => this.#manages(id, entry))
