@@ -10,6 +10,10 @@ export interface ModelRefreshResult {
     errors: { provider: string; message: string }[];
 }
 
+/** Pi's error when it refuses `models.json` as a whole: it then loads none of its providers. */
+export const MODELS_JSON_REFUSED =
+    /Failed to (?:load|parse) models.json|Invalid models.json schema/;
+
 type Bounded<T> = { value: T } | { problem: "timed out" | "failed" | "interrupted" };
 
 /** A refresh is shared by all tabs; it never changes a session's chosen model or waits for its run. */
@@ -99,11 +103,7 @@ export class ModelRefresh {
             return result();
         }
 
-        if (
-            /Failed to (?:load|parse) models.json|Invalid models.json schema/.test(
-                checked.value.getError() ?? "",
-            )
-        ) {
+        if (MODELS_JSON_REFUSED.test(checked.value.getError() ?? "")) {
             errors.set(
                 "models.json",
                 "Could not load model configuration. Check models.json and try again.",

@@ -23,6 +23,7 @@ import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { PocketApp } from "./app.ts";
 import { describe, HttpError } from "./errors.ts";
+import { MODELS_JSON_REFUSED } from "./model-refresh.ts";
 
 /** The API every endpoint here speaks. */
 const API = "openai-completions";
@@ -62,7 +63,7 @@ export interface CustomProviderInput {
 type Json = Record<string, unknown>;
 
 /** Pi's `models.json`, as `ModelRuntime.create()` finds it. */
-export function modelsPath(): string {
+function modelsPath(): string {
     return join(getAgentDir(), "models.json");
 }
 
@@ -79,7 +80,7 @@ function text(value: unknown, name: string, max: number): string {
 }
 
 /** An http(s) URL without a trailing slash: Pi adds `/chat/completions` to it. */
-export function baseUrlOf(value: unknown): string {
+function baseUrlOf(value: unknown): string {
     const raw = text(value, "a base URL", MAX_URL);
     let url: URL;
 
@@ -101,7 +102,7 @@ export function baseUrlOf(value: unknown): string {
 }
 
 /** The models asked for: ids, each once, with a context window when the endpoint said one. */
-export function modelsOf(value: unknown): CustomModel[] {
+function modelsOf(value: unknown): CustomModel[] {
     if (!Array.isArray(value)) {
         throw new HttpError(400, "models must be a list.");
     }
@@ -192,15 +193,11 @@ export function parseModelList(body: unknown): CustomModel[] {
 
 export class CustomProviders {
     readonly #app: PocketApp;
-    readonly #path: () => string;
-    readonly #fetch: typeof fetch;
     /** Changes, one after another: each reads the file the one before wrote. */
     #queue: Promise<unknown> = Promise.resolve();
 
-    constructor(app: PocketApp, options: { path?: () => string; fetch?: typeof fetch } = {}) {
+    constructor(app: PocketApp) {
         this.#app = app;
-        this.#path = options.path ?? modelsPath;
-        this.#fetch = options.fetch ?? ((url, init) => fetch(url, init));
     }
 
     /** The endpoints in `models.json` that this sheet manages: OpenAI-compatible, with a base URL, not built in. */
@@ -377,7 +374,7 @@ export class CustomProviders {
         let response: Response;
 
         try {
-            response = await this.#fetch(`${baseUrl}/models`, {
+            response = await fetch(`${baseUrl}/models`, {
                 headers,
                 signal: AbortSignal.timeout(DISCOVER_MS),
             });
@@ -398,7 +395,8 @@ export class CustomProviders {
                 502,
                 response.status === 401 || response.status === 403
                     ? `The endpoint refused the key (${String(response.status)}).`
-                    : `The endpoint answered ${String(response.status)} for ${baseUrl}/models. Add model IDs by hand.`,
+                    : `The endpoint answered ${String(response.status)} for ${baseUrl}/models. ` +
+                          "Add model IDs by hand.",
             );
         }
 
@@ -477,7 +475,7 @@ export class CustomProviders {
             throw new HttpError(409, "models.json has no providers object. Fix it by hand first.");
         }
 
-        if ((await refusal(this.#path())) !== undefined) {
+        if ((await refusal(modelsPath())) !== undefined) {
             throw new HttpError(409, "Pi cannot read models.json as it is. Fix it by hand first.");
         }
 
@@ -489,7 +487,7 @@ export class CustomProviders {
         let raw: string;
 
         try {
-            raw = readFileSync(this.#path(), "utf8").replace(/^\uFEFF/, "");
+            raw = readFileSync(modelsPath(), "utf8").replace(/^\uFEFF/, "");
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") {
                 return undefined;
@@ -513,17 +511,18 @@ export class CustomProviders {
         } catch {
             throw new HttpError(
                 409,
-                "models.json is not plain JSON (it may have comments or trailing commas), so Pi Pocket leaves it alone. Edit it by hand.",
+                "models.json is not plain JSON (it may have comments or trailing commas), " +
+                    "so Pi Pocket leaves it alone. Edit it by hand.",
             );
         }
     }
 
     /**
-     * Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing. A file
-     * Pi would refuse is not written: Pi then loads none of its providers.
+     * Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing.
+     * A file Pi would refuse is not written: Pi then loads none of its providers.
      */
     async #write(config: Json): Promise<void> {
-        const link = this.#path();
+        const link = modelsPath();
         // A models.json that links elsewhere (a dotfiles folder) stays a link: the file it names changes.
         const path = existsSync(link) ? realpathSync(link) : link;
         const temp = `${path}.${String(process.pid)}.tmp`;
@@ -581,7 +580,7 @@ async function refusal(path: string): Promise<string | undefined> {
     const runtime = await ModelRuntime.create({ modelsPath: path, refreshOnCreate: false });
     const error = runtime.getError() ?? "";
 
-    if (!/Failed to (?:load|parse) models.json|Invalid models.json schema/.test(error)) {
+    if (!MODELS_JSON_REFUSED.test(error)) {
         return undefined;
     }
 
