@@ -20,6 +20,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import type { User } from "../src/server/config.ts";
 
 let app: App;
 
@@ -47,6 +48,20 @@ async function source() {
     return id;
 }
 
+/** `person` writes in `id`, and Pi answers: Pi then works for them there. */
+async function writes(id: ConversationId, person: User, text: string) {
+    const { submissionId } = await app.commands.submit(id, person, {
+        text,
+        requestId: crypto.randomUUID(),
+    });
+
+    await (await app.harness.submission(submissionId, context))!.wait(context);
+}
+
+/** The messages in `id` that have `words`, without the scripted model's echo of them. */
+const told = async (id: ConversationId, words: string) =>
+    (await modelTexts(app, id)).filter((text) => text.includes(words) && !text.includes("echo: "));
+
 const row = (id: ConversationId) => app.sessions().find((session) => session.id === Number(id));
 
 test("start makes a top-level session in the given folder, with the given title, model, and thinking", async () => {
@@ -73,7 +88,7 @@ test("start makes a top-level session in the given folder, with the given title,
     assert.equal(app.cwdOf(id), work);
 });
 
-test("a message is sent once, as an ordinary input from the person", async () => {
+test("a message is sent as an ordinary input from the person", async () => {
     const id = await source();
     const { session } = await app.extensionSessions.start(
         id,
@@ -81,42 +96,29 @@ test("a message is sent once, as an ordinary input from the person", async () =>
         "noted",
     );
 
-    await until(
-        async () => (await modelTexts(app, session)).some((text) => text.includes("look here")),
-        "the message",
-    );
-    const texts = await modelTexts(app, session);
-    const own = texts.filter((text) => text.includes("look here"));
+    await until(async () => (await told(session, "look here")).length > 0, "the message");
+    const own = await told(session, "look here");
 
     assert.equal(own.length, 1);
     assert.equal(own[0]?.includes("[via "), false);
     assert.equal(own[0]?.includes("<linked-session-message>"), false);
-    assert.equal(
-        (await app.extensionSessions.start(id, { message: "look here" }, "noted")).session,
-        session,
-    );
-    assert.equal(
-        (await modelTexts(app, session)).filter((text) => text.includes("look here")).length,
-        1,
-    );
 });
 
-test("a repeat with the same key returns the same session and does not send the message again", async () => {
+test("a repeat returns the first session, as the first person, though a check now refuses", async () => {
     const id = await source();
     const request = { title: "Once", cwd: work, message: "only once" };
     const { session } = await app.extensionSessions.start(id, request, "once");
     const count = app.sessions().length;
 
-    await until(
-        async () => (await modelTexts(app, session)).some((text) => text.includes("only once")),
-        "the first",
-    );
+    await until(async () => (await told(session, "only once")).length > 0, "the first");
+    // Someone else is now the person Pi works for there, and the source is past its spend limit.
+    await writes(id, app.config.addUser("Later", "guest").user, "mine now");
+    await recordCost(app, id, 0.02);
+    await until(() => app.spend.sessionSpent(id) === 0.02, "the spend");
+    await app.spend.setSessionBudget(owner(app), id, 0.01);
     assert.equal((await app.extensionSessions.start(id, request, "once")).session, session);
     assert.equal(app.sessions().length, count);
-    assert.equal(
-        (await modelTexts(app, session)).filter((text) => text.includes("only once")).length,
-        1,
-    );
+    assert.equal((await told(session, "only once")).length, 1);
 });
 
 test("two starts at once with the same key make one session", async () => {
@@ -130,18 +132,8 @@ test("two starts at once with the same key make one session", async () => {
 
     assert.equal(first.session, second.session);
     assert.equal(app.sessions().length, count + 1);
-    await until(
-        async () =>
-            (await modelTexts(app, first.session)).some((text) =>
-                text.includes("once between them"),
-            ),
-        "the one message",
-    );
-    assert.equal(
-        (await modelTexts(app, first.session)).filter((text) => text.includes("once between them"))
-            .length,
-        1,
-    );
+    await until(async () => (await told(first.session, "between")).length > 0, "the message");
+    assert.equal((await told(first.session, "between")).length, 1);
 });
 
 test("an unknown model, or a folder that does not exist, is refused and leaves no session", async () => {
@@ -170,12 +162,7 @@ test("a source past its spend limit, an invited person, and a PiP source are ref
     const count = app.sessions().length;
     const invited = app.config.addUser("Invited", "guest", [String(id)]).user;
 
-    const { submissionId } = await app.commands.submit(id, invited, {
-        text: "mine",
-        requestId: crypto.randomUUID(),
-    });
-
-    await (await app.harness.submission(submissionId, context))!.wait(context);
+    await writes(id, invited, "mine");
     await assert.rejects(
         app.extensionSessions.start(id, { title: "No" }, "invited"),
         /one session/,

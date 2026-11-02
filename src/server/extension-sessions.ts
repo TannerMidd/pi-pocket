@@ -56,8 +56,13 @@ export class ExtensionSessions implements SessionsApi {
         key: string,
     ): Promise<{ session: ConversationId }> {
         const app = this.#app;
+        const token = callToken(source, key);
+        const recorded = async () =>
+            (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))?.items[token];
+        const previous = await recorded();
         const meta = app.sessionMeta(source);
-        const requester = app.attribution.requesterOf(source);
+        // A repeat acts for the person the first call acted for: the message is theirs, and goes once.
+        const requester = previous?.by ?? app.attribution.requesterOf(source);
         const user = requester === undefined ? undefined : app.config.userById(requester);
 
         if (meta === undefined || meta.pip !== undefined || user === undefined) {
@@ -66,33 +71,28 @@ export class ExtensionSessions implements SessionsApi {
 
         app.requireSee(user, source);
 
-        const chosen = await this.#chosen(request.model, request.thinking);
+        // A repeat returns the session the first call made, even when a check below would refuse a new call now.
+        let session = previous?.conversationId as ConversationId | undefined;
 
-        // Before anything is made: a source past its spend limit starts nothing.
-        app.spend.check(user, source);
+        if (session === undefined) {
+            const chosen = await this.#chosen(request.model, request.thinking);
 
-        const token = callToken(source, key);
+            // Before anything is made: a source past its spend limit starts nothing.
+            app.spend.check(user, source);
+            // A repeat that lost the race aborts its own creation and returns the session the winner recorded.
+            session = await this.#create(source, user, request, chosen, token).catch(
+                async (error) => {
+                    if (!(error instanceof AlreadyStarted)) {
+                        throw error;
+                    }
 
-        const recorded = async (): Promise<ConversationId | undefined> => {
-            const receipt = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
-                ?.items[token];
-
-            return receipt?.conversationId === undefined
-                ? undefined
-                : (receipt.conversationId as unknown as ConversationId);
-        };
-
-        const previous = await recorded();
-        // A repeat that lost the race aborts its own creation and returns the session the winner recorded.
-        const session =
-            previous ??
-            (await this.#create(source, user, request, chosen, token).catch(async (error) => {
-                if (!(error instanceof AlreadyStarted)) {
-                    throw error;
-                }
-
-                return (await recorded()) ?? error.session;
-            }));
+                    return (
+                        ((await recorded())?.conversationId as ConversationId | undefined) ??
+                        error.session
+                    );
+                },
+            );
+        }
 
         if (request.message !== undefined) {
             await this.#message(session, user, request.message, token);
