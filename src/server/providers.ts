@@ -320,18 +320,9 @@ export class Providers {
             notify: (event: unknown) => send({ step: "event", event }),
         };
 
-        void app.models
-            // Sign-ins that identify the installation (ChatGPT) get the ID Pi keeps for it, the same as Pi's own login.
-            .login(providerId, type, interaction, {
-                getDeviceId: () => app.settings.getOrCreateDeviceId(),
-            })
+        void this.#signIn(providerId, type, interaction)
             .then(
-                async () => {
-                    await app.models.getAvailable().catch(() => []);
-                    this.#signedInOrOut(providerId);
-                    send({ step: "done", ok: true });
-                    this.#changed();
-                },
+                () => send({ step: "done", ok: true }),
                 (error: unknown) =>
                     send({
                         step: "done",
@@ -390,6 +381,29 @@ export class Providers {
 
         flow.prompts.clear();
         flow.abort.abort();
+    }
+
+    /** Keep `key` as the provider's API-key sign-in, as the API key button does: an endpoint's key, say. */
+    storeApiKey(providerId: string, key: string): Promise<void> {
+        return this.#signIn(providerId, "api_key", {
+            prompt: () => Promise.resolve(key),
+            notify: () => {},
+        });
+    }
+
+    /** Pi's sign-in, then what each sign-in here does: no mark or limit of the account before stays, and tabs know. */
+    async #signIn(
+        providerId: string,
+        type: "api_key" | "oauth",
+        interaction: Parameters<PocketApp["models"]["login"]>[2],
+    ): Promise<void> {
+        // Sign-ins that identify the installation (ChatGPT) get the ID Pi keeps for it, the same as Pi's own login.
+        await this.#app.models.login(providerId, type, interaction, {
+            getDeviceId: () => this.#app.settings.getOrCreateDeviceId(),
+        });
+        await this.#app.models.getAvailable().catch(() => []);
+        this.#signedInOrOut(providerId);
+        this.#changed();
     }
 
     async logout(providerId: string): Promise<void> {

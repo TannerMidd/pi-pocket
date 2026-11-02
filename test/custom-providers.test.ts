@@ -164,6 +164,11 @@ test("an edit keeps what it does not change; no key uses the placeholder; removi
         "other APIs are not listed",
     );
 
+    // A new key is a new sign-in: a limit that the old key hit is not its own.
+    const epoch = app.providers.signInEpoch("home-llm");
+
+    await app.customProviders.update("home-llm", { apiKey: "sk-again" });
+    assert.equal(app.providers.signInEpoch("home-llm"), epoch + 1);
     await app.customProviders.remove("home-llm");
     assert.equal(readModels().providers["home-llm"], undefined);
     assert.ok(readModels().providers.other, "other providers stay");

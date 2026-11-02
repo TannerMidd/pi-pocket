@@ -258,7 +258,7 @@ export class CustomProviders {
             await this.#applied(id);
 
             if (key !== undefined && key !== NO_KEY) {
-                await this.#storeKey(id, key);
+                await this.#app.providers.storeApiKey(id, key);
             }
 
             return this.#one(id);
@@ -312,7 +312,7 @@ export class CustomProviders {
             if (key === NO_KEY) {
                 await this.#forgetKey(id);
             } else if (key !== undefined) {
-                await this.#storeKey(id, key);
+                await this.#app.providers.storeApiKey(id, key);
             }
 
             return this.#one(id);
@@ -557,16 +557,6 @@ export class CustomProviders {
         if (problem !== undefined) {
             throw new HttpError(400, `Pi did not accept the endpoint: ${problem}`);
         }
-    }
-
-    /** The key, as a stored API-key sign-in: the same as the Providers sheet's API key button stores. */
-    async #storeKey(id: string, key: string): Promise<void> {
-        await this.#app.models.login(id, "api_key", {
-            prompt: () => Promise.resolve(key),
-            notify: () => {},
-        });
-        await this.#app.models.getAvailable().catch(() => []);
-        this.#app.providers.modelsChanged();
     }
 
     async #forgetKey(id: string): Promise<void> {
