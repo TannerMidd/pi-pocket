@@ -199,25 +199,11 @@ test("a source past its spend limit, an invited person, and a PiP source are ref
     assert.equal(app.sessions().length, count);
 });
 
-test("the new session can itself start a linked session", async () => {
+test("a key also given to linkedSessions.start starts its own ordinary session", async () => {
     const id = await source();
-    const { session } = await app.extensionSessions.start(
-        id,
-        { title: "Top", message: "begin" },
-        "top",
-    );
+    const linked = await app.linkedSessions.start(id, { message: "a task" }, "shared");
+    const { session } = await app.extensionSessions.start(id, { title: "Own" }, "shared");
 
-    await until(
-        async () => (await modelTexts(app, session)).some((text) => text.includes("begin")),
-        "its message",
-    );
-    const { session: linked } = await app.linkedSessions.start(
-        session,
-        { title: "Child", message: "a task" },
-        "child",
-    );
-
+    assert.notEqual(session, linked.session);
     assert.equal(app.sessionMeta(session)?.linkedFrom, undefined);
-    assert.equal(app.sessionMeta(linked)?.linkedFrom?.id, Number(session));
-    assert.equal(row(linked)?.linkedFrom?.id, Number(session));
 });

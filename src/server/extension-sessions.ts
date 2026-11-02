@@ -1,4 +1,5 @@
 /** Ordinary sessions an extension starts: a top-level session, like New session, made once for a key. */
+import { createHash } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { AgentDoc, type ConversationId, type ModelRef, type Tx } from "@earendil-works/pi-durable";
@@ -7,11 +8,18 @@ import type { User } from "./config.ts";
 import { LinkedSessionCallsDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionsApi } from "./host.ts";
-import { callKey, recordOf } from "./linked-sessions.ts";
+import { recordOf } from "./linked-sessions.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { clientKey, ownRequest } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
+
+/**
+ * This call's record in `LinkedSessionCallsDoc`, apart from those of linked sessions: `callKey` there hashes
+ * `<source>:<key>`, which starts with a digit. A key a module also gives `linkedSessions.start` finds no linked one.
+ */
+const callToken = (source: ConversationId, key: string): string =>
+    createHash("sha256").update(`session:${source}:${key}`).digest("hex");
 
 /** Thrown inside the creation commit when a repeat already recorded this call, so that commit writes nothing. */
 class AlreadyStarted extends Error {
@@ -63,7 +71,7 @@ export class ExtensionSessions implements SessionsApi {
         // Before anything is made: a source past its spend limit starts nothing.
         app.spend.check(user, source);
 
-        const token = callKey(source, key);
+        const token = callToken(source, key);
 
         const recorded = async (): Promise<ConversationId | undefined> => {
             const receipt = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
