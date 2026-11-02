@@ -140,6 +140,8 @@ test("an edit keeps what it does not change; no key uses the placeholder; removi
         api: "anthropic-messages",
         apiKey: "k",
     };
+    // The user's own override of a built-in provider.
+    config.providers.openai = { baseUrl: "https://proxy.example/v1", api: "openai-completions" };
     writeFileSync(modelsFile, JSON.stringify(config));
 
     const edited = await app.customProviders.update("home-llm", {
@@ -161,8 +163,9 @@ test("an edit keeps what it does not change; no key uses the placeholder; removi
     assert.deepEqual(
         app.customProviders.list().map((each) => each.id),
         ["home-llm"],
-        "other APIs are not listed",
+        "other APIs and built-in providers are not listed",
     );
+    await assert.rejects(app.customProviders.remove("openai"), /No such endpoint/);
 
     // A new key is a new sign-in: a limit that the old key hit is not its own.
     const epoch = app.providers.signInEpoch("home-llm");
@@ -171,7 +174,8 @@ test("an edit keeps what it does not change; no key uses the placeholder; removi
     assert.equal(app.providers.signInEpoch("home-llm"), epoch + 1);
     await app.customProviders.remove("home-llm");
     assert.equal(readModels().providers["home-llm"], undefined);
-    assert.ok(readModels().providers.other, "other providers stay");
+    assert.ok(!readFileSync(authFile, "utf8").includes("sk-again"), "its key goes too");
+    assert.ok(readModels().providers.other && readModels().providers.openai, "the others stay");
     assert.equal(app.models.getModel("home-llm", "qwen-big"), undefined);
 });
 
