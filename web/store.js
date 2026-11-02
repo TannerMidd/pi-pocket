@@ -304,6 +304,8 @@ export const store = {
          * server's view of it comes (Appearance's Wait for updates, `holdsFor`): its id, or null.
          */
         holding: null,
+        /** A session opened without a tab-memory view: its pane waits for the device or server, not a boot screen. */
+        pending: null,
         missing: null,
         connection: "connecting",
         notices: [],
@@ -995,10 +997,10 @@ export function signOut() {
 
 /**
  * What the sessions this tab keeps in its memory may take in all, as the length of their JSON: once parsed they take
- * about 1.6 times that (measured on real sessions), so about 25 MB. However many sessions that is: 26 real ones took
+ * about 1.6 times that (measured on real sessions), so about 50 MB. However many sessions that is: 26 real ones took
  * 7.5 MB. The device keeps more (`DEVICE_CHARS`): a session that went from memory loads from there in a moment.
  */
-const KEPT_CHARS = 16_000_000;
+const KEPT_CHARS = 32_000_000;
 /**
  * What the sessions this browser keeps on the device (`session-cache.js`, IndexedDB) may take in all, as the length of
  * their JSON: about 100 MB. Shared by every tab of the browser; the sessions used longest ago go first.
@@ -1178,10 +1180,36 @@ function forgetKept() {
 
 // ─── Sessions kept on the device ───────────────────────────────────────────────────────────────────────────────────
 
-/** Whether this browser keeps sessions on the device: the server allows it (`PI_POCKET_SESSION_CACHE`), and it can. */
+/**
+ * Who is signed in, and this server's build, as the page carries them (`serveApp`): `{ user, build }`, the same shape
+ * `hello` sends, so a session the device kept can be checked (`usable`) before `/api/me` answers. Null when the page
+ * names neither, as for a signed-out request.
+ */
+function knownFromPage() {
+    const text = document.getElementById("pocket-known")?.textContent;
+
+    if (!text) {
+        return null;
+    }
+
+    try {
+        const known = JSON.parse(text);
+
+        return known?.user?.id && typeof known.build === "string" ? known : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Whether this browser keeps sessions on the device: the server allows it (`PI_POCKET_SESSION_CACHE`), and it can.
+ * Before `/api/me` answers, the page saying who is signed in (`knownFromPage`) says the server allows it: a server
+ * that does not sends no such page, and what it kept is checked again once the answer comes.
+ */
 const onDevice = () =>
     !deviceCacheStopped &&
-    store.state.server?.deviceCache === true &&
+    (store.state.server?.deviceCache === true ||
+        (store.state.me === undefined && store.state.server == null && knownFromPage() !== null)) &&
     typeof indexedDB !== "undefined";
 
 /** Set at sign-out, in this tab or another: the device keeps nothing more. */
@@ -1287,10 +1315,11 @@ function readDevice(id) {
         : disk.read(id).catch(() => undefined);
 }
 
-/** Whether what the device kept of session `id` may be used: this person's, with the same rights, of this build. */
-function usable(found, id) {
-    const { me, server } = store.state;
-
+/**
+ * Whether what the device kept of session `id` may be used: this person's, with the same rights, of this build. Before
+ * `/api/me` answers, the page's own word of who and which build (`knownFromPage`) stands in for the store's.
+ */
+function usable(found, id, { me, server } = store.state) {
     return (
         found !== undefined &&
         onDevice() &&
@@ -1303,9 +1332,9 @@ function usable(found, id) {
 }
 
 /** A session the device kept (`readDevice`), as `deviceView` gives it, once it is checked. */
-function adopt(id, found) {
+function adopt(id, found, identity = store.state) {
     if (
-        !usable(found, id) ||
+        !usable(found, id, identity) ||
         store.state.conversationId !== id ||
         store.state.view.conversation != null
     ) {
@@ -1494,7 +1523,15 @@ function keptView(id) {
     shownSeen = kept?.seen ?? null;
 
     if (kept === undefined) {
-        return { view: emptyView(), transcriptFrom: null, transcriptPlace: null, holding: null };
+        // Not in memory: the device may have it (`showKept` reads it). Until that read, or the server's view, the
+        // transcript shows the session's header and a quiet loader, not the full-page boot screen (`pending`).
+        return {
+            view: emptyView(),
+            transcriptFrom: null,
+            transcriptPlace: null,
+            holding: null,
+            pending: id,
+        };
     }
 
     const hold = holdsFor(kept);
@@ -1505,6 +1542,8 @@ function keptView(id) {
         transcriptFrom: place?.from ?? null,
         transcriptPlace: place === null ? null : { keep: place.keep },
         holding: hold ? id : null,
+        // In hand: its quiet loader, from a switch that found nothing in memory, goes.
+        pending: null,
     };
 }
 
@@ -1563,8 +1602,13 @@ function applyView(data) {
         synced = data.conversation.id;
     }
 
-    // A session held for its changes (`holdsFor`) shows with them.
-    store.set((state) => ({ view: mergeView(state.view, data), missing: null, holding: null }));
+    // A session held for its changes (`holdsFor`) shows with them. Its quiet loader (`pending`) goes with the view.
+    store.set((state) => ({
+        view: mergeView(state.view, data),
+        missing: null,
+        holding: null,
+        pending: null,
+    }));
 }
 
 /**
@@ -1931,7 +1975,7 @@ const handlers = {
         store.set((state) => ({
             // Said of a session this tab has since left (`show`), it is not what the tab shows.
             ...(state.conversationId === data.conversationId
-                ? { missing: data.message, holding: null }
+                ? { missing: data.message, holding: null, pending: null }
                 : {}),
             ...(state.view.conversation?.id === data.conversationId ? { view: emptyView() } : {}),
         }));
@@ -2545,7 +2589,8 @@ function showKept(id) {
         }
 
         if (found !== undefined) {
-            store.set(found);
+            // In hand from the device: its quiet loader, shown while the read ran, goes.
+            store.set({ ...found, pending: null });
         }
 
         show();
@@ -2582,15 +2627,36 @@ onRoute(() => {
     }
 });
 
+// A failed `/api/me` leaves this device snapshot on screen; its original provenance follows the next attempt.
+let shownEarly = null;
+
 export async function start() {
     const generation = accountGeneration;
+    const retained = shownEarly;
 
     try {
         const asked = moment();
-        // The session the page opens on, from the device, read while the server answers who this is: then checked.
+        // Read the device while asking who this is. The signed-in page supplies the same identity and build for
+        // `usable`, never a browser-stored guess. Apply a checked copy as soon as the read finishes.
         const id = store.state.conversationId;
         const onDisk = id === null ? undefined : readDevice(id);
-        const hello = await api("me");
+        const answer = api("me");
+
+        // The request may fail before IndexedDB answers; it is handled by the await below.
+        void answer.catch(() => {});
+        const cached = await onDisk;
+        const known = knownFromPage();
+        const early =
+            known === null ? undefined : adopt(id, cached, { me: known.user, server: known });
+
+        if (early !== undefined) {
+            shownEarly = { id, cached };
+        }
+
+        store.set(early ?? {});
+        // Let App's queued render replace the static boot screen before revealing a checked transcript.
+        queueMicrotask(() => document.getElementById("app")?.removeAttribute("hidden"));
+        const hello = await answer;
 
         if (!acceptPerson(hello.user, generation)) {
             return;
@@ -2606,15 +2672,30 @@ export async function start() {
         });
         store.set(layoutPatch(firstLayout()));
 
-        if (onDisk !== undefined && store.state.view.conversation == null) {
-            const cached = await onDisk;
+        if (generation !== accountGeneration || changingAccount) {
+            reloadAccount();
 
-            if (generation !== accountGeneration || changingAccount) {
-                reloadAccount();
+            return;
+        }
 
-                return;
-            }
+        // Recheck the original record, including its owner, against `/api/me`. A changed sign-in, rights, build, or
+        // device-cache policy must remove the early view, and must not keep it for a later switch, including on retry.
+        const shown = early !== undefined ? { id, cached } : retained;
 
+        if (
+            shown !== null &&
+            store.state.view.conversation?.id === shown.id &&
+            !usable(shown.cached, shown.id)
+        ) {
+            forgetKept();
+            store.set({
+                view: emptyView(),
+                transcriptFrom: null,
+                transcriptPlace: null,
+                holding: null,
+                pending: shown.id,
+            });
+        } else if (store.state.view.conversation == null) {
             const found = adopt(id, cached);
 
             if (found !== undefined) {
@@ -2622,6 +2703,7 @@ export async function start() {
             }
         }
 
+        shownEarly = null;
         connect();
     } catch (error) {
         if (generation !== accountGeneration || changingAccount) {
@@ -2635,6 +2717,7 @@ export async function start() {
         }
 
         store.set({ me: error.status === 401 ? null : undefined });
+        queueMicrotask(() => document.getElementById("app")?.removeAttribute("hidden"));
 
         if (error.status !== 401) {
             notify("error", `Server unreachable: ${error.message}`);

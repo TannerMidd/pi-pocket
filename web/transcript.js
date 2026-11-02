@@ -3299,8 +3299,8 @@ function windowStart(rows, from) {
 }
 
 /**
- * How long after a kept session shows again (`keptView` in store.js) what comes for it is its catch-up: what the server
- * sends after the switch, which glides in at the bottom, or arrives below the reader without moving what they read.
+ * How long new rows carry the catch-up entrance. Each update after rows are on screen opens this window (`keptAt`),
+ * so a slow answer or reconnect still glides at the bottom, or keeps the reader's row when scrolled up.
  */
 const CATCH_UP_MS = 3000;
 /** How long a session held for its changes (Appearance's Wait for updates) waits for them before it shows anyway. */
@@ -3441,11 +3441,9 @@ export function Transcript() {
         entrance.current = routeSliding() ? "" : "rising";
     }
 
-    // When a kept session showed again, drawn from what the tab kept: what comes for it until `CATCH_UP_MS` after is its
-    // catch-up. 0 for a session that opened from the server's view (one held for its changes too).
-    const keptAt = useRef(null);
-
-    keptAt.current ??= view.conversation && !held ? performance.now() : 0;
+    // The last update after this session had rows on screen. Every such update opens its own catch-up window: no
+    // deadline measured from opening the session can make a later answer jump. The initial view still shows whole.
+    const keptAt = useRef(0);
     const catching = () => keptAt.current > 0 && performance.now() - keptAt.current < CATCH_UP_MS;
     /** The row the reader looks at, as this draw began, while the session catches up (`anchorOf`). */
     const anchor = useRef(null);
@@ -3511,8 +3509,16 @@ export function Transcript() {
     // Rows of the catch-up about to be drawn: where the reader looks, before Preact changes the page (it does after this
     // function returns), to keep it there after.
     const drawnRows = useRef(rows);
+    // A draw has put rows on screen: the next rows are a catch-up, and glide.
+    const shown = useRef(false);
 
     if (rows !== drawnRows.current) {
+        // Rows are already on screen (`shown`): this update glides however late it is, even after an earlier update's
+        // window has passed. The rows the session opens with do not glide themselves.
+        if (shown.current && view.conversation && !held) {
+            keptAt.current = performance.now();
+        }
+
         drawnRows.current = rows;
         anchor.current = catching()
             ? anchorOf(scroller.current, column.current, stick.current)
@@ -3556,6 +3562,7 @@ export function Transcript() {
         catchUp(element);
         place(element);
         counted.current = rows.length;
+        shown.current = rows.length > 0;
 
         if (rows.length === 0) {
             return;
@@ -3592,8 +3599,12 @@ export function Transcript() {
         }
 
         // The row measured from was drawn again (or folded away): the glide goes by what came below, from where the end
-        // of the column was. Without this a large catch-up jumped there in one frame.
-        const now = placed ?? before.at - addedBelow(column.current, before);
+        // of the column was. It also goes by that when the row is still there and rows came after it, which a bottom
+        // anchor's own edge does not include. Without this a catch-up jumped there in one frame.
+        const now =
+            placed === null || (before.bottom && addedBelow(column.current, before) > 0)
+                ? before.at - addedBelow(column.current, before)
+                : placed;
 
         if (!before.bottom) {
             // A browser that keeps the row in place by itself (scroll anchoring) has: then this moves nothing.
@@ -3668,7 +3679,9 @@ export function Transcript() {
             return;
         }
 
-        if (keptAt.current > 0) {
+        // Rows already on screen: what mounts after them is new. The catch-up window (`keptAt`) opens on the next
+        // draw, so this cannot wait for it.
+        if (shown.current) {
             settledFor = conversationId;
 
             return;
@@ -3860,8 +3873,22 @@ export function Transcript() {
     }
 
     if (!view.conversation || held) {
-        const { connection, sessions, conversationId } = store.state;
+        const { connection, sessions, conversationId, pending } = store.state;
         const title = sessions.find((session) => session.id === conversationId)?.title;
+
+        // Nothing kept anywhere: the session's own pane, its title, and a quiet loader, not the full-page boot screen.
+        // A session held for its changes keeps that screen, as before.
+        if (pending === conversationId && !held) {
+            return html`<main class="scroller">
+                <div class="transcript" data-part="transcript">
+                    <div class="loader" role="status">
+                        <${Spinner} label="Loading" />
+                        <span>${title ? `Loading ${title}` : "Loading"}…</span>
+                    </div>
+                </div>
+            </main>`;
+        }
+
         const caption =
             connection === "connecting"
                 ? "connecting"
