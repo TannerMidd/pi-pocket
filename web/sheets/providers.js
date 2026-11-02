@@ -87,7 +87,7 @@ function SubagentModels({ names }) {
 
     return html`<div class="subagent-models">
         <div class="subagent-models-heading">
-            <div class="label">Models for subagents</div>
+            <div class="label">Subagent models</div>
             <${RefreshModelsButton} />
         </div>
         <${RefreshModelsStatus} />
@@ -107,7 +107,7 @@ function SubagentModels({ names }) {
                 />
             </label>`
         }
-        <div class="subagent-models-list" role="group" aria-label="Models for subagents">
+        <div class="subagent-models-list" role="group" aria-label="Subagent models">
             ${
                 groups.size === 0 &&
                 html`<p class="muted small">
