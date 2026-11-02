@@ -241,9 +241,12 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
     // Tool search asks it, to send the tools it loads through codemode.
     web?.provide({ only });
 
+    // Modules reload into the running server before its host changes: until a restart, Only hides nothing.
+    const toolNames = host.toolNames as PocketHost["toolNames"] | undefined;
+
     /** Only mode: each other tool is for scripts alone. The names come at each resolve, so later modules count too. */
     const hide = () => {
-        const names = host.toolNames();
+        const names = toolNames?.() ?? [];
         const waiting = names.includes(TOOL_SEARCH_TOOL_NAME) ? DEFERRED_TOOLS : [];
 
         return names

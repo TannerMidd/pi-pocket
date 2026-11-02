@@ -210,3 +210,9 @@ test("with Lancet Guard asking, each nested call waits for its own answer, even 
         /^Tool call blocked: Sam denied this bash call after Lancet Guard asked \(risky\)/,
     );
 });
+
+test("Only mode on a server from before host.toolNames hides nothing", () => {
+    const web = { settings: () => {}, setting: () => "only", provide: () => {} };
+
+    assert.deepEqual(createCodemode(host, web as never).wraps, []);
+});
