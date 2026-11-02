@@ -198,6 +198,8 @@ test("a source past its spend limit, an invited person, and a PiP source are ref
 
     const pip = await app.pip.ensure(owner(app));
 
+    // Its person wrote there, so Pi works for someone: PiP itself is refused.
+    await writes(pip, owner(app), "from my PiP");
     await assert.rejects(
         app.extensionSessions.start(pip, { title: "No" }, "pip"),
         /Pi works for someone/,
