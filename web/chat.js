@@ -4,6 +4,7 @@
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar, initials, personColor } from "./avatar.js";
+import { notesDrafts } from "./notes-drafts.js";
 import {
     actions,
     attempt,
@@ -639,61 +640,63 @@ function PinsTab({ onShowChat }) {
 }
 
 function NotesTab() {
-    const { notes, users } = store.state;
-    const [draft, setDraft] = useState(null);
-    const [base, setBase] = useState(notes?.rev ?? 0);
-    const [saving, setSaving] = useState(false);
+    const { notes, users, me, conversationId } = store.state;
+    const [, redraw] = useState(0);
 
-    if (notes === null) {
+    useLayoutEffect(() => notesDrafts.subscribe(() => redraw((value) => value + 1)), []);
+
+    if (notes === null || !me?.id || conversationId === null) {
         return html`<${Loader} label="Loading notes" />`;
     }
 
+    const { draft, saving, error } = notesDrafts.get(me.id, conversationId);
     const editing = draft !== null;
-    const changedMeanwhile = editing && notes.rev !== base;
+    const changedMeanwhile = editing && notes.rev !== draft.base;
     const by = notes.by ? (users.find((user) => user.id === notes.by)?.name ?? "someone") : null;
+    const discard = () => notesDrafts.discard(me.id, conversationId);
 
-    const save = async (rev = base) => {
-        setSaving(true);
-        const saved = await attempt(() => actions.saveNotes(draft, rev));
+    const save = async (rev) => {
+        const submitted = notesDrafts.beginSave(me.id, conversationId);
 
-        setSaving(false);
-
-        if (saved) {
-            setDraft(null);
-            setBase(saved.rev);
+        if (!submitted) {
+            return;
         }
+
+        // Hold this account, conversation, and draft until the response. The panel may have closed or moved on.
+        const saved = await attempt(() => actions.saveNotes(submitted.text, rev ?? submitted.base));
+
+        notesDrafts.finishSave(me.id, conversationId, submitted, Boolean(saved));
     };
 
     return html`<p class="muted small">
         One page of notes for everyone here: the plan, decisions, who does what. Pi does not see it unless you send it.
     </p>
     ${
+        error &&
+        html`<div class="error-box small" role="status">
+            ${
+                error === "clear"
+                    ? "This browser could not clear its kept notes draft. It may return after a reload."
+                    : "This browser cannot keep this draft after a reload. Save your notes before reloading."
+            }
+        </div>`
+    }
+    ${
         changedMeanwhile &&
         html`<div class="error-box small">
             ${by ?? "Someone"} saved the notes while you were editing.
-            <button
-                class="link small"
-                onClick=${() => {
-                    setDraft(null);
-                    setBase(notes.rev);
-                }}
-            >
+            <button class="link small" disabled=${Boolean(saving)} onClick=${discard}>
                 Use theirs
-            </button> · <button class="link small" onClick=${() => save(notes.rev)}>Keep mine</button>
+            </button> · <button class="link small" disabled=${Boolean(saving)} onClick=${() => save(notes.rev)}>Keep mine</button>
         </div>`
     }
     <textarea
         class="notes"
         rows="10"
-        value=${editing ? draft : notes.text}
+        readOnly=${Boolean(saving)}
+        value=${editing ? draft.text : notes.text}
         placeholder="Write the plan here…"
-        onInput=${(event) => {
-            if (!editing) {
-                setBase(notes.rev);
-            }
-
-            setDraft(event.currentTarget.value);
-        }}
+        onInput=${(event) => notesDrafts.edit(me.id, conversationId, event.currentTarget.value, notes.rev)}
     ></textarea>
     <div class="row">
         <span class="muted small grow">
@@ -713,7 +716,7 @@ function NotesTab() {
         }
         ${
             editing &&
-            html`<button class="button small ghost" onClick=${() => setDraft(null)}>Cancel</button>`
+            html`<button class="button small ghost" disabled=${Boolean(saving)} onClick=${discard}>Cancel</button>`
         }
         <button
             class="button small primary"
