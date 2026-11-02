@@ -3,7 +3,15 @@
 import { cleanUp, openApp, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    lstatSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -202,4 +210,14 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
         /API key/,
         "a key or No key is required",
     );
+
+    // A models.json that links to another file stays a link, and that file changes.
+    const target = join(root, "dotfiles-models.json");
+
+    writeFileSync(target, empty);
+    rmSync(modelsFile);
+    symlinkSync(target, modelsFile);
+    await app.customProviders.create({ name: "Linked", baseUrl, noKey: true, models: [] });
+    assert.ok(lstatSync(modelsFile).isSymbolicLink());
+    assert.ok(JSON.parse(readFileSync(target, "utf8")).providers.linked);
 });

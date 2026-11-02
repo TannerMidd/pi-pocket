@@ -8,7 +8,16 @@
  * (which Pi reads) or one that Pi refuses is left alone, with a message, so a hand-made file never loses anything.
  * Fields it does not manage (headers, compat, a model's metadata) are kept as they are.
  */
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    realpathSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -514,7 +523,9 @@ export class CustomProviders {
      * Pi would refuse is not written: Pi then loads none of its providers.
      */
     async #write(config: Json): Promise<void> {
-        const path = this.#path();
+        const link = this.#path();
+        // A models.json that links elsewhere (a dotfiles folder) stays a link: the file it names changes.
+        const path = existsSync(link) ? realpathSync(link) : link;
         const temp = `${path}.${String(process.pid)}.tmp`;
 
         mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
