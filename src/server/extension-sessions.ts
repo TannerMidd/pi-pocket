@@ -168,21 +168,9 @@ export class ExtensionSessions implements SessionsApi {
                 ...(request.title === undefined ? {} : { title: request.title }),
             },
             {
-                projectDefaults: chosen?.model === undefined,
                 ...(chosen?.model === undefined ? {} : { model: chosen.model }),
                 ...(chosen?.thinking === undefined ? {} : { thinkingLevel: chosen.thinking }),
                 init: async (tx, made) => {
-                    // After the harness writes the starting agent: a model that cannot think at the asked level
-                    // would otherwise keep the level it started with.
-                    if (chosen?.model !== undefined || chosen?.thinking !== undefined) {
-                        Object.assign(await tx.doc(AgentDoc, made), {
-                            ...(chosen.model === undefined ? {} : { model: chosen.model }),
-                            ...(chosen.thinking === undefined
-                                ? {}
-                                : { thinkingLevel: chosen.thinking }),
-                        });
-                    }
-
                     const agent = await tx.doc(AgentDoc, made);
                     const model =
                         agent.model &&
@@ -229,6 +217,7 @@ export class ExtensionSessions implements SessionsApi {
     async #message(id: ConversationId, user: User, message: string, token: string): Promise<void> {
         const app = this.#app;
         const requestId = ownRequest(user.id, clientKey(token));
+        // Looked up before `Commands.submit`: its checks (a spend limit reached since) would refuse a repeat.
         const sent =
             (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) !==
             undefined;
