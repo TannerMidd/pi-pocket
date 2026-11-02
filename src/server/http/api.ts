@@ -591,6 +591,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
             const body = await readJson<{
                 approvalRule?: unknown;
                 compactIdleHours?: unknown;
+                cacheObservation?: unknown;
                 defaultModel?: unknown;
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
@@ -602,6 +603,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 [
                     body.approvalRule,
                     body.compactIdleHours,
+                    body.cacheObservation,
                     body.defaultModel,
                     body.pipCompactAt,
                     body.subagentModels,
@@ -627,6 +629,10 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
             if (body.compactIdleHours !== undefined) {
                 await app.setCompactIdleHours(user, body.compactIdleHours);
+            }
+
+            if (body.cacheObservation !== undefined) {
+                await app.setCacheObservation(user, body.cacheObservation);
             }
 
             if (body.approvalRule !== undefined) {

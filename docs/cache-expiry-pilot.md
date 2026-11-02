@@ -5,9 +5,9 @@ It does not replace the branch’s existing idle-on-send compaction behavior.
 
 ## Enable on a throwaway server
 
-Set `PI_POCKET_CACHE_EXPIRY_PILOT=observe` in the environment before starting a throwaway server.
+On a throwaway server, enable **Observe prompt cache** in the owner’s Providers → Compaction settings.
+The setting takes effect immediately and defaults to off. Turning it off cancels pending observations.
 Follow [Self-editing](self-editing.md) for isolated server setup. Do not use the running server’s data directory.
-Unset the variable to disable the pilot on the next launch. No settings UI or private Pi fields are used.
 
 ## What it observes
 
@@ -16,6 +16,8 @@ Unset the variable to disable the pilot on the next launch. No settings UI or pr
 - A 5-minute or 1-hour TTL that agrees with the model’s public `promptCache` metadata. Mixed TTLs use the shortest lifetime.
 - Successful response usage that reports cache reads or writes. Cache usage alone does not prove full conversation coverage.
 
+Mistral, OpenAI Codex, and Gemini Bridge report available token usage with expiry marked unknown.
+Their observations have no expiry timer. Missing cache usage can mean a miss or missing upstream reporting.
 Other providers, proxies, missing metadata, unsupported payloads, disabled caches, and zero cache usage produce no timer.
 A cached system prompt alone does not qualify. Nothing polls the provider for an expiry timestamp.
 

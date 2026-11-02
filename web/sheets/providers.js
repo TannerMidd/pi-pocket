@@ -215,6 +215,19 @@ function IdleCompaction() {
                 </button>`,
             )}
         </div>
+        ${
+            typeof store.state.server?.cacheObservation === "boolean" &&
+            html`<div class="small">Observe prompt cache</div>
+        <div class="segmented" role="group" aria-label="Observe prompt cache">
+            ${[false, true].map(
+                (enabled) => html`<button
+                class=${store.state.server.cacheObservation === enabled ? "on" : ""}
+                aria-pressed=${store.state.server.cacheObservation === enabled}
+                onClick=${() => attempt(() => api("settings", { cacheObservation: enabled }))}
+            >${enabled ? "On" : "Off"}</button>`,
+            )}
+        </div>`
+        }
     </div>`;
 }
 

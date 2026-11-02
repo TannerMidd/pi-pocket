@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
     type Api,
+    createAssistantMessageEventStream,
     type Model,
     normalizeContext,
     type SimpleStreamOptions,
@@ -346,6 +347,69 @@ test("unknown providers, proxies, metadata and TTLs never create speculative tim
     assert.equal(r.timers.size, 0);
 });
 
+test("Mistral, Codex and Gemini bridge report usage without guessing expiry", async () => {
+    for (const provider of ["mistral", "openai-codex", "gemini-bridge"]) {
+        const logs: string[] = [];
+        let timers = 0;
+        let enabled = true;
+        const pilot = new CacheExpiryPilot({
+            enabled: () => enabled,
+            conversationOf: async () => 7,
+            assess: async () => {
+                throw new Error("must not assess unknown expiry");
+            },
+            log: (line) => logs.push(line),
+            setTimer: () => {
+                timers++;
+
+                return {} as ReturnType<typeof setTimeout>;
+            },
+        });
+        const models = {
+            streamSimple() {
+                const stream = createAssistantMessageEventStream();
+
+                queueMicrotask(() =>
+                    stream.push({
+                        type: "done",
+                        reason: "stop",
+                        message: {
+                            role: "assistant",
+                            content: [],
+                            usage: { input: 50, output: 2, cacheRead: 100, cacheWrite: 0 },
+                            stopReason: "stop",
+                            timestamp: 0,
+                        },
+                    } as never),
+                );
+
+                return stream;
+            },
+        };
+
+        pilot.install(models as never);
+        const send = models.streamSimple as unknown as (
+            model: unknown,
+            context: unknown,
+            options: unknown,
+        ) => ReturnType<typeof createAssistantMessageEventStream>;
+        const model = { ...MODEL, provider };
+
+        await send(model, context, { sessionId: "private-id" }).result();
+        await flush();
+        assert.equal(logs.length, 1);
+        assert.match(logs[0]!, /unknown; no deadline or timer/);
+        assert.match(logs[0]!, /"cacheRead":100/);
+        assert.doesNotMatch(logs[0]!, /private-id/);
+        assert.equal(timers, 0);
+        enabled = false;
+        await send(model, context, { sessionId: "private-id" }).result();
+        await flush();
+        assert.equal(logs.length, 1);
+        pilot.close();
+    }
+});
+
 test("a system-only cache cannot establish a conversation deadline; mixed TTLs choose the shortest", () => {
     const payload = {
         model: MODEL.id,
@@ -422,6 +486,18 @@ test("late responses and suspended or backwards clocks never cause catch-up work
     await r.fire(r.now() - 10_000);
     assert.equal(r.assessed.length, 0);
     assert.equal(r.timers.size, 0);
+});
+
+test("turning observation off clears a pending timer and permits a fresh observation later", async () => {
+    const r = rig();
+
+    await r.send();
+    assert.equal(r.timers.size, 1);
+    r.pilot.clear();
+    assert.equal(r.timers.size, 0);
+    await r.send();
+    assert.equal(r.timers.size, 1);
+    r.pilot.close();
 });
 
 test("close and restart discard observations; an in-flight response cannot rearm them", async () => {

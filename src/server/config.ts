@@ -108,6 +108,8 @@ interface PocketConfig {
     limitWaitHours?: number;
     /** Hours a session sits idle before its next message compacts it first; absent: 1; 0: never. */
     compactIdleHours?: number;
+    /** Observe cache usage without sending extra requests; absent: off. */
+    cacheObservation?: boolean;
     /**
      * The owner's values for the settings extension modules declare (`web.settings`), by module and setting name. A
      * setting with no value here has its default. Since 0.22.0; an older Pi Pocket ignores it.
@@ -311,6 +313,20 @@ export class ConfigStore {
             delete this.#config.compactIdleHours;
         } else {
             this.#config.compactIdleHours = hours;
+        }
+
+        this.save();
+    }
+
+    get cacheObservation(): boolean {
+        return this.#config.cacheObservation === true;
+    }
+
+    set cacheObservation(enabled: boolean) {
+        if (enabled) {
+            this.#config.cacheObservation = true;
+        } else {
+            delete this.#config.cacheObservation;
         }
 
         this.save();

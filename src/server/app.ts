@@ -748,16 +748,14 @@ export class PocketApp {
 
         this.models = await ModelRuntime.create();
 
-        if (process.env.PI_POCKET_CACHE_EXPIRY_PILOT === "observe") {
-            this.#cacheExpiryPilot = new CacheExpiryPilot({
-                now: this.now,
-                conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
-                assess: (id, model) => assessCacheContext(this, id as ConversationId, model),
-                log: this.#log,
-            });
-            this.#cacheExpiryPilot.install(this.models);
-            this.#log("[cache-expiry-pilot] Observation only: no additional model requests.");
-        }
+        this.#cacheExpiryPilot = new CacheExpiryPilot({
+            now: this.now,
+            enabled: () => this.config.cacheObservation,
+            conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
+            assess: (id, model) => assessCacheContext(this, id as ConversationId, model),
+            log: this.#log,
+        });
+        this.#cacheExpiryPilot.install(this.models);
 
         // Innermost: observe the adapter payload only after the caller and all extension shapers finish.
         this.cacheKeeper.installPayloadObserver(this.models);
@@ -2292,6 +2290,7 @@ export class PocketApp {
                 limitWaitHours: this.config.limitWaitHours,
                 // Hours of idleness after which a person's next message compacts the session first.
                 compactIdleHours: this.config.compactIdleHours,
+                cacheObservation: this.config.cacheObservation,
             },
             // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
             folderFavorites: await this.folderFavorites.list(user),
@@ -3258,6 +3257,28 @@ export class PocketApp {
         }
 
         this.config.compactIdleHours = hours;
+        await this.#refreshClients();
+    }
+
+    async setCacheObservation(user: User, enabled: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (typeof enabled !== "boolean") {
+            throw new HttpError(400, "cacheObservation must be a boolean");
+        }
+
+        if (enabled === this.config.cacheObservation) {
+            return;
+        }
+
+        this.config.cacheObservation = enabled;
+
+        if (!enabled) {
+            this.#cacheExpiryPilot?.clear();
+        }
+
         await this.#refreshClients();
     }
 

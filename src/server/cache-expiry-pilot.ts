@@ -142,6 +142,7 @@ type Deps = {
     conversationOf: (sessionId: string) => Promise<number | undefined>;
     assess: (id: number, model: Model<Api>) => Promise<CacheAssessment>;
     log: (line: string) => void;
+    enabled?: () => boolean;
     now?: () => number;
     setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
     clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
@@ -161,6 +162,7 @@ export class CacheExpiryPilot {
     constructor(deps: Deps) {
         this.#deps = {
             now: Date.now,
+            enabled: () => true,
             setTimer: (fn, ms) => {
                 const timer = setTimeout(fn, ms);
 
@@ -180,7 +182,7 @@ export class CacheExpiryPilot {
         models.streamSimple = (model, context, options) => {
             const key = options?.sessionId;
 
-            if (this.#closed || key === undefined) {
+            if (this.#closed || !this.#deps.enabled() || key === undefined) {
                 return underlying(model, context, options);
             }
 
@@ -219,7 +221,10 @@ export class CacheExpiryPilot {
 
     close(): void {
         this.#closed = true;
+        this.clear();
+    }
 
+    clear(): void {
         for (const key of this.#entries.keys()) {
             this.#drop(key);
         }
@@ -267,13 +272,35 @@ export class CacheExpiryPilot {
 
         if (
             id === undefined ||
-            entry.ttlMs === undefined ||
             !usageValid ||
-            cacheRead + cacheWrite <= 0 ||
             message.stopReason === "error" ||
             message.stopReason === "aborted"
         ) {
             return this.#skip(key, entry, "no supported, successful cache observation");
+        }
+
+        if (entry.ttlMs === undefined) {
+            if (["mistral", "openai-codex", "gemini-bridge"].includes(model.provider)) {
+                this.#log({
+                    event: "observed",
+                    conversationId: id,
+                    provider: model.provider,
+                    model: model.id,
+                    startedAt: entry.startedAt,
+                    input,
+                    output,
+                    cacheRead,
+                    cacheWrite,
+                    expiry: "unknown; no deadline or timer",
+                    coverage: "reported cached input; full conversation coverage is unverified",
+                });
+            }
+
+            return this.#drop(key);
+        }
+
+        if (cacheRead + cacheWrite <= 0) {
+            return this.#skip(key, entry, "no reported cache usage");
         }
 
         const estimatedExpiresAt = entry.startedAt + entry.ttlMs;

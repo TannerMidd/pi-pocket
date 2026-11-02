@@ -1,48 +1,38 @@
-// Boot real app instances with isolated Pi settings and data. No model request is made.
-import { cleanUp, home, root, scriptedModel, work } from "./helpers.ts";
+// Verify owner-only persistent observation settings on isolated application data.
+import { cleanUp, home, owner, root, scriptedModel, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { PocketApp } from "../src/server/app.ts";
 
-const previous = process.env.PI_POCKET_CACHE_EXPIRY_PILOT;
+after(cleanUp);
 
-after(() => {
-    if (previous === undefined) {
-        delete process.env.PI_POCKET_CACHE_EXPIRY_PILOT;
-    } else {
-        process.env.PI_POCKET_CACHE_EXPIRY_PILOT = previous;
-    }
-
-    cleanUp();
-});
-
-for (const mode of [undefined, "observe"]) {
-    test(`cache expiry pilot app startup and shutdown: ${mode ?? "disabled by default"}`, async () => {
-        if (mode === undefined) {
-            delete process.env.PI_POCKET_CACHE_EXPIRY_PILOT;
-        } else {
-            process.env.PI_POCKET_CACHE_EXPIRY_PILOT = mode;
-        }
-
-        const logs: string[] = [];
-        const provider = scriptedModel();
-        const app = await PocketApp.open({
-            dataDir: join(root, `cache-pilot-${mode ?? "off"}`),
+test("cache observation is owner-only, immediate, and persists across restart", async () => {
+    const dataDir = join(root, "cache-pilot-setting");
+    const provider = scriptedModel();
+    const open = () =>
+        PocketApp.open({
+            dataDir,
             defaultCwd: work,
             home,
             supervised: false,
-            log: (line) => logs.push(line),
+            log: () => {},
             configureModels: (models) => models.registerNativeProvider(provider.provider),
         });
+    let app = await open();
 
-        try {
-            assert.equal(
-                logs.some((line) => line.includes("[cache-expiry-pilot]")),
-                mode === "observe",
-            );
-        } finally {
-            await app.close();
-        }
-    });
-}
+    try {
+        assert.equal(app.config.cacheObservation, false);
+        await assert.rejects(app.setCacheObservation({ ...owner(app), role: "guest" }, true));
+        await assert.rejects(app.setCacheObservation(owner(app), "true"));
+        await app.setCacheObservation(owner(app), true);
+        assert.equal(app.config.cacheObservation, true);
+        await app.close();
+        app = await open();
+        assert.equal(app.config.cacheObservation, true);
+        await app.setCacheObservation(owner(app), false);
+        assert.equal(app.config.cacheObservation, false);
+    } finally {
+        await app.close();
+    }
+});
