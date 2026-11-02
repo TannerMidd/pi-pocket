@@ -7,7 +7,7 @@ import type { User } from "./config.ts";
 import { LinkedSessionCallsDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionsApi } from "./host.ts";
-import { callKey } from "./linked-sessions.ts";
+import { callKey, recordOf } from "./linked-sessions.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { clientKey, ownRequest } from "./requests.ts";
 
@@ -187,14 +187,14 @@ export class ExtensionSessions implements SessionsApi {
         token: string,
         now: number,
     ): Promise<void> {
-        const calls = await tx.doc(LinkedSessionCallsDoc, source);
-        const receipt = calls.items[token];
+        // Kept and pruned as the records of linked sessions are.
+        const receipt = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, now);
 
-        if (receipt?.conversationId !== undefined) {
+        if (receipt.conversationId !== undefined) {
             throw new AlreadyStarted(receipt.conversationId as unknown as ConversationId);
         }
 
-        calls.items[token] = { conversationId: Number(made), by: user.id, at: now };
+        Object.assign(receipt, { conversationId: Number(made), by: user.id });
     }
 
     /** Send the first message as the person wrote it, once: a submission already stored for this key is the first. */

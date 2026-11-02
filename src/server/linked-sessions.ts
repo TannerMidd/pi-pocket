@@ -63,7 +63,7 @@ type CallOutcome = { busy: boolean; stopping?: boolean } | { archived: boolean; 
 type CallRecord = { conversationId?: number; by?: string; at: number; result?: CallOutcome };
 
 /** The record of call `token` in `calls`, made when there is none, the oldest pruned to make room. */
-function recordOf(
+export function recordOf(
     calls: { items: Record<string, CallRecord> },
     token: string,
     now: number,
