@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
-import { RefreshModels } from "../model-refresh.js";
+import { RefreshModelsButton, RefreshModelsStatus } from "../model-refresh.js";
 import { EndpointForm, removeCustomProvider, useCustomProviders } from "./custom-providers.js";
 
 /** Models past this many get a box to find them by. */
@@ -86,7 +86,11 @@ function SubagentModels({ names }) {
     };
 
     return html`<div class="subagent-models">
-        <div class="label">Models for subagents</div>
+        <div class="subagent-models-heading">
+            <div class="label">Models for subagents</div>
+            <${RefreshModelsButton} />
+        </div>
+        <${RefreshModelsStatus} />
         <p class="muted small">
             With none checked, subagents and linked sessions run on their session's model, and Pi cannot choose another. Check some, and they run only on those: on the session's model when it is checked, otherwise on a checked model that Pi chooses to suit the work. Pi cannot use any other.
         </p>
@@ -433,7 +437,6 @@ export function ProvidersSheet() {
             ${
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
-                    <${RefreshModels} />
                     <${LimitWait} />
                     <${SubagentModels}
                         names=${Object.fromEntries(

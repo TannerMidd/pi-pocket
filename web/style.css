@@ -7895,9 +7895,6 @@ div.group-head {
         overflow-y: auto;
         overscroll-behavior: contain;
     }
-    .providers-side .model-refresh {
-        margin-top: 0;
-    }
     .providers-side .subagent-models {
         flex: 1 1 0;
         min-height: 18rem;
@@ -7906,7 +7903,8 @@ div.group-head {
         border-bottom: 0;
         border-top: 1px solid var(--line);
     }
-    .providers-side .subagent-models > .label {
+    .providers-side .subagent-models > .label,
+    .providers-side .subagent-models-heading .label {
         margin: 0;
         font-size: 13px;
         font-weight: 600;
@@ -8052,14 +8050,21 @@ div.group-head {
     overflow-wrap: anywhere;
 }
 
-/* Shared refresh feedback stays visible after a request and wraps provider messages as plain text. */
-.model-refresh {
-    margin-block: 0.5rem;
-    min-width: 0;
+/* Refresh sits in the Models heading; its feedback stays under the heading and wraps provider messages as plain text. */
+.model-refresh-button[aria-busy="true"] svg {
+    animation: model-refresh-turn 0.9s linear infinite;
 }
 
-.model-refresh .button.model-refresh-button {
-    min-height: 40px;
+@keyframes model-refresh-turn {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .model-refresh-button[aria-busy="true"] svg {
+        animation: none;
+    }
 }
 
 .model-refresh-status {
@@ -8067,6 +8072,10 @@ div.group-head {
     overflow-y: auto;
     overflow-wrap: anywhere;
     overscroll-behavior: contain;
+}
+
+.model-refresh-status:empty {
+    display: none;
 }
 
 .model-refresh-status p {
@@ -8099,6 +8108,18 @@ div.group-head {
     padding: 0.6rem 0 0.8rem;
     margin-bottom: 0.4rem;
     border-bottom: 1px solid var(--line);
+}
+
+.subagent-models-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-block: -8px;
+}
+
+.subagent-models-heading .label {
+    margin-block: 0;
 }
 
 .subagent-models p {
