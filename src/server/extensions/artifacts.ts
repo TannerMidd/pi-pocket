@@ -217,7 +217,7 @@ export const BRIDGE_GUIDE = join(APP_ROOT, "src", "server", "guides", "artifact-
 
 const guide = (inline: boolean) =>
     `Use the artifact tool for results to see rendered, not read: demos, games, charts, diagrams, reports; not for plain answers or project files.
-- HTML runs in a sandboxed frame on the user's device (often a phone), with no access to this app. Make it self-contained, responsive (a viewport meta tag), and touch-friendly, with loading and error states (window.onerror).
+- HTML runs in a sandboxed frame on the user's device (often a phone), with no access to this app, its cookies, or the parent page. Make it self-contained, responsive (a viewport meta tag), and touch-friendly, with loading and error states (window.onerror).
 - Load libraries from a CDN by full URL (https://esm.sh, https://cdn.jsdelivr.net); bare specifiers need an import map.
 - For a page that puts a message in the person's message box or keeps its state across reloads and devices, read ${BRIDGE_GUIDE} first.
 - Send edits for small fixes. Give path to publish a local file without repeating it; everyone in the conversation can open the copy.
@@ -650,7 +650,7 @@ const LEGACY_INLINE = "artifact_inline";
 
 /** What the artifact tool says it does where no reply draws a card. */
 const VIEWER_ONLY =
-    "Publish an HTML page, Markdown, or SVG to the artifact viewer. The same id makes a new version. Give one of content, edits, or path (up to 2 MB).";
+    "Publish an HTML page, Markdown, or SVG to the artifact viewer. The same id makes a new version. Give exactly one of content, edits, or path (up to 2 MB).";
 
 /** The artifact tool without `inline`, for a session whose panel draws no cards (PiP's). */
 export function withoutInline(tool: ToolRegistration): ToolRegistration {
@@ -671,14 +671,14 @@ export default function createArtifacts(_host: PocketHost) {
     const artifact = defineTool({
         name: "artifact",
         description:
-            "Publish an HTML page, Markdown, or SVG to the artifact viewer, or (inline: true, HTML only) as a card in your reply. The same id makes a new version. Give one of content, edits, or path (up to 2 MB); inline takes content or edits.",
+            "Publish an HTML page, Markdown, or SVG to the artifact viewer, or (inline: true, HTML only) as a card in your reply. The same id makes a new version. Give exactly one of content, edits, or path (up to 2 MB); inline takes content or edits.",
         parameters: Type.Object({
             inline: Type.Optional(Type.Boolean()),
             ...bundleParameters,
             type: Type.Optional(
                 StringEnum(["html", "markdown", "svg"] as const, {
                     description:
-                        "Default: html, or a new path's extension. A path cannot change it.",
+                        "Default: html, or a new path's extension. A path cannot change an existing type.",
                 }),
             ),
             content: Type.Optional(Type.String({ description: "The whole new version." })),

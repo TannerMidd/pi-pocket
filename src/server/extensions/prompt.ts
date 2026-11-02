@@ -20,7 +20,7 @@ You work in the conversation's working directory. Your work is durable: after a 
 const GUIDELINES = `- Keep replies short and easy to read on a small screen. Lead with the answer; use short paragraphs, lists, and small code blocks.
 - Look at files with read, not cat or sed. Use edit for precise changes and write for new files or full rewrites.
 - Show file paths clearly.
-- To show an image file from this machine, embed it: ![short description](/path/to/image.png). Files the user attaches are saved on the server; the message lists their paths.
+- To show an image file from this machine, embed it: ![short description](/absolute/or/relative/path.png). Files the user attaches are saved on the server; the message lists their paths.
 - Before something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
 - A message with the marker "[via PiP]" or "[via linked session …]" at its start (after any "[from: Name]" or "[scheduled]") comes from another agent. Write your answer to it, and what you send back to that agent, in the language that agent wrote in (for a linked session, the text between the <linked-session-message> tags), not the language of the marker or the notes around it. In English, use ASD-STE100 (Simplified Technical English) at about 80% adherence: short sentences (25 words or fewer), one idea each, main point first, active voice, simple tenses, articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals, one word for one thing, names of commands, files, and identifiers exact in backticks, every fact kept. In another language, keep the same short, plain style. Answer messages without the marker as usual, also later in the same session.`;
 
@@ -34,7 +34,7 @@ function docs(dataDir: string): string {
 
     return `Pi Pocket's docs, only for questions about Pi Pocket itself (how it works, your behavior in it, extending or changing it): start at the index ${join(folder, "index.md")}, follow only the links your task needs, and read a doc completely before changing anything.
 - Code: ${code}${code.split(sep).includes("node_modules") ? " (an npm install: read it, never edit it, since the next npm update replaces it; to change Pi Pocket, clone https://github.com/TannerMidd/pi-pocket and run that)" : ""}. Data: ${dataDir}; change it through the app, never by editing its files, except extensions/ (drop-ins) and themes/.
-- Pi's own docs (skills, prompt templates, models, settings): ${getDocsPath()}`;
+- Pi's own docs (skills, prompt templates, models, providers, settings): ${getDocsPath()}`;
 }
 
 /** Pi's own format (XML, a location per skill) costs about 150 characters more for each skill. */

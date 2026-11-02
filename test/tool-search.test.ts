@@ -53,6 +53,17 @@ const route: FauxResponseStep = (request) => {
         });
     }
 
+    if (role === "user" && text.includes("spawn from a script")) {
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("codemode", {
+                    code: 'return await tools.subagent({ action: "spawn", name: "scripted", message: "Look." })',
+                }),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
     if (role !== "toolResult" && text.includes("need the design system")) {
         return fauxAssistantMessage([fauxToolCall("tool_search", { query: "design_system" })], {
             stopReason: "toolUse",
@@ -195,6 +206,14 @@ test("subagent loads with its guide: a section with tool changes in the messages
     assert.match(result?.text ?? "", /Call it from a codemode script: await tools\.subagent/);
     assert.match(result?.text ?? "", /A subagent does not see this conversation/);
     assert.match(result?.text ?? "", /Subagents run on your model/);
+
+    // Through codemode, as the result says: the subagent starts.
+    await say(app, id, "spawn from a script");
+    await until(
+        async () =>
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.scripted !== undefined,
+        "the subagent a script started",
+    );
 });
 
 test("any design tool shows the design guide's section once it is loaded", async () => {

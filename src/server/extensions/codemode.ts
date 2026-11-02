@@ -57,7 +57,7 @@ const ONLY_GUIDE = `Your other tools are not declared. Call them only from a cod
 
 const DESCRIPTION = `Run JavaScript that calls your other tools: raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox, where top-level \`await\` and \`return\` work. No Node, file system, network, or timers.
 - \`await tools.<name>({ ...args })\` takes a tool's usual arguments and resolves to its text output; it rejects with an Error when the call fails or is blocked. Calls still running at the end are cancelled.
-- Each call is checked like a direct call: Lancet Guard may block it or wait for a person to approve it.
+- Each call is checked like a direct call: Lancet Guard may block it or ask a person.
 - Optional first line: \`// @options: {"max_output_tokens": 10000, "timeout_ms": 60000}\`
 Globals: \`text(value)\`, \`image(dataUrlOrImageBlock)\`, \`console.log(...)\`, and \`return\` add output; \`exit()\` ends the script; \`store(key, value)\` and \`load(key)\` keep JSON across codemode calls in this conversation; \`ALL_TOOLS\` lists the tools a script can call.`;
 
@@ -527,7 +527,7 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
                     return undefined;
                 }
 
-                return `Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of making many separate calls${names.includes("subagent") ? ", for example to start several subagents at once" : ""}.`;
+                return `Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output${names.includes("subagent") ? ", for example to start several subagents at once" : ""}.`;
             }),
         ],
     });

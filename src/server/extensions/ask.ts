@@ -7,7 +7,7 @@ import type { AskField, PocketHost } from "../host.ts";
 
 const DESCRIPTION =
     "Ask the person questions on a card, with answers to tap; they can also type their own. " +
-    "It waits for the answer, maybe for hours, and returns one line per question: `header: answer`.";
+    "It waits, maybe for hours, and returns one line per question: `header: answer`.";
 
 const GUIDE = `Use the ask tool when a decision changes the work and only the person can make it: the scope, a behavior choice, or a trade-off. Put all your questions in one call, and the option you recommend first, with "(Recommended)" at the end of its label. Not for a yes or no that a plain sentence covers, or for permission to run tools (the guard asks for that). Never ask the same thing twice.`;
 
