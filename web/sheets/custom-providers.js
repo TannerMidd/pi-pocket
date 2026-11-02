@@ -3,7 +3,7 @@
 // each endpoint's own row edits or removes it. The server keeps each in Pi's models.json, and its
 // key in Pi's sign-ins.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { api, attempt, notify } from "../store.js";
+import { api, attempt, notify, store } from "../store.js";
 import { html, Icon, MODEL_SEARCH_AT } from "../ui.js";
 
 /** The form that adds an endpoint (`editing` undefined) or changes one. */
@@ -43,7 +43,8 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             const answer = await api("custom-providers/discover", {
                 baseUrl,
                 ...(noKey ? {} : { apiKey }),
-                ...(editing ? { id: editing.id } : {}),
+                // No key asks with none, not with the saved key.
+                ...(editing && !noKey ? { id: editing.id } : {}),
             });
 
             setListed(answer.models);
@@ -252,9 +253,10 @@ export function useCustomProviders(owner) {
               })
             : undefined;
 
+    // Also when the models change, as another tab's save changes them.
     useEffect(() => {
         load();
-    }, [owner]);
+    }, [owner, store.state.models]);
 
     return { list, load };
 }
