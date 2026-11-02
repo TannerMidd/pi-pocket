@@ -144,10 +144,7 @@ export class ExtensionSessions implements SessionsApi {
             );
         }
 
-        const selected = app.models.getModel(model.provider, model.modelId)!;
-        const thinking = asked === undefined ? undefined : levelFor(selected, asked);
-
-        return { model, ...(thinking === undefined ? {} : { thinking }) };
+        return { model, ...(asked === undefined ? {} : { thinking: asked }) };
     }
 
     /** Make the session and the call's record in one commit. A repeat of that commit returns the first. */
@@ -183,6 +180,11 @@ export class ExtensionSessions implements SessionsApi {
                             409,
                             "Pick a model first: name one in `model`, or choose a default model.",
                         );
+                    }
+
+                    // Lowered to a level that the session's model has, named or the default.
+                    if (chosen?.thinking !== undefined && model !== undefined) {
+                        agent.thinkingLevel = levelFor(model, chosen.thinking);
                     }
 
                     await this.#receipt(tx, source, made, user, token, now);

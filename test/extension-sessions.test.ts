@@ -69,7 +69,8 @@ test("start makes a top-level session in the given folder, with the given title,
     const cwd = join(root, "ordinary-folder");
 
     mkdirSync(cwd);
-    await app.allowSubagentModel(owner(app), "faux/faux-2", false);
+    // A list for subagents without faux-2: it does not apply here.
+    await app.allowSubagentModel(owner(app), "faux/faux-1", true);
     const { session } = await app.extensionSessions.start(
         id,
         { title: "Project", cwd, model: "faux/faux-2", thinking: "high" },
@@ -86,6 +87,12 @@ test("start makes a top-level session in the given folder, with the given title,
     assert.equal(listed?.linkedFrom, undefined);
     assert.equal(app.sessionMeta(session)?.linkedFrom, undefined);
     assert.equal(app.cwdOf(id), work);
+    await app.setSubagentModels(owner(app), []);
+
+    // No model named: lowered to a level that the default model (faux-1, no reasoning) has.
+    const plain = await app.extensionSessions.start(id, { thinking: "xhigh" }, "plain");
+
+    assert.equal((await app.agentState(plain.session))?.thinkingLevel, "off");
 });
 
 test("a message is sent as an ordinary input from the person", async () => {
