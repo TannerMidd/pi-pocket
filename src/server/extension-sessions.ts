@@ -56,6 +56,12 @@ export class ExtensionSessions implements SessionsApi {
         key: string,
     ): Promise<{ session: ConversationId }> {
         const app = this.#app;
+
+        // `Commands.submit` sends no blank message: it is refused before anything is made.
+        if (request.message !== undefined && request.message.trim() === "") {
+            throw new HttpError(400, "The first message is empty.");
+        }
+
         const token = callToken(source, key);
         const recorded = async () =>
             (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))?.items[token];
@@ -148,7 +154,7 @@ export class ExtensionSessions implements SessionsApi {
     async #create(
         source: ConversationId,
         user: User,
-        request: { title?: string; cwd?: string },
+        request: { title?: string; cwd?: string; message?: string },
         chosen: { model?: ModelRef; thinking?: ModelThinkingLevel } | undefined,
         token: string,
     ): Promise<ConversationId> {
@@ -175,6 +181,20 @@ export class ExtensionSessions implements SessionsApi {
                                 ? {}
                                 : { thinkingLevel: chosen.thinking }),
                         });
+                    }
+
+                    const agent = await tx.doc(AgentDoc, made);
+                    const model =
+                        agent.model &&
+                        app.models.getModel(agent.model.provider, agent.model.modelId);
+
+                    // `Commands.submit` refuses a first message on a session with no model. Refused here, in the
+                    // commit that makes the session, it leaves no session.
+                    if (request.message !== undefined && model === undefined) {
+                        throw new HttpError(
+                            409,
+                            "Pick a model first: name one in `model`, or choose a default model.",
+                        );
                     }
 
                     await this.#receipt(tx, source, made, user, token, now);

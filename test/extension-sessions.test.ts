@@ -136,7 +136,7 @@ test("two starts at once with the same key make one session", async () => {
     assert.equal((await told(first.session, "between")).length, 1);
 });
 
-test("an unknown model, or a folder that does not exist, is refused and leaves no session", async () => {
+test("an unknown model, a missing folder, or a first message submit refuses leaves no session", async () => {
     const id = await source();
     const count = app.sessions().length;
     const file = join(root, "ordinary-file");
@@ -148,13 +148,25 @@ test("an unknown model, or a folder that does not exist, is refused and leaves n
         { model: "no-such" },
         { cwd: join(root, "missing-ordinary") },
         { cwd: file },
+        { message: "  " },
     ]) {
         await assert.rejects(
             app.extensionSessions.start(id, request, crypto.randomUUID()),
-            /not available|isn't there|not a folder|provider\/modelId/,
+            /not available|isn't there|not a folder|provider\/modelId|empty/,
         );
         assert.equal(app.sessions().length, count);
     }
+
+    const last = app.config.lastModel;
+
+    // No model a new session gets: `Commands.submit` would refuse the message after the session is made.
+    app.config.lastModel = undefined;
+    await assert.rejects(
+        app.extensionSessions.start(id, { message: "hi" }, "none"),
+        /Pick a model/,
+    );
+    app.config.lastModel = last;
+    assert.equal(app.sessions().length, count);
 });
 
 test("a source past its spend limit, an invited person, and a PiP source are refused", async () => {
