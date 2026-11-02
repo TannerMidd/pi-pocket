@@ -55,6 +55,10 @@ Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose funct
 
 `FolderFavoritesDoc` (`pocket.folder-favorites`) stores each person's ordered favorite working folders in SQLite. `folder-favorites.ts` reads and changes only the signed-in person's list; explicit star/unstar operations run inside one harness transaction, so concurrent devices do not overwrite unrelated changes. The commit coordinator sends each connected client only its person's list as a `folder-favorites` event. `hello.folderFavorites` supplies the initial list and refreshes it on reconnect. The folder picker shows only what the server committed, so a failed save leaves its list as it was.
 
+## Ordinary sessions an extension starts
+
+`ExtensionSessions` (`extension-sessions.ts`, `app.sessions`, `host.sessions` as `SessionsApi`) starts a top-level session for the person Pi works for in the source, the same kind New session makes. It writes nothing to `linkedFrom`. The owner's list of models for subagents does not apply: a named model must be known and usable now, and a start that names none keeps the default a new session would get. The call's record is an item of `LinkedSessionCallsDoc`, written in the commit that makes the session, so a repeat returns that session. Its first message, when given, goes through `Commands.submit` as that person's own words (a `u:` request id), and a repeat finds that submission. A source past its spend limit, an invited person, and a PiP source are refused before anything is made. Since 0.29.0, experimental.
+
 ## Linked sessions
 
 `LinkedSessions` (`linked-sessions.ts`, `app.linkedSessions`, `host.linkedSessions` as `LinkedSessionsApi`) starts a session from another and carries messages between them; Agent Teams (`extensions/agent-teams.ts`, off by default) is its only user. A linked session is an ordinary ownerless session in the source's folder. Its session entry's `linkedFrom` names the session that started it, and nothing else follows from it: it is not in `SubagentsDoc`, `parentOf`, or `rootOf`, so it gives no access, and stopping or archiving one leaves the other as it was.

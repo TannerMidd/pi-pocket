@@ -32,6 +32,7 @@ import {
     type Task,
     type TaskId,
     type TaskRuntime,
+    type Tx,
     type UserInput,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -390,7 +391,19 @@ export class Commands {
     async createSession(
         user: User,
         request: { cwd?: string; title?: string; worktree?: unknown },
-        { projectDefaults = true }: { projectDefaults?: boolean } = {},
+        {
+            projectDefaults = true,
+            model,
+            thinkingLevel,
+            init,
+        }: {
+            projectDefaults?: boolean;
+            /** A model the caller already checked: it replaces the default, in the commit that makes the session. */
+            model?: ModelRef;
+            thinkingLevel?: ModelThinkingLevel;
+            /** Runs in the commit that makes the session, after its entry is written. */
+            init?: (tx: Tx, id: ConversationId) => Promise<void>;
+        } = {},
     ): Promise<{ id: ConversationId }> {
         const app = this.#app;
 
@@ -422,17 +435,23 @@ export class Commands {
                 // An internal caller about to apply a person's explicit model keeps its previous starting pair.
                 const initial = this.#defaultModel(
                     undefined,
-                    projectDefaults && !remote ? cwd : undefined,
+                    projectDefaults && model === undefined && !remote ? cwd : undefined,
                 );
                 const conversation = await app.harness.createConversation(
                     {
                         ownership: { kind: "ownerless" },
                         agent: {
                             cwd,
-                            ...(initial.model === undefined ? {} : { model: initial.model }),
-                            ...(initial.thinkingLevel === undefined
-                                ? {}
-                                : { thinkingLevel: initial.thinkingLevel }),
+                            ...(model !== undefined
+                                ? { model }
+                                : initial.model === undefined
+                                  ? {}
+                                  : { model: initial.model }),
+                            ...(thinkingLevel !== undefined
+                                ? { thinkingLevel }
+                                : initial.thinkingLevel === undefined
+                                  ? {}
+                                  : { thinkingLevel: initial.thinkingLevel }),
                         },
                         init: async (tx, id) => {
                             const sessions = await tx.doc(SessionsDoc);
@@ -445,6 +464,7 @@ export class Commands {
                                 ...(title === undefined ? {} : { title }),
                                 ...(worktree === undefined ? {} : { worktree }),
                             };
+                            await init?.(tx, id);
                         },
                     },
                     context,
