@@ -7827,6 +7827,19 @@ div.group-head {
     flex-shrink: 0;
 }
 
+/* A quiet aside about where sign-ins live, tucked against the search box. */
+.providers-note {
+    margin: 0 2px -8px;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--faint);
+}
+
+.providers-note .mono {
+    font-style: normal;
+    font-size: 11px;
+}
+
 .provider-group {
     display: flex;
     flex-direction: column;

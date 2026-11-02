@@ -430,9 +430,6 @@ export function ProvidersSheet() {
         onClose=${closeSheet}
         className=${`providers-sheet ${owner ? "with-side" : ""}`}
     >
-        <p class="muted small">
-            Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
-        </p>
         <div class="providers-layout">
             ${
                 owner &&
@@ -447,6 +444,9 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${auth && !authInList && html`<${AuthDialog} inline=${true} />`}
+                <p class="providers-note">
+                    Pi Pocket shares Pi's sign-ins (<span class="mono">~/.pi/agent/auth.json</span>). ${owner ? "" : "Only the owner can change them."}
+                </p>
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
