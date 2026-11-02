@@ -207,6 +207,33 @@ test("an Interrupt chosen but not used does not stay armed for the next run", re
     await setBusy(false);
 });
 
+test("Stop keeps the pending message in the composer", real, async () => {
+    await home(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${Number(one)}`);
+    await opened(one);
+    await page.evaluate(`
+        const { actions } = await import('/store.js');
+        let rejectSend;
+        actions.submit = () => new Promise((resolve, reject) => { rejectSend = reject; });
+        actions.abort = async () => { rejectSend(new Error('Message stopped')); };
+    `);
+    await page.type({ selector: BOX }, "keep this message");
+    await page.click({ selector: ".send-button" });
+    await until(
+        () => inPage<boolean>(`return JSON.stringify(!!document.querySelector('.stop-button'))`),
+        "Stop is visible while sending",
+    );
+    await page.click({ selector: ".stop-button" });
+    await until(
+        () => inPage<boolean>(`return JSON.stringify(!document.querySelector('.stop-button'))`),
+        "the stopped send settles",
+    );
+    assert.equal(
+        await inPage<string>(`return JSON.stringify(document.querySelector('${BOX}').value)`),
+        "keep this message",
+    );
+});
+
 test("a chosen Queue stays chosen for the next run", real, async () => {
     await home(VIEWPORTS.desktop);
     await page.navigate(`${base}/s/${Number(one)}`);

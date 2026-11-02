@@ -590,6 +590,8 @@ export function createApi(options: HttpOptions, auth: Auth) {
         if (first === "settings" && method === "POST") {
             const body = await readJson<{
                 approvalRule?: unknown;
+                compactIdleHours?: unknown;
+                cacheObservation?: unknown;
                 defaultModel?: unknown;
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
@@ -600,6 +602,8 @@ export function createApi(options: HttpOptions, auth: Auth) {
             if (
                 [
                     body.approvalRule,
+                    body.compactIdleHours,
+                    body.cacheObservation,
                     body.defaultModel,
                     body.pipCompactAt,
                     body.subagentModels,
@@ -621,6 +625,14 @@ export function createApi(options: HttpOptions, auth: Auth) {
             // How long a run waits for a provider's limit to clear: the owner's (checked in `app.ts`).
             if (body.limitWaitHours !== undefined) {
                 await app.setLimitWaitHours(user, body.limitWaitHours);
+            }
+
+            if (body.compactIdleHours !== undefined) {
+                await app.setCompactIdleHours(user, body.compactIdleHours);
+            }
+
+            if (body.cacheObservation !== undefined) {
+                await app.setCacheObservation(user, body.cacheObservation);
             }
 
             if (body.approvalRule !== undefined) {
