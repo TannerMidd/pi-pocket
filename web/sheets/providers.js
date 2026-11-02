@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, Sheet } from "../ui.js";
 import { RefreshModels } from "../model-refresh.js";
-import { CustomProviders } from "./custom-providers.js";
+import { EndpointForm, removeCustomProvider, useCustomProviders } from "./custom-providers.js";
 
 /** Models past this many get a box to find them by. */
 const MODEL_SEARCH_AT = 8;
@@ -198,6 +198,18 @@ export function ProvidersSheet() {
         }
     }, [auth]);
     const owner = me?.role === "owner";
+    const custom = useCustomProviders(owner);
+    // The endpoint form: "new", an endpoint's id, or null when closed.
+    const [endpointForm, setEndpointForm] = useState(null);
+    const customIds = new Set((custom.list ?? []).map((endpoint) => endpoint.id));
+
+    const openEndpointForm = (id) => setEndpointForm((was) => (was === id ? null : id));
+
+    const endpointSaved = () => {
+        setEndpointForm(null);
+        custom.load();
+        load();
+    };
 
     const login = (provider, type, button) => {
         loginButton.current = button;
@@ -214,10 +226,26 @@ export function ProvidersSheet() {
             load();
         });
     const needle = query.trim().toLowerCase();
-    const list = (providers ?? [])
+    // Not a provider of Pi's: the row that adds an OpenAI-compatible endpoint, which becomes one.
+    const addRow = owner
+        ? [
+              {
+                  id: "openai-compatible",
+                  name: "OpenAI Compatible",
+                  configured: false,
+                  adds: true,
+                  models: 0,
+                  words: "custom endpoint local self-hosted ollama lm studio vllm llama.cpp proxy",
+              },
+          ]
+        : [];
+    const list = [...(providers === null ? [] : addRow), ...(providers ?? [])]
         .filter(
             (provider) =>
-                needle === "" || `${provider.id} ${provider.name}`.toLowerCase().includes(needle),
+                needle === "" ||
+                `${provider.id} ${provider.name} ${provider.words ?? ""}`
+                    .toLowerCase()
+                    .includes(needle),
         )
         .sort(
             (a, b) =>
@@ -236,7 +264,20 @@ export function ProvidersSheet() {
         ],
     ].filter(([, each]) => each.length > 0);
 
-    const row = (provider) => html`<div class="provider" key=${provider.id}>
+    // A row, and under it the endpoint form when it adds or edits that one.
+    const row = (provider) => [
+        providerRow(provider),
+        owner &&
+            (endpointForm === provider.id ||
+                (endpointForm === "new" && provider.id === "openai-compatible")) &&
+            html`<${EndpointForm}
+                key=${`form-${endpointForm}`}
+                editing=${custom.list?.find((endpoint) => endpoint.id === endpointForm)}
+                onDone=${endpointSaved}
+                onCancel=${() => setEndpointForm(null)}
+            />`,
+    ];
+    const providerRow = (provider) => html`<div class="provider" key=${provider.id}>
         <div class="provider-info">
             <div class="provider-name">
                 ${provider.name}
@@ -246,9 +287,15 @@ export function ProvidersSheet() {
                         : provider.configured && html` <span class="ok">✓</span>`
                 }
             </div>
-            <div class="muted small">
+            ${
+                provider.adds
+                    ? html`<div class="muted small">
+                          Any server with the OpenAI API (Ollama, LM Studio, vLLM, a proxy): a URL, a key, and its models
+                      </div>`
+                    : html`<div class="muted small">
                 ${provider.needsSignIn ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them" : provider.configured ? `signed in${provider.label ? ` · ${provider.label}` : provider.source ? ` · ${provider.source}` : ""}` : "not configured"} · ${provider.models} models
-            </div>
+                    </div>`
+            }
             ${
                 provider.needsSignIn &&
                 html`<div class="muted small mono provider-why">${provider.needsSignIn}</div>`
@@ -257,6 +304,36 @@ export function ProvidersSheet() {
         ${
             owner &&
             html`<div class="provider-actions">
+                ${
+                    provider.adds &&
+                    html`<button
+                        class="button small"
+                        aria-expanded=${endpointForm === "new"}
+                        onClick=${() => openEndpointForm("new")}
+                    >
+                        Add
+                    </button>`
+                }
+                ${
+                    customIds.has(provider.id) &&
+                    html`<button
+                            class="button small"
+                            aria-expanded=${endpointForm === provider.id}
+                            onClick=${() => openEndpointForm(provider.id)}
+                        >
+                            Edit
+                        </button>
+                        <button
+                            class="button small ghost"
+                            onClick=${() =>
+                                removeCustomProvider(
+                                    custom.list.find((endpoint) => endpoint.id === provider.id),
+                                    endpointSaved,
+                                )}
+                        >
+                            Remove
+                        </button>`
+                }
                 ${
                     provider.oauth &&
                     html`<button
@@ -268,6 +345,7 @@ export function ProvidersSheet() {
                 }
                 ${
                     provider.apiKey &&
+                    !customIds.has(provider.id) &&
                     html`<button
                         class="button small"
                         onClick=${(event) => login(provider, "api_key", event.currentTarget)}
@@ -327,7 +405,6 @@ export function ProvidersSheet() {
                         <button class="button" onClick=${() => setQuery("")}>Clear search</button>
                     </div>`
                 }
-                ${owner && needle === "" && html`<${CustomProviders} onChanged=${load} />`}
                 ${groups.map(
                     ([title, each]) => html`<section class="provider-group" key=${title}>
                         <h3 class="provider-group-head">

@@ -7936,11 +7936,9 @@ div.group-head {
     justify-content: flex-end;
 }
 
-/* OpenAI-compatible endpoints: their list, and the form that adds or edits one. */
-.custom-endpoints {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+/* The form under the OpenAI Compatible row (or an endpoint's row) that adds or edits an endpoint. */
+.custom-endpoint-form {
+    margin: 8px;
 }
 
 .custom-endpoint-models-head {

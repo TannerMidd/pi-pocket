@@ -1,5 +1,5 @@
-// OpenAI-compatible endpoints in the Providers sheet: the owner adds one with a URL and a key, picks its models from
-// what the endpoint lists (GET /models) or types their IDs, and edits or removes it later. The server keeps each in
+// OpenAI-compatible endpoints in the Providers sheet: the "OpenAI Compatible" row adds one with a URL and a key, its
+// models picked from what the endpoint lists (GET /models) or typed by hand; each endpoint's own row edits or removes it. The server keeps each in
 // Pi's models.json, and its key in Pi's sign-ins.
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, notify } from "../store.js";
@@ -8,15 +8,8 @@ import { html, Icon } from "../ui.js";
 /** Models past this many get a box to find them by. */
 const MODEL_SEARCH_AT = 8;
 
-const KEY_WORDS = {
-    stored: "key in Pi's sign-ins",
-    file: "key in models.json",
-    none: "no key",
-    missing: "no key set",
-};
-
 /** The form that adds an endpoint (`editing` undefined) or changes one. */
-function EndpointForm({ editing, onDone, onCancel }) {
+export function EndpointForm({ editing, onDone, onCancel }) {
     const [name, setName] = useState(editing?.name ?? "");
     const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "");
     const [apiKey, setApiKey] = useState("");
@@ -227,34 +220,26 @@ function EndpointForm({ editing, onDone, onCancel }) {
     </section>`;
 }
 
-/**
- * The owner's OpenAI-compatible endpoints: each with its URL and models, Edit and Remove, and a button that adds one.
- * `onChanged` reloads the sheet's providers.
- */
-export function CustomProviders({ onChanged }) {
+/** The owner's OpenAI-compatible endpoints, by id, and a way to load them again; null until they come. */
+export function useCustomProviders(owner) {
     const [list, setList] = useState(null);
-    // "new", an endpoint's id, or null: which form is open.
-    const [open, setOpen] = useState(null);
     const load = () =>
-        attempt(async () => {
-            setList(await api("custom-providers"));
-        });
+        owner
+            ? attempt(async () => {
+                  setList(await api("custom-providers"));
+              })
+            : undefined;
 
     useEffect(() => {
         load();
-    }, []);
+    }, [owner]);
 
-    if (list === null) {
-        return null;
-    }
+    return { list, load };
+}
 
-    const done = () => {
-        setOpen(null);
-        load();
-        onChanged?.();
-    };
-
-    const remove = (endpoint) =>
+/** Take an endpoint out of models.json and its key out of Pi's sign-ins, once the owner says so. */
+export function removeCustomProvider(endpoint, done) {
+    return (
         confirm(
             `Remove ${endpoint.name}? Its models leave Pi's models.json, and its key leaves Pi's sign-ins.`,
         ) &&
@@ -263,53 +248,6 @@ export function CustomProviders({ onChanged }) {
                 method: "DELETE",
             });
             done();
-        });
-
-    return html`<section class="provider-group custom-endpoints">
-        <h3 class="provider-group-head">
-            OpenAI-compatible endpoints <span class="muted">${list.length}</span>
-        </h3>
-        ${
-            list.length > 0 &&
-            html`<div class="sheet-list">
-                ${list.map(
-                    (endpoint) => html`<div class="provider" key=${endpoint.id}>
-                        <div class="provider-info">
-                            <div class="provider-name">${endpoint.name}</div>
-                            <div class="muted small provider-why">
-                                <span class="mono">${endpoint.baseUrl}</span> · ${endpoint.models.length} models ·
-                                ${" "}${KEY_WORDS[endpoint.key]}
-                            </div>
-                        </div>
-                        <div class="provider-actions">
-                            <button
-                                class="button small"
-                                onClick=${() => setOpen(open === endpoint.id ? null : endpoint.id)}
-                            >
-                                Edit
-                            </button>
-                            <button class="button small ghost" onClick=${() => remove(endpoint)}>
-                                Remove
-                            </button>
-                        </div>
-                    </div>`,
-                )}
-            </div>`
-        }
-        ${
-            open !== null &&
-            html`<${EndpointForm}
-                key=${open}
-                editing=${list.find((endpoint) => endpoint.id === open)}
-                onDone=${done}
-                onCancel=${() => setOpen(null)}
-            />`
-        }
-        ${
-            open === null &&
-            html`<button class="button wide" onClick=${() => setOpen("new")}>
-                <${Icon} name="plus" size=${16} /> Add OpenAI-compatible endpoint
-            </button>`
-        }
-    </section>`;
+        })
+    );
 }
