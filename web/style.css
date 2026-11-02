@@ -20508,19 +20508,31 @@ pre.gallery-code {
     color: var(--muted);
 }
 
-.quote-reply-button:hover,
 .quote-reply-button:active {
-    background: var(--card-2);
+    background: var(--hover);
 }
 
-.quote-reply-button:hover .icon,
 .quote-reply-button:active .icon {
     color: var(--accent);
 }
 
-.quote-reply-button:focus-visible {
-    outline: 2px solid var(--accent-line);
-    outline-offset: 2px;
+@media (hover: hover) {
+    .quote-reply-button:hover {
+        background: var(--hover);
+    }
+
+    .quote-reply-button:hover .icon {
+        color: var(--accent);
+    }
+}
+
+/* A finger needs more than 32 px: the button grows its touch area, not its look. */
+@media (pointer: coarse) {
+    .quote-reply-button::before {
+        content: "";
+        position: absolute;
+        inset: -6px;
+    }
 }
 
 .quote-strip {
