@@ -4,6 +4,9 @@ docs-site/dist/
 docs-site/.astro/
 package-lock.json
 flake.lock
+contrib/mermaid/node_modules/
+contrib/mermaid/package-lock.json
+contrib/mermaid/mermaid/vendor.js
 
 *.png
 *.woff2

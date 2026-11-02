@@ -1,0 +1,86 @@
+.x-mermaid {
+    position: relative;
+    max-width: 100%;
+    min-width: 0;
+    color: var(--text);
+    background: var(--card);
+    --x-mermaid-0: var(--accent);
+    --x-mermaid-1: var(--ok);
+    --x-mermaid-2: var(--warn);
+    --x-mermaid-3: var(--err);
+    --x-mermaid-4: color-mix(in srgb, var(--accent), var(--ok));
+    --x-mermaid-5: color-mix(in srgb, var(--accent), var(--warn));
+    --x-mermaid-6: color-mix(in srgb, var(--accent), var(--err));
+    --x-mermaid-7: color-mix(in srgb, var(--ok), var(--warn));
+    --x-mermaid-8: color-mix(in srgb, var(--ok), var(--err));
+    --x-mermaid-9: color-mix(in srgb, var(--warn), var(--err));
+    --x-mermaid-10: color-mix(in srgb, var(--accent) 70%, var(--card));
+    --x-mermaid-11: color-mix(in srgb, var(--ok) 70%, var(--card));
+}
+
+.x-mermaid-diagram {
+    max-width: 100%;
+    overflow: auto;
+    padding: 0.5rem;
+}
+
+.x-mermaid-diagram svg {
+    display: block;
+    width: 100%;
+    min-width: 280px;
+    height: auto;
+    font-family: sans-serif;
+    font-size: 14px;
+    color: var(--text);
+}
+
+.x-mermaid-diagram svg text,
+.x-mermaid-diagram svg tspan {
+    fill: var(--text);
+    stroke: none;
+}
+
+.x-mermaid-diagram svg rect:not([fill]),
+.x-mermaid-diagram svg circle:not([fill]),
+.x-mermaid-diagram svg ellipse:not([fill]),
+.x-mermaid-diagram svg polygon:not([fill]) {
+    fill: var(--card);
+}
+
+.x-mermaid-diagram svg :is(rect, circle, ellipse, polygon):not([stroke]) {
+    stroke: var(--accent);
+}
+
+.x-mermaid-diagram svg :is(path, line, polyline):not([fill]) {
+    fill: none;
+}
+
+.x-mermaid-diagram svg :is(path, line, polyline):not([stroke]) {
+    stroke: var(--muted);
+    stroke-width: 1.5px;
+}
+
+.x-mermaid-diagram svg marker path,
+.x-mermaid-diagram svg marker polygon {
+    fill: var(--muted);
+    stroke: var(--muted);
+}
+
+.x-mermaid-diagram svg .actor-line {
+    stroke-dasharray: 4 4;
+}
+
+.x-mermaid-error {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+}
+
+.x-mermaid-staging {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+}
