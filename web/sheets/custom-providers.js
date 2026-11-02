@@ -1,7 +1,7 @@
 // OpenAI-compatible endpoints in the Providers sheet: the "OpenAI Compatible" row adds one with a URL and a key, its
 // models picked from what the endpoint lists (GET /models) or typed by hand; each endpoint's own row edits or removes it. The server keeps each in
 // Pi's models.json, and its key in Pi's sign-ins.
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, notify } from "../store.js";
 import { html, Icon } from "../ui.js";
 
@@ -21,6 +21,15 @@ export function EndpointForm({ editing, onDone, onCancel }) {
     const [query, setQuery] = useState("");
     const [busy, setBusy] = useState("");
     const [problem, setProblem] = useState("");
+    const first = useRef(null);
+
+    // The form opens under its row: the name is the first thing to fill in.
+    useLayoutEffect(() => {
+        first.current?.focus({ preventScroll: true });
+        first.current
+            ?.closest(".provider-item")
+            ?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, []);
 
     const windows = new Map((listed ?? []).map((model) => [model.id, model.contextWindow]));
     const toggle = (id, on) =>
@@ -117,6 +126,7 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             <label class="field">
                 <span class="label">Name</span>
                 <input
+                    ref=${first}
                     value=${name}
                     placeholder="LM Studio"
                     maxlength="80"

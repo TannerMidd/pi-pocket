@@ -181,6 +181,49 @@ function LimitWait() {
     </div>`;
 }
 
+/** How long a panel under a row takes to close: `.provider-panel.closing` in style.css. */
+const PANEL_CLOSE_MS = 180;
+
+/**
+ * A panel that opens under a provider's row, inside the list: it grows open, and shrinks closed before it goes, still
+ * showing what it showed. With reduced motion it comes and goes at once.
+ */
+function RowPanel({ open, children }) {
+    const kept = useRef(null);
+    const [, redraw] = useState(0);
+
+    if (open) {
+        kept.current = children;
+    }
+
+    useEffect(() => {
+        if (open || kept.current === null) {
+            return undefined;
+        }
+
+        const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const timer = setTimeout(
+            () => {
+                kept.current = null;
+                redraw((n) => n + 1);
+            },
+            still ? 0 : PANEL_CLOSE_MS,
+        );
+
+        return () => clearTimeout(timer);
+    }, [open]);
+
+    if (kept.current === null) {
+        return null;
+    }
+
+    return html`<div class=${`provider-panel ${open ? "" : "closing"}`}>
+        <div class="provider-panel-clip">
+            <div class="provider-panel-body">${open ? children : kept.current}</div>
+        </div>
+    </div>`;
+}
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -264,20 +307,34 @@ export function ProvidersSheet() {
         ],
     ].filter(([, each]) => each.length > 0);
 
-    // A row, and under it the endpoint form when it adds or edits that one.
-    const row = (provider) => [
-        providerRow(provider),
-        owner &&
-            (endpointForm === provider.id ||
-                (endpointForm === "new" && provider.id === "openai-compatible")) &&
-            html`<${EndpointForm}
-                key=${`form-${endpointForm}`}
-                editing=${custom.list?.find((endpoint) => endpoint.id === endpointForm)}
-                onDone=${endpointSaved}
-                onCancel=${() => setEndpointForm(null)}
-            />`,
-    ];
-    const providerRow = (provider) => html`<div class="provider" key=${provider.id}>
+    // A sign-in opens under its provider's row; one whose row is not shown (a search hides it) opens above the list.
+    const authInList = auth !== null && list.some((provider) => provider.id === auth.providerId);
+    const formFor = (provider) =>
+        endpointForm !== null &&
+        (endpointForm === provider.id ||
+            (endpointForm === "new" && provider.id === "openai-compatible"));
+    const isOpen = (provider) => auth?.providerId === provider.id || formFor(provider);
+
+    // A row, and under it, inside the list, what its buttons opened: its sign-in, or the endpoint form.
+    const row = (provider) => html`<div class="provider-item" key=${provider.id}>
+        ${providerRow(provider)}
+        <${RowPanel} open=${isOpen(provider)}>
+            ${
+                auth?.providerId === provider.id
+                    ? html`<${AuthDialog} inline=${true} />`
+                    : formFor(provider) &&
+                      html`<${EndpointForm}
+                          key=${endpointForm}
+                          editing=${custom.list?.find((endpoint) => endpoint.id === endpointForm)}
+                          onDone=${endpointSaved}
+                          onCancel=${() => setEndpointForm(null)}
+                      />`
+            }
+        <//>
+    </div>`;
+    const providerRow = (
+        provider,
+    ) => html`<div class=${`provider ${isOpen(provider) ? "open" : ""}`}>
         <div class="provider-info">
             <div class="provider-name">
                 ${provider.name}
@@ -386,7 +443,7 @@ export function ProvidersSheet() {
                 </aside>`
             }
             <div class="providers-main">
-                ${store.state.auth && html`<${AuthDialog} inline=${true} />`}
+                ${auth && !authInList && html`<${AuthDialog} inline=${true} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
@@ -434,7 +491,13 @@ function AuthFrame({ title, onClose, inline, focusKey, children }) {
                 card?.querySelector("a[href], button:not(:disabled)");
 
             (control ?? ref.current)?.focus({ preventScroll: true });
-            ref.current?.scrollIntoView({ block: "nearest" });
+            // Under its row, the row comes to the top with it; above the list, it only needs to show.
+            const item = ref.current?.closest(".provider-item");
+
+            (item ?? ref.current)?.scrollIntoView({
+                block: item ? "start" : "nearest",
+                behavior: item ? "smooth" : "auto",
+            });
         }
     }, [inline, focusKey]);
     useEffect(() => {

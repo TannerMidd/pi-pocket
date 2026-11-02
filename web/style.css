@@ -7936,9 +7936,82 @@ div.group-head {
     justify-content: flex-end;
 }
 
-/* The form under the OpenAI Compatible row (or an endpoint's row) that adds or edits an endpoint. */
-.custom-endpoint-form {
-    margin: 8px;
+/*
+ * What a provider's buttons open, under its row and inside the list: its sign-in, or the endpoint form. The row and the
+ * panel share one tint, so they read as one item; the panel grows open and shrinks closed.
+ */
+.provider-item {
+    display: flex;
+    flex-direction: column;
+    /* Opened, it scrolls to the top of the list, clear of the sticky search box. */
+    scroll-margin-top: 64px;
+}
+
+.provider {
+    transition: background-color 180ms ease;
+}
+
+.provider.open,
+.provider-panel {
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg);
+}
+
+.provider-panel {
+    display: grid;
+    grid-template-rows: 1fr;
+    animation: provider-panel-open 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.provider-panel.closing {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    animation: provider-panel-close 180ms ease-in;
+}
+
+@keyframes provider-panel-open {
+    from {
+        grid-template-rows: 0fr;
+        opacity: 0;
+    }
+}
+
+@keyframes provider-panel-close {
+    from {
+        grid-template-rows: 1fr;
+        opacity: 1;
+    }
+}
+
+.provider-panel-clip {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.provider-panel-body {
+    margin: 0 16px;
+    padding: 14px 0 16px;
+    border-top: 1px solid var(--accent-line);
+}
+
+/* Inside a row's panel, a sign-in or a form has no card of its own: the panel is its card. */
+.provider-panel .auth-inline {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+}
+
+.provider-panel .auth-inline-head {
+    margin-bottom: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .provider,
+    .provider-panel,
+    .provider-panel.closing {
+        transition: none;
+        animation: none;
+    }
 }
 
 .custom-endpoint-models-head {
