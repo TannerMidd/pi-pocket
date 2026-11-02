@@ -198,7 +198,13 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
                     `${GUIDE}\n${models(
                         host,
                         agent.model,
-                        agent.tools.some((tool) => tool.name === "subagent"),
+                        // Offered, or for scripts alone (codemode's Only mode).
+                        agent.tools.some((tool) => tool.name === "subagent") ||
+                            agent.callable.some(
+                                (tool) =>
+                                    tool.name === "subagent" &&
+                                    tool.callers?.includes("model") === false,
+                            ),
                     )}`,
             ),
         ],

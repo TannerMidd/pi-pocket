@@ -469,8 +469,14 @@ export default function createBrowser(host: PocketHost) {
         name: "pocket-browser",
         tools: [browser],
         sections: [
-            section("browser", (input) =>
-                input.agent.tools.some((tool) => tool.name === "browser") ? GUIDE : undefined,
+            // Offered, or for scripts alone (codemode's Only mode).
+            section("browser", ({ agent }) =>
+                agent.tools.some((tool) => tool.name === "browser") ||
+                agent.callable.some(
+                    (tool) => tool.name === "browser" && tool.callers?.includes("model") === false,
+                )
+                    ? GUIDE
+                    : undefined,
             ),
         ],
     });

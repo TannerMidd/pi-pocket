@@ -28,6 +28,10 @@ Sections render before each request. Pi Pocket sends again only the sections tha
 - Put the date in a section, not the time.
 - Do not put counters in a section.
 
+## A section for one tool
+
+A section about a tool shows while `input.agent.tools` has the tool. In codemode's Only mode, scripts alone call most tools, so also check `input.agent.callable` for the tool.
+
 ## A section for one session
 
 `input.conversationId` is the session. `input.read.snapshot(Doc, input.conversationId, context)` reads a document of that session. Use them to write a section that depends on the session.
