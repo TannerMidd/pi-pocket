@@ -11,6 +11,7 @@ import {
     root,
     say,
     scriptedModel,
+    until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -26,6 +27,13 @@ let app: Awaited<ReturnType<typeof openApp>>;
 let declared: string[] = [];
 let sections: Record<string, string> = {};
 let result = "";
+/** The declared tools of the subagent's first request. */
+let child: string[] | undefined;
+/** Scripts the model runs, by a part of the message. */
+const scripts: Record<string, string> = {
+    "run a script": 'return await tools.late_tool({ text: "hi" })',
+    "spawn a helper": `return await tools.subagent({ action: "spawn", name: "kid", message: "Brief", tools: ["read"] })`,
+};
 
 const call = (name: string, args: Record<string, string>) =>
     fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
@@ -37,9 +45,12 @@ const model = scriptedModel((request) => {
     declared = system.flatMap((message) => (message.toolsAdded ?? []).map((tool) => tool.name));
     sections = Object.assign({}, ...system.map((message) => message.sections));
     result = role === "toolResult" ? text : result;
+    child ??= text.includes("Brief") ? declared : undefined;
 
-    if (role === "user" && text.includes("script")) {
-        return call("codemode", { code: 'return await tools.late_tool({ text: "hi" })' });
+    const code = Object.entries(scripts).find(([key]) => text.includes(key))?.[1];
+
+    if (role === "user" && code !== undefined) {
+        return call("codemode", { code });
     }
 
     return role === "user" && text.includes("browser")
@@ -113,4 +124,12 @@ test("in Only mode, a script calls a hidden tool, and a tool that waits goes thr
     await say(app, id, "need the browser");
     assert.match(result, /^Use these through codemode/);
     assert.ok(!declared.includes("browser"));
+});
+
+test("in Only mode, a subagent given a tool that only scripts call also gets codemode", async () => {
+    mode("only");
+    await say(app, await newSession(app), "spawn a helper");
+    await until(() => child !== undefined, "the subagent's first request");
+
+    assert.deepEqual(child, ["codemode"]);
 });
