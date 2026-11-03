@@ -22,7 +22,9 @@ import {
     CURRENT_SESSION_VERSION,
     migrateSessionEntries,
     parseSessionEntries,
+    type FileEntry,
     type SessionEntry,
+    type SessionHeader,
     sessionEntryToContextMessages,
     type SessionInfo,
     SessionManager,
@@ -151,16 +153,13 @@ function textOf(message: Message): string {
         .trim();
 }
 
-/** A session file's entries as `parseSessionEntries` gives them, header first. */
-type FileEntries = ReturnType<typeof parseSessionEntries>;
-
 /**
  * A session file's entries, read a line at a time, as `parseSessionEntries` reads them: a line that is not JSON (a
  * last one cut off while Pi writes it) is skipped. A file is never held whole as text, so its size has no limit but
  * the memory its entries take: big files are mostly images, kept once as their entries' strings.
  */
-export async function readSessionEntries(path: string): Promise<FileEntries> {
-    const entries: FileEntries = [];
+async function readSessionEntries(path: string): Promise<FileEntry[]> {
+    const entries: FileEntry[] = [];
     const lines = createInterface({
         input: createReadStream(path, { encoding: "utf8" }),
         crlfDelay: Infinity,
@@ -229,9 +228,7 @@ async function* linesFromEnd(path: string): AsyncGenerator<string> {
 }
 
 /** A file's first line, as JSON, or undefined when it is not. */
-async function firstEntry(
-    path: string,
-): Promise<{ type?: unknown; id?: unknown; version?: number } | undefined> {
+async function firstEntry(path: string): Promise<FileEntry | undefined> {
     const handle = await open(path, "r");
 
     try {
@@ -248,7 +245,7 @@ async function firstEntry(
 }
 
 /** Whether a session file's header is one this Pi Pocket reads; why not, in words for people. */
-function checkHeader(header: { type?: unknown; id?: unknown; version?: number } | undefined): void {
+function checkHeader(header: FileEntry | undefined): asserts header is SessionHeader {
     if (header?.type !== "session" || typeof header.id !== "string") {
         throw new PiSessionError("This is not a Pi session file.");
     }
@@ -269,12 +266,12 @@ type Tail = {
  * `parentId`, and a parent is always written before its children, so a walk back through the file finds the branch
  * in order and stops at the last few messages. Files from before entries had ids (version 1) are read whole.
  */
-export async function readPiTail(path: string): Promise<Tail> {
+async function readPiTail(path: string): Promise<Tail> {
     const header = await firstEntry(path);
 
     checkHeader(header);
 
-    if ((header!.version ?? 1) < 2) {
+    if ((header.version ?? 1) < 2) {
         const session = piSessionOf(await readSessionEntries(path));
 
         return { model: session.model, last: lastTexts(session.entries) };
@@ -365,14 +362,10 @@ export function readPiSession(text: string): PiSession {
 }
 
 /** A Pi session from its file's entries, header first; they are changed (migrated) in place. */
-export function piSessionOf(file: FileEntries): PiSession {
+function piSessionOf(file: FileEntry[]): PiSession {
     const header = file[0];
 
     checkHeader(header);
-
-    if (header?.type !== "session") {
-        throw new PiSessionError("This is not a Pi session file.");
-    }
 
     // In memory only: older files get the current format, as Pi gives them when it opens one.
     migrateSessionEntries(file);
@@ -502,19 +495,37 @@ export function piSessionOf(file: FileEntries): PiSession {
 
 /**
  * Write a Pi session's copy into a new conversation, from its `init`: its messages, then where it came from. One
- * commit, so a copy is whole or not there at all (a big one too: its text is held once already). Returns the entry
- * written here for each of Pi's entries that became one.
+ * commit, so a copy is whole or not there at all (a big one too: its text is held once already).
  */
 export async function writePiSession(
     tx: Tx,
     id: ConversationId,
     session: PiSession,
     data: FromPiData,
-): Promise<Map<string, EntryId>> {
+): Promise<void> {
     const made = new Map<string, EntryId>();
 
     for (const entry of session.entries) {
-        await writeEntry(tx, id, entry, made);
+        const written =
+            entry.kind === "compaction"
+                ? await tx.appendEntry(CompactionEntry, id, {
+                      model: [entry.message],
+                      // A kept entry is written before its compaction, as Pi keeps them.
+                      head: entry.head === null ? "self" : made.get(entry.head)!,
+                      data: { reason: "threshold" },
+                  })
+                : entry.kind === "toolResult"
+                  ? await tx.appendEntry(ToolResultEntry, id, {
+                        model: [entry.message],
+                        data: { diagnostics: [] },
+                    })
+                  : await tx.appendEntry(entry.kind === "user" ? UserEntry : AssistantEntry, id, {
+                        model: [entry.message],
+                    });
+
+        if (entry.from !== undefined && !made.has(entry.from)) {
+            made.set(entry.from, written.id);
+        }
     }
 
     const edits: ContextEdit[] = session.edits.flatMap(({ target, messages }) => {
@@ -537,37 +548,6 @@ export async function writePiSession(
         data,
         ...(edits.length === 0 ? {} : { edits }),
     });
-
-    return made;
-}
-
-/** Write one entry of the copy. */
-async function writeEntry(
-    tx: Tx,
-    id: ConversationId,
-    entry: PiEntry,
-    made: Map<string, EntryId>,
-): Promise<void> {
-    const written =
-        entry.kind === "compaction"
-            ? await tx.appendEntry(CompactionEntry, id, {
-                  model: [entry.message],
-                  // A kept entry is written before its compaction, as Pi keeps them.
-                  head: entry.head === null ? "self" : made.get(entry.head)!,
-                  data: { reason: "threshold" },
-              })
-            : entry.kind === "toolResult"
-              ? await tx.appendEntry(ToolResultEntry, id, {
-                    model: [entry.message],
-                    data: { diagnostics: [] },
-                })
-              : await tx.appendEntry(entry.kind === "user" ? UserEntry : AssistantEntry, id, {
-                    model: [entry.message],
-                });
-
-    if (entry.from !== undefined && !made.has(entry.from)) {
-        made.set(entry.from, written.id);
-    }
 }
 
 /** A session's title as `pi -r` shows it: its name, or the first line of what it was first asked. */
