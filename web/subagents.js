@@ -111,7 +111,9 @@ export function modelText(agent, { thinking = true } = {}) {
         return "";
     }
 
-    return `${model.other ? "↗ " : ""}${shortModelName(model.name)}${thinking && model.thinking && model.thinking !== "off" ? ` · ${model.thinking}` : ""}`;
+    const level = thinking && model.thinking !== "off" ? model.thinking : undefined;
+
+    return `${model.other ? "↗ " : ""}${shortModelName(model.name)}${level ? ` · ${level}` : ""}`;
 }
 
 /**
