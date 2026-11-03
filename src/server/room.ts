@@ -387,6 +387,18 @@ export class Room {
     }
 
     async open(conversation: Conversation): Promise<void> {
+        try {
+            await this.#open(conversation);
+        } catch (error) {
+            // A room that failed to open follows nothing: a retry opens its own watch.
+            void this.#watch?.stop();
+            this.#watch = undefined;
+
+            throw error;
+        }
+    }
+
+    async #open(conversation: Conversation): Promise<void> {
         const watch = await conversation.watch(context);
 
         this.#watch = watch;
