@@ -20,6 +20,7 @@ import {
     chmodSync,
     existsSync,
     mkdirSync,
+    readdirSync,
     readFileSync,
     realpathSync,
     unlinkSync,
@@ -2102,13 +2103,22 @@ test("invites carry a role and a session over HTTP, and viewers get 403 on steer
         assert.equal((await call(token, `c/${id}/abort`, {})).status, 403);
         assert.equal((await call(token, "invite", {})).status, 403);
         assert.equal((await call(token, "fs?path=/")).status, 403);
-        // A folder the server cannot read is a 403 for the owner too, not a 500 (#265).
+        // A folder the server cannot read is a 403 for the owner too, not a 500 (#265). Mode 0 does not stop
+        // reads on Windows or for root: there the folder lists.
         const locked = join(root, "locked-folder");
 
         mkdirSync(locked, { mode: 0o000 });
+        const readable = (() => {
+            try {
+                return readdirSync(locked) !== undefined;
+            } catch {
+                return false;
+            }
+        })();
+
         assert.equal(
             (await call(app.config.ownerToken, `fs?path=${encodeURIComponent(locked)}`)).status,
-            process.getuid?.() === 0 ? 200 : 403,
+            readable ? 200 : 403,
         );
         chmodSync(locked, 0o700);
         assert.equal(
