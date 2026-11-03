@@ -100,14 +100,8 @@ let chosen = { from: [], tiles: [] };
 
 /** The sessions shown as tiles now, in tile order. */
 export function peekTiles(state = store.state) {
-    const from = [
-        state.sessions,
-        openId(state),
-        state.pinned,
-        state.peekSeen,
-        lastLeft,
-        seenSince(),
-    ];
+    const open = openId(state);
+    const from = [state.sessions, open, state.pinned, state.peekSeen, lastLeft, seenSince()];
 
     if (from.every((value, index) => value === chosen.from[index])) {
         return chosen.tiles;
@@ -117,7 +111,7 @@ export function peekTiles(state = store.state) {
     const shown = state.sessions.filter(
         (session) =>
             !session.archived &&
-            session.id !== openId(state) &&
+            session.id !== open &&
             (session.busy ||
                 session.waiting ||
                 busyAgents(session) > 0 ||
