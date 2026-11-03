@@ -484,7 +484,7 @@ send(
 
 Since 0.14.0 · Experimental
 
-Sends `message` to the linked session at the address `to`. The session gets it at its next pause (since 0.29.0; before, only with `steer: true`). With `steer: false`, it waits for the session's run to end. `send` returns when the session takes the message, not when it answers.
+Sends `message` to the linked session at the address `to`. The session gets it at its next pause (since 0.28.0; before, only with `steer: true`). With `steer: false`, it waits for the session's run to end. `send` returns when the session takes the message, not when it answers.
 
 The session that gets the message reads it between tags. Words before it say that the agent of another session wrote it, and that it is a request, not a person's order. They also give the address to write to, and say that its final answer goes back by itself when its run ends ([linked-sessions.md](../linked-sessions.md#a-sessions-final-answer-comes-back-by-itself)).
 

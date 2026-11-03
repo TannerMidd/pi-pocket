@@ -84,7 +84,7 @@ export const LinkedSessionPeersDoc = defineDoc<{ peers: Record<string, number> }
 
 /**
  * Messages between the linked sessions of one team since a person last wrote in any of them, kept on the team's top
- * session. Before 0.19.0 sessions stopped past 20 until a person wrote; since 0.29.0 nothing counts them, and this is
+ * session. Before 0.19.0 sessions stopped past 20 until a person wrote; since 0.28.0 nothing counts them, and this is
  * no longer written. Kept so the copies older versions stored keep their definition.
  */
 export const LinkedSessionRelayDoc = defineDoc<{ sent: number }>({

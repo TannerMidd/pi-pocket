@@ -35,7 +35,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Sessions that one session starts:** no limit, since 0.19.0. Before 0.19.0, 10 at most. A linked session cannot start sessions.
 - **Messages between the sessions of a team:** no limit, since 0.19.0. Before 0.19.0, 20 at most since a person last wrote in one of them. The spend limit of the session that started the team still applies.
 - **A message:** 20,000 characters at most.
-- **A final answer's report** to the session that started it: the first 6,000 characters, and how much more is in the session. Since 0.29.0.
+- **A final answer's report** to the session that started it: the first 6,000 characters, and how much more is in the session. Since 0.28.0.
 - **A title:** one line of 120 characters at most.
 - **A call's key:** Pi Pocket keeps the record of a `key` for 30 days, and the records of the last 1,000 calls of each session.
 
