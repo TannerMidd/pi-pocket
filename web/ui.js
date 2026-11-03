@@ -25,6 +25,51 @@ export const fileUrl = (path, conversationId = currentConversation()) =>
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
 
+/** Attached types that go to a model that takes images, up to this size (`model-images.ts`). */
+const MODEL_IMAGE_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+]);
+const MAX_MODEL_IMAGE = 5 * 1024 * 1024;
+/** Photos a browser cannot show: the server sends them to the model as JPEG. */
+const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
+
+/** A file sent along by name (`@`) that can go to the model as an image, before the attached ones. */
+const MENTIONED_IMAGE = /\.(png|jpe?g|gif|webp|heic|heif)$/i;
+
+/**
+ * Where a sent attachment's thumbnail loads from, or null when it shows as a file chip. `files` are the message's
+ * attachment lines (`{ path, mime, size, noted }`); `entry` the message, with how many images it stores (`images`)
+ * and the files sent along by name (`files`). A HEIC or HEIF photo shows the JPEG the model got, the stored image in
+ * its place among the attached ones. Only when that place is sure: its line says it was converted, no file sent by
+ * name can be an image, and every attached image is stored, so a failed one cannot shift another into its place.
+ */
+export function attachedPictureSrc(file, files, entry, conversationId) {
+    if (!file.path || !file.mime.startsWith("image/")) {
+        return null;
+    }
+
+    if (!HEIC_TYPES.has(file.mime)) {
+        return fileUrl(file.path, conversationId);
+    }
+
+    const sent = files.filter(
+        (each) => MODEL_IMAGE_TYPES.has(each.mime) && each.size <= MAX_MODEL_IMAGE,
+    );
+    const mentioned = (entry.files ?? []).some((path) => MENTIONED_IMAGE.test(path));
+
+    if (!file.noted || mentioned || (entry.images ?? 0) !== sent.length) {
+        return null;
+    }
+
+    return entryImageUrl(entry.id, sent.indexOf(file), conversationId);
+}
+
 /** Where the browser loads `![alt](src)` from. Web and data URLs stay; paths and file:// URLs point at the server. */
 function imageSource(src, conversationId) {
     const value = String(src ?? "").trim();

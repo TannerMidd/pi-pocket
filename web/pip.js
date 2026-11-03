@@ -14,9 +14,9 @@ import { spendTap } from "./taps.js";
 import { memoryAvailable, useMemory } from "./sheets/memory.js";
 import { itemsOf, says, summarize } from "./turns.js";
 import {
+    attachedPictureSrc,
     contextLevel,
     entryImageUrl,
-    fileUrl,
     formatBytes,
     formatTokens,
     html,
@@ -432,7 +432,7 @@ function attachedFiles(block) {
     }
 
     return block.split("\n").flatMap((line) => {
-        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)(?: \[Image: .*)?$/.exec(line);
+        const suffix = /^- (.*), ([^,]*), (\d+) bytes\)( \[Image: .*)?$/.exec(line);
 
         if (!suffix) {
             return [];
@@ -442,6 +442,8 @@ function attachedFiles(block) {
             path: suffix[1].slice(0, separator.index),
             name: suffix[1].slice(separator.index + 2),
             mime: suffix[2],
+            size: Number(suffix[3]),
+            noted: suffix[4] !== undefined,
         }));
         const file = candidates.find((candidate) => candidate.path.endsWith(candidate.name));
 
@@ -491,9 +493,15 @@ function Item({ item, last, busy, conversationId }) {
             const [text, block] = splitAttachments(body);
             // Uploaded pictures also remain readable when the chosen model cannot take inline images.
             const files = attachedFiles(block);
-            // A browser cannot show a HEIC photo: it goes as a file.
-            const pictures = files.filter((file) => /^image\/(?!heic|heif)/.test(file.mime));
-            const others = files.filter((file) => !pictures.includes(file));
+            // A browser cannot show a HEIC photo: it shows the JPEG the model got, or goes as a file.
+            const pictures = files.flatMap((file) => {
+                const src = attachedPictureSrc(file, files, entry, conversationId);
+
+                return src === null ? [] : [{ file, src }];
+            });
+            const others = files.filter(
+                (file) => !pictures.some((picture) => picture.file === file),
+            );
 
             return html`<div class="pip-you">
                 ${text && html`<div>${text}</div>`}
@@ -509,9 +517,9 @@ function Item({ item, last, busy, conversationId }) {
                         ${
                             pictures.length > 0
                                 ? pictures.map(
-                                      (picture) => html`<${Thumb}
-                                          src=${fileUrl(picture.path, conversationId)}
-                                          alt=${picture.name}
+                                      ({ file, src }) => html`<${Thumb}
+                                          src=${src}
+                                          alt=${file.name}
                                       />`,
                                   )
                                 : Array.from(
