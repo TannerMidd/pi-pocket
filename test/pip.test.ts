@@ -188,6 +188,16 @@ test("only PiP has PiP's tools, and PiP has none that change files or run comman
 
     assert.equal(await inlineOf(id), undefined);
     assert.notEqual(await inlineOf(session), undefined);
+    // Only inline goes: what PiP must give is what a session must give.
+    const requiredOf = async (conversation: ConversationId) =>
+        (
+            (await (await app.conversation(conversation)).agent(context)).tools.find(
+                (each) => each.name === "artifact",
+            )?.parameters as unknown as { required?: string[] }
+        ).required;
+
+    assert.deepEqual(await requiredOf(id), await requiredOf(session));
+    assert.deepEqual(await requiredOf(id), ["id", "title"]);
     assert.ok(
         !(await (await app.conversation(session)).agent(context)).extensions.some(
             (extension) => extension.name === PIP_EXTENSION,

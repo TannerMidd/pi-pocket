@@ -650,14 +650,21 @@ const VIEWER_ONLY =
 
 /** The artifact tool without `inline`, for a session whose panel draws no cards (PiP's). */
 export function withoutInline(tool: ToolRegistration): ToolRegistration {
-    const { inline: _inline, ...properties } = (
-        tool.parameters as unknown as { properties: Record<string, unknown> }
-    ).properties;
+    const schema = tool.parameters as unknown as {
+        properties: Record<string, unknown>;
+        required?: readonly string[];
+    };
+    const { inline: _inline, ...properties } = schema.properties;
 
+    // The same schema without `inline`: obj() would make every property required, as `properties` has lost opt().
     return {
         ...tool,
         description: VIEWER_ONLY,
-        parameters: obj(properties as never, { open: true }),
+        parameters: {
+            ...schema,
+            properties,
+            required: (schema.required ?? []).filter((name) => name !== "inline"),
+        } as never,
         execute: (args, api, context) =>
             tool.execute({ ...(args as object), inline: undefined } as never, api, context),
     } as ToolRegistration;
