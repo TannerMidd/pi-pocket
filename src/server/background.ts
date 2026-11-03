@@ -410,6 +410,8 @@ export class BackgroundTasks {
         maxLog: 50 * 1024 * 1024,
         segment: SEGMENT_BYTES,
         keepEnded: 20,
+        /** Past those, how many tasks not yet told stay for their message: as many as can run at once. */
+        keepUntold: 50,
         /** More output than this in one tick stops the task: about 800 MB a second. */
         runaway: 200 * 1024 * 1024,
         /** More output than this many logs' worth in `SUSTAINED_MS` stops it too: 500 MB in 10 seconds. */
@@ -1216,12 +1218,18 @@ export class BackgroundTasks {
         }
     }
 
-    /** Ended tasks past the last few leave the document; their files go once the commit holds (`#removeFiles`). */
+    /**
+     * Ended tasks past the last few leave the document; their files go once the commit holds (`#removeFiles`). One not
+     * yet told stays for its message, which a batch gathers; up to `keepUntold`, so a message that never goes keeps none
+     * for good.
+     */
     #prune(items: Record<string, BackgroundTask>): string[] {
+        let untold = 0;
         const ended = Object.values(items)
             .filter((item) => item.status !== "running" && item.status !== "starting")
             .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
-            .slice(this.sizes.keepEnded);
+            .slice(this.sizes.keepEnded)
+            .filter((item) => item.untold !== true || ++untold > this.sizes.keepUntold);
 
         for (const item of ended) {
             delete items[item.id];
