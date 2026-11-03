@@ -152,6 +152,24 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
         /contextWindow/,
     );
     assert.ok(readFileSync(authFile, "utf8").includes("sk-secret"));
+
+    // A change to the file while the old key goes is not overwritten, and the key comes back.
+    const logout = app.providers.logout.bind(app.providers);
+    const edited = readFileSync(modelsFile, "utf8").replace("{", '{"$comment":"by hand",');
+
+    app.providers.logout = async (id) => {
+        await logout(id);
+        writeFileSync(modelsFile, edited);
+    };
+
+    await assert
+        .rejects(
+            app.customProviders.update("home-llm", { baseUrl: moved, noKey: true }),
+            /changed meanwhile/,
+        )
+        .finally(() => (app.providers.logout = logout));
+    assert.equal(readFileSync(modelsFile, "utf8"), edited);
+    assert.ok(readFileSync(authFile, "utf8").includes("sk-secret"));
 });
 
 test("an edit keeps what it does not change; no key uses the placeholder; removing takes the key too", async () => {

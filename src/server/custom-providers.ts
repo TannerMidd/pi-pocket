@@ -321,9 +321,20 @@ export class CustomProviders {
             // The old key goes just before the new address is in the file, so no request takes it there, and only
             // once the file is checked, so a refused save keeps it.
             await this.#write(config, async () => {
-                if (key === NO_KEY || (key !== undefined && moved)) {
-                    await this.#forgetKey(id);
+                if (key !== NO_KEY && (key === undefined || !moved)) {
+                    return undefined;
                 }
+
+                const old = (await this.#app.models.getAuth(id).catch(() => undefined))?.auth
+                    .apiKey;
+
+                await this.#forgetKey(id);
+
+                return async () => {
+                    if (old !== undefined) {
+                        await this.#app.providers.storeApiKey(id, old);
+                    }
+                };
             });
 
             try {
@@ -547,9 +558,13 @@ export class CustomProviders {
 
     /**
      * Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing.
-     * A file Pi would refuse is not written: Pi then loads none of its providers.
+     * A file Pi would refuse is not written: Pi then loads none of its providers. `beforeRename` runs once the file
+     * passed its checks; what it returns undoes it when the file changed meanwhile.
      */
-    async #write(config: Json, beforeRename?: () => Promise<void>): Promise<void> {
+    async #write(
+        config: Json,
+        beforeRename?: () => Promise<(() => Promise<void>) | undefined>,
+    ): Promise<void> {
         const link = modelsPath();
         // A models.json that links elsewhere (a dotfiles folder) stays a link: the file it names changes.
         const path = existsSync(link) ? realpathSync(link) : link;
@@ -574,12 +589,22 @@ export class CustomProviders {
             throw new HttpError(409, "models.json changed meanwhile. Try again.");
         }
 
+        let undo: (() => Promise<void>) | undefined;
+
         try {
-            await beforeRename?.();
+            undo = await beforeRename?.();
         } catch (error) {
             rmSync(temp, { force: true });
 
             throw error;
+        }
+
+        // Checked again: `beforeRename` waited, and the file may have changed in that time.
+        if (rawModels() !== this.#seen) {
+            rmSync(temp, { force: true });
+            await undo?.();
+
+            throw new HttpError(409, "models.json changed meanwhile. Try again.");
         }
 
         renameSync(temp, path);
