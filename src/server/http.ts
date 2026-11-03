@@ -28,7 +28,7 @@ import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
 
-/** The version of the embedder's bridge the web app speaks (`web/host.js`). */
+/** The version of the app bridge the web app speaks (`web/host.js`). */
 const BRIDGE_VERSION = 1;
 
 export function createHandler(options: HttpOptions) {
@@ -53,7 +53,7 @@ export function createHandler(options: HttpOptions) {
             response.setHeader("x-content-type-options", "nosniff");
 
             // What an embedder (an app that shows Pi Pocket) asks before it signs in: that this is
-            // Pi Pocket, and which version of the bridge its page speaks (`web/host.js`,
+            // Pi Pocket, and which version of the app bridge its page speaks (`web/host.js`,
             // docs/embedders.md). No version of Pi Pocket, ever.
             if (path === "/api/pocket/info" && request.method === "GET") {
                 return json(response, 200, { name: "pi-pocket", bridge: BRIDGE_VERSION });

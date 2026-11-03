@@ -1,4 +1,4 @@
-// An embedder's bridge in a real page, with the bridge and Window Controls Overlay supplied before the app starts.
+// The app bridge in a real page, with the app bridge and Window Controls Overlay supplied before the app starts.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -25,7 +25,7 @@ const real = {
     skip: chromium === undefined ? "no Chromium-based browser on this machine" : false,
 } as const;
 
-// An embedder installs its bridge before the page's modules run. Keep the calls so the test can inspect them.
+// An embedder installs its app bridge before the page's modules run. Keep the calls so the test can inspect them.
 const preload = `<script>
     const embedder = globalThis.embedderTest = {
         notifications: [], badges: [], pinned: [], invoked: [], visible: true, listener: null,
@@ -184,7 +184,7 @@ test(
         assert.equal(
             await inPage(`return JSON.stringify(embedderTest.pinned.at(-1)[0].state)`),
             "seen",
-            "the bridge keeps its shape names, not the row's new idle theme state",
+            "the app bridge keeps its shape names, not the row's new idle theme state",
         );
         assert.equal(await inPage(`return JSON.stringify(embedderTest.badges.at(-1))`), 0);
         await page.evaluate(`

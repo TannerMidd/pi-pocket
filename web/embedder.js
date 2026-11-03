@@ -1,4 +1,4 @@
-// What Pi Pocket does with the bridge an embedder gives it (`web/host.js`): notifications, badge, pinned sessions,
+// What Pi Pocket does with the app bridge an embedder gives it (`web/host.js`): notifications, badge, pinned sessions,
 // links, and the embedder's menu group. docs/embedders.md describes it.
 import { callHost, host, hostCan, onHost } from "./host.js";
 import { openPip } from "./pip.js";

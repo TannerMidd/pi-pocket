@@ -1,4 +1,4 @@
-// The embedder bridge's server side: `/api/pocket/info`, and notifications sent to embedders
+// The app bridge's server side: `/api/pocket/info`, and notifications sent to embedders
 // over their live connections (`embedder-notify`), with the same rules as Web Push.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -47,7 +47,7 @@ function embedderTab(id: ConversationId | undefined, user = owner(app)) {
     return { client, sent };
 }
 
-test("/api/pocket/info answers without a sign-in, with the bridge version and no Pi Pocket version", async () => {
+test("/api/pocket/info answers without a sign-in, with the app bridge version and no Pi Pocket version", async () => {
     const server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );

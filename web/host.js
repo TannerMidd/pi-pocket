@@ -1,4 +1,4 @@
-// `window.pocketHost`: the bridge an embedder (an app that shows Pi Pocket) gives the page (docs/embedders.md). This module imports nothing, so that
+// `window.pocketHost`: the app bridge an embedder (an app that shows Pi Pocket) gives the page (docs/embedders.md). This module imports nothing, so that
 // `store.js` and the modules that import it can all use it.
 
 const VERSION = 1;
