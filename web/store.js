@@ -766,11 +766,11 @@ function acceptPerson(user, generation) {
     try {
         localStorage.setItem(PERSON_KEY, person ?? "");
     } catch {
-        // The account channel still resets other open tabs when storage is blocked.
-    }
-
-    if (store.state.me === undefined) {
-        accountChannel?.postMessage({ person });
+        // Blocked storage sends no storage event, so the channel resets the other open tabs. A storage event comes only
+        // for a new person: a tab of the same person must not make the others that are still starting reload.
+        if (store.state.me === undefined) {
+            accountChannel?.postMessage({ person });
+        }
     }
 
     return true;

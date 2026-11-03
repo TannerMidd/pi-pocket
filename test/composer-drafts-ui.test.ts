@@ -221,10 +221,11 @@ test("Back covers the page until an account check passes, and keeps the draft", 
     );
 });
 
-test("a starting tab drops its answer when another person signs in", real, async () => {
+test("a starting tab keeps its answer for the same person only", real, async () => {
     await login(tab, app.config.ownerToken, owner(app).id);
-    // Each load hears the account signal, and can hold its first answer of /api/me.
+    // Each load counts itself, hears the account signal, and can hold its first answer of /api/me.
     const source = `
+        sessionStorage.setItem("loads", String(Number(sessionStorage.getItem("loads")) + 1));
         addEventListener("storage", (event) => {
             if (event.key === "pocket.person") globalThis.signal = event.newValue;
         });
@@ -249,11 +250,20 @@ test("a starting tab drops its answer when another person signs in", real, async
     const start = async () => {
         await tab.run(`
             sessionStorage.setItem("hold", "1");
+            sessionStorage.setItem("loads", "0");
             return "null";
         `);
         await tab.page.navigate(`${base}/s/${session}`);
         await tab.sees(`typeof globalThis.release === "function"`, "the held answer");
     };
+
+    await start();
+    await peer.page.navigate(`${base}/s/${session}`);
+    await peer.sees(`${me}?.id === ${JSON.stringify(owner(app).id)}`, "the owner's second tab");
+    await tab.run(`globalThis.release(); return "null"`);
+    await tab.sees(`${me}?.id === ${JSON.stringify(owner(app).id)}`, "the owner");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(await tab.run(`return JSON.stringify(sessionStorage.getItem("loads"))`), "1");
 
     await start();
     await tab.run(`
