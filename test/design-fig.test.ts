@@ -622,6 +622,30 @@ test("a mode keeps its values when another collection's first mode has its name"
     assert.equal(token(system, "space.base")?.modes.mobile?.literal, "4px");
 });
 
+test("a second mode named dark is a mode of its own, in a light first or a dark first file", () => {
+    const contrast = guid(10, 3);
+    const file = (first: [Guid, string], second: [Guid, string]) =>
+        figFile({
+            nodeChanges: [
+                modeSet(COLORS, [first, second, [contrast, "Dark high contrast"]]),
+                variable(guid(1, 2), "Colors/Paper", "COLOR", [
+                    [LIGHT, paint("#ffffff")],
+                    [DARK, paint("#1a1b26")],
+                    [contrast, paint("#000000")],
+                ]),
+            ],
+        });
+    const day = load(scanTokens(project({ "day.fig": file([LIGHT, "Light"], [DARK, "Dark"]) })));
+    const night = load(
+        scanTokens(project({ "night.fig": file([DARK, "Dark"], [LIGHT, "Light"]) })),
+    );
+
+    for (const system of [day, night]) {
+        assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
+        assert.equal(token(system, "color.paper")?.modes["dark-high-contrast"]?.hex, "#000000");
+    }
+});
+
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {
     const file = oneMode(
         variable(guid(1, 2), "Colors/Ink", "COLOR", [[LIGHT, paint("#111111")]]),

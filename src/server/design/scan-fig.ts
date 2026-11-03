@@ -157,6 +157,17 @@ export function figTokens(
     );
     const darkFirst =
         themed.length > 0 && themed.every((each) => isDarkMode(each.modes[0]?.name ?? ""));
+    // A collection's dark mode is its first after the default named so: another one named so
+    // (Dark high contrast) is a mode of its own.
+    const darkModes = new Set(
+        darkFirst
+            ? []
+            : themed.flatMap((each) => {
+                  const dark = each.modes.slice(1).find((mode) => isDarkMode(mode.name));
+
+                  return dark === undefined ? [] : [dark.id];
+              }),
+    );
 
     const { list, byKey } = variablesOf(nodes);
     const named = new Map<string, Shaped>();
@@ -230,10 +241,11 @@ export function figTokens(
 
             const name = modeNameOf(mode.name);
 
-            if (isDarkMode(mode.name)) {
+            if (darkModes.has(modeId)) {
                 darkChanges.set(shape.path.join("."), changed);
-            } else if (name !== (darkFirst ? "dark" : "light")) {
-                // A mode named like the default mode would be refused by the engine.
+            } else if (name !== "dark" && (darkFirst || name !== "light")) {
+                // A mode named like the default mode would be refused by the engine, and one
+                // named dark would replace the dark mode.
                 const tree = changes.get(name) ?? new Map<string, Obj>();
 
                 tree.set(shape.path.join("."), changed);
