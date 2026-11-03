@@ -11,6 +11,7 @@ import {
     type InputEntry,
     type UserInput,
 } from "@earendil-works/pi-durable";
+import { CONTEXT_BLOCK, FILE_BLOCK } from "./entry-format.ts";
 import { describe } from "./errors.ts";
 import { ownRequest } from "./requests.ts";
 
@@ -36,7 +37,9 @@ export function userContent(model: unknown): { text: string; images: ImageConten
     return {
         text: parts
             .flatMap((part, index) =>
-                part.type === "text" && (index === 0 || !part.text.startsWith('<file name="'))
+                part.type === "text" &&
+                (index === 0 ||
+                    (!part.text.startsWith(FILE_BLOCK) && !part.text.startsWith(CONTEXT_BLOCK)))
                     ? [part.text]
                     : [],
             )

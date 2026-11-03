@@ -183,7 +183,7 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `sheet-head`, `sheet-body`           | Its title bar, and what it holds                                                                                                                  |
 | `menu`                               | The menu, on wide screens (it is the sheet `menu` on phones)                                                                                      |
 | `session-menu`                       | The right-click menu on a session row (since 0.27.0)                                                                                              |
-| `quote-reply-button`                 | The Reply button that shows over selected text (since 0.27.0)                                                                                     |
+| `quote-reply-button`                 | The pill that shows over selected text, with Reply and (with PiP on) Ask PiP (since 0.27.0)                                                       |
 | `launcher`                           | The launcher (Ctrl/⌘+K)                                                                                                                           |
 | `launcher-input`, `launcher-filters` | Its search field, and the search types under it                                                                                                   |
 | `launcher-group`, `launcher-row`     | A group's heading, and each result                                                                                                                |

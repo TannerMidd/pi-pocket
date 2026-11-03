@@ -145,6 +145,8 @@ export const store = {
         /** A transcript message the next chat message discusses: `{ entryId, text }`. */
         chatQuote: null,
         replyQuote: null,
+        /** A passage for PiP's box to ask about (Ask PiP): `{ text, session }`, quoted before its next message. */
+        pipQuote: null,
         /** Text to put into the message box to Pi: `{ text, n }`, picked up by the composer. */
         composerInsert: null,
         /** Pi's prompt templates for a conversation's folder: `{ conversationId, at, list }`. */

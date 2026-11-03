@@ -28,6 +28,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { PipCompactionDoc } from "./docs.ts";
+import { CONTEXT_BLOCK } from "./entry-format.ts";
 import { describe } from "./errors.ts";
 import { noWait } from "./limit-gate.ts";
 import { clip, defang } from "./fence.ts";
@@ -106,10 +107,20 @@ export function leaveOutside(text: string): string {
     return text.replace(OUTSIDE, (_whole, tag: string) => LEFT_OUT[tag] ?? "[left out]");
 }
 
+/**
+ * A message's text for the summary. What Pi Pocket added for PiP alone (`CONTEXT_BLOCK`: where a quoted passage came
+ * from) stays out: a session's title in it is anyone's words.
+ */
 const textOf = (content: string | readonly { type: string; text?: string }[]): string =>
     typeof content === "string"
         ? content
         : content
+              .filter(
+                  (block, index) =>
+                      index === 0 ||
+                      block.type !== "text" ||
+                      !block.text?.startsWith(CONTEXT_BLOCK),
+              )
               .map((block) =>
                   block.type === "text"
                       ? (block.text ?? "")

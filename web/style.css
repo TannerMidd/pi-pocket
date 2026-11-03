@@ -18572,21 +18572,49 @@ pre.gallery-code {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-width: 92px;
     height: 36px;
-    padding: 0 12px;
+    overflow: hidden;
     border: 1px solid var(--hair-2);
     border-radius: 999px;
     background: var(--card);
     color: var(--text);
-    font: inherit;
     font-size: 13px;
     font-weight: 600;
     box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
-    cursor: pointer;
     -webkit-user-select: none;
     user-select: none;
+}
+
+.quote-reply-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 92px;
+    height: 100%;
+    padding: 0 12px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.quote-reply-action:hover {
+    background: var(--hover);
+}
+
+.quote-reply-action + .quote-reply-action {
+    border-left: 1px solid var(--hair-2);
+}
+
+.quote-reply-action.quote-reply-pip {
+    min-width: 44px;
+    padding: 0 12px;
+}
+
+.pip-quote-strip {
+    margin: 0 12px 6px;
 }
 
 .quote-strip {
