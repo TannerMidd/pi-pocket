@@ -613,7 +613,7 @@ if (typeof pocket.codeBlock === "function") {
 }
 ```
 
-Use only `pocket` in a drop-in; do not import core browser files. The optional [Mermaid example](../../../contrib/mermaid/README.md) uses this API. This addition leaves `pocketApi` unchanged; check for the method on older installations.
+Use only `pocket` in a drop-in; do not import core browser files. This addition leaves `pocketApi` unchanged; check for the method on older installations.
 
 ## Opening and closing
 
