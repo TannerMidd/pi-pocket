@@ -528,6 +528,55 @@ test(
     },
 );
 
+/** The session the list marks as open (its row's `aria-current`), or null for none. */
+const markedOpen = () =>
+    inPage<number | null>(
+        `const row = document.querySelector('.sidebar .session-row:has([aria-current="page"])');
+        return JSON.stringify(row ? Number(row.dataset.id) : null)`,
+    );
+
+test(
+    "Board: the session under PiP stays marked open in the list, as under Running now",
+    real,
+    async () => {
+        const other = await newSession(app, project);
+
+        await fresh("board");
+        await see(`document.querySelector('.sidebar .session-row') !== null`, "the session list");
+        assert.equal(await markedOpen(), Number(background), "the session is marked open");
+
+        await page.click({ selector: ".rail-running" });
+        await see(`(await import('/store.js')).store.state.board === 'running'`, "Running now");
+        await settle();
+        assert.equal(await markedOpen(), Number(background), "under Running now it stays marked");
+        await page.click({ selector: ".rail-running" });
+        await backTo(background, "the session again");
+        await settle();
+
+        await page.click({ selector: ".rail-pip" });
+        await boarded("PiP as a board");
+        assert.equal(await markedOpen(), Number(background), "under PiP it stays marked too");
+
+        // Kept on PiP's entry: through a reload, and back to it from another session.
+        await page.evaluate(`location.reload()`);
+        await boarded("PiP after a reload");
+        await see(`document.querySelector('.sidebar .session-row') !== null`, "the session list");
+        assert.equal(await markedOpen(), Number(background), "still marked after a reload");
+
+        await page.evaluate(`(await import('/store.js')).navigate(${Number(other)})`);
+        await backTo(other, "another session");
+        assert.equal(await markedOpen(), Number(other), "the session picked is the one marked");
+        await page.evaluate(`history.back()`);
+        await boarded("PiP again, by back");
+        assert.equal(await markedOpen(), Number(background), "back on PiP, the one under it again");
+
+        await page.click({ selector: '.topbar [aria-label="Close PiP"]' });
+        await shut("closed");
+        await backTo(background, "the session under it");
+        assert.equal(await markedOpen(), Number(background));
+    },
+);
+
 test("Board: back and forward keep where PiP closes to", real, async () => {
     const other = await newSession(app, project);
 

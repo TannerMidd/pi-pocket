@@ -54,6 +54,7 @@ import {
     holdNotice,
     navigate,
     notify,
+    openId,
     openSheet,
     panelsBeside,
     peopleDocked,
@@ -660,7 +661,7 @@ function step(by) {
         return;
     }
 
-    const at = order.findIndex((session) => session.id === store.state.conversationId);
+    const at = order.findIndex((session) => session.id === openId());
 
     const next = order[(at + by + order.length) % order.length].id;
 

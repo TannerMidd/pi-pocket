@@ -1,5 +1,5 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
-import { onRoute, pushRoute } from "./back.js";
+import { onRoute, pushRoute, routeState } from "./back.js";
 import { hostCan, onPageVisibility, pageVisible } from "./host.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
@@ -132,6 +132,8 @@ export const store = {
         /** Sessions marked unread in this browser: an id each, until opened again. */
         unread: unreadOf(),
         conversationId: routeConversation(),
+        /** The route this one was opened over, as a board is (`navigate`'s `over`): `{ id }`, null for home; else null. */
+        over: routeOver(),
         /** Sessions whose linked sessions are folded away in the list: this browser's choice (`toggleFoldedLinked`). */
         foldedLinked: readFoldedLinked(),
         view: emptyView(),
@@ -282,6 +284,18 @@ function routeConversation() {
     return match ? Number(match[1]) : null;
 }
 
+/** What the route's history entry keeps of the route it was opened over (`navigate`'s `over`), or null. */
+function routeOver() {
+    return routeState("over") ?? null;
+}
+
+/**
+ * The session the list, the rail, and the tabs mark as open: the one in the session's place, or, for a route opened over
+ * another as a board is (PiP's conversation), the one under it, as under Running now. Null for none (home).
+ */
+export const openId = (state = store.state) =>
+    state.over === null ? state.conversationId : state.over.id;
+
 // ─── People: presence, typing, and the side chat ───────────────────────────────────
 
 const CHAT_LIMIT = 500;
@@ -322,14 +336,15 @@ export function sessionUnread(session, state = store.state) {
  * (`session-tree.js`). Archived sessions are left out.
  */
 export function workspaceOrder(state = store.state) {
-    const { sessions, pinned: pins, foldedLinked, conversationId } = state;
+    const { sessions, pinned: pins, foldedLinked } = state;
+    const open = openId(state);
 
     // The list, the rail, the home screen, and peek tiles all ask as they draw: the order is made once for each list.
     if (
         ordered.sessions === sessions &&
         ordered.pinned === pins &&
         ordered.folded === foldedLinked &&
-        ordered.open === conversationId
+        ordered.open === open
     ) {
         return ordered.order;
     }
@@ -337,7 +352,7 @@ export function workspaceOrder(state = store.state) {
     // Linked sessions folded away are out of the order too: the numbers and Alt+arrows follow what shows.
     const order = orderOf(state, foldsNow(state));
 
-    ordered = { sessions, pinned: pins, folded: foldedLinked, open: conversationId, order };
+    ordered = { sessions, pinned: pins, folded: foldedLinked, open, order };
 
     return order;
 }
@@ -398,7 +413,7 @@ export function foldsNow(state = store.state) {
     const seen = new Set();
 
     for (
-        let at = byId.get(state.conversationId)?.linkedFrom?.id;
+        let at = byId.get(openId(state))?.linkedFrom?.id;
         at !== undefined && !seen.has(at);
         at = byId.get(at)?.linkedFrom?.id
     ) {
@@ -2283,11 +2298,18 @@ export function closeSignIn(flowId) {
     store.set((state) => (state.auth?.flowId === flowId ? { auth: null } : {}));
 }
 
-export function navigate(conversationId, { replace = false, sheet = null, state } = {}) {
+/**
+ * Go to a conversation (null: the home screen). With `over` (`{ id }`, the route under it), it opens over that route
+ * as a board does: the entry keeps it, and the list keeps that session marked open (`openId`) until another route.
+ */
+export function navigate(conversationId, { replace = false, sheet = null, over = null } = {}) {
     const path = conversationId === null ? "/" : `/s/${conversationId}`;
 
-    if (location.pathname !== path || store.state.conversationId !== conversationId) {
-        pushRoute(path, { replace, state });
+    // A new route says what it is over; the same route keeps what its entry already says.
+    const route = location.pathname !== path || store.state.conversationId !== conversationId;
+
+    if (route) {
+        pushRoute(path, { replace, state: over === null ? {} : { over } });
     }
 
     // The subagents board and extensions' pages show in the conversation's place: going to one, even the one under it,
@@ -2300,6 +2322,10 @@ export function navigate(conversationId, { replace = false, sheet = null, state 
     opened(conversationId);
 
     if (store.state.conversationId === conversationId && source) {
+        if (route && store.state.over?.id !== over?.id) {
+            store.set({ over });
+        }
+
         if (sheet) {
             openSheet(sheet);
         }
@@ -2309,6 +2335,7 @@ export function navigate(conversationId, { replace = false, sheet = null, state 
 
     keepView(store.state.view);
     store.set((state) => ({
+        ...(route ? { over } : {}),
         conversationId,
         ...keptView(conversationId),
         ...peopleFor(conversationId),
@@ -2353,11 +2380,18 @@ function showKept(id) {
 // Back or forward to another route. Back that only closes a layer (a sheet, a panel) is back.js's.
 onRoute(() => {
     const id = routeConversation();
+    // The entry says what its route is over: in the same change as the route, so the open mark never jumps between.
+    const over = store.state.over?.id === routeOver()?.id ? {} : { over: routeOver() };
 
-    if (id !== store.state.conversationId) {
+    if (id === store.state.conversationId) {
+        if ("over" in over) {
+            store.set(over);
+        }
+    } else {
         opened(id);
         keepView(store.state.view);
         store.set({
+            ...over,
             conversationId: id,
             ...keptView(id),
             ...peopleFor(id),

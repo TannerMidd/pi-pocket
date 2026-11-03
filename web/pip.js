@@ -5,7 +5,7 @@
 // events), so the session behind it stays as it was.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { followUpText } from "./artifact-bridge.js";
-import { backRoute, routeState, useBack } from "./back.js";
+import { backRoute, useBack } from "./back.js";
 import { boxKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
@@ -182,12 +182,6 @@ export const pipBoard = (state = store.state) =>
 /** PiP shows, in either place: its floating panel open, or its conversation in the session's place. */
 export const pipShown = (state = store.state) => state.pipOpen || pipBoard(state);
 
-/**
- * What PiP's board keeps on its route's history entry: the route it was opened over, `{ id }` with a session's id or
- * null for home. On the entry, it holds through back and forward and a reload; reached another way (the address), the
- * entry has none, and closing PiP goes home.
- */
-const BOARD_FROM = "pipFrom";
 /** The place the open panel is in, so a change of the setting moves it. */
 let place = pipPlace();
 
@@ -347,7 +341,7 @@ async function openBoard(text, keepSheet = false) {
     // stays over the new route. Its new entry keeps the route it was opened over, for closing it.
     navigate(id, {
         ...(keepSheet ? { sheet: store.state.sheet } : {}),
-        state: { [BOARD_FROM]: { id: store.state.conversationId } },
+        over: { id: store.state.conversationId },
     });
     store.set({
         launcher: false,
@@ -406,12 +400,13 @@ export function closePip() {
     const open = store.state.pipOpen;
 
     if (pipBoard()) {
-        const from = routeState(BOARD_FROM);
-        const { sheet } = store.state;
+        // The route it was opened over (`over`, kept on its history entry through back, forward, and a reload); none
+        // when reached another way (the address).
+        const { over: from, sheet } = store.state;
 
-        // Back to the route it was opened over, past whatever is open over it. A sheet still open (Appearance, moving
-        // PiP to the corner) stays, over that route; and reached another way, it gives the place to the home screen.
-        if (from !== undefined && !sheet) {
+        // Back there, past whatever is open over it. A sheet still open (Appearance, moving PiP to the corner) stays,
+        // over that route; and reached another way, it gives the place to the home screen.
+        if (from !== null && !sheet) {
             backRoute();
         } else {
             navigate(from?.id ?? null, { sheet });

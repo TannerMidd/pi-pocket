@@ -20,6 +20,7 @@ import {
     canSteer,
     navigate,
     notify,
+    openId,
     store,
     workspaceOrder,
 } from "./store.js";
@@ -53,15 +54,18 @@ store.set({ peeks: {} });
 let slots = [];
 /** The session open before this one: it stays a tile, in the place of the one that was opened. */
 let lastLeft = null;
-let previous = store.state.conversationId;
+let previous = openId();
 
-// The session left stays a tile, in the place of the one opened. `seen.js` marks both seen.
+// The session left stays a tile, in the place of the one opened; one with a board opened over it (PiP's) is not left.
+// `seen.js` marks both seen.
 store.subscribe((state) => {
-    if (state.conversationId !== previous) {
-        const left = previous;
-        const at = slots.indexOf(state.conversationId);
+    const open = openId(state);
 
-        previous = state.conversationId;
+    if (open !== previous) {
+        const left = previous;
+        const at = slots.indexOf(open);
+
+        previous = open;
 
         if (left !== null) {
             lastLeft = left;
@@ -98,7 +102,7 @@ let chosen = { from: [], tiles: [] };
 export function peekTiles(state = store.state) {
     const from = [
         state.sessions,
-        state.conversationId,
+        openId(state),
         state.pinned,
         state.peekSeen,
         lastLeft,
@@ -113,7 +117,7 @@ export function peekTiles(state = store.state) {
     const shown = state.sessions.filter(
         (session) =>
             !session.archived &&
-            session.id !== state.conversationId &&
+            session.id !== openId(state) &&
             (session.busy ||
                 session.waiting ||
                 busyAgents(session) > 0 ||
