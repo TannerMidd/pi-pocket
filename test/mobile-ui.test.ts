@@ -13,7 +13,7 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -1788,3 +1788,65 @@ test(
         assert.equal(requests.after, 2, "Refresh asks for the diff again");
     },
 );
+
+test("a sent HEIC photo shows the JPEG the model got", real, async () => {
+    const id = await newSession(app);
+
+    await app.commands.configure(id, owner(app), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+    const photo = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
+    const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+
+    writeFileSync(path, photo);
+    await say(app, id, "look at this", [
+        { path, name: "photo.heic", mime: "image/heic", size: photo.length },
+    ]);
+
+    await fresh();
+    await goTo(id);
+    await until(
+        async () =>
+            (await inPage<string>(
+                `return JSON.stringify(document.querySelector(".thumbs .thumb img")?.alt ?? "")`,
+            )) === "photo.heic",
+        "the HEIC photo's thumbnail",
+    );
+    const thumbnail = await inPage<{ path: string; width: number }>(`
+        const image = document.querySelector(".thumbs .thumb img");
+
+        await image.decode();
+
+        return JSON.stringify({ path: new URL(image.src).pathname, width: image.naturalWidth });
+    `);
+
+    assert.match(thumbnail.path, /\/image\/\d+\/0$/, "the image stored in the message");
+    assert.ok(thumbnail.width > 0);
+});
+
+test("a HEIC photo shows a stored image only where its place is sure", real, async () => {
+    const sources = await inPage<(string | null)[]>(`
+        const { attachedPictureSrc } = await import("/ui.js");
+        const heic = { path: "/u/a.heic", mime: "image/heic", size: 1000, noted: true };
+        const png = { path: "/u/b.png", mime: "image/png", size: 1000, noted: false };
+        const entry = (images, files) => ({ id: 7, images, files });
+
+        return JSON.stringify([
+            attachedPictureSrc(heic, [png, heic], entry(2), 1),
+            attachedPictureSrc({ ...heic, noted: false }, [heic], entry(1), 1),
+            attachedPictureSrc(heic, [png, heic], entry(1), 1),
+            attachedPictureSrc(heic, [heic, png], entry(2, ["/w/m.png"]), 1),
+            attachedPictureSrc(heic, [heic], entry(1, ["/w/notes.md"]), 1),
+            attachedPictureSrc(png, [png], entry(0), 1),
+        ]);
+    `);
+
+    assert.deepEqual(sources, [
+        "/api/c/1/image/7/1",
+        null,
+        null,
+        null,
+        "/api/c/1/image/7/0",
+        "/api/c/1/file?path=%2Fu%2Fb.png",
+    ]);
+});
