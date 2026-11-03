@@ -1,10 +1,27 @@
 import { useEffect, useState } from "preact/hooks";
+import { pipAvailable, quotePip } from "./pip.js";
 import { rangeText } from "./quote-text.js";
-import { quoteReply } from "./store.js";
+import { quoteReply, store } from "./store.js";
+import { prefs } from "./theme.js";
 import { html, Icon } from "./ui.js";
 
+/** Which of the pill's buttons show: each has its own switch in Appearance, and PiP's orb needs PiP on. */
+const buttons = () => ({
+    // Whoever cannot write to Pi has no message box to put the quote in.
+    reply:
+        prefs().quoteReply !== false &&
+        Boolean(document.querySelector('[data-part="composer"] textarea')),
+    // Never in PiP's own conversation (as a board, or opened as one): Reply already goes to PiP there.
+    pip:
+        prefs().askPipQuote !== false &&
+        pipAvailable() &&
+        (store.state.pip?.id === undefined || store.state.conversationId !== store.state.pip.id),
+});
+
 const coarse = matchMedia("(pointer: coarse)").matches;
-const WIDTH = 84;
+const REPLY_WIDTH = 84;
+// The orb, and the line between it and Reply.
+const PIP_WIDTH = 41;
 const HEIGHT = 32;
 
 function selected() {
@@ -24,8 +41,9 @@ function selected() {
     const from = within(range.startContainer);
     const to = within(end) ?? (within(range.commonAncestorContainer) ? from : null);
 
-    // Whoever cannot write to Pi has no message box to put the quote in.
-    if (!from || from !== to || !document.querySelector('[data-part="composer"] textarea')) {
+    const shown = buttons();
+
+    if (!from || from !== to || (!shown.reply && !shown.pip)) {
         return null;
     }
 
@@ -64,9 +82,10 @@ function selected() {
     }
 
     const anchor = below ? last.right : first.left;
-    const left = Math.max(8, Math.min(anchor - (below ? WIDTH : 0), innerWidth - WIDTH - 8));
+    const width = (shown.reply ? REPLY_WIDTH : 0) + (shown.pip ? PIP_WIDTH : 0);
+    const left = Math.max(8, Math.min(anchor - (below ? width : 0), innerWidth - width - 8));
 
-    return { text, top, left };
+    return { text, top, left, shown };
 }
 
 export function QuoteReplyButton() {
@@ -81,12 +100,24 @@ export function QuoteReplyButton() {
             timer = setTimeout(() => setAt(selected()), 160);
         };
 
+        // Appearance's switches and PiP turned on or off change which buttons show: measured again, at once.
+        let was = buttons();
+        const unsubscribe = store.subscribe(() => {
+            const now = buttons();
+
+            if (now.reply !== was.reply || now.pip !== was.pip) {
+                was = now;
+                setAt(selected());
+            }
+        });
+
         document.addEventListener("selectionchange", look);
         addEventListener("scroll", look, true);
         addEventListener("resize", look);
 
         return () => {
             clearTimeout(timer);
+            unsubscribe();
             document.removeEventListener("selectionchange", look);
             removeEventListener("scroll", look, true);
             removeEventListener("resize", look);
@@ -97,10 +128,18 @@ export function QuoteReplyButton() {
         return null;
     }
 
-    const reply = () => {
-        quoteReply(at.text);
+    const done = () => {
         getSelection()?.removeAllRanges();
         setAt(null);
+    };
+
+    const reply = () => {
+        if (!buttons().reply) {
+            return done();
+        }
+
+        quoteReply(at.text);
+        done();
 
         if (!coarse) {
             requestAnimationFrame(() =>
@@ -109,16 +148,51 @@ export function QuoteReplyButton() {
         }
     };
 
-    // Pressing the button must not take the selection away before the click reads it.
-    return html`<button
+    // The passage goes over PiP's box as a quote instead, with the session it came from (unless that is PiP's own).
+    const askPip = () => {
+        if (!buttons().pip) {
+            return done();
+        }
+
+        const text = at.text;
+        const { conversationId, sessions } = store.state;
+        // Only a session of the list (never a subagent's conversation, nor PiP's own) is named: PiP can read it.
+        const session = sessions.some((each) => each.id === conversationId)
+            ? conversationId
+            : undefined;
+
+        done();
+        quotePip(text, session);
+    };
+
+    // Pressing a button must not take the selection away before the click reads it.
+    const keep = (event) => event.preventDefault();
+
+    return html`<div
         class="quote-reply-button"
         data-part="quote-reply-button"
         style=${`top:${at.top}px;left:${at.left}px`}
-        onPointerDown=${(event) => event.preventDefault()}
-        onMouseDown=${(event) => event.preventDefault()}
-        onClick=${reply}
+        onPointerDown=${keep}
+        onMouseDown=${keep}
     >
-        <${Icon} name="reply" size=${14} stroke=${2} />
-        <span>Reply</span>
-    </button>`;
+        ${
+            at.shown.reply &&
+            html`<button type="button" class="quote-reply-action" onClick=${reply}>
+                <${Icon} name="reply" size=${14} stroke=${2} />
+                <span>Reply</span>
+            </button>`
+        }
+        ${
+            at.shown.pip &&
+            html`<button
+                type="button"
+                class="quote-reply-action quote-reply-pip"
+                aria-label="Ask PiP"
+                title="Ask PiP"
+                onClick=${askPip}
+            >
+                <${Icon} name="pip" size=${16} />
+            </button>`
+        }
+    </div>`;
 }

@@ -20685,56 +20685,96 @@ pre.gallery-code {
     position: fixed;
     z-index: 70;
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-width: 84px;
+    align-items: stretch;
     height: 32px;
-    padding: 0 12px 0 10px;
-    border: 0;
     border-radius: var(--r-card);
     background: var(--panel);
     color: var(--text);
-    font: inherit;
     font-size: 13px;
     font-weight: 500;
     box-shadow: var(--pop);
-    cursor: pointer;
     -webkit-user-select: none;
     user-select: none;
     animation: pop 0.2s var(--ease-out);
 }
 
-.quote-reply-button .icon {
+/* Reply, and PiP's orb beside it while PiP is on. */
+.quote-reply-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 84px;
+    padding: 0 12px 0 10px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.quote-reply-action:first-child {
+    border-start-start-radius: inherit;
+    border-end-start-radius: inherit;
+}
+
+.quote-reply-action:last-child {
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+}
+
+.quote-reply-action + .quote-reply-action {
+    border-left: 1px solid var(--hair);
+}
+
+.quote-reply-action.quote-reply-pip {
+    min-width: 40px;
+    padding: 0 12px;
+}
+
+.quote-reply-action .icon {
     color: var(--muted);
 }
 
-/* --hover is see-through: lay it over the panel, or the reply's words show through the button. */
-.quote-reply-button:active {
-    background-image: linear-gradient(var(--hover), var(--hover));
+/* --hover is see-through: it lies over the pill's panel, or the reply's words show through it. */
+.quote-reply-action:active {
+    background: var(--hover);
 }
 
-.quote-reply-button:active .icon {
+.quote-reply-action:active .icon {
     color: var(--accent);
 }
 
 @media (hover: hover) {
-    .quote-reply-button:hover {
-        background-image: linear-gradient(var(--hover), var(--hover));
+    .quote-reply-action:hover {
+        background: var(--hover);
     }
 
-    .quote-reply-button:hover .icon {
+    .quote-reply-action:hover .icon {
         color: var(--accent);
     }
 }
 
-/* A finger needs more than 32 px: the button grows its touch area, not its look. */
+/* A finger needs more than 32 px: each button grows its touch area, not its look. */
 @media (pointer: coarse) {
-    .quote-reply-button::before {
+    .quote-reply-action::before {
         content: "";
         position: absolute;
-        inset: -6px;
+        inset: -6px 0;
     }
+
+    .quote-reply-action:first-child::before {
+        left: -6px;
+    }
+
+    .quote-reply-action:last-child::before {
+        right: -6px;
+    }
+}
+
+.pip-quote-strip {
+    margin: 0 12px 6px;
 }
 
 .quote-strip {

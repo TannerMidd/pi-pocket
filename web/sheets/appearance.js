@@ -33,6 +33,7 @@ import {
 } from "../theme.js";
 import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
+import { pipAvailable } from "../pip.js";
 import { galleryAvailable } from "./gallery.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
@@ -827,6 +828,19 @@ export function AppearanceSheet() {
                     onChange=${() => setPrefs({ quoteReply: !p.quoteReply })}
                 />
             <//>
+            ${
+                pipAvailable() &&
+                html`<${SettingRow}
+                    title="Ask PiP about a passage"
+                    detail="Select words in one of Pi's replies, and PiP's orb by them asks PiP about them, and tells it which session they came from"
+                >
+                    <${Switch}
+                        on=${p.askPipQuote}
+                        label="Ask PiP about a passage"
+                        onChange=${() => setPrefs({ askPipQuote: !p.askPipQuote })}
+                    />
+                <//>`
+            }
             <${SettingRow}
                 title="Wait for updates"
                 detail="Going back to a session that changed while you were away: show it once its updates have come, instead of your last copy at once with the updates sliding in"

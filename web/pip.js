@@ -9,6 +9,7 @@ import { boxKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
 import { personStorage } from "./person-storage.js";
+import { splitQuote, withQuote } from "./quote-text.js";
 import { usePipResize } from "./pip-window.js";
 import { api, attempt, isRow, navigate, notify, openSheet, store, uid } from "./store.js";
 import { spendTap } from "./taps.js";
@@ -43,14 +44,29 @@ const composerDraft = createPipDraft({
     upload: (id, file) => api(`c/${id}/upload?name=${encodeURIComponent(file.name)}`, file),
     onError: (message) => notify("error", message),
 });
-const syncDraftScope = (state) =>
-    composerDraft.scope(
-        // Before the first hello, a signed-out/unknown bootstrap is not this tab logging out.
+
+const syncDraftScope = (state) => {
+    // Before the first hello, a signed-out/unknown bootstrap is not this tab logging out.
+    const changed = composerDraft.scope(
         state.me === undefined || (state.me === null && !state.server)
             ? undefined
             : (state.me?.id ?? null),
         state.pip?.id,
     );
+
+    // The quote over PiP's box goes with its draft's files: to another person, or another PiP, it was never theirs.
+    const stale = state.pipQuote;
+
+    if (changed && stale) {
+        // Out of this `set`: a change made from inside one reaches the listeners after it out of order. Only that quote:
+        // one put there meanwhile is the new person's.
+        queueMicrotask(() => {
+            if (store.state.pipQuote === stale) {
+                store.set({ pipQuote: null });
+            }
+        });
+    }
+};
 
 syncDraftScope(store.state);
 /** How many of PiP's newest rows the panel shows: it is for the moment, and the full conversation is a tap away. */
@@ -204,6 +220,18 @@ export function openPip(text) {
     store.set({ pipOpen: true, launcher: false, drawer: false });
 }
 
+/**
+ * Ask PiP about a passage of Pi's reply in session `session` (or none): a quote strip over PiP's box holds it, and the
+ * next message to PiP goes with it quoted first. The server tells PiP, unseen, which session it came from.
+ */
+export function quotePip(passage, session) {
+    store.set({
+        pipQuote: { text: passage, session: typeof session === "number" ? session : undefined },
+    });
+    openPip();
+    focusComposer();
+}
+
 export function closePip() {
     if (!store.state.pipOpen) {
         return;
@@ -286,7 +314,7 @@ export async function askPipFrom(source, text, send) {
 }
 
 /** Send PiP a message; false when it did not go (a notice says why). PiP made just now is waited for. */
-async function send(id, text, busy, attachments = []) {
+async function send(id, text, busy, attachments = [], about = undefined) {
     const account = store.state.me?.id;
     const target = id ?? store.state.pip?.id ?? (await opening)?.id;
 
@@ -304,6 +332,7 @@ async function send(id, text, busy, attachments = []) {
         api(`c/${target}/submit`, {
             text,
             ...(attachments.length > 0 ? { attachments } : {}),
+            ...(about === undefined ? {} : { about }),
             requestId: uid(),
             // Words for PiP while it works change what it does now, rather than wait for it.
             ...(busy ? { mode: "steer" } : {}),
@@ -498,8 +527,18 @@ function Item({ item, last, busy, conversationId }) {
                 (file) => !pictures.some((picture) => picture.file === file),
             );
 
+            // A passage asked about (Ask PiP) shows as a quote block above the words, as in a session.
+            const quote = splitQuote(text);
+
             return html`<div class="pip-you">
-                ${text && html`<div>${text}</div>`}
+                ${
+                    quote
+                        ? html`<blockquote class="reply-quote" data-part="reply-quote">
+                                  ${quote.passage}
+                              </blockquote>
+                              ${quote.rest && html`<div>${quote.rest}</div>`}`
+                        : text && html`<div>${text}</div>`
+                }
                 ${
                     others.length > 0 &&
                     html`<div class="attachments">
@@ -633,9 +672,11 @@ function Composer({ id, busy }) {
     const ref = useRef(null);
     const picker = useRef(null);
     const draft = store.state.pipDraft;
+    // A passage to ask about (Ask PiP by a selection): it goes quoted before the next message.
+    const quote = store.state.pipQuote;
     const change = composerDraft.changeText;
     const uploading = files.some((file) => file.state === "uploading");
-    const hasMessage = text.trim() !== "" || files.length > 0;
+    const hasMessage = text.trim() !== "" || files.length > 0 || Boolean(quote);
     const sendDisabled =
         !hasMessage || (uploading && !COMPACT.test(text.trim())) || Boolean(pending);
 
@@ -681,8 +722,15 @@ function Composer({ id, busy }) {
         // Read the durable-in-this-tab draft, not a render's text or an old panel's queue.
         const message = composerDraft.state.text.trim();
         const compact = COMPACT.exec(message);
+        const quoted = store.state.pipQuote;
 
-        if (message === "" && composerDraft.state.files.length === 0) {
+        if (message === "" && composerDraft.state.files.length === 0 && !quoted) {
+            return;
+        }
+
+        if (compact && quoted) {
+            notify("info", "A quote cannot go with a command. Remove the quote to run it.");
+
             return;
         }
 
@@ -708,12 +756,18 @@ function Composer({ id, busy }) {
                 ? (await compactPip(id, compact[1]?.trim())) !== undefined
                 : await send(
                       id,
-                      message,
+                      quoted ? withQuote(quoted.text, message) : message,
                       busy,
                       token.files.map((file) => file.attachment),
+                      quoted?.session === undefined ? undefined : { session: quoted.session },
                   );
         } finally {
             composerDraft.finish(token, success);
+        }
+
+        // Sent with it: the quote goes, unless another took its place meanwhile.
+        if (success && quoted && store.state.pipQuote === quoted) {
+            store.set({ pipQuote: null });
         }
     };
 
@@ -779,6 +833,21 @@ function Composer({ id, busy }) {
                         </button>
                     </div>`,
                 )}
+            </div>`
+        }
+        ${
+            quote &&
+            html`<div class="quote-strip pip-quote-strip" data-part="quote-strip">
+                <${Icon} name="reply" size=${13} />
+                <span class="quote-strip-text">${quote.text}</span>
+                <button
+                    type="button"
+                    class="icon-button small"
+                    aria-label="Remove the quote"
+                    onClick=${() => store.set({ pipQuote: null })}
+                >
+                    <${Icon} name="close" size=${12} />
+                </button>
             </div>`
         }
         <form class="pip-composer" onSubmit=${submit}>
