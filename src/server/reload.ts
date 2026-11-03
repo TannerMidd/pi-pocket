@@ -1161,14 +1161,15 @@ function summary(path: string): string {
 }
 
 /**
- * A file's size and time of last change, "folder" for a folder, or undefined when it is gone. Reading a file, or changing
- * its attributes, leaves it as it was: Windows reports those to a watch too.
+ * A file's inode, size, and time of last change, "folder" for a folder, or undefined when it is gone. Reading a file, or
+ * changing its attributes, leaves it as it was: Windows reports those to a watch too. The inode tells a file saved by a
+ * rename from the one before, also when a coarse clock gives both the same time.
  */
 function stampOf(path: string): string | undefined {
     try {
         const stats = statSync(path);
 
-        return stats.isDirectory() ? "folder" : `${stats.size}:${stats.mtimeMs}`;
+        return stats.isDirectory() ? "folder" : `${stats.ino}:${stats.size}:${stats.mtimeMs}`;
     } catch {
         return undefined;
     }

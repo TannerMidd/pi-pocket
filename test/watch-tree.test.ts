@@ -2,7 +2,16 @@
 // it was. Windows reports reads and attribute changes to a watch too, and every tab reloaded for them.
 import { cleanUp, root, until } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    mkdirSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    statSync,
+    utimesSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { watchTree } from "../src/server/reload.ts";
@@ -39,9 +48,25 @@ test("a watched tree tells of added, written, and removed files, and not of read
         await until(() => changes.length === 2, "the new file is told");
         assert.equal(changes[1], join("fonts", "new.woff2"));
 
+        // A save by rename, of the same size at the same time (a coarse clock): a new file all the same.
+        const saved = join(directory, "app.js.tmp");
+        const second = new Date(Math.floor(Date.now() / 1000) * 1000);
+
+        utimesSync(app, second, second);
+        await settle();
+        const before = changes.length;
+
+        writeFileSync(saved, "export const a = 3;\n");
+        utimesSync(saved, second, second);
+        assert.equal(statSync(saved).mtimeMs, statSync(app).mtimeMs);
+        renameSync(saved, app);
+        await until(() => changes.slice(before).includes("app.js"), "the rename is told");
+
+        const told = changes.length;
+
         rmSync(app);
-        await until(() => changes.length === 3, "the removal is told");
-        assert.equal(changes[2], "app.js");
+        await until(() => changes.length === told + 1, "the removal is told");
+        assert.equal(changes.at(-1), "app.js");
     } finally {
         stop();
     }
