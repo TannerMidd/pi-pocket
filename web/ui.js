@@ -7,7 +7,7 @@ import { Component, createContext, h } from "preact";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useDragToClose } from "./gestures.js";
 import { highlight, langOf } from "./highlight.js";
-import { actions, filesShown, notify, openSheet, store } from "./store.js";
+import { actions, filesShown, notify, openSheet, store, uid } from "./store.js";
 
 export const html = htm.bind(h);
 
@@ -93,16 +93,48 @@ const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[
 /** A fence's language as it may be kept: a short name of safe characters, or nothing. */
 const FENCE_NAME = /^[\w+#.-]{1,24}$/;
 
+// A per-parse, unpredictable mark connects only the parser's fenced tokens to the sanitized DOM.
+// A raw HTML <pre data-lang="…"> is never an extension renderer's input.
+let parsingFences = null;
+const fencedNodes = new WeakMap();
+let codeBlockRenderers = new Map();
+let codeBlockRevision = 0;
+const codeBlockListeners = new Set();
+const InsideCodeBlock = createContext(false);
+
+/** Extension UI publishes its ordered renderers after a batched change; no import back into extension-ui.js. */
+export function setCodeBlockRenderers(renderers) {
+    codeBlockRenderers = renderers;
+    codeBlockRevision++;
+    markdownCache.clear();
+
+    for (const listener of codeBlockListeners) {
+        listener();
+    }
+}
+
 marked.use({
     renderer: {
         // Task list boxes as characters: the sanitizer drops form controls.
         checkbox: ({ checked }) => (checked ? "☑ " : "☐ "),
         // A code block keeps its language as data (the sanitizer drops classes), for colors and a label.
-        code({ text, lang, escaped }) {
+        code({ text, lang, escaped, raw, codeBlockStyle }) {
             const name = (lang ?? "").trim().split(/\s+/)[0];
             const attribute = FENCE_NAME.test(name) ? ` data-lang="${name}"` : "";
+            let mark = "";
 
-            return `<pre${attribute}><code>${escaped ? text : escapeHtml(text)}</code></pre>\n`;
+            if (
+                parsingFences !== null &&
+                codeBlockStyle !== "indented" &&
+                /^\s*(`{3,}|~{3,})/.test(raw)
+            ) {
+                const id = `${parsingFences.prefix}-${parsingFences.blocks.size}`;
+
+                parsingFences.blocks.set(id, { text, language: name.toLowerCase() });
+                mark = ` data-pocket-fence="${id}"`;
+            }
+
+            return `<pre${attribute}${mark}><code>${escaped ? text : escapeHtml(text)}</code></pre>\n`;
         },
     },
 });
@@ -128,7 +160,7 @@ const PURIFY = {
         "picture",
     ],
     ALLOW_DATA_ATTR: false,
-    ADD_ATTR: ["data-lang"],
+    ADD_ATTR: ["data-lang", "data-pocket-fence"],
     // `data-path` is the app's own mark for file paths (`sanitize`): a reply may not set it.
     FORBID_ATTR: [
         "style",
@@ -246,6 +278,8 @@ function codeBlock(pre, fold) {
         more.textContent = `Show all ${lines} lines`;
         wrap.append(more);
     }
+
+    return wrap;
 }
 
 /**
@@ -282,7 +316,17 @@ function sanitize(html, fold) {
     }
 
     for (const pre of fragment.querySelectorAll("pre")) {
-        codeBlock(pre, fold);
+        const fence = parsingFences?.blocks.get(pre.getAttribute("data-pocket-fence"));
+        const wrap = codeBlock(pre, fold);
+
+        if (fence !== undefined) {
+            fencedNodes.set(wrap, fence);
+        }
+    }
+
+    // No provenance marks survive into cached HTML, including marks on raw HTML elements.
+    for (const node of fragment.querySelectorAll("[data-pocket-fence]")) {
+        node.removeAttribute("data-pocket-fence");
     }
 
     for (const image of fragment.querySelectorAll("img")) {
@@ -333,6 +377,18 @@ function partsOf(holder) {
     let run = "";
 
     for (const node of holder.childNodes) {
+        const extension = extensionPart(node);
+
+        if (extension !== null) {
+            if (run.trim() !== "") {
+                parts.push({ html: run });
+            }
+
+            run = "";
+            parts.push(extension);
+            continue;
+        }
+
         if (node.nodeType === Node.ELEMENT_NODE && node.matches(".code[data-kind]")) {
             if (run.trim() !== "") {
                 parts.push({ html: run });
@@ -359,6 +415,44 @@ function partsOf(holder) {
     }
 
     return parts;
+}
+
+/** Split only branches with registered fenced blocks. All attributes and HTML here have passed the sanitizer. */
+function extensionPart(node) {
+    const fence = fencedNodes.get(node);
+
+    if (fence && codeBlockRenderers.has(fence.language)) {
+        return { fence, html: node.outerHTML };
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE || codeBlockRenderers.size === 0) {
+        return null;
+    }
+
+    const children = [...node.childNodes].map(extensionPart);
+
+    if (children.every((child) => child === null)) {
+        return null;
+    }
+
+    return {
+        tag: node.localName,
+        attrs: Object.fromEntries([...node.attributes].map(({ name, value }) => [name, value])),
+        children: [...node.childNodes].map((child, index) => children[index] ?? plainNode(child)),
+    };
+}
+
+/** An unchanged node in a split branch: keep its own tag, not a wrapper that could break a list or paragraph. */
+function plainNode(node) {
+    return node.nodeType === Node.ELEMENT_NODE
+        ? {
+              tag: node.localName,
+              attrs: Object.fromEntries(
+                  [...node.attributes].map(({ name, value }) => [name, value]),
+              ),
+              html: node.innerHTML,
+          }
+        : { text: node.textContent ?? "" };
 }
 
 /** A reply that is a whole HTML page, not in a code block: shown as one, so it can be previewed rather than mangled. */
@@ -441,7 +535,9 @@ function markdownParts(
         return out;
     }
 
-    out = renderParts(fencePage(text), conversationId, base, breaks, cache);
+    const prepared = fencePage(text);
+
+    out = renderParts(prepared, conversationId, base, breaks, cache, prepared === text);
 
     if (cache) {
         if (markdownCache.size >= MARKDOWN_CACHE) {
@@ -455,15 +551,20 @@ function markdownParts(
 }
 
 /** Markdown parsed, sanitized, and split into parts (`partsOf`), for the conversation and folder given. */
-function renderParts(text, conversationId, base, breaks, fold) {
+function renderParts(text, conversationId, base, breaks, fold, allowRenderers = true) {
     rendering = conversationId ?? null;
     linkBase = base;
+    parsingFences =
+        !allowRenderers || codeBlockRenderers.size === 0
+            ? null
+            : { prefix: uid(), blocks: new Map() };
 
     try {
         return partsOf(sanitize(marked.parse(text, { async: false, breaks }), fold));
     } finally {
         rendering = null;
         linkBase = null;
+        parsingFences = null;
     }
 }
 
@@ -521,10 +622,21 @@ export function Markdown({
     conversationId = currentConversation(),
 }) {
     const live = useRef(null);
+    const [, setCodeBlockRevision] = useState(codeBlockRevision);
+
+    // Saved transcript rows can skip the app's redraw. Registry changes must reach their Markdown directly.
+    useLayoutEffect(() => {
+        const changed = () => setCodeBlockRevision(codeBlockRevision);
+
+        codeBlockListeners.add(changed);
+        changed();
+
+        return () => codeBlockListeners.delete(changed);
+    }, []);
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+        const settings = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}\u0000${codeBlockRevision}`;
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -535,7 +647,13 @@ export function Markdown({
         return html`<div class=${`md ${className}`}>
             ${blocks.flatMap(({ key, parts }) =>
                 parts
-                    .filter((part) => part.kind !== undefined || part.html.trim() !== "")
+                    .filter(
+                        (part) =>
+                            part.kind !== undefined ||
+                            part.tag ||
+                            part.fence ||
+                            part.html.trim() !== "",
+                    )
                     .map((part, index) => drawPart(part, `${key}.${index}`, true)),
             )}
         </div>`;
@@ -544,7 +662,7 @@ export function Markdown({
     live.current = null;
     const parts = markdownParts(text, conversationId, cache, base, breaks);
 
-    if (parts.length === 1 && parts[0].kind === undefined) {
+    if (parts.length === 1 && parts[0].kind === undefined && !parts[0].fence && !parts[0].tag) {
         return html`<div
             class=${`md ${className}`}
             dangerouslySetInnerHTML=${{ __html: parts[0].html }}
@@ -557,14 +675,55 @@ export function Markdown({
 }
 
 /** One part of rendered markdown (`partsOf`): a run of HTML, or a code block that shows more than code. */
-const drawPart = (part, key, streaming) =>
-    part.kind === undefined || RichBlock === null
+function drawPart(part, key, streaming) {
+    if (part.fence) {
+        return html`<${RenderedCodeBlock} key=${key} part=${part} streaming=${streaming} />`;
+    }
+
+    if (part.tag) {
+        return h(
+            part.tag,
+            {
+                ...part.attrs,
+                key,
+                ...(part.children ? {} : { dangerouslySetInnerHTML: { __html: part.html } }),
+            },
+            part.children?.map((child, index) => drawPart(child, index, streaming)),
+        );
+    }
+
+    if (part.text !== undefined) {
+        return part.text;
+    }
+
+    return part.kind === undefined || RichBlock === null
         ? html`<div
               key=${key}
               class="md-part"
               dangerouslySetInnerHTML=${{ __html: part.html }}
           ></div>`
         : html`<${RichBlock} key=${key} ...${part} streaming=${streaming} />`;
+}
+
+/** Core owns the source disclosure. Markdown drawn by a renderer cannot recursively invoke renderers. */
+function RenderedCodeBlock({ part, streaming }) {
+    const inside = useContext(InsideCodeBlock);
+    const component = codeBlockRenderers.get(part.fence.language);
+
+    if (streaming || inside || component === undefined) {
+        return html`<div class="md-part" dangerouslySetInnerHTML=${{ __html: part.html }}></div>`;
+    }
+
+    return html`<div class="md-code-renderer">
+        <${InsideCodeBlock.Provider} value=${true}>
+            <${component} ...${part.fence} />
+        <//>
+        <details class="md-code-source">
+            <summary>Source · ${part.fence.language}</summary>
+            <div dangerouslySetInnerHTML=${{ __html: part.html }}></div>
+        </details>
+    </div>`;
+}
 
 /** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
 const FILE_TYPES = new Set(

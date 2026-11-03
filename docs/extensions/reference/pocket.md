@@ -588,6 +588,33 @@ Since 0.14.0 · Stable
 
 Sets how the calls of one of the module's own tools show in transcripts and peek tiles. Without it, a call shows as the tool's name, with its arguments as JSON. It goes with the version that added it. See [`ToolCallSpec`](#toolcallspec). [How tool calls show](../tool-calls.md) tells you more.
 
+### `codeBlock`
+
+```ts
+codeBlock(spec: CodeBlockSpec): Added<CodeBlockSpec>;
+```
+
+Since 0.28.0 · Experimental
+
+Adds a component for real fenced Markdown blocks of one language, including fences inside lists and quotes. Raw HTML that looks like a code block, inline code, and indented code never qualify. Streaming shows ordinary code until the text is complete. Without a registered renderer, Markdown stays unchanged. See [`CodeBlockSpec`](#codeblockspec) and [`CodeBlockProps`](#codeblockprops).
+
+The language is the registration key within the module, matched without case. Registering it again replaces it. The first module in the server's order wins when modules register the same language; removing it exposes the next. `update` can change the component or language, replacing an existing registration for the new language. Old handles cannot change a replacement. Identical values redraw nothing. Changes use the usual batched extension redraw.
+
+Core keeps the original code, with its Copy button, in a **Source** disclosure outside the component. A component failure shows the existing extension error box without removing the source. Replacing the component or changing the source retries it. Removing the registration, disabling the module, or reloading its browser module restores the normal code view and unmounts the component. Use effect cleanup to cancel asynchronous work and ignore late results.
+
+The component receives source as untrusted text, not safe HTML. Validate it before passing it to a renderer library, and sanitize that library's output before inserting HTML or SVG. Browser modules are trusted code, not sandboxed renderers; the API does not make a library safe. Markdown drawn inside a renderer shows code normally instead of invoking renderers recursively.
+
+```js
+if (typeof pocket.codeBlock === "function") {
+    pocket.codeBlock({
+        language: "example",
+        component: ({ text, language }) => pocket.html`<p>${language}: ${text}</p>`,
+    });
+}
+```
+
+Use only `pocket` in a drop-in; do not import core browser files. This addition leaves `pocketApi` unchanged; check for the method on older installations.
+
 ## Opening and closing
 
 A module opens and closes only its own pages and sheets. A version that is gone, or that failed, opens and closes nothing.
@@ -1237,6 +1264,34 @@ type SheetProps<P extends object = object> = P & PageProps;
 Since 0.14.0 · Stable
 
 What a sheet's component gets: the fields of the `props` that `openSheet` gave, and `pocket` and `close`.
+
+### `CodeBlockSpec`
+
+```ts
+interface CodeBlockSpec {
+    language: string;
+    component: ComponentType<CodeBlockProps>;
+}
+```
+
+Since 0.28.0 · Experimental
+
+- `language`: 1–24 ASCII letters, digits, or `_`, `+`, `#`, `.`, and `-`. Matching ignores case.
+- `component`: a Preact function or class component using the app's `h`, `html`, and hooks. It gets [`CodeBlockProps`](#codeblockprops), not `pocket` or `close`; capture `pocket` in setup.
+
+### `CodeBlockProps`
+
+```ts
+interface CodeBlockProps {
+    text: string;
+    language: string;
+}
+```
+
+Since 0.28.0 · Experimental
+
+- `text`: the parser's source inside the fence, without its opening and closing lines. Markdown normalizes line endings and removes nesting indentation.
+- `language`: the first word of the fence's info string, lowercased. Extra info words are not passed.
 
 ### `ToolCallSpec`
 

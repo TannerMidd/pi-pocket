@@ -2312,6 +2312,46 @@ export interface CallSummary {
 }
 
 /**
+ * The parsed source of a fenced Markdown block. Treat it as untrusted text, not HTML.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface CodeBlockProps {
+    /**
+     * The source inside the fence, without its opening and closing lines.
+     * @since 0.28.0
+     * @experimental
+     */
+    text: string;
+    /**
+     * The fence's first language word, lowercased.
+     * @since 0.28.0
+     * @experimental
+     */
+    language: string;
+}
+
+/**
+ * A fenced-code renderer, keyed by language within its module. Core keeps the original source accessible.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface CodeBlockSpec {
+    /**
+     * A case-insensitive language: 1–24 letters, digits, or _ + # . -.
+     * @since 0.28.0
+     * @experimental
+     */
+    language: string;
+    /**
+     * A component drawn after streaming completes. Use effects with cleanup for asynchronous work.
+     * @since 0.28.0
+     * @experimental
+     */
+    component: ComponentType<CodeBlockProps>;
+}
+
+/**
  * How the calls of one of the module's tools show in transcripts and peek tiles. Each function gets a copy of the
  * call's arguments.
  * @since 0.14.0
@@ -2741,6 +2781,12 @@ export interface Pocket {
      * @since 0.14.0
      */
     toolCall<A = Record<string, unknown>>(spec: ToolCallSpec<A>): { remove(): void };
+    /**
+     * Renders real fenced Markdown blocks of a language. The first module in server order wins duplicates.
+     * @since 0.28.0
+     * @experimental
+     */
+    codeBlock(spec: CodeBlockSpec): Added<CodeBlockSpec>;
     /**
      * Opens one of the module's pages.
      * @since 0.14.0

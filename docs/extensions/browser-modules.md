@@ -135,6 +135,12 @@ These, and slots, came in 0.19.0, and are experimental: they can change in a min
 
 **`replyAction({ id, label, run(reply) or sheet })`** adds an action under Pi's answers, before More: "Send to Linear", "Read aloud". `run` gets the answer as `{ id, text, conversationId }`, and a sheet gets it as the prop `reply`.
 
+## Fenced-code renderers
+
+**`codeBlock({ language, component })`** (since 0.28.0, experimental) draws a component for a real fenced Markdown block after streaming finishes. Its props are `{ text, language }`. Core keeps the source in a disclosure, with the ordinary Copy button. Fences inside lists and quotes work too; raw HTML, inline code, and indented code do not qualify. Markdown inside a renderer cannot recursively invoke renderers.
+
+It returns `{ update(patch), remove() }` and goes with this module version. The language is its key; adding the same language replaces it. If modules register the same language, the first in server order wins. A component error stays in the existing extension boundary, with the source still accessible. Treat source as untrusted, sanitize library output, and cancel asynchronous rendering in effect cleanup. Check `typeof pocket.codeBlock === "function"` for older apps. See [the reference](reference/pocket.md#codeblock). No core imports are needed.
+
 ## The session list
 
 These came in 0.20.0, and are experimental. Check that they are there (`typeof pocket.sessionChips === "function"`) to work with an older app too. Session tags, a built-in module (`src/server/extensions/session-tags.ts`), uses all four.
