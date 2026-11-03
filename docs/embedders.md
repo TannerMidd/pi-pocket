@@ -16,6 +16,8 @@ A browser tab cannot do some things that such an app can, and Web Push does not 
 
 ## The app bridge
 
+The app bridge is experimental (since 0.28.0): it can change in a minor release ([API stability](extensions/policies/api-stability.md)). Before 0.28.0-beta.7 these docs were `docs/desktop.md`.
+
 The embedder (in Electron, its preload script) puts one object in the top page of the server's origin, and nowhere else: never in a frame (artifacts run in frames), never on another origin.
 
 ```js
