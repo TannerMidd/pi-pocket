@@ -156,6 +156,11 @@ test("with no models allowed, a subagent runs on its session's model, and Pi is 
         (await app.agentState(started.agents.plain!.conversationId))?.model?.modelId,
         "mine",
     );
+    // The bar and the board say the model it runs on: its session's, so not marked as another.
+    const shown = app.subagents(owner(app)).find((entry) => entry.name === "plain");
+
+    assert.equal(shown?.runsOn?.name, "mine");
+    assert.equal(shown?.runsOn?.other, undefined);
     assert.ok(offered !== undefined, "the parent was offered the tool");
     assert.equal("model" in offered, false, "no model parameter");
 
@@ -183,6 +188,13 @@ test("the owner allows models: Pi may use those, and is refused any other and to
         (await app.agentState(allowed.agents.reviewer!.conversationId))?.model?.modelId,
         "pricey",
     );
+    // Another model than its session's: the bar and the board mark it so.
+    const shown = app
+        .subagents(me)
+        .find((entry) => entry.conversationId === allowed.agents.reviewer!.conversationId);
+
+    assert.equal(shown?.runsOn?.name, "pricey");
+    assert.equal(shown?.runsOn?.other, true);
 
     const refused = await ask(id, "spawn wanderer faux/other");
 

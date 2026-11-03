@@ -165,6 +165,16 @@ test("the bar says what works; Stop stops one", real, async () => {
         `return JSON.stringify(document.querySelectorAll(".agent-row").length === 2)`,
         "a row each",
     );
+    // Each row says the model it runs on: the session's own, so with no "↗".
+    const models = await inPage<string[]>(
+        `return JSON.stringify([...document.querySelectorAll(".agent-row .agent-model")].map((tag) => tag.textContent.trim()))`,
+    );
+
+    assert.equal(models.length, 2, "a model on each row");
+    assert.ok(
+        models.every((text) => text !== "" && !text.startsWith("↗")),
+        `the session's own model: ${models.join(", ")}`,
+    );
     await settled();
     await page.click({ label: "Stop slow" });
     await says(".agents-count", /^1 stopped · 1 done$/, 15_000);
