@@ -8,6 +8,7 @@ import { useBack } from "./back.js";
 import { boxKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
+import { personStorage } from "./person-storage.js";
 import { usePipResize } from "./pip-window.js";
 import { api, attempt, isRow, navigate, notify, openSheet, store, uid } from "./store.js";
 import { spendTap } from "./taps.js";
@@ -34,17 +35,11 @@ import { MicButton, useDictation } from "./voice.js";
 
 const OPEN_KEY = "pocket.pip";
 const SEEN_KEY = "pocket.pip.seen";
-const DRAFT_KEY = "pocket.pip.draft";
+const DRAFT_KEY = "pip.draft";
 // Image previews and in-flight work outlive the panel, but never their PiP/account scope.
 const composerDraft = createPipDraft({
-    loadText: () => localStorage.getItem(DRAFT_KEY) ?? "",
-    saveText: (text) => {
-        if (text === "") {
-            localStorage.removeItem(DRAFT_KEY);
-        } else {
-            localStorage.setItem(DRAFT_KEY, text);
-        }
-    },
+    loadText: () => personStorage.get(DRAFT_KEY) ?? "",
+    saveText: (text) => personStorage.set(DRAFT_KEY, text || null),
     upload: (id, file) => api(`c/${id}/upload?name=${encodeURIComponent(file.name)}`, file),
     onError: (message) => notify("error", message),
 });
@@ -224,7 +219,7 @@ export const togglePip = () => (store.state.pipOpen ? closePip() : openPip());
 
 /** Put `text` in PiP's box, after what is there, and open the panel. */
 function draftPip(text) {
-    const draft = localStorage.getItem(DRAFT_KEY)?.trim();
+    const draft = personStorage.get(DRAFT_KEY)?.trim();
 
     openPip(draft ? `${draft}\n\n${text}` : text);
 }
@@ -866,7 +861,7 @@ function Composer({ id, busy }) {
     </div>`;
 }
 
-/** The owner's private review queue, not just the memories that apply in the conversation behind PiP. */
+/** The owner's review queue, not just the memories that apply in the conversation behind PiP. */
 function PendingMemories({ id }) {
     const data = useMemory(id, true);
     const count = data?.pendingAll === true ? data.lessons.length : null;

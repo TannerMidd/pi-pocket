@@ -117,7 +117,7 @@ async function fresh(viewport: Viewport = VIEWPORTS.desktop): Promise<void> {
     await page.evaluate(`
         (await import('/store.js')).closeSheet();
         (await import('/pip.js')).closePip();
-        localStorage.removeItem('pocket.pip.draft');
+        (await import('/person-storage.js')).personStorage.set('pip.draft', null);
     `);
     await settle();
     await page.setViewport(viewport);

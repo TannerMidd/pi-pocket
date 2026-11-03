@@ -9509,6 +9509,22 @@ div.group-head {
     animation: toast-out var(--t-out) linear forwards;
 }
 
+.account-cover[open] {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+    color: var(--text);
+}
+
 .signin,
 .plain {
     max-width: 440px;
