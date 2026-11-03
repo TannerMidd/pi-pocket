@@ -93,7 +93,7 @@ test("a page from before 0.28.0-beta.7 (`host=notify`), open across an update, s
     }
 });
 
-test("a embedder app hidden in its tray gets Pi finished; one that shows the session gets nothing", async () => {
+test("an embedder hidden in its tray gets Pi finished; one that shows the session gets nothing", async () => {
     const id = await newSession(app);
     const embedder = embedderTab(id);
 
@@ -141,7 +141,7 @@ test("an ordinary tab never gets embedder notifications", async () => {
     }
 });
 
-test("an approval reaches a embedder app with the whole call, and whether its person may allow it", async () => {
+test("an approval reaches an embedder with the whole call, and whether its person may allow it", async () => {
     const id = await newSession(app);
     const embedder = embedderTab(undefined);
 
@@ -180,7 +180,7 @@ test("an approval reaches a embedder app with the whole call, and whether its pe
     }
 });
 
-test("another person's embedder app gets nothing of a session they cannot see", async () => {
+test("another person's embedder gets nothing of a session they cannot see", async () => {
     const id = await newSession(app);
     const mine = embedderTab(id);
     const guest = app.config.addUser("Desk Guest", "guest").user;
@@ -216,7 +216,7 @@ test("another person's embedder app gets nothing of a session they cannot see", 
     }
 });
 
-test("Push notifications turned off for a kind stay off on embedder apps", async () => {
+test("Push notifications turned off for a kind stay off on embedders", async () => {
     const id = await newSession(app);
     const embedder = embedderTab(id);
 

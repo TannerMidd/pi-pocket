@@ -2145,8 +2145,7 @@ export class PocketApp {
     /**
      * Send a notification to this person's embedders (apps that show Pi Pocket and its notifications
      * themselves), over their live connections: Web Push cannot reach them. Each connected one gets
-     * it; the embedder shows one per tag. Returns how many
-     * got it.
+     * it; the embedder shows one per tag. Returns how many got it.
      */
     notifyEmbedders(userId: string, message: EmbedderMessage): number {
         // Web Push clips; an embedder takes the same, and the whole call for an approval.

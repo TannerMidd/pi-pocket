@@ -1,4 +1,4 @@
-// The app bridge in a real page, with the app bridge and Window Controls Overlay supplied before the app starts.
+// The app bridge in a real page, with `window.pocketHost` and Window Controls Overlay supplied before the app starts.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";

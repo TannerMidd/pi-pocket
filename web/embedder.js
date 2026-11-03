@@ -110,7 +110,8 @@ export function hostMenu() {
     const items = callHost("menuItems");
 
     return {
-        title: typeof title === "string" ? title.trim().slice(0, MAX_MENU_TITLE) : "",
+        // Cut by characters, not UTF-16 units: an emoji stays whole.
+        title: typeof title === "string" ? [...title.trim()].slice(0, MAX_MENU_TITLE).join("") : "",
         items: (Array.isArray(items) ? items : [])
             .filter((each) => typeof each?.id === "string" && typeof each?.label === "string")
             .map((each) => ({
