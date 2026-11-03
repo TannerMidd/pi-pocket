@@ -121,7 +121,7 @@ export function hostMenu() {
                     const done = callHost("invoke", each.id);
 
                     if (done === false) {
-                        notify("error", "The app around Pi Pocket could not do that.");
+                        notify("error", "The host around Pi Pocket could not do that.");
                     }
                 },
             })),
