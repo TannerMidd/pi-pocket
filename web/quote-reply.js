@@ -1,12 +1,21 @@
 import { useEffect, useState } from "preact/hooks";
 import { pipAvailable, quotePip } from "./pip.js";
 import { quoteReply, store } from "./store.js";
+import { prefs } from "./theme.js";
 import { html, Icon } from "./ui.js";
+
+/** Which of the pill's buttons show: each has its own switch in Appearance, and PiP's orb needs PiP on. */
+const buttons = () => ({
+    // Whoever cannot write to Pi has no message box to put the quote in.
+    reply:
+        prefs().quoteReply !== false &&
+        Boolean(document.querySelector('[data-part="composer"] textarea')),
+    pip: prefs().askPipQuote !== false && pipAvailable(),
+});
 
 const coarse = matchMedia("(pointer: coarse)").matches;
 const REPLY_WIDTH = 92;
-// With Ask PiP beside Reply: two buttons in one pill.
-const BOTH_WIDTH = 136;
+const PIP_WIDTH = 44;
 const HEIGHT = 36;
 
 function selected() {
@@ -27,13 +36,9 @@ function selected() {
     const to = within(end) ?? (within(range.commonAncestorContainer) ? from : null);
     const text = selection.toString().trim();
 
-    // Whoever cannot write to Pi has no message box to put the quote in.
-    if (
-        !from ||
-        from !== to ||
-        text === "" ||
-        !document.querySelector('[data-part="composer"] textarea')
-    ) {
+    const shown = buttons();
+
+    if (!from || from !== to || text === "" || (!shown.reply && !shown.pip)) {
         return null;
     }
 
@@ -48,14 +53,14 @@ function selected() {
     const below = coarse || first.top < HEIGHT + 12;
     const top = below ? last.bottom + 10 : first.top - HEIGHT - 8;
     const anchor = below ? last.right : first.left;
-    const width = pipAvailable() ? BOTH_WIDTH : REPLY_WIDTH;
+    const width = (shown.reply ? REPLY_WIDTH : 0) + (shown.pip ? PIP_WIDTH : 0);
     const left = Math.max(8, Math.min(anchor - (below ? width : 0), innerWidth - width - 8));
 
     if (top < 0 || top > (visualViewport?.height ?? innerHeight) - HEIGHT) {
         return null;
     }
 
-    return { text, top, left };
+    return { text, top, left, shown };
 }
 
 export function QuoteReplyButton() {
@@ -125,12 +130,15 @@ export function QuoteReplyButton() {
         onPointerDown=${keep}
         onMouseDown=${keep}
     >
-        <button type="button" class="quote-reply-action" onClick=${reply}>
-            <${Icon} name="reply" size=${14} stroke=${2} />
-            <span>Reply</span>
-        </button>
         ${
-            pipAvailable() &&
+            at.shown.reply &&
+            html`<button type="button" class="quote-reply-action" onClick=${reply}>
+                <${Icon} name="reply" size=${14} stroke=${2} />
+                <span>Reply</span>
+            </button>`
+        }
+        ${
+            at.shown.pip &&
             html`<button
                 type="button"
                 class="quote-reply-action quote-reply-pip"

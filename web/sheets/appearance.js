@@ -33,6 +33,7 @@ import {
 } from "../theme.js";
 import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
+import { pipAvailable } from "../pip.js";
 import { galleryAvailable } from "./gallery.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
@@ -792,6 +793,29 @@ export function AppearanceSheet() {
                     onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
                 />
             <//>
+            <${SettingRow}
+                title="Reply to a passage"
+                detail="Select words in one of Pi's replies, and a Reply button by them quotes them in your next message"
+            >
+                <${Switch}
+                    on=${p.quoteReply}
+                    label="Reply to a passage"
+                    onChange=${() => setPrefs({ quoteReply: !p.quoteReply })}
+                />
+            <//>
+            ${
+                pipAvailable() &&
+                html`<${SettingRow}
+                    title="Ask PiP about a passage"
+                    detail="Select words in one of Pi's replies, and PiP's orb by them asks PiP about them, and tells it which session they came from"
+                >
+                    <${Switch}
+                        on=${p.askPipQuote}
+                        label="Ask PiP about a passage"
+                        onChange=${() => setPrefs({ askPipQuote: !p.askPipQuote })}
+                    />
+                <//>`
+            }
         </div>
         <div class="label">Status line</div>
         <div class="sheet-list">
