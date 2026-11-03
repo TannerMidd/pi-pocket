@@ -387,11 +387,22 @@ export function openPip(text) {
  * Ask PiP about a passage of Pi's reply in session `session` (or none): a quote strip over PiP's box holds it, and the
  * next message to PiP goes with it quoted first. The server tells PiP, unseen, which session it came from.
  */
-export function quotePip(passage, session) {
-    store.set({
-        pipQuote: { text: passage, session: typeof session === "number" ? session : undefined },
-    });
-    openPip();
+export async function quotePip(passage, session) {
+    const about = typeof session === "number" ? session : undefined;
+
+    if (pipPlace() === "board") {
+        // As a board, PiP's box is the session composer's: its quote strip, once PiP's conversation shows.
+        await openPip();
+
+        if (pipBoard()) {
+            store.set({ replyQuote: passage, replyAbout: about ?? null });
+        }
+
+        return;
+    }
+
+    store.set({ pipQuote: { text: passage, session: about } });
+    await openPip();
     focusComposer();
 }
 

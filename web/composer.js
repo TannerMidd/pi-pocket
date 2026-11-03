@@ -855,6 +855,9 @@ export function Composer() {
                         : sendMode
                     : "followUp",
                 inlineFiles && mentionsFiles,
+                typeof store.state.replyAbout === "number"
+                    ? { session: store.state.replyAbout }
+                    : undefined,
             ),
         );
 
@@ -867,7 +870,7 @@ export function Composer() {
             }
 
             sent(full);
-            store.set({ replyQuote: null });
+            store.set({ replyQuote: null, replyAbout: null });
             // Files pasted while it went stay for the next message.
             forget(going);
             setFiles((current) => current.filter((file) => !going.includes(file)));
@@ -1590,7 +1593,7 @@ export function Composer() {
                             <button
                                 class="icon-button small"
                                 aria-label="Remove the quote"
-                                onClick=${() => store.set({ replyQuote: null })}
+                                onClick=${() => store.set({ replyQuote: null, replyAbout: null })}
                             >
                                 <${Icon} name="close" size=${12} />
                             </button>

@@ -35,6 +35,8 @@ let page: BrowserPage;
 let base = "";
 let pip: ConversationId;
 let background: ConversationId;
+/** The newest request the model got, as JSON: what PiP was told. */
+let lastAsked = "";
 const project = join(work, "project-board");
 
 /** Where PiP shows, as the store and the page say. */
@@ -179,11 +181,13 @@ before(async () => {
 
     mkdirSync(project);
     app = await openApp(
-        scriptedModel(async (request) =>
-            fauxAssistantMessage([
+        scriptedModel(async (request) => {
+            lastAsked = JSON.stringify((request as { messages: unknown[] }).messages);
+
+            return fauxAssistantMessage([
                 fauxText(`PiP heard: ${lastText(request as never).text.slice(-40)}`),
-            ]),
-        ),
+            ]);
+        }),
     );
 
     app.watches.gh = async () => {
@@ -704,6 +708,60 @@ test(
         (await import('/pip.js')).closePip();
     `);
         await shut("closed");
+    },
+);
+
+test(
+    "Board: Ask PiP puts the passage over the board's box, and PiP learns which session it came from",
+    real,
+    async () => {
+        await fresh("board");
+        await page.evaluate(`(await import('/store.js')).navigate(${Number(background)})`);
+        await backTo(background, "the session");
+
+        // Ask PiP, as the button by a selection does (`quote-reply.js`).
+        await page.evaluate(
+            `(await import('/pip.js')).quotePip("the build is red", ${Number(background)})`,
+        );
+        await boarded("PiP as a board");
+        await see(
+            `document.querySelector('.pane [data-part="quote-strip"] .quote-strip-text')?.textContent === 'the build is red'`,
+            "the quote over the board's box",
+        );
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll('.pip-panel').length)`,
+            ),
+            0,
+            "not in a floating panel too",
+        );
+
+        await sendInSession("why?");
+        await see(
+            `(await import('/store.js')).store.state.replyQuote === null && (await import('/store.js')).store.state.replyAbout === null`,
+            "the quote goes with the message",
+        );
+        await see(
+            `document.querySelector('.pane')?.textContent.includes('PiP heard:')`,
+            "PiP answers",
+        );
+        assert.ok(
+            lastAsked.includes(`<pocket-context session=\\"${Number(background)}`),
+            "PiP is told which session the passage came from",
+        );
+        assert.ok(lastAsked.includes("the build is red"), "with the passage quoted");
+
+        // Reply in a session is not about any other: a quote there names no session.
+        await page.click({ selector: '.topbar [aria-label="Close PiP"]' });
+        await shut("closed");
+        await page.evaluate(`(await import('/store.js')).quoteReply("a passage")`);
+        assert.equal(
+            await inPage<number | null>(
+                `return JSON.stringify((await import('/store.js')).store.state.replyAbout)`,
+            ),
+            null,
+        );
+        await page.evaluate(`(await import('/store.js')).store.set({ replyQuote: null })`);
     },
 );
 

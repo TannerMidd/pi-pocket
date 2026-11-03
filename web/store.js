@@ -162,6 +162,8 @@ export const store = {
         /** A transcript message the next chat message discusses: `{ entryId, text }`. */
         chatQuote: null,
         replyQuote: null,
+        /** The session the reply quote came from, when PiP's box (as a board) asks about it: its number, or null. */
+        replyAbout: null,
         /** A passage for PiP's box to ask about (Ask PiP): `{ text, session }`, quoted before its next message. */
         pipQuote: null,
         /** Text to put into the message box to Pi: `{ text, n }`, picked up by the composer. */
@@ -311,6 +313,7 @@ function peopleFor(id, reads = store.state.chatReads) {
         notes: null,
         chatQuote: null,
         replyQuote: null,
+        replyAbout: null,
         chatRead: id === null ? 0 : (reads[id] ?? 0),
     };
 }
@@ -2471,13 +2474,15 @@ const current = () => store.state.conversationId;
 
 export const actions = {
     /** `inlineFiles`: the files the message mentions with @ go along with it. */
-    submit: (text, attachments, mode, inlineFiles = false) =>
+    /** `about`: the session a quoted passage came from, for PiP's own conversation only. */
+    submit: (text, attachments, mode, inlineFiles = false, about = undefined) =>
         api(`c/${current()}/submit`, {
             text,
             attachments,
             mode,
             requestId: uid(),
             ...(inlineFiles ? { inlineFiles } : {}),
+            ...(about === undefined ? {} : { about }),
         }),
     /** Run a command in the session's folder (`!`); `context: false` keeps it from Pi (`!!`). */
     shell: (command, context, requestId = uid()) =>
@@ -2826,7 +2831,7 @@ export function insertIntoComposer(text, files = [], { inline = false, conversat
 }
 
 export function quoteReply(text) {
-    store.set({ replyQuote: text });
+    store.set({ replyQuote: text, replyAbout: null });
 }
 
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */
