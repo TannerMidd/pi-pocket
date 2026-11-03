@@ -17,6 +17,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import {
+    chmodSync,
     existsSync,
     mkdirSync,
     readFileSync,
@@ -2101,6 +2102,15 @@ test("invites carry a role and a session over HTTP, and viewers get 403 on steer
         assert.equal((await call(token, `c/${id}/abort`, {})).status, 403);
         assert.equal((await call(token, "invite", {})).status, 403);
         assert.equal((await call(token, "fs?path=/")).status, 403);
+        // A folder the server cannot read is a 403 for the owner too, not a 500 (#265).
+        const locked = join(root, "locked-folder");
+
+        mkdirSync(locked, { mode: 0o000 });
+        assert.equal(
+            (await call(app.config.ownerToken, `fs?path=${encodeURIComponent(locked)}`)).status,
+            process.getuid?.() === 0 ? 200 : 403,
+        );
+        chmodSync(locked, 0o700);
         assert.equal(
             (await call(token, "fs", { path: join(root, "made-by-watcher") })).status,
             403,
