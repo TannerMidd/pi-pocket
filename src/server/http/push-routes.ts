@@ -82,7 +82,7 @@ export async function pushRoutes(api: ApiRequest, action: string | undefined): P
         };
         const sent =
             (await store.notify(user.id, test)) +
-            app.notifyDesktops(user.id, { ...test, urgency: "normal" });
+            app.notifyEmbedders(user.id, { ...test, urgency: "normal" });
 
         if (sent === 0) {
             throw new HttpError(

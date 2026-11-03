@@ -145,11 +145,11 @@ export interface Client {
     /** False while the tab is hidden: the person is away, and push notifications may reach them. */
     visible?: boolean;
     /**
-     * The tab runs in a desktop app that shows notifications itself (`web/host.js`): Web Push
+     * The tab runs in an embedder that shows notifications itself (`web/host.js`): Web Push
      * cannot reach it, so the server sends it each notification over this connection
-     * (`desktop-notify`).
+     * (`embedder-notify`).
      */
-    readonly desktop?: boolean;
+    readonly embedder?: boolean;
     /** Entries this client has, so updates carry only new ones. */
     readonly sentEntries: Set<number>;
     orderKey: string;

@@ -1,4 +1,4 @@
-// Room for the window's own buttons (Window Controls Overlay) over the page. docs/desktop.md describes it.
+// Room for the window's own buttons (Window Controls Overlay) over the page. docs/embedders.md describes it.
 
 const overlay = navigator.windowControlsOverlay;
 const root = document.documentElement;
@@ -265,7 +265,7 @@ function update() {
         drag.style.setProperty("--drag-w", `${Math.round(width)}px`);
     }
 
-    // First in the body: what comes later (a sheet, the launcher, a viewer) takes clicks over it, as a desktop app
+    // First in the body: what comes later (a sheet, the launcher, a viewer) takes clicks over it, as an embedder
     // reads its page's drag regions in order.
     if (!drag.isConnected) {
         document.body.prepend(drag);
@@ -303,7 +303,7 @@ function moves(records) {
     );
 }
 
-// Before the app's first paint, on the buttons' side: a desktop app reads it to know that the page makes room for its
+// Before the app's first paint, on the buttons' side: an embedder reads it to know that the page makes room for its
 // buttons itself.
 root.dataset.windowControls = controls()?.side ?? "none";
 

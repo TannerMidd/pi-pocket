@@ -1516,14 +1516,14 @@ function setChanged(change) {
 /** Who hears extensions' events: `extension-ui.js`, which imports this module and so cannot be imported here. */
 const extensionListeners = new Set();
 
-/** Who hears the notifications for a desktop app: `desktop.js`, which imports this module. */
-const desktopListeners = new Set();
+/** Who hears the notifications for an embedder: `embedder.js`, which imports this module. */
+const embedderListeners = new Set();
 
-/** Hear the notifications the server sends this page's desktop app (`desktop-notify`). */
-export function onDesktopNotify(listener) {
-    desktopListeners.add(listener);
+/** Hear the notifications the server sends this page's embedder (`embedder-notify`). */
+export function onEmbedderNotify(listener) {
+    embedderListeners.add(listener);
 
-    return () => desktopListeners.delete(listener);
+    return () => embedderListeners.delete(listener);
 }
 
 /** Hear the events extension modules send their browser modules: `{ module, event, data }`. */
@@ -1661,8 +1661,8 @@ const handlers = {
         }
     },
     auth: (data) => handleAuth(data),
-    // A notification for the desktop app this page runs in, which shows it itself (`web/desktop.js`).
-    "desktop-notify": (data) => desktopListeners.forEach((listener) => listener(data)),
+    // A notification for the embedder this page runs in, which shows it itself (`web/embedder.js`).
+    "embedder-notify": (data) => embedderListeners.forEach((listener) => listener(data)),
     closing: () => store.set({ connection: "closed" }),
     reload: () => {
         // A web file changed on the server. Message drafts live in localStorage and survive the reload; an unsaved notes
@@ -1719,12 +1719,12 @@ export function connect() {
 function eventsQuery(kept) {
     const id = store.state.conversationId;
     const have = kept && id !== null ? haveOf(store.state.view) : null;
-    // A desktop app that shows notifications itself gets them over this connection (`web/host.js`).
-    const host = hostCan("notify") ? "&host=notify" : "";
+    // An embedder that shows notifications itself gets them over this connection (`web/host.js`).
+    const embedder = hostCan("notify") ? "&embedder=notify" : "";
     const session = id === null ? "" : `&c=${id}`;
     const resume = have === null ? "" : `&have=${have}`;
 
-    return `tab=${encodeURIComponent(TAB)}&p=${PROTOCOL}${session}${resume}${host}`;
+    return `tab=${encodeURIComponent(TAB)}&p=${PROTOCOL}${session}${resume}${embedder}`;
 }
 
 // A page kept for Back and Forward stays alive, frozen, and so would its stream: each holds one of the few connections a
@@ -2552,7 +2552,7 @@ export function discuss(entryId, text) {
 }
 
 // Tell the server when this tab is hidden or shown: others see "away", and push notifications only reach hidden tabs. A
-// desktop app's window hidden in its tray, or minimized, counts as hidden (`pageVisible`).
+// embedder's window hidden in its tray, or minimized, counts as hidden (`pageVisible`).
 let lastVisible = null;
 
 function reportVisibility() {

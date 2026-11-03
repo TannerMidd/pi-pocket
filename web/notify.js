@@ -26,13 +26,13 @@ let badged = null;
 let countedFrom = null;
 
 /**
- * The home-screen icon counts the sessions that need you: a call waits for approval, or the chat has news. A desktop
- * app with a badge of its own (`web/host.js`) shows it on its icon and tray instead.
+ * The home-screen icon counts the sessions that need you: a call waits for approval, or the chat has news. An
+ * embedder with a badge of its own (`web/host.js`) shows it on its icon and tray instead.
  */
 export function updateBadge(state) {
-    const desktop = hostCan("badge");
+    const embedder = hostCan("badge");
 
-    if ((!desktop && !("setAppBadge" in navigator)) || !state.me) {
+    if ((!embedder && !("setAppBadge" in navigator)) || !state.me) {
         return;
     }
 
@@ -63,7 +63,7 @@ export function updateBadge(state) {
 
     badged = count;
 
-    if (desktop) {
+    if (embedder) {
         callHost("setBadge", count);
 
         return;

@@ -119,7 +119,7 @@ import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { CustomProviders } from "./custom-providers.ts";
-import { type DesktopMessage, PushStore } from "./push.ts";
+import { type EmbedderMessage, PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import {
@@ -2143,12 +2143,13 @@ export class PocketApp {
     }
 
     /**
-     * Send a notification to this person's desktop apps, over their live connections: Web Push
-     * cannot reach them. Each connected one gets it; the app shows one per tag. Returns how many
+     * Send a notification to this person's embedders (apps that show Pi Pocket and its notifications
+     * themselves), over their live connections: Web Push cannot reach them. Each connected one gets
+     * it; the embedder shows one per tag. Returns how many
      * got it.
      */
-    notifyDesktops(userId: string, message: DesktopMessage): number {
-        // Web Push clips; a desktop app takes the same, and the whole call for an approval.
+    notifyEmbedders(userId: string, message: EmbedderMessage): number {
+        // Web Push clips; an embedder takes the same, and the whole call for an approval.
         message = {
             ...message,
             title: message.title.slice(0, 200),
@@ -2157,8 +2158,8 @@ export class PocketApp {
         let sent = 0;
 
         for (const client of this.#clients) {
-            if (client.user.id === userId && client.desktop === true) {
-                client.send("desktop-notify", message);
+            if (client.user.id === userId && client.embedder === true) {
+                client.send("embedder-notify", message);
                 sent += 1;
             }
         }
@@ -2166,10 +2167,10 @@ export class PocketApp {
         return sent;
     }
 
-    /** Whether any desktop app that shows notifications is connected now. */
-    hasDesktops(): boolean {
+    /** Whether any embedder that shows notifications is connected now. */
+    hasEmbedders(): boolean {
         for (const client of this.#clients) {
-            if (client.desktop === true) {
+            if (client.embedder === true) {
                 return true;
             }
         }

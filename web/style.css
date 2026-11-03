@@ -1096,7 +1096,7 @@ kbd {
     app-region: drag;
 }
 
-/* The title's button lies over its text, and a desktop app reads drag regions in page order: the whole title is no-drag. */
+/* The title's button lies over its text, and an embedder reads drag regions in page order: the whole title is no-drag. */
 :root:is([data-window-controls="left"], [data-window-controls="right"]) .topbar > .title {
     flex: 0 1 auto;
     margin-right: auto;

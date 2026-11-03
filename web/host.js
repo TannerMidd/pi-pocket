@@ -1,4 +1,4 @@
-// `window.pocketHost`: the bridge a desktop app gives the page (docs/desktop.md). This module imports nothing, so that
+// `window.pocketHost`: the app bridge an embedder (an app that shows Pi Pocket) gives the page (docs/embedders.md). This module imports nothing, so that
 // `store.js` and the modules that import it can all use it.
 
 const VERSION = 1;
@@ -56,7 +56,7 @@ export function onHost(type, listener) {
 }
 
 /**
- * Whether the person can see this page: the tab shows, and so does the host's window. A desktop app keeps its page
+ * Whether the person can see this page: the tab shows, and so does the host's window. An embedder can keep its page
  * running at full speed while its window hides in the tray, so the page itself always reads as visible there.
  */
 export function pageVisible() {
