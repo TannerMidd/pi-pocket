@@ -39,15 +39,18 @@ const MAX_MODEL_IMAGE = 5 * 1024 * 1024;
 /** Photos a browser cannot show: the server sends them to the model as JPEG. */
 const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
 
-/** A file sent along by name (`@`) that can go to the model as an image, before the attached ones. */
-const MENTIONED_IMAGE = /\.(png|jpe?g|gif|webp|heic|heif)$/i;
+/**
+ * A file named with `@` that can go to the model as an image, before the attached ones. It is not in the entry's `files`,
+ * which lists only the text files sent along.
+ */
+const MENTIONED_IMAGE = /(?:^|[\s([{])@(?:"[^"\n]*|[^\s"]*)\.(?:png|jpe?g|gif|webp|heic|heif)\b/i;
 
 /**
  * Where a sent attachment's thumbnail loads from, or null when it shows as a file chip. `files` are the message's
- * attachment lines (`{ path, mime, size, noted }`); `entry` the message, with how many images it stores (`images`)
- * and the files sent along by name (`files`). A HEIC or HEIF photo shows the JPEG the model got, the stored image in
- * its place among the attached ones. Only when that place is sure: its line says it was converted, no file sent by
- * name can be an image, and every attached image is stored, so a failed one cannot shift another into its place.
+ * attachment lines (`{ path, mime, size, noted }`); `entry` the message, with its text and how many images it stores
+ * (`images`). A HEIC or HEIF photo shows the JPEG the model got, the stored image in its place among the attached ones.
+ * Only when that place is sure: its line says it was converted, no file sent by name can be an image, and every
+ * attached image is stored, so a failed one cannot shift another into its place.
  */
 export function attachedPictureSrc(file, files, entry, conversationId) {
     if (!file.path || !file.mime.startsWith("image/")) {
@@ -61,7 +64,7 @@ export function attachedPictureSrc(file, files, entry, conversationId) {
     const sent = files.filter(
         (each) => MODEL_IMAGE_TYPES.has(each.mime) && each.size <= MAX_MODEL_IMAGE,
     );
-    const mentioned = (entry.files ?? []).some((path) => MENTIONED_IMAGE.test(path));
+    const mentioned = MENTIONED_IMAGE.test(entry.text ?? "");
 
     if (!file.noted || mentioned || (entry.images ?? 0) !== sent.length) {
         return null;

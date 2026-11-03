@@ -1943,14 +1943,14 @@ test("a HEIC photo shows a stored image only where its place is sure", real, asy
         const { attachedPictureSrc } = await import("/ui.js");
         const heic = { path: "/u/a.heic", mime: "image/heic", size: 1000, noted: true };
         const png = { path: "/u/b.png", mime: "image/png", size: 1000, noted: false };
-        const entry = (images, files) => ({ id: 7, images, files });
+        const entry = (images, text) => ({ id: 7, images, text });
 
         return JSON.stringify([
             attachedPictureSrc(heic, [png, heic], entry(2), 1),
             attachedPictureSrc({ ...heic, noted: false }, [heic], entry(1), 1),
             attachedPictureSrc(heic, [png, heic], entry(1), 1),
-            attachedPictureSrc(heic, [heic, png], entry(2, ["/w/m.png"]), 1),
-            attachedPictureSrc(heic, [heic], entry(1, ["/w/notes.md"]), 1),
+            attachedPictureSrc(heic, [heic, png], entry(2, "see @shot.png"), 1),
+            attachedPictureSrc(heic, [heic], entry(1, "see @notes.md"), 1),
             attachedPictureSrc(png, [png], entry(0), 1),
         ]);
     `);
