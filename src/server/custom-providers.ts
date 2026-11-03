@@ -238,10 +238,16 @@ export class CustomProviders {
             const key = this.#keyInput(input, true);
             const config = await this.#editable();
             const providers = config.providers as Record<string, Json>;
+            // An id that auth.json still has a key for (an endpoint removed by hand) is taken: that key
+            // is not this one's.
+            const keyed = new Set(
+                (await this.#app.models.listCredentials()).map((each) => each.providerId),
+            );
             const id = idFor(
                 name,
                 (each) =>
                     each in providers ||
+                    keyed.has(each) ||
                     this.#app.models.getProvider(each) !== undefined ||
                     getBuiltinProviders().includes(each as never),
             );
@@ -287,8 +293,12 @@ export class CustomProviders {
 
                 moved = new URL(String(entry.baseUrl)).origin !== new URL(baseUrl).origin;
 
-                // The saved key goes only where it was saved for, as in `discover`.
-                if (key === undefined && entry.apiKey !== NO_KEY && moved) {
+                // The saved key goes only where it was saved for, as in `discover`: also one Pi stored.
+                if (
+                    key === undefined &&
+                    moved &&
+                    (entry.apiKey !== NO_KEY || (await this.#stored(id)))
+                ) {
                     throw new HttpError(
                         400,
                         "The URL changed. Enter the API key again, or choose No key.",
@@ -313,14 +323,15 @@ export class CustomProviders {
 
             if (key === NO_KEY) {
                 entry.apiKey = NO_KEY;
-            } else if (key !== undefined && entry.apiKey === NO_KEY) {
-                // A real key replaces the placeholder: the stored sign-in carries it from now on.
+            } else if (key !== undefined && (entry.apiKey === NO_KEY || moved)) {
+                // A real key replaces the placeholder, and on a move a key in the file too: it was for
+                // the old address.
                 delete entry.apiKey;
             }
 
             // The old key goes before the new address is in the file, so no request takes it there. A save that is
-            // refused puts it back, unless a sign-in stored another key meanwhile.
-            const removed =
+            // refused puts it back, unless a sign-in or sign-out came meanwhile.
+            const taken =
                 key === NO_KEY || (key !== undefined && moved)
                     ? await this.#takeKey(id)
                     : undefined;
@@ -328,11 +339,8 @@ export class CustomProviders {
             try {
                 await this.#write(config);
             } catch (error) {
-                if (
-                    removed !== undefined &&
-                    this.#app.models.getProviderAuthStatus(id).source !== "stored"
-                ) {
-                    await this.#app.providers.storeApiKey(id, removed);
+                if (taken !== undefined) {
+                    await this.#app.providers.restoreApiKey(id, taken.key, taken.epoch);
                 }
 
                 throw error;
@@ -383,7 +391,7 @@ export class CustomProviders {
         id?: unknown;
     }): Promise<CustomModel[]> {
         const baseUrl = baseUrlOf(input.baseUrl);
-        const headers: Record<string, string> = { accept: "application/json" };
+        const headers = new Headers({ accept: "application/json" });
         let key =
             typeof input.apiKey === "string" && input.apiKey.trim() !== ""
                 ? input.apiKey.trim()
@@ -403,11 +411,17 @@ export class CustomProviders {
             const auth = await this.#app.models.getAuth(saved.id).catch(() => undefined);
 
             key = auth?.auth.apiKey;
-            Object.assign(headers, auth?.auth.headers ?? {});
+
+            for (const [name, value] of Object.entries(auth?.auth.headers ?? {})) {
+                if (value !== null) {
+                    headers.set(name, value);
+                }
+            }
         }
 
         if (key !== undefined && key !== NO_KEY) {
-            headers.authorization = `Bearer ${key}`;
+            // One Authorization header, also where Pi's own (`authHeader`) carries the same key.
+            headers.set("authorization", `Bearer ${key}`);
         }
 
         let response: Response;
@@ -609,23 +623,33 @@ export class CustomProviders {
         }
     }
 
-    /** Remove the endpoint's stored key, and give it back for a save that may need to put it back. */
-    async #takeKey(id: string): Promise<string | undefined> {
-        if (this.#app.models.getProviderAuthStatus(id).source !== "stored") {
+    /** Remove the endpoint's stored key; give it back, with the sign-in count after, for a save to put back. */
+    async #takeKey(id: string): Promise<{ key: string; epoch: number } | undefined> {
+        if (!(await this.#stored(id))) {
             return undefined;
         }
 
+        const providers = this.#app.providers;
+        const epoch = providers.signInEpoch(id);
         const key = (await this.#app.models.getAuth(id).catch(() => undefined))?.auth.apiKey;
 
-        await this.#app.providers.logout(id);
+        await providers.logout(id);
 
-        return key;
+        // Another sign-in or sign-out ended meanwhile: the key read may not be the one that went.
+        return key === undefined || providers.signInEpoch(id) !== epoch + 1
+            ? undefined
+            : { key, epoch: epoch + 1 };
     }
 
     async #forgetKey(id: string): Promise<void> {
-        if (this.#app.models.getProviderAuthStatus(id).source === "stored") {
+        if (await this.#stored(id)) {
             await this.#app.providers.logout(id);
         }
+    }
+
+    /** Whether auth.json has a key for the endpoint now: also one that Pi in a terminal stored. */
+    async #stored(id: string): Promise<boolean> {
+        return (await this.#app.models.listCredentials()).some((each) => each.providerId === id);
     }
 
     #one(id: string): CustomProvider {

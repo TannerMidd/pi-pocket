@@ -1,6 +1,6 @@
 // OpenAI-compatible endpoints from the Providers sheet: models.json made when missing, keys in auth.json, hand-made
 // files left alone, and an endpoint's models discovered.
-import { cleanUp, openApp, root, scriptedModel } from "./helpers.ts";
+import { cleanUp, openApp, owner, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
@@ -298,4 +298,111 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
     await app.customProviders.create({ name: "Linked", baseUrl, noKey: true, models: [] });
     assert.ok(lstatSync(modelsFile).isSymbolicLink());
     assert.ok(JSON.parse(readFileSync(target, "utf8")).providers.linked);
+});
+
+test("a new endpoint does not take a key that auth.json keeps for its id", async () => {
+    await app.customProviders.create({ name: "Gone", baseUrl, apiKey: "sk-gone", models: [] });
+    // Removed by hand: auth.json keeps its key.
+    writeFileSync(modelsFile, '{"providers":{}}');
+    await app.models.refresh({ allowNetwork: false });
+
+    const made = await app.customProviders.create({
+        name: "Gone",
+        baseUrl: baseUrl.replace("127.0.0.1", "localhost"),
+        noKey: true,
+        models: [],
+    });
+
+    assert.deepEqual([made.id, made.key], ["gone-2", "none"]);
+});
+
+test("a key that Pi stored for an endpoint without one does not move with it", async () => {
+    await app.customProviders.create({ name: "Term", baseUrl, noKey: true, models: [] });
+    // Pi in a terminal: /login term.
+    const auth = JSON.parse(readFileSync(authFile, "utf8"));
+
+    writeFileSync(authFile, JSON.stringify({ ...auth, term: { type: "api_key", key: "sk-term" } }));
+
+    const moved = baseUrl.replace("127.0.0.1", "localhost");
+
+    await assert.rejects(app.customProviders.update("term", { baseUrl: moved }), /URL changed/);
+    await app.customProviders.update("term", { baseUrl: moved, noKey: true });
+    assert.ok(!readFileSync(authFile, "utf8").includes("sk-term"));
+});
+
+test("a refused move puts the old key back only when no sign-in or sign-out came meanwhile", async () => {
+    await app.customProviders.create({ name: "Rot", baseUrl, apiKey: "sk-v1", models: [] });
+
+    const logout = app.providers.logout.bind(app.providers);
+    const stored = () => JSON.parse(readFileSync(authFile, "utf8")).rot?.key;
+
+    const refused = async (meanwhile: () => Promise<unknown> | void) => {
+        app.providers.logout = async (id) => {
+            app.providers.logout = logout;
+            await logout(id);
+            await meanwhile();
+            // Another server changes models.json: the save is refused.
+            writeFileSync(modelsFile, readFileSync(modelsFile, "utf8").replace("{", '{"x":1,'));
+        };
+
+        await assert.rejects(
+            app.customProviders.update("rot", {
+                baseUrl: baseUrl.replace("127.0.0.1", "localhost"),
+                apiKey: "sk-mine",
+            }),
+            /changed meanwhile/,
+        );
+        writeFileSync(modelsFile, JSON.stringify({ ...readModels(), x: undefined }));
+    };
+
+    // Pi in a terminal stores a newer key.
+    await refused(() =>
+        writeFileSync(
+            authFile,
+            JSON.stringify({
+                ...JSON.parse(readFileSync(authFile, "utf8")),
+                rot: { type: "api_key", key: "sk-v2" },
+            }),
+        ),
+    );
+    assert.equal(stored(), "sk-v2");
+    // Another tab logs out of it.
+    await refused(() => logout("rot"));
+    assert.equal(stored(), undefined);
+});
+
+test("a move with a new key takes a hand-made key out of models.json", async () => {
+    const config = readModels();
+
+    config.providers.hand = { baseUrl, api: "openai-completions", apiKey: "sk-file", models: [] };
+    writeFileSync(modelsFile, JSON.stringify(config));
+    await app.customProviders.update("hand", {
+        baseUrl: baseUrl.replace("127.0.0.1", "localhost"),
+        apiKey: "sk-new",
+    });
+    assert.equal(readModels().providers.hand.apiKey, undefined);
+});
+
+test("an endpoint takes its key in its form, not in a sign-in that holds Pi's queue open", async () => {
+    await app.customProviders.create({ name: "Form", baseUrl, noKey: true, models: [] });
+    assert.throws(
+        () => app.providers.startLogin(owner(app), "form", "api_key"),
+        (error: unknown) => error instanceof HttpError && error.status === 400,
+    );
+});
+
+test("Find models sends one Authorization header, also for an endpoint with authHeader", async () => {
+    const config = readModels();
+
+    config.providers.bearer = {
+        baseUrl,
+        api: "openai-completions",
+        apiKey: "sk-bearer",
+        authHeader: true,
+        models: [],
+    };
+    writeFileSync(modelsFile, JSON.stringify(config));
+    await app.models.refresh({ allowNetwork: false });
+    await app.customProviders.discover({ baseUrl, id: "bearer" });
+    assert.equal(seenAuth, "Bearer sk-bearer");
 });
