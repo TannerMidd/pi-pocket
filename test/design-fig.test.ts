@@ -641,12 +641,106 @@ test("a second mode named dark is a mode of its own, in a light first or a dark 
         file([DARK, "Dark"], [LIGHT, "Light"], high),
         // The plain Dark is the dark mode, wherever it is in the list.
         file([LIGHT, "Light"], high, [DARK, "Dark"]),
+        file(high, [DARK, "Dark"], [LIGHT, "Light"]),
     ].map((fig) => load(scanTokens(project({ "colors.fig": fig }))));
 
     for (const system of systems) {
         assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
         assert.equal(token(system, "color.paper")?.modes["dark-high-contrast"]?.hex, "#000000");
     }
+});
+
+test("a collection's light mode is the default and its dark mode is dark, in any order", () => {
+    const night = guid(1, 3);
+    const file = figFile({
+        nodeChanges: [
+            modeSet(COLORS, [
+                [LIGHT, "Light"],
+                [DARK, "Dark"],
+            ]),
+            modeSet(night, [
+                [CONTRAST, "Brand Dark"],
+                [HIGH, "Brand Light"],
+            ]),
+            variable(
+                guid(1, 2),
+                "Colors/Ink",
+                "COLOR",
+                [
+                    [CONTRAST, paint("#eeeeee")],
+                    [HIGH, paint("#111111")],
+                ],
+                night,
+            ),
+        ],
+    });
+    const ink = token(load(scanTokens(project({ "mixed.fig": file }))), "color.ink");
+
+    assert.equal(ink?.modes.light?.hex, "#111111");
+    assert.equal(ink?.modes.dark?.hex, "#eeeeee");
+});
+
+test("a mode name is cut whole, and two modes of one name stay two modes", () => {
+    const cut = `${"a".repeat(39)} b`;
+    const file = figFile({
+        nodeChanges: [
+            modeSet(COLORS, [
+                [LIGHT, "Default"],
+                [DARK, "Mobile"],
+                [CONTRAST, "mobile"],
+                [HIGH, cut],
+            ]),
+            variable(guid(1, 2), "Colors/Ink", "COLOR", [
+                [LIGHT, paint("#111111")],
+                [DARK, paint("#222222")],
+                [CONTRAST, paint("#333333")],
+                [HIGH, paint("#444444")],
+            ]),
+        ],
+    });
+    const ink = token(load(scanTokens(project({ "names.fig": file }))), "color.ink");
+
+    assert.equal(ink?.modes.mobile?.hex, "#222222");
+    assert.equal(ink?.modes["mobile-2"]?.hex, "#333333");
+    assert.equal(ink?.modes["a".repeat(39)]?.hex, "#444444");
+});
+
+test("modes past the engine's 16 are left out with a note, and the rest load", () => {
+    const list = Array.from({ length: 18 }, (_, i): [Guid, string] => [guid(3, i + 1), `M${i}`]);
+    const scan = scanTokens(
+        project({
+            "brands.fig": figFile({
+                nodeChanges: [
+                    modeSet(COLORS, list),
+                    variable(
+                        guid(4, 1),
+                        "Colors/Ink",
+                        "COLOR",
+                        list.map(([id], i) => [id, paint(`#0000${(16 + i).toString(16)}`)]),
+                    ),
+                ],
+            }),
+        }),
+    );
+
+    assert.equal(load(scan).modes.length, 17);
+    assert.match(scanReport(scan), /cannot hold them: 1 mode\./);
+});
+
+test("a spacing alias to a plain number keeps its value", () => {
+    const four = guid(1, 2);
+    const scan = scanTokens(
+        project({
+            "alias.fig": oneMode(
+                variable(four, "Primitives/4", "FLOAT", [[LIGHT, { floatValue: 4 }]]),
+                variable(guid(1, 3), "Spacing/Small", "FLOAT", [
+                    [LIGHT, { alias: { guid: four } }],
+                ]),
+            ),
+        }),
+    );
+
+    assert.equal(token(load(scan), "space.small")?.modes.light?.literal, "4px");
 });
 
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {
@@ -722,6 +816,17 @@ test("a variable named like a group does not take the path of another variable",
 
     assert.deepEqual(colors, ["#111111", "#222222", "#333333"]);
     assert.equal(token(load(scan), "color.text")?.modes.light?.literal, "#111111");
+});
+
+test("a token renamed for its group does not take another token's CSS variable", () => {
+    const renamed = new Map<string, string>();
+    const node = { $value: "#111111", $type: "color" };
+
+    assemble(
+        [["brand"], ["brand", "x"], ["brand-default"]].map((path) => ({ path, node })),
+        renamed,
+    );
+    assert.equal(renamed.get("brand"), "brand.base");
 });
 
 test("variables of one name get a number each, and the names do not grow", () => {

@@ -6,6 +6,7 @@ import { FIG_LIMITS, FigError } from "./scan-fig-kiwi.ts";
 import {
     type Collection,
     FONT_NAME,
+    type FigValue,
     type FigVariable,
     type Named,
     typeOf,
@@ -22,7 +23,7 @@ import { type Imported, addFound } from "./scan-import.ts";
 import { LIMITS as TOKEN_LIMITS } from "./scan-import-eval.ts";
 import { assemble, type Progress, dropTypes, hoistTypes, rewrite } from "./scan-tree.ts";
 import { type Obj } from "./scan-colors.ts";
-import { RESERVED } from "./tokens-base.ts";
+import { LIMITS as SYSTEM, RESERVED } from "./tokens-base.ts";
 
 export interface FigTokens {
     file: string;
@@ -53,22 +54,41 @@ function modeNameOf(name: string): string {
     const clean = name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 40);
+        .slice(0, 40)
+        .replace(/^-+|-+$/g, "");
 
     return clean === "" ? "mode" : RESERVED.has(clean) ? `${clean}-mode` : clean;
 }
 
-const isDarkMode = (name: string): boolean => /(?:^|[^a-z])dark(?:[^a-z]|$)/i.test(name);
+const isNamed = (name: string, word: string): boolean =>
+    new RegExp(`(?:^|[^a-z])${word}(?:[^a-z]|$)`, "i").test(name);
+const isDarkMode = (name: string): boolean => isNamed(name, "dark");
 
-function modesOf(collections: Map<string, Collection>) {
+// A collection's default is its mode named just Light (Dark when the file is dark first), or else
+// its first; in a light first file, a collection that starts dark takes its first named with light.
+// Its dark mode is the one named just Dark, or else its first named with dark: another (Dark high
+// contrast) is a mode of its own. A name used twice in a collection gets a number.
+function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
     // A variable names its collection by guid, or by its published key in a library file.
     const collectionOf = new Map<string, string>();
-    const firstOf = new Map<string, string>();
+    const baseOf = new Map<string, string>();
     const byId = new Map<string, { name: string; collection: string }>();
+    const home = darkFirst ? "dark" : "light";
 
     for (const collection of collections.values()) {
         const first = collection.modes[0];
+        const base =
+            collection.modes.find((mode) => modeNameOf(mode.name) === home) ??
+            (!darkFirst && isDarkMode(first?.name ?? "")
+                ? collection.modes.find((mode) => isNamed(mode.name, "light"))
+                : undefined) ??
+            first;
+        const others = collection.modes.filter((mode) => mode !== base);
+        const dark = darkFirst
+            ? undefined
+            : (others.find((mode) => modeNameOf(mode.name) === "dark") ??
+              others.find((mode) => isDarkMode(mode.name)));
+        const taken = new Set([home, "dark"]);
 
         collectionOf.set(collection.id, collection.id);
 
@@ -76,38 +96,79 @@ function modesOf(collections: Map<string, Collection>) {
             collectionOf.set(collection.key, collection.id);
         }
 
-        if (first !== undefined) {
-            firstOf.set(collection.id, first.id);
+        if (base !== undefined) {
+            baseOf.set(collection.id, base.id);
         }
 
-        for (const mode of collection.modes) {
-            byId.set(mode.id, { name: mode.name, collection: collection.id });
+        for (const mode of others) {
+            let name = mode === dark ? "dark" : modeNameOf(mode.name);
+
+            for (let index = 2; mode !== dark && taken.has(name); index += 1) {
+                name = `${modeNameOf(mode.name)}-${index}`;
+            }
+
+            taken.add(name);
+            byId.set(mode.id, { name, collection: collection.id });
         }
     }
 
-    return { collectionOf, firstOf, byId };
+    return { collectionOf, baseOf, byId };
 }
 
-function valueOf(
+interface Lookup {
+    named: Map<string, Shaped>;
+    byKey: Map<string, string>;
+    byId: Map<string, FigVariable>;
+    /** The mode of a variable that a value in `mode` reads: that mode, or its default mode. */
+    modeIn: (variable: FigVariable, mode: string) => string;
+}
+
+function literalOf(
     variable: FigVariable,
     mode: string,
-    named: Map<string, Shaped>,
-    byKey: Map<string, string>,
-): Obj | undefined {
+    look: Lookup,
+    depth = 0,
+): FigValue | undefined {
     const found = variable.values.get(mode);
-    const shape = named.get(variable.id);
+
+    if (found?.kind !== "alias") {
+        return found;
+    }
+
+    const target = look.byId.get(look.byKey.get(found.target) ?? found.target);
+
+    return target === undefined || depth >= 8
+        ? undefined
+        : literalOf(target, look.modeIn(target, mode), look, depth + 1);
+}
+
+function valueOf(variable: FigVariable, mode: string, look: Lookup): Obj | undefined {
+    let found = variable.values.get(mode);
+    const shape = look.named.get(variable.id);
 
     if (found === undefined || shape === undefined) {
         return undefined;
     }
 
     if (found.kind === "alias") {
-        const path = (named.get(byKey.get(found.target) ?? found.target) ?? named.get(found.target))
-            ?.path;
+        const target =
+            look.named.get(look.byKey.get(found.target) ?? found.target) ??
+            look.named.get(found.target);
 
-        return path === undefined
-            ? undefined
-            : { $value: `{${path.join(".")}}`, $type: shape.type };
+        if (target === undefined) {
+            return undefined;
+        }
+
+        if (target.type === shape.type) {
+            return { $value: `{${target.path.join(".")}}`, $type: shape.type };
+        }
+
+        // The engine refuses an alias to another type (a spacing to a number): copy the value.
+        found = literalOf(variable, mode, look);
+    }
+
+    if (found === undefined) {
+        return undefined;
     }
 
     const value =
@@ -115,7 +176,7 @@ function valueOf(
             ? found.value
             : found.kind === "number"
               ? numberValue(found.value, shape.measure)
-              : shape.type === "fontFamily"
+              : found.kind === "text" && shape.type === "fontFamily"
                 ? familyOf(found.value)
                 : undefined;
 
@@ -150,27 +211,13 @@ export function figTokens(
     const max = options.max ?? TOKEN_LIMITS.tokens;
     const { nodes } = decoded;
     const collections = collectionsOf(nodes);
-    const modes = modesOf(collections);
     // Only a collection with a dark mode chooses the default: a spacing collection has no theme.
     const themed = [...collections.values()].filter((each) =>
         each.modes.some((mode) => isDarkMode(mode.name)),
     );
     const darkFirst =
         themed.length > 0 && themed.every((each) => isDarkMode(each.modes[0]?.name ?? ""));
-    // A collection's dark mode is the one named just Dark, or else its first named with dark after the
-    // default: another (Dark high contrast) is a mode of its own.
-    const darkModes = new Set(
-        darkFirst
-            ? []
-            : themed.flatMap((each) => {
-                  const others = each.modes.slice(1);
-                  const dark =
-                      others.find((mode) => modeNameOf(mode.name) === "dark") ??
-                      others.find((mode) => isDarkMode(mode.name));
-
-                  return dark === undefined ? [] : [dark.id];
-              }),
-    );
+    const modes = modesOf(collections, darkFirst);
 
     const { list, byKey } = variablesOf(nodes);
     const named = new Map<string, Shaped>();
@@ -208,9 +255,18 @@ export function figTokens(
         named.set(variable.id, { ...shape, path, type: typeOf(variable, shape.measure) });
     }
 
+    const baseIn = (variable: FigVariable) =>
+        modes.baseOf.get(modes.collectionOf.get(variable.collection) ?? variable.collection) ??
+        [...variable.values.keys()][0] ??
+        "";
+    const look: Lookup = {
+        named,
+        byKey,
+        byId: new Map(list.map((each) => [each.id, each])),
+        modeIn: (variable, mode) => (variable.values.has(mode) ? mode : baseIn(variable)),
+    };
     const entries: { path: string[]; node: Obj }[] = [];
     const changes = new Map<string, Map<string, Obj>>();
-    const darkChanges = new Map<string, Obj>();
 
     for (const variable of list) {
         const shape = named.get(variable.id);
@@ -220,8 +276,8 @@ export function figTokens(
         }
 
         const collection = modes.collectionOf.get(variable.collection) ?? variable.collection;
-        const first = modes.firstOf.get(collection) ?? [...variable.values.keys()][0] ?? "";
-        const value = valueOf(variable, first, named, byKey);
+        const base = baseIn(variable);
+        const value = valueOf(variable, base, look);
 
         if (value === undefined) {
             continue;
@@ -230,30 +286,22 @@ export function figTokens(
         entries.push({ path: shape.path, node: value });
 
         for (const modeId of variable.values.keys()) {
-            const mode = modeId === first ? undefined : modes.byId.get(modeId);
+            const mode = modeId === base ? undefined : modes.byId.get(modeId);
 
             if (mode === undefined || mode.collection !== collection) {
                 continue;
             }
 
-            const changed = valueOf(variable, modeId, named, byKey);
+            const changed = valueOf(variable, modeId, look);
 
             if (changed === undefined || JSON.stringify(changed) === JSON.stringify(value)) {
                 continue;
             }
 
-            const name = modeNameOf(mode.name);
+            const tree = changes.get(mode.name) ?? new Map<string, Obj>();
 
-            if (darkModes.has(modeId)) {
-                darkChanges.set(shape.path.join("."), changed);
-            } else if (name !== "dark" && (darkFirst || name !== "light")) {
-                // A mode named like the default mode would be refused by the engine, and one
-                // named dark would replace the dark mode.
-                const tree = changes.get(name) ?? new Map<string, Obj>();
-
-                tree.set(shape.path.join("."), changed);
-                changes.set(name, tree);
-            }
+            tree.set(shape.path.join("."), changed);
+            changes.set(mode.name, tree);
         }
     }
 
@@ -287,8 +335,15 @@ export function figTokens(
     // No prototype: a mode's name is a key, and never a key of `Object`.
     const extra: Record<string, Obj> = Object.create(null) as Record<string, Obj>;
 
-    for (const [mode, tree] of changes) {
-        extra[mode] = dropTypes(fill(tree, renamed));
+    // The engine holds 16 modes beside the default: the dark mode first, then the others as found.
+    const kept = [...changes]
+        .sort(([a], [b]) => Number(b === "dark") - Number(a === "dark"))
+        .slice(0, SYSTEM.modes);
+
+    for (const [mode, tree] of kept) {
+        if (mode !== "dark") {
+            extra[mode] = dropTypes(fill(tree, renamed));
+        }
     }
 
     const variables = (type: string) => list.filter((each) => each.resolved === type).length;
@@ -305,6 +360,7 @@ export function figTokens(
     const leftOut = [
         [seen - made, "variable"],
         [left, "style"],
+        [changes.size - kept.length, "mode"],
     ] as const;
     const notes = [
         `Figma: read ${quoted(file, 60)}: ${plural(collections.size, "collection")}, ${withKinds(
@@ -357,7 +413,7 @@ export function figTokens(
     return {
         file,
         default: tokens,
-        dark: dropTypes(fill(darkChanges, renamed)),
+        dark: dropTypes(fill(changes.get("dark") ?? new Map(), renamed)),
         extra,
         count: progress.read,
         partial: stop !== undefined,
