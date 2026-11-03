@@ -195,12 +195,14 @@ export function safePath(named: Named): string[] {
 }
 
 // The next number of each base is kept, so a file of one repeated name costs one step a token.
+// A path is taken by its CSS variable (`a.b-c` and `a.b.c` are both `--a-b-c`), and a numbered
+// name is cut to stay within the engine's 64 characters.
 export function uniquePath(
     path: string[],
     taken: Set<string>,
     next: Map<string, number>,
 ): string[] {
-    const base = path.join(".");
+    const base = path.join("-");
 
     if (!taken.has(base)) {
         taken.add(base);
@@ -208,16 +210,23 @@ export function uniquePath(
         return path;
     }
 
+    const last = path.at(-1) ?? "";
+    const numbered = (index: number) => [
+        ...path.slice(0, -1),
+        `${last.slice(0, 63 - String(index).length).replace(/-+$/, "")}-${index}`,
+    ];
     let index = next.get(base) ?? 2;
 
-    while (taken.has(`${base}-${index}`)) {
+    while (taken.has(numbered(index).join("-"))) {
         index += 1;
     }
 
-    next.set(base, index + 1);
-    taken.add(`${base}-${index}`);
+    const free = numbered(index);
 
-    return [...path.slice(0, -1), `${path.at(-1)}-${index}`];
+    next.set(base, index + 1);
+    taken.add(free.join("-"));
+
+    return free;
 }
 
 export function numberValue(value: number, measure: Measure): unknown {

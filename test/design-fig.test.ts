@@ -709,6 +709,28 @@ test("variables of one name get a number each, and the names do not grow", () =>
     assert.equal(names.filter((name) => !/^color\.base(?:-\d+)?$/.test(name)).length, 0);
 });
 
+test("a numbered name stays within 64 characters, and two names of one CSS variable differ", () => {
+    const long = "a".repeat(70);
+    const names = load(
+        scanTokens(
+            project({
+                "names.fig": oneMode(
+                    variable(guid(1, 2), `Colors/${long}`, "COLOR", [[LIGHT, paint("#111111")]]),
+                    variable(guid(1, 3), `Colors/${long}b`, "COLOR", [[LIGHT, paint("#222222")]]),
+                    variable(guid(1, 4), "Colors/Brand/Primary", "COLOR", [
+                        [LIGHT, paint("#333333")],
+                    ]),
+                    variable(guid(1, 5), "Colors/Brand-Primary", "COLOR", [
+                        [LIGHT, paint("#444444")],
+                    ]),
+                ),
+            }),
+        ),
+    ).tokens.map((each) => each.name);
+
+    assert.equal(names.length, 4);
+});
+
 test("an enum decodes as the name the schema gives it, and as its number when it has none", () => {
     const schema: number[] = [];
 
