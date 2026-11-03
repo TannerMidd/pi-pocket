@@ -132,7 +132,11 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
 
                         // A listener is never called inline, so the value it started on is this one's to check.
                         await strand(watch.value);
-                        watch.start(strand);
+                        watch.start(async (call) => {
+                            if (call.kind === "value") {
+                                await strand(call.value);
+                            }
+                        });
                     }
 
                     settled = await submission.wait(context);
@@ -336,8 +340,8 @@ async function leftQueue(
 
     try {
         await new Promise<void>((resolve, reject) => {
-            watch.start(async (value) => {
-                if (!queued(value)) {
+            watch.start(async (call) => {
+                if (call.kind === "value" && !queued(call.value)) {
                     resolve();
                 }
             });

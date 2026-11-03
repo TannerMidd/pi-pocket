@@ -237,37 +237,40 @@ export class LinkedSessions implements LinkedSessionsApi {
                     "Session policy changed before the linked session could start. Review it and try again.",
                 ),
             );
-        const unsubscribe = app.harness.subscribeCommits((publication) => {
-            for (const change of publication.changes) {
-                if (change.type !== "document" || change.conversationId === undefined) {
-                    continue;
+        const observation = app.harness.observeCommits({
+            advance: (publication) => {
+                for (const change of publication.changes) {
+                    if (change.type !== "document" || change.conversationId === undefined) {
+                        continue;
+                    }
+
+                    const kind = change.record.kind;
+                    const before = expected.get(`${change.conversationId}:${kind}`);
+
+                    if (before === undefined) {
+                        continue;
+                    }
+
+                    const after =
+                        change.kind === "retire"
+                            ? "retired"
+                            : kind === AgentDoc.definition.kind
+                              ? "changed"
+                              : kind === PlanDoc.definition.kind
+                                ? JSON.stringify(change.value.on === true)
+                                : turnsOf(change.value);
+
+                    if (before !== after) {
+                        stop();
+                    }
                 }
-
-                const kind = change.record.kind;
-                const before = expected.get(`${change.conversationId}:${kind}`);
-
-                if (before === undefined) {
-                    continue;
-                }
-
-                const after =
-                    change.value === null
-                        ? "retired"
-                        : kind === AgentDoc.definition.kind
-                          ? "changed"
-                          : kind === PlanDoc.definition.kind
-                            ? JSON.stringify(change.value.on === true)
-                            : turnsOf(change.value);
-
-                if (before !== after) {
-                    stop();
-                }
-            }
+            },
+            end: () => {},
         });
         const lifetime = actor.context.abortSignal;
 
         const close = () => {
-            unsubscribe();
+            observation.detach();
             lifetime?.removeEventListener("abort", close);
         };
 

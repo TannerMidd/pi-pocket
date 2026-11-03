@@ -7,7 +7,7 @@ How Pi Pocket's parts depend on each other, and the orderings the code relies on
 Pi Durable owns the lasting state of conversations: conversations, entries, tasks, and Pi Pocket's documents (`docs.ts`), in `pocket.sqlite`. People and settings, push subscriptions, uploads, and worktrees are files beside it ([map.md](map.md#data-pi-pocket-or-pi_pocket_dir)). What `PocketApp` keeps in memory about conversations is read back from storage:
 
 - At startup, `#recover` reads each conversation's run, agent, chat, subagents, and who Pi works for in it.
-- After that, every commit goes through `#committed`, which keeps the memory up to date.
+- After that, every stored commit goes through `#committed`, which keeps the memory up to date.
 
 Pi Durable 1.4.0 migrates SQLite storage to schema version 2 when it opens. Older Durable versions cannot open that database. Back up the complete data folder with the server stopped before upgrading to Pi Pocket 0.21.0.
 
@@ -164,6 +164,8 @@ Pi Durable publishes each commit's changes in no set order. `#committed` handles
 2. **Then each change:**
     - Document changes go to `#documentCommitted`. It tracks busy and ended runs, agents, the session list, and the documents the rooms show (`ROOM_DOCS`).
     - Submissions go to `attribution.submissionCommitted`.
+
+It gets each commit once it is stored (`Harness.observeCommits`). Since Pi Durable 1.5, a partial answer and running tool output are stored later than they are shown: with the next commit that reads `pi.live` (the end of the answer, a tool that settles, the end of a run), and at the latest after `settings.progress.persistWithinMs` (1 second). A room's watch of its conversation's view (`Conversation.watch`) shows each at once. A crash loses up to about a second of a streamed answer. Pi Durable detaches an observer that throws, so `#committed` catches what one commit throws, and the app keeps hearing of the next ones.
 
 Everything here is synchronous. A commit listener may not call the harness's session APIs, so a write it causes (noting a message's author, or moving a session up the list when Pi starts work there) runs in `setImmediate`. Keep this one coordinator: separate listeners would make their registration order a billing rule nobody can see.
 

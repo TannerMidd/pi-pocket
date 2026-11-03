@@ -308,7 +308,7 @@ async function followed(
         if (watch !== undefined) {
             // A listener is never called inline, so the value it started on is this one's to look at.
             await look(watch.value);
-            watch.start(look);
+            watch.start((call) => (call.kind === "value" ? look(call.value) : looking));
         }
 
         return await Promise.race([submission.wait(context), left]);

@@ -356,7 +356,7 @@ test("a subagent whose run fails while a follow-up waits reports it, instead of 
         assert.equal(await queued(child), 0);
 
         await until(async () => {
-            const graph = await app.harness.taskGraph(context);
+            const graph = await app.harness.watchTaskGraph(context);
 
             try {
                 return !Object.values(graph.value.tasks).some(
@@ -364,7 +364,7 @@ test("a subagent whose run fails while a follow-up waits reports it, instead of 
                         node.kind === "pocket.subagent-reporter" && node.conversationId === id,
                 );
             } finally {
-                graph.dispose();
+                await graph.stop();
             }
         }, "no reporter left waiting");
     } finally {
