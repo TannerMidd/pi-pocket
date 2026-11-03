@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import { type ToolCall, Type } from "@earendil-works/pi-ai";
+import { type ToolCall } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import {
     type CodemodeResult,
@@ -259,7 +260,7 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
     const codemode = defineTool({
         name: CODEMODE_TOOL,
         description: DESCRIPTION,
-        parameters: Type.Object({ code: Type.String({ description: "Raw JavaScript source." }) }),
+        parameters: obj({ code: str({ description: "Raw JavaScript source." }) }, { open: true }),
         // A script's nested calls (bash, writes) are not safe to run twice.
         replay: "unsafe",
         execute: async (args, api: ToolExecutionApi<CodemodeDetails>, context) => {

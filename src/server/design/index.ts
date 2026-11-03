@@ -1,5 +1,6 @@
 /** Agent-facing Design tools and workspace export routes. Registered by the Design module. */
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { arr, bool, int, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { readBundle } from "./bundle.ts";
@@ -25,10 +26,11 @@ import {
 import { designSystemTool } from "./system.ts";
 import type { CheckFinding, CheckReport, DesignSystem } from "./system-types.ts";
 import { loadDesignSystem } from "./tokens.ts";
+import { literal, record } from "../tool-schema.ts";
 
 export { designGuide } from "./guide.ts";
 
-const version = Type.Optional(Type.Integer({ minimum: 1 }));
+const version = opt(int({ minimum: 1 }));
 const preset = StringEnum(["mobile", "tablet", "desktop"] as const);
 const formatSchema = StringEnum(["png", "pdf", "pptx", "html"] as const);
 
@@ -36,14 +38,13 @@ interface DesignToolDeps {
     loadSystem?: (cwd: string) => DesignSystem | undefined;
 }
 
-const tweakSchema = Type.Record(
-    Type.String({ maxLength: 80 }),
-    Type.Union([Type.String({ maxLength: 200 }), Type.Number(), Type.Boolean()]),
-    { maxProperties: 40, description: "Tweak values, as the Tweaks panel sets them." },
-);
-const slideSchema = Type.Union([Type.Integer({ minimum: 1, maximum: 100 }), Type.Literal("all")]);
+const tweakSchema = record(union([str({ maxLength: 200 }), num(), bool()]), {
+    maxProperties: 40,
+    description: "Tweak values, as the Tweaks panel sets them.",
+});
+const slideSchema = union([int({ minimum: 1, maximum: 100 }), literal("all")]);
 
-const modeSchema = Type.String({
+const modeSchema = str({
     minLength: 1,
     maxLength: 64,
     description:
@@ -173,42 +174,42 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
             name: "design_preview",
             description:
                 "Check an HTML design in private headless Chromium pages, never the shared browser. Returns screenshots, console errors, failed requests, and (checks, on by default) a compact list of problems: values that are not design-system tokens (with the nearest token), contrast, tap targets, overflow, alt text, headings, fonts, and focus. Fix every error, then preview again. Optional: tweaks (values to apply), colorScheme, mode (a mode of the design system, such as high-contrast), page (another HTML page of the bundle), actions (hover, click, or focus a selector before the screenshot). Slide numbers start at 1.",
-            parameters: Type.Object({
-                id: Type.String(),
-                version,
-                viewports: Type.Optional(
-                    Type.Array(preset, { minItems: 1, maxItems: 3, uniqueItems: true }),
-                ),
-                fullPage: Type.Optional(Type.Boolean()),
-                slide: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-                checks: Type.Optional(
-                    Type.Boolean({ description: "Run the design checks. Default: true." }),
-                ),
-                tweaks: Type.Optional(tweakSchema),
-                colorScheme: Type.Optional(
-                    Type.Union([Type.Literal("light"), Type.Literal("dark")]),
-                ),
-                mode: Type.Optional(modeSchema),
-                page: Type.Optional(
-                    Type.String({
-                        maxLength: 200,
-                        description: "Another HTML page of the bundle, such as about.html.",
-                    }),
-                ),
-                actions: Type.Optional(
-                    Type.Array(
-                        Type.Object({
-                            type: Type.Union([
-                                Type.Literal("hover"),
-                                Type.Literal("click"),
-                                Type.Literal("focus"),
-                            ]),
-                            selector: Type.String({ minLength: 1, maxLength: 300 }),
+            parameters: obj(
+                {
+                    id: str(),
+                    version,
+                    viewports: opt(arr(preset, { minItems: 1, maxItems: 3, uniqueItems: true })),
+                    fullPage: opt(bool()),
+                    slide: opt(int({ minimum: 1, maximum: 100 })),
+                    checks: opt(bool({ description: "Run the design checks. Default: true." })),
+                    tweaks: opt(tweakSchema),
+                    colorScheme: opt(union([literal("light"), literal("dark")])),
+                    mode: opt(modeSchema),
+                    page: opt(
+                        str({
+                            maxLength: 200,
+                            description: "Another HTML page of the bundle, such as about.html.",
                         }),
-                        { maxItems: 10 },
                     ),
-                ),
-            }),
+                    actions: opt(
+                        arr(
+                            obj(
+                                {
+                                    type: union([
+                                        literal("hover"),
+                                        literal("click"),
+                                        literal("focus"),
+                                    ]),
+                                    selector: str({ minLength: 1, maxLength: 300 }),
+                                },
+                                { open: true },
+                            ),
+                            { maxItems: 10 },
+                        ),
+                    ),
+                },
+                { open: true },
+            ),
             replay: "safe",
             execute: async (args, api, context) => {
                 const bundle = await readBundle(
@@ -391,24 +392,30 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
         name: "design_export",
         description:
             "Export an HTML design as PNG, PDF, PPTX (image slides with text notes), or an HTML bundle zip. Writes inside the session folder, by default exports/<id>-v<version>.<ext>. Existing output files are replaced. PPTX requires a deck. A page's PNG and PDF use the viewport's width (a preset, or { width, height }). tweaks applies tweak values first. mode draws it in a mode of the design system (data-theme and the mode's color scheme). For a deck's PNG, slide picks a slide (from 1; default 1), or \"all\" writes a zip with every slide.",
-        parameters: Type.Object({
-            id: Type.String(),
-            version,
-            format: formatSchema,
-            viewport: Type.Optional(
-                Type.Union([
-                    preset,
-                    Type.Object({
-                        width: Type.Integer({ minimum: 320, maximum: 2560 }),
-                        height: Type.Integer({ minimum: 240, maximum: 2560 }),
-                    }),
-                ]),
-            ),
-            path: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
-            tweaks: Type.Optional(tweakSchema),
-            slide: Type.Optional(slideSchema),
-            mode: Type.Optional(modeSchema),
-        }),
+        parameters: obj(
+            {
+                id: str(),
+                version,
+                format: formatSchema,
+                viewport: opt(
+                    union([
+                        preset,
+                        obj(
+                            {
+                                width: int({ minimum: 320, maximum: 2560 }),
+                                height: int({ minimum: 240, maximum: 2560 }),
+                            },
+                            { open: true },
+                        ),
+                    ]),
+                ),
+                path: opt(str({ minLength: 1, maxLength: 4096 })),
+                tweaks: opt(tweakSchema),
+                slide: opt(slideSchema),
+                mode: opt(modeSchema),
+            },
+            { open: true },
+        ),
         execute: async (args, api, context) => {
             const bundle = await readBundle(
                 host,

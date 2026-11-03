@@ -69,13 +69,13 @@ A module is one `.ts` file with a default export: a function. Pi Pocket calls it
  * A clock tool: the date and time now, in any time zone. The first sentence of this comment is the module's
  * description in the Extensions sheet.
  */
-import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { obj, opt, str } from "@earendil-works/pi-schema";
 
 const clock = defineTool({
     name: "clock",
     description: "The date and time now, in a time zone such as Europe/Berlin.",
-    parameters: Type.Object({ zone: Type.Optional(Type.String()) }),
+    parameters: obj({ zone: opt(str()) }),
     replay: "safe",
     execute: async (args) => ({
         output: [

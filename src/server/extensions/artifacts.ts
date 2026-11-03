@@ -9,7 +9,8 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { Message } from "@earendil-works/pi-ai";
 import {
     defineExtension,
@@ -572,37 +573,32 @@ async function publish(
 }
 
 const bundleParameters = {
-    assets: Type.Optional(
-        Type.Array(
-            Type.Object({
-                name: Type.String({
-                    description:
-                        "Relative path in the bundle, up to 200 characters, with no . or .. segment.",
-                }),
-                path: Type.Optional(Type.String({ description: "A local file, binary too." })),
-                content: Type.Optional(
-                    Type.String({ description: "UTF-8 text, instead of path." }),
-                ),
-            }),
+    assets: opt(
+        arr(
+            obj(
+                {
+                    name: str({
+                        description:
+                            "Relative path in the bundle, up to 200 characters, with no . or .. segment.",
+                    }),
+                    path: opt(str({ description: "A local file, binary too." })),
+                    content: opt(str({ description: "UTF-8 text, instead of path." })),
+                },
+                { open: true },
+            ),
             {
                 description:
                     "Files the page loads by relative URL, added or replaced by name; earlier ones stay. Up to 5 MB each, 20 MB per version.",
             },
         ),
     ),
-    removeAssets: Type.Optional(
-        Type.Array(Type.String(), { description: "Bundle paths to drop." }),
-    ),
-    group: Type.Optional(
-        Type.String({ description: "Group variations under one kebab-case slug." }),
-    ),
-    kind: Type.Optional(
-        StringEnum(["page", "deck"] as const, { description: "deck: a slide deck." }),
-    ),
-    id: Type.String({ description: "Stable kebab-case id; reuse it for a new version." }),
-    title: Type.String({ description: "Short title." }),
-    edits: Type.Optional(
-        Type.Array(Type.Object({ oldText: Type.String(), newText: Type.String() }), {
+    removeAssets: opt(arr(str(), { description: "Bundle paths to drop." })),
+    group: opt(str({ description: "Group variations under one kebab-case slug." })),
+    kind: opt(StringEnum(["page", "deck"] as const, { description: "deck: a slide deck." })),
+    id: str({ description: "Stable kebab-case id; reuse it for a new version." }),
+    title: str({ description: "Short title." }),
+    edits: opt(
+        arr(obj({ oldText: str(), newText: str() }, { open: true }), {
             description: "Exact, unique replacements on the latest version.",
         }),
     ),
@@ -661,7 +657,7 @@ export function withoutInline(tool: ToolRegistration): ToolRegistration {
     return {
         ...tool,
         description: VIEWER_ONLY,
-        parameters: Type.Object(properties as never),
+        parameters: obj(properties as never, { open: true }),
         execute: (args, api, context) =>
             tool.execute({ ...(args as object), inline: undefined } as never, api, context),
     } as ToolRegistration;
@@ -672,23 +668,26 @@ export default function createArtifacts(_host: PocketHost) {
         name: "artifact",
         description:
             "Publish an HTML page, Markdown, or SVG to the artifact viewer, or (inline: true, HTML only) as a card in your reply. The same id makes a new version. Give exactly one of content, edits, or path (up to 2 MB); inline takes content or edits.",
-        parameters: Type.Object({
-            inline: Type.Optional(Type.Boolean()),
-            ...bundleParameters,
-            type: Type.Optional(
-                StringEnum(["html", "markdown", "svg"] as const, {
-                    description:
-                        "Default: html, or a new path's extension. A path cannot change an existing type.",
-                }),
-            ),
-            content: Type.Optional(Type.String({ description: "The whole new version." })),
-            path: Type.Optional(
-                Type.String({
-                    description:
-                        "A local UTF-8 file to copy (a snapshot, without the files beside it): absolute, ~/…, or relative to the session folder.",
-                }),
-            ),
-        }),
+        parameters: obj(
+            {
+                inline: opt(bool()),
+                ...bundleParameters,
+                type: opt(
+                    StringEnum(["html", "markdown", "svg"] as const, {
+                        description:
+                            "Default: html, or a new path's extension. A path cannot change an existing type.",
+                    }),
+                ),
+                content: opt(str({ description: "The whole new version." })),
+                path: opt(
+                    str({
+                        description:
+                            "A local UTF-8 file to copy (a snapshot, without the files beside it): absolute, ~/…, or relative to the session folder.",
+                    }),
+                ),
+            },
+            { open: true },
+        ),
         // The commit in publish() is idempotent per call, so a rerun after a crash is harmless.
         replay: "safe",
         execute: (args, api, context) => publish(args, api, context, args.inline === true),

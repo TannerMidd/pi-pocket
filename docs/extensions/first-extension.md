@@ -18,7 +18,7 @@ In the drop-in folder, make the file `my-words.ts` with this text:
 /**
  * Counts the words in a text: a tool for Pi, and a /my-words command for people.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Web } from "./_pocket.d.ts";
 
@@ -30,7 +30,7 @@ function countWords(text: string): number {
 const wordCount = defineTool({
     name: "my_word_count",
     description: "Count the words in a text.",
-    parameters: Type.Object({ text: Type.String({ description: "The text to count" }) }),
+    parameters: obj({ text: str({ description: "The text to count" }) }),
     replay: "safe",
     execute: async (args) => ({
         output: [{ type: "text" as const, text: `${countWords(args.text)} words` }],

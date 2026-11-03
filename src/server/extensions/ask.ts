@@ -1,7 +1,7 @@
 /**
  * Ask: Pi asks you up to 4 questions on a card in the session, each with 2 to 4 answers to tap or one of your own.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { AskField, PocketHost } from "../host.ts";
 
@@ -18,35 +18,42 @@ type Reply = { text: string; answers?: { header: string; question: string; answe
 
 const flat = (text: string) => text.replace(/\s+/g, " ").trim();
 
-const Choice = Type.Object({
-    label: Type.String({ minLength: 1, maxLength: 60, description: "1 to 5 words" }),
-    description: Type.Optional(
-        Type.String({ maxLength: 160, description: "What it means or costs" }),
-    ),
-});
+const Choice = obj(
+    {
+        label: str({ minLength: 1, maxLength: 60, description: "1 to 5 words" }),
+        description: opt(str({ maxLength: 160, description: "What it means or costs" })),
+    },
+    { open: true },
+);
 
-const Question = Type.Object({
-    question: Type.String({
-        minLength: 1,
-        maxLength: 300,
-        description: "Ends with ?",
-    }),
-    header: Type.String({
-        minLength: 1,
-        maxLength: 12,
-        description: "A short tag, such as Scope",
-    }),
-    options: Type.Array(Choice, { minItems: 2, maxItems: 4 }),
-    multiSelect: Type.Optional(Type.Boolean({ description: "Allow more than one answer" })),
-});
+const Question = obj(
+    {
+        question: str({
+            minLength: 1,
+            maxLength: 300,
+            description: "Ends with ?",
+        }),
+        header: str({
+            minLength: 1,
+            maxLength: 12,
+            description: "A short tag, such as Scope",
+        }),
+        options: arr(Choice, { minItems: 2, maxItems: 4 }),
+        multiSelect: opt(bool({ description: "Allow more than one answer" })),
+    },
+    { open: true },
+);
 
 export default function createAsk(host: PocketHost) {
     const ask = defineTool({
         name: "ask",
         description: DESCRIPTION,
-        parameters: Type.Object({
-            questions: Type.Array(Question, { minItems: 1, maxItems: 4 }),
-        }),
+        parameters: obj(
+            {
+                questions: arr(Question, { minItems: 1, maxItems: 4 }),
+            },
+            { open: true },
+        ),
         // The card's id comes from the call: after a restart, the same card asks again unless the memo has the answer.
         replay: "safe",
         execute: async (args, api, context) => {

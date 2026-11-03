@@ -14,7 +14,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { arr, bool, obj, opt, str, union, unknown } from "@earendil-works/pi-schema";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
 import { TOKEN_TYPES, boundedText } from "./tokens-base.ts";
@@ -38,6 +38,7 @@ import {
     systemSummary,
     writeDesignSystem,
 } from "./tokens.ts";
+import { literal, record } from "../tool-schema.ts";
 
 export { boundedText, utf8Cut } from "./tokens-base.ts";
 
@@ -310,83 +311,85 @@ export function designSystemTool(): ToolRegistration {
             '- compile: {"action":"compile"}',
             'Tokens: groups nest; a token is {"$value":…,"$type":…}; $type is inherited from the group; a reference is "{color.gray.900}". A mode file holds only what changes. --color-bg-surface is color.bg.surface. A text color can declare "$extensions":{"com.pi-pocket":{"contrast":{"on":"{color.bg.surface}","min":4.5}}}.',
         ].join("\n"),
-        parameters: Type.Object({
-            action: Type.Union(
-                [
-                    Type.Literal("read"),
-                    Type.Literal("write"),
-                    Type.Literal("scan"),
-                    Type.Literal("init"),
-                    Type.Literal("resync"),
-                    Type.Literal("set"),
-                    Type.Literal("validate"),
-                    Type.Literal("compile"),
-                    Type.Literal("component"),
-                    Type.Literal("guidelines"),
-                ],
-                { description: "What to do." },
-            ),
-            file: Type.Optional(Type.String({ description: used("file", "A file to show.") })),
-            path: Type.Optional(Type.String({ description: used("path", "A folder to scan.") })),
-            fromScan: Type.Optional(
-                Type.Boolean({ description: used("fromScan", "Save the scan's draft.") }),
-            ),
-            tokens: Type.Optional(
-                Type.Record(Type.String(), Type.Unknown(), {
-                    description: used("tokens", "The whole tokens.json."),
-                }),
-            ),
-            modes: Type.Optional(
-                Type.Record(Type.String(), Type.Unknown(), {
-                    description: used("modes", "Mode files by name: {dark:{…}}."),
-                }),
-            ),
-            name: Type.Optional(Type.String({ description: used("name", "The system's name.") })),
-            description: Type.Optional(
-                Type.String({ description: used("description", "What the system is for.") }),
-            ),
-            replace: Type.Optional(
-                Type.Boolean({ description: used("replace", "Replace a system that exists.") }),
-            ),
-            apply: Type.Optional(Type.Boolean({ description: used("apply", "Write it.") })),
-            changes: Type.Optional(
-                Type.Array(
-                    Type.Object({
-                        token: Type.String({ description: "A path: color.bg.surface." }),
-                        value: Type.Unknown({
-                            description:
-                                'A $value ("#7aa2f7", "16px", "{color.blue.500}", 600, a DTCG color object, { value, unit }) or a whole token.',
-                        }),
-                        mode: Type.Optional(Type.String({ description: "Default: tokens.json." })),
-                        type: Type.Optional(
-                            Type.String({
-                                description: `The $type, if new: ${TOKEN_TYPES.join(", ")}.`,
-                            }),
-                        ),
-                        description: Type.Optional(Type.String()),
+        parameters: obj(
+            {
+                action: union(
+                    [
+                        literal("read"),
+                        literal("write"),
+                        literal("scan"),
+                        literal("init"),
+                        literal("resync"),
+                        literal("set"),
+                        literal("validate"),
+                        literal("compile"),
+                        literal("component"),
+                        literal("guidelines"),
+                    ],
+                    { description: "What to do." },
+                ),
+                file: opt(str({ description: used("file", "A file to show.") })),
+                path: opt(str({ description: used("path", "A folder to scan.") })),
+                fromScan: opt(bool({ description: used("fromScan", "Save the scan's draft.") })),
+                tokens: opt(
+                    record(unknown(), {
+                        description: used("tokens", "The whole tokens.json."),
                     }),
-                    { maxItems: 200, description: used("changes", "Tokens to add or change.") },
                 ),
-            ),
-            remove: Type.Optional(
-                Type.Array(
-                    Type.Object({ token: Type.String(), mode: Type.Optional(Type.String()) }),
-                    { maxItems: 200, description: used("remove", "Tokens to delete.") },
+                modes: opt(
+                    record(unknown(), {
+                        description: used("modes", "Mode files by name: {dark:{…}}."),
+                    }),
                 ),
-            ),
-            slug: Type.Optional(Type.String({ description: used("slug", "A component: button.") })),
-            drop: Type.Optional(
-                Type.Boolean({ description: used("drop", "Delete the component.") }),
-            ),
-            content: Type.Optional(
-                Type.String({
-                    description: used(
-                        "content",
-                        'Markdown, or a specimen: <script type="application/json" id="pocket-component">{"name","states"}</script>, a <style> of var(--…) rules, and a <template data-state="default"> for each state.',
+                name: opt(str({ description: used("name", "The system's name.") })),
+                description: opt(
+                    str({ description: used("description", "What the system is for.") }),
+                ),
+                replace: opt(
+                    bool({ description: used("replace", "Replace a system that exists.") }),
+                ),
+                apply: opt(bool({ description: used("apply", "Write it.") })),
+                changes: opt(
+                    arr(
+                        obj(
+                            {
+                                token: str({ description: "A path: color.bg.surface." }),
+                                value: unknown({
+                                    description:
+                                        'A $value ("#7aa2f7", "16px", "{color.blue.500}", 600, a DTCG color object, { value, unit }) or a whole token.',
+                                }),
+                                mode: opt(str({ description: "Default: tokens.json." })),
+                                type: opt(
+                                    str({
+                                        description: `The $type, if new: ${TOKEN_TYPES.join(", ")}.`,
+                                    }),
+                                ),
+                                description: opt(str()),
+                            },
+                            { open: true },
+                        ),
+                        { maxItems: 200, description: used("changes", "Tokens to add or change.") },
                     ),
-                }),
-            ),
-        }),
+                ),
+                remove: opt(
+                    arr(obj({ token: str(), mode: opt(str()) }, { open: true }), {
+                        maxItems: 200,
+                        description: used("remove", "Tokens to delete."),
+                    }),
+                ),
+                slug: opt(str({ description: used("slug", "A component: button.") })),
+                drop: opt(bool({ description: used("drop", "Delete the component.") })),
+                content: opt(
+                    str({
+                        description: used(
+                            "content",
+                            'Markdown, or a specimen: <script type="application/json" id="pocket-component">{"name","states"}</script>, a <style> of var(--…) rules, and a <template data-state="default"> for each state.',
+                        ),
+                    }),
+                ),
+            },
+            { open: true },
+        ),
         // Not read-only: most actions change the session's files. Not replay-safe either, on purpose: a call that a
         // restart stopped comes back interrupted instead of running and writing twice.
         execute: async (args, api, context) => {

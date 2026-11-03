@@ -1,6 +1,6 @@
 /** Tool search keeps tools that few conversations use out of every request until Pi asks for them. */
 import type { Context } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
+import { num, obj, opt, str } from "@earendil-works/pi-schema";
 import { DESIGN_GUIDE } from "../design/guide.ts";
 import {
     createToolSearchExtension,
@@ -144,14 +144,17 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
         ...search,
         description:
             "Loads waiting tools (deferred_tools lists them). The query: their names (`browser, background`) or words to search for.",
-        parameters: Type.Object({
-            query: Type.String({ description: "Names of waiting tools, or words to search for." }),
-            limit: Type.Optional(
-                Type.Number({
-                    description: `Matches a text search loads (default ${SEARCH_LIMIT}).`,
-                }),
-            ),
-        }),
+        parameters: obj(
+            {
+                query: str({ description: "Names of waiting tools, or words to search for." }),
+                limit: opt(
+                    num({
+                        description: `Matches a text search loads (default ${SEARCH_LIMIT}).`,
+                    }),
+                ),
+            },
+            { open: true },
+        ),
         async execute(args: { query: string; limit?: number }, api, context) {
             const names = String(args.query)
                 .split(/[\s,]+/)

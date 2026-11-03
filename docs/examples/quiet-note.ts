@@ -2,7 +2,7 @@
  * A note the transcript can fold: one line in the app, and the whole message for the model.
  * An example drop-in: copy it and `quiet-note.js` into `~/.pi-pocket/extensions/`, then turn it on in Menu → Extensions.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 // A type import is gone when the module runs. In the drop-in folder, import the types from "./_pocket.d.ts".
 import type { Web } from "../../types/pocket.d.ts";
@@ -14,9 +14,9 @@ const leaveNote = defineTool({
     name: "quiet_note",
     description:
         "Leave a note in this session. The app may show one line; you still read the whole note.",
-    parameters: Type.Object({
-        text: Type.String({ description: "The whole note" }),
-        summary: Type.String({ description: "A few words for the one line" }),
+    parameters: obj({
+        text: str({ description: "The whole note" }),
+        summary: str({ description: "A few words for the one line" }),
     }),
     // The request id is this call's, so a replay finds the note instead of leaving another.
     replay: "safe",

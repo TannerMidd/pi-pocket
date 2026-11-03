@@ -4,12 +4,13 @@
  * webhooks turn posts from other services into messages to a session or to PiP. While this is off, watches wait and
  * webhooks answer 503.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { PrWatch } from "../docs.ts";
 import { quoted } from "../fence.ts";
 import type { PocketHost } from "../host.ts";
 import { endedText, MAX_SENT, TRIGGERS_EXTENSION, WATCH_VIA } from "../watches.ts";
+import { literal } from "../tool-schema.ts";
 
 const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
 
@@ -42,19 +43,18 @@ export default function createTriggers(host: PocketHost) {
         description:
             `Watch this session's pull request on GitHub until it is merged or closed: when its checks fail (with their logs), it has conflicts, or reviewers comment, you get a message starting "[via ${WATCH_VIA}]". ` +
             `Start it after you open a PR (gh pr create) when the person wants it seen through. At most ${MAX_SENT} messages. Actions: start (pr: its number in this folder's repository, or the address or owner/name#12 of one in another repository you can push to; default the PR of the current branch), status, stop.`,
-        parameters: Type.Object({
-            action: Type.Union([
-                Type.Literal("start"),
-                Type.Literal("status"),
-                Type.Literal("stop"),
-            ]),
-            pr: Type.Optional(
-                Type.String({
-                    description:
-                        "start: the PR's number, address, or owner/name#12; default the current branch's",
-                }),
-            ),
-        }),
+        parameters: obj(
+            {
+                action: union([literal("start"), literal("status"), literal("stop")]),
+                pr: opt(
+                    str({
+                        description:
+                            "start: the PR's number, address, or owner/name#12; default the current branch's",
+                    }),
+                ),
+            },
+            { open: true },
+        ),
         // Safe to run again: a start finds the watch this very call made, status only reads, and stopping twice is
         // stopping once.
         replay: "safe",

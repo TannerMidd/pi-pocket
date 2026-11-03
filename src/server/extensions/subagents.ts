@@ -15,7 +15,8 @@
  * and Pi is told to stop and tell the user, never to try another model.
  */
 import type { AssistantMessage, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import type { Context } from "@earendil-works/chord";
 import {
     AgentDoc,
@@ -807,38 +808,41 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
     const choosing = allowedModels(host).length > 0;
     const base = {
         action: StringEnum(["spawn", "send", "stop", "status"] as const),
-        name: Type.Optional(
-            Type.String({ description: "Short kebab-case name, for example test-runner." }),
-        ),
-        message: Type.Optional(
-            Type.String({
+        name: opt(str({ description: "Short kebab-case name, for example test-runner." })),
+        message: opt(
+            str({
                 description: "spawn, send: the full brief.",
             }),
         ),
-        followUp: Type.Optional(Type.Boolean()),
-        thinking: Type.Optional(
+        followUp: opt(bool()),
+        thinking: opt(
             StringEnum(THINKING_LEVELS, {
                 description:
                     "spawn only: its thinking level; left out, yours. One its model lacks becomes the nearest lower one it has, else its lowest.",
             }),
         ),
-        tools: Type.Optional(
-            Type.Array(Type.String(), {
+        tools: opt(
+            arr(str(), {
                 description: "spawn only: the tool names it may use. Default: yours.",
             }),
         ),
     };
-    const offered = Type.Object({
-        ...base,
-        model: Type.Optional(
-            Type.String({
-                description:
-                    "spawn only: provider/modelId, one on the user's list. Left out: yours; required when yours is not listed.",
-            }),
-        ),
-    });
+    const offered = obj(
+        {
+            ...base,
+            model: opt(
+                str({
+                    description:
+                        "spawn only: provider/modelId, one on the user's list. Left out: yours; required when yours is not listed.",
+                }),
+            ),
+        },
+        { open: true },
+    );
     // Without a choice, no model parameter at all. A model passed anyway is still refused.
-    const parameters = choosing ? offered : (Type.Object(base) as unknown as typeof offered);
+    const parameters = choosing
+        ? offered
+        : (obj(base, { open: true }) as unknown as typeof offered);
 
     const subagent = defineTool({
         name: "subagent",
@@ -1003,7 +1007,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
 
             // Every tool given that waits for a search, also one this session loaded: the subagent has no search.
             const waiting = (tools ?? []).filter((tool) => tool.deferred === true);
-            // TypeBox infers no type from a union built from a list; the schema itself checks the value.
+            // The levels are a list, not a tuple, so the schema gives no type; the schema itself checks the value.
             const asked = args.thinking as ModelThinkingLevel | undefined;
             const wanted = asked ?? parent.thinkingLevel ?? "off";
             const notes: string[] = [];
