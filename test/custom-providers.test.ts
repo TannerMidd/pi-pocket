@@ -141,6 +141,17 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
     ]);
     assert.equal(seenAuth, "Bearer sk-moved");
     await app.customProviders.update("home-llm", { baseUrl, apiKey: "sk-secret" });
+
+    // A move that Pi's check refuses keeps the sign-in it had.
+    await assert.rejects(
+        app.customProviders.update("home-llm", {
+            baseUrl: moved,
+            apiKey: "sk-refused",
+            models: [{ id: "half", contextWindow: 0.5 }],
+        }),
+        /contextWindow/,
+    );
+    assert.ok(readFileSync(authFile, "utf8").includes("sk-secret"));
 });
 
 test("an edit keeps what it does not change; no key uses the placeholder; removing takes the key too", async () => {

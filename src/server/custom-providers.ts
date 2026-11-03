@@ -318,12 +318,13 @@ export class CustomProviders {
                 delete entry.apiKey;
             }
 
-            // The old key goes before the new address is in the file, so no request takes it there.
-            if (key === NO_KEY || (key !== undefined && moved)) {
-                await this.#forgetKey(id);
-            }
-
-            await this.#write(config);
+            // The old key goes just before the new address is in the file, so no request takes it there, and only
+            // once the file is checked, so a refused save keeps it.
+            await this.#write(config, async () => {
+                if (key === NO_KEY || (key !== undefined && moved)) {
+                    await this.#forgetKey(id);
+                }
+            });
 
             try {
                 await this.#applied(id);
@@ -548,7 +549,7 @@ export class CustomProviders {
      * Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing.
      * A file Pi would refuse is not written: Pi then loads none of its providers.
      */
-    async #write(config: Json): Promise<void> {
+    async #write(config: Json, beforeRename?: () => Promise<void>): Promise<void> {
         const link = modelsPath();
         // A models.json that links elsewhere (a dotfiles folder) stays a link: the file it names changes.
         const path = existsSync(link) ? realpathSync(link) : link;
@@ -571,6 +572,14 @@ export class CustomProviders {
             rmSync(temp, { force: true });
 
             throw new HttpError(409, "models.json changed meanwhile. Try again.");
+        }
+
+        try {
+            await beforeRename?.();
+        } catch (error) {
+            rmSync(temp, { force: true });
+
+            throw error;
         }
 
         renameSync(temp, path);
