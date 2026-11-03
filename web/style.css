@@ -20668,8 +20668,9 @@ pre.gallery-code {
     color: var(--muted);
 }
 
+/* --hover is see-through: lay it over the panel, or the reply's words show through the button. */
 .quote-reply-button:active {
-    background: var(--hover);
+    background-image: linear-gradient(var(--hover), var(--hover));
 }
 
 .quote-reply-button:active .icon {
@@ -20678,7 +20679,7 @@ pre.gallery-code {
 
 @media (hover: hover) {
     .quote-reply-button:hover {
-        background: var(--hover);
+        background-image: linear-gradient(var(--hover), var(--hover));
     }
 
     .quote-reply-button:hover .icon {
