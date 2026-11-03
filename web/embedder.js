@@ -1,10 +1,11 @@
-// The desktop app side of `web/host.js`: notifications, badge, tray, and links. docs/desktop.md describes it.
+// What Pi Pocket does with the bridge an embedder gives it (`web/host.js`): notifications, badge, pinned sessions,
+// links, and the embedder's menu group. docs/embedders.md describes it.
 import { callHost, host, hostCan, onHost } from "./host.js";
 import { openPip } from "./pip.js";
 import { sessionMark } from "./sessions.js";
-import { actions, attempt, navigate, notify, onDesktopNotify, store } from "./store.js";
+import { actions, attempt, navigate, notify, onEmbedderNotify, store } from "./store.js";
 
-/** The longest list of pinned sessions the host gets: a tray menu shows a few. */
+/** The longest list of pinned sessions the embedder gets: a tray menu shows a few. */
 const MAX_PINNED = 20;
 
 export function openAddress(address) {
@@ -33,7 +34,7 @@ export function openAddress(address) {
 
 if (host !== null) {
     if (hostCan("notify")) {
-        onDesktopNotify((message) => callHost("notify", message));
+        onEmbedderNotify((message) => callHost("notify", message));
         onHost("open", (event) => openAddress(event.url));
         onHost("approve", (event) =>
             attempt(async () => {
@@ -93,25 +94,36 @@ if (host !== null) {
     }
 }
 
-export function hostMenuItems() {
+/** The longest title the embedder's menu group shows. */
+const MAX_MENU_TITLE = 40;
+
+/**
+ * The embedder's group for the app menu: its title (`menuTitle()`, such as the app's name), or none, and its items
+ * (`menuItems()`), such as its own settings.
+ */
+export function hostMenu() {
     if (!hostCan("menu")) {
-        return [];
+        return { title: "", items: [] };
     }
 
+    const title = callHost("menuTitle");
     const items = callHost("menuItems");
 
-    return (Array.isArray(items) ? items : [])
-        .filter((each) => typeof each?.id === "string" && typeof each?.label === "string")
-        .map((each) => ({
-            key: `host:${each.id}`,
-            label: each.label,
-            hint: typeof each.hint === "string" ? each.hint : "",
-            run: () => {
-                const done = callHost("invoke", each.id);
+    return {
+        title: typeof title === "string" ? title.trim().slice(0, MAX_MENU_TITLE) : "",
+        items: (Array.isArray(items) ? items : [])
+            .filter((each) => typeof each?.id === "string" && typeof each?.label === "string")
+            .map((each) => ({
+                key: `host:${each.id}`,
+                label: each.label,
+                hint: typeof each.hint === "string" ? each.hint : "",
+                run: () => {
+                    const done = callHost("invoke", each.id);
 
-                if (done === false) {
-                    notify("error", "The desktop app could not do that.");
-                }
-            },
-        }));
+                    if (done === false) {
+                        notify("error", "The app around Pi Pocket could not do that.");
+                    }
+                },
+            })),
+    };
 }

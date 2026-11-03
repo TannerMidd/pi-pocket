@@ -50,12 +50,12 @@ export type PushMessage = {
 };
 export type Urgency = "very-low" | "low" | "normal" | "high";
 /**
- * A notification as a desktop app gets it over its live connection (`desktop-notify`,
- * `PocketApp.notifyDesktops`): the push message, its urgency, and for an approval the whole call
- * and whether this person may allow it, so that the app decides how much of it to show and whether
- * to offer Allow (docs/desktop.md).
+ * A notification as an embedder gets it over its live connection (`embedder-notify`,
+ * `PocketApp.notifyEmbedders`): the push message, its urgency, and for an approval the whole call
+ * and whether this person may allow it, so that the embedder decides how much of it to show and whether
+ * to offer Allow (docs/embedders.md).
  */
-export type DesktopMessage = PushMessage & {
+export type EmbedderMessage = PushMessage & {
     urgency: Urgency;
     approval?: { id: string; allow: boolean; may: boolean; call: string };
 };
