@@ -553,7 +553,11 @@ export function Composer() {
     const insert = store.state.composerInsert;
 
     useEffect(() => {
-        if (!insert || insert.n <= insertedUpTo) {
+        if (
+            !insert ||
+            insert.n <= insertedUpTo ||
+            (insert.conversationId !== undefined && insert.conversationId !== conversationId)
+        ) {
             return;
         }
 

@@ -2283,11 +2283,11 @@ export function closeSignIn(flowId) {
     store.set((state) => (state.auth?.flowId === flowId ? { auth: null } : {}));
 }
 
-export function navigate(conversationId, { replace = false, sheet = null } = {}) {
+export function navigate(conversationId, { replace = false, sheet = null, state } = {}) {
     const path = conversationId === null ? "/" : `/s/${conversationId}`;
 
     if (location.pathname !== path || store.state.conversationId !== conversationId) {
-        pushRoute(path, { replace });
+        pushRoute(path, { replace, state });
     }
 
     // The subagents board and extensions' pages show in the conversation's place: going to one, even the one under it,
@@ -2775,12 +2775,19 @@ export function openSheet(sheet) {
 
 /**
  * Put text into the message box to Pi (after what is there: on a new paragraph, or with `inline`, after a space), and
- * files to attach, and close any sheet so it shows.
+ * files to attach, and close any sheet so it shows. With `conversationId`, only that conversation's box takes it, once
+ * it shows: a session shown before it does not.
  */
-export function insertIntoComposer(text, files = [], { inline = false } = {}) {
+export function insertIntoComposer(text, files = [], { inline = false, conversationId } = {}) {
     store.set((state) => ({
         sheet: null,
-        composerInsert: { text, files, inline, n: (state.composerInsert?.n ?? 0) + 1 },
+        composerInsert: {
+            text,
+            files,
+            inline,
+            conversationId,
+            n: (state.composerInsert?.n ?? 0) + 1,
+        },
     }));
 }
 

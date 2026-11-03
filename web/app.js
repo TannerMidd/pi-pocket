@@ -31,7 +31,7 @@ import {
     peeksWanted,
     togglePeeks,
 } from "./peeks.js";
-import { closePip, openPip, PipHost, pipAvailable, togglePip } from "./pip.js";
+import { closePip, openPip, PipHost, pipAvailable, pipBoard, togglePip } from "./pip.js";
 import { Drawer, RailNav, ResizeHandle, SessionList, toSessions } from "./sessions.js";
 import { SessionTabs } from "./session-tabs.js";
 // Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
@@ -194,6 +194,19 @@ defineItem("topbar", {
             onClick=${() => openSheet({ type: "menu" })}
         >
             <${Icon} name="more" />
+        </button>`,
+});
+
+// PiP opened as a board (Appearance → PiP → Board): its × closes it, back to what was in the session's place.
+defineItem("topbar", {
+    id: "core:pip-close",
+    label: "Close PiP",
+    order: 1100,
+    fixed: true,
+    render: () =>
+        pipBoard() &&
+        html`<button class="icon-button" aria-label="Close PiP" title="Close PiP" onClick=${closePip}>
+            <${Icon} name="close" />
         </button>`,
 });
 
