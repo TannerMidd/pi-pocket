@@ -26,7 +26,6 @@ import {
     canSteer,
     closePeople,
     closeSheet,
-    EXT_PANEL_KEY,
     insertIntoComposer,
     navigate,
     notify,
@@ -1689,9 +1688,6 @@ export function openExtPanel(module, id) {
         return;
     }
 
-    sessionStorage.setItem(EXT_PANEL_KEY, JSON.stringify({ module, id }));
-    sessionStorage.removeItem("pocket.browser");
-    sessionStorage.removeItem("pocket.files");
     closePeople();
     store.set({
         extPanel: { module, id },
@@ -1707,8 +1703,6 @@ export function openExtPanel(module, id) {
 }
 
 export function closeExtPanel() {
-    sessionStorage.removeItem(EXT_PANEL_KEY);
-
     // Its active border goes to the conversation, not nowhere.
     if (document.documentElement.dataset.focus === "extension-panel") {
         document.documentElement.dataset.focus = "pane";
