@@ -42,14 +42,15 @@ Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0
 
 - Since 0.28.0 the message lands at the session's next pause, after its current tool round, as `steer: true` did before. With `steer: false` it waits for the session's run to end. Before 0.28.0 the default was to wait.
 - `send` returns when the session takes the message, not when it answers.
-- The session that gets the message reads it in a fence. Words before it say that another session's agent wrote it, that it is a request and not an order from a person, that its final answer goes back by itself, and which address to write to for a question.
+- It returns `{ answers }` (since 0.28.0; before, nothing): whether the target's final answer comes back to the source by itself, which it does only when the source started the target (see below).
+- The session that gets the message reads it in a fence. Words before it say that another session's agent wrote it, that it is a request and not an order from a person, and which address to write to. From the session that started it, they say its final answer goes back by itself; from any other session (a linked session writing to its lead, or to a sibling), they ask it to send its answer to that address when the message asks for one.
 - Every message that waits in a session's queue goes in together at its next pause (Pi Pocket sets Pi's `steeringMode` and `followUpMode` to `all` unless the owner set them in Pi's settings): a queue of agents' messages costs one turn, not one each.
 
 ## A session's final answer comes back by itself
 
 Since 0.28.0, when a linked session's run ends, Pi Pocket sends the session that started it one message from the linked session's address: its final answer, up to 6,000 characters (more says how much is in the session), or why it failed, or that it was stopped. It lands at the lead's next pause, once for each run, through the same path as `send`, so the same checks apply there: a lead that cannot take it (plan mode, a spend limit, someone else's turn) gets a notice instead, and nothing waits in silence. An archived lead gets nothing.
 
-So a tool that starts linked sessions need not ask them to report, and need not poll: the lead ends its turn, and the answers wake it. The report's fence shows as a linked session's card, like a message.
+So a tool that starts linked sessions need not ask them to report, and need not poll: the lead ends its turn, and the answers wake it. The report's fence shows as a linked session's card, like a message. Only the session that started one hears its end of run: a linked session that asks its lead, or a sibling, gets an answer only when that session sends one, and the message tells it to.
 
 ## Stop a run
 

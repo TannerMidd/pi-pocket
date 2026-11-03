@@ -282,6 +282,39 @@ test("a linked session's final answer comes back to the session that started it,
     assert.equal(app.sessionMeta(target)?.linkedFrom?.id, Number(id));
 });
 
+test("only the session that started one hears its answer by itself: a message the other way asks for a reply", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+
+    await until(async () => (await sent(target)) === 1, "the first message");
+    const [origin] = await app.linkedSessions.list(target);
+    const asks = /Your final answer does not reach that session by itself/;
+    const comes = /your final answer reaches it by itself/;
+
+    // From the lead: no reply needed, and the tool is told so.
+    assert.deepEqual(await app.linkedSessions.send(id, { to: address, message: "more" }, "down"), {
+        answers: true,
+    });
+    await until(async () => (await sent(target)) === 2, "the lead's message");
+    const down = (await modelTexts(app, target)).filter((text) => text.startsWith('"'));
+
+    assert.match(down.at(-1)!, comes);
+    assert.doesNotMatch(down.at(-1)!, asks);
+
+    // From the worker to its lead: the lead's run end reports to nobody, so the message asks it to reply.
+    assert.deepEqual(
+        await app.linkedSessions.send(target, { to: origin!.address, message: "a question" }, "up"),
+        { answers: false },
+    );
+    await until(async () => (await sent(id)) === 1, "the worker's question");
+    const up = (await modelTexts(app, id)).filter(
+        (text) => /a question/.test(text) && text.startsWith('"'),
+    );
+
+    assert.match(up.at(-1)!, asks);
+    assert.doesNotMatch(up.at(-1)!, comes);
+});
+
 test("a linked session that fails or is stopped says so to the session that started it", async () => {
     const failing = scriptedModel((request) => {
         const { text } = lastText(request as never);

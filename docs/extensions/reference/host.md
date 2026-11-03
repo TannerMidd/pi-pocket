@@ -479,12 +479,12 @@ send(
     source: ConversationId,
     request: { to: string; message: string; steer?: boolean },
     key: string,
-): Promise<void>;
+): Promise<{ answers: boolean }>;
 ```
 
 Since 0.14.0 · Experimental
 
-Sends `message` to the linked session at the address `to`. The session gets it at its next pause (since 0.28.0; before, only with `steer: true`). With `steer: false`, it waits for the session's run to end. `send` returns when the session takes the message, not when it answers.
+Sends `message` to the linked session at the address `to`. The session gets it at its next pause (since 0.28.0; before, only with `steer: true`). With `steer: false`, it waits for the session's run to end. `send` returns when the session takes the message, not when it answers, with `{ answers }` (since 0.28.0): whether the session's final answer comes back to the source by itself, which it does only when the source started it.
 
 The session that gets the message reads it between tags. Words before it say that the agent of another session wrote it, and that it is a request, not a person's order. They also give the address to write to, and say that its final answer goes back by itself when its run ends ([linked-sessions.md](../linked-sessions.md#a-sessions-final-answer-comes-back-by-itself)).
 

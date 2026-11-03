@@ -73,12 +73,16 @@ export interface LinkedSessionsApi {
         },
         key: string,
     ): Promise<{ session: ConversationId; address: string }>;
-    /** Send `message` to the linked session at address `to`: a follow-up, or with `steer` at its next pause. */
+    /**
+     * Send `message` to the linked session at address `to`: at its next pause, or with `steer: false` after its run.
+     * `answers` says whether its final answer comes back to the source by itself (the source started it); otherwise the
+     * message asks it to reply when an answer is needed.
+     */
     send(
         source: ConversationId,
         request: { to: string; message: string; steer?: boolean },
         key: string,
-    ): Promise<void>;
+    ): Promise<{ answers: boolean }>;
     /**
      * Stop the run of the linked session at address `to`, and withdraw what waits in its queue. Idle is a no-op.
      * Returns whether it was working.
