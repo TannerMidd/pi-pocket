@@ -100,10 +100,15 @@ test("a linked session's message is a card that names its session and opens it",
 
     await page.setViewport(VIEWPORTS.mobile);
     await page.navigate(`${base}/s/${source}`);
+    // Two cards: the report of the linked session's first run, which came by itself, then the message.
     await see(
-        `return JSON.stringify(document.querySelector(".linked-message .linked-name")?.textContent.trim() === "Post-fix review")`,
-        "the card with the session's name",
+        `return JSON.stringify([...document.querySelectorAll(".linked-message .linked-name")].map((each) => each.textContent.trim()).join() === "Post-fix review,Post-fix review")`,
+        "the cards with the session's name",
     );
+    const row = await inPage<string>(
+        `return JSON.stringify([...document.querySelectorAll(".user-row:has(.linked-message)")].at(-1).id)`,
+    );
+    const CARD = `#${row} .linked-message`;
 
     const card = await inPage<{
         from: string;
@@ -114,7 +119,7 @@ test("a linked session's message is a card that names its session and opens it",
         routing: boolean;
         more: string;
     }>(`
-        const card = document.querySelector(".linked-message");
+        const card = document.querySelector(${JSON.stringify(CARD)});
         return JSON.stringify({
             from: card.dataset.from,
             tag: card.querySelector(".linked-tag").textContent,
@@ -138,19 +143,19 @@ test("a linked session's message is a card that names its session and opens it",
     // Folded until Show all; then whole.
     const height = () =>
         inPage<number>(
-            `return JSON.stringify(document.querySelector(".linked-message .linked-body").getBoundingClientRect().height)`,
+            `return JSON.stringify(document.querySelector(${JSON.stringify(`${CARD} .linked-body`)}).getBoundingClientRect().height)`,
         );
     const folded = await height();
 
-    await page.click({ selector: ".linked-message .linked-more" });
+    await page.click({ selector: `${CARD} .linked-more` });
     await see(
-        `return JSON.stringify(document.querySelector(".linked-message .linked-more").textContent.trim() === "Show less")`,
+        `return JSON.stringify(document.querySelector(${JSON.stringify(`${CARD} .linked-more`)}).textContent.trim() === "Show less")`,
         "the message open",
     );
     assert.ok((await height()) > folded);
 
     // Open goes to the session that sent it.
-    await page.click({ selector: ".linked-message .linked-open" });
+    await page.click({ selector: `${CARD} .linked-open` });
     await see(`return JSON.stringify(location.pathname === "/s/${session}")`, "the linked session");
 });
 

@@ -21,9 +21,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { LinkedSessionCallsDoc, LinkedSessionRelayDoc, TurnsDoc } from "../src/server/docs.ts";
+import { LinkedSessionCallsDoc, TurnsDoc } from "../src/server/docs.ts";
 
 let app: App;
 
@@ -244,15 +244,135 @@ test("linked sessions exchange more than 10 turns, and no message count stops th
         async () => (await sent(target)) === 13 && (await sent(id)) === 12,
         "every message of the exchange",
     );
-    assert.equal((await app.harness.snapshot(LinkedSessionRelayDoc, id, context))?.sent, 25);
-
-    // A count stored by an older Pi Pocket, at its old limit, stops nothing either.
-    await app.harness.commit(async (tx) => {
-        (await tx.doc(LinkedSessionRelayDoc, id)).sent = 20;
-    }, context);
     await send(id, address);
     await start(id);
     await until(async () => (await sent(target)) === 14, "the message past the old limit");
+});
+
+/** The reports of linked sessions' runs in `id`: what the fence of each carries. */
+const reports = async (id: ConversationId, ended: RegExp) =>
+    (await modelTexts(app, id))
+        // A message to the lead (a string), not the lead's answer about it (an array of parts).
+        .filter((text) => text.startsWith('"') && ended.test(text))
+        .map(
+            (text) =>
+                /<linked-session-message>\\n([^]*?)\\n<\/linked-session-message>/.exec(text)?.[1],
+        );
+
+test("a linked session's final answer comes back to the session that started it, once for each run", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+    const finished = /Linked session \S+ finished its run/;
+
+    await until(async () => (await reports(id, finished)).length === 1, "the first report");
+    // The whole answer, defanged like any linked message: the echo model answers with the message it got.
+    assert.match(
+        (await reports(id, finished))[0]!,
+        /^echo: .*a task\\n‹\/linked-session-message>$/,
+    );
+
+    // The lead answers the report (it is an ordinary message there), and the answer is no report of its own.
+    await until(() => !app.isBusy(id), "the lead to answer");
+    assert.equal((await reports(id, finished)).length, 1);
+
+    // A second run: a second report, with that run's answer, and the first one is not sent again.
+    await app.linkedSessions.send(id, { to: address, message: "more work" }, "more");
+    await until(async () => (await reports(id, finished)).length === 2, "the second report");
+    assert.match((await reports(id, finished))[1]!, /more work/);
+    assert.equal(app.sessionMeta(target)?.linkedFrom?.id, Number(id));
+});
+
+test("a linked session that fails or is stopped says so to the session that started it", async () => {
+    const failing = scriptedModel((request) => {
+        const { text } = lastText(request as never);
+
+        if (text.includes("FAIL_NOW")) {
+            return {
+                role: "assistant",
+                content: [],
+                stopReason: "error",
+                errorMessage: "the model fell over",
+            } as never;
+        }
+
+        if (text.includes("STREAM_A_WHILE")) {
+            return fauxAssistantMessage([fauxText("word ".repeat(80_000))]);
+        }
+
+        return fauxAssistantMessage([fauxText("Done.")]);
+    });
+    const isolated = await openApp(failing, join(root, "report-data"));
+    const texts = async (id: ConversationId, ended: RegExp) =>
+        (await modelTexts(isolated, id)).filter((text) => text.startsWith('"') && ended.test(text));
+
+    try {
+        const origin = await newSession(isolated);
+
+        await say(isolated, origin, "hello");
+        const { session } = await isolated.linkedSessions.start(
+            origin,
+            { message: "FAIL_NOW" },
+            "fail",
+        );
+        const failed = /Linked session \S+ failed/;
+
+        await until(async () => (await texts(origin, failed)).length === 1, "the failure report");
+        assert.match((await texts(origin, failed))[0]!, /fell over/);
+        assert.equal(isolated.isBusy(session), false);
+
+        const second = await isolated.linkedSessions.start(
+            origin,
+            { message: "STREAM_A_WHILE" },
+            "stream",
+        );
+
+        await until(() => isolated.isBusy(second.session), "the run to start");
+        await isolated.linkedSessions.stop(origin, { to: second.address }, "stop");
+        const stopped = /Linked session \S+ was stopped/;
+
+        await until(async () => (await texts(origin, stopped)).length === 1, "the stop report");
+    } finally {
+        await isolated.close();
+    }
+});
+
+test("a message to a linked session lands at its next pause unless told to wait for its run", async () => {
+    const streaming = scriptedModel((request) => {
+        const { text } = lastText(request as never);
+
+        if (text.includes("STREAM_A_WHILE")) {
+            return fauxAssistantMessage([fauxText("word ".repeat(80_000))]);
+        }
+
+        return fauxAssistantMessage([fauxText("Done.")]);
+    });
+    const isolated = await openApp(streaming, join(root, "steer-data"));
+
+    try {
+        const origin = await newSession(isolated);
+
+        await say(isolated, origin, "hello");
+        const { session, address: to } = await isolated.linkedSessions.start(
+            origin,
+            { message: "STREAM_A_WHILE" },
+            "busy",
+        );
+
+        await until(() => isolated.isBusy(session), "the run to start");
+        await isolated.linkedSessions.send(origin, { to, message: "now" }, "steer");
+        await isolated.linkedSessions.send(
+            origin,
+            { to, message: "later", steer: false },
+            "follow",
+        );
+        const modes = (await isolated.harness.snapshot(InboxDoc, session, context))?.items.map(
+            (item) => item.mode,
+        );
+
+        assert.deepEqual(modes, ["steer", "followUp"]);
+    } finally {
+        await isolated.close();
+    }
 });
 
 test("a start or send is refused in plan mode, past a spend limit, or without the turn", async () => {
