@@ -447,9 +447,27 @@ test("a big pasted image goes to the model at most 2000 pixels a side", async ()
     const user = entries.items.find((entry) => entry.kind === "pi.user")!;
     const image = (await app.transcripts.entryImage(id, user.id as unknown as number, 0))!;
 
-    assert.equal(image.mimeType, "image/png");
-    assert.equal(image.data.readUInt32BE(20), 2000, "its height, from the PNG header");
+    // Pi 1.5 sends the smaller of PNG and JPEG.
+    assert.ok(["image/png", "image/jpeg"].includes(image.mimeType));
+    assert.equal(heightOf(image.data), 2000, "its height, from the image's header");
 });
+
+/** An image's height in pixels: from a PNG's header, or a JPEG's first frame header. */
+function heightOf(bytes: Buffer): number {
+    if (bytes.readUInt32BE(0) === 0x89504e47) {
+        return bytes.readUInt32BE(20);
+    }
+
+    for (let at = 2; at + 9 < bytes.length; at += 2 + bytes.readUInt16BE(at + 2)) {
+        const marker = bytes[at + 1]!;
+
+        if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+            return bytes.readUInt16BE(at + 5);
+        }
+    }
+
+    throw new Error("no image header");
+}
 
 test("a HEIC attachment reaches the model as a JPEG, and its line says so", async () => {
     const id = await newSession();
