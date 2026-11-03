@@ -10,7 +10,11 @@ const buttons = () => ({
     reply:
         prefs().quoteReply !== false &&
         Boolean(document.querySelector('[data-part="composer"] textarea')),
-    pip: prefs().askPipQuote !== false && pipAvailable(),
+    // Never in PiP's own conversation (as a board, or opened as one): Reply already goes to PiP there.
+    pip:
+        prefs().askPipQuote !== false &&
+        pipAvailable() &&
+        (store.state.pip?.id === undefined || store.state.conversationId !== store.state.pip.id),
 });
 
 const coarse = matchMedia("(pointer: coarse)").matches;
