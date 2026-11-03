@@ -573,6 +573,28 @@ test("a mode named for dark first makes the file dark first", () => {
     assert.equal(token(system, "color.paper")?.modes.light?.hex, "#ffffff");
 });
 
+test("a dark first color collection stays dark first beside a one-mode collection", () => {
+    const spacing = guid(1, 3);
+    const night = figFile({
+        nodeChanges: [
+            modeSet(COLORS, [
+                [DARK, "Dark"],
+                [LIGHT, "Light"],
+            ]),
+            modeSet(spacing, [[CONTRAST, "Default"]]),
+            variable(guid(1, 2), "Colors/Paper", "COLOR", [
+                [DARK, paint("#1a1b26")],
+                [LIGHT, paint("#ffffff")],
+            ]),
+            variable(guid(2, 1), "Spacing/Base", "FLOAT", [[CONTRAST, { floatValue: 4 }]], spacing),
+        ],
+    });
+    const system = load(scanTokens(project({ "night.fig": night })));
+
+    assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
+    assert.equal(token(system, "color.paper")?.modes.light?.hex, "#ffffff");
+});
+
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {
     const file = oneMode(
         variable(guid(1, 2), "Colors/Ink", "COLOR", [[LIGHT, paint("#111111")]]),

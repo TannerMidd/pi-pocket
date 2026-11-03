@@ -256,9 +256,12 @@ export function figTokens(
 
     stop ??= progress.stopped ? "time" : undefined;
 
+    // Only a collection with a dark mode chooses the default: a spacing collection has no theme.
+    const themed = [...collections.values()].filter((each) =>
+        each.modes.some((mode) => isDarkMode(mode.name)),
+    );
     const darkFirst =
-        collections.size > 0 &&
-        [...collections.values()].every((each) => isDarkMode(each.modes[0]?.name ?? ""));
+        themed.length > 0 && themed.every((each) => isDarkMode(each.modes[0]?.name ?? ""));
 
     if (darkFirst && Object.keys(tokens).length > 0) {
         tokens.$extensions = { "com.pi-pocket": { mode: "dark" } };
