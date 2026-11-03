@@ -131,6 +131,16 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
         app.customProviders.update("home-llm", { baseUrl: "http://127.0.0.1:1/v1" }),
         (error: unknown) => error instanceof HttpError && error.status === 400,
     );
+
+    // A move with a new key: a discovery asked meanwhile waits for it, and never gets the old key.
+    const moved = baseUrl.replace("127.0.0.1", "localhost");
+
+    await Promise.all([
+        app.customProviders.update("home-llm", { baseUrl: moved, apiKey: "sk-moved" }),
+        app.customProviders.discover({ baseUrl: moved, id: "home-llm" }),
+    ]);
+    assert.equal(seenAuth, "Bearer sk-moved");
+    await app.customProviders.update("home-llm", { baseUrl, apiKey: "sk-secret" });
 });
 
 test("an edit keeps what it does not change; no key uses the placeholder; removing takes the key too", async () => {

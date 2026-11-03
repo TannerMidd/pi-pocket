@@ -280,16 +280,15 @@ export class CustomProviders {
             }
 
             const key = this.#keyInput(input, false);
+            let moved = false;
 
             if (input.baseUrl !== undefined) {
                 const baseUrl = baseUrlOf(input.baseUrl);
 
+                moved = new URL(String(entry.baseUrl)).origin !== new URL(baseUrl).origin;
+
                 // The saved key goes only where it was saved for, as in `discover`.
-                if (
-                    key === undefined &&
-                    entry.apiKey !== NO_KEY &&
-                    new URL(String(entry.baseUrl)).origin !== new URL(baseUrl).origin
-                ) {
+                if (key === undefined && entry.apiKey !== NO_KEY && moved) {
                     throw new HttpError(
                         400,
                         "The URL changed. Enter the API key again, or choose No key.",
@@ -319,13 +318,19 @@ export class CustomProviders {
                 delete entry.apiKey;
             }
 
-            await this.#write(config);
-            await this.#applied(id);
-
-            if (key === NO_KEY) {
+            // The old key goes before the new address is in the file, so no request takes it there.
+            if (key === NO_KEY || (key !== undefined && moved)) {
                 await this.#forgetKey(id);
-            } else if (key !== undefined) {
-                await this.#app.providers.storeApiKey(id, key);
+            }
+
+            await this.#write(config);
+
+            try {
+                await this.#applied(id);
+            } finally {
+                if (key !== undefined && key !== NO_KEY) {
+                    await this.#app.providers.storeApiKey(id, key);
+                }
             }
 
             return this.#one(id);
@@ -354,7 +359,12 @@ export class CustomProviders {
      * Ask an endpoint for its models (`GET <baseUrl>/models`), with the key given, or else the saved endpoint's own.
      * The owner's to ask, so a local or private address is allowed: that is where such servers often are.
      */
-    async discover(input: {
+    discover(input: { baseUrl?: unknown; apiKey?: unknown; id?: unknown }): Promise<CustomModel[]> {
+        // After any save in progress: a saved key is read with the address it belongs to.
+        return this.#serial(() => this.#discover(input));
+    }
+
+    async #discover(input: {
         baseUrl?: unknown;
         apiKey?: unknown;
         id?: unknown;
