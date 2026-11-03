@@ -122,17 +122,19 @@ export function memoryHint(data) {
 }
 
 /**
- * The owner's private review queue across every project, not just the lessons that apply here: PiP's strip, in its
- * floating panel and above its box as a board. `before` runs ahead of the sheet opening (the panel closes first).
+ * The owner's review queue across every project, not just the lessons that apply here: PiP's strip, in its
+ * floating panel and above its box as a board. It shows only while something waits for approval (or the server must
+ * restart to list them): with none, nothing. `before` runs ahead of the sheet opening (the panel closes first).
  */
 export function PendingMemories({ id, before }) {
     const data = useMemory(id, true);
-    const count = data?.pendingAll === true ? data.lessons.length : null;
-    const hint = data?.restartRequired
-        ? "Restart required"
-        : count === null
-          ? "Loading…"
-          : `${count} pending`;
+    const count = data?.pendingAll === true ? data.lessons.length : 0;
+
+    if (!data?.restartRequired && count === 0) {
+        return null;
+    }
+
+    const hint = data.restartRequired ? "Restart required" : `${count} pending`;
 
     return html`<div class="pip-memory">
         <button
@@ -398,7 +400,7 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     };
 
     if (pendingOnly) {
-        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+        return html`<${Sheet} title=${title} onClose=${closeSheet} className="pending-memories">
             <p class="muted small">
                 Memories waiting for your approval, across every project and everywhere.
                 Approve only what you want Pi to keep; until then Pi goes on as before.

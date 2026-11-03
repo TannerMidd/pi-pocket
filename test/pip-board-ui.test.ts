@@ -529,7 +529,7 @@ test(
 );
 
 test(
-    "Pending memories: PiP's strip shows in both places, and opens the approval list",
+    "Pending memories: PiP's strip shows in both places only while some wait, and opens the approval list",
     real,
     async () => {
         const strip = (where: string) =>
@@ -545,27 +545,63 @@ test(
             true,
             "memory is on in this server",
         );
+
+        // None waiting: no strip in either place.
         await page.evaluate(`(await import('/pip.js')).openPip()`);
         await floating("the floating panel");
-        await see(
-            `/\\d+ pending/.test(document.querySelector('.pip-panel .pip-memory-count')?.textContent ?? '')`,
-            "the panel's count",
-        );
-        const count = await strip(".pip-panel");
-
+        await settle();
+        assert.equal(await strip(".pip-panel"), null, "no strip with nothing to approve");
         await place("board");
         await boarded("moved to the board");
+        await settle();
+        assert.equal(await strip(".pane .dock"), null, "none on the board either");
+
+        // Pi proposes one: it waits for the owner, and the strip says so in both places.
+        const lesson = await app.memory.add(
+            background,
+            project,
+            { userId: owner(app).id, byPi: true, name: "Pi" },
+            { text: "Run-the-board-tests-with-two-workers.", scope: "everywhere" },
+        );
+
+        assert.equal(lesson.pending, true);
         await see(
-            `document.querySelector('.pane .composer-wrap .dock .pip-memory-count')?.textContent.trim() === ${JSON.stringify(count)}`,
-            "the same count above the board's box",
+            `document.querySelector('.pane .dock .pip-memory-count')?.textContent.trim() === '1 pending'`,
+            "1 pending above the board's box",
+        );
+        await place("floating");
+        await floating("back in the corner");
+        await see(
+            `document.querySelector('.pip-panel .pip-memory-count')?.textContent.trim() === '1 pending'`,
+            "1 pending in the panel",
+        );
+        await place("board");
+        await boarded("on the board again");
+
+        // The approval list: that lesson, in a sheet as tall as the Memory sheet.
+        await see(
+            `document.querySelector('.pane .dock [aria-label="Pending memories"]') !== null`,
+            "the strip",
         );
         await page.click({ selector: '.pane .dock [aria-label="Pending memories"]' });
         await see(
-            `(await import('/store.js')).store.state.sheet?.type === 'memory' && (await import('/store.js')).store.state.sheet.pendingOnly === true && document.querySelector('.sheet')?.textContent.includes('Pending memories')`,
-            "the approval list",
+            `document.querySelector('.sheet.pending-memories')?.textContent.includes('Run-the-board-tests-with-two-workers.') === true`,
+            "the approval list, with the lesson",
+        );
+        await settle();
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector('.sheet.pending-memories').getBoundingClientRect().height >= Math.min(innerHeight * 0.86, innerHeight * 0.93 - 16) - 1)`,
+            ),
+            true,
+            "as tall as the Memory sheet",
         );
         await boarded("PiP stays on the board under it");
+
+        // Discarded: the strip goes.
+        await app.memory.edit(background, owner(app), lesson.id, "discard");
         await page.evaluate(`(await import('/store.js')).closeSheet()`);
+        await see(`document.querySelector('.pip-memory') === null`, "no strip once none waits");
 
         // Only PiP's conversation has it: not another session's box.
         await page.click({ selector: '.topbar [aria-label="Close PiP"]' });
