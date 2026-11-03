@@ -1105,11 +1105,6 @@ export class Commands {
     }
 
     /**
-     * The files a message mentions with `@`, for Pi: text files as `<file>` blocks, as Pi's terminal app sends files
-     * given on its command line, and images as images when the model takes them. Only files this person may load
-     * through the session; anything else stays a mention, which Pi can read itself.
-     */
-    /**
      * For a message to PiP that asks about a passage: which session it came from, for PiP alone (`CONTEXT_BLOCK`). Only
      * a session its person may see, and never another PiP; nothing for a message to anyone else.
      */
@@ -1143,12 +1138,25 @@ export class Commands {
 
         app.requireSee(user, target);
 
-        const title = attribute(app.hidden.replace(meta.title ?? "untitled", target)).slice(0, 120);
-        const folder = attribute(meta.cwd);
+        // Anyone in that session can name it: no invisible characters carry words past people to PiP.
+        const plain = (text: string, max: number) =>
+            attribute(snippet(text.replace(/\p{Cf}/gu, "").replace(/\p{Cc}/gu, " "), max));
+        const title = plain(app.hidden.replace(meta.title ?? "untitled", target), 120);
+        const folder = plain(meta.cwd, 300);
 
-        return `${CONTEXT_BLOCK} session="${session}" title="${title}" folder="${folder}">\nThe quoted passage at the start of this message comes from Pi's reply in session ${session}. Read that session with session_read for more context when the question needs it.\n</pocket-context>`;
+        return [
+            `${CONTEXT_BLOCK} session="${session}" title="${title}" folder="${folder}">`,
+            `The quoted passage at the start of this message comes from Pi's reply in session ${session}.`,
+            "Read that session with session_read for more context when the question needs it.",
+            "</pocket-context>",
+        ].join("\n");
     }
 
+    /**
+     * The files a message mentions with `@`, for Pi: text files as `<file>` blocks, as Pi's terminal app sends files
+     * given on its command line, and images as images when the model takes them. Only files this person may load
+     * through the session; anything else stays a mention, which Pi can read itself.
+     */
     async #mentionedFiles(
         id: ConversationId,
         user: User,

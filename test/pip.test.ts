@@ -521,7 +521,7 @@ test("Ask PiP: PiP reads which session a quote came from, and people see only th
     const id = await pip();
     const session = await newSession(app);
 
-    await retitle(session, 'Deploy "fix" <now>');
+    await retitle(session, 'Deploy "fix"\u200B\u{E0041} <now>');
     await app.commands.submit(id, owner(app), {
         text: "> the build is red\n\nwhy?",
         requestId: "about-1",
@@ -529,7 +529,7 @@ test("Ask PiP: PiP reads which session a quote came from, and people see only th
     });
     await until(async () => !app.isBusy(id), "PiP at rest");
 
-    // The model gets the hidden block, after the words, with the title made safe for an attribute.
+    // The model gets the hidden block, after the words, with the title made safe for an attribute and with no invisible characters.
     assert.ok(lastRequest.pip.includes('<pocket-context session=\\"' + String(session)));
     assert.ok(lastRequest.pip.includes('title=\\\"Deploy  fix   now\\\"'));
     assert.ok(lastRequest.pip.includes(`comes from Pi's reply in session ${String(session)}`));
@@ -540,40 +540,24 @@ test("Ask PiP: PiP reads which session a quote came from, and people see only th
 
     assert.equal(mine?.kind === "user" ? mine.text : "", "> the build is red\n\nwhy?");
 
-    // Only to PiP, about a session its person may see, and never about PiP itself.
-    await assert.rejects(
-        app.commands.submit(session, owner(app), {
-            text: "hi",
-            requestId: "about-2",
-            about: { session: Number(session) },
-        }),
-        /Only a message to PiP/,
-    );
-    await assert.rejects(
-        app.commands.submit(id, owner(app), {
-            text: "hi",
-            requestId: "about-3",
-            about: { session: Number(id) },
-        }),
-        /no such session/,
-    );
-    await assert.rejects(
-        app.commands.submit(id, owner(app), {
-            text: "hi",
-            requestId: "about-4",
-            about: { session: "1" as unknown as number },
-        }),
-        /session's number/,
-    );
-    // A subagent's conversation is no session of the list: the browser names none for it.
-    await assert.rejects(
-        app.commands.submit(id, owner(app), {
-            text: "hi",
-            requestId: "about-5",
-            about: { session: 999_999 },
-        }),
-        /no such session/,
-    );
+    // Only to PiP, about a session of the list (a subagent's conversation is none), never about PiP itself.
+    const refused: [ConversationId, unknown, RegExp][] = [
+        [session, Number(session), /Only a message to PiP/],
+        [id, Number(id), /no such session/],
+        [id, "1", /session's number/],
+        [id, 999_999, /no such session/],
+    ];
+
+    for (const [to, about, error] of refused) {
+        await assert.rejects(
+            app.commands.submit(to, owner(app), {
+                text: "hi",
+                requestId: "about-refused",
+                about: { session: about as number },
+            }),
+            error,
+        );
+    }
 
     // A marker typed into the message itself is the person's words: it shows, as typed.
     await app.commands.submit(id, owner(app), {
