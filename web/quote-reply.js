@@ -79,12 +79,24 @@ export function QuoteReplyButton() {
             timer = setTimeout(() => setAt(selected()), 160);
         };
 
+        // Appearance's switches and PiP turned on or off change which buttons show: measured again, at once.
+        let was = buttons();
+        const unsubscribe = store.subscribe(() => {
+            const now = buttons();
+
+            if (now.reply !== was.reply || now.pip !== was.pip) {
+                was = now;
+                setAt(selected());
+            }
+        });
+
         document.addEventListener("selectionchange", look);
         addEventListener("scroll", look, true);
         addEventListener("resize", look);
 
         return () => {
             clearTimeout(timer);
+            unsubscribe();
             document.removeEventListener("selectionchange", look);
             removeEventListener("scroll", look, true);
             removeEventListener("resize", look);
@@ -101,6 +113,10 @@ export function QuoteReplyButton() {
     };
 
     const reply = () => {
+        if (!buttons().reply) {
+            return done();
+        }
+
         quoteReply(at.text);
         done();
 
@@ -113,6 +129,10 @@ export function QuoteReplyButton() {
 
     // The passage goes over PiP's box as a quote instead, with the session it came from (unless that is PiP's own).
     const askPip = () => {
+        if (!buttons().pip) {
+            return done();
+        }
+
         const text = at.text;
         const { conversationId, sessions } = store.state;
         // Only a session of the list (never a subagent's conversation, nor PiP's own) is named: PiP can read it.

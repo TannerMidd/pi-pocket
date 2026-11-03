@@ -60,9 +60,16 @@ const syncDraftScope = (state) => {
     );
 
     // The quote over PiP's box goes with its draft's files: to another person, or another PiP, it was never theirs.
-    if (changed && state.pipQuote) {
-        // Out of this `set`: a change made from inside one reaches the listeners after it out of order.
-        queueMicrotask(() => store.set({ pipQuote: null }));
+    const stale = state.pipQuote;
+
+    if (changed && stale) {
+        // Out of this `set`: a change made from inside one reaches the listeners after it out of order. Only that quote:
+        // one put there meanwhile is the new person's.
+        queueMicrotask(() => {
+            if (store.state.pipQuote === stale) {
+                store.set({ pipQuote: null });
+            }
+        });
     }
 };
 
