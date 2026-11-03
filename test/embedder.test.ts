@@ -37,7 +37,7 @@ after(async () => {
 /** An embedder's tab: a tab whose connection said `embedder=notify`. */
 function embedderTab(id: ConversationId | undefined, user = owner(app)) {
     const tab = fakeTab(id, user);
-    const client: Client = { ...tab.client, embedder: true };
+    const client: Client = { ...tab.client, embedder: "embedder-notify" };
     const sent = () =>
         tab.events
             .filter((each) => each.event === "embedder-notify")
@@ -64,6 +64,31 @@ test("/api/pocket/info answers without a sign-in, with the app bridge version an
         // Everything else under /api still needs a sign-in.
         assert.equal((await fetch(`http://127.0.0.1:${port}/api/me`)).status, 401);
     } finally {
+        server.close();
+    }
+});
+
+test("a page from before 0.28.0-beta.7 (`host=notify`), open across an update, still hears", async () => {
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+    const stop = new AbortController();
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+        const port = (server.address() as { port: number }).port;
+
+        void fetch(`http://127.0.0.1:${port}/api/events?tab=old&p=6&host=notify`, {
+            headers: { authorization: `Bearer ${app.config.ownerToken}` },
+            signal: stop.signal,
+        }).catch(() => {});
+        await until(
+            () => [...app.clients].some((each) => each.embedder === "desktop-notify"),
+            "the old page, sent the event it listens for",
+        );
+    } finally {
+        stop.abort();
         server.close();
     }
 });

@@ -146,10 +146,10 @@ export interface Client {
     visible?: boolean;
     /**
      * The tab runs in an embedder that shows notifications itself (`web/host.js`): Web Push
-     * cannot reach it, so the server sends it each notification over this connection
-     * (`embedder-notify`).
+     * cannot reach it, so the server sends it each notification over this connection, as this
+     * event. A page from before 0.28.0-beta.7, still open after an update, hears `desktop-notify`.
      */
-    readonly embedder?: boolean;
+    readonly embedder?: "embedder-notify" | "desktop-notify";
     /** Entries this client has, so updates carry only new ones. */
     readonly sentEntries: Set<number>;
     orderKey: string;

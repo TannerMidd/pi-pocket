@@ -2158,8 +2158,8 @@ export class PocketApp {
         let sent = 0;
 
         for (const client of this.#clients) {
-            if (client.user.id === userId && client.embedder === true) {
-                client.send("embedder-notify", message);
+            if (client.user.id === userId && client.embedder !== undefined) {
+                client.send(client.embedder, message);
                 sent += 1;
             }
         }
@@ -2170,7 +2170,7 @@ export class PocketApp {
     /** Whether any embedder that shows notifications is connected now. */
     hasEmbedders(): boolean {
         for (const client of this.#clients) {
-            if (client.embedder === true) {
+            if (client.embedder !== undefined) {
                 return true;
             }
         }

@@ -48,6 +48,8 @@ window.pocketHost = {
 | `pinned`     | Calls `setPinned(list)` when a pinned session's title or state changes, for a tray menu. `state` is the square's shape from `sessionMark`: `waiting`, `limited`, `working`, `failed`, `fresh` (finished, not read), or `seen`. The session list's theme states `done` and `idle` do not change these app bridge names. `label` says it in words. |
 | `open`       | Opens what the embedder asks for (an `open` event), also without `notify`.                                                                                                                                                                                                                                                                       |
 
+A page from before 0.28.0-beta.7, still open after the server updates, asks with `host=notify` and listens for `desktop-notify`: the server still sends it those, until the page reloads.
+
 A page in an Electron window keeps running at full speed while the window hides in the tray, so `document.visibilityState` stays `visible` there. That is why `visible()` exists: without it, the server would think the person is looking, and hold every notification back.
 
 ### Notifications
