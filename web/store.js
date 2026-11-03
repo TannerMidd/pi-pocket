@@ -1870,6 +1870,14 @@ function coverAccount() {
 }
 
 async function restoreAccount() {
+    // Kept as it left to change accounts (a sign-out goes to "/"), and back: its requests stay refused,
+    // and a refusal is no sign-out of the person, so it loads again.
+    if (changingAccount) {
+        location.reload();
+
+        return;
+    }
+
     clearTimeout(accountRetry);
     accountRequest?.abort();
     coverAccount();

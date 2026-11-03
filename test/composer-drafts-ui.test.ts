@@ -196,6 +196,12 @@ test("drafts stay with their person across a switch, and sign-out clears them", 
             key.startsWith("pocket.person.") || key.startsWith("drafts-test.")))`),
         ["drafts-test.preference"],
     );
+    // Back to the page kept from before the sign-out: it loads again, signed out.
+    await tab.page.go(-1);
+    await tab.sees(
+        `${me} === null && document.querySelector(".account-cover") === null`,
+        "the page signed out, with no account check left over",
+    );
 });
 
 test("Back covers the page until an account check passes, and keeps the draft", real, async () => {
