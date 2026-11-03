@@ -1114,6 +1114,120 @@ test(
     },
 );
 
+test("a switch sent while the polling session starts again goes to the new one", real, async () => {
+    // A name that is not local, so the tab polls (`pollHere`); Chromium sends it to this computer.
+    const host = base.replace("127.0.0.1", "pocket.localhost");
+    const polling = await browsers.open(2);
+    const inPolling = async <T>(script: string): Promise<T> =>
+        JSON.parse(await polling.evaluate(script)) as T;
+
+    try {
+        await polling.navigate(`${host}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await until(
+            async () =>
+                (await inPolling<boolean>(`
+                const { store } = await import("/store.js");
+
+                return JSON.stringify(store.state.sessionsLoaded === true);
+            `)) === true,
+            "the signed-in page",
+            20_000,
+        );
+        await polling.evaluate(`localStorage.setItem("pocket.transport", "poll:" + Date.now())`);
+        await polling.navigate(`${host}/s/${first}`);
+        await until(
+            async () =>
+                (await inPolling<boolean>(`
+                const { store } = await import("/store.js");
+
+                const polled = performance.getEntriesByType("resource")
+                    .some((each) => each.name.includes("/api/poll?"));
+
+                return JSON.stringify(store.state.connection === "open" && polled &&
+                    store.state.view.conversation?.id === ${Number(first)});
+            `)) === true,
+            "the session, polled",
+            20_000,
+        );
+        // The next poll finds its session gone, and its answer waits until the tab has switched. That switch fails.
+        await polling.evaluate(`
+            const send = window.fetch;
+
+            window.__switches = [];
+            window.__release = {};
+            window.__asked = new Promise((resolve) => { window.__release.asked = resolve; });
+            window.fetch = async (url, init) => {
+                const path = String(url);
+
+                const again = path.startsWith("/api/poll?") && path.includes("&session=");
+
+                if (again && window.__release.poll === undefined) {
+                    const answer = send(path.replace(/&session=[^&]*&ack=\\d+/, ""), init);
+
+                    await new Promise((resolve) => {
+                        window.__release.poll = resolve;
+                        window.__release.asked();
+                    });
+
+                    return answer;
+                }
+
+                const switches = path.endsWith("/api/switch") &&
+                    window.__switches.push(JSON.parse(init.body).c);
+
+                if (switches === 1) {
+                    await new Promise((resolve) => { window.__release.switch = resolve; });
+
+                    return new Response("{}", { status: 409 });
+                }
+
+                return send(url, init);
+            };
+            "armed";
+        `);
+        // A new session in the list ends the poll on its way, so the next one goes out.
+        const other = await newSession(app);
+        const shown = await inPolling<{ id: number | null; switches: number[] }>(`
+            const { navigate, store } = await import("/store.js");
+            const streamId = store.state.streamId;
+
+            await window.__asked;
+            navigate(${Number(other)});
+
+            while (window.__release.switch === undefined) {
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+
+            window.__release.poll();
+
+            while (store.state.streamId === streamId) {
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+
+            window.__release.switch();
+            const until = Date.now() + 3000;
+
+            while (store.state.view.conversation?.id !== ${Number(other)} && Date.now() < until) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+
+            return JSON.stringify({
+                id: store.state.view.conversation?.id ?? null,
+                switches: window.__switches,
+            });
+        `);
+
+        assert.equal(shown.id, Number(other), "the session switched to shows");
+        assert.deepEqual(
+            shown.switches,
+            [other, other],
+            "the switch goes again, on the new session",
+        );
+    } finally {
+        await browsers.close(2);
+    }
+});
+
 test(
     "a session kept on the device shows after a reload, and the server sends only what is new; another person's, or none when the server says so",
     real,

@@ -1911,6 +1911,8 @@ function pollEvents() {
         while (!stopped) {
             request = new AbortController();
             const asked = moment();
+            const named = store.state.conversationId;
+            let fresh = false;
 
             try {
                 // A poll the server no longer knows (it started again, or this tab fell far behind) attaches afresh: it
@@ -1946,6 +1948,7 @@ function pollEvents() {
                     // It named the session shown when it was asked: a switch still on its way went to the old one.
                     switching = null;
                     switchSeq++;
+                    fresh = true;
                 }
 
                 failures = 0;
@@ -1961,6 +1964,11 @@ function pollEvents() {
                     if (handlers[item.event]) {
                         heard(item.event, item.data, handlers[item.event]);
                     }
+                }
+
+                // The tab switched while it was asked: the new session shows the old one, so switch it too.
+                if (fresh && named !== store.state.conversationId) {
+                    show();
                 }
             } catch {
                 if (stopped) {
