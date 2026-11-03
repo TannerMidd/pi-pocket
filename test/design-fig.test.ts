@@ -624,10 +624,11 @@ test("a mode keeps its values when another collection's first mode has its name"
 
 test("a second mode named dark is a mode of its own, in a light first or a dark first file", () => {
     const contrast = guid(10, 3);
-    const file = (first: [Guid, string], second: [Guid, string]) =>
+    const high: [Guid, string] = [contrast, "Dark high contrast"];
+    const file = (...modes: [Guid, string][]) =>
         figFile({
             nodeChanges: [
-                modeSet(COLORS, [first, second, [contrast, "Dark high contrast"]]),
+                modeSet(COLORS, modes),
                 variable(guid(1, 2), "Colors/Paper", "COLOR", [
                     [LIGHT, paint("#ffffff")],
                     [DARK, paint("#1a1b26")],
@@ -635,12 +636,14 @@ test("a second mode named dark is a mode of its own, in a light first or a dark 
                 ]),
             ],
         });
-    const day = load(scanTokens(project({ "day.fig": file([LIGHT, "Light"], [DARK, "Dark"]) })));
-    const night = load(
-        scanTokens(project({ "night.fig": file([DARK, "Dark"], [LIGHT, "Light"]) })),
-    );
+    const systems = [
+        file([LIGHT, "Light"], [DARK, "Dark"], high),
+        file([DARK, "Dark"], [LIGHT, "Light"], high),
+        // The plain Dark is the dark mode, wherever it is in the list.
+        file([LIGHT, "Light"], high, [DARK, "Dark"]),
+    ].map((fig) => load(scanTokens(project({ "colors.fig": fig }))));
 
-    for (const system of [day, night]) {
+    for (const system of systems) {
         assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
         assert.equal(token(system, "color.paper")?.modes["dark-high-contrast"]?.hex, "#000000");
     }

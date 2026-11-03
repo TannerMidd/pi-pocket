@@ -157,13 +157,16 @@ export function figTokens(
     );
     const darkFirst =
         themed.length > 0 && themed.every((each) => isDarkMode(each.modes[0]?.name ?? ""));
-    // A collection's dark mode is its first after the default named so: another one named so
-    // (Dark high contrast) is a mode of its own.
+    // A collection's dark mode is the one named just Dark, or else its first named with dark after the
+    // default: another (Dark high contrast) is a mode of its own.
     const darkModes = new Set(
         darkFirst
             ? []
             : themed.flatMap((each) => {
-                  const dark = each.modes.slice(1).find((mode) => isDarkMode(mode.name));
+                  const others = each.modes.slice(1);
+                  const dark =
+                      others.find((mode) => modeNameOf(mode.name) === "dark") ??
+                      others.find((mode) => isDarkMode(mode.name));
 
                   return dark === undefined ? [] : [dark.id];
               }),
