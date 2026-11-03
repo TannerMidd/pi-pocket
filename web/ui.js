@@ -1946,6 +1946,14 @@ export function modelLabel(agent) {
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");
 }
 
+/** A model's name as the composer's chip says it: "opus 5.5" for "Anthropic: Claude Opus 5.5". */
+export const shortModelName = (name) =>
+    name
+        // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
+        .replace(/^[^:]{1,24}:\s*/, "")
+        .replace(/^(?:anthropic\s+)?claude\s+/i, "")
+        .toLowerCase();
+
 /** An on and off switch, named for screen readers by `label`. */
 export function Switch({ on, disabled, label, onChange }) {
     return html`<button
