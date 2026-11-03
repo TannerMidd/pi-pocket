@@ -198,7 +198,13 @@ async function* linesFromEnd(path: string): AsyncGenerator<string> {
             const part = Buffer.allocUnsafe(size);
 
             position -= size;
-            await handle.read(part, 0, size, position);
+
+            // A file rewritten shorter while it is read (Pi migrates an old one in place) ends the walk: the rest of
+            // the chunk would be memory never written, not the file.
+            if ((await handle.read(part, 0, size, position)).bytesRead < size) {
+                return;
+            }
+
             let end = size;
 
             while (end > 0) {
