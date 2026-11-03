@@ -649,6 +649,27 @@ test("a renamed token keeps its alias in the dark and the other mode trees", () 
     );
 });
 
+test("a variable named like a group does not take the path of another variable", () => {
+    const brand = guid(1, 2);
+    const scan = scanTokens(
+        project({
+            "brand.fig": oneMode(
+                variable(brand, "Colors/Brand", "COLOR", [[LIGHT, paint("#111111")]]),
+                variable(guid(1, 3), "Colors/Brand/Default", "COLOR", [[LIGHT, paint("#222222")]]),
+                variable(guid(1, 4), "Colors/Brand/Base", "COLOR", [[LIGHT, paint("#333333")]]),
+                variable(guid(1, 5), "Colors/Text", "COLOR", [[LIGHT, { alias: { guid: brand } }]]),
+            ),
+        }),
+    );
+    const colors = load(scan)
+        .tokens.filter((each) => each.name.startsWith("color.brand"))
+        .map((each) => each.modes.light?.hex)
+        .sort();
+
+    assert.deepEqual(colors, ["#111111", "#222222", "#333333"]);
+    assert.equal(token(load(scan), "color.text")?.modes.light?.literal, "#111111");
+});
+
 test("variables of one name get a number each, and the names do not grow", () => {
     const names = load(
         scanTokens(project({ "names.fig": manyModes(1, 2000, () => "Colors/Base") })),

@@ -148,7 +148,15 @@ export function assemble(
         let path = entry.path;
 
         if (groups.has(name)) {
-            path = [...entry.path, paths.has(`${name}.default`) ? "base" : "default"];
+            const free = (end: string) =>
+                !paths.has(`${name}.${end}`) && !groups.has(`${name}.${end}`);
+            let end = free("default") ? "default" : "base";
+
+            for (let index = 2; !free(end); index += 1) {
+                end = `default-${index}`;
+            }
+
+            path = [...entry.path, end];
             renamed.set(name, path.join("."));
         }
 
