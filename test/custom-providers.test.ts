@@ -153,23 +153,40 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
     );
     assert.ok(readFileSync(authFile, "utf8").includes("sk-secret"));
 
-    // A change to the file while the old key goes is not overwritten, and the key comes back.
+    // A change to the file while the old key goes is not overwritten: the key comes back, unless a sign-in from
+    // another tab stored a newer one meanwhile.
     const logout = app.providers.logout.bind(app.providers);
-    const edited = readFileSync(modelsFile, "utf8").replace("{", '{"$comment":"by hand",');
 
-    app.providers.logout = async (id) => {
-        await logout(id);
-        writeFileSync(modelsFile, edited);
+    const refusedMove = async (edit: string, rotate?: string) => {
+        const edited = readFileSync(modelsFile, "utf8").replace("{", `{"$comment":"${edit}",`);
+
+        app.providers.logout = async (id) => {
+            await logout(id);
+
+            if (rotate !== undefined) {
+                await app.providers.storeApiKey(id, rotate);
+            }
+
+            writeFileSync(modelsFile, edited);
+        };
+
+        try {
+            await assert.rejects(
+                app.customProviders.update("home-llm", { baseUrl: moved, noKey: true }),
+                /changed meanwhile/,
+            );
+        } finally {
+            app.providers.logout = logout;
+        }
+
+        assert.equal(readFileSync(modelsFile, "utf8"), edited);
     };
 
-    await assert
-        .rejects(
-            app.customProviders.update("home-llm", { baseUrl: moved, noKey: true }),
-            /changed meanwhile/,
-        )
-        .finally(() => (app.providers.logout = logout));
-    assert.equal(readFileSync(modelsFile, "utf8"), edited);
+    await refusedMove("by hand");
     assert.ok(readFileSync(authFile, "utf8").includes("sk-secret"));
+    writeFileSync(modelsFile, JSON.stringify(readModels()));
+    await refusedMove("again", "sk-rotated");
+    assert.ok(readFileSync(authFile, "utf8").includes("sk-rotated"));
 });
 
 test("an edit keeps what it does not change; no key uses the placeholder; removing takes the key too", async () => {

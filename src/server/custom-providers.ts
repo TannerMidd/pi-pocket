@@ -318,24 +318,25 @@ export class CustomProviders {
                 delete entry.apiKey;
             }
 
-            // The old key goes just before the new address is in the file, so no request takes it there, and only
-            // once the file is checked, so a refused save keeps it.
-            await this.#write(config, async () => {
-                if (key !== NO_KEY && (key === undefined || !moved)) {
-                    return undefined;
+            // The old key goes before the new address is in the file, so no request takes it there. A save that is
+            // refused puts it back, unless a sign-in stored another key meanwhile.
+            const removed =
+                key === NO_KEY || (key !== undefined && moved)
+                    ? await this.#takeKey(id)
+                    : undefined;
+
+            try {
+                await this.#write(config);
+            } catch (error) {
+                if (
+                    removed !== undefined &&
+                    this.#app.models.getProviderAuthStatus(id).source !== "stored"
+                ) {
+                    await this.#app.providers.storeApiKey(id, removed);
                 }
 
-                const old = (await this.#app.models.getAuth(id).catch(() => undefined))?.auth
-                    .apiKey;
-
-                await this.#forgetKey(id);
-
-                return async () => {
-                    if (old !== undefined) {
-                        await this.#app.providers.storeApiKey(id, old);
-                    }
-                };
-            });
+                throw error;
+            }
 
             try {
                 await this.#applied(id);
@@ -558,13 +559,9 @@ export class CustomProviders {
 
     /**
      * Write the whole file at once (a temporary file, then a rename), private, with its folder made when missing.
-     * A file Pi would refuse is not written: Pi then loads none of its providers. `beforeRename` runs once the file
-     * passed its checks; what it returns undoes it when the file changed meanwhile.
+     * A file Pi would refuse is not written: Pi then loads none of its providers.
      */
-    async #write(
-        config: Json,
-        beforeRename?: () => Promise<(() => Promise<void>) | undefined>,
-    ): Promise<void> {
+    async #write(config: Json): Promise<void> {
         const link = modelsPath();
         // A models.json that links elsewhere (a dotfiles folder) stays a link: the file it names changes.
         const path = existsSync(link) ? realpathSync(link) : link;
@@ -585,24 +582,6 @@ export class CustomProviders {
         // Another server or Pi changed the file since it was read: writing now would undo that change.
         if (rawModels() !== this.#seen) {
             rmSync(temp, { force: true });
-
-            throw new HttpError(409, "models.json changed meanwhile. Try again.");
-        }
-
-        let undo: (() => Promise<void>) | undefined;
-
-        try {
-            undo = await beforeRename?.();
-        } catch (error) {
-            rmSync(temp, { force: true });
-
-            throw error;
-        }
-
-        // Checked again: `beforeRename` waited, and the file may have changed in that time.
-        if (rawModels() !== this.#seen) {
-            rmSync(temp, { force: true });
-            await undo?.();
 
             throw new HttpError(409, "models.json changed meanwhile. Try again.");
         }
@@ -628,6 +607,19 @@ export class CustomProviders {
         if (errors.has(id)) {
             throw new HttpError(500, "Pi could not load the endpoint. Try Refresh models.");
         }
+    }
+
+    /** Remove the endpoint's stored key, and give it back for a save that may need to put it back. */
+    async #takeKey(id: string): Promise<string | undefined> {
+        if (this.#app.models.getProviderAuthStatus(id).source !== "stored") {
+            return undefined;
+        }
+
+        const key = (await this.#app.models.getAuth(id).catch(() => undefined))?.auth.apiKey;
+
+        await this.#app.providers.logout(id);
+
+        return key;
     }
 
     async #forgetKey(id: string): Promise<void> {
