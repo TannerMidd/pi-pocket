@@ -938,12 +938,6 @@ export class Commands {
         const titled = app.hidden.replace(typed, id);
 
         await this.#touched(id, titled, text === titled ? undefined : text);
-
-        // A person's own words: linked sessions may message each other again (`linked-sessions.ts`).
-        if (via === undefined) {
-            await app.linkedSessions.personWrote(id);
-        }
-
         this.#reportUnanswered(id, submission.wait(context));
 
         if (failure !== undefined) {

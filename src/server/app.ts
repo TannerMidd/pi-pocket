@@ -487,6 +487,7 @@ export class PocketApp {
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
     #unsubscribeCommits: (() => void) | undefined;
+    #unsubscribeRunEnds: (() => void) | undefined;
     #unsubscribeApprovals: (() => void) | undefined;
     #unsubscribeBrowsers: (() => void) | undefined;
     #lockFile: string;
@@ -1019,6 +1020,7 @@ export class PocketApp {
         });
 
         this.#unsubscribeCommits = () => commits.detach();
+        this.#unsubscribeRunEnds = this.linkedSessions.watch();
         this.#unsubscribeApprovals = this.approvals.subscribe((id) => {
             void this.#rooms.get(id)?.then(
                 (room) => room.schedule(),
@@ -1469,11 +1471,13 @@ export class PocketApp {
             get retry() {
                 return safe(() => settings.getRetrySettings()) ?? {};
             },
+            // Every message that waits goes in at once, so a queue of agents' messages and reports costs one turn, not
+            // one each. Pi's own setting, when the owner set one, still wins.
             get steeringMode() {
-                return safe(() => settings.getSteeringMode());
+                return safe(() => settings.getSettings().steeringMode) ?? "all";
             },
             get followUpMode() {
-                return safe(() => settings.getFollowUpMode());
+                return safe(() => settings.getSettings().followUpMode) ?? "all";
             },
         } as HarnessSettings;
     }
@@ -4163,6 +4167,7 @@ export class PocketApp {
             this.limits.close();
             this.background.close();
             this.#unsubscribeCommits?.();
+            this.#unsubscribeRunEnds?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
             this.guard.close();

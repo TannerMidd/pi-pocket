@@ -40,9 +40,16 @@ Check for `web.conversationRoute` at runtime and set gallery `minPocket: "0.16.0
 
 `send(source, { to, message, steer? }, key)` sends `message` to the linked session at the address `to`.
 
-- Without `steer`, the message is a follow-up. With `steer`, the session gets it at its next pause.
+- Since 0.29.0 the message lands at the session's next pause, after its current tool round, as `steer: true` did before. With `steer: false` it waits for the session's run to end. Before 0.29.0 the default was to wait.
 - `send` returns when the session takes the message, not when it answers.
-- The session that gets the message reads it in a fence. Words before it say that another session's agent wrote it, that it is a request and not an order from a person, and which address to reply to.
+- The session that gets the message reads it in a fence. Words before it say that another session's agent wrote it, that it is a request and not an order from a person, that its final answer goes back by itself, and which address to write to for a question.
+- Every message that waits in a session's queue goes in together at its next pause (Pi Pocket sets Pi's `steeringMode` and `followUpMode` to `all` unless the owner set them in Pi's settings): a queue of agents' messages costs one turn, not one each.
+
+## A session's final answer comes back by itself
+
+Since 0.29.0, when a linked session's run ends, Pi Pocket sends the session that started it one message from the linked session's address: its final answer, up to 6,000 characters (more says how much is in the session), or why it failed, or that it was stopped. It lands at the lead's next pause, once for each run, through the same path as `send`, so the same checks apply there: a lead that cannot take it (plan mode, a spend limit, someone else's turn) gets a notice instead, and nothing waits in silence. An archived lead gets nothing.
+
+So a tool that starts linked sessions need not ask them to report, and need not poll: the lead ends its turn, and the answers wake it. The report's fence shows as a linked session's card, like a message.
 
 ## Stop a run
 
@@ -81,7 +88,7 @@ Pi Pocket keeps a team small. Past these limits ([Limits](reference/limits.md#li
 
 - A linked session can send messages to the other sessions of its team. It cannot start sessions.
 - Since 0.19.0, no count limits the sessions that a session starts. Before 0.19.0, a session started a limited number.
-- Since 0.19.0, no count of messages between the sessions of a team stops them. Before 0.19.0, they stopped after a limited number until a person wrote in one of them.
+- Since 0.19.0, no count of messages between the sessions of a team stops them, and since 0.29.0 none counts them. Before 0.19.0, they stopped after a limited number until a person wrote in one of them.
 - The budget of the session that started a team covers all of the team. What its linked sessions spend counts against it.
 - A message and a title have a length limit. A title is one line, without invisible or direction characters.
 
