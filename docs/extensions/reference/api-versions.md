@@ -14,7 +14,7 @@ The version goes up only when a change breaks something that modules use. Additi
 
 Since 0.21.0, document definitions should name `checkpointWhen` in every `defineDoc` or `defineDocFamily` call. When it is missing, Pi Pocket supplies `checkpointWhen: () => false` for older drop-ins, and logs the module and the document kind. Explicit policies stay as they are. Since 0.21.0 (Pi Durable 1.4), a task must not use `TaskRuntime.sleep()`: it must wait with durable `sleepUntil()` checkpoints.
 
-Since 0.28.0 (Pi 1.5), the main entry of `@earendil-works/pi-ai` does not export TypeBox's `Type`. A drop-in that imports `Type` from it still gets it: Pi Pocket gives drop-ins pi-ai with TypeBox's `Type` added, so their tool schemas stay as they were. New code builds its schemas with `@earendil-works/pi-schema` ([Tools](../tools.md#define-a-tool)).
+Since 0.28.0 (Pi 1.5), the main entry of `@earendil-works/pi-ai` does not export TypeBox's `Type`. A drop-in that imports `Type` from it still gets it: Pi Pocket gives drop-ins pi-ai with TypeBox's `Type` added, so their tool schemas stay as they were. New code builds its schemas with `@earendil-works/pi-schema` ([Tools](../tools.md#define-a-tool)). Since then, a watch listener (`api.watchDoc`) gets one call: `watch.start(async (call, context) => …)`, with `call.value`, `call.ops`, and `call.retired` when `call.kind` is `"value"`. A document that is retired does not end its watch with a `null` value any more: the next call has `retired: true`.
 
 ## `pocketApi`
 

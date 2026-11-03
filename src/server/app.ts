@@ -180,9 +180,10 @@ const MAX_SUBAGENT_MODELS = 50;
 export const MAX_PEEKS = 20;
 /**
  * How a run that failed leaves its messages: the model or its provider answered with an error, no model was there to
- * ask, or the run broke. Stopped (`aborted`), cleared (`reset`), and replaced (`stale`) runs did not fail.
+ * ask, the run broke, or the server stopped while the model answered and no retry was left (`interrupted`, since Pi
+ * Durable 1.5). Stopped (`aborted`), cleared (`reset`), and replaced (`stale`) runs did not fail.
  */
-const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
+const FAILED_RUN = new Set(["model_error", "no_model", "faulted", "interrupted"]);
 
 /** The session list goes to every tab on each change: these bound what it carries. */
 const FAILURE_TEXT = 120;
@@ -988,7 +989,7 @@ export class PocketApp {
                     await tx.doc(ArtifactsDoc, conversation.id);
                     await tx.doc(SubagentsDoc, conversation.id);
                 },
-                onReport: (error) => this.notice("warning", describe(error)),
+                onReport: (report) => this.notice("warning", describe(report.error)),
             },
             context,
         );

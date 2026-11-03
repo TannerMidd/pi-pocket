@@ -731,7 +731,7 @@ export function projectLive(live: LiveState | undefined): ClientLive {
 
     if (live.compactions !== undefined) {
         out.compactions = live.compactions.map((compaction) => ({
-            reason: compaction.reason,
+            reason: compaction.trigger,
             blocking: compaction.blocking,
             attempt: compaction.attempt,
             ...(compaction.retry === undefined ? {} : { retry: compaction.retry }),

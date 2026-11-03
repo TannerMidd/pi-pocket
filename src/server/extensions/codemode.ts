@@ -307,7 +307,10 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
                         `codemode/${n}/${name}`,
                         ...rest,
                     )) as ToolExecutionApi["memo"];
-                const hookApi: HookApi = { ...api, memo };
+                // A tool's api cannot read the conversation's entries: hooks get them for a model's calls only.
+                const noEntries = (): Promise<never> =>
+                    Promise.reject(new Error("A hook cannot read entries in a codemode call"));
+                const hookApi: HookApi = { ...api, memo, entry: noEntries, entries: noEntries };
                 const check = (value: unknown): JsonObject =>
                     validateToolArguments(tool, {
                         ...call,
