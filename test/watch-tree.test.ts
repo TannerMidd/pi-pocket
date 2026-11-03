@@ -38,7 +38,7 @@ test("a watched tree tells of added, written, and removed files, and not of read
         chmodSync(app, 0o600);
         chmodSync(join(directory, "fonts", "font.woff2"), 0o600);
         await settle();
-        assert.deepEqual(changes, []);
+        assert.equal(changes.length, 0, "nothing is told");
 
         writeFileSync(app, "export const a = 2;\n");
         await until(() => changes.length === 1, "the edit is told");
