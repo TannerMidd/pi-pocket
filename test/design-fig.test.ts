@@ -595,6 +595,33 @@ test("a dark first color collection stays dark first beside a one-mode collectio
     assert.equal(token(system, "color.paper")?.modes.light?.hex, "#ffffff");
 });
 
+test("a mode keeps its values when another collection's first mode has its name", () => {
+    const sizes = guid(1, 3);
+    const file = figFile({
+        nodeChanges: [
+            modeSet(sizes, [
+                [CONTRAST, "Desktop"],
+                [HIGH, "Mobile"],
+            ]),
+            modeSet(COLORS, [[LIGHT, "Mobile"]]),
+            variable(guid(1, 2), "Colors/Paper", "COLOR", [[LIGHT, paint("#ffffff")]]),
+            variable(
+                guid(2, 1),
+                "Spacing/Base",
+                "FLOAT",
+                [
+                    [CONTRAST, { floatValue: 8 }],
+                    [HIGH, { floatValue: 4 }],
+                ],
+                sizes,
+            ),
+        ],
+    });
+    const system = load(scanTokens(project({ "sizes.fig": file })));
+
+    assert.equal(token(system, "space.base")?.modes.mobile?.literal, "4px");
+});
+
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {
     const file = oneMode(
         variable(guid(1, 2), "Colors/Ink", "COLOR", [[LIGHT, paint("#111111")]]),

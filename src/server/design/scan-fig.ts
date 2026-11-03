@@ -65,7 +65,6 @@ function modesOf(collections: Map<string, Collection>) {
     // A variable names its collection by guid, or by its published key in a library file.
     const collectionOf = new Map<string, string>();
     const firstOf = new Map<string, string>();
-    const firstNames = new Set<string>();
     const byId = new Map<string, { name: string; collection: string }>();
 
     for (const collection of collections.values()) {
@@ -78,7 +77,6 @@ function modesOf(collections: Map<string, Collection>) {
         }
 
         if (first !== undefined) {
-            firstNames.add(modeNameOf(first.name));
             firstOf.set(collection.id, first.id);
         }
 
@@ -87,7 +85,7 @@ function modesOf(collections: Map<string, Collection>) {
         }
     }
 
-    return { collectionOf, firstOf, firstNames, byId };
+    return { collectionOf, firstOf, byId };
 }
 
 function valueOf(
@@ -153,6 +151,13 @@ export function figTokens(
     const { nodes } = decoded;
     const collections = collectionsOf(nodes);
     const modes = modesOf(collections);
+    // Only a collection with a dark mode chooses the default: a spacing collection has no theme.
+    const themed = [...collections.values()].filter((each) =>
+        each.modes.some((mode) => isDarkMode(mode.name)),
+    );
+    const darkFirst =
+        themed.length > 0 && themed.every((each) => isDarkMode(each.modes[0]?.name ?? ""));
+
     const { list, byKey } = variablesOf(nodes);
     const named = new Map<string, Shaped>();
     const taken = new Set<string>();
@@ -227,8 +232,8 @@ export function figTokens(
 
             if (isDarkMode(mode.name)) {
                 darkChanges.set(shape.path.join("."), changed);
-            } else if (!modes.firstNames.has(name)) {
-                // A mode named like a default mode would be refused by the engine.
+            } else if (name !== (darkFirst ? "dark" : "light")) {
+                // A mode named like the default mode would be refused by the engine.
                 const tree = changes.get(name) ?? new Map<string, Obj>();
 
                 tree.set(shape.path.join("."), changed);
@@ -255,13 +260,6 @@ export function figTokens(
     const tokens = rewrite(assemble(entries, renamed, progress), renamed) as Obj;
 
     stop ??= progress.stopped ? "time" : undefined;
-
-    // Only a collection with a dark mode chooses the default: a spacing collection has no theme.
-    const themed = [...collections.values()].filter((each) =>
-        each.modes.some((mode) => isDarkMode(mode.name)),
-    );
-    const darkFirst =
-        themed.length > 0 && themed.every((each) => isDarkMode(each.modes[0]?.name ?? ""));
 
     if (darkFirst && Object.keys(tokens).length > 0) {
         tokens.$extensions = { "com.pi-pocket": { mode: "dark" } };
