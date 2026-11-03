@@ -528,6 +528,53 @@ test(
     },
 );
 
+test(
+    "Pending memories: PiP's strip shows in both places, and opens the approval list",
+    real,
+    async () => {
+        const strip = (where: string) =>
+            inPage<string | null>(
+                `return JSON.stringify(document.querySelector('${where} .pip-memory-count')?.textContent.trim() ?? null)`,
+            );
+
+        await fresh("floating");
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify((await import('/sheets/memory.js')).memoryAvailable())`,
+            ),
+            true,
+            "memory is on in this server",
+        );
+        await page.evaluate(`(await import('/pip.js')).openPip()`);
+        await floating("the floating panel");
+        await see(
+            `/\\d+ pending/.test(document.querySelector('.pip-panel .pip-memory-count')?.textContent ?? '')`,
+            "the panel's count",
+        );
+        const count = await strip(".pip-panel");
+
+        await place("board");
+        await boarded("moved to the board");
+        await see(
+            `document.querySelector('.pane .composer-wrap .dock .pip-memory-count')?.textContent.trim() === ${JSON.stringify(count)}`,
+            "the same count above the board's box",
+        );
+        await page.click({ selector: '.pane .dock [aria-label="Pending memories"]' });
+        await see(
+            `(await import('/store.js')).store.state.sheet?.type === 'memory' && (await import('/store.js')).store.state.sheet.pendingOnly === true && document.querySelector('.sheet')?.textContent.includes('Pending memories')`,
+            "the approval list",
+        );
+        await boarded("PiP stays on the board under it");
+        await page.evaluate(`(await import('/store.js')).closeSheet()`);
+
+        // Only PiP's conversation has it: not another session's box.
+        await page.click({ selector: '.topbar [aria-label="Close PiP"]' });
+        await shut("closed");
+        await backTo(background, "the session again");
+        assert.equal(await strip(".pane .composer-wrap"), null, "no strip in another session");
+    },
+);
+
 /** The session the list marks as open (its row's `aria-current`), or null for none. */
 const markedOpen = () =>
     inPage<number | null>(

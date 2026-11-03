@@ -30,6 +30,7 @@ import {
 } from "./store.js";
 import { useDock } from "./dock.js";
 import { defineItem, slotItems } from "./slots.js";
+import { memoryAvailable, PendingMemories } from "./sheets/memory.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
@@ -1343,6 +1344,13 @@ export function Composer() {
             <${WatchBar} />
             <${SubagentsBar} />
             <${TrustBar} />
+            ${
+                // PiP's conversation as a board keeps its floating panel's strip: every project's memories to approve.
+                conversationId === store.state.pip?.id &&
+                store.state.me?.role === "owner" &&
+                memoryAvailable(conversationId) &&
+                html`<${PendingMemories} id=${conversationId} />`
+            }
         </div>
         <${ParentSessionButton} />
         ${
