@@ -387,33 +387,32 @@ export class TailscaleServe {
     /**
      * Take down the mount at `/` that publishes this server: on quit when this run made it, and always when the user
      * moves to another mode, where leaving it would keep serving the app to an audience the panel no longer promises.
-     * A mount someone pointed at another target is theirs and stays.
+     * A mount someone pointed at another target is theirs and stays. The answer: whether nothing of this run's still
+     * publishes this server; when it is false, the mount is kept as this run's, so a later stop or start tries again.
      */
-    stop(always = false): void {
+    stop(always = false): boolean {
         if (!this.#published && !always) {
-            return;
+            return true;
         }
 
-        this.#published = false;
-
-        // Someone may have put another service at `/` since: that one is theirs, and stays.
+        // Someone may have put another service at `/` since: that one is theirs, and stays. A mount that cannot be
+        // read may be theirs by now too, so it stays, and the receipt makes the next start try again.
         const now = this.#serveConfig();
 
-        // On quit, a mount that cannot be read may be someone else's by now: leave it, and keep the receipt so the next
-        // start tries again. Leaving the mode takes it down anyway, as the mode must stop publishing this server.
-        if (!now.ok && !always) {
+        if (!now.ok) {
             this.#events.mountAttempt?.();
             this.#events.problem(`${now.message} Pi Pocket left the Serve mount as it is.`);
 
-            return;
+            return false;
         }
 
-        const mount = now.ok ? mountAt(now.config, this.#dnsName, SERVE_PORT) : undefined;
+        const mount = mountAt(now.config, this.#dnsName, SERVE_PORT);
 
         if (mount !== undefined && !sameLocalTarget(mount.Proxy, this.#port)) {
+            this.#published = false;
             this.#events.mountRemoved?.();
 
-            return;
+            return true;
         }
 
         const removed = this.#run(["serve", `--https=${SERVE_PORT}`, "--set-path=/", "off"]);
@@ -424,13 +423,19 @@ export class TailscaleServe {
         if (!removed.ok && !missingMount(removed.message)) {
             // Keep ownership: the receipt is what makes the next start try again, including for an adopted mount this
             // run took responsibility for by leaving the mode.
+            this.#published = true;
             this.#events.mountAttempt?.();
             this.#events.problem(
                 `${removed.message} The tailnet may still point here; the next start takes the mount down or reuses it.`,
             );
-        } else {
-            this.#events.mountRemoved?.();
+
+            return false;
         }
+
+        this.#published = false;
+        this.#events.mountRemoved?.();
+
+        return true;
     }
 
     #serveConfig(): ConfigRun {

@@ -711,12 +711,14 @@ test("stop on quit leaves a mount it cannot read, which may be someone else's by
 
         assert.equal(serve.start().ok, true);
         writeFileSync(join(dirname(fake.binary), "serve.json"), "No serve config\n");
-        serve.stop();
+        assert.equal(serve.stop(), false);
+        // Leaving the mode does not take it down either: the mode stays, as the mount may still publish this server.
+        assert.equal(serve.stop(true), false);
         assert.equal(
             fake.calls().some((line) => line.endsWith(" off")),
             false,
         );
-        assert.equal(said.problems.length, 1);
+        assert.equal(said.problems.length, 2);
     } finally {
         fake.restore();
     }
@@ -769,7 +771,7 @@ test("stop reports an off that failed for any other reason", async (t) => {
 
         serve.start();
         lifecycle.length = 0;
-        serve.stop();
+        assert.equal(serve.stop(), false, "the mount is still up");
         assert.deepEqual(said.problems, [
             'Run "sudo tailscale set --operator=$USER" once, so Pi Pocket may configure serve. The tailnet may still point here; the next start takes the mount down or reuses it.',
         ]);
@@ -1145,7 +1147,7 @@ test("a failed cleanup preserves ownership for a later retry", () => {
  * The launcher itself, copied beside a stub server that only says it is ready, started in `local` mode on `port` with
  * the fake tailscale on its PATH. It runs until the stub starts, which is after the stale mount cleanup, then quits.
  */
-async function launchLocal(data: string, port: number, access = "local"): Promise<void> {
+async function launchLocal(data: string, port: number, access = "local"): Promise<boolean> {
     const repo = fileURLToPath(new URL("..", import.meta.url));
     const root = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-"));
     const started = join(root, "started");
@@ -1202,7 +1204,7 @@ setInterval(() => {}, 60_000);
             launchError = error;
         });
 
-        for (let waited = 0; !existsSync(started); waited += 50) {
+        for (let waited = 0; !existsSync(started) && launcher.exitCode === null; waited += 50) {
             if (launchError !== undefined) {
                 throw launchError;
             }
@@ -1210,6 +1212,8 @@ setInterval(() => {}, 60_000);
             assert.ok(waited < 15_000, "the launcher did not start its server");
             await new Promise((resolve) => setTimeout(resolve, 50));
         }
+
+        return existsSync(started);
     } finally {
         const timer = setTimeout(() => launcher?.kill("SIGKILL"), 15_000);
 
@@ -1253,6 +1257,29 @@ test("a local start leaves the owner's own mount at its port alone, and takes do
         await launchLocal(data, LOCAL_PORT);
         assert.ok(fake.calls().includes("serve --https=443 --set-path=/ off"));
         assert.equal(existsSync(join(data, "serve-mount.json")), false);
+    } finally {
+        fake.restore();
+        rmSync(data, { recursive: true, force: true });
+    }
+});
+
+test("a local start refuses a port that a mount of an earlier run may still publish", async (t) => {
+    if (process.platform === "win32") {
+        t.skip(SKIP_WINDOWS);
+
+        return;
+    }
+
+    const fake = fakeTailscale({
+        serve: mounted(),
+        offFailure: { status: 1, error: "serve config denied" },
+    });
+    const data = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-data-"));
+
+    try {
+        writeFileSync(join(data, "serve-mount.json"), `${JSON.stringify({ port: LOCAL_PORT })}\n`);
+        assert.equal(await launchLocal(data, LOCAL_PORT), false, "the server does not start");
+        assert.ok(existsSync(join(data, "serve-mount.json")), "the receipt stays for a retry");
     } finally {
         fake.restore();
         rmSync(data, { recursive: true, force: true });

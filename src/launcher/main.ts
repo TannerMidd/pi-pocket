@@ -916,13 +916,19 @@ function prepareServe(): boolean {
     return true;
 }
 
-/** Stop the Serve mount. `always` takes down an adopted one too: leaving the mode must stop publishing this server. */
-function stopServe(always = false): void {
-    const current = serve;
+/**
+ * Stop the Serve mount. `always` takes down an adopted one too: leaving the mode must stop publishing this server. The
+ * answer: whether the mount is gone; when it is not, the mode keeps it.
+ */
+function stopServe(always = false): boolean {
+    if (serve?.stop(always) === false) {
+        return false;
+    }
 
     serve = undefined;
     state.accessUrl = undefined;
-    current?.stop(always);
+
+    return true;
 }
 
 /** Switch to `mode`: start or stop the tunnel, and restart the server when it has to listen somewhere else. */
@@ -932,13 +938,15 @@ async function applyAccess(mode: AccessMode, binary: string | undefined): Promis
     // back after.
     const mounted = mode === "tailscale-serve" && serve !== undefined ? state.accessUrl : undefined;
 
-    await stopTunnel();
+    // Leaving the mode must stop publishing this server: an adopted mount still points at this port, and leaving it
+    // would serve the app to the audience the panel no longer promises. A mount that stays keeps the mode.
+    if (mode !== "tailscale-serve" && !stopServe(true)) {
+        log(yellow("  The Tailscale Serve mount is still up, so access stays on Tailscale Serve."));
 
-    if (mode !== "tailscale-serve") {
-        // Leaving the mode must stop publishing this server: an adopted mount still points at this port, and leaving it
-        // would serve the app to the audience the panel no longer promises.
-        stopServe(true);
+        return;
     }
+
+    await stopTunnel();
 
     state.mode = mode;
     saveSettings(mode);
@@ -1200,6 +1208,14 @@ async function main(): Promise<void> {
                 if (removed) {
                     log(dim("  Removed the Tailscale Serve mount an earlier run left behind."));
                 }
+            }
+
+            // The receipt stays until the mount is gone. One for this port would publish this mode's server on the
+            // tailnet, which the mode does not promise.
+            if (savedServeMountPort() === options.port) {
+                fail(
+                    `A Tailscale Serve mount from an earlier run may still publish port ${options.port}. Remove it with "tailscale serve --https=443 --set-path=/ off", start on another --port, or start with --access tailscale-serve. When it is gone already, delete ${serveMountFile}.`,
+                );
             }
         }
 
