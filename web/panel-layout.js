@@ -4,7 +4,7 @@
 // shows a session's as it opens. No imports, so Node tests it.
 
 /** How many sessions' layouts a tab, and the device, keep: the ones shown longest ago go first. */
-export const LAYOUT_MAX = 200;
+const LAYOUT_MAX = 200;
 
 /** A session that shows no panel: what one never seen before shows. */
 export const NO_LAYOUT = Object.freeze({ panel: null, filesTab: "files" });
@@ -63,10 +63,8 @@ export function layoutOf(state) {
     return { panel: state.peopleOpen ? "people" : null, filesTab };
 }
 
-/** What the store's state takes to show `layout` (null: no panel). */
-export function layoutPatch(layout) {
-    const { panel, ext, filesTab } = layout ?? NO_LAYOUT;
-
+/** What the store's state takes to show `layout`. */
+export function layoutPatch({ panel, ext, filesTab }) {
     return {
         extPanel: panel === "ext" ? { ...ext } : null,
         browserOpen: panel === "browser",
