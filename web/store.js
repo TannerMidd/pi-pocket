@@ -2648,15 +2648,13 @@ const current = () => store.state.conversationId;
 
 export const actions = {
     /** `inlineFiles`: the files the message mentions with @ go along with it. */
-    /** `about`: the session a quoted passage came from, for PiP's own conversation only. */
-    submit: (text, attachments, mode, inlineFiles = false, about = undefined) =>
+    submit: (text, attachments, mode, inlineFiles = false) =>
         api(`c/${current()}/submit`, {
             text,
             attachments,
             mode,
             requestId: uid(),
             ...(inlineFiles ? { inlineFiles } : {}),
-            ...(about === undefined ? {} : { about }),
         }),
     /** Run a command in the session's folder (`!`); `context: false` keeps it from Pi (`!!`). */
     shell: (command, context, requestId = uid()) =>
@@ -3019,10 +3017,6 @@ export const showsPip = (state = store.state) =>
     state.conversationId !== null &&
     (state.conversationId === state.pip?.id || state.view.conversation?.pip === true);
 
-/** The quote over the session composer's box: PiP's own on PiP's board, else the session's reply quote. */
-export const composerQuote = (state = store.state) =>
-    showsPip(state) ? state.pipQuote : state.replyQuote;
-
 /** Reply to a passage of the conversation shown: on PiP's board, it is PiP's quote. */
 export function quoteReply(text) {
     store.set(showsPip() ? { pipQuote: { text } } : { replyQuote: { text } });
@@ -3030,7 +3024,7 @@ export function quoteReply(text) {
 
 /**
  * Take away `quote` from the box that holds it, never another one put there meanwhile: dismissed, or as a send takes it.
- * A send holds its quote while it goes, so no box (PiP's other place, a session's box shown again) offers it twice.
+ * A send holds its quote while it goes, so no box shown again meanwhile offers it twice.
  */
 export function dropQuote(quote) {
     if (!quote) {

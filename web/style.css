@@ -18450,11 +18450,6 @@ textarea.notes {
     color: var(--accent);
 }
 
-/* Above the box of PiP's conversation as a board: a bar among the dock's others. */
-.dock > .pip-memory {
-    margin: 0 0 5px;
-}
-
 .pip-composer-wrap {
     flex: none;
     min-width: 0;

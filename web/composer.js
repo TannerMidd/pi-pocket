@@ -24,10 +24,8 @@ import {
     navigate,
     notify,
     openSheet,
-    composerQuote,
     dropQuote,
     giveBackQuote,
-    showsPip,
     store,
     takeInsert,
     typing,
@@ -35,7 +33,6 @@ import {
 } from "./store.js";
 import { useDock } from "./dock.js";
 import { defineItem, slotItems } from "./slots.js";
-import { memoryAvailable, PendingMemories } from "./sheets/memory.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
@@ -735,7 +732,7 @@ export function Composer() {
         if (command.args || command.template) {
             update(`/${command.name} `);
             focusEnd();
-        } else if (composerQuote()) {
+        } else if (store.state.replyQuote) {
             notify("info", "A quote cannot go with a command. Remove the quote to run it.");
         } else {
             runCommand({ command, arg: "" }, `/${command.name}`);
@@ -756,7 +753,9 @@ export function Composer() {
     const canSend =
         !sending &&
         !uploading &&
-        (text.trim() !== "" || composerQuote() || files.some((file) => file.state === "done"));
+        (text.trim() !== "" ||
+            store.state.replyQuote ||
+            files.some((file) => file.state === "done"));
 
     /** What went out stays for ↑; its pastes are done with. */
     const sent = (full) => {
@@ -807,7 +806,7 @@ export function Composer() {
 
         // A command runs or expands only when it starts the message: a quote in front would stop that.
         if (
-            composerQuote() &&
+            store.state.replyQuote &&
             (parsed || shell || template || text.trimStart().startsWith("/skill:"))
         ) {
             return notify("info", "A quote cannot go with a command. Remove the quote to run it.");
@@ -830,9 +829,8 @@ export function Composer() {
         }
 
         setSending(true);
-        // The quote goes with the message, out of its box at once: no box (PiP's other place) offers it again meanwhile.
-        const quote = composerQuote();
-        const forPip = showsPip();
+        // The quote goes with the message, out of its box at once: no box shown again meanwhile offers it.
+        const quote = store.state.replyQuote;
         const going = files.filter((file) => file.state === "done");
         const attachments = going.map((file) => file.attachment);
 
@@ -850,7 +848,6 @@ export function Composer() {
                         : sendMode
                     : "followUp",
                 inlineFiles && mentionsFiles,
-                typeof quote?.session === "number" ? { session: quote.session } : undefined,
             ),
         );
 
@@ -873,7 +870,7 @@ export function Composer() {
                 box.current?.focus();
             }
         } else {
-            giveBackQuote(quote, forPip, conversationId);
+            giveBackQuote(quote, false, conversationId);
         }
     };
 
@@ -1189,7 +1186,7 @@ export function Composer() {
         );
     };
 
-    const shownQuote = sendingQuote ?? composerQuote();
+    const shownQuote = sendingQuote ?? store.state.replyQuote;
     const placeholder = dictation.listening
         ? "Listening…"
         : busy
@@ -1198,9 +1195,7 @@ export function Composer() {
               : sendMode === "interrupt"
                 ? "Stop the run and send this now…"
                 : "Queue a message for after this run…"
-          : showsPip()
-            ? "Ask PiP anything…"
-            : "Ask Pi anything…";
+          : "Ask Pi anything…";
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
@@ -1346,13 +1341,6 @@ export function Composer() {
             <${WatchBar} />
             <${SubagentsBar} />
             <${TrustBar} />
-            ${
-                // PiP's conversation as a board keeps its floating panel's strip: every project's memories to approve.
-                showsPip() &&
-                store.state.me?.role === "owner" &&
-                memoryAvailable(conversationId) &&
-                html`<${PendingMemories} id=${conversationId} />`
-            }
         </div>
         <${ParentSessionButton} />
         ${
