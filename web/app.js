@@ -206,7 +206,12 @@ defineItem("topbar", {
     fixed: true,
     render: () =>
         pipBoard() &&
-        html`<button class="icon-button" aria-label="Close PiP" title="Close PiP" onClick=${closePip}>
+        html`<button
+            class="icon-button"
+            aria-label="Close PiP"
+            title="Close PiP"
+            onClick=${closePip}
+        >
             <${Icon} name="close" />
         </button>`,
 });
