@@ -21,6 +21,7 @@ import { setArchived, toggleBoard } from "./sessions.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { recentLabels } from "./sheets/folder.js";
 import { galleryAvailable } from "./sheets/gallery.js";
+import { keepWarmAvailable } from "./sheets/keep-warm.js";
 import { memoryAvailable } from "./sheets/memory.js";
 import { piSessionsAvailable } from "./sheets/pi-sessions.js";
 import {
@@ -466,6 +467,14 @@ function actionItems() {
             icon: "key",
             run: () => openSheet({ type: "providers" }),
         },
+        me?.role === "owner" &&
+            keepWarmAvailable() && {
+                label: "Keep warm",
+                detail: "keep prompt caches warm after a run",
+                keywords: "cache prompt idle keepwarm",
+                icon: "reload",
+                run: () => openSheet({ type: "keep-warm" }),
+            },
         modelRefreshAvailable() && {
             label: "Refresh models",
             detail: store.state.modelRefresh.loading
