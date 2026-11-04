@@ -321,6 +321,20 @@ test("Phones: × closes past the Files tile, and PiP opens again without it", re
     await page.setViewport(VIEWPORTS.desktop);
 });
 
+test("Phones: the first Ask PiP after a load focuses PiP's box on the board", real, async () => {
+    await fresh("board", VIEWPORTS.mobile);
+    // Its conversation comes a moment after the route, as a slower connection brings it.
+    await page.evaluate(`const real = window.fetch;
+        window.fetch = async (url, init) => String(url).endsWith('/switch')
+            ? new Promise((go) => setTimeout(go, 300)).then(() => real(url, init))
+            : real(url, init);
+        ${PIP}.quotePip('focus me', ${Number(background)})`);
+    await boarded("PiP");
+    await see(`document.activeElement === document.querySelector('${BOARD_BOX}')`, "its box");
+    await page.evaluate(`${PIP}.closePip()`);
+    await page.setViewport(VIEWPORTS.desktop);
+});
+
 test("Changing the setting moves PiP, never into both places", real, async () => {
     const choose = async (value: string) => {
         await see(`document.querySelector('.sheet .segmented') !== null`, "Appearance");

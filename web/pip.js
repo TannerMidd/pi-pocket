@@ -134,6 +134,8 @@ let seq = 0;
 let toldConnection = null;
 /** The server's answer to the last "open": PiP's state, with its conversation's id. */
 let opening = null;
+/** PiP's box is to take the focus as it shows, also on a phone (`focusComposer`). */
+let focusWanted = false;
 
 /** Tell the server whether this tab's panel shows: while it does, the server sends PiP's conversation. */
 function tellServer(on) {
@@ -368,6 +370,9 @@ async function openBoard(keepSheet = false) {
 
 /** Open PiP where Appearance says; with `text`, put it in PiP's message box. Resolves once it is open as a board. */
 export function openPip(text) {
+    // A focus asked for before, by an open that did not show PiP, is not this one's.
+    focusWanted = false;
+
     if (!pipAvailable()) {
         return Promise.resolve();
     }
@@ -571,8 +576,17 @@ function PipContext({ stats, window }) {
     </span>`;
 }
 
+/** Focus PiP's box: now, or as it shows, when its conversation comes after the route (the board's first open). */
 function focusComposer() {
-    requestAnimationFrame(() => document.querySelector(".pip-composer textarea")?.focus());
+    focusWanted = true;
+    requestAnimationFrame(() => {
+        const box = document.querySelector(".pip-composer textarea");
+
+        if (box) {
+            focusWanted = false;
+            box.focus();
+        }
+    });
 }
 
 /** A message in PiP's conversation without the "[from: Name]" a server with several people puts first. */
@@ -891,10 +905,12 @@ function Composer({ id, busy, board = false }) {
     const dictation = useDictation(ref, change, { top: true });
 
     useLayoutEffect(fit, [text]);
-    // A phone's keyboard would cover the panel as it opens: there, the box waits for a tap. Elsewhere it takes the focus
-    // as it mounts, in the same task as the key that opened it, so the next keys land here.
+    // A phone's keyboard would cover the panel as it opens: there, the box waits for a tap, unless one asked for the
+    // focus (Ask PiP). Elsewhere it takes the focus as it mounts, in the same task as the key that opened it, so the
+    // next keys land here.
     useLayoutEffect(() => {
-        if (!NARROW.matches) {
+        if (!NARROW.matches || focusWanted) {
+            focusWanted = false;
             ref.current?.focus({ preventScroll: true });
         }
     }, []);
