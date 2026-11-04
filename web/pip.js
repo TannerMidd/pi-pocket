@@ -184,6 +184,8 @@ export const pipShown = (state = store.state) => state.pipOpen || pipBoard(state
 
 /** The place the open panel is in, so a change of the setting moves it. */
 let place = pipPlace();
+/** PiP was turned off in Extensions, as the server last said: the change closes the board, once. */
+let turnedOff = false;
 
 // A floating panel kept open across a reload, where PiP now opens as a board: its conversation's route is what is kept.
 if (store.state.pipOpen && place === "board") {
@@ -192,11 +194,23 @@ if (store.state.pipOpen && place === "board") {
 }
 
 // A reconnect (or the first connection, with the panel kept open across a reload) gets the panel's view again; PiP
-// turned off in Extensions closes the panel. The setting changed while PiP shows moves it to the other place.
+// turned off in Extensions closes the panel, and the board. The setting changed while PiP shows moves it to the other
+// place.
 store.subscribe((state) => {
     syncDraftScope(state);
 
     const board = pipBoard(state);
+    const off = Boolean(state.server) && !pipAvailable();
+
+    if (off !== turnedOff) {
+        turnedOff = off;
+
+        if (off && board) {
+            closePip();
+
+            return;
+        }
+    }
 
     if (board && state.pip?.endedAt !== undefined) {
         // Its conversation in view counts as seen, as the panel does.
