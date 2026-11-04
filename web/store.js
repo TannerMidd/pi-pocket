@@ -210,6 +210,22 @@ function firstLayout() {
     return layoutFor(id);
 }
 
+/**
+ * PiP's id comes with the connection, after the first layout: a panel kept for its conversation before then (the old
+ * global panel handed over on a PiP board) is dropped, and does not show on it.
+ */
+function pipLayout(pip) {
+    const id = pip?.id;
+
+    if (id === undefined || id === store.state.pip?.id || layoutPerson() === null) {
+        return {};
+    }
+
+    keepLayout(id, NO_LAYOUT);
+
+    return id === store.state.conversationId ? layoutPatch(NO_LAYOUT) : {};
+}
+
 /** The session and layout last kept: a change to either keeps the layout again. */
 let layoutShown = { id: null, layout: NO_LAYOUT };
 
@@ -1882,7 +1898,7 @@ const handlers = {
     },
     // This person's PiP: its conversation, whether it works, and when it last answered (`pip.js`); null for none.
     // Sent again on each connect, mostly as it was.
-    pip: (pip) => setChanged({ pip: kept(store.state.pip, pip) }),
+    pip: (pip) => setChanged({ ...pipLayout(pip), pip: kept(store.state.pip, pip) }),
     // PiP's conversation, while this tab's PiP panel is open.
     pipview: applyPipView,
     chat: applyChat,

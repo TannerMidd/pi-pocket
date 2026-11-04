@@ -244,6 +244,16 @@ test("Phones: × closes past the Files tile, and PiP opens again without it", re
     await boarded("PiP again");
     await settle();
     assert.equal(await inPage(`${STORE}.store.state.filesOpen`), false, "no panel kept for PiP");
+    // The one panel an older version kept for the tab: a reload on the board gives it to no one.
+    await page.evaluate(`sessionStorage.setItem('pocket.files', '1')`);
+
+    for (const when of ["the update's reload", "another reload"]) {
+        await page.evaluate(`location.reload()`);
+        await boarded(`PiP after ${when}`);
+        await settle();
+        assert.equal(await inPage(`${STORE}.store.state.filesOpen`), false, when);
+    }
+
     await page.evaluate(`history.back()`);
     await backTo(background, "Back on a phone");
     await page.setViewport(VIEWPORTS.desktop);
