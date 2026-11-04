@@ -1201,7 +1201,9 @@ export function Composer() {
               : sendMode === "interrupt"
                 ? "Stop the run and send this now…"
                 : "Queue a message for after this run…"
-          : "Ask Pi anything…";
+          : conversationId === store.state.pip?.id
+            ? "Ask PiP anything…"
+            : "Ask Pi anything…";
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
