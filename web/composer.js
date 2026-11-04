@@ -165,11 +165,21 @@ const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes
 /**
  * Each conversation's message (or command) on its way, by its id: `{ text, quote, files }`, the box's words, its quote,
  * and the paths of the files that go. It lives here, not in the box: a box shown again meanwhile (another route, Alt+A
- * twice) holds it as on its way, and cannot send it twice. Its words and files stay in the draft until it went.
+ * twice) holds it as on its way, and cannot send it twice. Its words and files stay in the draft until it went, and
+ * meanwhile its words are all the draft holds: what comes for the box (an insert, Edit on a queued message) waits until
+ * it ended (`afterSend`), so what leaves the draft once it went is only what went.
  */
 const onTheWay = new Map();
 /** The boxes shown, each told when a message from its conversation went. */
 const sentListeners = new Set();
+/** By conversation, what waits for its send on its way to end (`afterSend`). */
+const sendWaiters = new Map();
+
+/** Resolves once conversation `id` has no send on its way. */
+const afterSend = (id) =>
+    onTheWay.has(id)
+        ? new Promise((resolve) => sendWaiters.set(id, [...(sendWaiters.get(id) ?? []), resolve]))
+        : Promise.resolve();
 
 const requestKey = (id) => `sendRequest.${id}`;
 
@@ -238,12 +248,9 @@ function endSend(id, record, went) {
     }
 
     if (went) {
-        // Words put in meanwhile (`takeInsert`) follow the sent ones without their end spaces.
-        const left = drafts.get(id).replace(record.text.trimEnd(), "").trim();
-
-        drafts.set(id, left);
-
-        if (left === "") {
+        // The draft held only what went, unless another tab wrote it since: that stays.
+        if (drafts.get(id) === record.text) {
+            drafts.set(id, "");
             savePastes(id, {});
         }
 
@@ -257,6 +264,8 @@ function endSend(id, record, went) {
     }
 
     store.set({});
+    sendWaiters.get(id)?.forEach((resolve) => resolve());
+    sendWaiters.delete(id);
 }
 
 /**
@@ -673,7 +682,8 @@ export function Composer() {
     const insert = store.state.composerInsert;
 
     useEffect(() => {
-        const taken = insert && takeInsert(drafts.get(conversationId));
+        // It waits while a send is on its way: the box then holds only what goes.
+        const taken = insert && !sending && takeInsert(drafts.get(conversationId));
 
         if (taken?.files.length > 0) {
             addFiles(taken.files);
@@ -694,7 +704,7 @@ export function Composer() {
             element.focus();
             element.setSelectionRange(element.value.length, element.value.length);
         });
-    }, [insert?.n]);
+    }, [insert?.n, sending]);
     useEffect(() => {
         const fit = () => fitBox(box.current);
 
@@ -731,7 +741,8 @@ export function Composer() {
 
     /**
      * The box's own change of its words (typing, dictation, history, a suggestion, a module's key): none while they are
-     * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in.
+     * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in, once
+     * they went or did not (`afterSend`).
      */
     const edit = (value, at) => {
         if (onTheWay.has(conversationId)) {
@@ -1002,6 +1013,8 @@ export function Composer() {
             return;
         }
 
+        // Taken back while a send is on its way, it goes into the box once that ended.
+        await afterSend(conversationId);
         const current = drafts.get(conversationId);
         const at = back.text.length;
 

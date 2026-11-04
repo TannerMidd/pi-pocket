@@ -40,6 +40,8 @@ let pip: ConversationId;
 let background: ConversationId;
 /** The newest request the model got, as JSON: what PiP was told. */
 let lastAsked = "";
+/** What the model waits for before it answers: a test keeps Pi working with it. */
+let thinking = Promise.resolve();
 const project = join(work, "project-board");
 
 const inPage = async <T>(script: string): Promise<T> =>
@@ -176,6 +178,7 @@ before(async () => {
     mkdirSync(project);
     app = await openApp(
         scriptedModel(async (request) => {
+            await thinking;
             lastAsked = JSON.stringify((request as { messages: unknown[] }).messages);
 
             return fauxAssistantMessage([
@@ -589,6 +592,43 @@ test("A session's send on its way, its box shown again: once, or all back", real
     });
     await see(`document.querySelector('${BOX}').value === 'and then'`, "sent");
     assert.equal(await inPage(`window.sends`), 1, "once");
+});
+
+test("A queued message taken back while a send is on its way keeps every word", real, async () => {
+    let answer = () => {};
+
+    thinking = new Promise((resolve) => (answer = resolve));
+    await fresh("board");
+
+    try {
+        for (const words of ["start", "tell him hello from me"]) {
+            await type(BOX, words);
+            await page.press("Enter");
+            await see(`document.querySelector('${BOX}').value === ''`, `"${words}" went`);
+        }
+
+        await type(BOX, "hello");
+        await holdingSends(async () => {
+            await page.press("Enter");
+            await see(`window.sends === 1`, "on its way");
+            const queued = `[...document.querySelectorAll('.pane .queued-text')]
+                .find((each) => each.textContent.includes('tell him'))`;
+
+            await page.evaluate(`${queued}.click()`);
+            await see(`document.querySelector('.pane .queued-actions .button')`, "its Edit");
+            await page.evaluate(`document.querySelector('.pane .queued-actions .button').click()`);
+            await see(`!${queued}`, "taken back");
+            await page.evaluate(`window.release()`);
+        });
+        await see(
+            `document.querySelector('${BOX}').value === 'tell him hello from me'`,
+            "taken back whole, what went gone",
+        );
+    } finally {
+        answer();
+    }
+
+    await see(`!${STORE}.store.state.view.live.busy`, "Pi done");
 });
 
 test("A `!` command with its answer lost runs once when sent again", real, async () => {
