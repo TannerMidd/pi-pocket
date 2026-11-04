@@ -328,12 +328,6 @@ export const goBack = () => history.back();
 /** What `pushRoute` kept on the route's entry under `key`, or undefined. */
 export const routeState = (key) => history.state?.pocket?.[key];
 
-/**
- * Back to the route before this one, past the layers open over it (a Files tile, a sheet), which close as back closes
- * them. After history has caught up with what is open.
- */
-export const backRoute = () => queue(() => history.go(-(depth() + 1)));
-
 // ─── Routes ───────────────────────────────────────────────────────────────────────
 
 /** The session list's route. */
@@ -434,6 +428,23 @@ export function pushRoute(path, { replace = false, state: kept = {} } = {}) {
         }
     });
     // Layers still open (a panel that stays) get their entries again, above the new route.
+    settle();
+}
+
+/**
+ * Back to the route under this one (the one a route was opened over), which the app shows already: as `pushRoute` goes
+ * to a new route, but back, so that no entry of the route left stays to come back to. The layers still open (a sheet
+ * that stays) get their entries again over it. Should history not land there, the app follows the address.
+ */
+export function popRoute(path) {
+    homeRequest++;
+    heading("back");
+    moved();
+    shown = path;
+    queue(async () => {
+        await traverse(-(depth() + 1), { follow: true });
+        shownBack = history.state?.pocket?.back;
+    });
     settle();
 }
 

@@ -5,7 +5,7 @@
 // events), so the session behind it stays as it was.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { followUpText } from "./artifact-bridge.js";
-import { backRoute, useBack } from "./back.js";
+import { useBack } from "./back.js";
 import { boxKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
@@ -15,12 +15,14 @@ import { usePipResize } from "./pip-window.js";
 import {
     api,
     attempt,
+    giveBackQuote,
     insertIntoComposer,
     isRow,
     navigate,
     notify,
     openSheet,
     dropQuote,
+    showsPip,
     store,
     uid,
 } from "./store.js";
@@ -170,15 +172,12 @@ function tellServer(on) {
 /** Where PiP opens, as Appearance says: `"floating"` (the corner, or a phone's sheet), or `"board"`. */
 export const pipPlace = () => (prefs()?.pip === "board" ? "board" : "floating");
 
-/** PiP's conversation is the route: open as a page, perhaps under a board (Running now) for now. */
-const inPip = (state) =>
-    state.conversationId !== null &&
-    state.pip?.id !== undefined &&
-    state.conversationId === state.pip.id;
-
-/** PiP open as a board: its conversation shows in the session's place, with nothing over that place. */
+/**
+ * PiP open as a board: its conversation is the route (`showsPip`), in the session's place, with nothing (Running now, an
+ * extension's page) over that place.
+ */
 export const pipBoard = (state = store.state) =>
-    inPip(state) && !state.board && state.page === null;
+    showsPip(state) && !state.board && state.page === null;
 
 /** PiP shows, in either place: its floating panel open, or its conversation in the session's place. */
 export const pipShown = (state = store.state) => state.pipOpen || pipBoard(state);
@@ -419,17 +418,12 @@ export function closePip() {
     const open = store.state.pipOpen;
 
     if (pipBoard()) {
-        // The route it was opened over (`over`, kept on its history entry through back, forward, and a reload); none
-        // when reached another way (the address).
+        // Back to the route it was opened over (`over`, kept on its history entry through back, forward, and a reload),
+        // so no entry of PiP's stays to come back to; a sheet still open (Appearance, moving PiP to the corner) stays
+        // over it. Reached another way (the address), it gives the place to the home screen.
         const { over: from, sheet } = store.state;
 
-        // Back there, past whatever is open over it. A sheet still open (Appearance, moving PiP to the corner) stays,
-        // over that route; and reached another way, it gives the place to the home screen.
-        if (from !== null && !sheet) {
-            backRoute();
-        } else {
-            navigate(from?.id ?? null, { sheet });
-        }
+        navigate(from?.id ?? null, { sheet, back: from !== null });
     }
 
     if (!open || !store.state.pipOpen) {
@@ -952,8 +946,10 @@ function Composer({ id, busy }) {
             return;
         }
 
-        // What shows is what goes: words still coming would land in the emptied box.
+        // What shows is what goes: words still coming would land in the emptied box. The quote goes with the words, out
+        // of PiP's box at once, so neither of PiP's places offers it again while it goes.
         dictation.stop(true);
+        dropQuote(quoted);
         let success = false;
 
         try {
@@ -971,9 +967,8 @@ function Composer({ id, busy }) {
             composerDraft.finish(token, success);
         }
 
-        // Sent with it: this quote goes, from the box that holds it now, not another put there meanwhile.
-        if (success) {
-            dropQuote(quoted);
+        if (!success) {
+            giveBackQuote(quoted, true);
         }
     };
 

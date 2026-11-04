@@ -1,5 +1,5 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
-import { onRoute, pushRoute, routeState } from "./back.js";
+import { onRoute, popRoute, pushRoute, routeState } from "./back.js";
 import { hostCan, onPageVisibility, pageVisible } from "./host.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
@@ -450,6 +450,13 @@ function routeOver() {
  */
 export const openId = (state = store.state) =>
     state.over === null ? state.conversationId : state.over.id;
+
+/**
+ * The session's Reply quote stays while that session stays open (`openId`): under a route opened over it (PiP's board,
+ * whose box has PiP's quote) and back from there. Going to another session drops it.
+ */
+const keptReply = (state, id, over) =>
+    (over === null ? id : over.id) === openId(state) ? { replyQuote: state.replyQuote } : {};
 
 // ─── People: presence, typing, and the side chat ───────────────────────────────────
 
@@ -2460,14 +2467,20 @@ export function closeSignIn(flowId) {
 /**
  * Go to a conversation (null: the home screen). With `over` (`{ id }`, the route under it), it opens over that route
  * as a board does: the entry keeps it, and the list keeps that session marked open (`openId`) until another route.
+ * With `back`, it goes back to the route that one was opened over, keeping what stays open over both (a sheet).
  */
-export function navigate(conversationId, { replace = false, sheet = null, over = null } = {}) {
+export function navigate(
+    conversationId,
+    { replace = false, sheet = null, over = null, back = false } = {},
+) {
     const path = conversationId === null ? "/" : `/s/${conversationId}`;
 
     // A new route says what it is over; the same route keeps what its entry already says.
     const route = location.pathname !== path || store.state.conversationId !== conversationId;
 
-    if (route) {
+    if (route && back) {
+        popRoute(path);
+    } else if (route) {
         pushRoute(path, { replace, state: over === null ? {} : { over } });
     }
 
@@ -2498,6 +2511,7 @@ export function navigate(conversationId, { replace = false, sheet = null, over =
         conversationId,
         ...keptView(conversationId),
         ...peopleFor(conversationId),
+        ...keptReply(state, conversationId, route ? over : state.over),
         ...layoutPatch(layoutFor(conversationId)),
         browser: null,
         history: null,
@@ -2555,6 +2569,7 @@ onRoute(() => {
             conversationId: id,
             ...keptView(id),
             ...peopleFor(id),
+            ...keptReply(store.state, id, routeOver()),
             ...layoutPatch(layoutFor(id)),
             browser: null,
             history: null,
@@ -2981,9 +2996,13 @@ export function insertIntoComposer(text, files = [], { inline = false, conversat
     }));
 }
 
-/** Whether the conversation shown is PiP's, open as a board in the session's place. */
+/**
+ * Whether the conversation in the session's place is PiP's (as a board): as its view says, which comes before PiP's id
+ * may, after a reload, or as PiP's id says.
+ */
 export const showsPip = (state = store.state) =>
-    state.conversationId !== null && state.conversationId === state.pip?.id;
+    state.conversationId !== null &&
+    (state.conversationId === state.pip?.id || state.view.conversation?.pip === true);
 
 /** The quote over the session composer's box: PiP's own on PiP's board, else the session's reply quote. */
 export const composerQuote = (state = store.state) =>
@@ -2994,7 +3013,10 @@ export function quoteReply(text) {
     store.set(showsPip() ? { pipQuote: { text } } : { replyQuote: { text } });
 }
 
-/** Take away `quote`, sent or dismissed, from the box that holds it: never another one put there meanwhile. */
+/**
+ * Take away `quote` from the box that holds it, never another one put there meanwhile: dismissed, or as a send takes it.
+ * A send holds its quote while it goes, so no box (PiP's other place, a session's box shown again) offers it twice.
+ */
 export function dropQuote(quote) {
     if (!quote) {
         return;
@@ -3004,6 +3026,20 @@ export function dropQuote(quote) {
         store.set({ replyQuote: null });
     } else if (quote === store.state.pipQuote) {
         store.set({ pipQuote: null });
+    }
+}
+
+/**
+ * A send that did not go gives its quote back, unless another took its place meanwhile: to PiP's box (`pip`), or to the
+ * box of session `id` while it is still open.
+ */
+export function giveBackQuote(quote, pip, id) {
+    const free = pip
+        ? store.state.pipQuote === null
+        : store.state.replyQuote === null && openId() === id;
+
+    if (quote && free) {
+        store.set(pip ? { pipQuote: quote } : { replyQuote: quote });
     }
 }
 

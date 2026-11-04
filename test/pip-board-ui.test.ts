@@ -229,6 +229,19 @@ test("Board: the session under it stays marked open, and is where it closes to",
     await boarded("PiP over Running now");
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session it was first opened over");
+
+    // Its Reply quote waits under PiP's board, whose box has PiP's own: a Reply there is PiP's, also before PiP's id
+    // comes (after a reload).
+    const STRIP = "document.querySelector('.pane .quote-strip-text')?.textContent ?? null";
+
+    await page.evaluate(`${STORE}.quoteReply('under the board')`);
+    await page.evaluate(`${PIP}.openPip()`);
+    await boarded("PiP over a Reply quote");
+    assert.equal(await inPage(STRIP), null, "not over PiP's box");
+    await page.evaluate(`${STORE}.store.set({ pip: null }); ${STORE}.quoteReply('on the board')`);
+    assert.equal(await inPage(`${STORE}.store.state.pipQuote?.text ?? null`), "on the board");
+    await page.evaluate(`${PIP}.closePip()`);
+    await see(`${STRIP} === 'under the board'`, "the session's quote again");
 });
 
 test("Phones: × closes past the Files tile, and PiP opens again without it", real, async () => {
@@ -270,7 +283,16 @@ test("Phones: × closes past the Files tile, and PiP opens again without it", re
 });
 
 test("Changing the setting moves PiP, never into both places", real, async () => {
+    const choose = async (value: string) => {
+        await see(`document.querySelector('.sheet .segmented') !== null`, "Appearance");
+        await page.evaluate(`[...document.querySelectorAll('.sheet .segmented button')]
+            .find((button) => button.textContent.trim() === '${value}').click()`);
+    };
+
     await fresh("floating");
+    // Home under the session, in this page's history.
+    await page.evaluate(`${STORE}.navigate(null); ${STORE}.navigate(${Number(background)})`);
+    await backTo(background, "the session again");
     await page.evaluate(`
         window.pipBoth = 0;
         new MutationObserver(() => {
@@ -294,16 +316,24 @@ test("Changing the setting moves PiP, never into both places", real, async () =>
     await new Promise((resolve) => setTimeout(resolve, 500));
     await floating("still floating");
 
-    // From Appearance: the sheet that changed it stays, over PiP's board.
+    // From Appearance: the sheet that changed it stays, over PiP's board, and over the session back from there.
     await page.evaluate(`${STORE}.openSheet({ type: 'appearance' })`);
-    await see(`document.querySelector('.sheet .segmented') !== null`, "Appearance");
-    await page.evaluate(`[...document.querySelectorAll('.sheet .segmented button')]
-        .find((button) => button.textContent.trim() === 'Board').click()`);
+    await choose("Board");
     await see(`${STORE}.store.state.conversationId === ${Number(pip)}`, "Board chosen");
     assert.equal(await inPage(`${STORE}.store.state.sheet?.type ?? null`), "appearance");
     await page.evaluate(`${STORE}.closeSheet()`);
     await boarded("on the board");
+    await page.evaluate(`${STORE}.openSheet({ type: 'appearance' })`);
+    await choose("Floating");
+    await floating("Floating chosen");
+    assert.equal(await inPage(`${STORE}.store.state.sheet?.type ?? null`), "appearance");
     assert.equal(await inPage(`window.pipBoth`), 0, "never both");
+    // No entry of PiP's board is left for back to open again.
+    await page.evaluate(`${STORE}.closeSheet(); ${PIP}.closePip()`);
+    await shut("closed");
+    await settle();
+    await page.evaluate(`history.back()`);
+    await see(`location.pathname === '/'`, "back past the session");
 });
 
 test("Ask PiP: the passage over the board's box, and PiP told its session", real, async () => {
@@ -361,6 +391,11 @@ test(
         await see(`typeof window.release === 'function'`, "the send on its way");
         await place("floating");
         await floating("in the corner");
+        assert.equal(
+            await inPage(strip(".pip-panel", "still red")),
+            false,
+            "on its way: not twice",
+        );
         await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
         await until(async () => lastAsked.includes("still red"), "PiP asked");
         await see(`${STORE}.store.state.pipQuote === null`, "the sent quote gone");
@@ -372,6 +407,38 @@ test(
         await page.evaluate(`${PIP}.closePip()`);
     },
 );
+
+test("Ask PiP: a failed send gives the quote back, wherever PiP shows", real, async () => {
+    await fresh("floating");
+    await page.evaluate(`${PIP}.quotePip('try again', ${Number(background)})`);
+    await floating("in the corner");
+    // The send waits, and then fails, after PiP moved to the board.
+    await page.evaluate(`
+        const real = window.fetch;
+        const failed = () => new Response('{}', { status: 400 });
+        window.fetch = (url, init) => String(url).includes('/submit')
+            ? new Promise((resolve) => { window.fail = () => resolve(failed()); })
+            : real(url, init);
+        const box = document.querySelector('.pip-composer textarea');
+        box.value = 'again?';
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+    `);
+    await page.click({ selector: ".pip-panel .pip-send" });
+    await see(`typeof window.fail === 'function'`, "the send on its way");
+    await place("board");
+    await boarded("moved meanwhile");
+    assert.equal(
+        await inPage(`document.querySelector('.pane .quote-strip') === null`),
+        true,
+        "on its way",
+    );
+    await page.evaluate(`window.fail()`);
+    await see(
+        `document.querySelector('.pane .quote-strip-text')?.textContent === 'try again'`,
+        "the quote back",
+    );
+    await page.evaluate(`${PIP}.closePip()`);
+});
 
 test("Pending memories: PiP's strip in both places, only while one waits", real, async () => {
     const COUNT = (where: string) =>

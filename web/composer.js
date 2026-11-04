@@ -26,6 +26,7 @@ import {
     openSheet,
     composerQuote,
     dropQuote,
+    giveBackQuote,
     showsPip,
     store,
     typing,
@@ -445,6 +446,8 @@ export function Composer() {
     // The queued message whose Interrupt was tapped once (`CONFIRM_INTERRUPT`).
     const [interrupting, setInterrupting] = useState(null);
     const [sending, setSending] = useState(false);
+    // The quote of the message on its way: out of its box (`dropQuote`), shown here with the words until then.
+    const [sendingQuote, setSendingQuote] = useState(null);
     // Slash command suggestions: the highlighted one, and whether Escape hid the list.
     const [pick, setPick] = useState(0);
     const [hideCommands, setHideCommands] = useState(false);
@@ -842,10 +845,14 @@ export function Composer() {
         }
 
         setSending(true);
-        // The quote that goes: once sent, it leaves the box that holds it, wherever PiP shows by then.
+        // The quote goes with the message, out of its box at once: no box (PiP's other place) offers it again meanwhile.
         const quote = composerQuote();
+        const forPip = showsPip();
         const going = files.filter((file) => file.state === "done");
         const attachments = going.map((file) => file.attachment);
+
+        setSendingQuote(quote);
+        dropQuote(quote);
         const ok = await attempt(() =>
             actions.submit(
                 withQuote(quote?.text, full),
@@ -863,6 +870,7 @@ export function Composer() {
         );
 
         setSending(false);
+        setSendingQuote(null);
 
         if (ok) {
             // Interrupting stops the run: do not let the next message stop one by habit.
@@ -871,7 +879,6 @@ export function Composer() {
             }
 
             sent(full);
-            dropQuote(quote);
 
             // Files pasted while it went stay for the next message.
             forget(going);
@@ -880,6 +887,8 @@ export function Composer() {
             if (!coarse) {
                 box.current?.focus();
             }
+        } else {
+            giveBackQuote(quote, forPip, conversationId);
         }
     };
 
@@ -1195,7 +1204,7 @@ export function Composer() {
         );
     };
 
-    const shownQuote = composerQuote();
+    const shownQuote = sendingQuote ?? composerQuote();
     const placeholder = dictation.listening
         ? "Listening…"
         : busy
@@ -1354,7 +1363,7 @@ export function Composer() {
             <${TrustBar} />
             ${
                 // PiP's conversation as a board keeps its floating panel's strip: every project's memories to approve.
-                conversationId === store.state.pip?.id &&
+                showsPip() &&
                 store.state.me?.role === "owner" &&
                 memoryAvailable(conversationId) &&
                 html`<${PendingMemories} id=${conversationId} />`
@@ -1598,6 +1607,7 @@ export function Composer() {
                             <button
                                 class="icon-button small"
                                 aria-label="Remove the quote"
+                                disabled=${sending}
                                 onClick=${() => dropQuote(shownQuote)}
                             >
                                 <${Icon} name="close" size=${12} />

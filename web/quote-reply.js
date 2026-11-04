@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { pipAvailable, quotePip } from "./pip.js";
 import { rangeText } from "./quote-text.js";
-import { quoteReply, store } from "./store.js";
+import { quoteReply, showsPip, store } from "./store.js";
 import { prefs } from "./theme.js";
 import { html, Icon } from "./ui.js";
 
@@ -12,10 +12,7 @@ const buttons = () => ({
         prefs().quoteReply !== false &&
         Boolean(document.querySelector('[data-part="composer"] textarea')),
     // Never in PiP's own conversation (as a board, or opened as one): Reply already goes to PiP there.
-    pip:
-        prefs().askPipQuote !== false &&
-        pipAvailable() &&
-        (store.state.pip?.id === undefined || store.state.conversationId !== store.state.pip.id),
+    pip: prefs().askPipQuote !== false && pipAvailable() && !showsPip(),
 });
 
 const coarse = matchMedia("(pointer: coarse)").matches;
