@@ -727,20 +727,39 @@ test("modes past the engine's 16 are left out with a note, and the rest load", (
     assert.match(scanReport(scan), /cannot hold them: 1 mode\./);
 });
 
-test("a spacing alias to a plain number keeps its value", () => {
+test("a spacing alias to a plain number of another collection keeps its value in each mode", () => {
+    const numbers = guid(1, 4);
     const four = guid(1, 2);
-    const scan = scanTokens(
-        project({
-            "alias.fig": oneMode(
-                variable(four, "Primitives/4", "FLOAT", [[LIGHT, { floatValue: 4 }]]),
-                variable(guid(1, 3), "Spacing/Small", "FLOAT", [
-                    [LIGHT, { alias: { guid: four } }],
-                ]),
+    const file = figFile({
+        nodeChanges: [
+            modeSet(COLORS, [
+                [LIGHT, "Light"],
+                [DARK, "Dark"],
+            ]),
+            modeSet(numbers, [
+                [CONTRAST, "Light"],
+                [HIGH, "Dark"],
+            ]),
+            variable(
+                four,
+                "Primitives/4",
+                "FLOAT",
+                [
+                    [CONTRAST, { floatValue: 4 }],
+                    [HIGH, { floatValue: 8 }],
+                ],
+                numbers,
             ),
-        }),
-    );
+            variable(guid(1, 3), "Spacing/Small", "FLOAT", [
+                [LIGHT, { alias: { guid: four } }],
+                [DARK, { alias: { guid: four } }],
+            ]),
+        ],
+    });
+    const small = token(load(scanTokens(project({ "alias.fig": file }))), "space.small");
 
-    assert.equal(token(load(scan), "space.small")?.modes.light?.literal, "4px");
+    assert.equal(small?.modes.light?.literal, "4px");
+    assert.equal(small?.modes.dark?.literal, "8px");
 });
 
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {

@@ -73,6 +73,9 @@ function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
     const collectionOf = new Map<string, string>();
     const baseOf = new Map<string, string>();
     const byId = new Map<string, { name: string; collection: string }>();
+    // A collection's modes by the name they take: an alias across collections reads the target's
+    // mode of the same name.
+    const named = new Map<string, Map<string, string>>();
     const home = darkFirst ? "dark" : "light";
 
     for (const collection of collections.values()) {
@@ -89,6 +92,7 @@ function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
             : (others.find((mode) => modeNameOf(mode.name) === "dark") ??
               others.find((mode) => isDarkMode(mode.name)));
         const taken = new Set([home, "dark"]);
+        const names = new Map<string, string>();
 
         collectionOf.set(collection.id, collection.id);
 
@@ -108,18 +112,24 @@ function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
             }
 
             taken.add(name);
+            names.set(name, mode.id);
             byId.set(mode.id, { name, collection: collection.id });
         }
+
+        named.set(collection.id, names);
     }
 
-    return { collectionOf, baseOf, byId };
+    return { collectionOf, baseOf, byId, named };
 }
 
 interface Lookup {
     named: Map<string, Shaped>;
     byKey: Map<string, string>;
     byId: Map<string, FigVariable>;
-    /** The mode of a variable that a value in `mode` reads: that mode, or its default mode. */
+    /**
+     * The mode of a variable that a value in `mode` reads: that mode, its collection's mode of the
+     * same name (an alias to another collection), or its default mode.
+     */
     modeIn: (variable: FigVariable, mode: string) => string;
 }
 
@@ -263,7 +273,13 @@ export function figTokens(
         named,
         byKey,
         byId: new Map(list.map((each) => [each.id, each])),
-        modeIn: (variable, mode) => (variable.values.has(mode) ? mode : baseIn(variable)),
+        modeIn: (variable, mode) => {
+            const name = modes.byId.get(mode)?.name;
+            const collection = modes.collectionOf.get(variable.collection) ?? variable.collection;
+            const same = name === undefined ? mode : modes.named.get(collection)?.get(name);
+
+            return same !== undefined && variable.values.has(same) ? same : baseIn(variable);
+        },
     };
     const entries: { path: string[]; node: Obj }[] = [];
     const changes = new Map<string, Map<string, Obj>>();
