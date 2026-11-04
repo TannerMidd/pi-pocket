@@ -36,6 +36,7 @@ import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
+import { fingerprint } from "./text-hash.js";
 import { says } from "./turns.js";
 import { MicButton, useDictation } from "./voice.js";
 import {
@@ -169,12 +170,45 @@ const onTheWay = new Map();
 /** The boxes shown, each told when a message from its conversation went. */
 const sentListeners = new Set();
 
-/** Start a send of `record` from conversation `id`'s box; null while one is on its way from there. */
-function beginSend(id, record) {
+const requestKey = (id) => `sendRequest.${id}`;
+
+/**
+ * The request id of `message` (what goes: its kind, words, and files) from conversation `id`, kept with the draft in
+ * the person's storage until it is known sent (`endSend`), or another message goes. Sent again after a lost answer,
+ * also from a box shown again or after a reload, it goes with the same id, and the server gives back its first send
+ * instead of a second. A request the server refused stored nothing there: the same id then makes a new one.
+ */
+function requestFor(id, message) {
+    const what = fingerprint(JSON.stringify(message));
+    let kept = null;
+
+    try {
+        kept = JSON.parse(personStorage.get(requestKey(id)) ?? "null");
+    } catch {
+        // A damaged value is no request id: a new one replaces it.
+    }
+
+    if (kept?.what === what && typeof kept.requestId === "string") {
+        return kept.requestId;
+    }
+
+    const requestId = uid();
+
+    personStorage.set(requestKey(id), JSON.stringify({ what, requestId }));
+
+    return requestId;
+}
+
+/**
+ * Start a send of `record` from conversation `id`'s box, with the request id of `message` (`record.requestId`); null
+ * while one is on its way from there.
+ */
+function beginSend(id, record, message) {
     if (onTheWay.has(id)) {
         return null;
     }
 
+    record.requestId = requestFor(id, message);
     onTheWay.set(id, record);
     store.set({});
 
@@ -189,6 +223,7 @@ function endSend(id, record, went) {
     onTheWay.delete(id);
 
     if (went) {
+        personStorage.set(requestKey(id), null);
         // Words put in meanwhile (`takeInsert`) follow the sent ones without their end spaces.
         const left = drafts.get(id).replace(record.text.trimEnd(), "").trim();
 
@@ -208,26 +243,6 @@ function endSend(id, record, went) {
     }
 
     store.set({});
-}
-
-/**
- * Each conversation's `!` command or extension command that may have run on the server: its text,
- * the command's id, and its request id. Sent again, also from a box shown again, it goes with that
- * request id, so the server finds the first run and does not run it twice.
- */
-const retries = new Map();
-
-/** The request id to send `text` (of command `commandId`) with from conversation `id`. */
-function retryId(id, text, commandId = null) {
-    const kept = retries.get(id);
-    const request =
-        kept?.text === text && kept.commandId === commandId
-            ? kept
-            : { text, commandId, requestId: uid() };
-
-    retries.set(id, request);
-
-    return request.requestId;
 }
 
 /**
@@ -753,33 +768,22 @@ export function Composer() {
 
     /** Run a slash command. The text goes away once it worked; attached files stay for the next message. */
     const runCommand = async ({ command, arg }, sent) => {
-        const record = beginSend(conversationId, { text, quote: null, files: [] });
+        const record = beginSend(conversationId, { text, quote: null, files: [] }, [
+            "command",
+            command.id ?? command.name,
+            sent,
+        ]);
 
         if (!record) {
             return;
         }
 
-        const requestId = command.extension ? retryId(conversationId, sent, command.id) : undefined;
-
+        // Only an extension's command runs on the server, which finds a first run by its request id.
         const ok = await attempt(async () => {
-            try {
-                await command.run(arg, requestId);
-            } catch (error) {
-                // A 4xx made no run, or refused it for good: the next send is a new request. After a network error
-                // or a 5xx, the run may be there: the same send finds it.
-                if (requestId && error.status >= 400 && error.status < 500) {
-                    retries.delete(conversationId);
-                }
-
-                throw error;
-            }
+            await command.run(arg, command.extension ? record.requestId : undefined);
 
             return true;
         });
-
-        if (ok && requestId) {
-            retries.delete(conversationId);
-        }
 
         endSend(conversationId, record, Boolean(ok));
     };
@@ -852,14 +856,14 @@ export function Composer() {
             return notify("info", "Say which command to run, such as !git status.");
         }
 
-        const record = beginSend(conversationId, { text, quote: null, files: [] });
+        const record = beginSend(conversationId, { text, quote: null, files: [] }, ["shell", full]);
 
         if (!record) {
             return;
         }
 
         const started = await attempt(() =>
-            actions.shell(command, !full.startsWith("!!"), retryId(conversationId, full)),
+            actions.shell(command, !full.startsWith("!!"), record.requestId),
         );
 
         endSend(conversationId, record, Boolean(started));
@@ -874,7 +878,6 @@ export function Composer() {
                 { taskId: started.taskId, command, conversationId, at: Date.now() },
             ],
         }));
-        retries.delete(conversationId);
         sent(full);
     };
 
@@ -913,11 +916,13 @@ export function Composer() {
         const attachments = files
             .filter((file) => file.state === "done")
             .map((file) => file.attachment);
-        const record = beginSend(conversationId, {
-            text,
-            quote,
-            files: attachments.map((attachment) => attachment.path),
-        });
+        const paths = attachments.map((attachment) => attachment.path);
+        // The message is its words and files, which a reload keeps; not its quote, which lives in this page only.
+        const record = beginSend(conversationId, { text, quote, files: paths }, [
+            "message",
+            full,
+            paths,
+        ]);
 
         if (!record) {
             return;
@@ -936,6 +941,7 @@ export function Composer() {
                         : sendMode
                     : "followUp",
                 inlineFiles && mentionsFiles,
+                record.requestId,
             ),
         );
 

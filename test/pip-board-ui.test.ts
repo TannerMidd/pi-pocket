@@ -7,6 +7,7 @@ import {
     newSession,
     openApp,
     owner,
+    recordCost,
     root,
     scriptedModel,
     until,
@@ -580,4 +581,44 @@ test("A `!` command with its answer lost runs once when sent again", real, async
     await page.press("Enter");
     await until(() => existsSync(ran) && readFileSync(ran, "utf8").includes("z"), "z ran");
     assert.equal(readFileSync(ran, "utf8"), "x\ny\nz\n");
+});
+
+test("A message goes once: refused, its answer lost to a reload, sent again", real, async () => {
+    const sent = async () =>
+        (await app.transcripts.allEntries(background, true)).filter(
+            (entry) => entry.kind === "user" && entry.text.includes("keep me"),
+        ).length;
+
+    await fresh("board");
+    // Refused (a spend limit): the server keeps nothing, so the same send goes once it is lifted.
+    await app.spend.setSessionBudget(owner(app), background, 0.01);
+    await recordCost(app, background, 0.02);
+    await type(BOX, "keep me");
+    await page.press("Enter");
+    await see(
+        `${STORE}.store.state.notices.some((notice) => notice.message.includes('spend limit'))`,
+        "refused",
+    );
+    await app.spend.setSessionBudget(owner(app), background, null);
+
+    // The server gets it, and a reload loses its answer (and puts fetch back).
+    try {
+        await page.evaluate(`const real = window.fetch;
+            window.fetch = async (url, init) => String(url).endsWith('/submit')
+                ? (await real(url, init), new Promise(() => {}))
+                : real(url, init);`);
+        await page.press("Enter");
+        await until(async () => (await sent()) === 1, "the message there");
+    } finally {
+        await page.navigate(`${base}/s/${background}`);
+    }
+
+    await see(`document.querySelector('${BOX}')?.value === 'keep me'`, "the box after a reload");
+    await page.press("Enter");
+    await see(`document.querySelector('${BOX}').value === ''`, "sent again");
+    assert.equal(await sent(), 1, "once");
+    // Known sent: the same words again are a new message.
+    await type(BOX, "keep me");
+    await page.press("Enter");
+    await until(async () => (await sent()) === 2, "a new message");
 });
