@@ -2,9 +2,7 @@
 const PREFIX = "pocket.person.";
 // Old versions did not know whose drafts these were. Do not assign them to whoever signs in next.
 const legacy = (key) =>
-    /^(pocket\.(draft\.|pastes\.|attached\.|notesDraft\.|viewed\.|history(?:$|\.)|pip\.draft$))/.test(
-        key,
-    );
+    /^(pocket\.(draft\.|pastes\.|attached\.|viewed\.|history(?:$|\.)|pip\.draft$))/.test(key);
 
 /** A blocked/full store keeps changes in memory, including deletions that would otherwise reveal an older value. */
 export function createPersonStorage(storage = () => localStorage) {

@@ -639,6 +639,11 @@ function PinsTab({ onShowChat }) {
     </div>`;
 }
 
+const NOTES_WARNINGS = {
+    clear: "This browser could not clear its kept notes draft. It may return after a reload.",
+    write: "This browser cannot keep this draft after a reload. Save it before you reload.",
+};
+
 function NotesTab() {
     const { notes, users, me, conversationId } = store.state;
     const [, redraw] = useState(0);
@@ -662,7 +667,7 @@ function NotesTab() {
             return;
         }
 
-        // Hold this account, conversation, and draft until the response. The panel may have closed or moved on.
+        // Keep this account, session, and draft until the answer: the panel can close meanwhile.
         const saved = await attempt(() => actions.saveNotes(submitted.text, rev ?? submitted.base));
 
         notesDrafts.finishSave(me.id, conversationId, submitted, Boolean(saved));
@@ -671,23 +676,20 @@ function NotesTab() {
     return html`<p class="muted small">
         One page of notes for everyone here: the plan, decisions, who does what. Pi does not see it unless you send it.
     </p>
-    ${
-        error &&
-        html`<div class="error-box small" role="status">
-            ${
-                error === "clear"
-                    ? "This browser could not clear its kept notes draft. It may return after a reload."
-                    : "This browser cannot keep this draft after a reload. Save your notes before reloading."
-            }
-        </div>`
-    }
+    ${error && html`<div class="error-box small" role="status">${NOTES_WARNINGS[error]}</div>`}
     ${
         changedMeanwhile &&
         html`<div class="error-box small">
             ${by ?? "Someone"} saved the notes while you were editing.
             <button class="link small" disabled=${Boolean(saving)} onClick=${discard}>
                 Use theirs
-            </button> · <button class="link small" disabled=${Boolean(saving)} onClick=${() => save(notes.rev)}>Keep mine</button>
+            </button> · <button
+                class="link small"
+                disabled=${Boolean(saving)}
+                onClick=${() => save(notes.rev)}
+            >
+                Keep mine
+            </button>
         </div>`
     }
     <textarea
@@ -696,7 +698,8 @@ function NotesTab() {
         readOnly=${Boolean(saving)}
         value=${editing ? draft.text : notes.text}
         placeholder="Write the plan here…"
-        onInput=${(event) => notesDrafts.edit(me.id, conversationId, event.currentTarget.value, notes.rev)}
+        onInput=${(event) =>
+            notesDrafts.edit(me.id, conversationId, event.currentTarget.value, notes.rev)}
     ></textarea>
     <div class="row">
         <span class="muted small grow">
@@ -716,7 +719,9 @@ function NotesTab() {
         }
         ${
             editing &&
-            html`<button class="button small ghost" disabled=${Boolean(saving)} onClick=${discard}>Cancel</button>`
+            html`<button class="button small ghost" disabled=${Boolean(saving)} onClick=${discard}>
+                Cancel
+            </button>`
         }
         <button
             class="button small primary"
