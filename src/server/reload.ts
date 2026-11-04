@@ -175,14 +175,15 @@ export interface ExtensionInfo {
     }[];
     /**
      * What it adds to the app: its routes (`GET status`), who loads its browser module, when it has one, the widest
-     * access of the two, its commands (`conversation /name`, `global /name`), and whether it draws pages for anyone with
-     * one of its public links.
+     * access of the two, its commands (`conversation /name`, `global /name`), the UI languages it declares (`zh-CN`),
+     * and whether it draws pages for anyone with one of its public links.
      */
     web?: {
         routes: string[];
         client?: WebAccess;
         access?: WebAccess;
         commands?: string[];
+        locales?: string[];
         publicPage?: boolean;
         service?: boolean;
         settings?: boolean;
@@ -384,6 +385,8 @@ export class ExtensionLoader {
         this.#dropIn = folders.dropIn;
         this.#choice = choice;
         this.#webs = options.webs ?? new ExtensionWebs();
+        // The layers of the UI catalog follow the loader's order, not the order that loads finish in.
+        this.#webs.locales.orderedBy(() => this.files());
         this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
         this.#stopDocumentImports =

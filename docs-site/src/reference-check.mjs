@@ -68,6 +68,7 @@ export const PAGES = {
         "PublicLinkInfo",
         "SettingField",
         "SettingValue",
+        "UiLocalePack",
     ],
     "pocket.md": [
         "Pocket",

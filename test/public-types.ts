@@ -54,6 +54,7 @@ import type {
     PublicPageRequest,
     Web,
     WebRequest,
+    UiLocalePack,
 } from "../types/pocket.d.ts";
 
 /**
@@ -142,3 +143,35 @@ export const linkedBack = (types: LinkedSession): RealLinkedSession => types;
 
 /** A module written against the public types is one the loader takes. */
 export const module = (types: Module): ExtensionModule => types;
+export const moduleDefaultBack = (real: ExtensionModule["default"]): Module["default"] => real;
+
+// R18: Compare the actual registered pack types, not just the bivariant methods that accept them.
+type RealUiLocalePack = Parameters<ExtensionWeb["uiLocales"]>[0][number];
+export const uiLocalePack = (real: RealUiLocalePack): UiLocalePack => real;
+export const uiLocalePackBack = (types: UiLocalePack): RealUiLocalePack => types;
+export const uiLocaleDeclaration = (web: Web, packs: readonly UiLocalePack[]): void =>
+    web.uiLocales(packs);
+export const uiLocaleModule: Module = {
+    default(_host, web) {
+        web.uiLocales([{ id: "fr", label: "Français", messages: { "action.save": "Sauver" } }]);
+    },
+};
+export const oldVoidModule: Module = { default: () => {} };
+export const oldArrayModule: Module = { default: () => [] };
+
+export function uiLocaleTypeErrors(web: Web, pack: UiLocalePack): void {
+    // @ts-expect-error A declaration is an array, not one pack.
+    web.uiLocales(pack);
+    // @ts-expect-error A message is a string, not executable code.
+    web.uiLocales([{ id: "fr", label: "Français", messages: { save: () => "Sauver" } }]);
+    // @ts-expect-error A pack must have messages.
+    web.uiLocales([{ id: "fr", label: "Français" }]);
+    // @ts-expect-error A pack's id is readonly.
+    pack.id = "de";
+    // @ts-expect-error A label is readonly.
+    pack.label = "Deutsch";
+    // @ts-expect-error The messages property itself is readonly.
+    pack.messages = {};
+    // @ts-expect-error Its messages are readonly too.
+    pack.messages.save = "changed";
+}

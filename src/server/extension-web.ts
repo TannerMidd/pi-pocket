@@ -36,6 +36,7 @@ import {
     type SettingValue,
     settingValue,
 } from "./extension-settings.ts";
+import { checkUiLocales, type UiLocalePack, UiLocales } from "./ui-locales.ts";
 
 /**
  * The version of the extension API: the server's `web` and the app's `pocket`. It goes up only when something modules
@@ -202,6 +203,8 @@ export class WebPart {
     /** What the module offers other modules (`web.provide`), and the settings it declares (`web.settings`). */
     service: object | undefined;
     settings: SettingField[] | undefined;
+    /** The UI languages it declares (`web.uiLocales`), checked and frozen: its layers of the app's catalog. */
+    locales: readonly UiLocalePack[] | undefined;
     /** What the module listens to: other modules' services, and its own settings. They go with this version. */
     readonly serviceListeners: { module: string; listener: () => void }[] = [];
     readonly settingsListeners: (() => void)[] = [];
@@ -226,7 +229,8 @@ export class WebPart {
         this.title = title;
     }
 
-    /** Whether it added nothing to the app: no routes, browser module, public pages, or commands (cleanups do not count). */
+    /** Whether it added nothing to the app: no routes, browser module, public pages, services, settings, UI languages,
+     * or commands (cleanups do not count). */
     get empty(): boolean {
         return (
             this.routes.length === 0 &&
@@ -234,6 +238,7 @@ export class WebPart {
             this.page === undefined &&
             this.service === undefined &&
             this.settings === undefined &&
+            this.locales === undefined &&
             this.commands.length === 0
         );
     }
@@ -257,9 +262,13 @@ interface Options {
     links?: PublicLinks;
     /** The owner's values for modules' settings (config.json). Without it, every setting has its default. */
     settings?: (module: string) => Record<string, SettingValue>;
+    /** Modules' UI languages came, changed, or went: tabs must read the catalog again. */
+    localesChanged?: () => void;
 }
 
 export class ExtensionWebs {
+    /** The UI languages of every module that is on, merged over English in the loader's order. */
+    readonly locales = new UiLocales();
     /** The web part of every module that has one, by module name. */
     readonly #parts = new Map<string, WebPart>();
     readonly #options: Options;
@@ -453,6 +462,24 @@ export class ExtensionWebs {
                         part.settingsListeners.splice(at, 1);
                     }
                 };
+            },
+            uiLocales: (packs) => {
+                // Every refused declaration names the module that made it, a late one too.
+                if (part.sealed) {
+                    throw new Error(
+                        `web.uiLocales: ${part.file}: declare a module's UI languages while it loads`,
+                    );
+                }
+
+                open("uiLocales");
+
+                if (part.locales !== undefined) {
+                    throw new Error(
+                        `web.uiLocales: ${part.file}: declare a module's UI languages once`,
+                    );
+                }
+
+                part.locales = checkUiLocales(part.module, packs);
             },
             onDispose: (dispose) => {
                 if (typeof dispose !== "function") {
@@ -660,6 +687,8 @@ export class ExtensionWebs {
         for (const command of part.commands) {
             this.#clash(part, command.name);
         }
+
+        this.locales.check(part.file, part.locales);
     }
 
     /** Every installed module's commands, without their handlers. */
@@ -725,6 +754,10 @@ export class ExtensionWebs {
 
         if (previous?.service !== undefined || part.service !== undefined) {
             this.#serviceChanged(part.module);
+        }
+
+        if (this.locales.set(part.file, part.locales)) {
+            this.#options.localesChanged?.();
         }
     }
 
@@ -802,6 +835,10 @@ export class ExtensionWebs {
 
         if (part.service !== undefined) {
             this.#serviceChanged(part.module);
+        }
+
+        if (this.locales.set(part.file, undefined)) {
+            this.#options.localesChanged?.();
         }
     }
 
@@ -924,6 +961,7 @@ export class ExtensionWebs {
               client?: WebAccess;
               access: WebAccess;
               commands: string[];
+              locales: string[];
               publicPage: boolean;
               service: boolean;
               settings: boolean;
@@ -947,6 +985,7 @@ export class ExtensionWebs {
             ...(part.client === undefined ? {} : { client: part.client.access }),
             access,
             commands: part.commands.map((command) => `${command.scope} /${command.name}`),
+            locales: (part.locales ?? []).map((pack) => pack.id),
             publicPage: part.page !== undefined,
             service: part.service !== undefined,
             settings: part.settings !== undefined,

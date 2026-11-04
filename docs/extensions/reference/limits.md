@@ -108,6 +108,16 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Services:** one for each module.
 - **Events:** each listener gets each event once, after the change is stored; nothing is kept for a listener added later.
 
+## UI languages
+
+[web](web.md#uilocales)
+
+- **One module's declaration:** 1 to 16 languages, and 1 MiB as JSON at most, measured before keys that English does not have are left out.
+- **A language's tag:** 1 to 64 characters, and one that `Intl.getCanonicalLocales` takes. `en` is Pi Pocket's own.
+- **A language's `label`:** one line of 1 to 80 characters, counted as written.
+- **Messages of one language:** 1 to 10,000 keys. A key is up to 160 characters, a message up to 8,192 UTF-8 bytes. A language gives a part of the catalog: the keys that it leaves out show English.
+- **All committed languages but English:** 4 MiB as JSON together, counted as their modules declared them, before English leaves a key out. A version that would pass it does not commit, and the version before stays.
+
 ## Asking people and hidden values
 
 [People's values and the browser](../people-values.md)

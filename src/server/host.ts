@@ -28,6 +28,7 @@ import type { BrowserControl } from "./browser/page.ts";
 import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
+import type { UiLocalePack } from "./ui-locales.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
 
@@ -728,6 +729,11 @@ export interface ExtensionWeb {
     setting(name: string): SettingValue | undefined;
     /** Hear when the owner changes the module's settings. Returns how to stop; it stops when this version goes. */
     onSettings(listener: () => void): () => void;
+    /**
+     * Declares the UI text of other languages, while it loads: each is a language tag, its own name, and its messages by
+     * key. Core merges them over its English, key by key, and keeps English as the fallback.
+     */
+    uiLocales(packs: readonly UiLocalePack[]): void;
 }
 
 /** The shape of every module in `src/server/extensions/`: a default export building one or more extensions. */

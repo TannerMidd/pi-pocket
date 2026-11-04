@@ -174,6 +174,47 @@ Since 0.22.0 · Experimental
 
 Calls `listener` after the owner changes the module's settings. The module's tabs hear it too, with `pocket.onSettings`. It returns how to stop, and stops by itself when this version of the module goes.
 
+### `uiLocales`
+
+```ts
+uiLocales(packs: readonly UiLocalePack[]): void;
+```
+
+Since 0.28.0 · Experimental
+
+Declares the UI text of other languages, while it loads: each is a language tag, the language's own name, and its messages by key. Pi Pocket merges each language over its English, key by key, in the order that the modules load, and shows the merged text in the app and on the sign-in pages of this server. English stays the baseline: a module adds a language, and cannot change English.
+
+- A language's `id` is a tag that `Intl.getCanonicalLocales` takes: `zh-cn` becomes `zh-CN`. `en` is Pi Pocket's own, and two languages of one declaration with the same tag are refused.
+- A language has exactly `id`, `label`, and `messages`: another field on it throws, so nothing of a declaration is silently ignored.
+- A language gives a part of the catalog, not all of it: `messages` has at least one key of its own, and the keys that it leaves out show English.
+- The messages are only text: no functions, no HTML, and no files or addresses. A translation says the same placeholder names as English (`{name}`), and a message that is empty or blank counts as none.
+- A key that English does not have is left out, after its size is counted: a Pi Pocket with fewer keys still loads your module.
+- A language of the same tag from another module comes over this one, key by key, and its `label` names the language. Turning a module off takes its layers away: the layer before it shows, or English.
+- A mistake throws, so the module does not load and the version before it stays. [Limits](limits.md#ui-languages) has the numbers.
+- Check `typeof web.uiLocales === "function"` before you call it: a server that runs older code has no such member, and needs a restart with this version.
+
+The text of a message is public: everyone who uses this Pi Pocket reads it, and so does anyone with one of its sign-in pages. Put no secret in it.
+
+### `UiLocalePack`
+
+```ts
+interface UiLocalePack {
+    readonly id: string;
+    readonly label: string;
+    readonly messages: Readonly<Record<string, string>>;
+}
+```
+
+Since 0.28.0 · Experimental
+
+One language, as [`uiLocales`](#uilocales) takes it.
+
+- `id`: the language tag, as `Intl.getCanonicalLocales` writes it.
+- `label`: the language's name for itself, as the language list shows it: one line of plain text.
+- `messages`: the app's own labels by message key, such as `sessions.mark-read`. A key names a message, not a sentence, and a message says the same placeholder names as English (`{name}`). A language gives the keys that it has: `messages` has at least one key of its own, and the rest show English.
+
+[Limits](limits.md#ui-languages) has the numbers.
+
 ## Sending and answering
 
 ### `send`
