@@ -33,6 +33,7 @@ import {
     store,
     workspaceOrder,
     foldsNow,
+    openId as markedOpen,
     toggleFoldedLinked,
 } from "./store.js";
 import { prefetchRunning } from "./running-board.js";
@@ -383,7 +384,7 @@ function slotOf(session, { state, collabs, answered, team }) {
     if (
         isUnread(session.id) ||
         finishedUnseen(session, state) ||
-        (collabs && session.id !== state.conversationId && sessionUnread(session, state))
+        (collabs && session.id !== markedOpen(state) && sessionUnread(session, state))
     ) {
         return "ready";
     }
@@ -1242,7 +1243,8 @@ function AllSessions({ compact = false }) {
     const slotsShown = useRef(new Map());
     const askOrder = useRef([]);
     // Linked sessions folded away (`store.js`), but never above the open session, which always shows.
-    const { foldedLinked, conversationId: openId } = store.state;
+    const { foldedLinked } = store.state;
+    const openId = markedOpen();
     const folded = useMemo(() => foldsNow(), [foldedLinked, openId, sessions]);
     // The sessions above the open one: their folds stay open, so their fold buttons do nothing and are off.
     const holdsOpen = useMemo(() => {
@@ -1361,7 +1363,7 @@ function AllSessions({ compact = false }) {
         );
 
         if (tab === "priority" && needle === "") {
-            const openId = store.state.conversationId;
+            const openId = markedOpen();
 
             if (opened.current.id !== openId) {
                 opened.current = {
@@ -1418,7 +1420,7 @@ function AllSessions({ compact = false }) {
         peekSeen,
         chatReads,
         chatRead,
-        store.state.conversationId,
+        markedOpen(),
         store.state.server,
         answered,
     ]);
@@ -1482,7 +1484,7 @@ function AllSessions({ compact = false }) {
         if (event.shiftKey) {
             // From the last row picked, or else the open session, if it shows; or else from this row on.
             if (!visible.current.includes(anchor.current)) {
-                const open = store.state.conversationId;
+                const open = markedOpen();
 
                 anchor.current = visible.current.includes(open) ? open : id;
             }
@@ -1974,7 +1976,8 @@ function AllSessions({ compact = false }) {
     const [onRead] = useState(() => (id) => handlers.current.readOne(id));
     // What every row reads of the store, read once here: rows read none of it themselves (`SessionRow`). Marks, seen
     // marks, and read times come through `isUnread`, `finishedUnseen`, and `sessionUnread`.
-    const { conversationId, me, moving } = store.state;
+    const { me, moving } = store.state;
+    const conversationId = markedOpen();
     const collabs = collab();
     // Row buttons that only a hovering pointer shows (`NO_HOVER`): touch screens draw none.
     const hovers = !NO_HOVER.matches;
@@ -2342,7 +2345,8 @@ function AllSessions({ compact = false }) {
 /**
  * The store's keys the session list reads as it draws, itself and through what it calls: `prefs()` (`appearance`),
  * `canSteer()`, `scoped()`, and `collab()` (`me`, `server`), `isPinned` and `workspaceOrder` (`pinned`), `isUnread`
- * (`unread`), `sessionUnread` (`conversationId`, `chatRead`, `chatReads`, `me`), `finishedUnseen` and `sessionMark`
+ * (`unread`), `sessionUnread` (`conversationId`, `chatRead`, `chatReads`, `me`), the session marked open (`over`, by
+ * `openId`), `finishedUnseen` and `sessionMark`
  * (`peekSeen`, and `server` for when this browser started), and extensions' chips, words, filters, and actions
  * (`extensionsRev`). The sheet and the launcher it reads only as keys are pressed.
  */
@@ -2355,6 +2359,7 @@ const LIST_KEYS = [
     "unread",
     "moving",
     "conversationId",
+    "over",
     "chatRead",
     "chatReads",
     "peekSeen",
@@ -2404,7 +2409,7 @@ export const toggleRunning = () => toggleBoard("running");
 
 /** The folded sidebar's sessions, numbered like Waybar's workspaces. */
 function RailTiles() {
-    const { conversationId } = store.state;
+    const conversationId = markedOpen();
     const items = useRef(null);
     const order = workspaceOrder();
     // The tiles are as tall as each other: the open session's place in the order says where its marker goes.
@@ -2643,6 +2648,7 @@ const RAIL_KEYS = [
     "unread",
     "peekSeen",
     "conversationId",
+    "over",
     "chatRead",
     "chatReads",
     "appearance",

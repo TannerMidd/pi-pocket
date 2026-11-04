@@ -67,6 +67,11 @@ const DEFAULTS = {
      * conversation (`session-tabs.js`), which Appearance pairs with the folded sidebar.
      */
     sessionTabs: false,
+    /**
+     * Where PiP opens: "floating", a window in the corner (a sheet from the bottom on a phone), over what shows; or
+     * "board", its own conversation in the session's place, as a session opens (`pip.js`).
+     */
+    pip: "floating",
     /** How the session list groups: "priority" (by what needs you), "recent" (by day), or "folder". */
     group: "recent",
     /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). Off until turned on. */

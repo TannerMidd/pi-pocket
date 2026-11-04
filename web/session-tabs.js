@@ -3,14 +3,15 @@
 // open one fills, one that works pulses, one that waits for you shows in the warning color.
 import { useEffect, useRef } from "preact/hooks";
 import { folderColor } from "./avatar.js";
-import { isUnread, navigate, store, workspaceOrder } from "./store.js";
+import { isUnread, navigate, openId, store, workspaceOrder } from "./store.js";
 import { TAB_MAX, tabSessions, tabState } from "./tab-order.js";
 import { drawnFor, html } from "./ui.js";
 
 const STATE_WORDS = { waiting: ", needs you", working: ", working", unread: ", unread", idle: "" };
 
 function Tabs() {
-    const { conversationId } = store.state;
+    // Under a route opened over a session (PiP's board), that session's tab stays the open one.
+    const conversationId = openId();
     const order = workspaceOrder();
     const tabs = tabSessions(order, conversationId, TAB_MAX, store.state.sessions);
     const strip = useRef(null);
@@ -52,7 +53,7 @@ function Tabs() {
     </nav>`;
 }
 
-const KEYS = ["sessions", "pinned", "unread", "conversationId", "foldedLinked"];
+const KEYS = ["sessions", "pinned", "unread", "conversationId", "over", "foldedLinked"];
 
 /** Drawn again only when the sessions, the open one, or what is unread changes: not as an answer streams. */
 export const SessionTabs = drawnFor(KEYS, Tabs);

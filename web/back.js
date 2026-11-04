@@ -323,6 +323,15 @@ export const canGoBack = () =>
 /** Back, as the system's back does it: for gestures of the app's own. */
 export const goBack = () => history.back();
 
+/** What `pushRoute` kept on the route's entry under `key`, or undefined. */
+export const routeState = (key) => history.state?.pocket?.[key];
+
+/**
+ * Back to the route before this one, past the layers open over it (a Files tile, a sheet), which close as back closes
+ * them. After history has caught up with what is open.
+ */
+export const backRoute = () => queue(() => history.go(-(depth() + 1)));
+
 // ─── Routes ───────────────────────────────────────────────────────────────────────
 
 /** The session list's route. */
@@ -391,9 +400,10 @@ export const routeSliding = () => routeWindow !== null && matchMedia("(max-width
 
 /**
  * Show a route: its own entry, after the layers above this one, so back from it comes back here. With `replace`, it
- * takes this route's place instead. The history entry follows the app a moment later while open layers come off.
+ * takes this route's place instead. `state` is kept on the entry (and its layers' entries) for the route's owner to read
+ * with `routeState`. The history entry follows the app a moment later while open layers come off.
  */
-export function pushRoute(path, { replace = false } = {}) {
+export function pushRoute(path, { replace = false, state: kept = {} } = {}) {
     // There already, or on the way (history lags while layers come off): nothing more to write.
     if (path === shown && !replace) {
         return;
@@ -411,7 +421,7 @@ export function pushRoute(path, { replace = false } = {}) {
         const here = history.state?.pocket?.back;
         const back =
             path === HOME ? 0 : replace ? here : typeof here === "number" ? here + 1 : undefined;
-        const state = { pocket: { layers: 0, back } };
+        const state = { pocket: { ...kept, layers: 0, back } };
 
         shownBack = back;
 

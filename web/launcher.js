@@ -37,6 +37,7 @@ import {
     sessionOrder,
     setUnread,
     signOut,
+    openId,
     store,
     workspaceOrder,
 } from "./store.js";
@@ -563,7 +564,7 @@ function sessionItems() {
             detail: shortPath(session.cwd, server?.home),
             status:
                 [
-                    session.id === store.state.conversationId ? "Current" : null,
+                    session.id === openId() ? "Current" : null,
                     session.waiting ? "Waiting" : session.busy ? "Working" : null,
                     session.archived ? "Archived" : null,
                 ]

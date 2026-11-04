@@ -7093,6 +7093,11 @@ div.group-head {
     .sheet.wide {
         max-width: 760px;
     }
+    /* Pending memories (PiP's strip): as tall as a full Memory sheet (its 86dvh, inside the overlay's 7vh and 16px), not
+       a short card high on the screen. */
+    .sheet.pending-memories {
+        min-height: min(86dvh, calc(93dvh - 16px));
+    }
     .leaving .sheet {
         animation: pop-out var(--t-out) linear forwards;
     }
@@ -18443,6 +18448,11 @@ textarea.notes {
 
 .pip-memory-count.waiting {
     color: var(--accent);
+}
+
+/* Above the box of PiP's conversation as a board: a bar among the dock's others. */
+.dock > .pip-memory {
+    margin: 0 0 5px;
 }
 
 .pip-composer-wrap {

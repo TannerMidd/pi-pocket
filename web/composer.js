@@ -30,6 +30,7 @@ import {
 } from "./store.js";
 import { useDock } from "./dock.js";
 import { defineItem, slotItems } from "./slots.js";
+import { memoryAvailable, PendingMemories } from "./sheets/memory.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
@@ -553,7 +554,11 @@ export function Composer() {
     const insert = store.state.composerInsert;
 
     useEffect(() => {
-        if (!insert || insert.n <= insertedUpTo) {
+        if (
+            !insert ||
+            insert.n <= insertedUpTo ||
+            (insert.conversationId !== undefined && insert.conversationId !== conversationId)
+        ) {
             return;
         }
 
@@ -850,6 +855,9 @@ export function Composer() {
                         : sendMode
                     : "followUp",
                 inlineFiles && mentionsFiles,
+                typeof store.state.replyAbout === "number"
+                    ? { session: store.state.replyAbout }
+                    : undefined,
             ),
         );
 
@@ -862,7 +870,7 @@ export function Composer() {
             }
 
             sent(full);
-            store.set({ replyQuote: null });
+            store.set({ replyQuote: null, replyAbout: null });
             // Files pasted while it went stay for the next message.
             forget(going);
             setFiles((current) => current.filter((file) => !going.includes(file)));
@@ -1339,6 +1347,13 @@ export function Composer() {
             <${WatchBar} />
             <${SubagentsBar} />
             <${TrustBar} />
+            ${
+                // PiP's conversation as a board keeps its floating panel's strip: every project's memories to approve.
+                conversationId === store.state.pip?.id &&
+                store.state.me?.role === "owner" &&
+                memoryAvailable(conversationId) &&
+                html`<${PendingMemories} id=${conversationId} />`
+            }
         </div>
         <${ParentSessionButton} />
         ${
@@ -1578,7 +1593,7 @@ export function Composer() {
                             <button
                                 class="icon-button small"
                                 aria-label="Remove the quote"
-                                onClick=${() => store.set({ replyQuote: null })}
+                                onClick=${() => store.set({ replyQuote: null, replyAbout: null })}
                             >
                                 <${Icon} name="close" size=${12} />
                             </button>
