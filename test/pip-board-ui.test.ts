@@ -137,6 +137,26 @@ async function holdingSends(steps: () => Promise<void>, fail = false) {
     }
 }
 
+/** Send `words` from the session's box: its request reaches the server (`path`), not its answer. */
+async function lost(path: string, words: string) {
+    await page.evaluate(`const real = window.fetch;
+        window.fetch = async (url, init) => {
+            if (!String(url).endsWith('${path}')) {
+                return real(url, init);
+            }
+
+            window.fetch = real;
+            await real(url, init);
+            window.lost = true;
+
+            return new Response('{}', { status: 502 });
+        };`);
+    await type(BOX, words);
+    await page.press("Enter");
+    await see(`window.lost && !document.querySelector('.pane .send-button').disabled`, "lost");
+    await page.evaluate(`window.lost = false`);
+}
+
 /** A fresh tab on the background session, PiP closed, in `mode`. */
 async function fresh(mode: "floating" | "board", viewport: Viewport = VIEWPORTS.desktop) {
     await page.evaluate(`${STORE}.closeSheet(); ${PIP}.closePip();`);
@@ -573,29 +593,11 @@ test("A session's send on its way, its box shown again: once, or all back", real
 
 test("A `!` command with its answer lost runs once when sent again", real, async () => {
     const ran = join(project, "ran.txt");
-
-    // The command reaches the server, and its answer is lost.
-    const lost = async (word: string) => {
-        await page.evaluate(`const real = window.fetch;
-            window.fetch = async (url, init) => {
-                if (!String(url).endsWith('/shell')) {
-                    return real(url, init);
-                }
-
-                window.fetch = real;
-                await real(url, init);
-                window.lost = true;
-
-                return new Response('{}', { status: 502 });
-            };`);
-        await type(BOX, `!echo ${word} >> ${ran}`);
-        await page.press("Enter");
-        await see(`window.lost && !document.querySelector('.pane .send-button').disabled`, "lost");
-        await page.evaluate(`window.lost = false`);
-    };
+    const echo = (word: string) => `!echo ${word} >> ${ran}`;
+    const file = () => (existsSync(ran) ? readFileSync(ran, "utf8") : "");
 
     await fresh("board");
-    await lost("x");
+    await lost("/shell", echo("x"));
     // Sent again from its box shown again.
     await page.press("Alt+a");
     await boarded("PiP's board over the session");
@@ -603,12 +605,16 @@ test("A `!` command with its answer lost runs once when sent again", real, async
     await backTo(background, "the session again");
     await page.press("Enter");
     await see(`document.querySelector('${BOX}').value === ''`, "sent again");
-    // Another command after a lost answer is a new one.
-    await lost("y");
-    await type(BOX, `!echo z >> ${ran}`);
+    // After a lost answer, the same command typed again is a new one, and so is another command.
+    await lost("/shell", echo("y"));
+    await type(BOX, "");
+    await type(BOX, echo("y"));
     await page.press("Enter");
-    await until(() => existsSync(ran) && readFileSync(ran, "utf8").includes("z"), "z ran");
-    assert.equal(readFileSync(ran, "utf8"), "x\ny\nz\n");
+    await until(() => file().endsWith("y\ny\n"), "y typed again ran");
+    await type(BOX, echo("z"));
+    await page.press("Enter");
+    await until(() => file().includes("z"), "z ran");
+    assert.equal(file(), "x\ny\ny\nz\n");
 });
 
 test("A message goes once: refused, its answer lost to a reload, sent again", real, async () => {
@@ -617,23 +623,21 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
             (entry) => entry.kind === "user" && entry.text.includes("keep me"),
         ).length;
 
+    // A spend limit refuses it: the server keeps nothing of the request.
+    const refused = async () => {
+        await app.spend.setSessionBudget(owner(app), background, 0.01);
+        await page.press("Enter");
+        await see(
+            `${STORE}.store.state.notices.some((notice) => notice.message.includes('spend limit'))`,
+            "refused",
+        );
+        await app.spend.setSessionBudget(owner(app), background, null);
+    };
+
     await fresh("board");
-    // Refused (a spend limit): an answer, which ends its request id, so the same words go as a new request.
-    await app.spend.setSessionBudget(owner(app), background, 0.01);
     await recordCost(app, background, 0.02);
     await type(BOX, "keep me");
-    await page.press("Enter");
-    await see(
-        `${STORE}.store.state.notices.some((notice) => notice.message.includes('spend limit'))`,
-        "refused",
-    );
-    assert.equal(
-        await inPage(
-            `(await import('/person-storage.js')).personStorage.get('sendRequest.${background}')`,
-        ),
-        null,
-    );
-    await app.spend.setSessionBudget(owner(app), background, null);
+    await refused();
 
     // The server gets it, and a reload loses its answer (and puts fetch back).
     try {
@@ -648,6 +652,8 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
     }
 
     await see(`document.querySelector('${BOX}')?.value === 'keep me'`, "the box after a reload");
+    // Refused when sent again, then sent: it went before, so it goes once.
+    await refused();
     await page.press("Enter");
     await see(`document.querySelector('${BOX}').value === ''`, "sent again");
     assert.equal(await sent(), 1, "once");
@@ -655,4 +661,15 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
     await type(BOX, "keep me");
     await page.press("Enter");
     await until(async () => (await sent()) === 2, "a new message");
+    // After a lost answer, the same words typed again, or with another quote, are a new message.
+    await lost("/submit", "keep me");
+    await type(BOX, "");
+    await type(BOX, "keep me");
+    await page.press("Enter");
+    await until(async () => (await sent()) === 4, "typed again");
+    await page.evaluate(`${STORE}.quoteReply('one part')`);
+    await lost("/submit", "keep me");
+    await page.evaluate(`${STORE}.quoteReply('another part')`);
+    await page.press("Enter");
+    await until(async () => (await sent()) === 6, "another quote");
 });

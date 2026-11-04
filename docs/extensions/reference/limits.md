@@ -144,7 +144,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **A toast's message:** cut to 500 characters.
 - **A card:** Pi Pocket keeps the last 30,000 characters.
 - **Runs of one person:** 4 at the same time, in all sessions together. Pi Pocket refuses a fifth run until one ends.
-- **Kept requests:** Pi Pocket keeps the request ids of the last 100 finished runs of each person in each session. The same text sent again from the same tab finds the first run only while its id is kept.
+- **Kept requests:** Pi Pocket keeps the request ids of the last 100 finished runs of each person in each session. The same text sent again from the same browser finds the first run only while its id is kept.
 
 ## Cleanups
 

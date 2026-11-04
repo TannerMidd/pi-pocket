@@ -186,23 +186,25 @@ function keptRequest(id) {
 }
 
 /**
- * The request id of `message` (what goes: its kind, words, and files) from conversation `id`. It is kept with the draft
- * in the person's storage only while what came of the send is not known: no answer came (a network error, the page
- * went), or one that does not say (a 5xx, or one that could not be read). Sent again then, from a box shown again or
- * after a reload, it goes with the same id, and the server gives back its first send instead of a second. An answer
- * that says (it went, was refused, or ran and failed) ends it (`endSend`): the same words again are a new request.
+ * The request id of `message` (what goes: its kind, words, and files) with `quote` from
+ * conversation `id`. It is kept with the draft in the person's storage until the send went
+ * (`endSend`), or the person changes the words (`edit`). Sent again before, from a box shown
+ * again or after a reload, it goes with the same id, and the server gives back its first send
+ * instead of a second; a refusal stored nothing, so the same id goes as new. A reload loses the
+ * quote: the same words without one are the same message, and with another quote a new one.
  */
-function requestFor(id, message) {
+function requestFor(id, message, quote) {
     const what = fingerprint(JSON.stringify(message));
+    const about = quote ? fingerprint(quote) : null;
     const kept = keptRequest(id);
 
-    if (kept?.what === what) {
+    if (kept?.what === what && (about === null || kept.about === about)) {
         return kept.requestId;
     }
 
     const requestId = uid();
 
-    personStorage.set(requestKey(id), JSON.stringify({ what, requestId }));
+    personStorage.set(requestKey(id), JSON.stringify({ what, about, requestId }));
 
     return requestId;
 }
@@ -216,7 +218,7 @@ function beginSend(id, record, message) {
         return null;
     }
 
-    record.requestId = message === null ? undefined : requestFor(id, message);
+    record.requestId = message === null ? undefined : requestFor(id, message, record.quote?.text);
     onTheWay.set(id, record);
     store.set({});
 
@@ -230,8 +232,8 @@ function beginSend(id, record, message) {
 function endSend(id, record, went) {
     onTheWay.delete(id);
 
-    // What came of it is known: its request id is done with.
-    if ((went || record.refused) && keptRequest(id)?.requestId === record.requestId) {
+    // It went: its request id is done with.
+    if (went && keptRequest(id)?.requestId === record.requestId) {
         personStorage.set(requestKey(id), null);
     }
 
@@ -256,19 +258,6 @@ function endSend(id, record, went) {
 
     store.set({});
 }
-
-/**
- * Run `request`, the send of `record`, as `attempt` does (a notice says why it did not go). A refusal (a 4xx) says what
- * came of it (`record.refused`); no answer, one that could not be read, or a 5xx does not.
- */
-const sendFor = (record, request) =>
-    attempt(() =>
-        request().catch((error) => {
-            record.refused = error?.status >= 400 && error.status < 500;
-
-            throw error;
-        }),
-    );
 
 /**
  * The subagents a waiting message carries reports from (`extensions/subagents.ts`), as the server reads them from its
@@ -745,9 +734,17 @@ export function Composer() {
      * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in.
      */
     const edit = (value, at) => {
-        if (!onTheWay.has(conversationId)) {
-            update(value, at);
+        if (onTheWay.has(conversationId)) {
+            return;
         }
+
+        // Changed words are a new message, also when typed again the same: not one sent again
+        // after a lost answer.
+        if (value !== text && keptRequest(conversationId)) {
+            personStorage.set(requestKey(conversationId), null);
+        }
+
+        update(value, at);
     };
 
     // Ctrl+R: what was sent before that has the words in the box.
@@ -814,7 +811,7 @@ export function Composer() {
             return;
         }
 
-        const ok = await sendFor(record, async () => {
+        const ok = await attempt(async () => {
             await command.run(arg, record.requestId);
 
             return true;
@@ -897,7 +894,7 @@ export function Composer() {
             return;
         }
 
-        const started = await sendFor(record, () =>
+        const started = await attempt(() =>
             actions.shell(command, !full.startsWith("!!"), record.requestId),
         );
 
@@ -952,7 +949,8 @@ export function Composer() {
             .filter((file) => file.state === "done")
             .map((file) => file.attachment);
         const paths = attachments.map((attachment) => attachment.path);
-        // The message is its words and files, which a reload keeps; not its quote, which lives in this page only.
+        // The message is its words and files, which a reload keeps; its quote, which lives in this
+        // page only, is apart.
         const record = beginSend(conversationId, { text, quote, files: paths }, [
             "message",
             full,
@@ -964,7 +962,7 @@ export function Composer() {
         }
 
         dropQuote(quote);
-        const ok = await sendFor(record, () =>
+        const ok = await attempt(() =>
             actions.submit(
                 withQuote(quote?.text, full),
                 attachments,
