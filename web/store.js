@@ -140,17 +140,29 @@ function deviceLayouts() {
 /** Set at sign-out, in this tab or another: the device keeps no more layouts (`pocket:signedOut`). */
 let layoutsStopped = false;
 
-/** The panel `id` showed when it was left: in this tab, else on this device, else none. */
+/**
+ * The panel `id` showed when it was left: in this tab, else on this device, else none. An extension's panel shows only
+ * while the server lists its module: one turned off since is kept for when it comes back.
+ */
 function layoutFor(id) {
     if (id === null || layoutPerson() === null) {
         return NO_LAYOUT;
     }
 
-    return (
-        keptLayout(tabLayouts(), id) ??
-        (layoutsStopped ? null : keptLayout(deviceLayouts(), id)) ??
-        NO_LAYOUT
-    );
+    const kept =
+        keptLayout(tabLayouts(), id) ?? (layoutsStopped ? null : keptLayout(deviceLayouts(), id));
+    const listed = store.state.server?.ui;
+
+    if (
+        kept === null ||
+        (kept.panel === "ext" &&
+            Array.isArray(listed) &&
+            !listed.some((each) => each.module === kept.ext.module))
+    ) {
+        return NO_LAYOUT;
+    }
+
+    return kept;
 }
 
 /** Keep the panel `id` shows now, for this tab and the device: the device keeps only a panel, not "none". */
