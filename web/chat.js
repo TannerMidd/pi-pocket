@@ -680,8 +680,11 @@ function NotesTab() {
     ${
         changedMeanwhile &&
         html`<div class="error-box small">
-            ${by ?? "Someone"} saved the notes while you were editing.
-            <button class="link small" disabled=${Boolean(saving)} onClick=${discard}>
+            ${by ?? "Someone"} saved the notes while you were editing. <button
+                class="link small"
+                disabled=${Boolean(saving)}
+                onClick=${discard}
+            >
                 Use theirs
             </button> · <button
                 class="link small"
