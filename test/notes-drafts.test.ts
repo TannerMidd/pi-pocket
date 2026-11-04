@@ -294,7 +294,7 @@ test("blocked storage falls back to memory without losing a draft or throwing", 
     assert.equal(drafts.get("owner", 1).error, "write");
     drafts.discard("owner", 1);
     assert.equal(drafts.get("owner", 1).draft, null);
-    assert.equal(drafts.get("owner", 1).error, "clear");
+    assert.equal(drafts.get("owner", 1).error, null);
 });
 
 test("a full store keeps the latest edit in memory and can recover", () => {

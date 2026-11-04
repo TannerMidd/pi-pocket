@@ -42,16 +42,17 @@ export function createNotesDrafts(storage = personStorage) {
 
     const forget = (account, id, record) => {
         // A failed write can leave our earlier draft on disk. Never remove a different tab's newer value.
-        record.error = storage.removeIf(
+        const removed = storage.removeIf(
             keyFor(id),
             [JSON.stringify(record.draft), record.stored],
             account,
-        )
-            ? null
-            : "clear";
+        );
+
+        // Warn only when a draft of ours reached disk: with blocked storage, nothing can return.
+        record.error = removed || record.stored === null ? null : "clear";
         record.draft = null;
 
-        if (record.error === null) {
+        if (removed) {
             record.stored = null;
         }
     };
