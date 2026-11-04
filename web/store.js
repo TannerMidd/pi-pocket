@@ -2984,6 +2984,16 @@ export function quoteReply(text) {
     store.set({ replyQuote: text, replyAbout: null });
 }
 
+/** A quote went with a message: it goes from the box it is in now, also after PiP moved it to its other place. */
+export function quoteSent(text) {
+    const { replyQuote, pipQuote } = store.state;
+
+    store.set({
+        ...(replyQuote === text ? { replyQuote: null, replyAbout: null } : {}),
+        ...(pipQuote?.text === text ? { pipQuote: null } : {}),
+    });
+}
+
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */
 export function discuss(entryId, text) {
     store.set((state) => ({

@@ -344,6 +344,30 @@ test("Ask PiP: the passage and its session move with PiP, both ways", real, asyn
     await page.evaluate(`${PIP}.closePip()`);
 });
 
+test("Ask PiP: a quote sent while PiP moves does not come back", real, async () => {
+    await fresh("board");
+    await page.evaluate(`${PIP}.quotePip('sent once', ${Number(background)})`);
+    await see(`${STORE}.store.state.replyQuote === 'sent once'`, "over the board's box");
+    // The send waits until PiP moved to the corner.
+    await page.evaluate(`
+        const real = window.fetch;
+        window.fetch = (url, init) => String(url).includes('/submit') && !window.release
+            ? new Promise((resolve) => { window.release = () => resolve(real(url, init)); })
+            : real(url, init);
+        const box = document.querySelector('.pane .composer textarea');
+        box.value = 'and now?';
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+    `);
+    await page.click({ selector: ".pane .send-button" });
+    await see(`typeof window.release === 'function'`, "the send on its way");
+    await place("floating");
+    await floating("in the corner");
+    await page.evaluate(`window.release()`);
+    await until(async () => lastAsked.includes("sent once"), "PiP asked");
+    await see(`${STORE}.store.state.pipQuote === null`, "the sent quote gone from the corner");
+    await page.evaluate(`${PIP}.closePip()`);
+});
+
 test("Pending memories: PiP's strip in both places, only while one waits", real, async () => {
     const COUNT = (where: string) =>
         `document.querySelector('${where} .pip-memory-count')?.textContent.trim()`;

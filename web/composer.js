@@ -24,6 +24,7 @@ import {
     navigate,
     notify,
     openSheet,
+    quoteSent,
     store,
     typing,
     uid,
@@ -841,11 +842,12 @@ export function Composer() {
         }
 
         setSending(true);
+        const quote = store.state.replyQuote;
         const going = files.filter((file) => file.state === "done");
         const attachments = going.map((file) => file.attachment);
         const ok = await attempt(() =>
             actions.submit(
-                withQuote(store.state.replyQuote, full),
+                withQuote(quote, full),
                 attachments,
                 busy
                     ? other === true && sendMode !== "interrupt"
@@ -870,7 +872,11 @@ export function Composer() {
             }
 
             sent(full);
-            store.set({ replyQuote: null, replyAbout: null });
+
+            if (quote) {
+                quoteSent(quote);
+            }
+
             // Files pasted while it went stay for the next message.
             forget(going);
             setFiles((current) => current.filter((file) => !going.includes(file)));

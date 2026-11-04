@@ -20,6 +20,7 @@ import {
     navigate,
     notify,
     openSheet,
+    quoteSent,
     store,
     uid,
 } from "./store.js";
@@ -996,9 +997,9 @@ function Composer({ id, busy }) {
             composerDraft.finish(token, success);
         }
 
-        // Sent with it: the quote goes, unless another took its place meanwhile.
-        if (success && quoted && store.state.pipQuote === quoted) {
-            store.set({ pipQuote: null });
+        // Sent with it: the quote goes, where it is now, unless another took its place meanwhile.
+        if (success && quoted) {
+            quoteSent(quoted.text);
         }
     };
 
