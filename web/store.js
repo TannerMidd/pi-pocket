@@ -8,6 +8,17 @@ import { fingerprint } from "./text-hash.js";
 import * as disk from "./session-cache.js";
 import { personStorage } from "./person-storage.js";
 import { notesDrafts } from "./notes-drafts.js";
+import {
+    keptLayout,
+    layoutOf,
+    layoutPairs,
+    layoutPatch,
+    legacyLayout,
+    LEGACY_KEYS,
+    NO_LAYOUT,
+    remember,
+    sameLayout,
+} from "./panel-layout.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
 export function uid() {
@@ -96,20 +107,125 @@ const emptyView = () => ({
     subagentsHeld: null,
 });
 
-/** Where a tab keeps the extension panel it shows (`extPanel`), as `{ module, id }`. */
-export const EXT_PANEL_KEY = "pocket.extPanel";
+// ─── Each session's panel ──────────────────────────────────────────────────────────
 
-function readExtPanel() {
+/**
+ * Where the panel each session shows is kept (`panel-layout.js`): the tab's, for this tab, and the device's, for a tab
+ * that never showed the session. Both as `[id, layout]` pairs, the session shown longest ago first.
+ */
+const TAB_LAYOUTS = "pocket.layouts";
+const DEVICE_LAYOUTS = "pocket.layouts";
+// One key, in two storages: `sessionStorage` (the tab's) and `localStorage` (the device's, shared by its tabs). Both are
+// read as the session opens, before it draws, so its panel shows with it. They are small: ids and panel names.
+
+function readPairs(storage, key) {
     try {
-        const kept = JSON.parse(sessionStorage.getItem(EXT_PANEL_KEY));
-
-        return typeof kept?.module === "string" && typeof kept.id === "string"
-            ? { module: kept.module, id: kept.id }
-            : null;
+        return layoutPairs(JSON.parse(storage.getItem(key)));
     } catch {
-        return null;
+        return [];
     }
 }
+
+function writePairs(storage, key, pairs) {
+    try {
+        if (pairs.length === 0) {
+            storage.removeItem(key);
+        } else {
+            storage.setItem(key, JSON.stringify(pairs));
+        }
+    } catch {
+        // Storage full or refused: the session shows no panel next time.
+    }
+}
+
+/** Set at sign-out, in this tab or another: the device keeps no more layouts (`pocket:signedOut`). */
+let layoutsStopped = false;
+
+/** The panel `id` showed when it was left: in this tab, else on this device, else none. */
+function layoutFor(id) {
+    if (id === null) {
+        return NO_LAYOUT;
+    }
+
+    return (
+        keptLayout(readPairs(sessionStorage, TAB_LAYOUTS), id) ??
+        (layoutsStopped ? null : keptLayout(readPairs(localStorage, DEVICE_LAYOUTS), id)) ??
+        NO_LAYOUT
+    );
+}
+
+/** Keep the panel `id` shows now, for this tab and the device: the device keeps only a panel, not "none". */
+function keepLayout(id, layout) {
+    writePairs(
+        sessionStorage,
+        TAB_LAYOUTS,
+        remember(readPairs(sessionStorage, TAB_LAYOUTS), id, layout),
+    );
+
+    if (!layoutsStopped) {
+        writePairs(
+            localStorage,
+            DEVICE_LAYOUTS,
+            remember(readPairs(localStorage, DEVICE_LAYOUTS), id, layout, { keepNone: false }),
+        );
+    }
+}
+
+/**
+ * The panel the page opens with. A tab that kept one panel for every session (before layouts were a session's) gives it
+ * to the session it shows, once.
+ */
+function firstLayout() {
+    const id = routeConversation();
+    const legacy = legacyLayout((key) => sessionStorage.getItem(key));
+
+    for (const key of LEGACY_KEYS) {
+        sessionStorage.removeItem(key);
+    }
+
+    if (
+        legacy !== null &&
+        id !== null &&
+        keptLayout(readPairs(sessionStorage, TAB_LAYOUTS), id) === null
+    ) {
+        keepLayout(id, legacy);
+    }
+
+    return layoutFor(id);
+}
+
+/** The session and layout last kept: a change to either keeps the layout again. */
+let layoutShown = { id: null, layout: NO_LAYOUT };
+
+// A panel opened or closed is kept for the session at once, so a reload or a visit later shows it again. Going to another
+// session shows the layout kept for it; one opened on the way there (a chat docked as People) is kept too.
+function followLayout(state) {
+    const id = state.conversationId;
+    const layout = layoutOf(state);
+
+    if (id === layoutShown.id && sameLayout(layout, layoutShown.layout)) {
+        return;
+    }
+
+    const moved = id !== layoutShown.id;
+
+    layoutShown = { id, layout };
+
+    if (id !== null && !state.missing && !(moved && sameLayout(layout, layoutFor(id)))) {
+        keepLayout(id, layout);
+    }
+}
+
+addEventListener("pocket:signedOut", () => {
+    layoutsStopped = true;
+
+    try {
+        sessionStorage.removeItem(TAB_LAYOUTS);
+        localStorage.removeItem(DEVICE_LAYOUTS);
+    } catch {
+        // Refused: nothing was kept.
+    }
+});
 
 /** Where this browser keeps the sessions whose linked sessions are folded away (`toggleFoldedLinked`). */
 const FOLDED_LINKED_KEY = "pocket.foldedLinked";
@@ -182,9 +298,9 @@ export const store = {
         page: null,
         /**
          * An extension's panel beside the conversation, where the Browser and Files panels dock (`extension-ui.js`):
-         * `{ module, id }`. Kept per tab, like the browser's.
+         * `{ module, id }`. Kept for each session, like the browser's.
          */
-        extPanel: readExtPanel(),
+        extPanel: null,
         /** Counts changes to what extensions' browser modules add (`extension-ui.js`), so what shows them draws again. */
         extensionsRev: 0,
         /** Counts the lists of files for @ mentions that arrived; the lists themselves are kept in `files.js`. */
@@ -193,18 +309,18 @@ export const store = {
         pendingShells: [],
         /** The session's browser page as the server last told: address, title, loading, size (`browser.js`). */
         browser: null,
-        /** The Browser panel shows; kept per tab, so the reload after a live edit keeps it. */
-        browserOpen: sessionStorage.getItem("pocket.browser") === "1",
-        /** The Files tile shows (`files-panel.js`); kept per tab, like the browser's. */
-        filesOpen: sessionStorage.getItem("pocket.files") === "1",
+        /** The Browser panel shows. Kept for each session, like the other panels' (`panel-layout.js`). */
+        browserOpen: false,
+        /** The Files tile shows (`files-panel.js`); kept for each session, like the browser's. */
+        filesOpen: false,
         /** The Files tile's tab: `files` or `changes`. */
-        filesTab: sessionStorage.getItem("pocket.filesTab") === "changes" ? "changes" : "files",
+        filesTab: "files",
         /** The last file asked to open in the Files tile: `{ path, line, n }`, `n` telling requests apart. */
         filesTarget: null,
         /** When someone last asked for the Files tile, and for which tab: `{ tab, at }`. */
         filesAsk: null,
-        /** The People panel shows beside the conversation on wide screens; kept per tab, like the browser's. */
-        peopleOpen: sessionStorage.getItem("pocket.people") === "1",
+        /** The People panel shows beside the conversation on wide screens; kept for each session, like the browser's. */
+        peopleOpen: false,
         /** The last request to show the People panel: which tab and chat message, and a count that tells requests apart. */
         peopleAsk: { tab: null, highlight: null, n: 0 },
         /** This person's PiP, as the server last told (`{ id, busy, endedAt }`); null when they have none yet. */
@@ -213,6 +329,8 @@ export const store = {
         pipOpen: sessionStorage.getItem("pocket.pip") === "1",
         /** PiP's conversation, while the panel shows. */
         pipView: emptyView(),
+        // The panel the session the page opens on showed (`browserOpen`, `filesOpen`, `filesTab`, `extPanel`, `peopleOpen`).
+        ...layoutPatch(firstLayout()),
     },
     listeners: new Set(),
     /**
@@ -1067,6 +1185,9 @@ function saveShown() {
     lastSaved = { view, place: transcriptPlace };
     void saveToDevice(keptRecord(view));
 }
+
+layoutShown = { id: store.state.conversationId, layout: layoutOf(store.state) };
+store.subscribe(followLayout);
 
 let savingShown;
 let savedFor = null;
@@ -2314,6 +2435,7 @@ export function navigate(conversationId, { replace = false, sheet = null } = {})
         conversationId,
         ...keptView(conversationId),
         ...peopleFor(conversationId),
+        ...layoutPatch(layoutFor(conversationId)),
         browser: null,
         history: null,
         missing: null,
@@ -2363,6 +2485,7 @@ onRoute(() => {
             conversationId: id,
             ...keptView(id),
             ...peopleFor(id),
+            ...layoutPatch(layoutFor(id)),
             browser: null,
             history: null,
             missing: null,
@@ -2665,7 +2788,6 @@ export function revealEntry(entryId) {
 
 // ─── The People panel ──────────────────────────────────────────────────────────────
 
-const PEOPLE_KEY = "pocket.people";
 /** Wide enough for the session list, the conversation, and a panel beside it: where the Browser panel docks too. */
 const PEOPLE_DOCK = matchMedia("(min-width: 1100px)");
 
@@ -2699,11 +2821,6 @@ function sheetChange(sheet, state) {
     if (sheet?.type !== "chat" || !PEOPLE_DOCK.matches) {
         return { sheet };
     }
-
-    sessionStorage.setItem(PEOPLE_KEY, "1");
-    sessionStorage.removeItem("pocket.browser");
-    sessionStorage.removeItem("pocket.files");
-    sessionStorage.removeItem(EXT_PANEL_KEY);
 
     return {
         sheet: null,
@@ -2739,8 +2856,6 @@ export function filesShown(state = store.state) {
 
 /** Hide the People panel. Showing it is `openSheet({ type: "chat" })`, which docks it on wide screens. */
 export function closePeople() {
-    sessionStorage.removeItem(PEOPLE_KEY);
-
     // Its active border goes to the conversation, not nowhere.
     if (document.documentElement.dataset.focus === "people-panel") {
         document.documentElement.dataset.focus = "pane";
