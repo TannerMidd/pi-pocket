@@ -89,6 +89,36 @@ const markedOpen = () =>
             ?.dataset.id)`,
     );
 
+/**
+ * Run `steps` while each send (`/submit`) waits for `window.release()`, which then sends it (or, with `fail`, fails it).
+ * Every send held is let go, and fetch put back, also when a step fails: no test leaves the page stuck.
+ */
+async function holdingSends(steps: () => Promise<void>, fail = false) {
+    await page.evaluate(`
+        const real = window.fetch;
+        const held = [];
+        window.sends = 0;
+        window.release = () => held.splice(0).forEach((go) => go());
+        window.unhold = () => { window.fetch = real; window.release(); };
+        window.fetch = (url, init) => {
+            if (!String(url).includes('/submit')) {
+                return real(url, init);
+            }
+
+            window.sends++;
+
+            return new Promise((resolve) => held.push(() =>
+                resolve(${fail} ? new Response('{}', { status: 400 }) : real(url, init))));
+        };
+    `);
+
+    try {
+        await steps();
+    } finally {
+        await page.evaluate(`window.unhold?.()`);
+    }
+}
+
 /** A fresh tab on the background session, PiP closed, in `mode`. */
 async function fresh(mode: "floating" | "board", viewport: Viewport = VIEWPORTS.desktop) {
     await page.evaluate(`${STORE}.closeSheet(); ${PIP}.closePip();`);
@@ -378,25 +408,23 @@ test(
             "the same",
         );
         // A send held until PiP moved to the corner, beside a Reply quote of the same words.
-        await page.evaluate(`
-        const real = window.fetch;
-        window.fetch = (url, init) => String(url).includes('/submit') && !window.release
-            ? new Promise((resolve) => { window.release = () => resolve(real(url, init)); })
-            : real(url, init);
-        const box = document.querySelector('.pane .composer textarea');
-        box.value = 'and now?';
-        box.dispatchEvent(new Event('input', { bubbles: true }));
-    `);
-        await page.click({ selector: ".pane .send-button" });
-        await see(`typeof window.release === 'function'`, "the send on its way");
-        await place("floating");
-        await floating("in the corner");
-        assert.equal(
-            await inPage(strip(".pip-panel", "still red")),
-            false,
-            "on its way: not twice",
-        );
-        await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
+        await holdingSends(async () => {
+            await page.evaluate(`
+                const box = document.querySelector('.pane .composer textarea');
+                box.value = 'and now?';
+                box.dispatchEvent(new Event('input', { bubbles: true }));
+            `);
+            await page.click({ selector: ".pane .send-button" });
+            await see(`window.sends === 1`, "the send on its way");
+            await place("floating");
+            await floating("in the corner");
+            assert.equal(
+                await inPage(strip(".pip-panel", "still red")),
+                false,
+                "on its way: not twice",
+            );
+            await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
+        });
         await until(async () => lastAsked.includes("still red"), "PiP asked");
         await see(`${STORE}.store.state.pipQuote === null`, "the sent quote gone");
         assert.equal(
@@ -413,26 +441,22 @@ test("Ask PiP: a failed send gives the quote back, wherever PiP shows", real, as
     await page.evaluate(`${PIP}.quotePip('try again', ${Number(background)})`);
     await floating("in the corner");
     // The send waits, and then fails, after PiP moved to the board.
-    await page.evaluate(`
-        const real = window.fetch;
-        const failed = () => new Response('{}', { status: 400 });
-        window.fetch = (url, init) => String(url).includes('/submit')
-            ? new Promise((resolve) => { window.fail = () => resolve(failed()); })
-            : real(url, init);
-        const box = document.querySelector('.pip-composer textarea');
-        box.value = 'again?';
-        box.dispatchEvent(new Event('input', { bubbles: true }));
-    `);
-    await page.click({ selector: ".pip-panel .pip-send" });
-    await see(`typeof window.fail === 'function'`, "the send on its way");
-    await place("board");
-    await boarded("moved meanwhile");
-    assert.equal(
-        await inPage(`document.querySelector('.pane .quote-strip') === null`),
-        true,
-        "on its way",
-    );
-    await page.evaluate(`window.fail()`);
+    await holdingSends(async () => {
+        await page.evaluate(`
+            const box = document.querySelector('.pip-composer textarea');
+            box.value = 'again?';
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+        `);
+        await page.click({ selector: ".pip-panel .pip-send" });
+        await see(`window.sends === 1`, "the send on its way");
+        await place("board");
+        await boarded("moved meanwhile");
+        assert.equal(
+            await inPage(`document.querySelector('.pane .quote-strip') === null`),
+            true,
+            "on its way",
+        );
+    }, true);
     await see(
         `document.querySelector('.pane .quote-strip-text')?.textContent === 'try again'`,
         "the quote back",
