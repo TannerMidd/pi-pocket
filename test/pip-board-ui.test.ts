@@ -320,36 +320,35 @@ test("Ask PiP: the passage over the board's box, and PiP told its session", real
         box.dispatchEvent(new Event('input', { bubbles: true }));
     `);
     await page.click({ selector: ".pane .send-button" });
-    await see(`${STORE}.store.state.replyAbout === null`, "sent");
+    await see(`${STORE}.store.state.pipQuote === null`, "sent");
     await until(async () => lastAsked.includes("the build is red"), "PiP asked");
     assert.ok(lastAsked.includes(`<pocket-context session=\\"${Number(background)}`));
     await page.evaluate(`${PIP}.closePip()`);
 });
 
-test("Ask PiP: the passage and its session move with PiP, both ways", real, async () => {
-    const strip = (where: string, text: string) =>
-        `document.querySelector('${where} .quote-strip-text')?.textContent === '${text}'`;
+test(
+    "Ask PiP: PiP's one quote moves with it, and a send takes away only that quote",
+    real,
+    async () => {
+        const strip = (where: string, text: string) =>
+            `document.querySelector('${where} .quote-strip-text')?.textContent === '${text}'`;
 
-    await fresh("board");
-    await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
-    await see(strip(".pane", "still red"), "over the board's box");
-    await place("floating");
-    await floating("in the corner");
-    await see(strip(".pip-panel", "still red"), "over the corner's box");
-    assert.equal(await inPage(`${STORE}.store.state.pipQuote.session`), Number(background));
-    await place("board");
-    await see(strip(".pane", "still red"), "over the board's box again");
-    assert.equal(await inPage(`${STORE}.store.state.replyAbout`), Number(background));
-    assert.equal(await inPage(`${STORE}.store.state.pipQuote`), null, "not left in the corner");
-    await page.evaluate(`${PIP}.closePip()`);
-});
-
-test("Ask PiP: a quote sent while PiP moves does not come back", real, async () => {
-    await fresh("board");
-    await page.evaluate(`${PIP}.quotePip('sent once', ${Number(background)})`);
-    await see(`${STORE}.store.state.replyQuote === 'sent once'`, "over the board's box");
-    // The send waits until PiP moved to the corner.
-    await page.evaluate(`
+        await fresh("board");
+        await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
+        await see(strip(".pane", "still red"), "over the board's box");
+        await page.evaluate(`window.asked = ${STORE}.store.state.pipQuote`);
+        await place("floating");
+        await floating("in the corner");
+        await see(strip(".pip-panel", "still red"), "over the corner's box");
+        await place("board");
+        await see(strip(".pane", "still red"), "over the board's box again");
+        assert.equal(
+            await inPage(`${STORE}.store.state.pipQuote === window.asked`),
+            true,
+            "the same",
+        );
+        // A send held until PiP moved to the corner, beside a Reply quote of the same words.
+        await page.evaluate(`
         const real = window.fetch;
         window.fetch = (url, init) => String(url).includes('/submit') && !window.release
             ? new Promise((resolve) => { window.release = () => resolve(real(url, init)); })
@@ -358,15 +357,21 @@ test("Ask PiP: a quote sent while PiP moves does not come back", real, async () 
         box.value = 'and now?';
         box.dispatchEvent(new Event('input', { bubbles: true }));
     `);
-    await page.click({ selector: ".pane .send-button" });
-    await see(`typeof window.release === 'function'`, "the send on its way");
-    await place("floating");
-    await floating("in the corner");
-    await page.evaluate(`window.release()`);
-    await until(async () => lastAsked.includes("sent once"), "PiP asked");
-    await see(`${STORE}.store.state.pipQuote === null`, "the sent quote gone from the corner");
-    await page.evaluate(`${PIP}.closePip()`);
-});
+        await page.click({ selector: ".pane .send-button" });
+        await see(`typeof window.release === 'function'`, "the send on its way");
+        await place("floating");
+        await floating("in the corner");
+        await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
+        await until(async () => lastAsked.includes("still red"), "PiP asked");
+        await see(`${STORE}.store.state.pipQuote === null`, "the sent quote gone");
+        assert.equal(
+            await inPage(`${STORE}.store.state.replyQuote?.text`),
+            "still red",
+            "Reply's stays",
+        );
+        await page.evaluate(`${PIP}.closePip()`);
+    },
+);
 
 test("Pending memories: PiP's strip in both places, only while one waits", real, async () => {
     const COUNT = (where: string) =>

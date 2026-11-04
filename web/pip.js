@@ -20,7 +20,7 @@ import {
     navigate,
     notify,
     openSheet,
-    quoteSent,
+    dropQuote,
     store,
     uid,
 } from "./store.js";
@@ -224,23 +224,13 @@ store.subscribe((state) => {
         place = now;
 
         // Moved after this change has reached every listener (a change made from inside one would reach the listeners
-        // after it out of order), and only if the setting and PiP's place are still what they were by then. A passage
-        // not sent yet (Ask PiP) moves with it, to the other place's quote strip.
+        // after it out of order), and only if the setting and PiP's place are still what they were by then. PiP's quote
+        // is PiP's wherever it shows, so it stays as it is.
         if (now === "board" && state.pipOpen) {
-            queueMicrotask(async () => {
+            queueMicrotask(() => {
                 if (pipPlace() === "board" && store.state.pipOpen) {
-                    const quote = store.state.pipQuote;
-
                     closePip();
-                    await openBoard(undefined, true);
-
-                    if (quote && pipBoard()) {
-                        store.set({
-                            pipQuote: null,
-                            replyQuote: quote.text,
-                            replyAbout: quote.session ?? null,
-                        });
-                    }
+                    openBoard(undefined, true);
                 }
             });
 
@@ -250,14 +240,6 @@ store.subscribe((state) => {
         if (now === "floating" && board) {
             queueMicrotask(() => {
                 if (pipPlace() === "floating" && pipBoard()) {
-                    const { replyQuote, replyAbout } = store.state;
-
-                    if (replyQuote) {
-                        store.set({
-                            pipQuote: { text: replyQuote, session: replyAbout ?? undefined },
-                        });
-                    }
-
                     closePip();
                     openPip();
                 }
@@ -422,22 +404,14 @@ export function openPip(text) {
  * next message to PiP goes with it quoted first. The server tells PiP, unseen, which session it came from.
  */
 export async function quotePip(passage, session) {
-    const about = typeof session === "number" ? session : undefined;
-
-    if (pipPlace() === "board") {
-        // As a board, PiP's box is the session composer's: its quote strip, once PiP's conversation shows.
-        await openPip();
-
-        if (pipBoard()) {
-            store.set({ replyQuote: passage, replyAbout: about ?? null });
-        }
-
-        return;
-    }
-
-    store.set({ pipQuote: { text: passage, session: about } });
+    store.set({
+        pipQuote: { text: passage, ...(typeof session === "number" ? { session } : {}) },
+    });
     await openPip();
-    focusComposer();
+
+    if (!pipBoard()) {
+        focusComposer();
+    }
 }
 
 /** Close PiP in either place: its conversation in the session's place gives way to what was there before. */
@@ -997,9 +971,9 @@ function Composer({ id, busy }) {
             composerDraft.finish(token, success);
         }
 
-        // Sent with it: the quote goes, where it is now, unless another took its place meanwhile.
-        if (success && quoted) {
-            quoteSent(quoted.text);
+        // Sent with it: this quote goes, from the box that holds it now, not another put there meanwhile.
+        if (success) {
+            dropQuote(quoted);
         }
     };
 
@@ -1076,7 +1050,7 @@ function Composer({ id, busy }) {
                     type="button"
                     class="icon-button small"
                     aria-label="Remove the quote"
-                    onClick=${() => store.set({ pipQuote: null })}
+                    onClick=${() => dropQuote(quote)}
                 >
                     <${Icon} name="close" size=${12} />
                 </button>

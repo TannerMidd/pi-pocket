@@ -24,7 +24,9 @@ import {
     navigate,
     notify,
     openSheet,
-    quoteSent,
+    composerQuote,
+    dropQuote,
+    showsPip,
     store,
     typing,
     uid,
@@ -745,7 +747,7 @@ export function Composer() {
         if (command.args || command.template) {
             update(`/${command.name} `);
             focusEnd();
-        } else if (store.state.replyQuote) {
+        } else if (composerQuote()) {
             notify("info", "A quote cannot go with a command. Remove the quote to run it.");
         } else {
             runCommand({ command, arg: "" }, `/${command.name}`);
@@ -766,9 +768,7 @@ export function Composer() {
     const canSend =
         !sending &&
         !uploading &&
-        (text.trim() !== "" ||
-            store.state.replyQuote ||
-            files.some((file) => file.state === "done"));
+        (text.trim() !== "" || composerQuote() || files.some((file) => file.state === "done"));
 
     /** What went out stays for ↑; its pastes are done with. */
     const sent = (full) => {
@@ -819,7 +819,7 @@ export function Composer() {
 
         // A command runs or expands only when it starts the message: a quote in front would stop that.
         if (
-            store.state.replyQuote &&
+            composerQuote() &&
             (parsed || shell || template || text.trimStart().startsWith("/skill:"))
         ) {
             return notify("info", "A quote cannot go with a command. Remove the quote to run it.");
@@ -842,12 +842,13 @@ export function Composer() {
         }
 
         setSending(true);
-        const quote = store.state.replyQuote;
+        // The quote that goes: once sent, it leaves the box that holds it, wherever PiP shows by then.
+        const quote = composerQuote();
         const going = files.filter((file) => file.state === "done");
         const attachments = going.map((file) => file.attachment);
         const ok = await attempt(() =>
             actions.submit(
-                withQuote(quote, full),
+                withQuote(quote?.text, full),
                 attachments,
                 busy
                     ? other === true && sendMode !== "interrupt"
@@ -857,9 +858,7 @@ export function Composer() {
                         : sendMode
                     : "followUp",
                 inlineFiles && mentionsFiles,
-                typeof store.state.replyAbout === "number"
-                    ? { session: store.state.replyAbout }
-                    : undefined,
+                typeof quote?.session === "number" ? { session: quote.session } : undefined,
             ),
         );
 
@@ -872,10 +871,7 @@ export function Composer() {
             }
 
             sent(full);
-
-            if (quote) {
-                quoteSent(quote);
-            }
+            dropQuote(quote);
 
             // Files pasted while it went stay for the next message.
             forget(going);
@@ -1199,6 +1195,7 @@ export function Composer() {
         );
     };
 
+    const shownQuote = composerQuote();
     const placeholder = dictation.listening
         ? "Listening…"
         : busy
@@ -1207,7 +1204,7 @@ export function Composer() {
               : sendMode === "interrupt"
                 ? "Stop the run and send this now…"
                 : "Queue a message for after this run…"
-          : conversationId === store.state.pip?.id
+          : showsPip()
             ? "Ask PiP anything…"
             : "Ask Pi anything…";
     const inbox = view.inbox ?? [];
@@ -1594,14 +1591,14 @@ export function Composer() {
                         </div>`
                     }
                     ${
-                        store.state.replyQuote &&
+                        shownQuote &&
                         html`<div class="quote-strip" data-part="quote-strip">
                             <${Icon} name="reply" size=${13} />
-                            <span class="quote-strip-text">${store.state.replyQuote}</span>
+                            <span class="quote-strip-text">${shownQuote.text}</span>
                             <button
                                 class="icon-button small"
                                 aria-label="Remove the quote"
-                                onClick=${() => store.set({ replyQuote: null, replyAbout: null })}
+                                onClick=${() => dropQuote(shownQuote)}
                             >
                                 <${Icon} name="close" size=${12} />
                             </button>

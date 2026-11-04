@@ -312,10 +312,12 @@ export const store = {
         auth: null,
         /** A transcript message the next chat message discusses: `{ entryId, text }`. */
         chatQuote: null,
+        /** A passage the session's next message quotes (Reply): `{ text }`. Leaving the session drops it. */
         replyQuote: null,
-        /** The session the reply quote came from, when PiP's box (as a board) asks about it: its number, or null. */
-        replyAbout: null,
-        /** A passage for PiP's box to ask about (Ask PiP): `{ text, session }`, quoted before its next message. */
+        /**
+         * A passage PiP's next message quotes (Ask PiP, or Reply on PiP's own board): `{ text, session? }`, with the
+         * session it came from. One for PiP wherever it shows, so moving PiP between its places keeps it as it is.
+         */
         pipQuote: null,
         /** Text to put into the message box to Pi: `{ text, n }`, picked up by the composer. */
         composerInsert: null,
@@ -464,7 +466,6 @@ function peopleFor(id, reads = store.state.chatReads) {
         notes: null,
         chatQuote: null,
         replyQuote: null,
-        replyAbout: null,
         chatRead: id === null ? 0 : (reads[id] ?? 0),
     };
 }
@@ -2980,18 +2981,30 @@ export function insertIntoComposer(text, files = [], { inline = false, conversat
     }));
 }
 
+/** Whether the conversation shown is PiP's, open as a board in the session's place. */
+export const showsPip = (state = store.state) =>
+    state.conversationId !== null && state.conversationId === state.pip?.id;
+
+/** The quote over the session composer's box: PiP's own on PiP's board, else the session's reply quote. */
+export const composerQuote = (state = store.state) =>
+    showsPip(state) ? state.pipQuote : state.replyQuote;
+
+/** Reply to a passage of the conversation shown: on PiP's board, it is PiP's quote. */
 export function quoteReply(text) {
-    store.set({ replyQuote: text, replyAbout: null });
+    store.set(showsPip() ? { pipQuote: { text } } : { replyQuote: { text } });
 }
 
-/** A quote went with a message: it goes from the box it is in now, also after PiP moved it to its other place. */
-export function quoteSent(text) {
-    const { replyQuote, pipQuote } = store.state;
+/** Take away `quote`, sent or dismissed, from the box that holds it: never another one put there meanwhile. */
+export function dropQuote(quote) {
+    if (!quote) {
+        return;
+    }
 
-    store.set({
-        ...(replyQuote === text ? { replyQuote: null, replyAbout: null } : {}),
-        ...(pipQuote?.text === text ? { pipQuote: null } : {}),
-    });
+    if (quote === store.state.replyQuote) {
+        store.set({ replyQuote: null });
+    } else if (quote === store.state.pipQuote) {
+        store.set({ pipQuote: null });
+    }
 }
 
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */
