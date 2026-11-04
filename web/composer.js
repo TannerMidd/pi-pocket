@@ -189,8 +189,8 @@ function endSend(id, record, went) {
     onTheWay.delete(id);
 
     if (went) {
-        const now = drafts.get(id);
-        const left = now === record.text ? "" : now.replace(record.text, "").trim();
+        // Words put in meanwhile (`takeInsert`) follow the sent ones without their end spaces.
+        const left = drafts.get(id).replace(record.text.trimEnd(), "").trim();
 
         drafts.set(id, left);
 
@@ -208,6 +208,26 @@ function endSend(id, record, went) {
     }
 
     store.set({});
+}
+
+/**
+ * Each conversation's `!` command or extension command that may have run on the server: its text,
+ * the command's id, and its request id. Sent again, also from a box shown again, it goes with that
+ * request id, so the server finds the first run and does not run it twice.
+ */
+const retries = new Map();
+
+/** The request id to send `text` (of command `commandId`) with from conversation `id`. */
+function retryId(id, text, commandId = null) {
+    const kept = retries.get(id);
+    const request =
+        kept?.text === text && kept.commandId === commandId
+            ? kept
+            : { text, commandId, requestId: uid() };
+
+    retries.set(id, request);
+
+    return request.requestId;
 }
 
 /**
@@ -537,11 +557,6 @@ export function Composer() {
     const dock = useRef(null);
     const picker = useRef(null);
     const list = useRef(null);
-    // One per `!` command: sending it again after a lost reply runs it once. Made when the first is sent, not on each
-    // draw of the message box.
-    const requestId = useRef(null);
-    // An extension's command while its send is unresolved: sending the same text again finds the first run.
-    const commandRequest = useRef(null);
     const busy = view.live.busy;
     const agent = view.agent;
     // The message on its way from here (`onTheWay`): the box holds it, read only, until it went.
@@ -738,34 +753,22 @@ export function Composer() {
 
     /** Run a slash command. The text goes away once it worked; attached files stay for the next message. */
     const runCommand = async ({ command, arg }, sent) => {
-        let request = null;
-
-        if (command.extension) {
-            const kept = commandRequest.current;
-
-            request =
-                kept?.commandId === command.id &&
-                kept.text === sent &&
-                kept.conversationId === conversationId
-                    ? kept
-                    : { requestId: uid(), commandId: command.id, text: sent, conversationId };
-            commandRequest.current = request;
-        }
-
         const record = beginSend(conversationId, { text, quote: null, files: [] });
 
         if (!record) {
             return;
         }
 
+        const requestId = command.extension ? retryId(conversationId, sent, command.id) : undefined;
+
         const ok = await attempt(async () => {
             try {
-                await command.run(arg, request?.requestId);
+                await command.run(arg, requestId);
             } catch (error) {
                 // A 4xx made no run, or refused it for good: the next send is a new request. After a network error
                 // or a 5xx, the run may be there: the same send finds it.
-                if (error.status >= 400 && error.status < 500) {
-                    commandRequest.current = null;
+                if (requestId && error.status >= 400 && error.status < 500) {
+                    retries.delete(conversationId);
                 }
 
                 throw error;
@@ -774,8 +777,8 @@ export function Composer() {
             return true;
         });
 
-        if (ok) {
-            commandRequest.current = null;
+        if (ok && requestId) {
+            retries.delete(conversationId);
         }
 
         endSend(conversationId, record, Boolean(ok));
@@ -856,7 +859,7 @@ export function Composer() {
         }
 
         const started = await attempt(() =>
-            actions.shell(command, !full.startsWith("!!"), (requestId.current ??= uid())),
+            actions.shell(command, !full.startsWith("!!"), retryId(conversationId, full)),
         );
 
         endSend(conversationId, record, Boolean(started));
@@ -871,7 +874,7 @@ export function Composer() {
                 { taskId: started.taskId, command, conversationId, at: Date.now() },
             ],
         }));
-        requestId.current = null;
+        retries.delete(conversationId);
         sent(full);
     };
 

@@ -13,7 +13,7 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -55,6 +55,8 @@ const settle = () =>
 
 /** PiP's own box as a board, in the session's place. */
 const BOARD_BOX = ".pane .pip-composer textarea";
+/** A session's own box. */
+const BOX = ".pane .composer textarea";
 /** PiP as a board: its conversation in the session's place, with its own box (no session box) and a ×, and no panel. */
 const boarded = (what: string) =>
     see(
@@ -503,7 +505,6 @@ test("PiP turned off in Extensions closes the board", real, async () => {
 });
 
 test("A session's send on its way, its box shown again: once, or all back", real, async () => {
-    const BOX = ".pane .composer textarea";
     const held = () =>
         inPage(`[document.querySelector('${BOX}').value,
             document.querySelector('.pane .quote-strip-text')?.textContent ?? null,
@@ -520,15 +521,16 @@ test("A session's send on its way, its box shown again: once, or all back", real
 
     await fresh("board");
     await page.evaluate(`${STORE}.quoteReply('this part')`);
-    await type(BOX, "only once");
+    // With a space at the end, as a phone's keyboard leaves it.
+    await type(BOX, "only once ");
     await holdingSends(async () => {
         await page.press("Enter");
         await see(`window.sends === 1`, "on its way");
         await awayAndBack();
-        assert.deepEqual(await held(), ["only once", "this part", true], "on its way");
+        assert.deepEqual(await held(), ["only once ", "this part", true], "on its way");
     }, true);
     await see(`!document.querySelector('.pane .send-button').disabled`, "failed");
-    assert.deepEqual(await held(), ["only once", "this part", false], "all back");
+    assert.deepEqual(await held(), ["only once ", "this part", false], "all back");
     // Sent at last, with words put in the box meanwhile: they stay.
     await holdingSends(async () => {
         await page.press("Enter");
@@ -538,4 +540,44 @@ test("A session's send on its way, its box shown again: once, or all back", real
     });
     await see(`document.querySelector('${BOX}').value === 'and then'`, "sent");
     assert.equal(await inPage(`window.sends`), 1, "once");
+});
+
+test("A `!` command with its answer lost runs once when sent again", real, async () => {
+    const ran = join(project, "ran.txt");
+
+    // The command reaches the server, and its answer is lost.
+    const lost = async (word: string) => {
+        await page.evaluate(`const real = window.fetch;
+            window.fetch = async (url, init) => {
+                if (!String(url).endsWith('/shell')) {
+                    return real(url, init);
+                }
+
+                window.fetch = real;
+                await real(url, init);
+                window.lost = true;
+
+                return new Response('{}', { status: 502 });
+            };`);
+        await type(BOX, `!echo ${word} >> ${ran}`);
+        await page.press("Enter");
+        await see(`window.lost && !document.querySelector('.pane .send-button').disabled`, "lost");
+        await page.evaluate(`window.lost = false`);
+    };
+
+    await fresh("board");
+    await lost("x");
+    // Sent again from its box shown again.
+    await page.press("Alt+a");
+    await boarded("PiP's board over the session");
+    await page.press("Alt+a");
+    await backTo(background, "the session again");
+    await page.press("Enter");
+    await see(`document.querySelector('${BOX}').value === ''`, "sent again");
+    // Another command after a lost answer is a new one.
+    await lost("y");
+    await type(BOX, `!echo z >> ${ran}`);
+    await page.press("Enter");
+    await until(() => existsSync(ran) && readFileSync(ran, "utf8").includes("z"), "z ran");
+    assert.equal(readFileSync(ran, "utf8"), "x\ny\nz\n");
 });
