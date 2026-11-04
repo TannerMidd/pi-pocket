@@ -727,9 +727,10 @@ test("modes past the engine's 16 are left out with a note, and the rest load", (
     assert.match(scanReport(scan), /cannot hold them: 1 mode\./);
 });
 
-test("a spacing alias to a plain number of another collection keeps its value in each mode", () => {
+test("a spacing alias to a number keeps its value in each mode, through other collections", () => {
     const numbers = guid(1, 4);
     const four = guid(1, 2);
+    const [one, scale, gap] = [guid(12, 1), guid(12, 2), guid(1, 6)];
     const file = figFile({
         nodeChanges: [
             modeSet(COLORS, [
@@ -740,6 +741,7 @@ test("a spacing alias to a plain number of another collection keeps its value in
                 [CONTRAST, "Light"],
                 [HIGH, "Dark"],
             ]),
+            modeSet(scale, [[one, "Value"]]),
             variable(
                 four,
                 "Primitives/4",
@@ -754,12 +756,27 @@ test("a spacing alias to a plain number of another collection keeps its value in
                 [LIGHT, { alias: { guid: four } }],
                 [DARK, { alias: { guid: four } }],
             ]),
+            // Through a collection of one mode, and from one: the dark mode of what they read.
+            variable(gap, "Scale/Gap", "FLOAT", [[one, { alias: { guid: four } }]], scale),
+            variable(guid(1, 7), "Spacing/Gap", "FLOAT", [
+                [LIGHT, { alias: { guid: gap } }],
+                [DARK, { alias: { guid: gap } }],
+            ]),
+            variable(
+                guid(1, 8),
+                "Radius/Small",
+                "FLOAT",
+                [[one, { alias: { guid: four } }]],
+                scale,
+            ),
         ],
     });
-    const small = token(load(scanTokens(project({ "alias.fig": file }))), "space.small");
+    const system = load(scanTokens(project({ "alias.fig": file })));
 
-    assert.equal(small?.modes.light?.literal, "4px");
-    assert.equal(small?.modes.dark?.literal, "8px");
+    for (const name of ["space.small", "space.gap", "radius.small"]) {
+        assert.equal(token(system, name)?.modes.light?.literal, "4px", name);
+        assert.equal(token(system, name)?.modes.dark?.literal, "8px", name);
+    }
 });
 
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {
