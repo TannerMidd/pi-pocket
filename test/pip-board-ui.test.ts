@@ -501,3 +501,41 @@ test("PiP turned off in Extensions closes the board", real, async () => {
     await page.evaluate(`${STORE}.api('extensions/pip.ts', { enabled: true })`);
     await see(`${PIP}.pipAvailable()`, "PiP on again");
 });
+
+test("A session's send on its way, its box shown again: once, or all back", real, async () => {
+    const BOX = ".pane .composer textarea";
+    const held = () =>
+        inPage(`[document.querySelector('${BOX}').value,
+            document.querySelector('.pane .quote-strip-text')?.textContent ?? null,
+            document.querySelector('.pane .send-button').disabled]`);
+
+    // Away and back while it goes, and Enter again there.
+    const awayAndBack = async () => {
+        await page.press("Alt+a");
+        await boarded("PiP's board over the session");
+        await page.press("Alt+a");
+        await backTo(background, "the session again");
+        await page.press("Enter");
+    };
+
+    await fresh("board");
+    await page.evaluate(`${STORE}.quoteReply('this part')`);
+    await type(BOX, "only once");
+    await holdingSends(async () => {
+        await page.press("Enter");
+        await see(`window.sends === 1`, "on its way");
+        await awayAndBack();
+        assert.deepEqual(await held(), ["only once", "this part", true], "on its way");
+    }, true);
+    await see(`!document.querySelector('.pane .send-button').disabled`, "failed");
+    assert.deepEqual(await held(), ["only once", "this part", false], "all back");
+    // Sent at last, with words put in the box meanwhile: they stay.
+    await holdingSends(async () => {
+        await page.press("Enter");
+        await see(`window.sends === 1`, "on its way again");
+        await awayAndBack();
+        await page.evaluate(`${STORE}.insertIntoComposer('and then'); window.release()`);
+    });
+    await see(`document.querySelector('${BOX}').value === 'and then'`, "sent");
+    assert.equal(await inPage(`window.sends`), 1, "once");
+});

@@ -161,6 +161,56 @@ function savePastes(id, pastes) {
 const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes[n] ?? whole);
 
 /**
+ * Each conversation's message (or command) on its way, by its id: `{ text, quote, files }`, the box's words, its quote,
+ * and the paths of the files that go. It lives here, not in the box: a box shown again meanwhile (another route, Alt+A
+ * twice) holds it as on its way, and cannot send it twice. Its words and files stay in the draft until it went.
+ */
+const onTheWay = new Map();
+/** The boxes shown, each told when a message from its conversation went. */
+const sentListeners = new Set();
+
+/** Start a send of `record` from conversation `id`'s box; null while one is on its way from there. */
+function beginSend(id, record) {
+    if (onTheWay.has(id)) {
+        return null;
+    }
+
+    onTheWay.set(id, record);
+    store.set({});
+
+    return record;
+}
+
+/**
+ * The send of `record` from `id` ended. Once it went, its words, pastes, and files leave the draft, and what was put in
+ * meanwhile stays; if it did not go, the words and files are still there, and its quote comes back.
+ */
+function endSend(id, record, went) {
+    onTheWay.delete(id);
+
+    if (went) {
+        const now = drafts.get(id);
+        const left = now === record.text ? "" : now.replace(record.text, "").trim();
+
+        drafts.set(id, left);
+
+        if (left === "") {
+            savePastes(id, {});
+        }
+
+        saveAttached(
+            id,
+            loadAttached(id).filter((file) => !record.files.includes(file.attachment.path)),
+        );
+        sentListeners.forEach((listener) => listener(id, record));
+    } else {
+        giveBackQuote(record.quote, false, id);
+    }
+
+    store.set({});
+}
+
+/**
  * The subagents a waiting message carries reports from (`extensions/subagents.ts`), as the server reads them from its
  * whole text: the queue gets only the start. Null for any other message, such as a person's, which has who sent it.
  */
@@ -441,9 +491,6 @@ export function Composer() {
     const [reading, setReading] = useState(null);
     // The queued message whose Interrupt was tapped once (`CONFIRM_INTERRUPT`).
     const [interrupting, setInterrupting] = useState(null);
-    const [sending, setSending] = useState(false);
-    // The quote of the message on its way: out of its box (`dropQuote`), shown here with the words until then.
-    const [sendingQuote, setSendingQuote] = useState(null);
     // Slash command suggestions: the highlighted one, and whether Escape hid the list.
     const [pick, setPick] = useState(0);
     const [hideCommands, setHideCommands] = useState(false);
@@ -497,6 +544,9 @@ export function Composer() {
     const commandRequest = useRef(null);
     const busy = view.live.busy;
     const agent = view.agent;
+    // The message on its way from here (`onTheWay`): the box holds it, read only, until it went.
+    const going = onTheWay.get(conversationId);
+    const sending = going !== undefined;
 
     // An Interrupt is for the run it was chosen in: when Pi stops working, an unused one goes back to Steer, so it does
     // not stop the next run. Steer and Queue stay as the person chose.
@@ -523,6 +573,29 @@ export function Composer() {
 
         return () => removeEventListener("pocket:signedOut", clear);
     }, []);
+    // A message from here went (sent by this box, or by the one before it showed again): it leaves the box.
+    useEffect(() => {
+        const went = (id, record) => {
+            if (id !== conversationId) {
+                return;
+            }
+
+            setBrowsing(null);
+            update(drafts.get(id));
+            setPastes(loadPastes(id));
+            setFiles((current) => {
+                const gone = current.filter((file) => record.files.includes(file.attachment?.path));
+
+                forget(gone);
+
+                return current.filter((file) => !gone.includes(file));
+            });
+        };
+
+        sentListeners.add(went);
+
+        return () => sentListeners.delete(went);
+    }, [conversationId]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -679,7 +752,12 @@ export function Composer() {
             commandRequest.current = request;
         }
 
-        setSending(true);
+        const record = beginSend(conversationId, { text, quote: null, files: [] });
+
+        if (!record) {
+            return;
+        }
+
         const ok = await attempt(async () => {
             try {
                 await command.run(arg, request?.requestId);
@@ -696,12 +774,11 @@ export function Composer() {
             return true;
         });
 
-        setSending(false);
-
         if (ok) {
             commandRequest.current = null;
-            update("");
         }
+
+        endSend(conversationId, record, Boolean(ok));
     };
 
     /**
@@ -757,16 +834,11 @@ export function Composer() {
             store.state.replyQuote ||
             files.some((file) => file.state === "done"));
 
-    /** What went out stays for ↑; its pastes are done with. */
+    /** What went out stays for ↑. */
     const sent = (full) => {
         if (full.length <= REMEMBER_CHARS) {
             remember(full, historyScope);
         }
-
-        setPastes({});
-        savePastes(conversationId, {});
-        setBrowsing(null);
-        update("");
     };
 
     /** Run `!command` in the session's folder. Its entry shows once it is done; until then, a row says it runs. */
@@ -777,12 +849,17 @@ export function Composer() {
             return notify("info", "Say which command to run, such as !git status.");
         }
 
-        setSending(true);
+        const record = beginSend(conversationId, { text, quote: null, files: [] });
+
+        if (!record) {
+            return;
+        }
+
         const started = await attempt(() =>
             actions.shell(command, !full.startsWith("!!"), (requestId.current ??= uid())),
         );
 
-        setSending(false);
+        endSend(conversationId, record, Boolean(started));
 
         if (!started) {
             return;
@@ -828,13 +905,21 @@ export function Composer() {
             return runShell(full);
         }
 
-        setSending(true);
         // The quote goes with the message, out of its box at once: no box shown again meanwhile offers it.
         const quote = store.state.replyQuote;
-        const going = files.filter((file) => file.state === "done");
-        const attachments = going.map((file) => file.attachment);
+        const attachments = files
+            .filter((file) => file.state === "done")
+            .map((file) => file.attachment);
+        const record = beginSend(conversationId, {
+            text,
+            quote,
+            files: attachments.map((attachment) => attachment.path),
+        });
 
-        setSendingQuote(quote);
+        if (!record) {
+            return;
+        }
+
         dropQuote(quote);
         const ok = await attempt(() =>
             actions.submit(
@@ -851,8 +936,8 @@ export function Composer() {
             ),
         );
 
-        setSending(false);
-        setSendingQuote(null);
+        // Files pasted while it went stay for the next message.
+        endSend(conversationId, record, Boolean(ok));
 
         if (ok) {
             // Interrupting stops the run: do not let the next message stop one by habit.
@@ -862,15 +947,9 @@ export function Composer() {
 
             sent(full);
 
-            // Files pasted while it went stay for the next message.
-            forget(going);
-            setFiles((current) => current.filter((file) => !going.includes(file)));
-
             if (!coarse) {
                 box.current?.focus();
             }
-        } else {
-            giveBackQuote(quote, false, conversationId);
         }
     };
 
@@ -1186,7 +1265,7 @@ export function Composer() {
         );
     };
 
-    const shownQuote = sendingQuote ?? store.state.replyQuote;
+    const shownQuote = going?.quote ?? store.state.replyQuote;
     const placeholder = dictation.listening
         ? "Listening…"
         : busy
