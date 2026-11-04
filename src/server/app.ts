@@ -568,6 +568,8 @@ export class PocketApp {
             },
             // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
             commandsChanged: () => this.#websChanged("all"),
+            // The UI catalog changed: every tab reads it again, as it does on each new connection.
+            localesChanged: () => this.#websChanged("all"),
             log: (line) => this.#log(line),
             // Something about a module only the owner can mend: their tabs, as what it says can name the server's folders.
             warn: (message) => this.ownerNotice("warning", message),
@@ -2258,6 +2260,8 @@ export class PocketApp {
                 peeks: true,
                 // This server's clock: peek tiles compare the browser's looks with when runs ended here.
                 now: Date.now(),
+                // The UI catalog's revision: a tab reads the catalog again when this changes, and on each connection.
+                localeRevision: this.webs.locales.revision,
                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
                 collab: 2,
                 reactions: REACTIONS,

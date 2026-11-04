@@ -5,6 +5,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, normalize, sep } from "node:path";
+import type { PocketApp } from "./app.ts";
 import { Auth } from "./auth.ts";
 import { describe, HttpError } from "./errors.ts";
 import { createApi } from "./http/api.ts";
@@ -17,6 +18,21 @@ import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
+
+/**
+ * The app's own UI text in other languages (`ui-locales.ts`): the catalog that its tabs and sign-in pages read. It is
+ * public, as those pages are, so it answers before any sign-in, and no cache keeps it.
+ */
+function uiLocales(app: PocketApp, request: IncomingMessage, response: ServerResponse): void {
+    if (request.method !== "GET") {
+        throw new HttpError(405, "Only GET answers the UI catalog");
+    }
+
+    const snapshot = app.webs.locales.snapshot();
+
+    response.setHeader("cache-control", "no-store");
+    json(response, 200, { revision: snapshot.revision, locales: snapshot.locales });
+}
 
 export function createHandler(options: HttpOptions) {
     const { app } = options;
@@ -38,6 +54,12 @@ export function createHandler(options: HttpOptions) {
             const parts = path.split("/").filter((part) => part !== "");
 
             response.setHeader("x-content-type-options", "nosniff");
+
+            // The UI catalog, before the API's checks: the sign-in pages and every tab read it, signed in or not.
+            // Exactly `/ui-locales.json`, and only a GET.
+            if (parts.length === 1 && parts[0] === "ui-locales.json") {
+                return uiLocales(app, request, response);
+            }
 
             if (parts[0] === "api") {
                 return await api(request, response, url, parts.slice(1));

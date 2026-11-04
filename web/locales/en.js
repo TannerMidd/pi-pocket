@@ -15,6 +15,9 @@ export const EN_LABEL = "English";
 export const EN = Object.freeze({
     // Shared controls, in more than one place.
     "ui.close": "Close",
+    "ui.page-open": "a page open",
+    "boot.starting": "starting",
+    "boot.waiting": "waiting for the server",
     "ui.back": "Back",
     "ui.loading": "Loading…",
     "ui.open": "Open",
@@ -43,11 +46,13 @@ export const EN = Object.freeze({
     "app.people": "People",
     "app.not-found": "Not found",
     "app.back-to-sessions": "Back to sessions",
+    "app.back-waiting": "Back to sessions, {count} waiting for you",
     "app.branch": "The git branch",
     "app.branch-none": "No branch: switch to one",
     "app.branch-switch": "Switch or make a branch",
     "app.changes-uncommitted": "Uncommitted changes in this session's folder",
     "app.subagents-working": "Subagents working",
+    "app.subagents-busy": "Subagents: {count} working",
     "app.peek-tiles": "Peek tiles",
     "app.stop-again": "Press Esc again to stop Pi.",
     "app.shared-missing": "What was shared did not arrive. Share it again.",
@@ -211,6 +216,8 @@ export const EN = Object.freeze({
     // Signing in: the app's own sign-in screen, and the pages outside it (/login, /join, /share).
     "signin.title": "Pi Pocket",
     "signin.sign-in": "Sign in",
+    "signin.intro":
+        "Open the sign-in link Pi Pocket printed when it started, or an invite from a signed-in device. You can also paste the link, the token, or an invite code here.",
     "signin.field": "Link, token, or invite code",
     "signin.enter": "Enter",
     "signin.switch-title": "Switch account?",

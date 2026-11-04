@@ -117,6 +117,11 @@ export const store = {
         modelRefresh: { loading: false, result: null, error: null },
         guard: null,
         server: null,
+        /**
+         * Counts the times the app's own words changed: another language, another catalog, or the words of the one this
+         * tab shows (`ui-locale.js`). What draws text compares it, so it draws again without a reload.
+         */
+        localeRevision: 0,
         sessions: [],
         /** This person's favorite folders, in shortcut order, sent by the server to every signed-in device. */
         folderFavorites: [],
@@ -888,6 +893,19 @@ export function onExtensionEvent(listener) {
     return () => extensionListeners.delete(listener);
 }
 
+/** Who hears each hello: `ui-locale.js`, which imports this module and so cannot be imported here. */
+const helloListeners = new Set();
+
+/**
+ * Hear each hello, after its facts are in the store: the server's facts, which hold the catalog's `localeRevision`,
+ * and this connection's id (`undefined` for `GET /api/me`).
+ */
+export function onHello(listener) {
+    helloListeners.add(listener);
+
+    return () => helloListeners.delete(listener);
+}
+
 /** What the server sends, by event name. Both transports deliver the same events. */
 const handlers = {
     // Sent again on each connect, mostly as it was: what is the same keeps its identity (`kept`).
@@ -909,6 +927,11 @@ const handlers = {
             // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
             ...(data.connection === undefined ? {} : { streamId: data.connection }),
         });
+
+        // `ui-locale.js` hears each hello: a new connection reads the catalog, and so does one whose revision changed.
+        for (const listener of helloListeners) {
+            listener(data.server, data.connection);
+        }
     },
     sessions: (list) => {
         const state = store.state;

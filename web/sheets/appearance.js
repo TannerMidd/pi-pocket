@@ -33,6 +33,7 @@ import {
 } from "../theme.js";
 import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
+import { languages, localeId, setLocale, t } from "../ui-locale.js";
 import { galleryAvailable } from "./gallery.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
@@ -564,11 +565,11 @@ function SlotLayout({ slot }) {
     const changed = Object.keys(prefs().layout?.[slot] ?? {}).length > 0;
 
     return html`<div class="label slot-label">
-            <span>${SLOTS[slot].label}</span>
+            <span>${SLOTS[slot].label()}</span>
             ${
                 changed &&
                 html`<button class="button ghost small" onClick=${() => resetSlot(slot)}>
-                    Reset
+                    ${t("ui.reset", "Reset")}
                 </button>`
             }
         </div>
@@ -615,20 +616,49 @@ function SlotLayout({ slot }) {
         </div>`;
 }
 
+/**
+ * The app's language, when the server offers one more than English: the choice is this browser's, kept in its
+ * cookie (`ui-locale.js`), and the words change as it is picked, without a reload.
+ */
+function LanguageSection() {
+    const list = languages();
+
+    if (list.length < 2) {
+        return null;
+    }
+
+    return html`<div class="label">${t("appearance.language", "Language")}</div>
+        <div class="sheet-list">
+            <label class="label setting">
+                <span>${t("appearance.language", "Language")}</span>
+                <select
+                    value=${localeId()}
+                    onChange=${(event) => setLocale(event.currentTarget.value)}
+                >
+                    ${list.map(
+                        (each) =>
+                            html`<option key=${each.id} value=${each.id}>${each.label}</option>`,
+                    )}
+                </select>
+            </label>
+        </div>`;
+}
+
 export function AppearanceSheet() {
     const p = prefs();
     const desktop = store.state.desktopTheme;
 
     useEffect(() => () => preview(null), []);
 
-    return html`<${Sheet} title="Appearance" onClose=${closeSheet} wide=${true}>
-        <div class="label">Theme</div>
+    return html`<${Sheet} title=${t("appearance.title", "Appearance")} onClose=${closeSheet} wide=${true}>
+        <${LanguageSection} />
+        <div class="label">${t("appearance.theme", "Theme")}</div>
         <div class="look-grid">
             ${lookIds().map((id) => html`<${LookCard} key=${id} id=${id} />`)}
         </div>
         ${store.state.me?.role === "owner" && html`<${LookTools} />`}
         ${store.state.me?.role === "owner" && html`<${FontTools} />`}
-        <div class="label">Colors</div>
+        <div class="label">${t("appearance.colors", "Colors")}</div>
         <div class="theme-grid">
             ${desktop && html`<${ThemeCard} id="desktop" desktop=${true} />`}
             ${[...themeIds(), ...folderPaletteIds()].map(
@@ -643,7 +673,7 @@ export function AppearanceSheet() {
                 Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.
             </p>`
         }
-        <div class="label">Layout and motion</div>
+        <div class="label">${t("appearance.layout", "Layout and motion")}</div>
         <div class="sheet-list">
             <${SettingRow}
                 title="Tiled windows"

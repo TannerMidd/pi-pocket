@@ -8,6 +8,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact
 import { useDragToClose } from "./gestures.js";
 import { highlight, langOf } from "./highlight.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
+import { t } from "./ui-locale.js";
 
 export const html = htm.bind(h);
 
@@ -1187,7 +1188,7 @@ export function Loader({ label = "Loading" }) {
 }
 
 /** The full-screen loader: π over Omarchy's boot bar, and what is happening under it. */
-export function Boot({ caption = "starting", detail = "", inline = false }) {
+export function Boot({ caption = t("boot.starting", "starting"), detail = "", inline = false }) {
     return html`<div
         class=${`boot ${inline ? "inline" : ""}`}
         data-part="boot"
@@ -1733,7 +1734,7 @@ export function Sheet({ title, onClose, children, wide = false, actions = null, 
                 }
                 <h2>${title}</h2>
                 ${actions}
-                <button class="icon-button" onClick=${onClose} aria-label="Close">
+                <button class="icon-button" onClick=${onClose} aria-label=${t("ui.close", "Close")}>
                     <${Icon} name="close" />
                 </button>
             </header>
@@ -1895,7 +1896,7 @@ export function PlaceTile({ place }) {
         type="button"
         class=${`place ${place.on ? "on" : ""}`}
         data-place=${place.id}
-        aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.badge ? `${place.label}, ${place.badge}` : place.dot ? `${place.label}, ${place.dotLabel ?? "a page open"}` : place.label}
+        aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.badge ? `${place.label}, ${place.badge}` : place.dot ? `${place.label}, ${place.dotLabel ?? t("ui.page-open", "a page open")}` : place.label}
         aria-pressed=${place.on === undefined ? undefined : place.on ? "true" : "false"}
         onClick=${place.run}
     >

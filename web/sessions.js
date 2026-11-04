@@ -15,6 +15,7 @@ import { useDragToClose } from "./gestures.js";
 import { PeeksRailButton, wholeOnTile } from "./peeks.js";
 import { PipRailButton } from "./pip.js";
 import { sessionForest, unfolded } from "./session-tree.js";
+import { t } from "./ui-locale.js";
 import {
     actions,
     attempt,
@@ -237,22 +238,22 @@ function todayStart() {
 /** Which day bucket a time falls in, in this device's time zone: `start` is when today began (`todayStart`). */
 function dayGroup(ms, start) {
     if (ms >= start) {
-        return "Today";
+        return t("sessions.today", "Today");
     }
 
     if (ms >= start - DAY) {
-        return "Yesterday";
+        return t("sessions.yesterday", "Yesterday");
     }
 
     if (ms >= start - 6 * DAY) {
-        return "This week";
+        return t("sessions.this-week", "This week");
     }
 
     if (ms >= start - 29 * DAY) {
-        return "This month";
+        return t("sessions.this-month", "This month");
     }
 
-    return "Earlier";
+    return t("sessions.earlier", "Earlier");
 }
 
 /** `~/Development/pi-pocket` with its last part bold, for a folder group's name. */
@@ -378,10 +379,10 @@ function priorityGroups(shown, ctx, held) {
     const groups = [];
 
     for (const [slot, label] of [
-        ["needs", "Needs you"],
-        ["ready", "Ready to read"],
-        ["working", "Working"],
-        ["quiet", "Quiet"],
+        ["needs", t("sessions.needs-you", "Needs you")],
+        ["ready", t("sessions.ready-to-read", "Ready to read")],
+        ["working", t("sessions.working", "Working")],
+        ["quiet", t("sessions.quiet", "Quiet")],
     ]) {
         if (slots[slot].length > 0) {
             const rows = rowsOf(slots[slot]);
@@ -551,25 +552,30 @@ function stateMark(session, working, marked, unseen = finishedUnseen(session)) {
     const fresh = marked || unseen;
 
     if (session.waiting) {
-        return { shape: "waiting", label: "Waiting for approval" };
+        return { shape: "waiting", label: t("sessions.waiting-approval", "Waiting for approval") };
     }
 
     // Pi's request waits for the provider's limit to clear: working, held up, until a time or a try.
     if (session.limited !== undefined) {
-        return { shape: "limited", label: "Waiting for a usage limit" };
+        return {
+            shape: "limited",
+            label: t("sessions.waiting-limit", "Waiting for a usage limit"),
+        };
     }
 
     if (session.busy || working) {
-        return { shape: "working", label: "Working" };
+        return { shape: "working", label: t("sessions.working", "Working") };
     }
 
     if (session.failed) {
         return fresh
-            ? { shape: "failed", label: "Failed, not read" }
-            : { shape: "failed seen", label: "Failed" };
+            ? { shape: "failed", label: t("sessions.failed-unread", "Failed, not read") }
+            : { shape: "failed seen", label: t("sessions.failed", "Failed") };
     }
 
-    return fresh ? { shape: "fresh", label: "Not read" } : { shape: "seen", label: "" };
+    return fresh
+        ? { shape: "fresh", label: t("sessions.not-read", "Not read") }
+        : { shape: "seen", label: "" };
 }
 
 /** A row's state for themes (`data-state`), by its square's shape: a documented name that stays when the squares change. */
@@ -1924,6 +1930,7 @@ function AllSessions({ compact = false }) {
             foldTrouble=${isFolded ? hiddenTrouble(group, session.id) : undefined}
             onFold=${onFold}
             index=${index}
+            localeRevision=${store.state.localeRevision}
             number=${numbers.get(session.id)}
             needle=${needle}
             selected=${selected.has(session.id)}
@@ -1979,7 +1986,7 @@ function AllSessions({ compact = false }) {
                 canStart &&
                 html`<button
                     class="new-button"
-                    title="New session (Alt+N)"
+                    title=${t("sessions.new-alt", "New session (Alt+N)")}
                     onClick=${() => openSheet({ type: "cwd", mode: "new", fromList: true })}
                 >
                     <${Icon} name="plus" size=${14} />
@@ -1990,8 +1997,8 @@ function AllSessions({ compact = false }) {
         <label class=${`search ${query ? "filled" : ""}`} data-part="session-search">
             <${Icon} name="search" size=${14} />
             <input
-                placeholder="Search sessions"
-                aria-label="Search sessions"
+                placeholder=${t("sessions.search", "Search sessions")}
+                aria-label=${t("sessions.search", "Search sessions")}
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
                 onKeyDown=${(event) => {
@@ -2100,7 +2107,15 @@ function AllSessions({ compact = false }) {
                 sessionsLoaded &&
                 shown.length === 0 &&
                 html`<div class="sessions-empty">
-                    ${kept !== null && !needle ? "No sessions match the filters." : archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}
+                    ${
+                        kept !== null && !needle
+                            ? t("sessions.no-match", "No sessions match the filters.")
+                            : archived
+                              ? t("sessions.no-archived", "No archived sessions.")
+                              : needle
+                                ? t("sessions.no-matches", "No matches.")
+                                : t("sessions.empty", "No sessions yet. Start one with New.")
+                    }
                 </div>`
             }
             ${
@@ -2275,6 +2290,7 @@ function AllSessions({ compact = false }) {
  * (`extensionsRev`). The sheet and the launcher it reads only as keys are pressed.
  */
 const LIST_KEYS = [
+    "localeRevision",
     "sessions",
     "sessionsLoaded",
     "server",
@@ -2443,8 +2459,8 @@ function Rail({ foldable = false, folded = false }) {
             html`<button
                 class="rail-button rail-new"
                 data-part="rail-button"
-                title="New session (Alt+N)"
-                aria-label="New session"
+                title=${t("sessions.new-alt", "New session (Alt+N)")}
+                aria-label=${t("sessions.new", "New session")}
                 onClick=${() => openSheet({ type: "cwd", mode: "new" })}
             >
                 <${Icon} name="plus" size=${19} />
@@ -2548,6 +2564,7 @@ function Rail({ foldable = false, folded = false }) {
  * which show their page or panel as open (`page`, `extPanel`, `extensionsRev`).
  */
 const RAIL_KEYS = [
+    "localeRevision",
     "sessions",
     "server",
     "me",
