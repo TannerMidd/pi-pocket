@@ -53,13 +53,16 @@ const settle = () =>
         await new Promise((resolve) => setTimeout(resolve, 100));
     `);
 
-/** PiP as a board: its conversation in the session's place, with its box and a ×, and no panel. */
+/** PiP's own box as a board, in the session's place. */
+const BOARD_BOX = ".pane .pip-composer textarea";
+/** PiP as a board: its conversation in the session's place, with its own box (no session box) and a ×, and no panel. */
 const boarded = (what: string) =>
     see(
         `${STORE}.store.state.view.conversation?.id === ${Number(pip)} &&
             ${PIP}.pipBoard() && !${STORE}.store.state.pipOpen &&
             document.querySelector('.pane .topbar [aria-label="Close PiP"]') !== null &&
-            document.querySelector('.pane .composer textarea') !== null &&
+            document.querySelector('${BOARD_BOX}') !== null &&
+            document.querySelector('.pane .composer') === null &&
             document.querySelector('.pip-panel:not(.leaving)') === null`,
         what,
     );
@@ -80,6 +83,11 @@ const backTo = (id: ConversationId, what: string) =>
             location.pathname === '/s/${Number(id)}'`,
         what,
     );
+/** Type `value` into the box `selector` finds, as a person does. */
+const type = (selector: string, value: string) =>
+    page.evaluate(`const box = document.querySelector('${selector}');
+        box.value = ${JSON.stringify(value)};
+        box.dispatchEvent(new Event('input', { bubbles: true }));`);
 const place = (value: "floating" | "board") =>
     page.evaluate(`(await import('/theme.js')).setPrefs({ pip: '${value}' })`);
 /** The session the list marks open. */
@@ -205,20 +213,18 @@ test("Board: the ways in open it, and Back, Alt+A, and its × close it", real, a
     await page.click({ selector: '.topbar [aria-label="Close PiP"]' });
     await backTo(background, "the session after ×");
 
-    // Text for PiP goes into its box only, not a session's in view; `pocket.pip.ask` puts it there.
-    await page.evaluate(
-        `${STORE}.insertIntoComposer('not here', [], { conversationId: ${Number(pip)} })`,
-    );
-    await settle();
-    assert.equal(await inPage(`document.querySelector('.pane .composer textarea').value`), "");
+    // Text for PiP (`pocket.pip.ask`), then text for the box in the session's place, go into PiP's box there.
     await page.evaluate(`${PIP}.askPipFrom({ module: 'demo' }, 'only for pip', false)`);
     await boarded("pocket.pip.ask");
+    await page.evaluate(`${STORE}.insertIntoComposer('and this')`);
     await see(
-        `document.querySelector('.pane .composer textarea').value.includes('only for pip')`,
+        `document.querySelector('${BOARD_BOX}').value.includes('only for pip\\n\\nand this')`,
         "in PiP's box",
     );
+    await type(BOARD_BOX, "");
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session");
+    assert.equal(await inPage(`document.querySelector('.pane .composer textarea').value`), "");
 
     // A notification's link, from a fresh tab at home.
     await page.navigate(`${base}/?pip=1`);
@@ -374,120 +380,117 @@ test("Ask PiP: the passage over the board's box, and PiP told its session", real
         `document.querySelector('.pane .quote-strip-text')?.textContent === 'the build is red'`,
         "the quote over the board's box",
     );
-    await page.evaluate(`
-        const box = document.querySelector('.pane .composer textarea');
-        box.value = 'why?';
-        box.dispatchEvent(new Event('input', { bubbles: true }));
-    `);
-    await page.click({ selector: ".pane .send-button" });
+    await type(BOARD_BOX, "why?");
+    await page.click({ selector: ".pane .pip-send" });
     await see(`${STORE}.store.state.pipQuote === null`, "sent");
     await until(async () => lastAsked.includes("the build is red"), "PiP asked");
     assert.ok(lastAsked.includes(`<pocket-context session=\\"${Number(background)}`));
     await page.evaluate(`${PIP}.closePip()`);
 });
 
-test(
-    "Ask PiP: PiP's one quote moves with it, and a send takes away only that quote",
-    real,
-    async () => {
-        const strip = (where: string, text: string) =>
-            `document.querySelector('${where} .quote-strip-text')?.textContent === '${text}'`;
+test("PiP's one box: its words, file, quote, and send on its way move with it", real, async () => {
+    const shown = (where: string) =>
+        inPage(`[document.querySelector('${where} .pip-composer textarea').value,
+            document.querySelector('${where} .pip-attachment-name')?.textContent ?? null,
+            document.querySelector('${where} .quote-strip-text')?.textContent ?? null]`);
 
-        await fresh("board");
-        await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
-        await see(strip(".pane", "still red"), "over the board's box");
-        await page.evaluate(`window.asked = ${STORE}.store.state.pipQuote`);
+    await fresh("floating");
+    await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
+    await floating("in the corner");
+    await type(".pip-composer textarea", "half a thought");
+    await page.evaluate(`const data = new DataTransfer();
+        data.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+        const picker = document.querySelector('.pip-file-picker');
+        picker.files = data.files;
+        picker.dispatchEvent(new Event('change', { bubbles: true }));`);
+    await see(`!document.querySelector('.pip-send').disabled`, "the file uploaded");
+    await place("board");
+    await boarded("on the board");
+    assert.deepEqual(await shown(".pane"), ["half a thought", "notes.txt", "still red"]);
+    // Sent on the board, held until PiP is in the corner, beside a Reply quote of the same words: on its way there too.
+    await holdingSends(async () => {
+        await page.click({ selector: ".pane .pip-send" });
+        await see(`window.sends === 1`, "the send on its way");
         await place("floating");
         await floating("in the corner");
-        await see(strip(".pip-panel", "still red"), "over the corner's box");
-        await place("board");
-        await see(strip(".pane", "still red"), "over the board's box again");
-        assert.equal(
-            await inPage(`${STORE}.store.state.pipQuote === window.asked`),
-            true,
-            "the same",
-        );
-        // A send held until PiP moved to the corner, beside a Reply quote of the same words.
+        assert.deepEqual(await shown(".pip-panel"), ["", "notes.txt", null], "on its way");
+        await page.press("Enter");
+        await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
+    });
+    await until(async () => lastAsked.includes("still red"), "PiP asked");
+    await see(`document.querySelector('.pip-attachment') === null`, "sent with its file");
+    assert.equal(await inPage(`window.sends`), 1, "once");
+    assert.equal(await inPage(`${STORE}.store.state.replyQuote?.text`), "still red", "Reply's");
+    await page.evaluate(`${PIP}.closePip()`);
+});
+
+test(
+    "Ask PiP: a failed send gives the words and quote back, wherever PiP shows",
+    real,
+    async () => {
+        await fresh("floating");
+        await page.evaluate(`${PIP}.quotePip('try again', ${Number(background)})`);
+        await floating("in the corner");
+        // The send waits, and then fails, after PiP moved to the board.
         await holdingSends(async () => {
-            await page.evaluate(`
-                const box = document.querySelector('.pane .composer textarea');
-                box.value = 'and now?';
-                box.dispatchEvent(new Event('input', { bubbles: true }));
-            `);
-            await page.click({ selector: ".pane .send-button" });
+            await type(".pip-composer textarea", "again?");
+            await page.click({ selector: ".pip-panel .pip-send" });
             await see(`window.sends === 1`, "the send on its way");
-            await place("floating");
-            await floating("in the corner");
+            await place("board");
+            await boarded("moved meanwhile");
             assert.equal(
-                await inPage(strip(".pip-panel", "still red")),
-                false,
-                "on its way: not twice",
+                await inPage(`document.querySelector('.pane .quote-strip') === null`),
+                true,
+                "on its way",
             );
-            await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
-        });
-        await until(async () => lastAsked.includes("still red"), "PiP asked");
-        await see(`${STORE}.store.state.pipQuote === null`, "the sent quote gone");
-        assert.equal(
-            await inPage(`${STORE}.store.state.replyQuote?.text`),
-            "still red",
-            "Reply's stays",
+        }, true);
+        await see(
+            `document.querySelector('.pane .quote-strip-text')?.textContent === 'try again' &&
+            document.querySelector('${BOARD_BOX}').value === 'again?'`,
+            "the quote and the words back",
         );
         await page.evaluate(`${PIP}.closePip()`);
     },
 );
 
-test("Ask PiP: a failed send gives the quote back, wherever PiP shows", real, async () => {
-    await fresh("floating");
-    await page.evaluate(`${PIP}.quotePip('try again', ${Number(background)})`);
-    await floating("in the corner");
-    // The send waits, and then fails, after PiP moved to the board.
-    await holdingSends(async () => {
-        await page.evaluate(`
-            const box = document.querySelector('.pip-composer textarea');
-            box.value = 'again?';
-            box.dispatchEvent(new Event('input', { bubbles: true }));
-        `);
-        await page.click({ selector: ".pip-panel .pip-send" });
-        await see(`window.sends === 1`, "the send on its way");
-        await place("board");
-        await boarded("moved meanwhile");
-        assert.equal(
-            await inPage(`document.querySelector('.pane .quote-strip') === null`),
-            true,
-            "on its way",
+test(
+    "Over PiP's box: Pending memories in both places while one waits, and waiting messages",
+    real,
+    async () => {
+        const COUNT = (where: string) =>
+            `document.querySelector('${where} .pip-memory-count')?.textContent.trim()`;
+
+        await fresh("board");
+        await page.evaluate(`${PIP}.openPip()`);
+        await boarded("PiP");
+        await settle();
+        assert.equal(await inPage(`${COUNT(".pane")} ?? null`), null, "none waits: no strip");
+
+        const lesson = await app.memory.add(
+            background,
+            project,
+            { userId: owner(app).id, byPi: true, name: "Pi" },
+            { text: "Run the board tests alone.", scope: "everywhere" },
         );
-    }, true);
-    await see(
-        `document.querySelector('.pane .quote-strip-text')?.textContent === 'try again'`,
-        "the quote back",
-    );
-    await page.evaluate(`${PIP}.closePip()`);
-});
 
-test("Pending memories: PiP's strip in both places, only while one waits", real, async () => {
-    const COUNT = (where: string) =>
-        `document.querySelector('${where} .pip-memory-count')?.textContent.trim()`;
-
-    await fresh("board");
-    await page.evaluate(`${PIP}.openPip()`);
-    await boarded("PiP");
-    await settle();
-    assert.equal(await inPage(`${COUNT(".pane .dock")} ?? null`), null, "none waits: no strip");
-
-    const lesson = await app.memory.add(
-        background,
-        project,
-        { userId: owner(app).id, byPi: true, name: "Pi" },
-        { text: "Run the board tests alone.", scope: "everywhere" },
-    );
-
-    await see(`${COUNT(".pane .dock")} === '1 pending'`, "on the board");
-    await place("floating");
-    await see(`${COUNT(".pip-panel")} === '1 pending'`, "floating");
-    await app.memory.edit(background, owner(app), lesson.id, "discard");
-    await see(`document.querySelector('.pip-memory') === null`, "gone once none waits");
-    await page.evaluate(`${PIP}.closePip()`);
-});
+        await see(
+            `${COUNT(".pane .pip-composer-wrap")} === '1 pending'`,
+            "over PiP's box on the board",
+        );
+        // Over it too: your message that waits while PiP works, as in the panel.
+        await page.evaluate(`${STORE}.store.set((state) => ({ view: { ...state.view, inbox: [
+        { id: 9001, mode: 'steer', by: '${owner(app).id}', text: 'also this' }] } }))`);
+        await see(
+            `document.querySelector('.pane .pip-you.pending')?.textContent.includes('also this')`,
+            "waiting",
+        );
+        await place("floating");
+        await see(`${COUNT(".pip-panel")} === '1 pending'`, "floating");
+        await app.memory.edit(background, owner(app), lesson.id, "discard");
+        await see(`document.querySelector('.pip-memory') === null`, "gone once none waits");
+        await page.evaluate(`${PIP}.closePip()`);
+    },
+);
 
 test("PiP turned off in Extensions closes the board", real, async () => {
     await fresh("board");

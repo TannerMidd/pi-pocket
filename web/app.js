@@ -6,7 +6,7 @@ import { canGoBack, goBack, replaceAddress, startHistory, useBack } from "./back
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, setBrowserOpen, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
-import { Composer, openingByAlt, shortModel } from "./composer.js";
+import { Composer, openingByAlt, shortModel, StatusLine } from "./composer.js";
 import { useChanges } from "./diff.js";
 import {
     FilesButton,
@@ -31,7 +31,15 @@ import {
     peeksWanted,
     togglePeeks,
 } from "./peeks.js";
-import { closePip, openPip, PipHost, pipAvailable, pipBoard, togglePip } from "./pip.js";
+import {
+    closePip,
+    openPip,
+    PipBoardBox,
+    PipHost,
+    pipAvailable,
+    pipBoard,
+    togglePip,
+} from "./pip.js";
 import { Drawer, RailNav, ResizeHandle, SessionList, toSessions } from "./sessions.js";
 import { SessionTabs } from "./session-tabs.js";
 // Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
@@ -575,7 +583,10 @@ function App() {
                     ${
                         state.view.conversation &&
                         !state.missing &&
-                        html`<${Composer} key=${state.conversationId} />`
+                        // PiP's conversation as a board has PiP's own box, the one its panel has.
+                        (pipBoard()
+                            ? html`<${PipBoardBox}><${StatusLine} /><//>`
+                            : html`<${Composer} key=${state.conversationId} />`)
                     }`
                           : html`<div class="home-list" data-part="home-list">
                           <${RailNav} />

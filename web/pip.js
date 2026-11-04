@@ -16,7 +16,6 @@ import {
     api,
     attempt,
     giveBackQuote,
-    insertIntoComposer,
     isRow,
     navigate,
     notify,
@@ -24,6 +23,7 @@ import {
     dropQuote,
     showsPip,
     store,
+    takeInsert,
     uid,
 } from "./store.js";
 import { spendTap } from "./taps.js";
@@ -229,7 +229,7 @@ store.subscribe((state) => {
             queueMicrotask(() => {
                 if (pipPlace() === "board" && store.state.pipOpen) {
                     closePip();
-                    openBoard(undefined, true);
+                    openBoard(true);
                 }
             });
 
@@ -340,10 +340,10 @@ const placeNow = () => {
 };
 
 /**
- * Open PiP's conversation in the session's place, as a session opens; with `text`, put it in its message box. What is
- * over that place goes, as for Running now, but with `keepSheet` the sheet that moved it there (Appearance) stays.
+ * Open PiP's conversation in the session's place, as a session opens. What is over that place goes, as for Running now,
+ * but with `keepSheet` the sheet that moved it there (Appearance) stays.
  */
-async function openBoard(text, keepSheet = false) {
+async function openBoard(keepSheet = false) {
     const before = placeNow();
     const id = await pipConversation();
 
@@ -364,11 +364,6 @@ async function openBoard(text, keepSheet = false) {
         page: null,
         ...(keepSheet ? {} : { sheet: null }),
     });
-
-    // Into PiP's own box only, once its conversation shows.
-    if (text) {
-        insertIntoComposer(text, [], { conversationId: id });
-    }
 }
 
 /** Open PiP where Appearance says; with `text`, put it in PiP's message box. Resolves once it is open as a board. */
@@ -377,12 +372,13 @@ export function openPip(text) {
         return Promise.resolve();
     }
 
-    if (pipPlace() === "board") {
-        return openBoard(text);
-    }
-
+    // PiP's box takes it as it shows, in either place.
     if (text) {
         store.set({ pipDraft: { text, n: (store.state.pipDraft?.n ?? 0) + 1 } });
+    }
+
+    if (pipPlace() === "board") {
+        return openBoard();
     }
 
     if (store.state.pipOpen) {
@@ -407,10 +403,7 @@ export async function quotePip(passage, session) {
         pipQuote: { text: passage, ...(typeof session === "number" ? { session } : {}) },
     });
     await openPip();
-
-    if (!pipBoard()) {
-        focusComposer();
-    }
+    focusComposer();
 }
 
 /** Close PiP in either place: its conversation in the session's place gives way to what was there before. */
@@ -438,15 +431,8 @@ export function closePip() {
 
 export const togglePip = () => (pipShown() ? closePip() : openPip());
 
-/** Put `text` in PiP's box, after what is there, and open the panel. */
+/** Put `text` in PiP's box, after what is there, and open PiP. */
 function draftPip(text) {
-    // As a board, PiP's box is its conversation's, which keeps its own draft.
-    if (pipPlace() === "board") {
-        openPip(text);
-
-        return;
-    }
-
     const draft = personStorage.get(DRAFT_KEY)?.trim();
 
     openPip(draft ? `${draft}\n\n${text}` : text);
@@ -862,7 +848,11 @@ function Welcome({ id, name, hasModel }) {
     </div>`;
 }
 
-function Composer({ id, busy }) {
+/**
+ * PiP's one message box, with its one draft (`composerDraft`): in its panel, or with `board` in the session's place,
+ * where it takes what is put into that place's box (`insertIntoComposer`) and has the session box's theme parts.
+ */
+function Composer({ id, busy, board = false }) {
     const [saved, setSaved] = useState(() => {
         composerDraft.syncText();
 
@@ -916,6 +906,21 @@ function Composer({ id, busy }) {
             store.set({ pipDraft: null });
         }
     }, [draft?.n]);
+
+    const insert = board ? store.state.composerInsert : null;
+
+    useEffect(() => {
+        const taken = insert && takeInsert(composerDraft.state.text);
+
+        if (taken?.files.length > 0) {
+            composerDraft.addFiles(taken.files);
+        }
+
+        if (taken?.text) {
+            change(taken.text);
+            ref.current?.focus();
+        }
+    }, [insert?.n]);
 
     const submit = async (event) => {
         event?.preventDefault();
@@ -1013,6 +1018,12 @@ function Composer({ id, busy }) {
         }}
     >
         ${
+            id !== undefined &&
+            store.state.me?.role === "owner" &&
+            memoryAvailable(id) &&
+            html`<${PendingMemories} id=${id} before=${board ? undefined : closePip} />`
+        }
+        ${
             files.length > 0 &&
             html`<div class="pip-attachments" aria-label="Files attached to PiP">
                 ${files.map(
@@ -1051,7 +1062,11 @@ function Composer({ id, busy }) {
                 </button>
             </div>`
         }
-        <form class="pip-composer" onSubmit=${submit}>
+        <form
+            class="pip-composer"
+            data-part=${board ? "message-box" : undefined}
+            onSubmit=${submit}
+        >
             <input
                 class="pip-file-picker"
                 ref=${picker}
@@ -1121,6 +1136,7 @@ function Composer({ id, busy }) {
                     : html`<button
                           type="submit"
                           class="icon-button pip-send"
+                          data-part=${board ? "send-button" : undefined}
                           aria-label="Send to PiP"
                           disabled=${sendDisabled}
                       >
@@ -1142,6 +1158,51 @@ const pendingWhen = (item, busy) =>
 /** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
 const FROM = /^\[from: [^\]\n]{1,60}\] /;
 
+/** Your messages in `view` (PiP's) that wait while PiP works: shown at once, as waiting, until PiP takes them. */
+function Waiting({ id, view, busy }) {
+    const me = store.state.me;
+
+    return (view.inbox ?? [])
+        .filter((item) => item.by === me?.id && (item.mode === "steer" || item.mode === "followUp"))
+        .map(
+            (item) => html`<div class="pip-you pending" key=${`pending-${item.id}`}>
+                <div>
+                    ${
+                        typeof item.label === "string" && item.label !== ""
+                            ? `▸ ${item.label}${item.summary ? `: ${item.summary}` : ""}`
+                            : (item.text ?? "").replace(FROM, "")
+                    }
+                </div>
+                <div class="pip-pending-line">
+                    <span>${pendingWhen(item, busy)}</span>
+                    <button
+                        type="button"
+                        class="pip-pending-withdraw"
+                        onClick=${() =>
+                            attempt(() => api(`c/${id}/withdraw`, { submissionId: item.id }))}
+                    >
+                        Withdraw
+                    </button>
+                </div>
+            </div>`,
+        );
+}
+
+/**
+ * PiP's conversation as a board: in the session composer's place, PiP's own box (the panel's, with the same draft),
+ * the messages that wait over it, and `children` (the status line) under it.
+ */
+export function PipBoardBox({ children }) {
+    const { view, pip } = store.state;
+    const busy = view.live.busy === true;
+
+    return html`<footer class="composer-wrap pip-board-box" data-part="composer">
+        <div class="pip-waiting"><${Waiting} id=${pip?.id} view=${view} busy=${busy} /></div>
+        <${Composer} id=${pip?.id} busy=${busy} board=${true} />
+        ${children}
+    </footer>`;
+}
+
 function PipPanel({ leaving, scrim }) {
     const { pip, pipView: view, me } = store.state;
     const ref = useRef(null);
@@ -1155,12 +1216,6 @@ function PipPanel({ leaving, scrim }) {
               .map((entryId) => view.entries.get(entryId))
               .filter((entry) => entry && isRow(entry))
               .slice(-ROWS)
-        : [];
-    // Your messages that wait while PiP works: shown at once, as waiting, until PiP takes them.
-    const pending = ready
-        ? (view.inbox ?? []).filter(
-              (item) => item.by === me?.id && (item.mode === "steer" || item.mode === "followUp"),
-          )
         : [];
     const blocks = live.generation?.message?.blocks ?? [];
     const items = itemsOf(rows, blocks.length > 0 ? { kind: "assistant", blocks } : null);
@@ -1325,28 +1380,7 @@ function PipPanel({ leaving, scrim }) {
                     <span>Thinking</span>
                 </div>`
             }
-            ${pending.map(
-                (item) => html`<div class="pip-you pending" key=${`pending-${item.id}`}>
-                    <div>
-                        ${
-                            typeof item.label === "string" && item.label !== ""
-                                ? `▸ ${item.label}${item.summary ? `: ${item.summary}` : ""}`
-                                : (item.text ?? "").replace(FROM, "")
-                        }
-                    </div>
-                    <div class="pip-pending-line">
-                        <span>${pendingWhen(item, busy)}</span>
-                        <button
-                            type="button"
-                            class="pip-pending-withdraw"
-                            onClick=${() =>
-                                attempt(() => api(`c/${id}/withdraw`, { submissionId: item.id }))}
-                        >
-                            Withdraw
-                        </button>
-                    </div>
-                </div>`,
-            )}
+            ${ready && html`<${Waiting} id=${id} view=${view} busy=${busy} />`}
         </div>
         ${
             waiting.length > 0 &&
@@ -1364,12 +1398,6 @@ function PipPanel({ leaving, scrim }) {
                     Review
                 </button>
             </div>`
-        }
-        ${
-            ready &&
-            me?.role === "owner" &&
-            memoryAvailable(id) &&
-            html`<${PendingMemories} id=${id} before=${closePip} />`
         }
         <${Composer} id=${id} busy=${busy} />
     </section>`;

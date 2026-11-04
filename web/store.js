@@ -2979,21 +2979,36 @@ export function openSheet(sheet) {
 }
 
 /**
- * Put text into the message box to Pi (after what is there: on a new paragraph, or with `inline`, after a space), and
- * files to attach, and close any sheet so it shows. With `conversationId`, only that conversation's box takes it, once
- * it shows: a session shown before it does not.
+ * Put text into the message box in the session's place (after what is there: on a new paragraph, or with `inline`,
+ * after a space), and files to attach, and close any sheet so it shows. The box that shows takes it (`takeInsert`).
  */
-export function insertIntoComposer(text, files = [], { inline = false, conversationId } = {}) {
+export function insertIntoComposer(text, files = [], { inline = false } = {}) {
     store.set((state) => ({
         sheet: null,
-        composerInsert: {
-            text,
-            files,
-            inline,
-            conversationId,
-            n: (state.composerInsert?.n ?? 0) + 1,
-        },
+        composerInsert: { text, files, inline, n: (state.composerInsert?.n ?? 0) + 1 },
     }));
+}
+
+/** The newest `insertIntoComposer` a box took: each goes into one box, once. */
+let insertedUpTo = 0;
+
+/**
+ * Take what `insertIntoComposer` put that no box took yet: its files, and its text after `current` (the box's words),
+ * or null for none. Null when nothing waits.
+ */
+export function takeInsert(current) {
+    const insert = store.state.composerInsert;
+
+    if (!insert || insert.n <= insertedUpTo) {
+        return null;
+    }
+
+    insertedUpTo = insert.n;
+    const gap = insert.inline ? " " : "\n\n";
+    const text =
+        current.trim() === "" ? insert.text : `${current.replace(/\s+$/, "")}${gap}${insert.text}`;
+
+    return { files: insert.files ?? [], text: insert.text === "" ? null : text };
 }
 
 /**

@@ -29,6 +29,7 @@ import {
     giveBackQuote,
     showsPip,
     store,
+    takeInsert,
     typing,
     uid,
 } from "./store.js";
@@ -82,8 +83,6 @@ const coarse = matchMedia("(pointer: coarse)").matches;
 let openedByAlt = null;
 
 export const openingByAlt = (id) => (openedByAlt = APPLE ? id : null);
-/** The newest "Send to Pi" text already put into a message box (see `insertIntoComposer`). */
-let insertedUpTo = 0;
 
 /** Pasted text this long goes into the box as a placeholder; the message goes out with the text in its place. */
 const PASTE_LINES = 20;
@@ -560,31 +559,17 @@ export function Composer() {
     const insert = store.state.composerInsert;
 
     useEffect(() => {
-        if (
-            !insert ||
-            insert.n <= insertedUpTo ||
-            (insert.conversationId !== undefined && insert.conversationId !== conversationId)
-        ) {
+        const taken = insert && takeInsert(drafts.get(conversationId));
+
+        if (taken?.files.length > 0) {
+            addFiles(taken.files);
+        }
+
+        if (!taken?.text) {
             return;
         }
 
-        insertedUpTo = insert.n;
-
-        if (insert.files?.length > 0) {
-            addFiles(insert.files);
-        }
-
-        if (insert.text === "") {
-            return;
-        }
-
-        const current = drafts.get(conversationId);
-
-        update(
-            current.trim() === ""
-                ? insert.text
-                : `${current.replace(/\s+$/, "")}${insert.inline ? " " : "\n\n"}${insert.text}`,
-        );
+        update(taken.text);
         requestAnimationFrame(() => {
             const element = box.current;
 
@@ -2166,7 +2151,7 @@ defineItem("status", {
 });
 
 /** Under the message box: the `status` slot's items, on one row: a narrow one takes shorter forms (`SHORTER`). */
-function StatusLine() {
+export function StatusLine() {
     const line = useRef(null);
     const items = slotItems("status");
     const parts = items.map(({ node }) => node);

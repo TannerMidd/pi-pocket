@@ -18411,10 +18411,10 @@ textarea.notes {
     min-height: 40px;
 }
 
-/* Quick access to the owner's private all-project memory approval queue. */
+/* Quick access to the owner's private all-project memory approval queue: the top of PiP's box, in both places. */
 .pip-memory {
     flex: none;
-    margin: 0 12px 6px;
+    margin: 0 0 6px;
 }
 
 .pip-memory .button {
@@ -18459,6 +18459,23 @@ textarea.notes {
     flex: none;
     min-width: 0;
     padding: 4px 12px 12px;
+}
+
+/* PiP's box on its board, in the session composer's place: that place's room, and the status line under it. */
+.pip-board-box > .pip-composer-wrap {
+    padding: 0 0 4px;
+}
+
+/* Over it there, your messages that wait while PiP works, as in its panel. */
+.pip-waiting {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pip-waiting:empty {
+    display: none;
 }
 
 .pip-attachments {
