@@ -284,6 +284,8 @@ The server keeps one catalog (`src/server/ui-locales.ts`): English (`web/locales
 
 The browser keeps the person's choice in one cookie (`pocket_locale`), and nowhere else. `web/ui-locale.js` holds the catalog it last read, the preferred language, and the effective one: English when the catalog does not have the preferred language, when the server has no catalog (an older server, or one whose answer failed), and in safe mode. It reads the catalog at start, on each new connection whether the revision changed or not, and when the revision changes; a fetch that is not the latest is dropped, so an old answer cannot overwrite a newer one. Text is looked up as a part draws — `t(key, english, values)`, over the same `web/locale.js` the server uses — and never kept at load: `store.set` bumps `store.state.localeRevision`, and every part that draws text names that key in its `drawnFor` keys or takes it as a prop for `memo`. Nothing reloads and no part remounts: drafts, focus, panels, and history stay.
 
+The pages outside the app (`/login`, `/join/:code`, `/share`) read that same catalog, and only that one: `http.ts` takes one snapshot and one language for the whole request before a page starts, and the page holds them while it waits for a session's title. A missing, invalid, or unavailable choice shows English, and a page opened with `?noext=1` shows English and keeps the choice. The words are escaped where they go into the page, once: a translated sentence that holds a person's name or a session's title is interpolated with the raw text and escaped after it.
+
 **Contracts with the server.**
 
 - Event names and shapes (`hello`, `view`, `chat`, `peek`, `subagents`, `ext`, …) and the sheet types the server names (`sheet: "chat"`).

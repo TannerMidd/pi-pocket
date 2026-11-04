@@ -10,7 +10,7 @@
  */
 
 import { EN, EN_LABEL } from "../../web/locales/en.js";
-import { placeholders } from "../../web/locale.js";
+import { placeholders, translate } from "../../web/locale.js";
 
 /** One language's UI text, as a module declares it: its tag, its own name, and its messages by key. */
 export interface UiLocalePack {
@@ -464,4 +464,74 @@ export class UiLocales {
 /** A language as it was declared, as JSON: what the committed total counts. */
 function declaredJson(pack: UiLocalePack): string {
     return DECLARED.get(pack) ?? JSON.stringify(pack);
+}
+
+/** One language for one request: the tag it shows, and its words. It holds its own messages, so it stays as it was. */
+export interface RequestLocale {
+    /** The tag of the language shown: one that the catalog has, or `en`. */
+    readonly lang: string;
+    /** The words for `key`: the language's, else `english`, which is the wording of the page that asks. */
+    t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+}
+
+/** A language tag as `Intl` writes it, or undefined when it is not one: only an exact tag matches. */
+function canonicalTag(value: string | undefined): string | undefined {
+    if (value === undefined || value === "") {
+        return undefined;
+    }
+
+    try {
+        return Intl.getCanonicalLocales(value)[0];
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * The `pocket_locale` cookie of a request, or undefined. It is the browser's one copy of the choice; a request that
+ * names no language, or one that is not a tag, shows English.
+ */
+export function localeCookie(cookie: string | undefined): string | undefined {
+    for (const each of (cookie ?? "").split(";")) {
+        const at = each.indexOf("=");
+
+        if (at > 0 && each.slice(0, at).trim() === "pocket_locale") {
+            const raw = each
+                .slice(at + 1)
+                .trim()
+                .replace(/^"|"$/g, "");
+
+            try {
+                return decodeURIComponent(raw);
+            } catch {
+                return undefined;
+            }
+        }
+    }
+
+    return undefined;
+}
+
+/**
+ * The language of one request, from one catalog snapshot: the preference while that snapshot has it, else English. A
+ * missing, invalid, or unavailable preference shows English; no parent language matches. `safe` keeps English, and the
+ * preference stays as it is.
+ */
+export function requestLocale(
+    snapshot: UiLocaleSnapshot,
+    preference: string | undefined,
+    safe = false,
+): RequestLocale {
+    const wanted = safe ? undefined : canonicalTag(preference);
+    const pack =
+        wanted === undefined || wanted === "en"
+            ? undefined
+            : snapshot.locales.find((each) => each.id === wanted);
+    const messages = pack?.messages ?? EN;
+
+    return Object.freeze({
+        lang: pack?.id ?? "en",
+        t: (key: string, english: string, values?: Readonly<Record<string, string | number>>) =>
+            translate(messages, key, english, values),
+    });
 }

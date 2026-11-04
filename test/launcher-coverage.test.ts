@@ -17,13 +17,17 @@ test("the launcher opens every sheet the menu opens", () => {
 });
 
 test("the launcher has every row of the menu, by name", () => {
-    // `item("Name"`, and `item(cond ? "One" : "Other"` on the lines after it.
+    // Literal names, call-site English in `t`, and conditional names on the lines after `item(`.
     const names = [
         ...[...menu.matchAll(/item\(\s*"([^"]+)"/g)].map((match) => match[1]),
         ...[...menu.matchAll(/item\(\s*\n\s*[^"\n]*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/g)].flatMap(
             (match) => [match[1], match[2]],
         ),
     ];
+
+    names.push(
+        ...[...menu.matchAll(/item\(\s*t\(\s*"[^"]+"\s*,\s*"([^"]+)"/g)].map((match) => match[1]),
+    );
     const missing = names.filter((name) => !launcher.includes(`"${name}`));
 
     assert.ok(names.includes("Webhooks and watches") && names.includes("Take turns"));

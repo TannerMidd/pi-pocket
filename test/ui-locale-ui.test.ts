@@ -21,6 +21,7 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import { Auth } from "../src/server/auth.ts";
 
 const data = join(root, "locale-ui-data");
 const dropIns = join(data, "extensions");
@@ -42,7 +43,10 @@ export default (_host, web) => web.uiLocales([{ id: "fr", label: "Français", me
     "menu.appearance": "Apparence", "appearance.title": "Apparence", "appearance.language": "Langue",
     "sessions.new": "Nouvelle session", "sessions.search": "Rechercher des sessions",
     "sessions.mark-read": "Marquer comme lu", "sessions.recent": "Récent", "sessions.selected": "Sélectionné", "sessions.not-read": "Non lu", "menu.mark-unread": "Marquer non lu",
-    "slots.topbar": "Boutons du haut", "slots.places": "Emplacements"
+    "slots.topbar": "Boutons du haut", "slots.places": "Emplacements",
+    "signin.switch-title": "Changer de compte ?", "signin.switch-page-title": "Changer de compte ? · Pi Pocket",
+    "signin.switch-body": "Compte {current} vers {next}.", "signin.switch-as": "Continuer comme {name}", "signin.stay-as": "Rester comme {name}",
+    "signin.name-label": "Votre nom", "signin.name-placeholder": "ex. Alex", "signin.join-title": "Rejoindre Pi Pocket", "signin.join": "Rejoindre"
 } }]);
 `,
     );
@@ -182,6 +186,257 @@ async function chooseFrench(page: BrowserPage): Promise<void> {
         "the translated Appearance sheet redraws",
     );
 }
+
+for (const viewport of ["mobile", "desktop"] as const) {
+    test(`R25: ${viewport} SSR and the browser use the same installed catalog and recover after disable`, async () => {
+        const page = await openPage(viewport);
+        const visitor = app.config.addUser(`SSR ${viewport}`, "guest");
+
+        await chooseFrench(page);
+        const response = await fetch(`${base}/ui-locales.json`);
+        const catalog = (await response.json()) as {
+            locales: { id: string; messages: Record<string, string> }[];
+        };
+        const message = catalog.locales.find((entry) => entry.id === "fr")!.messages[
+            "signin.switch-title"
+        ]!;
+
+        await page.navigate(`${base}/login?token=${encodeURIComponent(visitor.token)}&next=%2F`);
+        await see(
+            page,
+            `document.querySelector('main.plain h1')`,
+            "the translated SSR switch-account page",
+        );
+        assert.equal(
+            await pageScript<string>(page, `return JSON.stringify(document.documentElement.lang)`),
+            "fr",
+        );
+        assert.equal(
+            await pageScript<string>(
+                page,
+                `return JSON.stringify(document.querySelector('main.plain h1').textContent)`,
+            ),
+            message,
+        );
+        await page.evaluate(`document.querySelector('form button').click()`);
+        await see(
+            page,
+            `(await import('/store.js')).store.state.me?.role === 'guest'`,
+            "the signed-in guest reaches the main app",
+        );
+        assert.equal(
+            await pageScript<string>(page, `return JSON.stringify(document.documentElement.lang)`),
+            "fr",
+            "SSR preference reaches the main app",
+        );
+        await appearance(page);
+        assert.equal(
+            await pageScript<string>(
+                page,
+                `return JSON.stringify(document.querySelector('[data-sheet=appearance] h2').textContent)`,
+            ),
+            "Apparence",
+        );
+
+        try {
+            await app.setExtensionEnabled(owner(app), "a-locale.ts", false);
+            await app.setExtensionEnabled(owner(app), "z-locale.ts", false);
+            await see(
+                page,
+                `document.documentElement.lang === 'en'`,
+                "the main app falls back after disable",
+            );
+            await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+            await see(
+                page,
+                `document.querySelector('main.plain h1')`,
+                "the SSR switch-account page after disable",
+            );
+            assert.equal(
+                await pageScript<string>(
+                    page,
+                    `return JSON.stringify(document.documentElement.lang)`,
+                ),
+                "en",
+            );
+            assert.equal(
+                await pageScript<string>(
+                    page,
+                    `return JSON.stringify(document.querySelector('main.plain h1').textContent)`,
+                ),
+                "Switch account?",
+            );
+        } finally {
+            await app.setExtensionEnabled(owner(app), "a-locale.ts", true);
+            await app.setExtensionEnabled(owner(app), "z-locale.ts", true);
+            page.close();
+        }
+    });
+}
+
+test("R27: real SSR translations and names render as literal text in Chromium", async () => {
+    const file = join(dropIns, "a-locale.ts");
+    const original = readFileSync(file, "utf8");
+    const marker = 'Changer "<img src=x onerror=window.localeInjected=1>';
+    const placeholder = 'Nom "<img src=x onerror=window.localeInjected=2>';
+    const name = 'Guest "<img src=x onerror=window.localeInjected=3>';
+    const page = await openPage("desktop");
+    const visitor = app.config.addUser(name, "guest");
+
+    try {
+        await chooseFrench(page);
+        writeFileSync(
+            file,
+            original
+                .replace(JSON.stringify("Changer de compte ?"), JSON.stringify(marker))
+                .replace(JSON.stringify("ex. Alex"), JSON.stringify(placeholder)),
+        );
+        await app.reloadExtension("a-locale.ts");
+        await page.navigate(`${base}/login?token=${encodeURIComponent(visitor.token)}`);
+        await see(
+            page,
+            `document.querySelector('main.plain h1')`,
+            "the malicious switch text is rendered",
+        );
+        const switched = await pageScript<{
+            heading: string;
+            text: string;
+            images: number;
+            token: string;
+            next: string;
+        }>(
+            page,
+            `
+            return JSON.stringify({ heading: document.querySelector('main.plain h1').textContent,
+                text: document.querySelector('main.plain').textContent, images: document.querySelectorAll('main.plain img').length,
+                token: document.querySelector('input[name=token]').value, next: document.querySelector('input[name=next]').value });
+        `,
+        );
+
+        assert.equal(switched.heading, marker);
+        assert.ok(switched.text.includes(name));
+        assert.equal(switched.images, 0);
+        assert.equal(
+            await pageScript<boolean>(
+                page,
+                `return JSON.stringify(window.localeInjected === undefined)`,
+            ),
+            true,
+            "no injected event ran",
+        );
+        assert.equal(switched.token, visitor.token);
+        assert.equal(switched.next, "/");
+        const code = new Auth(app.config).createInvite(owner(app), {
+            role: "viewer",
+            session: String(session),
+        }).code;
+
+        await app.commands.updateSession(session, owner(app), { title: name });
+        await page.navigate(`${base}/join/${code}`);
+        await see(
+            page,
+            `document.querySelector('main.plain input[name=name]')`,
+            "the translated invite form",
+        );
+        const joined = await pageScript<{ placeholder: string; text: string; images: number }>(
+            page,
+            `
+            return JSON.stringify({ placeholder: document.querySelector('input[name=name]').placeholder,
+                text: document.querySelector('main.plain').textContent, images: document.querySelectorAll('main.plain img').length });
+        `,
+        );
+
+        const catalog = (await (await fetch(`${base}/ui-locales.json`)).json()) as {
+            locales: { id: string; messages: Record<string, string> }[];
+        };
+        const same = catalog.locales.find((item) => item.id === "fr")!.messages[
+            "signin.name-placeholder"
+        ];
+
+        assert.equal(joined.placeholder, placeholder);
+        assert.equal(
+            joined.placeholder,
+            same,
+            "SSR and the public catalog share this translated attribute",
+        );
+        assert.ok(joined.text.includes(name));
+        assert.equal(joined.images, 0);
+        assert.equal(
+            await pageScript<boolean>(
+                page,
+                `return JSON.stringify(window.localeInjected === undefined)`,
+            ),
+            true,
+            "no injected event ran",
+        );
+        await page.navigate(`${base}/`);
+        await see(
+            page,
+            `(await import("/store.js")).store.state.me?.role === "owner"`,
+            "the main browser after SSR",
+        );
+        const browserWords = await pageScript<string>(
+            page,
+            `return JSON.stringify((await import("/ui-locale.js")).t("signin.name-placeholder", "e.g. Alex"))`,
+        );
+
+        assert.equal(
+            browserWords,
+            same,
+            "the browser uses the same key and bytes as SSR and the catalog",
+        );
+    } finally {
+        await app.commands.updateSession(session, owner(app), { title: "Close" });
+        writeFileSync(file, original);
+        await app.reloadExtension("a-locale.ts");
+        page.close();
+    }
+});
+
+test("R25: absent or blocked locale cookies leave SSR and the next main page in English", async () => {
+    const page = await openPage("desktop");
+    const guest = app.config.addUser("Cookie blocked guest", "guest");
+
+    await appearance(page);
+    await page.evaluate(`
+        document.cookie = 'pocket_locale=; Max-Age=0; Path=/';
+        const cookie = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+        Object.defineProperty(document, 'cookie', { configurable: true, get: () => cookie.get.call(document),
+            set: () => { throw new DOMException('blocked', 'SecurityError'); } });
+    `);
+    await chooseFrench(page);
+    assert.equal(
+        await pageScript<string>(page, `return JSON.stringify(document.documentElement.lang)`),
+        "fr",
+    );
+    await page.navigate(`${base}/login?token=${encodeURIComponent(guest.token)}`);
+    await see(
+        page,
+        `document.querySelector('main.plain h1')`,
+        "the SSR page without a saved cookie",
+    );
+    assert.equal(
+        await pageScript<string>(page, `return JSON.stringify(document.documentElement.lang)`),
+        "en",
+    );
+    assert.equal(
+        await pageScript<string>(
+            page,
+            `return JSON.stringify(document.querySelector('main.plain h1').textContent)`,
+        ),
+        "Switch account?",
+    );
+    await page.evaluate(`document.querySelector('form button').click()`);
+    await see(
+        page,
+        `(await import('/store.js')).store.state.me?.role === 'guest'`,
+        "the new page opens after SSR",
+    );
+    assert.equal(
+        await pageScript<string>(page, `return JSON.stringify(document.documentElement.lang)`),
+        "en",
+    );
+});
 
 test("R14: disabling and restoring real overlay modules updates every role and keeps each preference", async () => {
     const tokens = [
