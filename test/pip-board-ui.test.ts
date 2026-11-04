@@ -594,34 +594,39 @@ test("A session's send on its way, its box shown again: once, or all back", real
     assert.equal(await inPage(`window.sends`), 1, "once");
 });
 
-test("A queued message taken back while a send is on its way keeps every word", real, async () => {
+test("A queued message's Edit while a send goes, box shown again: every word", real, async () => {
+    const queued = `[...document.querySelectorAll('.pane .queued-text')]
+        .find((each) => each.textContent.includes('tell him'))`;
+
     let answer = () => {};
 
     thinking = new Promise((resolve) => (answer = resolve));
     await fresh("board");
 
     try {
-        for (const words of ["start", "tell him hello from me"]) {
+        for (const words of ["start", "tell him hello from me", "hello"]) {
             await type(BOX, words);
-            await page.press("Enter");
-            await see(`document.querySelector('${BOX}').value === ''`, `"${words}" went`);
+
+            if (words !== "hello") {
+                await page.press("Enter");
+                await see(`document.querySelector('${BOX}').value === ''`, `"${words}" went`);
+            }
         }
 
-        await type(BOX, "hello");
         await holdingSends(async () => {
             await page.press("Enter");
             await see(`window.sends === 1`, "on its way");
-            const queued = `[...document.querySelectorAll('.pane .queued-text')]
-                .find((each) => each.textContent.includes('tell him'))`;
-
             await page.evaluate(`${queued}.click()`);
             await see(`document.querySelector('.pane .queued-actions .button')`, "its Edit");
             await page.evaluate(`document.querySelector('.pane .queued-actions .button').click()`);
-            await see(`!${queued}`, "taken back");
+            await page.press("Alt+a");
+            await boarded("PiP's board over the session");
+            await page.press("Alt+a");
+            await backTo(background, "the session again");
             await page.evaluate(`window.release()`);
         });
         await see(
-            `document.querySelector('${BOX}').value === 'tell him hello from me'`,
+            `document.querySelector('${BOX}').value === 'tell him hello from me' && !${queued}`,
             "taken back whole, what went gone",
         );
     } finally {

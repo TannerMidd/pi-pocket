@@ -123,20 +123,21 @@ function loadAttached(id) {
     try {
         const list = JSON.parse(personStorage.get(attachedKey(id)) ?? "[]");
 
-        return list.map((attachment) => ({
-            key: uid(),
-            name: attachment.name,
-            size: attachment.size,
-            state: "done",
-            preview: /^image\/(?!heic|heif)/.test(attachment.mime ?? "")
-                ? fileUrl(attachment.path)
-                : null,
-            attachment,
-        }));
+        return list.map(chipOf);
     } catch {
         return [];
     }
 }
+
+/** The box's chip of a file uploaded before. */
+const chipOf = (attachment) => ({
+    key: uid(),
+    name: attachment.name,
+    size: attachment.size,
+    state: "done",
+    preview: /^image\/(?!heic|heif)/.test(attachment.mime ?? "") ? fileUrl(attachment.path) : null,
+    attachment,
+});
 
 function saveAttached(id, files) {
     if (attachmentsStopped || !store.state.me?.id) {
@@ -172,6 +173,8 @@ const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes
 const onTheWay = new Map();
 /** The boxes shown, each told when a message from its conversation went. */
 const sentListeners = new Set();
+/** The boxes shown, each asked to take a queued message of its conversation taken back. */
+const backListeners = new Set();
 /** By conversation, what waits for its send on its way to end (`afterSend`). */
 const sendWaiters = new Map();
 
@@ -182,6 +185,22 @@ const afterSend = (id) =>
         : Promise.resolve();
 
 const requestKey = (id) => `sendRequest.${id}`;
+
+/** A queued message's words taken back, before what the box holds. */
+const joinBack = (words, current) => (current.trim() === "" ? words : `${words}\n${current}`);
+
+/**
+ * Put `back`, a queued message of conversation `id` taken back, into its box that shows, or else
+ * into its draft: a box can go while it comes back (another route, a session switch).
+ */
+function takeBack(id, back) {
+    if ([...backListeners].some((listener) => listener(id, back))) {
+        return;
+    }
+
+    drafts.set(id, joinBack(back.text, drafts.get(id)));
+    saveAttached(id, [...back.attachments.map(chipOf), ...loadAttached(id)]);
+}
 
 /** The request id kept for conversation `id`, `{ what, requestId }`, or null. */
 function keptRequest(id) {
@@ -649,6 +668,30 @@ export function Composer() {
 
         return () => sentListeners.delete(went);
     }, [conversationId]);
+    // A queued message of this conversation taken back (`takeBack`) goes before the box's words.
+    useEffect(() => {
+        const taken = (id, back) => {
+            if (id !== conversationId) {
+                return false;
+            }
+
+            const at = back.text.length;
+
+            setReading(null);
+            update(joinBack(back.text, drafts.get(id)), at);
+            setFiles((list) => [...back.attachments.map(chipOf), ...list]);
+            requestAnimationFrame(() => {
+                box.current?.focus();
+                box.current?.setSelectionRange(at, at);
+            });
+
+            return true;
+        };
+
+        backListeners.add(taken);
+
+        return () => backListeners.delete(taken);
+    }, [conversationId]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -1006,37 +1049,17 @@ export function Composer() {
         }
     };
 
+    // Edit on a queued message: while a send is on its way, the message waits in the queue, and
+    // comes back once it ended (`takeBack`).
     const editQueued = async (item) => {
+        await afterSend(conversationId);
         const back = await attempt(() => actions.editQueued(item.id));
 
-        if (!back) {
-            return;
+        if (back) {
+            // A send that began while it came back ends first.
+            await afterSend(conversationId);
+            takeBack(conversationId, back);
         }
-
-        // Taken back while a send is on its way, it goes into the box once that ended.
-        await afterSend(conversationId);
-        const current = drafts.get(conversationId);
-        const at = back.text.length;
-
-        setReading(null);
-        update(current.trim() === "" ? back.text : `${back.text}\n${current}`, at);
-        setFiles((list) => [
-            ...back.attachments.map((attachment) => ({
-                key: uid(),
-                name: attachment.name,
-                size: attachment.size,
-                state: "done",
-                preview: /^image\/(?!heic|heif)/.test(attachment.mime)
-                    ? fileUrl(attachment.path)
-                    : null,
-                attachment,
-            })),
-            ...list,
-        ]);
-        requestAnimationFrame(() => {
-            box.current?.focus();
-            box.current?.setSelectionRange(at, at);
-        });
     };
 
     /** Put a message sent before into the box, to send again or change. */
