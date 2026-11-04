@@ -223,12 +223,23 @@ store.subscribe((state) => {
         place = now;
 
         // Moved after this change has reached every listener (a change made from inside one would reach the listeners
-        // after it out of order), and only if the setting and PiP's place are still what they were by then.
+        // after it out of order), and only if the setting and PiP's place are still what they were by then. A passage
+        // not sent yet (Ask PiP) moves with it, to the other place's quote strip.
         if (now === "board" && state.pipOpen) {
-            queueMicrotask(() => {
+            queueMicrotask(async () => {
                 if (pipPlace() === "board" && store.state.pipOpen) {
+                    const quote = store.state.pipQuote;
+
                     closePip();
-                    openBoard(undefined, true);
+                    await openBoard(undefined, true);
+
+                    if (quote && pipBoard()) {
+                        store.set({
+                            pipQuote: null,
+                            replyQuote: quote.text,
+                            replyAbout: quote.session ?? null,
+                        });
+                    }
                 }
             });
 
@@ -238,6 +249,14 @@ store.subscribe((state) => {
         if (now === "floating" && board) {
             queueMicrotask(() => {
                 if (pipPlace() === "floating" && pipBoard()) {
+                    const { replyQuote, replyAbout } = store.state;
+
+                    if (replyQuote) {
+                        store.set({
+                            pipQuote: { text: replyQuote, session: replyAbout ?? undefined },
+                        });
+                    }
+
                     closePip();
                     openPip();
                 }

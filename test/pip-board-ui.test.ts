@@ -326,6 +326,24 @@ test("Ask PiP: the passage over the board's box, and PiP told its session", real
     await page.evaluate(`${PIP}.closePip()`);
 });
 
+test("Ask PiP: the passage and its session move with PiP, both ways", real, async () => {
+    const strip = (where: string, text: string) =>
+        `document.querySelector('${where} .quote-strip-text')?.textContent === '${text}'`;
+
+    await fresh("board");
+    await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
+    await see(strip(".pane", "still red"), "over the board's box");
+    await place("floating");
+    await floating("in the corner");
+    await see(strip(".pip-panel", "still red"), "over the corner's box");
+    assert.equal(await inPage(`${STORE}.store.state.pipQuote.session`), Number(background));
+    await place("board");
+    await see(strip(".pane", "still red"), "over the board's box again");
+    assert.equal(await inPage(`${STORE}.store.state.replyAbout`), Number(background));
+    assert.equal(await inPage(`${STORE}.store.state.pipQuote`), null, "not left in the corner");
+    await page.evaluate(`${PIP}.closePip()`);
+});
+
 test("Pending memories: PiP's strip in both places, only while one waits", real, async () => {
     const COUNT = (where: string) =>
         `document.querySelector('${where} .pip-memory-count')?.textContent.trim()`;
