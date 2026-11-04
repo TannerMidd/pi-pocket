@@ -173,23 +173,30 @@ const sentListeners = new Set();
 
 const requestKey = (id) => `sendRequest.${id}`;
 
+/** The request id kept for conversation `id`, `{ what, requestId }`, or null. */
+function keptRequest(id) {
+    try {
+        const kept = JSON.parse(personStorage.get(requestKey(id)) ?? "null");
+
+        return typeof kept?.requestId === "string" ? kept : null;
+    } catch {
+        // A damaged value is no request id: a new one replaces it.
+        return null;
+    }
+}
+
 /**
- * The request id of `message` (what goes: its kind, words, and files) from conversation `id`, kept with the draft in
- * the person's storage until it is known sent (`endSend`), or another message goes. Sent again after a lost answer,
- * also from a box shown again or after a reload, it goes with the same id, and the server gives back its first send
- * instead of a second. A request the server refused stored nothing there: the same id then makes a new one.
+ * The request id of `message` (what goes: its kind, words, and files) from conversation `id`. It is kept with the draft
+ * in the person's storage only while what came of the send is not known: no answer came (a network error, the page
+ * went), or one that does not say (a 5xx, or one that could not be read). Sent again then, from a box shown again or
+ * after a reload, it goes with the same id, and the server gives back its first send instead of a second. An answer
+ * that says (it went, was refused, or ran and failed) ends it (`endSend`): the same words again are a new request.
  */
 function requestFor(id, message) {
     const what = fingerprint(JSON.stringify(message));
-    let kept = null;
+    const kept = keptRequest(id);
 
-    try {
-        kept = JSON.parse(personStorage.get(requestKey(id)) ?? "null");
-    } catch {
-        // A damaged value is no request id: a new one replaces it.
-    }
-
-    if (kept?.what === what && typeof kept.requestId === "string") {
+    if (kept?.what === what) {
         return kept.requestId;
     }
 
@@ -201,15 +208,15 @@ function requestFor(id, message) {
 }
 
 /**
- * Start a send of `record` from conversation `id`'s box, with the request id of `message` (`record.requestId`); null
- * while one is on its way from there.
+ * Start a send of `record` from conversation `id`'s box, with the request id of `message` (`record.requestId`; none for
+ * a command that runs in the browser); null while one is on its way from there.
  */
 function beginSend(id, record, message) {
     if (onTheWay.has(id)) {
         return null;
     }
 
-    record.requestId = requestFor(id, message);
+    record.requestId = message === null ? undefined : requestFor(id, message);
     onTheWay.set(id, record);
     store.set({});
 
@@ -223,8 +230,12 @@ function beginSend(id, record, message) {
 function endSend(id, record, went) {
     onTheWay.delete(id);
 
-    if (went) {
+    // What came of it is known: its request id is done with.
+    if ((went || record.refused) && keptRequest(id)?.requestId === record.requestId) {
         personStorage.set(requestKey(id), null);
+    }
+
+    if (went) {
         // Words put in meanwhile (`takeInsert`) follow the sent ones without their end spaces.
         const left = drafts.get(id).replace(record.text.trimEnd(), "").trim();
 
@@ -245,6 +256,19 @@ function endSend(id, record, went) {
 
     store.set({});
 }
+
+/**
+ * Run `request`, the send of `record`, as `attempt` does (a notice says why it did not go). A refusal (a 4xx) says what
+ * came of it (`record.refused`); no answer, one that could not be read, or a 5xx does not.
+ */
+const sendFor = (record, request) =>
+    attempt(() =>
+        request().catch((error) => {
+            record.refused = error?.status >= 400 && error.status < 500;
+
+            throw error;
+        }),
+    );
 
 /**
  * The subagents a waiting message carries reports from (`extensions/subagents.ts`), as the server reads them from its
@@ -779,19 +803,19 @@ export function Composer() {
 
     /** Run a slash command. The text goes away once it worked; attached files stay for the next message. */
     const runCommand = async ({ command, arg }, sent) => {
-        const record = beginSend(conversationId, { text, quote: null, files: [] }, [
-            "command",
-            command.id ?? command.name,
-            sent,
-        ]);
+        // Only an extension's command runs on the server, which finds a first run by its request id.
+        const record = beginSend(
+            conversationId,
+            { text, quote: null, files: [] },
+            command.extension ? ["command", command.id, sent] : null,
+        );
 
         if (!record) {
             return;
         }
 
-        // Only an extension's command runs on the server, which finds a first run by its request id.
-        const ok = await attempt(async () => {
-            await command.run(arg, command.extension ? record.requestId : undefined);
+        const ok = await sendFor(record, async () => {
+            await command.run(arg, record.requestId);
 
             return true;
         });
@@ -873,7 +897,7 @@ export function Composer() {
             return;
         }
 
-        const started = await attempt(() =>
+        const started = await sendFor(record, () =>
             actions.shell(command, !full.startsWith("!!"), record.requestId),
         );
 
@@ -940,7 +964,7 @@ export function Composer() {
         }
 
         dropQuote(quote);
-        const ok = await attempt(() =>
+        const ok = await sendFor(record, () =>
             actions.submit(
                 withQuote(quote?.text, full),
                 attachments,

@@ -2646,6 +2646,18 @@ export async function start() {
 
 const current = () => store.state.conversationId;
 
+/**
+ * A send's answer, which names what the send made (`key`). One that does not was not the server's, or was cut short:
+ * an error with no status, as for no answer, since what came of the send is not known.
+ */
+const answered = (key) => (answer) => {
+    if (answer?.[key] === undefined) {
+        throw new ApiError(undefined, "The answer could not be read. Send it again: it goes once.");
+    }
+
+    return answer;
+};
+
 export const actions = {
     /** `inlineFiles`: the files the message mentions with @ go along with it. */
     submit: (text, attachments, mode, inlineFiles = false, requestId = uid()) =>
@@ -2655,14 +2667,16 @@ export const actions = {
             mode,
             requestId,
             ...(inlineFiles ? { inlineFiles } : {}),
-        }),
+        }).then(answered("submissionId")),
     /** Run a command in the session's folder (`!`); `context: false` keeps it from Pi (`!!`). */
     shell: (command, context, requestId = uid()) =>
-        api(`c/${current()}/shell`, { command, context, requestId }),
+        api(`c/${current()}/shell`, { command, context, requestId }).then(answered("taskId")),
     stopShell: (taskId) => api(`c/${current()}/shell/${taskId}/stop`, {}),
     /** Run an extension's command; sending the same request id again finds the first run. */
     extensionCommand: (commandId, args, requestId = uid()) =>
-        api(`c/${current()}/extension-commands`, { commandId, args, requestId }),
+        api(`c/${current()}/extension-commands`, { commandId, args, requestId }).then(
+            answered("taskId"),
+        ),
     /** A file or folder for the viewer. */
     view: (path) => api(`c/${current()}/view?path=${encodeURIComponent(path)}`),
     /** What changed in the session's folder: git's uncommitted changes, and Pi's edits. */

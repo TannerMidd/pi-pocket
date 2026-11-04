@@ -618,7 +618,7 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
         ).length;
 
     await fresh("board");
-    // Refused (a spend limit): the server keeps nothing, so the same send goes once it is lifted.
+    // Refused (a spend limit): an answer, which ends its request id, so the same words go as a new request.
     await app.spend.setSessionBudget(owner(app), background, 0.01);
     await recordCost(app, background, 0.02);
     await type(BOX, "keep me");
@@ -626,6 +626,12 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
     await see(
         `${STORE}.store.state.notices.some((notice) => notice.message.includes('spend limit'))`,
         "refused",
+    );
+    assert.equal(
+        await inPage(
+            `(await import('/person-storage.js')).personStorage.get('sendRequest.${background}')`,
+        ),
+        null,
     );
     await app.spend.setSessionBudget(owner(app), background, null);
 
