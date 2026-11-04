@@ -3052,6 +3052,14 @@ export function giveBackQuote(quote, pip, id) {
     }
 }
 
+/**
+ * Whether `part` of a message box (a file, the quote) is in `going`, what a send on its way holds. The rule, the same
+ * in the session's box and PiP's: a send on its way locks what it sends (its words, files, and quote), which shows as
+ * on its way and cannot be changed or removed, by a key, dictation, or a ×. The rest stays free: a file added
+ * meanwhile, and in PiP's box, which empties as it sends, the next words.
+ */
+export const onItsWay = (going, part) => Boolean(part) && going?.includes(part) === true;
+
 /** Open the chat to discuss a transcript message: the next chat message quotes it. */
 export function discuss(entryId, text) {
     store.set((state) => ({

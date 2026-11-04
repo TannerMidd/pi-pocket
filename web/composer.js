@@ -26,6 +26,7 @@ import {
     openSheet,
     dropQuote,
     giveBackQuote,
+    onItsWay,
     store,
     takeInsert,
     typing,
@@ -566,7 +567,7 @@ export function Composer() {
     // Dictation writes into the box as typing does, so the draft keeps what was heard.
     const dictation = useDictation(box, (value, at) => {
         setBrowsing(null);
-        update(value, at);
+        edit(value, at);
     });
     // What is above the message box, and how it shares the room with the conversation (`dock.js`).
     const dock = useRef(null);
@@ -715,6 +716,16 @@ export function Composer() {
         typing(value.trim() === "" || value.startsWith("/") ? null : "pi");
     };
 
+    /**
+     * The box's own change of its words (typing, dictation, history, a suggestion, a module's key): none while they are
+     * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in.
+     */
+    const edit = (value, at) => {
+        if (!onTheWay.has(conversationId)) {
+            update(value, at);
+        }
+    };
+
     // Ctrl+R: what was sent before that has the words in the box.
     const recalled = searching ? searchHistory(text, historyScope) : [];
     const chosenRecall = recalled[Math.min(pick, recalled.length - 1)];
@@ -798,7 +809,7 @@ export function Composer() {
         const space = item.dir || /^\s/.test(rest) ? "" : " ";
         const at = mention.start + written.length + (item.dir ? 0 : 1);
 
-        update(`${text.slice(0, mention.start)}${written}${space}${rest}`, at);
+        edit(`${text.slice(0, mention.start)}${written}${space}${rest}`, at);
         requestAnimationFrame(() => {
             const element = box.current;
 
@@ -814,7 +825,7 @@ export function Composer() {
     /** A tapped suggestion: commands that take text, and prompt templates, fill the box; the others run at once. */
     const choose = (command) => {
         if (command.args || command.template) {
-            update(`/${command.name} `);
+            edit(`/${command.name} `);
             focusEnd();
         } else if (store.state.replyQuote) {
             notify("info", "A quote cannot go with a command. Remove the quote to run it.");
@@ -995,7 +1006,7 @@ export function Composer() {
 
     /** Put a message sent before into the box, to send again or change. */
     const recall = (value, at = value.length) => {
-        update(value, at);
+        edit(value, at);
         requestAnimationFrame(() => box.current?.setSelectionRange(at, at));
     };
 
@@ -1055,7 +1066,7 @@ export function Composer() {
     const onKey = (event) => {
         // A module's key (`pocket.composerKey`) comes first: it may take any key, the box's own too.
         const keyed = keyBox(event.currentTarget, "session", (value, start, end) => {
-            update(value, start);
+            edit(value, start);
             requestAnimationFrame(() => box.current?.setSelectionRange(start, end));
         });
 
@@ -1254,7 +1265,7 @@ export function Composer() {
         const value = event.clipboardData?.getData("text/plain") ?? "";
         const lines = value.replace(/\n$/, "").split("\n").length;
 
-        if (lines <= PASTE_LINES && value.length <= PASTE_CHARS) {
+        if (sending || (lines <= PASTE_LINES && value.length <= PASTE_CHARS)) {
             return;
         }
 
@@ -1647,6 +1658,7 @@ export function Composer() {
                                     <button
                                         class="icon-button small"
                                         aria-label=${`Remove ${file.name}`}
+                                        disabled=${onItsWay(going?.files, file.attachment?.path)}
                                         onClick=${() => {
                                             forget([file]);
                                             setFiles((current) =>
@@ -1668,7 +1680,7 @@ export function Composer() {
                             <button
                                 class="icon-button small"
                                 aria-label="Remove the quote"
-                                disabled=${sending}
+                                disabled=${onItsWay(going && [going.quote], shownQuote)}
                                 onClick=${() => dropQuote(shownQuote)}
                             >
                                 <${Icon} name="close" size=${12} />
@@ -1683,7 +1695,7 @@ export function Composer() {
                         placeholder=${placeholder}
                         onInput=${(event) => {
                             setBrowsing(null);
-                            update(event.currentTarget.value, event.currentTarget.selectionStart);
+                            edit(event.currentTarget.value, event.currentTarget.selectionStart);
                         }}
                         onKeyDown=${onKey}
                         onKeyUp=${(event) => setCaret(event.currentTarget.selectionStart)}
@@ -1751,6 +1763,7 @@ export function Composer() {
                             dictation=${dictation}
                             class="composer-mic"
                             part="composer-button"
+                            disabled=${sending}
                         />
                         <button
                             class=${`send-button ${canSend ? "ready" : ""}`}

@@ -91,6 +91,13 @@ const type = (selector: string, value: string) =>
     page.evaluate(`const box = document.querySelector('${selector}');
         box.value = ${JSON.stringify(value)};
         box.dispatchEvent(new Event('input', { bubbles: true }));`);
+/** Attach a file through the file input `picker` finds, as the picker does. */
+const attach = (picker: string) =>
+    page.evaluate(`const data = new DataTransfer();
+        data.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+        const picker = document.querySelector('${picker}');
+        picker.files = data.files;
+        picker.dispatchEvent(new Event('change', { bubbles: true }));`);
 const place = (value: "floating" | "board") =>
     page.evaluate(`(await import('/theme.js')).setPrefs({ pip: '${value}' })`);
 /** The session the list marks open. */
@@ -409,28 +416,25 @@ test("PiP's one box: its words, file, quote, and send on its way move with it", 
     const shown = (where: string) =>
         inPage(`[document.querySelector('${where} .pip-composer textarea').value,
             document.querySelector('${where} .pip-attachment-name')?.textContent ?? null,
-            document.querySelector('${where} .quote-strip-text')?.textContent ?? null]`);
+            document.querySelector('${where} .quote-strip-text')?.textContent ?? null,
+            document.querySelector('${where} .pip-attachment-remove')?.disabled ?? null]`);
 
     await fresh("floating");
     await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
     await floating("in the corner");
     await type(".pip-composer textarea", "half a thought");
-    await page.evaluate(`const data = new DataTransfer();
-        data.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
-        const picker = document.querySelector('.pip-file-picker');
-        picker.files = data.files;
-        picker.dispatchEvent(new Event('change', { bubbles: true }));`);
+    await attach(".pip-file-picker");
     await see(`!document.querySelector('.pip-send').disabled`, "the file uploaded");
     await place("board");
     await boarded("on the board");
-    assert.deepEqual(await shown(".pane"), ["half a thought", "notes.txt", "still red"]);
+    assert.deepEqual(await shown(".pane"), ["half a thought", "notes.txt", "still red", false]);
     // Sent on the board, held until PiP is in the corner, beside a Reply quote of the same words: on its way there too.
     await holdingSends(async () => {
         await page.click({ selector: ".pane .pip-send" });
         await see(`window.sends === 1`, "the send on its way");
         await place("floating");
         await floating("in the corner");
-        assert.deepEqual(await shown(".pip-panel"), ["", "notes.txt", null], "on its way");
+        assert.deepEqual(await shown(".pip-panel"), ["", "notes.txt", null, true], "on its way");
         await page.press("Enter");
         await page.evaluate(`${STORE}.quoteReply('still red'); window.release()`);
     });
@@ -520,10 +524,14 @@ test("PiP turned off in Extensions closes the board", real, async () => {
 });
 
 test("A session's send on its way, its box shown again: once, or all back", real, async () => {
+    // Its words, the quote and file with their ×, Dictate, and Send: what is on its way is locked.
+    const LOCKS =
+        ".pane .quote-strip button, .pane .files button, .pane .composer-mic, .pane .send-button";
     const held = () =>
         inPage(`[document.querySelector('${BOX}').value,
             document.querySelector('.pane .quote-strip-text')?.textContent ?? null,
-            document.querySelector('.pane .send-button').disabled]`);
+            [...document.querySelectorAll(${JSON.stringify(LOCKS)})]
+                .map((button) => button.disabled)]`);
 
     // Away and back while it goes, and Enter again there.
     const awayAndBack = async () => {
@@ -538,14 +546,20 @@ test("A session's send on its way, its box shown again: once, or all back", real
     await page.evaluate(`${STORE}.quoteReply('this part')`);
     // With a space at the end, as a phone's keyboard leaves it.
     await type(BOX, "only once ");
+    await attach(".pane .composer input[type=file]");
+    await see(
+        `document.querySelector('.pane .files .chip:not(:has(.spinner))')`,
+        "the file uploaded",
+    );
     await holdingSends(async () => {
         await page.press("Enter");
         await see(`window.sends === 1`, "on its way");
         await awayAndBack();
-        assert.deepEqual(await held(), ["only once ", "this part", true], "on its way");
+        assert.deepEqual(await held(), ["only once ", "this part", [true, true, true, true]]);
+        await type(BOX, "changed");
     }, true);
     await see(`!document.querySelector('.pane .send-button').disabled`, "failed");
-    assert.deepEqual(await held(), ["only once ", "this part", false], "all back");
+    assert.deepEqual(await held(), ["only once ", "this part", [false, false, false, false]]);
     // Sent at last, with words put in the box meanwhile: they stay.
     await holdingSends(async () => {
         await page.press("Enter");

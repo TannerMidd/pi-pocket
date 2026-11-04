@@ -21,6 +21,7 @@ import {
     notify,
     openSheet,
     dropQuote,
+    onItsWay,
     showsPip,
     store,
     takeInsert,
@@ -1055,6 +1056,7 @@ function Composer({ id, busy, board = false }) {
                             type="button"
                             class="icon-button pip-attachment-remove"
                             aria-label=${`Remove ${file.name}`}
+                            disabled=${onItsWay(pending?.files, file)}
                             onClick=${() => composerDraft.removeFile(file.key)}
                         >
                             <${Icon} name="close" size=${14} />
