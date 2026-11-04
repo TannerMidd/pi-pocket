@@ -52,6 +52,7 @@ test("a person reads only their own drafts, and only once known", () => {
 test("old drafts of no known person go, and sign-out clears all drafts but not preferences", () => {
     const disk = memory({
         "pocket.draft.1": "whose?",
+        'pocket.notesDraft.["owner",1]': "whose?",
         "pocket.history.v2": "[]",
         "pocket.pip.draft": "whose?",
         "pocket.prefs": "theme",

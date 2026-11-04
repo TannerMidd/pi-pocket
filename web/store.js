@@ -7,6 +7,7 @@ import { fitClock, moment } from "./clock.js";
 import { fingerprint } from "./text-hash.js";
 import * as disk from "./session-cache.js";
 import { personStorage } from "./person-storage.js";
+import { notesDrafts } from "./notes-drafts.js";
 
 /** A random id. crypto.randomUUID only exists on https and localhost pages; plain-http network addresses lack it. */
 export function uid() {
@@ -704,6 +705,7 @@ function reloadAccount(to) {
 
     changingAccount = true;
     personStorage.identify(null);
+    notesDrafts.clear();
     source?.close();
     store.set({ me: null, composerInsert: null, auth: null, pip: null, pipOpen: false });
 
@@ -1783,8 +1785,8 @@ const handlers = {
     "embedder-notify": (data) => embedderListeners.forEach((listener) => listener(data)),
     closing: () => store.set({ connection: "closed" }),
     reload: () => {
-        // A web file changed on the server. Message drafts live in localStorage and survive the reload; an unsaved notes
-        // draft, attachments not yet sent, and an open provider sign-in do not.
+        // A web file changed on the server. Message, notes, and attachment drafts survive when browser storage works;
+        // an open provider sign-in does not.
         setTimeout(() => location.reload(), 150);
     },
 };

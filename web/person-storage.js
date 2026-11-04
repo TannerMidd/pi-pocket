@@ -2,7 +2,9 @@
 const PREFIX = "pocket.person.";
 // Old versions did not know whose drafts these were. Do not assign them to whoever signs in next.
 const legacy = (key) =>
-    /^(pocket\.(draft\.|pastes\.|attached\.|viewed\.|history(?:$|\.)|pip\.draft$))/.test(key);
+    /^(pocket\.(draft\.|pastes\.|attached\.|notesDraft\.|viewed\.|history(?:$|\.)|pip\.draft$))/.test(
+        key,
+    );
 
 /** A blocked/full store keeps changes in memory, including deletions that would otherwise reveal an older value. */
 export function createPersonStorage(storage = () => localStorage) {
@@ -84,6 +86,30 @@ export function createPersonStorage(storage = () => localStorage) {
 
                 return true;
             } catch {
+                return false;
+            }
+        },
+        /** Remove this editor's stored values, never a newer edit from another tab. Drop this page's fallback too. */
+        removeIf(key, values, account = person) {
+            const name = scoped(key, account);
+
+            if (name === null) {
+                return false;
+            }
+
+            try {
+                const disk = storage();
+
+                if (values.includes(disk.getItem(name))) {
+                    disk.removeItem(name);
+                }
+
+                pending.delete(name);
+
+                return true;
+            } catch {
+                pending.set(name, null);
+
                 return false;
             }
         },
