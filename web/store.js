@@ -198,7 +198,8 @@ function firstLayout() {
 let layoutShown = { id: null, layout: NO_LAYOUT };
 
 // A panel opened or closed is kept for the session at once, so a reload or a visit later shows it again. Going to another
-// session shows the layout kept for it; one opened on the way there (a chat docked as People) is kept too.
+// session shows the layout kept for it; one opened on the way there (a chat docked as People) is kept too. PiP's
+// conversation keeps none: opened again (as a board), it shows PiP, not a panel left over it.
 function followLayout(state) {
     const id = state.conversationId;
     const layout = layoutOf(state);
@@ -211,7 +212,12 @@ function followLayout(state) {
 
     layoutShown = { id, layout };
 
-    if (id !== null && !state.missing && !(moved && sameLayout(layout, layoutFor(id)))) {
+    if (
+        id !== null &&
+        id !== state.pip?.id &&
+        !state.missing &&
+        !(moved && sameLayout(layout, layoutFor(id)))
+    ) {
         keepLayout(id, layout);
     }
 }
