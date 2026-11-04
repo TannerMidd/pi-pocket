@@ -161,8 +161,9 @@ addEventListener("popstate", (event) => {
         setTimeout(() => delete document.documentElement.dataset.backShown, 500);
     }
 
-    // The person went back or forward: the route first, then the layers above the entry it landed on. Forward goes
-    // further from the session list; anything else counts as back.
+    // The person went back or forward: the layers above the entry it landed on close first, on the route they were
+    // opened over, then the route changes (a panel it shows again stays open). Forward goes further from the session
+    // list; anything else counts as back.
     const back = event.state?.pocket?.back;
 
     if (location.pathname !== shown) {
@@ -178,7 +179,6 @@ addEventListener("popstate", (event) => {
 
     shownBack = back;
 
-    routeListener();
     const at = event.state?.pocket?.layers ?? 0;
 
     while (layers.length > at) {
@@ -187,6 +187,8 @@ addEventListener("popstate", (event) => {
         layer.gone = true;
         layer.close();
     }
+
+    routeListener();
 
     // Forward onto layers that are gone: back down to the ones open.
     if (at > layers.length) {

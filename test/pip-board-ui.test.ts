@@ -232,14 +232,24 @@ test("Board: the session under it stays marked open, and is where it closes to",
 });
 
 test("Phones: × closes past the Files tile, and PiP opens again without it", real, async () => {
+    const FILES = "(await import('/files-panel.js'))";
+
     await fresh("board", VIEWPORTS.mobile);
+    // The session's own tile, which PiP's closing must not take with it.
+    await page.evaluate(`${FILES}.setFilesOpen(true)`);
+    await see(`document.querySelector('.files-tile:not(.leaving)') !== null`, "its Files tile");
+    await settle();
     await page.evaluate(`${PIP}.openPip()`);
     await boarded("PiP on a phone");
-    await page.evaluate(`(await import('/files-panel.js')).setFilesOpen(true)`);
+    await page.evaluate(`${FILES}.setFilesOpen(true)`);
     await see(`document.querySelector('.files-tile:not(.leaving)') !== null`, "the Files tile");
     await settle();
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session, past the tile");
+    await settle();
+    assert.equal(await inPage(`${STORE}.store.state.filesOpen`), true, "the session's tile");
+    await page.evaluate(`${FILES}.setFilesOpen(false)`);
+    await settle();
     await page.evaluate(`${PIP}.openPip()`);
     await boarded("PiP again");
     await settle();
