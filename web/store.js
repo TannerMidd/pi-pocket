@@ -140,12 +140,15 @@ function deviceLayouts() {
 /** Set at sign-out, in this tab or another: the device keeps no more layouts (`pocket:signedOut`). */
 let layoutsStopped = false;
 
+/** Whether `id` keeps a layout: a session does; home and PiP's conversation, open as a board, do not. */
+const keepsLayout = (id, state = store.state) => id !== null && id !== state.pip?.id;
+
 /**
  * The panel `id` showed when it was left: in this tab, else on this device, else none. An extension's panel shows only
  * while the server lists its module: one turned off since is kept for when it comes back.
  */
 function layoutFor(id) {
-    if (id === null || layoutPerson() === null) {
+    if (!keepsLayout(id) || layoutPerson() === null) {
         return NO_LAYOUT;
     }
 
@@ -225,12 +228,7 @@ function followLayout(state) {
 
     layoutShown = { id, layout };
 
-    if (
-        id !== null &&
-        id !== state.pip?.id &&
-        !state.missing &&
-        !(moved && sameLayout(layout, layoutFor(id)))
-    ) {
+    if (keepsLayout(id, state) && !state.missing && !(moved && sameLayout(layout, layoutFor(id)))) {
         keepLayout(id, layout);
     }
 }

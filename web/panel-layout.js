@@ -1,7 +1,7 @@
 // Which panel each session shows beside its conversation, so going back to a session shows what it showed when it was
 // left: an extension's panel (as Design's), the Browser panel, the Files tile on its tab, or the People panel. PiP's
-// panel is not a session's: it stays as it is. `store.js` keeps the layouts (the tab's first, then the device's) and
-// shows a session's as it opens. No imports, so Node tests it.
+// panel is not a session's: it stays as it is, and its board keeps no layout. `store.js` keeps the layouts (the tab's
+// first, then the device's) and shows a session's as it opens. No imports, so Node tests it.
 
 /** How many sessions' layouts a tab, and the device, keep: the ones shown longest ago go first. */
 const LAYOUT_MAX = 200;
