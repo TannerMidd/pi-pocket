@@ -110,31 +110,30 @@ const emptyView = () => ({
 // ─── Each session's panel ──────────────────────────────────────────────────────────
 
 /**
- * Where the panel each session shows is kept (`panel-layout.js`): the tab's, for this tab, and the device's, for a tab
- * that never showed the session. Both as `[id, layout]` pairs, the session shown longest ago first.
+ * Where the panel each session shows is kept (`panel-layout.js`), as `[id, layout]` pairs, the one shown longest ago
+ * first: the tab's in `sessionStorage`, with whose they are, and the device's in `personStorage`, for a tab that never
+ * showed the session. Another account in this browser sees neither. They are small: ids and panel names.
  */
 const TAB_LAYOUTS = "pocket.layouts";
-const DEVICE_LAYOUTS = "pocket.layouts";
-// One key, in two storages: `sessionStorage` (the tab's) and `localStorage` (the device's, shared by its tabs). Both are
-// read as the session opens, before it draws, so its panel shows with it. They are small: ids and panel names.
+const DEVICE_LAYOUTS = "layouts";
 
-function readPairs(storage, key) {
+const layoutPerson = () => store.state.me?.id ?? null;
+
+function tabLayouts() {
     try {
-        return layoutPairs(JSON.parse(storage.getItem(key)));
+        const kept = JSON.parse(sessionStorage.getItem(TAB_LAYOUTS));
+
+        return kept?.person === layoutPerson() ? layoutPairs(kept.pairs) : [];
     } catch {
         return [];
     }
 }
 
-function writePairs(storage, key, pairs) {
+function deviceLayouts() {
     try {
-        if (pairs.length === 0) {
-            storage.removeItem(key);
-        } else {
-            storage.setItem(key, JSON.stringify(pairs));
-        }
+        return layoutPairs(JSON.parse(personStorage.get(DEVICE_LAYOUTS)));
     } catch {
-        // Storage full or refused: the session shows no panel next time.
+        return [];
     }
 }
 
@@ -143,51 +142,53 @@ let layoutsStopped = false;
 
 /** The panel `id` showed when it was left: in this tab, else on this device, else none. */
 function layoutFor(id) {
-    if (id === null) {
+    if (id === null || layoutPerson() === null) {
         return NO_LAYOUT;
     }
 
     return (
-        keptLayout(readPairs(sessionStorage, TAB_LAYOUTS), id) ??
-        (layoutsStopped ? null : keptLayout(readPairs(localStorage, DEVICE_LAYOUTS), id)) ??
+        keptLayout(tabLayouts(), id) ??
+        (layoutsStopped ? null : keptLayout(deviceLayouts(), id)) ??
         NO_LAYOUT
     );
 }
 
 /** Keep the panel `id` shows now, for this tab and the device: the device keeps only a panel, not "none". */
 function keepLayout(id, layout) {
-    writePairs(
-        sessionStorage,
-        TAB_LAYOUTS,
-        remember(readPairs(sessionStorage, TAB_LAYOUTS), id, layout),
-    );
+    const person = layoutPerson();
+
+    if (person === null) {
+        return;
+    }
+
+    const pairs = remember(tabLayouts(), id, layout);
+
+    try {
+        sessionStorage.setItem(TAB_LAYOUTS, JSON.stringify({ person, pairs }));
+    } catch {
+        // Storage full or refused: the session shows no panel next time.
+    }
 
     if (!layoutsStopped) {
-        writePairs(
-            localStorage,
-            DEVICE_LAYOUTS,
-            remember(readPairs(localStorage, DEVICE_LAYOUTS), id, layout, { keepNone: false }),
-        );
+        const device = remember(deviceLayouts(), id, layout, { keepNone: false });
+
+        personStorage.set(DEVICE_LAYOUTS, device.length === 0 ? null : JSON.stringify(device));
     }
 }
 
 /**
- * The panel the page opens with. A tab that kept one panel for every session (before layouts were a session's) gives it
- * to the session it shows, once.
+ * The panel the page shows once it knows who is signed in. A tab that kept one panel for every session (before layouts
+ * were a session's) gives it to the session it shows, once.
  */
 function firstLayout() {
-    const id = routeConversation();
+    const id = store.state.conversationId;
     const legacy = legacyLayout((key) => sessionStorage.getItem(key));
 
     for (const key of LEGACY_KEYS) {
         sessionStorage.removeItem(key);
     }
 
-    if (
-        legacy !== null &&
-        id !== null &&
-        keptLayout(readPairs(sessionStorage, TAB_LAYOUTS), id) === null
-    ) {
+    if (legacy !== null && id !== null && keptLayout(tabLayouts(), id) === null) {
         keepLayout(id, legacy);
     }
 
@@ -225,11 +226,12 @@ function followLayout(state) {
 addEventListener("pocket:signedOut", () => {
     layoutsStopped = true;
 
+    personStorage.set(DEVICE_LAYOUTS, null);
+
     try {
         sessionStorage.removeItem(TAB_LAYOUTS);
-        localStorage.removeItem(DEVICE_LAYOUTS);
     } catch {
-        // Refused: nothing was kept.
+        // Refused: it is another person's to read no more.
     }
 });
 
@@ -339,8 +341,6 @@ export const store = {
         pipOpen: sessionStorage.getItem("pocket.pip") === "1",
         /** PiP's conversation, while the panel shows. */
         pipView: emptyView(),
-        // The panel the session the page opens on showed (`browserOpen`, `filesOpen`, `filesTab`, `extPanel`, `peopleOpen`).
-        ...layoutPatch(firstLayout()),
     },
     listeners: new Set(),
     /**
@@ -2561,6 +2561,7 @@ export async function start() {
             server: keptServer(store.state.server, hello.server, asked),
             themeList: Array.isArray(hello.themes) ? hello.themes : [],
         });
+        store.set(layoutPatch(firstLayout()));
 
         if (onDisk !== undefined && store.state.view.conversation == null) {
             const cached = await onDisk;
