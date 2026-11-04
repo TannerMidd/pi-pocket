@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # Pi Pocket with Python: the stock image (docker/Dockerfile) plus python3, uv,
-# kubectl, and Obsidian with its CLI.
+# kubectl, Hugo with obsidian-export, and Obsidian with its CLI.
 #
 #   docker build -f docker/tools.dockerfile -t pi-pocket:tools .
 #
@@ -117,6 +117,8 @@ FROM app AS development
 
 ARG UV_VERSION=0.13.5
 ARG GLAB_VERSION=1.124.0
+ARG HUGO_VERSION=0.169.0
+ARG OBSIDIAN_EXPORT_VERSION=25.3.0
 ARG OBSIDIAN_VERSION=1.14.5
 ARG KUBECTL_VERSION=1.32.5
 
@@ -158,6 +160,47 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/kubectl; \
     HOME=/tmp/kubectl-check /usr/local/bin/kubectl version --client; \
     rm -rf /tmp/kubectl-check
+
+# Hugo builds the blog the LLMWiki vault holds (`blog/ponym.work/.site/build.sh`). It must
+# be the extended build: the site's templates use image processing and `transform.ToMath`,
+# and the standard build has neither. The archive holds one top-level file, so it is
+# extracted straight into /usr/local/bin. The version is the one the project pins in its
+# `.gitlab-ci.yml`.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) hugo_arch=amd64 ;; \
+        arm64) hugo_arch=arm64 ;; \
+        *) echo "Hugo has no release for $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 3 -o /tmp/hugo.tar.gz \
+        "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-${hugo_arch}.tar.gz"; \
+    tar -xzf /tmp/hugo.tar.gz -C /usr/local/bin hugo; \
+    rm -f /tmp/hugo.tar.gz; \
+    hugo version | grep -q '+extended'
+
+# obsidian-export is the step before Hugo: it rewrites the vault's Obsidian Markdown into
+# the standard Markdown that Hugo renders (the first step of the same build.sh). It is a
+# glibc binary, which is why the project's CI also uses Debian and not Alpine; this image
+# is Debian too, so nothing more is needed. GitHub publishes it for x86_64 linux only, so
+# an arm64 image gets Hugo and no export step, and `build.sh` names the tool it lacks.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) obsidian_export_arch=x86_64-unknown-linux-gnu ;; \
+        *) echo "obsidian-export has no linux release for $arch: Hugo only" >&2; \
+           obsidian_export_arch= ;; \
+    esac; \
+    if [ -n "$obsidian_export_arch" ]; then \
+        curl -fsSL --retry 3 -o /tmp/obsidian-export.tar.xz \
+            "https://github.com/zoni/obsidian-export/releases/download/v${OBSIDIAN_EXPORT_VERSION}/obsidian-export-${obsidian_export_arch}.tar.xz"; \
+        tar -xJf /tmp/obsidian-export.tar.xz -C /tmp \
+            "obsidian-export-${obsidian_export_arch}/obsidian-export"; \
+        install -m 0755 "/tmp/obsidian-export-${obsidian_export_arch}/obsidian-export" \
+            /usr/local/bin/obsidian-export; \
+        rm -rf /tmp/obsidian-export.tar.xz "/tmp/obsidian-export-${obsidian_export_arch}"; \
+        /usr/local/bin/obsidian-export --version; \
+    fi
 
 # The stock image has no python at all. Debian's python is enough for uv: uv reads
 # the interpreter of a venv from its pyvenv.cfg, whatever version wrote it.

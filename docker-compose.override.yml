@@ -24,9 +24,10 @@ services:
     # `node` user. HOME stays unset, so the image uses its own /home/node as it is.
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     # The stock image's stages are in this file; docker/tools.dockerfile starts FROM
-    # that `app` stage and adds python3 and uv. Compose builds the image a service
-    # names before it creates the container, so `up -d --build` makes pi-pocket:local
-    # in the same build and the tools are layered on it, not built again.
+    # that `app` stage and adds python3, uv, Hugo, obsidian-export, kubectl and
+    # Obsidian. Compose builds the image a service names before it creates the
+    # container, so `up -d --build` makes pi-pocket:local in the same build and the
+    # tools are layered on it, not built again.
     #
     # Compose merges this build mapping into the stock one key by key, so `dockerfile`
     # and `target` are named here, together with the image they belong to.

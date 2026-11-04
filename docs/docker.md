@@ -106,13 +106,17 @@ What a session gets:
 - `uv` and `uvx` in `/usr/local/bin`, and `/opt/uv-bin` (the folder `UV_TOOL_BIN_DIR` names) at the start of PATH. Both folders are on the image, so the PATH comes from the image and no compose variable sets it.
 - `/opt/uv-bin` is writable by every uid, so a tool that the host's uid installs with `uv tool install ruff` lands on PATH in the same container.
 - `kubectl` in `/usr/local/bin`, placed by architecture as `glab` is. It is pinned to `v1.32.5`, the cluster's version, because a client may only be one minor ahead of or behind its server. It needs no cluster at build time. A kubeconfig in `~/.kube` is on the home bind mount, so contexts and logins survive a recreate.
+- `hugo` in `/usr/local/bin`, the extended build, pinned to `v0.169.0`. The extended build is the one that processes images and renders maths, and a blog whose templates use both needs it.
+- `obsidian-export` in `/usr/local/bin`, pinned to `v25.3.0`. It is the step before Hugo: it rewrites a vault's Obsidian Markdown into the standard Markdown that Hugo renders, so the two build a blog from an Obsidian vault, as the LLMWiki blog does with `blog/ponym.work/.site/build.sh`. Both versions are the ones that project pins in its `.gitlab-ci.yml`.
+
+`obsidian-export` is a glibc binary, so it needs this Debian image and not Alpine. GitHub publishes it for x86_64 linux only: an arm64 image gets Hugo and no export step, and the blog's `build.sh` names the tool it lacks. The vault must be inside a bind mount for a session to reach it.
 
 A project venv works as usual. `UV_PROJECT_ENVIRONMENT=.venv` puts it at the project folder, and `.venv` is the name uv and every editor expect by default, so `uv run` and `uv sync` find it without a PATH entry. Scripts in a venv are not reachable by name from outside it: use `uv run` in the project folder, or activate the venv with `source .venv/bin/activate`.
 
 Check that a running container has them:
 
 ```bash
-docker compose exec pi-pocket sh -c 'python3 --version && uv --version && kubectl version --client'
+docker compose exec pi-pocket sh -c 'python3 --version && uv --version && kubectl version --client && hugo version && obsidian-export --version'
 ```
 
 ## Security
