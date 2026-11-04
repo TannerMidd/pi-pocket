@@ -811,7 +811,8 @@ kbd {
     :root:not([data-motion="full"], [data-motion="fluid"]) .background-now .dot,
     :root:not([data-motion="full"], [data-motion="fluid"]) .agents-dot.working,
     :root:not([data-motion="full"], [data-motion="fluid"]) .session-working,
-    :root:not([data-motion="full"], [data-motion="fluid"]) .session-placeholder span {
+    :root:not([data-motion="full"], [data-motion="fluid"]) .session-placeholder span,
+    :root:not([data-motion="full"], [data-motion="fluid"]) .icon.warming {
         animation: none !important;
     }
 }
@@ -4198,6 +4199,36 @@ pre.diff .del {
 
 .model-chip .model-spark {
     color: var(--accent);
+}
+
+/* Keep warm is on for the session; while it keeps the cache alive, the flame flickers. */
+.model-chip .model-spark.warm {
+    color: var(--o-orange);
+}
+
+.icon.warming {
+    transform-origin: 50% 90%;
+    animation: flicker 1.6s ease-in-out infinite;
+}
+
+@keyframes flicker {
+    0%,
+    100% {
+        transform: scale(1, 1) rotate(0deg);
+        opacity: 1;
+    }
+    25% {
+        transform: scale(0.94, 1.08) rotate(-4deg);
+        opacity: 0.85;
+    }
+    50% {
+        transform: scale(1.04, 0.95) rotate(2deg);
+        opacity: 1;
+    }
+    75% {
+        transform: scale(0.97, 1.05) rotate(4deg);
+        opacity: 0.9;
+    }
 }
 
 .model-chip .model-name {
@@ -18331,6 +18362,638 @@ textarea.notes {
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/*
+ * Keep warm: three tabs (When, Limits, Models) above one scrolling panel each. The sheet is a container: at 700px and
+ * wider (the 760px sheet of wide screens) When and Limits take two columns.
+ */
+.sheet.keep-warm-sheet {
+    container: keep-warm / inline-size;
+    height: 88dvh;
+}
+
+@media (min-width: 1000px) {
+    .sheet.keep-warm-sheet {
+        max-width: 760px;
+        height: 86dvh;
+    }
+}
+
+/* The tabs stay put; only what is under them scrolls. */
+.keep-warm-sheet .sheet-body {
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.keep-warm-sheet p {
+    margin: 0;
+}
+
+.keep-warm-sheet b {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.keep-warm-sheet .faint {
+    color: var(--faint);
+}
+
+.keep-warm-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    margin: 10px 16px 0;
+    padding: 3px;
+    border-radius: var(--r-control);
+    background: var(--card);
+}
+
+/* A tab: its name over the value it holds (beside it on a wide sheet). */
+.keep-warm-tabs button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 44px;
+    padding: 3px 4px;
+    border-radius: var(--r-seg);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25;
+}
+
+.keep-warm-tab-value {
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--faint);
+    font-size: 11.5px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.keep-warm-tabs button.on {
+    background: var(--raised);
+    color: var(--text);
+    box-shadow: 0 1px 2px color-mix(in srgb, black 35%, transparent);
+}
+
+.keep-warm-tabs button.on .keep-warm-tab-value {
+    color: var(--muted);
+}
+
+@container keep-warm (min-width: 700px) {
+    .keep-warm-tabs {
+        margin: 12px 20px 0;
+    }
+    .keep-warm-tabs button {
+        flex-direction: row;
+        gap: 8px;
+        min-height: 36px;
+    }
+}
+
+.keep-warm-scroll {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: calc(16px * var(--space-y)) calc(20px * var(--space-x)) calc(22px * var(--space-y));
+}
+
+.keep-warm-scroll > * {
+    flex-shrink: 0;
+}
+
+.keep-warm-now {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--muted);
+}
+
+.keep-warm-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+.keep-warm-panel[hidden] {
+    display: none;
+}
+
+/* When: on a phone, what keep warm does, the times, the examples, and where it comes from. */
+.keep-warm-when,
+.keep-warm-limits {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+.keep-warm-when-side {
+    display: contents;
+}
+
+.keep-warm-about {
+    display: grid;
+    order: -1;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.keep-warm-about > p:first-child {
+    color: var(--body);
+    font-size: 12.5px;
+}
+
+/* Wide: the times on the left; on the right what keep warm does, the examples, and where it comes from. */
+@container keep-warm (min-width: 700px) {
+    .keep-warm-when,
+    .keep-warm-limits {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        align-items: start;
+        gap: 20px;
+    }
+    .keep-warm-when-side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .keep-warm-about {
+        order: 0;
+    }
+}
+
+.keep-warm-times,
+.keep-warm-examples {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* On a narrow phone the headers wrap; anything still too wide scrolls sideways in the table alone. */
+.keep-warm-examples {
+    overflow-x: auto;
+}
+
+.keep-warm-times > .group-title {
+    margin: 0 2px;
+}
+
+/* A time: a radio dot, its name, and what it would do for the example model. */
+.keep-warm-time {
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    align-items: center;
+    gap: 0 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 6px 12px;
+    color: var(--text);
+    font-size: 13.5px;
+    text-align: left;
+}
+
+.keep-warm-dot {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border: 1.5px solid var(--hair-2);
+    border-radius: 50%;
+}
+
+.keep-warm-time.on .keep-warm-dot {
+    border-color: var(--accent);
+}
+
+.keep-warm-time.on .keep-warm-dot::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.keep-warm-time-estimate {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.keep-warm-time.on {
+    background: var(--accent-soft);
+}
+
+.keep-warm-time.on .keep-warm-time-estimate {
+    color: var(--text);
+}
+
+/* The chosen time's estimate, under its row. */
+.keep-warm-chosen {
+    padding: 0 12px 10px 42px;
+    background: var(--accent-soft);
+    color: var(--body);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+/* A setting: its name and note on the left, its control on the right. */
+.keep-warm-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 52px;
+    padding: 8px 12px 8px 14px;
+}
+
+.keep-warm-row-label {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    color: var(--text);
+    font-size: 13.5px;
+}
+
+.keep-warm-row-label .muted {
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.keep-warm-input {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.keep-warm-number-field {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    min-width: 0;
+    white-space: normal;
+}
+
+.keep-warm-number-field .warn {
+    max-width: 12rem;
+}
+
+.keep-warm-number {
+    min-height: 36px;
+    padding: 0 8px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    appearance: textfield;
+}
+
+@media (pointer: coarse) {
+    .keep-warm-number {
+        min-height: 44px;
+    }
+}
+
+.keep-warm-number::-webkit-inner-spin-button,
+.keep-warm-number::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+}
+
+/* The models: search, then one fold for each provider, its models in as many columns as fit. */
+.keep-warm-models {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.keep-warm-models .search {
+    min-height: 40px;
+    margin: 0;
+}
+
+.keep-warm-model-list {
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--bg);
+}
+
+.keep-warm-model-list > p {
+    padding: 0.6rem 12px;
+}
+
+.keep-warm-provider + .keep-warm-provider {
+    border-top: 1px solid var(--hair);
+}
+
+.keep-warm-provider > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.keep-warm-provider > summary::-webkit-details-marker {
+    display: none;
+}
+
+.keep-warm-provider > summary .muted {
+    flex: 1;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.keep-warm-provider > summary svg {
+    color: var(--muted);
+    transition: transform 0.15s;
+}
+
+.keep-warm-provider[open] > summary {
+    border-bottom: 1px solid var(--hair);
+}
+
+.keep-warm-provider[open] > summary svg {
+    transform: rotate(90deg);
+}
+
+.keep-warm-model-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+}
+
+/* A model: its name and cache cost, when its cache expires, and what keep warm does with it. */
+.keep-warm-model {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--hair);
+}
+
+.keep-warm-model-grid > .keep-warm-model:first-child {
+    border-top: 0;
+}
+
+@container keep-warm (min-width: 700px) {
+    .keep-warm-model-grid > .keep-warm-model:nth-child(2) {
+        border-top: 0;
+    }
+}
+
+/* On a narrow phone, the value goes under the name rather than squeezing it out. */
+.keep-warm-model-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0 8px;
+    min-height: 44px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.keep-warm-model-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.keep-warm-model-value {
+    display: inline-flex;
+    flex: none;
+    margin-left: auto;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.keep-warm-model-note {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* No known cache time: said quietly, with a small dot rather than warning text. */
+.keep-warm-model-note.off::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--warn);
+    opacity: 0.7;
+    vertical-align: 1px;
+}
+
+/* A session's keep warm: the reply menu's card, and the session menu's compact one (whose flame is its switch). */
+.keep-warm-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+}
+
+.keep-warm-card.compact {
+    gap: 8px;
+    margin: 6px 12px 10px;
+    padding: 10px;
+    border-radius: var(--r-card);
+    background: var(--card-2);
+}
+
+.keep-warm-card-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.keep-warm-card.compact .keep-warm-card-head {
+    gap: 10px;
+}
+
+.keep-warm-flame {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-control);
+    transition:
+        background var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.keep-warm-card.compact .keep-warm-flame {
+    width: 32px;
+    height: 32px;
+}
+
+.keep-warm-pill,
+.keep-warm-flame {
+    background: color-mix(in srgb, var(--o-orange) 15%, transparent);
+    color: var(--o-orange);
+}
+
+.keep-warm-pill.off,
+.keep-warm-flame.off {
+    background: var(--raised);
+    color: var(--muted);
+}
+
+.keep-warm-card-title {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    color: var(--text);
+}
+
+.keep-warm-card:not(.compact) .keep-warm-card-title > span:first-child {
+    font-weight: 500;
+}
+
+.keep-warm-pill {
+    flex: none;
+    padding: 2px 9px;
+    border-radius: var(--r-pill);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+/* The times, as one bar: a raised button is the choice. */
+.segmented.keep-warm-bar {
+    display: grid;
+    align-self: stretch;
+    grid-auto-flow: column;
+    grid-auto-columns: auto;
+    gap: 2px;
+    padding: 3px;
+    border: 0;
+    border-radius: var(--r-control);
+    background: var(--card-2);
+}
+
+.keep-warm-card.compact .segmented.keep-warm-bar {
+    background: var(--card);
+}
+
+.segmented.keep-warm-bar button {
+    min-width: 0;
+    height: 34px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: var(--r-seg);
+    background: none;
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.keep-warm-card.compact .segmented.keep-warm-bar button {
+    height: 32px;
+    font-size: 12.5px;
+}
+
+.segmented.keep-warm-bar button.on {
+    background: var(--raised);
+    color: var(--text);
+    box-shadow: 0 1px 2px color-mix(in srgb, black 35%, transparent);
+}
+
+.segmented.keep-warm-bar.dim {
+    opacity: 0.5;
+}
+
+@media (hover: hover) {
+    .segmented.keep-warm-bar button:not(.on, :disabled):hover {
+        color: var(--text);
+    }
+}
+
+.keep-warm-card-details {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+}
+
+.keep-warm-card.compact .keep-warm-card-details {
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.keep-warm-card-details b {
+    color: var(--text);
+    font-weight: 500;
+}
+
+/* The examples: each model's Break-even, its cost, and one message without a cache. */
+.keep-warm-stops {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.keep-warm-stops th,
+.keep-warm-stops td {
+    padding: 5px 0;
+    vertical-align: top;
+    text-align: right;
+    font-weight: normal;
+    white-space: nowrap;
+}
+
+.keep-warm-stops thead th {
+    color: var(--muted);
+    white-space: normal;
+}
+
+.keep-warm-stops th:first-child {
+    color: var(--text);
+    text-align: left;
+}
+
+.keep-warm-stops thead th:first-child {
+    color: var(--muted);
+}
+
+.keep-warm-stops :is(th, td) + :is(th, td) {
+    padding-left: 10px;
+}
+
+/* A cell's second line: the model's cache time, or the refreshes. */
+.keep-warm-stops :is(th, td) > span {
+    display: block;
+    font-size: 0.92em;
 }
 
 .pip-welcome {

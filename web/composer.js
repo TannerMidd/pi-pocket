@@ -33,6 +33,7 @@ import {
     uid,
 } from "./store.js";
 import { useDock } from "./dock.js";
+import { keepWarmOn } from "./sheets/keep-warm.js";
 import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
@@ -1903,7 +1904,7 @@ defineItem("composer", {
     id: "core:model",
     label: "Model",
     order: 300,
-    render: ({ agent, level }) =>
+    render: ({ agent, level, view }) =>
         html`<button
             class=${`model-chip ${agent?.available === false ? "warn" : ""}`}
             data-part="model-chip"
@@ -1911,7 +1912,18 @@ defineItem("composer", {
             title=${`Model and thinking: ${modelLabel(agent)}${level ? `, ${level}` : ""}`}
             onClick=${() => openSheet({ type: "model" })}
         >
-            <${Icon} name="sparkle" size=${12} class="model-spark" />
+            ${
+                // While keep warm is on for this session, a flame takes the star's place; it flickers while it keeps the
+                // cache alive (the run is over and refreshes go on). Nothing else changes.
+                keepWarmOn(view.conversation)
+                    ? html`<${Icon}
+                          name="flame"
+                          size=${13}
+                          stroke=${2}
+                          class=${`model-spark warm ${view.conversation.keepWarm.status?.warm ? "warming" : ""}`}
+                      />`
+                    : html`<${Icon} name="sparkle" size=${12} class="model-spark" />`
+            }
             <span class="model-name">${shortModel(agent)}</span>
             ${level && html`<span class="model-level">${level}</span>`}
             <${Icon} name="chevron" size=${12} stroke=${2.2} class="model-caret" />
