@@ -749,7 +749,8 @@ export function Composer() {
 
     useEffect(() => {
         // It waits while a send is on its way: the box then holds only what goes.
-        const taken = insert && !sending && takeInsert(drafts.get(conversationId));
+        const taken =
+            insert && !sending ? takeInsert(drafts.get(conversationId), conversationId) : null;
 
         if (taken?.files.length > 0) {
             addFiles(taken.files);
@@ -770,7 +771,7 @@ export function Composer() {
             element.focus();
             element.setSelectionRange(element.value.length, element.value.length);
         });
-    }, [insert?.n, sending]);
+    }, [insert?.n, sending, conversationId]);
     useEffect(() => {
         const fit = () => fitBox(box.current);
 

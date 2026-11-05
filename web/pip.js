@@ -927,7 +927,7 @@ function Composer({ id, busy, board = false }) {
     const insert = board ? store.state.composerInsert : null;
 
     useEffect(() => {
-        const taken = insert && takeInsert(composerDraft.state.text);
+        const taken = insert && takeInsert(composerDraft.state.text, store.state.conversationId);
 
         if (taken?.files.length > 0) {
             composerDraft.addFiles(taken.files);

@@ -594,6 +594,31 @@ test("A session's send on its way, its box shown again: once, or all back", real
     assert.equal(await inPage(`window.sends`), 1, "once");
 });
 
+test("Text put in the box during a send waits for its own session, all of it", real, async () => {
+    const other = await newSession(app, work);
+    const words = (value: string, what: string) =>
+        see(`document.querySelector('${BOX}')?.value === ${JSON.stringify(value)}`, what);
+
+    await fresh("floating");
+    await holdingSends(async () => {
+        await type(BOX, "going");
+        await page.press("Enter");
+        await see(`window.sends === 1`, "on its way");
+        await page.evaluate(
+            `${STORE}.insertIntoComposer('first'); ${STORE}.insertIntoComposer('second')`,
+        );
+        await page.evaluate(`${STORE}.navigate(${Number(other)})`);
+        await backTo(other, "another session");
+        await words("", "another session's box, empty");
+        await settle();
+        await words("", "still empty");
+        await page.evaluate(`${STORE}.navigate(${Number(background)}); window.release()`);
+    });
+    await backTo(background, "its own session");
+    await words("first\n\nsecond", "both, in order, in its own box");
+    await type(BOX, "");
+});
+
 test("A queued message's Edit during a send: kept through a reload or a move", real, async () => {
     const queued = `[...document.querySelectorAll('.pane .queued-text')]
         .find((each) => each.textContent.includes('tell him'))`;
