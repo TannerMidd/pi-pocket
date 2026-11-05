@@ -1,6 +1,5 @@
 // Provenance and location checks for the coordinator's final reviewed WP2 classification; real UI tests check behavior.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -15,14 +14,17 @@ const BASELINE_HASHES = [
     "eda79e81f9258c8da019fe6234f7a2340fd35a88a03a61178cfe0a6fddcf7881",
 ];
 const EXPECTED = [52, 105, 148, 1];
-const ROOT = new URL("../", import.meta.url);
+const baselineFixture = JSON.parse(
+    readFileSync(new URL("./fixtures/wp2-baseline.json", import.meta.url), "utf8"),
+) as { commit: string; sources: Record<string, string> };
 
 function baseline(file: string): string {
-    return execFileSync("git", ["show", `${BASELINE}:${file}`], {
-        cwd: ROOT,
-        encoding: "utf8",
-        maxBuffer: 4 * 1024 * 1024,
-    });
+    assert.equal(baselineFixture.commit, BASELINE);
+    const source = baselineFixture.sources[file];
+
+    assert.equal(typeof source, "string", `missing baseline fixture: ${file}`);
+
+    return source!;
 }
 
 function at(file: string, source: string, id: string): string {
