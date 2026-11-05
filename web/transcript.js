@@ -1992,11 +1992,13 @@ function choiceValue(field, { picked, other }) {
         .join("\n");
 }
 
-// Unsent answers belong to this approval, and to the person who may answer it. Another approval, or a form that
-// changed, starts empty rather than showing answers that no longer fit. They are kept by session, each under its
-// approval's id and the time it asked: an id is unique only while it waits, so a later ask with the same id is another.
+// Unsent answers belong to this approval, and to the person who may answer it. Another approval, or a
+// form that changed, starts empty rather than showing answers that no longer fit. They are kept by
+// session, each under its approval's id and its call (or the time it asked, with no call): an id is
+// unique only while it waits, so a later ask with the same id is another, but its call asking again,
+// as after a restart, is the same ask.
 const askKey = (conversationId) => `ask.${conversationId}`;
-const askEntry = (approval) => `${approval.id}@${approval.createdAt}`;
+const askEntry = (approval) => `${approval.id}@${approval.callId ?? approval.createdAt}`;
 
 /** The approvals waiting in `conversationId` as this tab knows them, or undefined when it knows none. */
 function waitingIn(conversationId) {

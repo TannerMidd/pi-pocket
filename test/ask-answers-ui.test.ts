@@ -88,9 +88,9 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     const other = await newSession(app);
     const form = { title: "Set up", fields, submit: "Send" };
     const request = { id: "ask-1", conversationId: id, taskId: 1 as unknown as TaskId };
-    const ask = (createdAt: number) =>
+    const ask = (createdAt: number, callId?: string) =>
         void app.approvals.request(
-            { ...request, tool: "ask", subject: "Set up", reason: "", createdAt, form },
+            { ...request, tool: "ask", subject: "Set up", reason: "", createdAt, form, callId },
             context,
         );
     const first = Date.now();
@@ -156,4 +156,15 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     await sees(`${card} !== null`);
     assert.deepEqual(await shown(), ["", "", ""]);
     assert.equal(await saved(), null, "and they went");
+
+    // The same call asks again, later, as after a restart: what was typed stays.
+    ask(first + 3, "call-1");
+    await sees(`${store}.store.state.view.approvals[0]?.createdAt === ${first + 3}`);
+    await page.type({ selector: "input[name=user]" }, "bob");
+    ask(first + 4, "call-1");
+    await sees(`${store}.store.state.view.approvals[0]?.createdAt === ${first + 4}`);
+    assert.deepEqual(await shown(), ["", "bob", ""]);
+    await page.reload();
+    await sees(`${card} !== null`);
+    assert.deepEqual(await shown(), ["", "bob", ""]);
 });
