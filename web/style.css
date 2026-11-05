@@ -5658,6 +5658,13 @@ pre.diff .del {
     contain-intrinsic-size: 0 0;
 }
 
+/* A browser without it (Safari before 18, Firefox before 125) would show them under the matches. */
+@supports not (content-visibility: hidden) {
+    .session-group.kept {
+        display: none;
+    }
+}
+
 /*
  * A row out of sight is not styled or laid out (`content-visibility`): with hundreds of sessions, each restyle and each
  * width change (the sidebar's drag, the window's) paid for every row. Meanwhile it keeps the size it last had, or its

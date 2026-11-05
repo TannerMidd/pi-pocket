@@ -356,7 +356,9 @@ function withMark(text, needle) {
         return text;
     }
 
-    return html`${text.slice(0, at)}<mark>${text.slice(at, at + needle.length)}</mark>${text.slice(at + needle.length)}`;
+    const end = at + needle.length;
+
+    return html`${text.slice(0, at)}<mark>${text.slice(at, end)}</mark>${text.slice(end)}`;
 }
 
 /** What a search looks through in each session, lowercased: made once for each version of it and of its words. */
@@ -1317,7 +1319,7 @@ const listKept = { query: "", scroll: 0 };
 /**
  * Rows are `ROW_FLOOR` px tall at least. As the list's rows change wholly (it opens, another tab, a search starts or
  * ends), a screenful of them draws at once (`firstRows`), and the rest follow, `ROWS_PER_FRAME` at each frame: hundreds
- * of rows held the first frame up. A list that opens scrolled draws down to where it was at once.
+ * of rows held the first frame up. They draw down to where the list was scrolled at once, as it opens and for a tab.
  */
 const ROW_FLOOR = 28;
 const ROWS_PER_FRAME = 40;
@@ -1415,17 +1417,19 @@ function AllSessions({ compact = false }) {
     const marks = useRef([]);
     const drawnRows = useRef({ base: null, matches: null });
     const opening = fills.current === null;
-    // Opening, the list draws down to where it was scrolled at once.
-    const startFill = () => ({
-        rows: firstRows() + (opening && !compact ? Math.ceil(listKept.scroll / ROW_FLOOR) : 0),
-    });
+    // The rows down to `scrolled` draw at once: where the list was as it opens, where it is for another tab.
+    const startFill = (scrolled) => ({ rows: firstRows() + Math.ceil(scrolled / ROW_FLOOR) });
+    const reopened = opening && !compact ? listKept.scroll : 0;
 
     if (opening || fills.current.tab !== tab) {
-        fills.current = { tab, base: null, matches: null };
+        fills.current = {
+            tab,
+            base: startFill(opening ? reopened : list.current.scrollTop),
+            matches: null,
+        };
     }
 
-    fills.current.base ??= startFill();
-    fills.current.matches = searching ? (fills.current.matches ?? startFill()) : null;
+    fills.current.matches = searching ? (fills.current.matches ?? startFill(reopened)) : null;
 
     const setQuery = (next) => {
         if (!compact) {

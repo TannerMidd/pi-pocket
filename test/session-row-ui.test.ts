@@ -624,3 +624,23 @@ test(
         await inPage(`(await import("/theme.js")).setPrefs({ sidebarWidth: 312 }); return "null"`);
     },
 );
+
+test("another tab opens where the list was scrolled", real, async () => {
+    for (let count = 0; count < 30; count++) {
+        await newSession(app);
+    }
+
+    await fresh();
+    // A short window: a screenful is a few rows, and the list scrolls past them.
+    await page.setViewport({ ...DESKTOP, height: 420 });
+    const scrolled = (to = "") =>
+        inPage<number>(
+            `const list = document.querySelector(".sidebar .session-items"); ${to} return JSON.stringify(list.scrollTop)`,
+        );
+
+    await until(async () => (await scrolled("list.scrollTop = 600;")) === 600, "the list scrolled");
+    await selectTab("Folders");
+    assert.equal(await scrolled(), 600, "Folders");
+    await selectTab("Recent");
+    assert.equal(await scrolled(), 600, "Recent");
+});

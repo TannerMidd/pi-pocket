@@ -229,6 +229,18 @@ test(
     },
 );
 
+test("a browser without content-visibility does not show the kept groups", real, async () => {
+    // Chromium has it: the fallback is checked as the page's stylesheet has it.
+    const fallback = await inPage<string>(`
+        const all = (rules) => [...rules].flatMap((rule) => [rule, ...all(rule.cssRules ?? rule.styleSheet?.cssRules ?? [])]);
+        const rule = all([...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])).find(
+            (each) => each.conditionText === "not (content-visibility: hidden)");
+        return JSON.stringify(rule?.cssRules[0].cssText);
+    `);
+
+    assert.equal(fallback, ".session-group.kept { display: none; }");
+});
+
 test("the search and the launcher find a session by an extension's words", real, async () => {
     await search(`word${second}`);
     await until(async () => (await rows()).join() === String(second), "only the second session");
