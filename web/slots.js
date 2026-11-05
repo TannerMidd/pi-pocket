@@ -5,14 +5,19 @@
 // (Appearance → Layout), which win. Fixed items (the menu, Lancet Guard) always show, in their own place.
 import { Fragment, h } from "preact";
 import { prefs, setPrefs } from "./theme.js";
+import { store } from "./store.js";
+import { t } from "./ui-locale.js";
 
-/** The slots, with their names for people and where extensions' items go by default. */
+/**
+ * The slots, with their names for people and where extensions' items go by default. A name is looked up as it draws,
+ * never kept: the same place reads in the language the person chose now (`ui-locale.js`).
+ */
 export const SLOTS = {
-    topbar: { label: "Top bar buttons", extensions: 550 },
-    status: { label: "Status line items", extensions: 500 },
-    places: { label: "Places", extensions: 1000 },
-    composer: { label: "Message box buttons", extensions: 500 },
-    reply: { label: "Under Pi's answers", extensions: 500 },
+    topbar: { label: () => t("slots.topbar", "Top bar buttons"), extensions: 550 },
+    status: { label: () => t("slots.status", "Status line items"), extensions: 500 },
+    places: { label: () => t("slots.places", "Places"), extensions: 1000 },
+    composer: { label: () => t("slots.composer", "Message box buttons"), extensions: 500 },
+    reply: { label: () => t("slots.reply", "Under Pi's answers"), extensions: 500 },
 };
 
 /**
@@ -89,9 +94,10 @@ export function arranged(slot) {
 
 function keptFor(slot) {
     const layout = prefs().layout;
+    const locale = store.state.localeRevision;
     const last = kept.get(slot);
 
-    if (last?.version === version && last.layout === layout) {
+    if (last?.version === version && last.layout === layout && last.locale === locale) {
         return last;
     }
 
@@ -99,10 +105,11 @@ function keptFor(slot) {
     const next = {
         version,
         layout,
+        locale,
         list,
-        key: list
+        key: `${locale}:${list
             .map(({ item, hidden }) => `${item.id}${item.revision ?? ""}${hidden ? "-" : "+"}`)
-            .join(),
+            .join()}`,
     };
 
     kept.set(slot, next);
@@ -110,9 +117,15 @@ function keptFor(slot) {
     return next;
 }
 
+/** An item with its label read now: a core item gives a function, an extension gives text as it always did. */
+function shownItem(item) {
+    return typeof item.label === "function" ? { ...item, label: item.label() } : item;
+}
+
 function arrange(slot) {
     const defaultPlace = (item) => item.order ?? SLOTS[slot].extensions;
     let list = [...core.get(slot), ...extensionItems(slot)]
+        .map(shownItem)
         .map((item, index) => ({ item, index }))
         .sort((a, b) => defaultPlace(a.item) - defaultPlace(b.item) || a.index - b.index)
         .map(({ item }) => item);

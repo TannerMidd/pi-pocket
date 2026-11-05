@@ -9,7 +9,13 @@ const STUBS: Record<string, string> = {
         export const useRef = (current) => ({ current });
         export const useEffect = (effect) => globalThis.voiceCleanups.push(effect());
     `,
-    "./store.js": `export const notify = () => {};`,
+    "./store.js": `
+        export const notify = () => {};
+        export const onHello = () => {};
+        export const setFixedText = () => {};
+        export const store = { state: { localeRevision: 0 }, set(value) { Object.assign(this.state, value); } };
+    `,
+    "./safe-mode.js": `export const safeMode = () => true; export const onSafeModeEnd = () => {};`,
     "./ui.js": `export const html = () => null; export const Icon = () => null;`,
 };
 
@@ -17,7 +23,8 @@ registerHooks({
     resolve(specifier, context, next) {
         const stub = STUBS[specifier];
 
-        return stub !== undefined && context.parentURL?.endsWith("/web/voice.js")
+        return stub !== undefined &&
+            ["/web/voice.js", "/web/ui-locale.js"].some((file) => context.parentURL?.endsWith(file))
             ? { url: `data:text/javascript,${encodeURIComponent(stub)}`, shortCircuit: true }
             : next(specifier, context);
     },
@@ -41,7 +48,12 @@ type Voice = {
 const recognitions: Recognition[] = [];
 
 (globalThis as Record<string, unknown>).voiceCleanups = [];
+
+(globalThis as Record<string, unknown>).addEventListener = () => {};
+
 (globalThis as Record<string, unknown>).document = {
+    cookie: "",
+    documentElement: { lang: "en" },
     activeElement: null,
     hidden: false,
     addEventListener() {},

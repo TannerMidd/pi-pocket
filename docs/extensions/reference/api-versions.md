@@ -88,9 +88,13 @@ Each member in the reference has its own Since line. These parts came together:
 | People's values and the browser: `host.ask`, `hide`, `commandEnv`, `browser` (experimental)                                                                       | 0.22.0 |
 | Events, services, and settings: `host.on`, `web.provide`, `use`, `onService`, `settings`, `setting`, `onSettings`, `pocket.settings`, `onSettings` (experimental) | 0.22.0 |
 | Give PiP a message: `pocket.pip.ask` (experimental)                                                                                                               | 0.26.0 |
+| UI language packs and request locales; browser `pocket.t` and `pocket.onLocaleChange` (experimental)                                                              | 0.28.0 |
 | A person's role: `host.roleOf` (experimental)                                                                                                                     | 0.27.0 |
 | The page's scroll position: `scroll` in the `host.browser` snapshot (experimental)                                                                                | 0.27.0 |
 | Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0 |
 | Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0 |
 | How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0 |
+| `web.presentEntry`, `PresentEntry`, and `pocket.entryPresentation` (experimental)                                                                                 | 0.28.0 |
+| `host.registerWorkspaceProvider`, `WorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0 |
+| `pocket.fence`, `pocket.mathInline`, and their types (experimental)                                                                                               | 0.28.0 |
 | `host.sessions.start` (experimental)                                                                                                                              | 0.28.0 |

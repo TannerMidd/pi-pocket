@@ -1,0 +1,1739 @@
+[
+    {
+        "key": "web.browser-panel.browser-panel.aria-label.size-switch",
+        "english": "Size: {size}. Switch to {next}",
+        "chinese": "尺寸：{size}。切换到{next}",
+        "values": ["size", "next"],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.browser-panel.div.take-turns-driver-uses",
+        "english": "Take turns is on: the driver uses the page.",
+        "chinese": "轮流操作已开启：仅当前操作人可以使用此页面。",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.browser-panel.div.watch-people-who-steer",
+        "english": "You can watch; people who can steer use the page.",
+        "chinese": "你可以查看；有操作权限的成员可以使用此页面。",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.browser-panel.label.starting-the-browser",
+        "english": "Starting the browser",
+        "chinese": "正在启动浏览器",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.browser-panel.placeholder.address-such-localhost",
+        "english": "Address, such as localhost:5173",
+        "chinese": "地址，例如 localhost:5173",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.browser-panel.title.next",
+        "english": "{size} · next: {next}",
+        "chinese": "{size} · 下一个：{next}",
+        "values": ["size", "next"],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.console-pane.span.lines",
+        "english": "{count} lines",
+        "chinese": "{count} 行",
+        "values": ["count"],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.desktop.label.desktop-1280-800",
+        "english": "Desktop 1280×800",
+        "chinese": "桌面 1280×800",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.fit.label.fit-the-panel",
+        "english": "Fit the panel",
+        "chinese": "适应面板",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.mobile.label.phone-390-844",
+        "english": "Phone 390×844",
+        "chinese": "手机 390×844",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.start-screen.label.looking-for-servers",
+        "english": "Looking for servers",
+        "chinese": "正在查找服务器",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.start-screen.p.nothing-open-yet-pi",
+        "english": "Nothing is open yet. Pi, or someone who can steer, opens pages here.",
+        "chinese": "当前没有打开的页面。Pi 或有操作权限的成员可以在此打开网页。",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.start-screen.p.type-address-above-such",
+        "english": "Type an address above, such as localhost:5173, or ask Pi to open one.",
+        "chinese": "请在上方输入地址，例如 localhost:5173，也可以让 Pi 打开网页。",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.browser-panel.tablet.label.tablet-820-1180",
+        "english": "Tablet 820×1180",
+        "chinese": "平板 820×1180",
+        "values": [],
+        "file": "web/browser-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.label.reading-the-diff",
+        "english": "Reading the diff",
+        "chinese": "正在读取差异",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.p.file-changed-after-diff",
+        "english": "The file changed after this diff was read, so its other lines cannot be shown. Refresh to see them.",
+        "chinese": "读取差异后文件已更改，无法显示其余行。刷新以查看最新内容。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.p.file-too-big-show",
+        "english": "This file is too big to show its other lines here.",
+        "chinese": "此文件过大，无法在此显示其余行。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.p.large-diff-changed-lines",
+        "english": "A large diff: {detail} changed lines. ",
+        "chinese": "差异较大：{detail} 行更改。 ",
+        "values": ["detail"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.p.mode-changed",
+        "english": "Only its mode changed.",
+        "chinese": "仅文件模式发生变化。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.p.no-difference-text",
+        "english": "No difference in text.",
+        "chinese": "文本没有变化。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-file.p.renamed-no-change-text",
+        "english": "Renamed, with no change to its text.",
+        "chinese": "已重命名，文本未变化。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.div.pi-also-edited-no",
+        "english": "Pi also edited (no uncommitted change)",
+        "chinese": "Pi 也修改过（当前没有未提交的更改）",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.div.pi-wrote-edited",
+        "english": "Pi wrote or edited",
+        "chinese": "Pi 编写或修改的文件",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.label.asking-git",
+        "english": "Asking git",
+        "chinese": "正在查询 Git",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.p.more-changed-not-listed",
+        "english": "And {more} more changed files, not listed here.",
+        "chinese": "另有 {more} 个已改文件未在此列出。",
+        "values": ["more"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.p.more-changed-not-listed-one",
+        "english": "And 1 more changed file, not listed here.",
+        "chinese": "另有 1 个已改文件未在此列出。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.p.no-uncommitted-changes",
+        "english": "No uncommitted changes.",
+        "chinese": "没有未提交的更改。",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.diff-review.p.no-uncommitted-changes-branch",
+        "english": "No uncommitted changes on {branch}.",
+        "chinese": "{branch} 上没有未提交的更改。",
+        "values": ["branch"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.diff-review.span.viewed",
+        "english": "{seen} of {count} viewed",
+        "chinese": "已查看 {seen} / 共 {count}",
+        "values": ["seen", "count"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.strong.files",
+        "english": "{count} files",
+        "chinese": "{count} 个文件",
+        "values": ["count"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.diff-review.strong.one-file",
+        "english": "1 file",
+        "chinese": "1 个文件",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.file-head.aria-label.fold",
+        "english": "Fold",
+        "chinese": "折叠",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.file-head.aria-label.unfold",
+        "english": "Unfold",
+        "chinese": "展开",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.file-head.title.added",
+        "english": "added",
+        "chinese": "已添加",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.file-head.title.deleted",
+        "english": "deleted",
+        "chinese": "已删除",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.file-head.title.modified",
+        "english": "modified",
+        "chinese": "已修改",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.file-head.title.new",
+        "english": "new",
+        "chinese": "新文件",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.file-head.title.renamed",
+        "english": "renamed",
+        "chinese": "已重命名",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.diff.gap-row.button.show-hidden",
+        "english": "Show {count} hidden lines",
+        "chinese": "显示 {count} 行隐藏内容",
+        "values": ["count"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.gap-row.button.show-hidden-lines",
+        "english": "Show all {left} hidden lines",
+        "chinese": "显示全部隐藏的 {left} 行",
+        "values": ["left"],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.gap-row.button.show-hidden-one",
+        "english": "Show 1 hidden line",
+        "chinese": "显示 1 行隐藏内容",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.layouts.auto",
+        "english": "Auto",
+        "chinese": "自动",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.layouts.split",
+        "english": "Split",
+        "chinese": "并排",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.layouts.unified",
+        "english": "Unified",
+        "chinese": "统一",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.title.delete-new-file",
+        "english": "Delete this new file",
+        "chinese": "删除这个新文件",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.title.tap-again-delete-new",
+        "english": "Tap again to delete this new file",
+        "chinese": "再次点击即可删除这个新文件",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.title.tap-again-throw-changes",
+        "english": "Tap again to throw these changes away",
+        "chinese": "再次点击即可放弃这些更改",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.title.undo-changes-file",
+        "english": "Undo the changes to this file",
+        "chinese": "撤销对此文件的更改",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.tools.delete",
+        "english": "Delete?",
+        "chinese": "删除？",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.tools.undo",
+        "english": "Undo?",
+        "chinese": "撤销？",
+        "values": [],
+        "file": "web/diff.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.undo.deleted",
+        "english": "Deleted {path}.",
+        "chinese": "已删除 {path}。",
+        "values": ["path"],
+        "file": "web/diff.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.diff.review-file.undo.last-commit",
+        "english": "{path} is as the last commit has it.",
+        "chinese": "文件 {path} 已恢复为最近一次提交中的状态。",
+        "values": ["path"],
+        "file": "web/diff.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.files-panel.files-panel.button.changes",
+        "english": "Changes",
+        "chinese": "更改",
+        "values": [],
+        "file": "web/files-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.files-panel.files-tab.aria-label.back-changes",
+        "english": "Back to Changes",
+        "chinese": "返回“更改”",
+        "values": [],
+        "file": "web/files-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.files-panel.files-tab.aria-label.back-files",
+        "english": "Back to the files",
+        "chinese": "返回文件列表",
+        "values": [],
+        "file": "web/files-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.files-panel.matches.p.no-file-matches",
+        "english": "No file matches “{query}”.",
+        "chinese": "没有匹配的文件：“{query}”。",
+        "values": ["query"],
+        "file": "web/files-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.files-panel.tree-folder.div.first-listed",
+        "english": "Only the first {count} are listed.",
+        "chinese": "仅列出前 {count} 项。",
+        "values": ["count"],
+        "file": "web/files-panel.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.linked-sessions.linked-sessions.button.more",
+        "english": "+{count} more",
+        "chinese": "另有 {count} 项",
+        "values": ["count"],
+        "file": "web/linked-sessions.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.linked-sessions.linked-sessions.link.new-session",
+        "english": "New session",
+        "chinese": "新会话",
+        "values": [],
+        "file": "web/linked-sessions.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.linked-sessions.linked-sessions.text.linked-session",
+        "english": "Linked session: {title}",
+        "chinese": "关联会话：{title}",
+        "values": ["title"],
+        "file": "web/linked-sessions.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.linked-sessions.linked-sessions.text.started",
+        "english": "Started from: {title}",
+        "chinese": "源自：{title}",
+        "values": ["title"],
+        "file": "web/linked-sessions.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.agent-rows.span.more",
+        "english": "{count} more",
+        "chinese": "另有 {count} 个",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.agent-rows.span.need-approval",
+        "english": "{count} need approval",
+        "chinese": "{count} 个待批准",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.agent-rows.span.one-needs-approval",
+        "english": "1 needs approval",
+        "chinese": "1 个待批准",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peek-ask.span.asks",
+        "english": "{who} asks",
+        "chinese": "{who} 发起请求",
+        "values": ["who"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peek-column.verb.need",
+        "english": "{count} need you",
+        "chinese": "{count} 个需要你处理",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peek-column.verb.needs-one",
+        "english": "1 needs you",
+        "chinese": "1 个需要你处理",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peek-column.verb.waiting",
+        "english": "{count} waiting",
+        "chinese": "{count} 个在等待",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peek-column.verb.waiting-one",
+        "english": "1 waiting",
+        "chinese": "1 个在等待",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peeks-button.title.hide-peek-tiles-alt",
+        "english": "Hide peek tiles (Alt+P)",
+        "chinese": "隐藏会话速览（Alt+P）",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peeks-button.title.peek-other-sessions-alt",
+        "english": "Peek at other sessions (Alt+P)",
+        "chinese": "查看其他会话（Alt+P）",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peeks-rail-button.title.hide-peek-tiles-alt",
+        "english": "Hide peek tiles (Alt+P)",
+        "chinese": "隐藏会话速览（Alt+P）",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.peeks-rail-button.title.peek-other-sessions-alt",
+        "english": "Peek at other sessions (Alt+P)",
+        "chinese": "查看其他会话（Alt+P）",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.render.title.new-session",
+        "english": "New session",
+        "chinese": "新会话",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.render.title.open",
+        "english": "Open {title}",
+        "chinese": "打开 {title}",
+        "values": ["title"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.done-new",
+        "english": "done · new",
+        "chinese": "已完成 · 有新内容",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.just-left",
+        "english": "just left",
+        "chinese": "刚刚离开",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.needs",
+        "english": "needs you",
+        "chinese": "待你处理",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.needs-many",
+        "english": "{count} subagents need you",
+        "chinese": "有 {count} 个子代理需要你处理",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.needs-one",
+        "english": "a subagent needs you",
+        "chinese": "有 1 个子代理需要你处理",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.pinned",
+        "english": "pinned",
+        "chinese": "已置顶",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.waiting",
+        "english": "waiting",
+        "chinese": "等待中",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.waiting-limit",
+        "english": "waiting for a limit",
+        "chinese": "等待限额解除",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.waiting-many",
+        "english": "{count} subagents waiting",
+        "chinese": "有 {count} 个子代理在等待",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.waiting-one",
+        "english": "a subagent waiting",
+        "chinese": "有 1 个子代理在等待",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.working",
+        "english": "working",
+        "chinese": "工作中",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.working-many",
+        "english": "{count} subagents working",
+        "chinese": "有 {count} 个子代理在工作",
+        "values": ["count"],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.tile-props.label.working-one",
+        "english": "a subagent working",
+        "chinese": "有 1 个子代理在工作",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.peeks.toggle-peeks.text.peek-tiles-sessions-show",
+        "english": "Peek tiles on: sessions show here while they work, wait for you, or finish.",
+        "chinese": "会话速览已开启：正在运行、等待你处理或刚完成的会话会显示在这里。",
+        "values": [],
+        "file": "web/peeks.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.ask-pip.text.pi-p-not",
+        "english": "PiP is not on here.",
+        "chinese": "此处尚未启用 PiP。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.ask-pip.text.pi-p-not-ready-yet",
+        "english": "PiP is not ready yet: your message waits in its box.",
+        "chinese": "PiP 尚未就绪：你的消息仍保留在输入框中。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.composer.aria-label.remove",
+        "english": "Remove {name}",
+        "chinese": "移除 {name}",
+        "values": ["name"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.composer.label.uploading",
+        "english": "Uploading {name}",
+        "chinese": "正在上传 {name}",
+        "values": ["name"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.composer.placeholder.ask-pi-p",
+        "english": "Ask PiP…",
+        "chinese": "向 PiP 提问…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.composer.placeholder.listening",
+        "english": "Listening…",
+        "chinese": "正在聆听…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.composer.placeholder.tell-pi-p-more",
+        "english": "Tell PiP more…",
+        "chinese": "继续告诉 PiP…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.composer.submit.pi-p-not-ready-yet",
+        "english": "PiP is not ready yet. Try again in a moment.",
+        "chinese": "PiP 尚未就绪，请稍后重试。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.intro.i-keep-eye-sessions",
+        "english": "I keep an eye on your sessions and repositories: ask what’s going on, start new work, have me check back later, or watch a repository and act when something happens.",
+        "chinese": "我会关注你的会话和仓库：你可以询问进展、开始新工作、让我稍后跟进，或监视仓库并在出现新情况时采取行动。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.item.alt.image",
+        "english": "Image {detail}",
+        "chinese": "图片 {detail}",
+        "values": ["detail"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.item.line.earlier-messages-summarized",
+        "english": "Earlier messages summarized",
+        "chinese": "较早的消息已总结",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.item.line.fresh-start",
+        "english": "Fresh start",
+        "chinese": "已重新开始",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.item.text.model-request-failed",
+        "english": "The model request failed.",
+        "chinese": "模型请求失败。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pending-memories.hint.loading",
+        "english": "Loading…",
+        "chinese": "正在加载…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pending-memories.hint.pending",
+        "english": "{count} pending",
+        "chinese": "{count} 项待处理",
+        "values": ["count"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pending-memories.hint.restart-required",
+        "english": "Restart required",
+        "chinese": "需要重启",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pending-when.pi-p-reads-finishes",
+        "english": "PiP reads this when it finishes",
+        "chinese": "PiP 会在完成后读取",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pending-when.pi-p-reads-next-pause",
+        "english": "PiP reads this at its next pause",
+        "chinese": "PiP 会在下次暂停时读取",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pending-when.waiting-pi-p",
+        "english": "Waiting for PiP",
+        "chinese": "等待 PiP",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-bubble.aria-label.pi-p-something-new-open",
+        "english": "PiP has something new: open PiP",
+        "chinese": "PiP 有新消息：打开 PiP",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-bubble.aria-label.pi-p-working-open",
+        "english": "PiP is working: open PiP",
+        "chinese": "PiP 正在工作：打开 PiP",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-context.aria-label.context-full",
+        "english": "Context {about}{percent}% full",
+        "chinese": "上下文已用 {about}{percent}%",
+        "values": ["about", "percent"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-context.title.meter-capped",
+        "english": "The meter is capped at the model's context window.",
+        "chinese": "进度条上限为模型的上下文窗口。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-context.tokens.tokens-pi-p-s-context",
+        "english": "{about}{detail} of {count} tokens in PiP's context.",
+        "chinese": "PiP 上下文令牌 {about}{detail}/{count}。",
+        "values": ["about", "detail", "count"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-context.when.compact-grows",
+        "english": "Compact it when it grows.",
+        "chinese": "上下文增多时可手动压缩。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-context.when.pi-p-compacts-itself-above",
+        "english": "PiP compacts itself above {detail} once idle.",
+        "chinese": "上下文超过 {detail} 后，PiP 会在空闲时自动压缩。",
+        "values": ["detail"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-context.when.pi-p-s-idle-compaction",
+        "english": "PiP's idle compaction limit is {detail} tokens.",
+        "chinese": "PiP 空闲时的压缩阈值为 {detail} token。",
+        "values": ["detail"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-panel.aria-label.pi-p-model",
+        "english": "PiP model: {model}{detail}",
+        "chinese": "PiP 模型：{model}{detail}",
+        "values": ["model", "detail"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-panel.label.waking-pi-p",
+        "english": "Waking PiP",
+        "chinese": "正在唤醒 PiP",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-panel.span.pi-p-waits-approval",
+        "english": "PiP waits for your approval: {tool}",
+        "chinese": "PiP 正在等待你批准：{tool}",
+        "values": ["tool"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-panel.status.compacting",
+        "english": "compacting…",
+        "chinese": "正在压缩…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-panel.status.needs",
+        "english": "needs you",
+        "chinese": "待你处理",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-panel.status.working",
+        "english": "working…",
+        "chinese": "正在工作…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-rail-button.text.something-new",
+        "english": "something new",
+        "chinese": "有新内容",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.pip-rail-button.text.working",
+        "english": "working",
+        "chinese": "工作中",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.report.text.report",
+        "english": "Report",
+        "chinese": "报告",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.send.text.pi-p-not-ready-yet",
+        "english": "PiP is not ready yet. Try again in a moment.",
+        "chinese": "PiP 尚未就绪，请稍后重试。",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.suggestions.ci-fails-main",
+        "english": "When CI fails on main in …",
+        "chinese": "当以下仓库 main 分支的 CI 失败时…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.suggestions.every-weekday-tell-me",
+        "english": "Every weekday at 9:00, tell me what changed overnight",
+        "chinese": "每个工作日 9:00，告诉我昨晚有什么变化",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.suggestions.happened-today",
+        "english": "What happened today?",
+        "chinese": "今天有什么进展？",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.suggestions.needs-me",
+        "english": "What needs me?",
+        "chinese": "有哪些事情需要我处理？",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.suggestions.start-session",
+        "english": "Start a session to …",
+        "chinese": "新建会话来…",
+        "values": [],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.pip.welcome.p.hi-i-m-pi-p",
+        "english": "Hi{detail}. I’m PiP.",
+        "chinese": "你好{detail}，我是 PiP。",
+        "values": ["detail"],
+        "file": "web/pip.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.html-preview.text.preview",
+        "english": "Preview",
+        "chinese": "预览",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.inline-artifact.p.loading",
+        "english": "Loading…",
+        "chinese": "正在加载…",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.inline-artifact.p.version-not-loaded",
+        "english": "This version could not be loaded.",
+        "chinese": "无法加载此版本。",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.button.diff",
+        "english": "Diff",
+        "chinese": "差异",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.button.image",
+        "english": "Image",
+        "chinese": "图像",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.button.preview",
+        "english": "Preview",
+        "chinese": "预览",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.button.run",
+        "english": "▶ Run",
+        "chinese": "▶ 运行",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.button.stop",
+        "english": "■ Stop",
+        "chinese": "■ 停止",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.copy.copied",
+        "english": "Copied.",
+        "chinese": "已复制。",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.copy.not-copy",
+        "english": "Could not copy.",
+        "chinese": "无法复制。",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "清单外补充",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.title.run-scripts-sandbox-artifact",
+        "english": "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app",
+        "chinese": "在沙盒中运行脚本（与成果运行方式相同）：可以访问互联网，但不能访问应用",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.rich.rich-block.title.stop-scripts",
+        "english": "Stop its scripts",
+        "chinese": "停止脚本",
+        "values": [],
+        "file": "web/rich.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.run-frame.run-frame.text.preview",
+        "english": "Preview",
+        "chinese": "预览",
+        "values": [],
+        "file": "web/run-frame.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.ago.text.ago",
+        "english": "{when} ago",
+        "chinese": "{when}前",
+        "values": ["when"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.ago.text.just",
+        "english": "just now",
+        "chinese": "刚刚",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.ago.text.on",
+        "english": "on {date}",
+        "chinese": "于 {date}",
+        "values": ["date"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.board-status.span.state-when",
+        "english": "{state} {when}",
+        "chinese": "{state} {when}",
+        "values": ["state", "when"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents-board.cell.aria-label.name-state",
+        "english": "{name}, {state}",
+        "chinese": "{name}，{state}",
+        "values": ["name", "state"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.detail.button.open",
+        "english": "Open",
+        "chinese": "打开",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.detail.button.review-approval",
+        "english": "Review the approval",
+        "chinese": "查看审批请求",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.detail.span.ended",
+        "english": "Ended",
+        "chinese": "已结束",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.detail.span.running",
+        "english": "Running",
+        "chinese": "运行中",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.done.done",
+        "english": "Done",
+        "chinese": "完成",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.failed.failed",
+        "english": "Failed",
+        "chinese": "失败",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.label-of.dismissed",
+        "english": "{state} · dismissed",
+        "chinese": "{state} · 已忽略",
+        "values": ["state"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents-board.needs-you.span.failed",
+        "english": "failed",
+        "chinese": "失败",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.needs-you.span.needs-approval",
+        "english": "needs approval",
+        "chinese": "待批准",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.now-of.text.waiting-approval",
+        "english": "Waiting for approval: {tool} {subject}",
+        "chinese": "等待批准：{tool} {subject}",
+        "values": ["tool", "subject"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.stopped.stopped",
+        "english": "Stopped",
+        "chinese": "已停止",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.button.show-fewer",
+        "english": "Show fewer",
+        "chinese": "收起",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.button.show-more",
+        "english": "Show {count} more",
+        "chinese": "再显示 {count} 项",
+        "values": ["count"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.div.one-session",
+        "english": "{total} in 1 session",
+        "chinese": "{total} 个，来自 1 个会话",
+        "values": ["total"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.div.sessions",
+        "english": "{total} in {sessions} sessions",
+        "chinese": "{total} 个，来自 {sessions} 个会话",
+        "values": ["total", "sessions"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.filter.all",
+        "english": "All",
+        "chinese": "全部",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.title.more-finished-earlier-open",
+        "english": "{older} more, finished earlier: open the session to see them",
+        "chinese": "另有 {older} 个较早完成的子代理：打开会话查看",
+        "values": ["older"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.title.open",
+        "english": "Open {title}",
+        "chinese": "打开 {title}",
+        "values": ["title"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.title.session",
+        "english": "Session {id}",
+        "chinese": "会话 {id}",
+        "values": ["id"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.subagents-board.titles.new-session",
+        "english": "New session",
+        "chinese": "新会话",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.summary-of.parts.done",
+        "english": "done",
+        "chinese": "已完成",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.summary-of.parts.failed",
+        "english": "failed",
+        "chinese": "失败",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.summary-of.parts.stopped",
+        "english": "stopped",
+        "chinese": "已停止",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.summary-of.parts.working",
+        "english": "working",
+        "chinese": "工作中",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.summary-of.text.approve",
+        "english": "approve",
+        "chinese": "待批准",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.summary-of.text.count-state",
+        "english": "{count} {state}",
+        "chinese": "{count} {state}",
+        "values": ["count", "state"],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents-board.summary-of.text.need-approval",
+        "english": "need approval",
+        "chinese": "待批准",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.waiting.needs-approval",
+        "english": "Needs approval",
+        "chinese": "待批准",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents-board.working.working",
+        "english": "Working",
+        "chinese": "处理中",
+        "values": [],
+        "file": "web/subagents-board.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.agent-row.aria-label.stop",
+        "english": "Stop {name}",
+        "chinese": "停止 {name}",
+        "values": ["name"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.agent-row.when.dismissed",
+        "english": "{state} {when} · dismissed",
+        "chinese": "{state} {when} · 已忽略",
+        "values": ["state", "when"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents.agent-row.when.state-when",
+        "english": "{state} {when}",
+        "chinese": "{state} {when}",
+        "values": ["state", "when"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents.bar.label.lead",
+        "english": ". {name}: {doing}",
+        "chinese": "。{name}：{doing}",
+        "values": ["name", "doing"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.bar.label.subagents",
+        "english": "Subagents: {summary}{name}",
+        "chinese": "子代理：{summary}{name}",
+        "values": ["summary", "name"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.bar.span.lead",
+        "english": "{name}: {doing}",
+        "chinese": "{name}：{doing}",
+        "values": ["name", "doing"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.bar.summary.one",
+        "english": "1 subagent {state}",
+        "chinese": "1 个子代理{state}",
+        "values": ["state"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents.bar.summary.part",
+        "english": "{count} {state}",
+        "chinese": "{count} {state}",
+        "values": ["count", "state"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents.bar.summary.state",
+        "english": "{count} subagents {state}",
+        "chinese": "{count} 个子代理{state}",
+        "values": ["count", "state"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "本次修复"
+    },
+    {
+        "key": "web.subagents.held.span.reports-wait",
+        "english": "Reports wait: {why}.",
+        "chinese": "报告正在等待：{why}。",
+        "values": ["why"],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.state-of.done",
+        "english": "done",
+        "chinese": "已完成",
+        "values": [],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.state-of.failed",
+        "english": "failed",
+        "chinese": "失败",
+        "values": [],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.state-of.stopped",
+        "english": "stopped",
+        "chinese": "已停止",
+        "values": [],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    },
+    {
+        "key": "web.subagents.state-of.working",
+        "english": "working",
+        "chinese": "工作中",
+        "values": [],
+        "file": "web/subagents.js",
+        "scope": "297 台账",
+        "chineseFrom": "测试移交"
+    }
+]

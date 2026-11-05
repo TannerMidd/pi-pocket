@@ -4,6 +4,7 @@
 import { useEffect } from "preact/hooks";
 import { actions, attempt, closeSheet, notify, openSheet, store } from "./store.js";
 import { html, Icon, Loader, Sheet, shortPath } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** Only the owner decides which projects Pi trusts: the answer goes into Pi's own settings. */
 export const trustAvailable = () => store.state.me?.role === "owner";
@@ -129,25 +130,47 @@ export function TrustBar() {
         return null;
     }
 
+    const skills = skillNames(info.skills);
+    const why = info.settings
+        ? `${t(
+              "web.trust.trust-bar.span.settings-model-defaults",
+              "Its .pi/settings.json can set the model and thinking level of later new sessions. This session will not change.",
+          )}${
+              info.skills.length > 0
+                  ? ` ${t(
+                        "web.trust.trust-bar.span.skills-also-need-trust",
+                        "Its skills in .agents/skills ({skills}) also need trust.",
+                        { skills },
+                    )}`
+                  : ""
+          }`
+        : t(
+              "web.trust.trust-bar.span.skills-load-only-trusted",
+              "Its skills in .agents/skills ({skills}) load only in a project Pi trusts.",
+              { skills },
+          );
+
     return html`<div class="trust-bar">
         <span class="grow">
-            <strong>Trust this project?</strong>${" "}${
-                info.settings
-                    ? `Its .pi/settings.json can set the model and thinking level of later new sessions. This session will not change.${info.skills.length > 0 ? ` Its skills in .agents/skills (${skillNames(info.skills)}) also need trust.` : ""}`
-                    : `Its skills in .agents/skills (${skillNames(info.skills)}) load only in a project Pi trusts.`
-            }
+            <strong>${t(
+                "web.trust.trust-bar.strong.trust-this-project",
+                "Trust this project?",
+            )}</strong>${` ${why}`}
         </span>
         <span class="trust-actions">
             <button class="link small" onClick=${() => attempt(() => decide("distrust"))}>
-                Don't trust
+                ${t("web.trust.trust-bar.button.don-t-trust", "Don't trust")}
             </button>
             <button class="button small primary" onClick=${() => openSheet({ type: "trust" })}>
-                Review
+                ${t("web.trust.trust-bar.button.review", "Review")}
             </button>
             <button
                 class="icon-button"
-                aria-label="Not now"
-                title="Not now: ask again in a new tab"
+                aria-label=${t("web.trust.trust-bar.aria-label.not-now", "Not now")}
+                title=${t(
+                    "web.trust.trust-bar.title.not-ask-again-new",
+                    "Not now: ask again in a new tab",
+                )}
                 onClick=${() => putOff(info.folder)}
             >
                 <${Icon} name="close" size=${13} />
@@ -164,7 +187,7 @@ function Choice({ label, detail, current, onClick }) {
             <span>${label}</span>
             ${detail && html`<span class="muted small mono">${detail}</span>`}
         </span>
-        ${current && html`<span class="trust-current">✓ current</span>`}
+        ${current && html`<span class="trust-current">✓ ${t("web.launcher.launcher.span.current", "current")}</span>`}
     </button>`;
 }
 
@@ -185,13 +208,33 @@ function ownSkillsText(info) {
 
     if (info.skills.length > 0) {
         texts.push(
-            `In .agents/skills: ${list(info.skills)}. ${info.trusted ? "Pi has them." : "They load once you trust it."}`,
+            info.trusted
+                ? t(
+                      "web.trust.own-skills-text.text.agents-skills-has",
+                      "In .agents/skills: {skills}. Pi has them.",
+                      { skills: list(info.skills) },
+                  )
+                : t(
+                      "web.trust.own-skills-text.text.agents-skills-once-trusted",
+                      "In .agents/skills: {skills}. They load once you trust it.",
+                      { skills: list(info.skills) },
+                  ),
         );
     }
 
     if (info.ownSkills.length > 0) {
         texts.push(
-            `In .pi/skills: ${list(info.ownSkills)}. ${distrusted(info) ? "They stay off while it is not trusted." : "They load unless you choose Don't trust."}`,
+            distrusted(info)
+                ? t(
+                      "web.trust.own-skills-text.text.own-skills-stay-off",
+                      "In .pi/skills: {skills}. They stay off while it is not trusted.",
+                      { skills: list(info.ownSkills) },
+                  )
+                : t(
+                      "web.trust.own-skills-text.text.own-skills-load-unless",
+                      "In .pi/skills: {skills}. They load unless you choose Don't trust.",
+                      { skills: list(info.ownSkills) },
+                  ),
         );
     }
 
@@ -199,36 +242,65 @@ function ownSkillsText(info) {
         ? texts
         : [
               info.settings
-                  ? "It has no skills of its own."
-                  : "It has no skills of its own, so this changes nothing in Pi Pocket here.",
+                  ? t("web.trust.own-skills-text.text.no-skills", "It has no skills of its own.")
+                  : t(
+                        "web.trust.own-skills-text.text.no-skills-changes-nothing",
+                        "It has no skills of its own, so this changes nothing in Pi Pocket here.",
+                    ),
           ];
 }
 
 /** Where the decision comes from, in a sentence. */
 function status(info, short) {
     if (info.unreadable) {
-        return "Pi's trust store (~/.pi/agent/trust.json) cannot be read, so no project is trusted, and no answer can be saved until it is mended or deleted.";
+        return t(
+            "web.trust.status.text.store-unreadable",
+            "Pi's trust store (~/.pi/agent/trust.json) cannot be read, so no project is trusted, and no answer can be saved until it is mended or deleted.",
+        );
     }
 
     if (info.saved === null) {
         if (info.defaultProjectTrust === "always") {
-            return "Trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts every project.";
+            return t(
+                "web.trust.status.text.default-trusts-every-project",
+                "Trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts every project.",
+            );
         }
 
         if (info.defaultProjectTrust === "never") {
-            return "Not trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts no project.";
+            return t(
+                "web.trust.status.text.default-trusts-no-project",
+                "Not trusted: no decision is saved for it, and Pi's defaultProjectTrust setting trusts no project.",
+            );
         }
 
         return info.skills.length > 0
-            ? "No decision yet. Until there is one, Pi Pocket leaves its skills in .agents/skills off."
-            : "No decision yet.";
+            ? t(
+                  "web.trust.status.text.no-decision-skills-off",
+                  "No decision yet. Until there is one, Pi Pocket leaves its skills in .agents/skills off.",
+              )
+            : t("web.trust.status.text.no-decision", "No decision yet.");
     }
 
-    const what = info.saved.trusted ? "Trusted" : "Not trusted";
+    if (info.saved.path === info.folder) {
+        return info.saved.trusted
+            ? t("web.trust.status.text.trusted", "Trusted.")
+            : t("web.trust.status.text.not-trusted", "Not trusted.");
+    }
 
-    return info.saved.path === info.folder
-        ? `${what}.`
-        : `${what}, as the folder it is in: ${short(info.saved.path)}.`;
+    const folder = short(info.saved.path);
+
+    return info.saved.trusted
+        ? t(
+              "web.trust.status.text.trusted-from-folder",
+              "Trusted, as the folder it is in: {folder}.",
+              { folder },
+          )
+        : t(
+              "web.trust.status.text.not-trusted-from-folder",
+              "Not trusted, as the folder it is in: {folder}.",
+              { folder },
+          );
 }
 
 /** The project's trust, and the three answers Pi's `/trust` offers. */
@@ -240,8 +312,11 @@ export function TrustSheet() {
     const info = currentTrust();
 
     if (!info) {
-        return html`<${Sheet} title="Project trust" onClose=${closeSheet}>
-            <${Loader} label="Loading" />
+        return html`<${Sheet} title=${t(
+            "web.trust.trust-sheet.title.project-trust",
+            "Project trust",
+        )} onClose=${closeSheet}>
+            <${Loader} />
         <//>`;
     }
 
@@ -252,40 +327,52 @@ export function TrustSheet() {
         });
     const saved = (path, trusted) => info.saved?.path === path && info.saved.trusted === trusted;
 
-    return html`<${Sheet} title="Project trust" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t(
+        "web.trust.trust-sheet.title.project-trust",
+        "Project trust",
+    )} onClose=${closeSheet}>
         <p class="mono small">${short(info.folder)}</p>
         <p>${status(info, short)}</p>
         ${ownSkillsText(info).map((text) => html`<p>${text}</p>`)}
         ${
             info.settings &&
             html`<p>
-                In .pi/settings.json: model and thinking defaults apply only to later new sessions, after trust. This session will not change. The owner's Default model still wins; clear it in Menu → Default model to use project defaults. No project setting can grant trust to itself. Extra skill and prompt paths and per-project run policy are not supported yet.
+                ${t("web.trust.trust-sheet.p.pi-settings-json-model", "In .pi/settings.json: model and thinking defaults apply only to later new sessions, after trust. This session will not change. The owner's Default model still wins; clear it in Menu → Default model to use project defaults. No project setting can grant trust to itself. Extra skill and prompt paths and per-project run policy are not supported yet.")}
             </p>`
         }
         <p class="muted small">
-            Pi's CLI goes by the same decision, saved in ~/.pi/agent/trust.json. There, trusting a project also loads its .pi settings, extensions, and packages, which run code on this machine. Trust only folders whose contents you trust.
+            ${t("web.trust.trust-sheet.p.pi-s-cli-goes", "Pi's CLI goes by the same decision, saved in ~/.pi/agent/trust.json. There, trusting a project also loads its .pi settings, extensions, and packages, which run code on this machine. Trust only folders whose contents you trust.")}
         </p>
         ${
             !trustAvailable()
-                ? html`<p class="muted small">Only the owner can change this.</p>`
+                ? html`<p class="muted small">${t(
+                      "web.trust.trust-sheet.p.owner-change",
+                      "Only the owner can change this.",
+                  )}</p>`
                 : !info.unreadable &&
                   html`<div class="group">
                       <${Choice}
-                          label="Trust this folder"
+                          label=${t(
+                              "web.trust.trust-sheet.choice.label.trust-this-folder",
+                              "Trust this folder",
+                          )}
                           current=${saved(info.folder, true)}
                           onClick=${() => choose("trust")}
                       />
                       ${
                           info.parent &&
                           html`<${Choice}
-                              label="Trust the folder above it"
+                              label=${t(
+                                  "web.trust.trust-sheet.choice.label.trust-the-folder-above-it",
+                                  "Trust the folder above it",
+                              )}
                               detail=${short(info.parent)}
                               current=${saved(info.parent, true)}
                               onClick=${() => choose("trust-parent")}
                           />`
                       }
                       <${Choice}
-                          label="Don't trust"
+                          label=${t("web.trust.trust-bar.button.don-t-trust", "Don't trust")}
                           current=${saved(info.folder, false)}
                           onClick=${() => choose("distrust")}
                       />

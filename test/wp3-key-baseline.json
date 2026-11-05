@@ -1,0 +1,1138 @@
+{
+    "web/browser-panel.js": {
+        "sha256": "439282fb6573a6341eee51c4c03871559fbd61f4de67096924ee402aeb82f644",
+        "webLiterals": [
+            "web.browser-panel.browser-button.aria-label.browser",
+            "web.browser-panel.browser-button.title.browser-alt-b",
+            "web.browser-panel.browser-panel.aria-label.back",
+            "web.browser-panel.browser-panel.aria-label.browser",
+            "web.browser-panel.browser-panel.aria-label.close-the-browser",
+            "web.browser-panel.browser-panel.aria-label.console",
+            "web.browser-panel.browser-panel.aria-label.forward",
+            "web.browser-panel.browser-panel.aria-label.reload",
+            "web.browser-panel.browser-panel.aria-label.stop-loading",
+            "web.browser-panel.browser-panel.aria-label.type-into-the-page",
+            "web.browser-panel.browser-panel.button.open-it-again",
+            "web.browser-panel.browser-panel.button.reload",
+            "web.browser-panel.browser-panel.button.try-again",
+            "web.browser-panel.browser-panel.code.browser-s-path-restart",
+            "web.browser-panel.browser-panel.p.no-browser-found-machine",
+            "web.browser-panel.browser-panel.p.the-page-closed",
+            "web.browser-panel.browser-panel.span.starting-the-browser",
+            "web.browser-panel.browser-panel.title.back",
+            "web.browser-panel.browser-panel.title.close-browser-alt-b",
+            "web.browser-panel.browser-panel.title.console",
+            "web.browser-panel.browser-panel.title.forward",
+            "web.browser-panel.browser-panel.title.reload",
+            "web.browser-panel.browser-panel.title.stop",
+            "web.browser-panel.browser-panel.title.type-into-the-page",
+            "web.browser-panel.console-pane.aria-label.close-the-console",
+            "web.browser-panel.console-pane.aria-label.console",
+            "web.browser-panel.console-pane.button.clear",
+            "web.browser-panel.console-pane.div.loading",
+            "web.browser-panel.console-pane.div.nothing-yet-logs-errors",
+            "web.browser-panel.console-pane.strong.console",
+            "web.browser-panel.resize-edge.title.drag-to-resize",
+            "web.browser-panel.screen.alt.page-click-once-focused",
+            "web.browser-panel.screen.alt.the-page",
+            "web.browser-panel.start-screen.div.running-on-this-machine",
+            "web.browser-panel.start-screen.h2.browser",
+            "web.browser-panel.type-bar.aria-label.close-the-keyboard-bar",
+            "web.browser-panel.type-bar.button.send",
+            "web.browser-panel.type-bar.placeholder.type-into-the-page",
+            "web.browser-panel.type-bar.title.backspace",
+            "web.browser-panel.type-bar.title.enter",
+            "web.browser-panel.type-bar.title.tab"
+        ],
+        "calls": [
+            {
+                "key": "web.browser-panel.screen.alt.the-page",
+                "english": "The page",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.screen.alt.page-click-once-focused",
+                "english": "The page. Click to use it; once focused, keys go to the page.",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.type-bar.placeholder.type-into-the-page",
+                "english": "Type into the page…",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.type-bar.button.send",
+                "english": "Send",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.type-bar.title.enter",
+                "english": "Enter",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.type-bar.title.backspace",
+                "english": "Backspace",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.type-bar.title.tab",
+                "english": "Tab",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.type-bar.aria-label.close-the-keyboard-bar",
+                "english": "Close the keyboard bar",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.console-pane.aria-label.console",
+                "english": "Console",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.console-pane.strong.console",
+                "english": "Console",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.console-pane.button.clear",
+                "english": "Clear",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.console-pane.aria-label.close-the-console",
+                "english": "Close the console",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.console-pane.div.loading",
+                "english": "Loading…",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.console-pane.div.nothing-yet-logs-errors",
+                "english": "Nothing yet. Logs, errors, and failed loads show here.",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.start-screen.h2.browser",
+                "english": "Browser",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.start-screen.div.running-on-this-machine",
+                "english": "Running on this machine",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.resize-edge.title.drag-to-resize",
+                "english": "Drag to resize",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.p.no-browser-found-machine",
+                "english": "No browser was found on the machine Pi Pocket runs on. Install Chromium or Google Chrome there (or set",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.code.browser-s-path-restart",
+                "english": "to a browser's path), then restart Pi Pocket.",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.button.try-again",
+                "english": "Try again",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.p.the-page-closed",
+                "english": "The page closed.",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.button.open-it-again",
+                "english": "Open it again",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.span.starting-the-browser",
+                "english": "Starting the browser…",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.button.reload",
+                "english": "Reload",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.browser",
+                "english": "Browser",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.back",
+                "english": "Back",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.back",
+                "english": "Back",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.forward",
+                "english": "Forward",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.forward",
+                "english": "Forward",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.stop-loading",
+                "english": "Stop loading",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.stop",
+                "english": "Stop",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.reload",
+                "english": "Reload",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.reload",
+                "english": "Reload",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.console",
+                "english": "Console",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.console",
+                "english": "Console",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.type-into-the-page",
+                "english": "Type into the page",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.type-into-the-page",
+                "english": "Type into the page",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.aria-label.close-the-browser",
+                "english": "Close the browser",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-panel.title.close-browser-alt-b",
+                "english": "Close the browser (Alt+B)",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-button.aria-label.browser",
+                "english": "Browser",
+                "count": 1
+            },
+            {
+                "key": "web.browser-panel.browser-button.title.browser-alt-b",
+                "english": "Browser (Alt+B)",
+                "count": 1
+            }
+        ]
+    },
+    "web/diff.js": {
+        "sha256": "33051380a1b33f0489fb95394f4913677b0f5b763614e5dde757784279d1456e",
+        "webLiterals": [
+            "web.diff.diff-file.button.show-it",
+            "web.diff.diff-file.gap-rows.button.show-more",
+            "web.diff.diff-file.gap-rows.span.reading-the-file",
+            "web.diff.diff-file.p.binary-file-no-lines",
+            "web.diff.diff-file.p.diff-too-long-show",
+            "web.diff.diff-review.aria-label.changed-files",
+            "web.diff.diff-review.aria-label.refresh",
+            "web.diff.diff-review.button.files",
+            "web.diff.diff-review.button.only",
+            "web.diff.diff-review.p.no-file-matches",
+            "web.diff.diff-review.placeholder.filter-files",
+            "web.diff.diff-review.span.not-git-repository-pi",
+            "web.diff.diff-review.span.show",
+            "web.diff.diff-review.title.branch",
+            "web.diff.diff-review.title.files-pi-edited",
+            "web.diff.diff-review.title.look-again",
+            "web.diff.diff-review.title.switch-make-branch",
+            "web.diff.file-head.aria-label.viewed",
+            "web.diff.file-head.span.viewed",
+            "web.diff.file-head.title.mark-as-viewed-v",
+            "web.diff.gap-row.title.show-more-above-hunk",
+            "web.diff.gap-row.title.show-more-below-hunk",
+            "web.diff.layout-switch.aria-label.diff-layout",
+            "web.diff.layout-switch.title.layout-s",
+            "web.diff.review-file.aria-label.open-the-file",
+            "web.diff.review-file.aria-label.undo-changes",
+            "web.diff.review-file.span.changed",
+            "web.diff.review-file.span.pi",
+            "web.diff.review-file.title.changed-after-marked-viewed",
+            "web.diff.review-file.title.open-the-file",
+            "web.diff.tree-node.title.pi-edited-it",
+            "web.diff.wrap-toggle.button.wrap",
+            "web.diff.wrap-toggle.title.wrap-long-lines-w"
+        ],
+        "calls": [
+            {
+                "key": "web.diff.gap-row.title.show-more-below-hunk",
+                "english": "Show more below the hunk above",
+                "count": 1
+            },
+            {
+                "key": "web.diff.gap-row.title.show-more-above-hunk",
+                "english": "Show more above the hunk below",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-file.gap-rows.span.reading-the-file",
+                "english": "Reading the file…",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-file.gap-rows.button.show-more",
+                "english": "↓ Show more",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-file.p.binary-file-no-lines",
+                "english": "A binary file: no lines to compare.",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-file.button.show-it",
+                "english": "Show it",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-file.p.diff-too-long-show",
+                "english": "The diff is too long to show whole: the rest is left out.",
+                "count": 1
+            },
+            {
+                "key": "web.diff.file-head.title.mark-as-viewed-v",
+                "english": "Mark as viewed (v)",
+                "count": 1
+            },
+            {
+                "key": "web.diff.file-head.aria-label.viewed",
+                "english": "Viewed",
+                "count": 1
+            },
+            {
+                "key": "web.diff.file-head.span.viewed",
+                "english": "Viewed",
+                "count": 1
+            },
+            {
+                "key": "web.diff.layout-switch.aria-label.diff-layout",
+                "english": "Diff layout",
+                "count": 1
+            },
+            {
+                "key": "web.diff.layout-switch.title.layout-s",
+                "english": "Layout (s)",
+                "count": 1
+            },
+            {
+                "key": "web.diff.wrap-toggle.title.wrap-long-lines-w",
+                "english": "Wrap long lines (w)",
+                "count": 1
+            },
+            {
+                "key": "web.diff.wrap-toggle.button.wrap",
+                "english": "Wrap",
+                "count": 1
+            },
+            {
+                "key": "web.diff.tree-node.title.pi-edited-it",
+                "english": "Pi edited it",
+                "count": 1
+            },
+            {
+                "key": "web.diff.review-file.title.open-the-file",
+                "english": "Open the file",
+                "count": 1
+            },
+            {
+                "key": "web.diff.review-file.aria-label.open-the-file",
+                "english": "Open the file",
+                "count": 1
+            },
+            {
+                "key": "web.diff.review-file.aria-label.undo-changes",
+                "english": "Undo changes",
+                "count": 1
+            },
+            {
+                "key": "web.diff.review-file.span.pi",
+                "english": "Pi",
+                "count": 1
+            },
+            {
+                "key": "web.diff.review-file.title.changed-after-marked-viewed",
+                "english": "It changed after you marked it viewed",
+                "count": 1
+            },
+            {
+                "key": "web.diff.review-file.span.changed",
+                "english": "changed",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.title.switch-make-branch",
+                "english": "Switch or make a branch",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.title.branch",
+                "english": "Branch",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.span.not-git-repository-pi",
+                "english": "Not a git repository: only Pi's edits are listed.",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.title.look-again",
+                "english": "Look again",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.aria-label.refresh",
+                "english": "Refresh",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.placeholder.filter-files",
+                "english": "Filter files",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.title.files-pi-edited",
+                "english": "Only the files Pi edited",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.button.only",
+                "english": "π only",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.button.files",
+                "english": "Files",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.aria-label.changed-files",
+                "english": "Changed files",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.p.no-file-matches",
+                "english": "No file matches.",
+                "count": 1
+            },
+            {
+                "key": "web.diff.diff-review.span.show",
+                "english": "show",
+                "count": 1
+            }
+        ]
+    },
+    "web/files-panel.js": {
+        "sha256": "064ab49afb107a937da4d95026fdee82779a11a80ebb530dee40bf60eacf69c5",
+        "webLiterals": [
+            "web.files-panel.files-button.aria-label.files",
+            "web.files-panel.files-button.title.files-changes-alt-e",
+            "web.files-panel.files-panel.aria-label.back-to-the-conversation",
+            "web.files-panel.files-panel.aria-label.changes",
+            "web.files-panel.files-panel.aria-label.close-the-files",
+            "web.files-panel.files-panel.aria-label.files",
+            "web.files-panel.files-panel.button.files",
+            "web.files-panel.files-panel.title.back-alt-e",
+            "web.files-panel.files-panel.title.close-alt-e",
+            "web.files-panel.files-tab.aria-label.close-the-file",
+            "web.files-panel.files-tab.aria-label.files",
+            "web.files-panel.files-tab.aria-label.fold-every-folder",
+            "web.files-panel.files-tab.aria-label.refresh",
+            "web.files-panel.files-tab.p.pick-file-read",
+            "web.files-panel.files-tab.placeholder.go-to-file",
+            "web.files-panel.files-tab.title.close-the-file",
+            "web.files-panel.files-tab.title.fold-every-folder",
+            "web.files-panel.files-tab.title.look-again",
+            "web.files-panel.matches.p.listing-the-folder",
+            "web.files-panel.resize-edge.title.drag-to-resize",
+            "web.files-panel.tree-folder.title.has-changes"
+        ],
+        "calls": [
+            {
+                "key": "web.files-panel.tree-folder.title.has-changes",
+                "english": "Has changes",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.matches.p.listing-the-folder",
+                "english": "Listing the folder…",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.resize-edge.title.drag-to-resize",
+                "english": "Drag to resize",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.placeholder.go-to-file",
+                "english": "Go to file",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.title.fold-every-folder",
+                "english": "Fold every folder",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.aria-label.fold-every-folder",
+                "english": "Fold every folder",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.title.look-again",
+                "english": "Look again",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.aria-label.refresh",
+                "english": "Refresh",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.aria-label.files",
+                "english": "Files",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.aria-label.close-the-file",
+                "english": "Close the file",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.title.close-the-file",
+                "english": "Close the file",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-tab.p.pick-file-read",
+                "english": "Pick a file to read it here.",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-panel.aria-label.files",
+                "english": "Files",
+                "count": 2
+            },
+            {
+                "key": "web.files-panel.files-panel.aria-label.back-to-the-conversation",
+                "english": "Back to the conversation",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-panel.title.back-alt-e",
+                "english": "Back (Alt+E)",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-panel.button.files",
+                "english": "Files",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-panel.aria-label.close-the-files",
+                "english": "Close the files",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-panel.title.close-alt-e",
+                "english": "Close (Alt+E)",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-panel.aria-label.changes",
+                "english": "Changes",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-button.aria-label.files",
+                "english": "Files",
+                "count": 1
+            },
+            {
+                "key": "web.files-panel.files-button.title.files-changes-alt-e",
+                "english": "Files and changes (Alt+E)",
+                "count": 1
+            }
+        ]
+    },
+    "web/linked-sessions.js": {
+        "sha256": "8b2d5cb2fcd563d3423e073c25aa035e9741274b63816c228224993d99e2d47b",
+        "webLiterals": [
+            "web.linked-sessions.linked-sessions.aria-label.linked-sessions",
+            "web.linked-sessions.linked-sessions.p.started-from-another-session"
+        ],
+        "calls": [
+            {
+                "key": "web.linked-sessions.linked-sessions.aria-label.linked-sessions",
+                "english": "Linked sessions",
+                "count": 1
+            },
+            {
+                "key": "web.linked-sessions.linked-sessions.p.started-from-another-session",
+                "english": "Started from another session",
+                "count": 1
+            }
+        ]
+    },
+    "web/peeks.js": {
+        "sha256": "7cb722fd49d24a4c534d1c0cba1e61650eddde7e2911b979623ebc3c74b7d681",
+        "webLiterals": [
+            "web.peeks.agent-rows.aria-label.subagents-at-work",
+            "web.peeks.agent-rows.title.see-them-subagents-board",
+            "web.peeks.peek-approval.button.allow",
+            "web.peeks.peek-approval.button.decline",
+            "web.peeks.peek-approval.button.deny",
+            "web.peeks.peek-approval.button.open",
+            "web.peeks.peek-approval.title.answer-where-waits",
+            "web.peeks.peek-approval.title.see-whole-command-where",
+            "web.peeks.peek-column.aria-label.peeks",
+            "web.peeks.peek-column.p.other-sessions-show-while",
+            "web.peeks.peek-column.p.pinned-sessions-stay-alt",
+            "web.peeks.peek-strip.aria-label.peeks",
+            "web.peeks.peeks-button.aria-label.peek-tiles",
+            "web.peeks.peeks-rail-button.aria-label.peek-tiles",
+            "web.peeks.render.aria-label.mark-as-seen",
+            "web.peeks.render.title.mark-as-seen",
+            "web.peeks.status.title.failed",
+            "web.peeks.status.title.running"
+        ],
+        "calls": [
+            {
+                "key": "web.peeks.peeks-rail-button.aria-label.peek-tiles",
+                "english": "Peek tiles",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peeks-button.aria-label.peek-tiles",
+                "english": "Peek tiles",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.status.title.running",
+                "english": "Running",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.status.title.failed",
+                "english": "Failed",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-approval.button.decline",
+                "english": "Decline",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-approval.title.answer-where-waits",
+                "english": "Answer it where it waits",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-approval.button.open",
+                "english": "Open",
+                "count": 2
+            },
+            {
+                "key": "web.peeks.peek-approval.button.deny",
+                "english": "Deny",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-approval.button.allow",
+                "english": "Allow",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-approval.title.see-whole-command-where",
+                "english": "See the whole command where it waits",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.agent-rows.aria-label.subagents-at-work",
+                "english": "Subagents at work",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.agent-rows.title.see-them-subagents-board",
+                "english": "See them all on the subagents board",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.render.title.mark-as-seen",
+                "english": "Mark as seen",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.render.aria-label.mark-as-seen",
+                "english": "Mark as seen",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-column.aria-label.peeks",
+                "english": "Peeks",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-column.p.other-sessions-show-while",
+                "english": "Other sessions show here while they work, wait for you, or finish.",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-column.p.pinned-sessions-stay-alt",
+                "english": "Pinned sessions stay here. Alt+P hides this.",
+                "count": 1
+            },
+            {
+                "key": "web.peeks.peek-strip.aria-label.peeks",
+                "english": "Peeks",
+                "count": 1
+            }
+        ]
+    },
+    "web/pip.js": {
+        "sha256": "a5b6ed114d3b3614a17206f184f2093184ee00a453aef49658f3c9adcde1e085",
+        "webLiterals": [
+            "web.pip.composer.aria-label.attach-files-to-pi-p",
+            "web.pip.composer.aria-label.files-attached-to-pi-p",
+            "web.pip.composer.aria-label.message-to-pi-p",
+            "web.pip.composer.aria-label.send-to-pi-p",
+            "web.pip.composer.aria-label.stop-pi-p",
+            "web.pip.composer.title.attach-files-images-need",
+            "web.pip.composer.title.stop",
+            "web.pip.item.span.stopped",
+            "web.pip.pending-memories.aria-label.pending-memories",
+            "web.pip.pending-memories.span.pending-memories",
+            "web.pip.pip-bubble.title.pi-p-alt-a",
+            "web.pip.pip-panel.aria-label.close-pi-p",
+            "web.pip.pip-panel.aria-label.compact",
+            "web.pip.pip-panel.aria-label.open-as-a-conversation",
+            "web.pip.pip-panel.aria-label.pi-p-your-assistant",
+            "web.pip.pip-panel.aria-label.start-fresh",
+            "web.pip.pip-panel.button.review",
+            "web.pip.pip-panel.button.withdraw",
+            "web.pip.pip-panel.confirm.start-fresh-pi-p-forgets",
+            "web.pip.pip-panel.h2.pi-p",
+            "web.pip.pip-panel.span.thinking",
+            "web.pip.pip-panel.title.change-pi-p-s-model",
+            "web.pip.pip-panel.title.close-esc",
+            "web.pip.pip-panel.title.compact-pi-p-keeps-summary",
+            "web.pip.pip-panel.title.open-conversation-every-step",
+            "web.pip.pip-panel.title.start-fresh-pi-p-forgets",
+            "web.pip.pip-rail-button.title.pi-p-assistant-alt",
+            "web.pip.welcome.button.choose-model-suggestions"
+        ],
+        "calls": [
+            {
+                "key": "web.pip.item.span.stopped",
+                "english": "Stopped",
+                "count": 1
+            },
+            {
+                "key": "web.pip.welcome.button.choose-model-suggestions",
+                "english": "Choose a model to use these suggestions",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.aria-label.files-attached-to-pi-p",
+                "english": "Files attached to PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.aria-label.attach-files-to-pi-p",
+                "english": "Attach files to PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.title.attach-files-images-need",
+                "english": "Attach files. Images need an image-capable model to be read inline.",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.aria-label.message-to-pi-p",
+                "english": "Message to PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.aria-label.stop-pi-p",
+                "english": "Stop PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.title.stop",
+                "english": "Stop",
+                "count": 1
+            },
+            {
+                "key": "web.pip.composer.aria-label.send-to-pi-p",
+                "english": "Send to PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pending-memories.aria-label.pending-memories",
+                "english": "Pending memories",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pending-memories.span.pending-memories",
+                "english": "Pending memories",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.aria-label.pi-p-your-assistant",
+                "english": "PiP, your assistant",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.h2.pi-p",
+                "english": "PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.title.change-pi-p-s-model",
+                "english": "Change PiP's model and thinking level",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.aria-label.compact",
+                "english": "Compact",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.title.compact-pi-p-keeps-summary",
+                "english": "Compact: PiP keeps a summary of older messages, and reads less each time",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.aria-label.start-fresh",
+                "english": "Start fresh",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.title.start-fresh-pi-p-forgets",
+                "english": "Start fresh: PiP forgets this conversation",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.confirm.start-fresh-pi-p-forgets",
+                "english": "Start fresh? PiP forgets this conversation; you can still read it.",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.aria-label.open-as-a-conversation",
+                "english": "Open as a conversation",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.title.open-conversation-every-step",
+                "english": "Open as a conversation, with every step",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.aria-label.close-pi-p",
+                "english": "Close PiP",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.title.close-esc",
+                "english": "Close (Esc)",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.span.thinking",
+                "english": "Thinking",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.button.withdraw",
+                "english": "Withdraw",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-panel.button.review",
+                "english": "Review",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-bubble.title.pi-p-alt-a",
+                "english": "PiP (Alt+A)",
+                "count": 1
+            },
+            {
+                "key": "web.pip.pip-rail-button.title.pi-p-assistant-alt",
+                "english": "PiP, your assistant (Alt+A)",
+                "count": 1
+            }
+        ]
+    },
+    "web/rich.js": {
+        "sha256": "b87753a9c33102d6f6ff6512e82ebb5d69687fd6e4ffeacf5868d80d6d14763c",
+        "webLiterals": [
+            "web.rich.inline-artifact.button.open",
+            "web.rich.rich-block.button.code",
+            "web.rich.rich-block.button.copy",
+            "web.rich.rich-block.button.open",
+            "web.rich.rich-block.title.open-artifact-viewer-version",
+            "web.rich.svg-image.alt.svg-image",
+            "web.rich.svg-image.p.svg-not-drawn"
+        ],
+        "calls": [
+            {
+                "key": "web.rich.svg-image.p.svg-not-drawn",
+                "english": "This SVG could not be drawn.",
+                "count": 1
+            },
+            {
+                "key": "web.rich.svg-image.alt.svg-image",
+                "english": "SVG image",
+                "count": 1
+            },
+            {
+                "key": "web.rich.rich-block.button.code",
+                "english": "Code",
+                "count": 1
+            },
+            {
+                "key": "web.rich.rich-block.title.open-artifact-viewer-version",
+                "english": "Open it in the artifact viewer, at this version",
+                "count": 1
+            },
+            {
+                "key": "web.rich.rich-block.button.open",
+                "english": "Open",
+                "count": 1
+            },
+            {
+                "key": "web.rich.rich-block.button.copy",
+                "english": "Copy",
+                "count": 1
+            },
+            {
+                "key": "web.rich.inline-artifact.button.open",
+                "english": "Open",
+                "count": 1
+            }
+        ]
+    },
+    "web/run-frame.js": {
+        "sha256": "11664430cd8ac4353acbfb803a1e23ee40478e4415dfec279b6e0d9a3c86aabf",
+        "webLiterals": [],
+        "calls": []
+    },
+    "web/subagents-board.js": {
+        "sha256": "29e3a62d0a05d7f6f915690bd8175579e946162abc983886329a6c18c6f93fc1",
+        "webLiterals": [
+            "web.subagents-board.detail-bar.aria-label.close",
+            "web.subagents-board.detail-bar.button.stop",
+            "web.subagents-board.detail.button.stop",
+            "web.subagents-board.detail.span.asked",
+            "web.subagents-board.detail.span.error",
+            "web.subagents-board.detail.span.now",
+            "web.subagents-board.detail.span.report-way-pi",
+            "web.subagents-board.detail.span.session",
+            "web.subagents-board.dismiss.button.dismiss",
+            "web.subagents-board.dismiss.title.stays-failed-no-longer",
+            "web.subagents-board.needs-you.div.needs-you",
+            "web.subagents-board.search.placeholder.find-subagent-task",
+            "web.subagents-board.status-line.span.hover-square-see-doing",
+            "web.subagents-board.status-line.span.move-enter-opens",
+            "web.subagents-board.subagents-board.aria-label.close",
+            "web.subagents-board.subagents-board.aria-label.show-only",
+            "web.subagents-board.subagents-board.aria-label.subagents-at-work",
+            "web.subagents-board.subagents-board.aria-label.subagents-in-every-session",
+            "web.subagents-board.subagents-board.div.loading-subagents",
+            "web.subagents-board.subagents-board.div.no-subagents-yet-pi",
+            "web.subagents-board.subagents-board.h2.subagents",
+            "web.subagents-board.subagents-board.title.back-conversation-esc"
+        ],
+        "calls": [
+            {
+                "key": "web.subagents-board.needs-you.div.needs-you",
+                "english": "Needs you",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.dismiss.title.stays-failed-no-longer",
+                "english": "It stays here as failed, and no longer needs you",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.dismiss.button.dismiss",
+                "english": "Dismiss",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail.span.session",
+                "english": "Session",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail.span.asked",
+                "english": "Asked",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail.span.now",
+                "english": "Now",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail.span.error",
+                "english": "Error",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail.span.report-way-pi",
+                "english": "report on its way to Pi",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail.button.stop",
+                "english": "Stop",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.status-line.span.hover-square-see-doing",
+                "english": "Hover a square to see what it is doing",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.status-line.span.move-enter-opens",
+                "english": "←→↑↓ move · Enter opens",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail-bar.aria-label.close",
+                "english": "Close",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.detail-bar.button.stop",
+                "english": "Stop",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.search.placeholder.find-subagent-task",
+                "english": "Find a subagent or task",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.aria-label.subagents-at-work",
+                "english": "Subagents at work",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.div.loading-subagents",
+                "english": "Loading subagents…",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.div.no-subagents-yet-pi",
+                "english": "No subagents yet. Pi starts them when a task splits into parts that can run at once.",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.aria-label.subagents-in-every-session",
+                "english": "Subagents in every session",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.h2.subagents",
+                "english": "Subagents",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.title.back-conversation-esc",
+                "english": "Back to the conversation (Esc)",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.aria-label.close",
+                "english": "Close",
+                "count": 1
+            },
+            {
+                "key": "web.subagents-board.subagents-board.aria-label.show-only",
+                "english": "Show only",
+                "count": 1
+            }
+        ]
+    },
+    "web/subagents.js": {
+        "sha256": "c241efeffc0a22f37c50bad34641df6fc249b38c47c98b0052caf2165f6a9144",
+        "webLiterals": [
+            "web.subagents.agent-row.span.report-way-pi",
+            "web.subagents.agent-row.title.stop",
+            "web.subagents.bar.aria-label.put-subagents-bar-away",
+            "web.subagents.bar.title.put-away",
+            "web.subagents.held.button.raise-it",
+            "web.subagents.held.span.they-go-once-owner"
+        ],
+        "calls": [
+            {
+                "key": "web.subagents.agent-row.span.report-way-pi",
+                "english": "report on its way to Pi",
+                "count": 1
+            },
+            {
+                "key": "web.subagents.agent-row.title.stop",
+                "english": "Stop",
+                "count": 1
+            },
+            {
+                "key": "web.subagents.held.button.raise-it",
+                "english": "Raise it",
+                "count": 1
+            },
+            {
+                "key": "web.subagents.held.span.they-go-once-owner",
+                "english": "They go once the owner raises it.",
+                "count": 1
+            },
+            {
+                "key": "web.subagents.bar.aria-label.put-subagents-bar-away",
+                "english": "Put the subagents bar away",
+                "count": 1
+            },
+            {
+                "key": "web.subagents.bar.title.put-away",
+                "english": "Put away",
+                "count": 1
+            }
+        ]
+    }
+}

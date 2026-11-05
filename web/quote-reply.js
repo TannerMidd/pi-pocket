@@ -4,6 +4,7 @@ import { rangeText } from "./quote-text.js";
 import { quoteReply, showsPip, store } from "./store.js";
 import { prefs } from "./theme.js";
 import { html, Icon } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** Which of the pill's buttons show: each has its own switch in Appearance, and PiP's orb needs PiP on. */
 const buttons = () => ({
@@ -176,7 +177,7 @@ export function QuoteReplyButton() {
             at.shown.reply &&
             html`<button type="button" class="quote-reply-action" onClick=${reply}>
                 <${Icon} name="reply" size=${14} stroke=${2} />
-                <span>Reply</span>
+                <span>${t("web.quote-reply.quote-reply-button.span.reply", "Reply")}</span>
             </button>`
         }
         ${
@@ -184,8 +185,8 @@ export function QuoteReplyButton() {
             html`<button
                 type="button"
                 class="quote-reply-action quote-reply-pip"
-                aria-label="Ask PiP"
-                title="Ask PiP"
+                aria-label=${t("web.quote-reply.ask-pip", "Ask PiP")}
+                title=${t("web.quote-reply.ask-pip", "Ask PiP")}
                 onClick=${askPip}
             >
                 <${Icon} name="pip" size=${16} />

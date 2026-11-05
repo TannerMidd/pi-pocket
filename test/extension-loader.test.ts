@@ -30,6 +30,7 @@ const shared = globalThis as unknown as {
     gates?: Record<string, Promise<void>>;
     cleaned?: Record<string, number>;
     checkpointIdentity?: unknown;
+    localeStarted?: number;
 };
 
 shared.gates = {};
@@ -48,16 +49,23 @@ function setUp(loadLimitMs?: number, changed?: () => void) {
 
     const registry = createRegistry();
     const notices: { to: string; level: string; message: string }[] = [];
+    const disabled = new Set<string>();
     const host = {
         notice: (level: string, message: string) =>
             notices.push({ to: "everyone", level, message }),
     } as unknown as PocketHost;
     const webs = new ExtensionWebs(changed === undefined ? {} : { changed });
-    const loader = new ExtensionLoader(registry, host, { builtIn, dropIn }, () => true, {
-        webs,
-        notify: (level, message) => notices.push({ to: "owner", level, message }),
-        ...(loadLimitMs === undefined ? {} : { loadLimitMs }),
-    });
+    const loader = new ExtensionLoader(
+        registry,
+        host,
+        { builtIn, dropIn },
+        (file) => !disabled.has(file),
+        {
+            webs,
+            notify: (level, message) => notices.push({ to: "owner", level, message }),
+            ...(loadLimitMs === undefined ? {} : { loadLimitMs }),
+        },
+    );
     const installed = () =>
         registry
             .snapshot()
@@ -65,7 +73,7 @@ function setUp(loadLimitMs?: number, changed?: () => void) {
             .filter((extension) => extension.name.startsWith("t-"))
             .map((extension) => `${extension.name}@${(extension as { v?: number }).v}`);
 
-    return { dropIn, notices, webs, loader, installed };
+    return { builtIn, dropIn, disabled, notices, webs, loader, installed };
 }
 
 /** A module that adds a route answering its version, and one extension. */
@@ -87,6 +95,10 @@ function gate(name: string): () => void {
 
 const owner = { role: "owner" as const };
 
+/** Read a real, committed layer from the loader's catalog. */
+const localeOf = (webs: ExtensionWebs, id = "fr") =>
+    webs.locales.snapshot().locales.find((each) => each.id === id);
+
 const answer = (webs: ExtensionWebs, module: string) => {
     const found = webs.match(module, "GET", ["v"], owner);
 
@@ -94,6 +106,336 @@ const answer = (webs: ExtensionWebs, module: string) => {
         ? (found.route.handle({} as never) as { v?: unknown })
         : undefined;
 };
+
+test("R08: a locale-only module can return void without installing an extension", async () => {
+    const { dropIn, loader, webs, installed } = setUp();
+
+    writeFileSync(
+        join(dropIn, "locale-only.ts"),
+        `/** Locale-only module. */
+export default (_host, web) => {
+    web.uiLocales([{ id: "fr", label: "Français", messages: { "ui.close": "Fermer" } }]);
+};
+`,
+    );
+
+    try {
+        await assert.doesNotReject(
+            async () => assert.deepEqual(await loader.reload("locale-only.ts"), []),
+            "a valid locale-only module installs without a synthetic extension",
+        );
+        assert.equal(localeOf(webs)?.messages["ui.close"], "Fermer");
+        assert.deepEqual(installed(), []);
+        const info = loader.list().find((each) => each.file === "locale-only.ts");
+
+        assert.equal(info?.enabled, true);
+        assert.equal(info?.error, undefined);
+        assert.ok(info?.web, "the module's locale declaration counts as web content");
+    } finally {
+        await loader.close();
+    }
+});
+
+test("presentations and locales install, reject updates, and unload as one module version", async () => {
+    const { dropIn, disabled, loader, webs, installed } = setUp();
+    const file = join(dropIn, "combined.ts");
+    const source = (
+        version: number,
+        extra = "",
+    ) => `/** Combined presentation and locale registration. */
+export default (_host, web) => {
+    web.presentEntry({ kind: "x.combined.note", label: "Note ${version}", userPrefix: "COMBINED " });
+    web.uiLocales([{ id: "fr", label: "Français", messages: { "ui.close": "Close ${version}" } }]);
+    web.route("GET", "v", () => ({ v: ${version} }));
+    ${extra}
+    return { name: "t-combined", v: ${version} };
+};
+`;
+
+    try {
+        writeFileSync(file, source(1));
+        await loader.reload("combined.ts");
+        const before = webs.locales.snapshot();
+
+        assert.equal(webs.presentations().byKind.get("x.combined.note")?.label, "Note 1");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "Close 1");
+        assert.deepEqual(installed(), ["t-combined@1"]);
+
+        for (const extra of [
+            'web.presentEntry({ kind: "x.combined.note", label: "Duplicate" });',
+            'web.uiLocales([{ id: "de", label: "Deutsch", messages: {} }]);',
+            'throw new Error("after both declarations");',
+        ]) {
+            writeFileSync(file, source(2, extra));
+            await assert.rejects(loader.reload("combined.ts"));
+            assert.deepEqual(webs.locales.snapshot(), before);
+            assert.equal(webs.presentations().byKind.get("x.combined.note")?.label, "Note 1");
+            assert.deepEqual(answer(webs, "combined"), { v: 1 });
+            assert.deepEqual(installed(), ["t-combined@1"]);
+        }
+
+        writeFileSync(file, source(3));
+        await loader.reload("combined.ts");
+        assert.equal(webs.presentations().byKind.get("x.combined.note")?.label, "Note 3");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "Close 3");
+        assert.deepEqual(answer(webs, "combined"), { v: 3 });
+        disabled.add("combined.ts");
+        await loader.apply("combined.ts");
+        assert.equal(webs.presentations().byKind.size, 0);
+        assert.equal(localeOf(webs), undefined);
+        assert.equal(answer(webs, "combined"), undefined);
+        assert.deepEqual(installed(), []);
+    } finally {
+        await loader.close();
+    }
+});
+
+test("R10: invalid and throwing locale updates leave the previous module version installed", async () => {
+    const { dropIn, loader, webs, installed } = setUp();
+    const file = join(dropIn, "locale-atomic.ts");
+    const source = (version: number, value: string, extra = "") => `/** Atomic locale update. */
+export default (_host, web) => {
+    web.uiLocales([{ id: "fr", label: "Français", messages: { "ui.close": ${value} } }]);
+    web.route("GET", "v", () => ({ v: ${version} }));
+    ${extra}
+    return { name: "t-locale-atomic", v: ${version} };
+};
+`;
+
+    try {
+        writeFileSync(file, source(1, JSON.stringify("one")));
+        await loader.reload("locale-atomic.ts");
+        assert.deepEqual(installed(), ["t-locale-atomic@1"]);
+        const prior = webs.locales.snapshot();
+
+        assert.equal(localeOf(webs)?.messages["ui.close"], "one");
+        writeFileSync(file, source(2, "42"));
+        await assert.rejects(loader.reload("locale-atomic.ts"));
+        assert.deepEqual(
+            installed(),
+            ["t-locale-atomic@1"],
+            "a rejected package keeps the old extension",
+        );
+        assert.deepEqual(
+            answer(webs, "locale-atomic"),
+            { v: 1 },
+            "a rejected package keeps the old route",
+        );
+        assert.deepEqual(
+            webs.locales.snapshot(),
+            prior,
+            "a rejected package retains the old catalog and revision",
+        );
+        assert.ok(loader.list().find((each) => each.file === "locale-atomic.ts")?.error);
+
+        writeFileSync(
+            file,
+            source(
+                3,
+                JSON.stringify("three"),
+                'throw new Error("failure after locale registration");',
+            ),
+        );
+        await assert.rejects(
+            loader.reload("locale-atomic.ts"),
+            /failure after locale registration/,
+        );
+        assert.deepEqual(installed(), ["t-locale-atomic@1"]);
+        assert.deepEqual(answer(webs, "locale-atomic"), { v: 1 });
+        assert.deepEqual(
+            webs.locales.snapshot(),
+            prior,
+            "a thrown update cannot publish locale text",
+        );
+    } finally {
+        await loader.close();
+    }
+});
+
+test("R10: a timed-out or overtaken locale update cannot install later", async () => {
+    const { dropIn, disabled, loader, webs, installed } = setUp(400);
+    const file = join(dropIn, "locale-race.ts");
+    const source = (version: number, wait = false) => `/** Locale race. */
+export default async (_host, web) => {
+    web.uiLocales([{ id: "fr", label: "Français", messages: { "ui.close": "version ${version}" } }]);
+    web.route("GET", "v", () => ({ v: ${version} }));
+    globalThis.localeStarted = ${version};
+    ${wait ? "await globalThis.gates.localeRace;" : ""}
+    return { name: "t-locale-race", v: ${version} };
+};
+`;
+    let open = gate("localeRace");
+
+    try {
+        writeFileSync(file, source(1));
+        await loader.reload("locale-race.ts");
+        writeFileSync(file, source(2, true));
+        await assert.rejects(loader.reload("locale-race.ts"), /did not finish loading in time/);
+        assert.deepEqual(installed(), ["t-locale-race@1"]);
+        open();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.deepEqual(answer(webs, "locale-race"), { v: 1 }, "a late timeout cannot publish");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "version 1");
+
+        open = gate("localeRace");
+        writeFileSync(file, source(3, true));
+        const stale = loader.reload("locale-race.ts");
+
+        await until(() => shared.localeStarted === 3, "the old locale load is staged");
+        writeFileSync(file, source(4));
+        await loader.reload("locale-race.ts");
+        open();
+        await stale;
+        assert.deepEqual(installed(), ["t-locale-race@4"]);
+        assert.deepEqual(answer(webs, "locale-race"), { v: 4 }, "an overtaken load cannot publish");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "version 4");
+
+        open = gate("localeRace");
+        writeFileSync(file, source(5, true));
+        const disabledLoad = loader.reload("locale-race.ts");
+
+        await until(() => shared.localeStarted === 5, "the disabled locale load is staged");
+        disabled.add("locale-race.ts");
+        await loader.apply("locale-race.ts");
+        open();
+        await disabledLoad;
+        assert.deepEqual(installed(), []);
+        assert.equal(answer(webs, "locale-race"), undefined, "a disabled load cannot return later");
+        assert.equal(localeOf(webs), undefined);
+    } finally {
+        open();
+        await loader.close();
+    }
+});
+
+test("R10: loader failures name the module to the owner", async () => {
+    const { dropIn, loader, notices } = setUp();
+
+    writeFileSync(
+        join(dropIn, "broken-locale.ts"),
+        `/** Broken locale. */
+export default (_host, web) => web.uiLocales([{ id: "fr", label: "Français", messages: {} }]);
+`,
+    );
+
+    try {
+        await loader.loadAll();
+        const warning = notices.find((each) => each.level === "error");
+
+        assert.ok(warning, "the failed module is reported");
+        assert.equal(warning.to, "owner");
+        assert.match(warning.message, /broken-locale\.ts/);
+    } finally {
+        await loader.close();
+    }
+});
+
+test("R09 and R17: real loader order survives reload and removing an overlay reveals its predecessor", async () => {
+    const { builtIn, dropIn, disabled, loader, webs } = setUp();
+    const source = (label: string, close: string, back?: string) => `/** Locale layer. */
+export default (_host, web) => web.uiLocales([${JSON.stringify({
+        id: "fr-ca",
+        label,
+        messages: {
+            "ui.close": close,
+            ...(back === undefined ? {} : { "web.ui.sheet.aria-label.back": back }),
+        },
+    })}]);
+`;
+
+    writeFileSync(
+        join(builtIn, "browser.ts"),
+        source("Builtin browser", "builtin browser", "back from browser"),
+    );
+    writeFileSync(join(builtIn, "prompt.ts"), source("Builtin prompt", "builtin prompt"));
+    writeFileSync(join(builtIn, "z-built.ts"), source("Other builtin", "other builtin"));
+    writeFileSync(join(dropIn, "a-drop.ts"), source("Drop A", "drop A"));
+    writeFileSync(join(dropIn, "z-drop.ts"), source("Drop Z", "drop Z"));
+
+    try {
+        assert.deepEqual(loader.files(), [
+            "prompt.ts",
+            "browser.ts",
+            "z-built.ts",
+            "a-drop.ts",
+            "z-drop.ts",
+        ]);
+        await loader.loadAll();
+        assert.equal(localeOf(webs, "fr-CA")?.label, "Drop Z");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "drop Z");
+        assert.equal(
+            localeOf(webs, "fr-CA")?.messages["web.ui.sheet.aria-label.back"],
+            "back from browser",
+        );
+        writeFileSync(join(dropIn, "a-drop.ts"), source("Drop A revised", "drop A revised"));
+        await loader.reload("a-drop.ts");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "drop Z");
+        disabled.add("z-drop.ts");
+        await loader.apply("z-drop.ts");
+        assert.equal(localeOf(webs, "fr-CA")?.label, "Drop A revised");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "drop A revised");
+        disabled.add("a-drop.ts");
+        await loader.apply("a-drop.ts");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "other builtin");
+        disabled.add("z-built.ts");
+        await loader.apply("z-built.ts");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "builtin browser");
+        disabled.add("browser.ts");
+        await loader.apply("browser.ts");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "builtin prompt");
+        assert.equal(localeOf(webs, "fr-CA")?.messages["web.ui.sheet.aria-label.back"], undefined);
+        assert.equal(localeOf(webs, "fr"), undefined, "a parent tag is not substituted for fr-CA");
+        assert.equal(
+            localeOf(webs, "fr-FR"),
+            undefined,
+            "a different regional variant is not substituted",
+        );
+    } finally {
+        await loader.close();
+    }
+});
+
+test("R09: loader layers do not follow the order in which asynchronous modules finish", async () => {
+    const { dropIn, loader, webs } = setUp(2000);
+    const open = gate("localeOrder");
+
+    writeFileSync(
+        join(dropIn, "a-order.ts"),
+        `/** Lower layer. */
+export default async (_host, web) => {
+    web.uiLocales([{ id: "fr", label: "Lower", messages: { "ui.close": "lower" } }]);
+    globalThis.localeStarted = 10;
+    await globalThis.gates.localeOrder;
+};
+`,
+    );
+    writeFileSync(
+        join(dropIn, "z-order.ts"),
+        `/** Upper layer. */
+export default (_host, web) => web.uiLocales([{ id: "fr", label: "Upper", messages: { "ui.close": "upper" } }]);
+`,
+    );
+
+    try {
+        const lower = loader.reload("a-order.ts");
+
+        await until(() => shared.localeStarted === 10, "the lower layer waits after registration");
+        assert.equal(localeOf(webs), undefined, "a staged locale is not visible");
+        await loader.reload("z-order.ts");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "upper");
+        open();
+        await lower;
+        assert.equal(localeOf(webs)?.label, "Upper");
+        assert.equal(
+            localeOf(webs)?.messages["ui.close"],
+            "upper",
+            "the later completion stays below the upper layer",
+        );
+    } finally {
+        open();
+        await loader.close();
+    }
+});
 
 test("legacy drop-in documents write through frozen helper definitions, reload, and restart", async () => {
     const data = join(root, "legacy-documents");

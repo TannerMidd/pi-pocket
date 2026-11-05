@@ -273,6 +273,11 @@ export const store = {
         modelRefresh: { loading: false, result: null, error: null },
         guard: null,
         server: null,
+        /**
+         * Counts the times the app's own words changed: another language, another catalog, or the words of the one this
+         * tab shows (`ui-locale.js`). What draws text compares it, so it draws again without a reload.
+         */
+        localeRevision: 0,
         sessions: [],
         /** This person's favorite folders, in shortcut order, sent by the server to every signed-in device. */
         folderFavorites: [],
@@ -763,7 +768,10 @@ class ApiError extends Error {
 /** Call the server's API: a GET without `body`, a POST with one, or `options.method`; `options.signal` stops it. */
 export async function api(path, body, options = {}) {
     if (changingAccount) {
-        throw new ApiError(401, "The account changed. Reload Pi Pocket.");
+        throw new ApiError(
+            401,
+            fixedText("web.store.account.changed", "The account changed. Reload Pi Pocket."),
+        );
     }
 
     const init = {
@@ -1832,6 +1840,19 @@ export function onExtensionEvent(listener) {
     return () => extensionListeners.delete(listener);
 }
 
+/** Who hears each hello: `ui-locale.js`, which imports this module and so cannot be imported here. */
+const helloListeners = new Set();
+
+/**
+ * Hear each hello, after its facts are in the store: the server's facts, which hold the catalog's `localeRevision`,
+ * and this connection's id (`undefined` for `GET /api/me`).
+ */
+export function onHello(listener) {
+    helloListeners.add(listener);
+
+    return () => helloListeners.delete(listener);
+}
+
 /** What the server sends, by event name. Both transports deliver the same events. */
 const handlers = {
     // Sent again on each connect, mostly as it was: what is the same keeps its identity (`kept`).
@@ -1870,6 +1891,12 @@ const handlers = {
             // This connection's id, which peek lists name (`peeks.js`). `GET /api/me` answers without one.
             ...(data.connection === undefined ? {} : { streamId: data.connection }),
         });
+
+        // `ui-locale.js` hears each hello: a new connection reads the catalog, and so does one whose revision changed.
+        for (const listener of helloListeners) {
+            listener(data.server, data.connection);
+        }
+
         // The sessions used last, from the device into memory, once the page settles: after a reload they open at once.
         setTimeout(() => void warmFromDevice(), 1500);
     },
@@ -2030,10 +2057,33 @@ function eventsQuery(kept) {
     return `tab=${encodeURIComponent(TAB)}&p=${PROTOCOL}${session}${resume}${embedder}`;
 }
 
+let fixedText = (_key, english) => english;
+
+/** UI text comes from ui-locale.js, which imports this store: no import cycle at startup. */
+export function setFixedText(reader) {
+    fixedText = reader;
+    accountCoverText();
+}
+
 let accountCover = null;
 let accountRequest = null;
 let accountRetry;
 let accountFailures = 0;
+
+function accountCoverText() {
+    if (accountCover === null) {
+        return;
+    }
+
+    accountCover.querySelector("p").textContent =
+        accountFailures >= 3
+            ? fixedText("web.store.account.unreachable", "The server cannot be reached. Try again.")
+            : fixedText("web.store.account.checking", "Checking who is signed in…");
+    accountCover.querySelector("button").textContent = fixedText(
+        "web.store.account.retry",
+        "Retry",
+    );
+}
 
 /** Cover a frozen page until the server confirms whose cookie the browser has now. */
 function coverAccount() {
@@ -2045,12 +2095,13 @@ function coverAccount() {
     accountCover.className = "account-cover";
     accountCover.setAttribute("aria-labelledby", "account-check-status");
     accountCover.innerHTML = `<div class="plain">
-        <p id="account-check-status" role="status">Checking who is signed in…</p>
-        <button type="button">Retry</button>
+        <p id="account-check-status" role="status"></p>
+        <button type="button"></button>
     </div>`;
     accountCover.addEventListener("cancel", (event) => event.preventDefault());
     accountCover.querySelector("button").addEventListener("click", () => void restoreAccount());
     document.body.append(accountCover);
+    accountCoverText();
     accountCover.showModal();
 }
 
@@ -2106,10 +2157,7 @@ async function restoreAccount() {
             reloadAccount();
         } else {
             accountFailures++;
-            accountCover.querySelector("p").textContent =
-                accountFailures >= 3
-                    ? "The server cannot be reached. Try again."
-                    : "Checking who is signed in…";
+            accountCoverText();
             accountRetry = setTimeout(
                 restoreAccount,
                 Math.min(30_000, 1000 * 2 ** Math.min(accountFailures - 1, 5)),
@@ -2656,7 +2704,13 @@ const current = () => store.state.conversationId;
  */
 const answered = (key) => (answer) => {
     if (answer?.[key] === undefined) {
-        throw new ApiError(undefined, "The answer could not be read. Send it again: it goes once.");
+        throw new ApiError(
+            undefined,
+            fixedText(
+                "web.store.unreadable-answer",
+                "The answer could not be read. Send it again: it goes once.",
+            ),
+        );
     }
 
     return answer;

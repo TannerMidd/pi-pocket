@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, normalize, sep } from "node:path";
+import type { PocketApp } from "./app.ts";
 import { Auth } from "./auth.ts";
 import { describe, HttpError } from "./errors.ts";
 import { createApi } from "./http/api.ts";
@@ -27,6 +28,22 @@ import {
 import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
+import { pageLocale } from "./http/locale.ts";
+
+/**
+ * The app's own UI text in other languages (`ui-locales.ts`): the catalog that its tabs and sign-in pages read. It is
+ * public, as those pages are, so it answers before any sign-in, and no cache keeps it.
+ */
+function uiLocales(app: PocketApp, request: IncomingMessage, response: ServerResponse): void {
+    if (request.method !== "GET") {
+        throw new HttpError(405, "Only GET answers the UI catalog");
+    }
+
+    const snapshot = app.webs.locales.snapshot();
+
+    response.setHeader("cache-control", "no-store");
+    json(response, 200, { revision: snapshot.revision, locales: snapshot.locales });
+}
 
 /** The version of the app bridge the web app speaks (`web/host.js`). */
 const BRIDGE_VERSION = 1;
@@ -51,6 +68,12 @@ export function createHandler(options: HttpOptions) {
             const parts = path.split("/").filter((part) => part !== "");
 
             response.setHeader("x-content-type-options", "nosniff");
+
+            // The UI catalog, before the API's checks: the sign-in pages and every tab read it, signed in or not.
+            // Exactly `/ui-locales.json`, and only a GET.
+            if (parts.length === 1 && parts[0] === "ui-locales.json") {
+                return uiLocales(app, request, response);
+            }
 
             // What an embedder (an app that shows Pi Pocket) asks before it signs in: that this is
             // Pi Pocket, and which version of the app bridge its page speaks (`web/host.js`,
@@ -173,17 +196,24 @@ export function createHandler(options: HttpOptions) {
             }
 
             if (parts[0] === "login" && (request.method === "GET" || request.method === "POST")) {
-                return await login(auth, request, response, url);
+                return await login(auth, request, response, url, pageLocale(app, request, url));
             }
 
             if (parts[0] === "join" && parts[1] !== undefined) {
-                return await joinPage(app, auth, request, response, parts[1]);
+                return await joinPage(
+                    app,
+                    auth,
+                    request,
+                    response,
+                    parts[1],
+                    pageLocale(app, request, url),
+                );
             }
 
             // Shares from other apps go to the service worker (web/sw.js). One that reaches the server came before the
             // worker was installed on this device; nothing here knows where it should go.
             if (parts[0] === "share" && request.method === "POST") {
-                return sharePage(response);
+                return sharePage(response, pageLocale(app, request, url));
             }
 
             // The web app: index.html for app routes, files from web/ otherwise.

@@ -14,6 +14,7 @@ import { prepareModelImage } from "../model-images.ts";
 import { reveal } from "../reveal.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
+import { pageLocale } from "./locale.ts";
 
 const MAX_UPLOAD = 50 * 1024 * 1024;
 
@@ -495,7 +496,8 @@ export async function conversationRoutes(
     }
 
     if (third === "export" && method === "GET") {
-        const { filename, markdown } = await app.transcripts.exportMarkdown(id, user);
+        const locale = pageLocale(app, request, url);
+        const { filename, markdown } = await app.transcripts.exportMarkdown(id, user, locale);
 
         return send(response, 200, markdown, "text/markdown; charset=utf-8", {
             "content-disposition": `attachment; filename="${filename}"`,

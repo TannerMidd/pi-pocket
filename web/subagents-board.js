@@ -21,17 +21,29 @@ import {
     unresolved,
 } from "./subagents.js";
 import { html, Icon, timeAgo } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** The states, most urgent first: the order of the bar, the legend, the squares, and the sessions' summaries. */
 const STATES = ["waiting", "failed", "working", "stopped", "done"];
 
+/** Each state's name on the board: a key and its English, looked up as it draws. */
 const LABELS = {
-    waiting: "Needs approval",
-    failed: "Failed",
-    working: "Working",
-    stopped: "Stopped",
-    done: "Done",
+    waiting: ["web.subagents-board.waiting.needs-approval", "Needs approval"],
+    failed: ["web.subagents-board.failed.failed", "Failed"],
+    working: ["web.subagents-board.working.working", "Working"],
+    stopped: ["web.subagents-board.stopped.stopped", "Stopped"],
+    done: ["web.subagents-board.done.done", "Done"],
 };
+
+/** A summary's shorter words for a state, and the two ways waiting reads in one. */
+const SUMMARY_WORDS = {
+    failed: ["web.subagents-board.summary-of.parts.failed", "failed"],
+    working: ["web.subagents-board.summary-of.parts.working", "working"],
+    stopped: ["web.subagents-board.summary-of.parts.stopped", "stopped"],
+    done: ["web.subagents-board.summary-of.parts.done", "done"],
+};
+const WAITING_SHORT = ["web.subagents-board.summary-of.text.approve", "approve"];
+const WAITING_FULL = ["web.subagents-board.summary-of.text.need-approval", "need approval"];
 
 /** Where a subagent is on the board: waiting for an approval comes first, as it is working but held up. */
 const boardState = (agent) => (agent.waiting ? "waiting" : stateOf(agent));
@@ -41,9 +53,22 @@ const live = (state) => state === "working" || state === "waiting";
 /** What needs you: an approval it waits for, or a failure nobody has dealt with (seen or dismissed). */
 const needsYou = (agent) => boardState(agent) === "waiting" || unresolved(agent);
 
+/** "2 approve", "4 working": a count and its state, as a summary says them. */
+const countWord = (count, state, waiting = WAITING_SHORT) =>
+    t("web.subagents-board.summary-of.text.count-state", "{count} {state}", {
+        count,
+        state: t(...(state === "waiting" ? waiting : SUMMARY_WORDS[state])),
+    });
+
 /** A subagent's state in words: "Failed · dismissed" for a failure someone dealt with. */
-const labelOf = (agent) =>
-    `${LABELS[boardState(agent)]}${boardState(agent) === "failed" && agent.dealt ? " · dismissed" : ""}`;
+const labelOf = (agent) => {
+    const state = boardState(agent);
+    const label = t(...LABELS[state]);
+
+    return state === "failed" && agent.dealt
+        ? t("web.subagents-board.label-of.dismissed", "{state} · dismissed", { state: label })
+        : label;
+};
 
 /** The board goes to one column below this width, as sheets come up from the bottom. */
 const PHONE = matchMedia("(max-width: 699px)");
@@ -100,17 +125,15 @@ function summaryOf(counts, { short = false } = {}) {
         // Only finished ones left: those stopped, apart from those done.
         const finished = ["stopped", "done"]
             .filter((state) => counts[state] > 0)
-            .map((state) => `${counts[state]} ${state}`);
+            .map((state) => countWord(counts[state], state));
 
         return parts.length > 0
-            ? parts
-                  .map((state) => `${counts[state]} ${state === "waiting" ? "approve" : state}`)
-                  .join(" · ")
+            ? parts.map((state) => countWord(counts[state], state)).join(" · ")
             : finished.join(" · ");
     }
 
     return STATES.filter((state) => counts[state] > 0)
-        .map((state) => `${counts[state]} ${state === "waiting" ? "need approval" : state}`)
+        .map((state) => countWord(counts[state], state, WAITING_FULL))
         .join(" · ");
 }
 
@@ -141,18 +164,26 @@ function ago(server) {
     const ms = fromServer(server);
 
     if (Date.now() - ms >= 30 * 86_400_000) {
-        return `on ${new Date(ms).toLocaleDateString()}`;
+        return t("web.subagents-board.ago.text.on", "on {date}", {
+            date: new Date(ms).toLocaleDateString(),
+        });
     }
 
     const when = timeAgo(ms);
 
-    return when === "now" ? "just now" : `${when} ago`;
+    return when === "now"
+        ? t("web.subagents-board.ago.text.just", "just now")
+        : t("web.subagents-board.ago.text.ago", "{when} ago", { when });
 }
 
 /** What a subagent does now: the call waiting for an approval, or what its peek shows. */
 function nowOf(agent) {
     if (agent.waiting && agent.approval) {
-        return `Waiting for approval: ${agent.approval.tool} ${agent.approval.subject}`.trim();
+        return t(
+            "web.subagents-board.now-of.text.waiting-approval",
+            "Waiting for approval: {tool} {subject}",
+            { tool: agent.approval.tool, subject: agent.approval.subject },
+        ).trim();
     }
 
     return nowDoing(agent);
@@ -191,7 +222,10 @@ function whenOf(agent) {
 
 /** One subagent's square: its state's color, and "!" when it needs you. */
 function Cell({ agent, state, dim, selected, onPick, onHover }) {
-    const label = `${agent.name}, ${labelOf(agent)}`;
+    const label = t("web.subagents-board.cell.aria-label.name-state", "{name}, {state}", {
+        name: agent.name,
+        state: labelOf(agent),
+    });
 
     return html`<button
         class=${`board-cell ${state} ${dim ? "dim" : ""} ${selected ? "on" : ""}`}
@@ -217,7 +251,10 @@ function Mark({ state, glyph = true }) {
 /** The subagents that need you: waiting for an approval first, then failed with nobody dealing with it yet. */
 function NeedsYou({ needs, titles, selected, onPick }) {
     return html`<div class="board-needs">
-        <div class="label">Needs you <span class="board-needs-count">${needs.length}</span></div>
+        <div class="label">${t(
+            "web.subagents-board.needs-you.div.needs-you",
+            "Needs you",
+        )} <span class="board-needs-count">${needs.length}</span></div>
         ${needs.map((agent) => {
             const state = boardState(agent);
 
@@ -230,7 +267,14 @@ function NeedsYou({ needs, titles, selected, onPick }) {
                 <span class="board-need-main">
                     <span class="board-need-head">
                         <b>${agent.name}</b>${" "}<span class="board-need-what">
-                            ${state === "waiting" ? "needs approval" : "failed"}
+                            ${
+                                state === "waiting"
+                                    ? t(
+                                          "web.subagents-board.needs-you.span.needs-approval",
+                                          "needs approval",
+                                      )
+                                    : t("web.subagents-board.needs-you.span.failed", "failed")
+                            }
                         </span>
                     </span>
                     <span class="board-need-session">${titles.get(agent.id)}</span>
@@ -282,11 +326,14 @@ function Dismiss({ agent }) {
 
     return html`<button
         class="button board-dismiss"
-        title="It stays here as failed, and no longer needs you"
+        title=${t(
+            "web.subagents-board.dismiss.title.stays-failed-no-longer",
+            "It stays here as failed, and no longer needs you",
+        )}
         disabled=${asked === failure}
         onClick=${run}
     >
-        Dismiss
+        ${t("web.subagents-board.dismiss.button.dismiss", "Dismiss")}
     </button>`;
 }
 
@@ -307,40 +354,63 @@ function Detail({ agent, title }) {
             <span class=${`board-detail-state ${state}`}>${labelOf(agent)}</span>
         </div>
         <div class="board-facts">
-            <span>Session</span>
+            <span>${t("web.subagents-board.detail.span.session", "Session")}</span>
             <button class="board-link" onClick=${() => openSession(agent.id)}>${title}</button>
             ${
                 agent.runsOn &&
-                html`<span>Model</span>
+                html`<span>${t("web.subagents-board.model", "Model")}</span>
                     <span class="board-model">${modelText(agent)}</span>`
             }
-            <span>${now ? "Running" : "Ended"}</span>
+            <span>${
+                now
+                    ? t("web.subagents-board.detail.span.running", "Running")
+                    : t("web.subagents-board.detail.span.ended", "Ended")
+            }</span>
             <span class="board-when">${whenOf(agent) || "—"}</span>
             ${
                 agent.asked &&
-                html`<span>Asked</span>
+                html`<span>${t("web.subagents-board.detail.span.asked", "Asked")}</span>
                     <span class="board-asked">${agent.asked}</span>`
             }
             ${
                 now &&
-                html`<span>Now</span>
+                html`<span>${t("web.subagents-board.detail.span.now", "Now")}</span>
                     <span class=${`board-now ${state}`}>${nowOf(agent)}</span>`
             }
             ${
                 state === "failed" &&
                 agent.error &&
-                html`<span>Error</span><span class="board-error">${agent.error}</span>`
+                html`<span>${t(
+                    "web.subagents-board.detail.span.error",
+                    "Error",
+                )}</span><span class="board-error">${agent.error}</span>`
             }
         </div>
-        ${agent.reporting && html`<span class="agent-chip">report on its way to Pi</span>`}
+        ${
+            agent.reporting &&
+            html`<span class="agent-chip">${t(
+                "web.subagents-board.detail.span.report-way-pi",
+                "report on its way to Pi",
+            )}</span>`
+        }
         <div class="board-actions">
             <button class="button primary" onClick=${() => open(agent)}>
-                ${state === "waiting" ? "Review the approval" : "Open"}
+                ${
+                    state === "waiting"
+                        ? t(
+                              "web.subagents-board.detail.button.review-approval",
+                              "Review the approval",
+                          )
+                        : t("web.subagents-board.detail.button.open", "Open")
+                }
             </button>
             ${
                 now &&
                 canSteer() &&
-                html`<button class="button board-stop" onClick=${() => stop(agent)}>Stop</button>`
+                html`<button class="button board-stop" onClick=${() => stop(agent)}>${t(
+                    "web.subagents-board.detail.button.stop",
+                    "Stop",
+                )}</button>`
             }
             <${Dismiss} agent=${agent} />
         </div>
@@ -357,7 +427,18 @@ function StatusLine({ agent }) {
                 ? html`<${Mark} state=${state} glyph=${false} />
                       <span class="board-status-name">${agent.name}</span>
                       <span class="board-status-when">
-                          ${live(state) ? whenOf(agent) : `${state} ${whenOf(agent)}`}
+                          ${
+                              live(state)
+                                  ? whenOf(agent)
+                                  : t(
+                                        "web.subagents-board.board-status.span.state-when",
+                                        "{state} {when}",
+                                        {
+                                            state: t(...SUMMARY_WORDS[state]),
+                                            when: whenOf(agent),
+                                        },
+                                    )
+                          }
                       </span>
                       <span
                           class=${`board-status-line ${state}`}
@@ -366,9 +447,12 @@ function StatusLine({ agent }) {
                       >
                           ${lineOf(agent)}
                       </span>`
-                : html`<span class="board-status-line">Hover a square to see what it is doing</span>`
+                : html`<span class="board-status-line">${t("web.subagents-board.status-line.span.hover-square-see-doing", "Hover a square to see what it is doing")}</span>`
         }
-        <span class="board-keys">←→↑↓ move · Enter opens</span>
+        <span class="board-keys">${t(
+            "web.subagents-board.status-line.span.move-enter-opens",
+            "←→↑↓ move · Enter opens",
+        )}</span>
     </div>`;
 }
 
@@ -382,7 +466,10 @@ function DetailBar({ agent, title, onClose }) {
             <span class="board-detail-name">${agent.name}</span>
             <span class=${`board-detail-state ${state}`}>${labelOf(agent)}</span>
             <span class="board-bar-when">${whenOf(agent)}</span>
-            <button class="board-bar-close" aria-label="Close" onClick=${onClose}>
+            <button class="board-bar-close" aria-label=${t(
+                "web.subagents-board.detail-bar.aria-label.close",
+                "Close",
+            )} onClick=${onClose}>
                 <${Icon} name="close" size=${16} />
             </button>
         </div>
@@ -392,12 +479,22 @@ function DetailBar({ agent, title, onClose }) {
         <div class=${`board-bar-line ${state}`}>${lineOf(agent)}</div>
         <div class="board-bar-actions">
             <button class="button primary" onClick=${() => open(agent)}>
-                ${state === "waiting" ? "Review the approval" : "Open"}
+                ${
+                    state === "waiting"
+                        ? t(
+                              "web.subagents-board.detail.button.review-approval",
+                              "Review the approval",
+                          )
+                        : t("web.subagents-board.detail.button.open", "Open")
+                }
             </button>
             ${
                 live(state) &&
                 canSteer() &&
-                html`<button class="button" onClick=${() => stop(agent)}>Stop</button>`
+                html`<button class="button" onClick=${() => stop(agent)}>${t(
+                    "web.subagents-board.detail-bar.button.stop",
+                    "Stop",
+                )}</button>`
             }
             <${Dismiss} agent=${agent} />
         </div>
@@ -409,7 +506,10 @@ function Search({ query, setQuery }) {
     return html`<label class=${`board-search ${query ? "filled" : ""}`}>
         <${Icon} name="search" size=${14} />
         <input
-            placeholder="Find a subagent or task"
+            placeholder=${t(
+                "web.subagents-board.search.placeholder.find-subagent-task",
+                "Find a subagent or task",
+            )}
             value=${query}
             onInput=${(event) => setQuery(event.currentTarget.value)}
             onKeyDown=${(event) => {
@@ -453,7 +553,13 @@ export function SubagentsBoard() {
     const reveal = useRef(null);
     const { boardFocus } = store.state;
     const agents = boardAgents ?? [];
-    const titles = new Map(sessions.map((session) => [session.id, session.title ?? "New session"]));
+    const titles = new Map(
+        sessions.map((session) => [
+            session.id,
+            session.title ??
+                t("web.subagents-board.subagents-board.titles.new-session", "New session"),
+        ]),
+    );
     const cwds = new Map(sessions.map((session) => [session.id, session.cwd]));
     const known = new Map(sessions.map((session) => [session.id, session.subagents]));
     const needle = query.trim().toLowerCase();
@@ -667,10 +773,14 @@ export function SubagentsBoard() {
     const pick = (id) => setSelected(id);
     const sessionCount = rows.length;
     const legend = [
-        { key: "all", label: "All", count: total },
+        {
+            key: "all",
+            label: t("web.subagents-board.subagents-board.filter.all", "All"),
+            count: total,
+        },
         ...STATES.filter((state) => counts[state] > 0).map((state) => ({
             key: state,
-            label: LABELS[state],
+            label: t(...LABELS[state]),
             count: counts[state],
         })),
     ];
@@ -685,7 +795,9 @@ export function SubagentsBoard() {
             ),
         );
         const tone = top === undefined || top === "done" || top === "stopped" ? "quiet" : top;
-        const title = titles.get(id) ?? `Session ${id}`;
+        const title =
+            titles.get(id) ??
+            t("web.subagents-board.subagents-board.title.session", "Session {id}", { id });
 
         const folder = folderColor(cwds.get(id));
         // The ones at work now, as sub-tiles: what each does, without opening any of them. The filter and search apply.
@@ -711,7 +823,9 @@ export function SubagentsBoard() {
             <div class="board-row-head">
                 <button
                     class="board-session"
-                    title=${`Open ${title}`}
+                    title=${t("web.subagents-board.subagents-board.title.open", "Open {title}", {
+                        title,
+                    })}
                     onClick=${() => openSession(id)}
                 >
                     <span class="board-session-title">
@@ -742,7 +856,11 @@ export function SubagentsBoard() {
                         older > 0 &&
                         html`<span
                             class="board-older"
-                            title=${`${older} more, finished earlier: open the session to see them`}
+                            title=${t(
+                                "web.subagents-board.subagents-board.title.more-finished-earlier-open",
+                                "{older} more, finished earlier: open the session to see them",
+                                { older },
+                            )}
                         >
                             +${older}
                         </span>`
@@ -751,7 +869,10 @@ export function SubagentsBoard() {
             </div>
             ${
                 active.length > 0 &&
-                html`<div class="board-live" role="group" aria-label="Subagents at work">
+                html`<div class="board-live" role="group" aria-label=${t(
+                    "web.subagents-board.subagents-board.aria-label.subagents-at-work",
+                    "Subagents at work",
+                )}>
                     ${tiles.map(
                         (agent) => html`<${AgentTile}
                             key=${agent.conversationId}
@@ -765,7 +886,18 @@ export function SubagentsBoard() {
                     ${
                         active.length > cap + 1 &&
                         html`<button class="board-live-more" onClick=${toggle}>
-                            ${all ? "Show fewer" : `Show ${active.length - tiles.length} more`}
+                            ${
+                                all
+                                    ? t(
+                                          "web.subagents-board.subagents-board.button.show-fewer",
+                                          "Show fewer",
+                                      )
+                                    : t(
+                                          "web.subagents-board.subagents-board.button.show-more",
+                                          "Show {count} more",
+                                          { count: active.length - tiles.length },
+                                      )
+                            }
                         </button>`
                     }
                 </div>`
@@ -775,10 +907,13 @@ export function SubagentsBoard() {
 
     const empty =
         boardAgents === null
-            ? html`<div class="board-empty">Loading subagents…</div>`
+            ? html`<div class="board-empty">${t(
+                  "web.subagents-board.subagents-board.div.loading-subagents",
+                  "Loading subagents…",
+              )}</div>`
             : agents.length === 0
               ? html`<div class="board-empty">
-                    No subagents yet. Pi starts them when a task splits into parts that can run at once.
+                    ${t("web.subagents-board.subagents-board.div.no-subagents-yet-pi", "No subagents yet. Pi starts them when a task splits into parts that can run at once.")}
                 </div>`
               : null;
 
@@ -786,20 +921,38 @@ export function SubagentsBoard() {
         class=${`board ${phone ? "phone" : ""}`}
         data-part="subagents-board"
         ref=${box}
-        aria-label="Subagents in every session"
+        aria-label=${t(
+            "web.subagents-board.subagents-board.aria-label.subagents-in-every-session",
+            "Subagents in every session",
+        )}
     >
         <header class="board-head">
             <div class="board-title">
-                <h2>Subagents</h2>
+                <h2>${t("web.subagents-board.subagents-board.h2.subagents", "Subagents")}</h2>
                 <div class="board-sub">
-                    ${total} in ${sessionCount} session${sessionCount === 1 ? "" : "s"}
+                    ${
+                        sessionCount === 1
+                            ? t(
+                                  "web.subagents-board.subagents-board.div.one-session",
+                                  "{total} in 1 session",
+                                  { total },
+                              )
+                            : t(
+                                  "web.subagents-board.subagents-board.div.sessions",
+                                  "{total} in {sessions} sessions",
+                                  { total, sessions: sessionCount },
+                              )
+                    }
                 </div>
             </div>
             ${!phone && html`<${Search} query=${query} setQuery=${setQuery} />`}
             <button
                 class="icon-button"
-                title="Back to the conversation (Esc)"
-                aria-label="Close"
+                title=${t(
+                    "web.subagents-board.subagents-board.title.back-conversation-esc",
+                    "Back to the conversation (Esc)",
+                )}
+                aria-label=${t("web.subagents-board.subagents-board.aria-label.close", "Close")}
                 onClick=${closeBoard}
             >
                 <${Icon} name="close" />
@@ -819,11 +972,14 @@ export function SubagentsBoard() {
                         (state) => html`<span
                             class=${`board-state ${state} ${filter === "all" || filter === state ? "" : "dim"}`}
                             style=${`flex-grow:${counts[state]}`}
-                            title=${`${counts[state]} ${LABELS[state].toLowerCase()}`}
+                            title=${countWord(counts[state], state, WAITING_FULL)}
                         ></span>`,
                     )}
                 </div>
-                <div class="board-legend" role="group" aria-label="Show only">
+                <div class="board-legend" role="group" aria-label=${t(
+                    "web.subagents-board.subagents-board.aria-label.show-only",
+                    "Show only",
+                )}>
                     ${legend.map(
                         (item) => html`<button
                             class=${`board-filter ${item.key} ${filter === item.key ? "on" : ""}`}

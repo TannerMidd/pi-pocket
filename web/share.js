@@ -11,6 +11,7 @@ import {
     store,
 } from "./store.js";
 import { html, Icon, Loader, shortPath, Sheet, timeAgo } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 const SHARE_CACHE = "pocket-share";
 
@@ -89,7 +90,10 @@ export function ShareSheet({ share }) {
             deliver(created.id);
         });
 
-    return html`<${Sheet} title="Share to Pi" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t(
+        "web.share.share-sheet.title.share-to-pi",
+        "Share to Pi",
+    )} onClose=${closeSheet}>
         ${share.text && html`<p class="share-text">${share.text}</p>`}
         ${
             share.files.length > 0 &&
@@ -99,25 +103,45 @@ export function ShareSheet({ share }) {
         }
         ${
             !canSteer()
-                ? html`<p class="muted">You can view sessions here but not send to Pi.</p>`
+                ? html`<p class="muted">${t(
+                      "web.share.share-sheet.p.view-sessions-not-send",
+                      "You can view sessions here but not send to Pi.",
+                  )}</p>`
                 : html`<p class="muted small">
-                    It goes into the message box, so you can add to it before you send.
+                    ${t(
+                        "web.share.share-sheet.p.goes-message-box-add",
+                        "It goes into the message box, so you can add to it before you send.",
+                    )}
                 </p>
                 ${
                     !scoped() &&
                     html`<button class="list-item" onClick=${startNew}>
-                        <span><${Icon} name="plus" size=${15} /> New session</span>
+                        <span><${Icon} name="plus" size=${15} /> ${t(
+                            "web.share.share-sheet.text.new-session",
+                            "New session",
+                        )}</span>
                         <span class="muted small mono">
                             ${shortPath(recent[0]?.cwd ?? server?.defaultCwd, server?.home)}
                         </span>
                     </button>`
                 }
-                <div class="group-title">Recent sessions</div>
-                ${!sessionsLoaded && html`<${Loader} label="Loading sessions" />`}
+                <div class="group-title">${t(
+                    "web.share.share-sheet.div.recent-sessions",
+                    "Recent sessions",
+                )}</div>
+                ${
+                    !sessionsLoaded &&
+                    html`<${Loader}
+                        label=${t(
+                            "web.sessions.loading-sessions.aria-label.loading-sessions",
+                            "Loading sessions",
+                        )}
+                    />`
+                }
                 ${recent.map(
                     (session) =>
                         html`<button class="list-item" onClick=${() => deliver(session.id)}>
-                            <span>${session.title ?? "New session"}</span>
+                            <span>${session.title ?? t("web.share.share-sheet.text.new-session", "New session")}</span>
                             <span class="muted small">${timeAgo(session.updatedAt)}</span>
                         </button>`,
                 )}`

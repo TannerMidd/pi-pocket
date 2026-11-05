@@ -29,6 +29,7 @@ import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
+import type { RequestLocale, UiLocalePack } from "./ui-locales.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
 
@@ -619,6 +620,8 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** A request to a module's route, as its handler gets it. */
 export interface WebRequest {
+    /** One immutable language snapshot for this request; absent on older servers, which use English. */
+    readonly locale?: RequestLocale;
     /** @experimental @since 0.28.0 */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     readonly method: WebMethod;
@@ -731,6 +734,8 @@ export interface PublicLinks {
 
 /** A request to a public link's page, from anyone with its address: there is no person and no sign-in. */
 export interface PublicPageRequest {
+    /** One immutable language snapshot for this request; absent on older servers, which use English. */
+    readonly locale?: RequestLocale;
     readonly method: "GET" | "POST";
     /** The link the address names, still open. */
     readonly link: PublicLinkInfo;
@@ -836,6 +841,11 @@ export interface ExtensionWeb {
     setting(name: string): SettingValue | undefined;
     /** Hear when the owner changes the module's settings. Returns how to stop; it stops when this version goes. */
     onSettings(listener: () => void): () => void;
+    /**
+     * Declares the UI text of other languages, while it loads: each is a language tag, its own name, and its messages by
+     * key. Core merges them over its English, key by key, and keeps English as the fallback.
+     */
+    uiLocales(packs: readonly UiLocalePack[]): void;
 }
 
 /** The shape of every module in `src/server/extensions/`: a default export building one or more extensions. */

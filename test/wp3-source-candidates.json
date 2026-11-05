@@ -1,0 +1,1542 @@
+[
+    {
+        "id": "需人工:web/browser-panel.js:570:19",
+        "raw": "${entries ? `${entries.filter((entry) => entry.level !== \"nav\").length} lines` : \"\"}",
+        "rawHash": "99b4e4bdd2fe54cb52749bfcf02e07b4923e0fc72e79ef09bc4e780c2ff8970b"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:574:17",
+        "raw": "${steer &&\n                html`<button class=\"link\" onClick=${() => attempt(() => browserApi(\"clear\", {}))}>\n                    Clear\n                </button>`}",
+        "rawHash": "d44571ee45152b0b29556073e9c8b1bf33e9d1b0ec3a43b50e3d3df3437e0a4b"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:585:17",
+        "raw": "${entries === null\n                    ? html`<div class=\"muted small\">Loading…</div>`\n                    : entries.length === 0\n                      ? html`<div class=\"muted small\">\n                          Nothing yet. Logs, errors, and failed loads show here.\n                      </div>`\n                      : entries.map((entry) =>\n                            entry.level === \"nav\"\n                                ? html`<div key=${entry.seq} class=\"console-nav\">\n                                    ${displayUrl(entry.text) || entry.text}\n                                </div>`\n                                : html`<div key=${entry.seq} class=${`console-line ${entry.level}`}>\n                                    <span class=\"console-text\">${entry.text}</span>\n                                    ${\n                                        entry.source &&\n                                        html`<span class=\"console-source\">\n                                            ${source(entry.source)}\n                                        </span>`\n                                    }\n                                </div>`,\n                        )}",
+        "rawHash": "1d885cd307436197bef4dd674914f5052ca319157566f68bec6df3bb1011bd65"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:594:39",
+        "raw": "${displayUrl(entry.text) || entry.text}",
+        "rawHash": "1a5079e6b4120705c5332b114dab6964d5eea7bf1ebc6202aede636801d205d7"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:597:66",
+        "raw": "${entry.text}",
+        "rawHash": "de1e5963c6279807325070d7b32ed3696bbbe1271ab8a5c10a33ae232a3c92f1"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:599:41",
+        "raw": "${entry.source &&\n                                        html`<span class=\"console-source\">\n                                            ${source(entry.source)}\n                                        </span>`}",
+        "rawHash": "02810ea365b7bbe1603fc7f54cc8fbd256115d3ca79a9768dff1a44e43e609df"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:601:47",
+        "raw": "${source(entry.source)}",
+        "rawHash": "861fc0ff8c06dcbda93897b7c246a3388e7816f39b1aeb66bc5dd158db74d02e"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:630:15",
+        "raw": "${steer ? \"Type an address above, such as localhost:5173, or ask Pi to open one.\" : \"Nothing is open yet. Pi, or someone who can steer, opens pages here.\"}",
+        "rawHash": "da17303752ff075ee15b97a65835a78172feea542aa98c1834fb6dfcea3717ed"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:632:11",
+        "raw": "${owner && servers === null && html`<${Spinner} label=\"Looking for servers\" />`} ${servers?.length > 0 &&\n            html`<div class=\"browser-servers\">\n                <div class=\"browser-servers-label\">Running on this machine</div>\n                <div class=\"browser-server-list\">\n                    ${servers.slice(0, 8).map(\n                        (server) => html`<button\n                            key=${server.port}\n                            class=\"browser-server\"\n                            onClick=${() => openInBrowser(server.url)}\n                        >\n                            <span class=\"browser-live\" aria-hidden=\"true\"></span>\n                            <span class=\"mono\">localhost:${server.port}</span>\n                            ${server.title && html`<span class=\"browser-server-title\">${server.title}</span>`}\n                        </button>`,\n                    )}\n                </div>\n            </div>`}",
+        "rawHash": "9283202924915793716b7cc7294f1c3319df330e96f650cd87d74f3a7c362fc5"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:638:23",
+        "raw": "${servers.slice(0, 8).map(\n                        (server) => html`<button\n                            key=${server.port}\n                            class=\"browser-server\"\n                            onClick=${() => openInBrowser(server.url)}\n                        >\n                            <span class=\"browser-live\" aria-hidden=\"true\"></span>\n                            <span class=\"mono\">localhost:${server.port}</span>\n                            ${server.title && html`<span class=\"browser-server-title\">${server.title}</span>`}\n                        </button>`,\n                    )}",
+        "rawHash": "ac2ef69afb7309bc19467141d99be74b0985de95030d43335f18b41298b50150"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:645:48",
+        "raw": "localhost:${server.port}",
+        "rawHash": "daa74cce2f7499c1f0d1e3779a0ba5754b4c7bad2863f338f35507184de1a6d2"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:646:31",
+        "raw": "${server.title && html`<span class=\"browser-server-title\">${server.title}</span>`}",
+        "rawHash": "6b50ffdd782673294e46cddcfa7b0eaba794df55da6beee7a61133490268a647"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:646:89",
+        "raw": "${server.title}",
+        "rawHash": "e8abbbb7b8797bdbee990d55884388dc11ae46615d0732978f26732e26dabed6"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:875:18",
+        "raw": "${why}",
+        "rawHash": "975a9f638aea1da3eb89284b5033af73e06586619ae62b8c36ee0f61bad5ffad"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:876:15",
+        "raw": "${steer && html`<button class=\"button small\" onClick=${retry}>Try again</button>`}",
+        "rawHash": "bbd155fd8d09333f2b90b6f0513136d8ab42cf078f421391bdd181e4e2380098"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:893:15",
+        "raw": "${blank && html`<${StartScreen} steer=${steer} />`} ${state.problem &&\n                html`<div class=\"browser-crashed\">\n                    <span>${state.problem}</span>\n                    ${\n                        steer &&\n                        html`<button class=\"button small\" onClick=${() => run(\"reload\")}>\n                            Reload\n                        </button>`\n                    }\n                </div>`}",
+        "rawHash": "0b1020caffecab002c7a39391b9b0aa0781b5f4646829f8b9e06df3457d924cf"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:897:29",
+        "raw": "${state.problem}",
+        "rawHash": "c88e023d4db2236efc4d16b77cc2c0b826d757f15b7d4a8c58cf5a689abe25fb"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:899:25",
+        "raw": "${steer &&\n                        html`<button class=\"button small\" onClick=${() => run(\"reload\")}>\n                            Reload\n                        </button>`}",
+        "rawHash": "9c2decf182b51a737096740532a48ba438fc7a376c7f8e97a11bee392eed7fc4"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:940:17",
+        "raw": "${state?.loading && open\n                    ? html`<button\n                        class=\"icon-button\"\n                        aria-label=\"Stop loading\"\n                        title=\"Stop\"\n                        disabled=${!steer}\n                        onClick=${() => run(\"stop\")}\n                    >\n                        <${Icon} name=\"close\" size=${18} />\n                    </button>`\n                    : html`<button\n                        class=\"icon-button\"\n                        aria-label=\"Reload\"\n                        title=\"Reload\"\n                        disabled=${!steer || !open}\n                        onClick=${() => run(\"reload\")}\n                    >\n                        <${Icon} name=\"reload\" size=${18} />\n                    </button>`}",
+        "rawHash": "60405cb008c1ae3eea63515602c76d5469d3fed14d427a47c5748095c576fb3c"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:961:19",
+        "raw": "${open && !blank && html`<span class=\"browser-live\" aria-hidden=\"true\"></span>`}",
+        "rawHash": "a5104f02c707bb8c932c4a390de99cff76247c5f0d621083513d1356ce859df6"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:964:35",
+        "raw": "${steer ? \"Address, such as localhost:5173\" : \"\"}",
+        "rawHash": "fbee3b2f7ff4f81a970e06431e002842050058a8b56aa6af1760a9877ff2cbad"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:965:29",
+        "raw": "${state?.title || state?.url || \"\"}",
+        "rawHash": "0aacc20fa933387e0ffce3aedd4e117353104c3cd4e4c492af5a591d2f71e6bd"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1004:21",
+        "raw": "${state?.errors > 0 &&\n                    html`<span class=\"badge err\">${state.errors > 99 ? \"99+\" : state.errors}</span>`}",
+        "rawHash": "bb5f46a6d2addcf53f260a0449d42a09e7a846c320d4a15bf1894bc50929bcb5"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1005:52",
+        "raw": "${state.errors > 99 ? \"99+\" : state.errors}",
+        "rawHash": "20b92d31be53133835f9b87e77f0b64d2d302dce2b4dbae8830373d21a67e28d"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1009:17",
+        "raw": "${steer &&\n                touch &&\n                open &&\n                html`<button\n                    class=${`icon-button ${typing ? \"on\" : \"\"}`}\n                    aria-label=\"Type into the page\"\n                    title=\"Type into the page\"\n                    onClick=${() => {\n                        setTyping(!typing);\n\n                        // Focused in the tap itself, so the phone's keyboard opens; let go of, so it closes.\n                        if (typing) {\n                            typeInput.current?.blur();\n                        } else {\n                            typeInput.current?.focus();\n                        }\n                    }}\n                >\n                    <${Icon} name=\"keyboard\" size=${18} />\n                </button>`}",
+        "rawHash": "9b84e3830d7f483f06d64929331c6d737a1681a85011b83b0a01f6b12b294ce2"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1040:54",
+        "raw": "${stage}",
+        "rawHash": "87312a0933e96e81af8e8294beb1d164b2d3cd21220603d99ae04fce0ed7c84b"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1042:13",
+        "raw": "${steer &&\n            touch &&\n            open &&\n            html`<${TypeBar}\n                send=${send}\n                input=${typeInput}\n                shown=${typing}\n                onClose=${() => {\n                    typeInput.current?.blur();\n                    setTyping(false);\n                }}\n            />`} ${showConsole &&\n            html`<${ConsolePane}\n                conversationId=${conversationId}\n                logs=${state?.logs ?? 0}\n                steer=${steer}\n                onClose=${() => setShowConsole(false)}\n            />`} ${me &&\n            !steer &&\n            open &&\n            html`<div class=\"browser-foot muted small\">\n                ${canSteer() ? \"Take turns is on: the driver uses the page.\" : \"You can watch; people who can steer use the page.\"}\n            </div>`}",
+        "rawHash": "12e92531fa8d25ec974387089a27e8b67e1ebc0a5f15e3a92cad301ab23b7225"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1069:19",
+        "raw": "${canSteer() ? \"Take turns is on: the driver uses the page.\" : \"You can watch; people who can steer use the page.\"}",
+        "rawHash": "88b327550227ac59d8baf371f288fd705ddb64bf429914af71a1b376e38fa76b"
+    },
+    {
+        "id": "需人工:web/browser-panel.js:1095:11",
+        "raw": "${live && html`<span class=\"browser-dot\" aria-hidden=\"true\"></span>`}",
+        "rawHash": "3e898f5b8d99e16239a5f9a242994f9c8c14c5f564f31c50c20cb00b9a9aaa42"
+    },
+    {
+        "id": "无法映射键:web/browser-panel.js:989:30",
+        "raw": "${`Size: ${preset.id === \"fit\" ? `${state?.viewport?.width ?? \"\"}×${state?.viewport?.height ?? \"\"}` : preset.label}. Switch to ${nextPreset.label}`}",
+        "rawHash": "3cb24c369e3a810ebf722c9aa49ada807cc8428af1285289b8e73b9fcef8a722"
+    },
+    {
+        "id": "无法映射键:web/browser-panel.js:990:25",
+        "raw": "${`${preset.id === \"fit\" ? `${state?.viewport?.width}×${state?.viewport?.height}` : preset.label} · next: ${nextPreset.label}`}",
+        "rawHash": "e9b6a553ce7d5f234dbc77805b709472825cbb5143ddf62526ea22bb6bfc83a9"
+    },
+    {
+        "id": "需人工:web/diff.js:282:41",
+        "raw": "${row.left.text}",
+        "rawHash": "76a38ec777d756ad3492c0552c05bb59c3dd3472ade27220406ef601c22d558d"
+    },
+    {
+        "id": "需人工:web/diff.js:333:41",
+        "raw": "${row.left.text}",
+        "rawHash": "76a38ec777d756ad3492c0552c05bb59c3dd3472ade27220406ef601c22d558d"
+    },
+    {
+        "id": "需人工:web/diff.js:343:17",
+        "raw": "${left\n                    ? html`<${Code}\n                          line=${left}\n                          colored=${colored}\n                          marks=${marks}\n                          kind=${change ? \"del\" : \"ctx\"}\n                      />`\n                    : html`<td class=\"dv-code none\"></td>`}",
+        "rawHash": "631479a61f0dea082f830225d3843926766644594ee963442735ef9c87333005"
+    },
+    {
+        "id": "需人工:web/diff.js:354:17",
+        "raw": "${right\n                    ? html`<${Code}\n                          line=${right}\n                          colored=${colored}\n                          marks=${marks}\n                          kind=${change ? \"add\" : \"ctx\"}\n                      />`\n                    : html`<td class=\"dv-code none\"></td>`}",
+        "rawHash": "074a9e95a36ff6e77e62282d6d4ab032577f73601151ed221d50636373d421fa"
+    },
+    {
+        "id": "需人工:web/diff.js:378:17",
+        "raw": "${all\n                    ? html`<button type=\"button\" onClick=${() => onShow(\"all\")}>\n                          ${first ? \"↑\" : last ? \"↓\" : \"↕\"} Show ${left} hidden ${left === 1 ? \"line\" : \"lines\"}\n                      </button>`\n                    : html`${\n                          !first &&\n                          html`<button\n                              type=\"button\"\n                              title=\"Show more below the hunk above\"\n                              onClick=${() => onShow(\"top\")}\n                          >\n                              ↓ ${EXPAND_STEP}\n                          </button>`\n                      }\n                      <button type=\"button\" onClick=${() => onShow(\"all\")}>\n                          Show all ${left} hidden lines\n                      </button>\n                      ${\n                          !last &&\n                          html`<button\n                              type=\"button\"\n                              title=\"Show more above the hunk below\"\n                              onClick=${() => onShow(\"bottom\")}\n                          >\n                              ↑ ${EXPAND_STEP}\n                          </button>`\n                      }`}",
+        "rawHash": "f23f5b2865a85f4eb72d79d2d578a4c2da1c7d7eb228f67fd12c46f74856332a"
+    },
+    {
+        "id": "需人工:web/diff.js:380:29",
+        "raw": "${first ? \"↑\" : last ? \"↓\" : \"↕\"} Show ${left} hidden ${left === 1 ? \"line\" : \"lines\"}",
+        "rawHash": "8905effbb56a0f32dfcb338d187b8c3a736e9029ad179bbbb10dd545621c1277"
+    },
+    {
+        "id": "需人工:web/diff.js:383:27",
+        "raw": "${!first &&\n                          html`<button\n                              type=\"button\"\n                              title=\"Show more below the hunk above\"\n                              onClick=${() => onShow(\"top\")}\n                          >\n                              ↓ ${EXPAND_STEP}\n                          </button>`}",
+        "rawHash": "1d102d14838030c270ea3658b6474c3fbda510d082e4de150e45cc05dc35b825"
+    },
+    {
+        "id": "需人工:web/diff.js:389:31",
+        "raw": "↓ ${EXPAND_STEP}",
+        "rawHash": "cd4bee4c5e07447e293abc42a27370bdc911108390ca4b8919897b29daad948d"
+    },
+    {
+        "id": "需人工:web/diff.js:393:27",
+        "raw": "Show all ${left} hidden lines",
+        "rawHash": "7bc0a209a7d940b1a951537d6df69f3a11c118f12f0e83f89480545c8e314a90"
+    },
+    {
+        "id": "需人工:web/diff.js:396:27",
+        "raw": "${!last &&\n                          html`<button\n                              type=\"button\"\n                              title=\"Show more above the hunk below\"\n                              onClick=${() => onShow(\"bottom\")}\n                          >\n                              ↑ ${EXPAND_STEP}\n                          </button>`}",
+        "rawHash": "37b10705b9349ac4138ba02a4b3a00c4834cec8515666bd713c7eb30f2e8f909"
+    },
+    {
+        "id": "需人工:web/diff.js:402:31",
+        "raw": "↑ ${EXPAND_STEP}",
+        "rawHash": "45f9118de394249ba60824c91256233b4400000fc8ec4ea61b88e7ed9cfb6617"
+    },
+    {
+        "id": "需人工:web/diff.js:547:27",
+        "raw": "${contextRows(top)}",
+        "rawHash": "4edd01c76f91770799d90b4d10e3af0440a2d30baa5714029e6d1fd58e3fb34a"
+    },
+    {
+        "id": "需人工:web/diff.js:555:19",
+        "raw": "${contextRows(bottom)}",
+        "rawHash": "da3b76669d26a4d46c65b31dbfe69819ccf28b456a724c9d836c0a0be587267a"
+    },
+    {
+        "id": "需人工:web/diff.js:564:17",
+        "raw": "${split\n                    ? html`<colgroup>\n                          <col class=\"dv-col-n\" />\n                          <col />\n                          <col class=\"dv-col-n\" />\n                          <col />\n                      </colgroup>`\n                    : html`<colgroup>\n                          <col class=\"dv-col-n\" />\n                          <col class=\"dv-col-n\" />\n                          <col />\n                      </colgroup>`} ${file.hunks.map(\n                (hunk, index) => html`<tbody key=${index}>\n                    ${expandable && gapRows(index)}\n                    ${\n                        !wholeFile(file) &&\n                        (!expandable || (hunk.context && hiddenBefore(index) > 0)) &&\n                        html`<tr class=\"dv-hunk\">\n                            <td colspan=${columns}>\n                                <span class=\"dv-at\">${`@@ −${hunk.oldStart} +${hunk.newStart} @@`}</span>\n                                ${hunk.context && html`<span class=\"dv-context\">${hunk.context}</span>`}\n                            </td>\n                        </tr>`\n                    }\n                    <${Rows}\n                        rows=${rowsByHunk[index]}\n                        colored=${colored}\n                        marks=${marks}\n                        onLine=${onLine}\n                    />\n                </tbody>`,\n            )} ${expandable && html`<tbody>${gapRows(gaps.length - 1)}</tbody>`}",
+        "rawHash": "e916a212d79c862ec9135f821e8271a54f8e5c709294969cea7d9f995af0289d"
+    },
+    {
+        "id": "需人工:web/diff.js:579:23",
+        "raw": "${expandable && gapRows(index)} ${!wholeFile(file) &&\n                        (!expandable || (hunk.context && hiddenBefore(index) > 0)) &&\n                        html`<tr class=\"dv-hunk\">\n                            <td colspan=${columns}>\n                                <span class=\"dv-at\">${`@@ −${hunk.oldStart} +${hunk.newStart} @@`}</span>\n                                ${hunk.context && html`<span class=\"dv-context\">${hunk.context}</span>`}\n                            </td>\n                        </tr>`}",
+        "rawHash": "2bc963f9aa762c1deaa2f0f0a79fa99dbb702b20f5da3b0974220274ac6e7f69"
+    },
+    {
+        "id": "需人工:web/diff.js:586:35",
+        "raw": "${hunk.context && html`<span class=\"dv-context\">${hunk.context}</span>`}",
+        "rawHash": "f31cf172dfdcc4e892d769d6dde6b29c9d95e2c825a962f492ae28fab37b0e83"
+    },
+    {
+        "id": "需人工:web/diff.js:586:83",
+        "raw": "${hunk.context}",
+        "rawHash": "a11b4b282e710fc74f6c7313c409fb561e4e6405cc7e3d470970da943b25e80e"
+    },
+    {
+        "id": "需人工:web/diff.js:598:43",
+        "raw": "${gapRows(gaps.length - 1)}",
+        "rawHash": "6fdd6c106b9fb2f71d7adf7349ce904f15d7305a86fae2ac8633579e3041c0c7"
+    },
+    {
+        "id": "需人工:web/diff.js:606:47",
+        "raw": "${error}",
+        "rawHash": "17a0b469bc440841215eb827cca805761dede6f13ed2a350d072a555a554ad05"
+    },
+    {
+        "id": "需人工:web/diff.js:613:15",
+        "raw": "${file.kind === \"renamed\" ? \"Renamed, with no change to its text.\" : file.mode ? \"Only its mode changed.\" : \"No difference in text.\"}",
+        "rawHash": "1ab9af34d868c82a410c8c70087d1de2f8942139bbc72e12790b3ef05c277690"
+    },
+    {
+        "id": "需人工:web/diff.js:622:15",
+        "raw": "${table} ${file.truncated &&\n                html`<p class=\"dv-empty small\">\n                    ${\"The diff is too long to show whole: the rest is left out.\"}\n                </p>`} ${canExpand &&\n                !matches &&\n                html`<p class=\"dv-empty small\">\n                    ${fetched === false ? \"This file is too big to show its other lines here.\" : \"The file changed after this diff was read, so its other lines cannot be shown. Refresh to see them.\"}\n                </p>`}",
+        "rawHash": "db108ef38963add0a8a816af5a8802098ba0905fe521e0cb3b1b2f8ce23824d5"
+    },
+    {
+        "id": "需人工:web/diff.js:633:23",
+        "raw": "${fetched === false ? \"This file is too big to show its other lines here.\" : \"The file changed after this diff was read, so its other lines cannot be shown. Refresh to see them.\"}",
+        "rawHash": "d73790ec5382029041e67266d39099ab23ddff10cd6631e9f2e67d83f00ed55a"
+    },
+    {
+        "id": "需人工:web/diff.js:643:11",
+        "raw": "${head && html`<${FileHead} file=${file} tools=${tools} viewed=${viewed} onViewed=${onViewed} open=${open} onToggle=${onToggle} note=${note} />`} ${open ? body : error && html`<p class=\"dv-empty err\">${error}</p>`}",
+        "rawHash": "27e0542ac46c5fc3f91daef15268af5d5f2834b502539e20cf32ddce7223c3d1"
+    },
+    {
+        "id": "需人工:web/diff.js:644:65",
+        "raw": "${error}",
+        "rawHash": "17a0b469bc440841215eb827cca805761dede6f13ed2a350d072a555a554ad05"
+    },
+    {
+        "id": "需人工:web/diff.js:652:47",
+        "raw": "${path}",
+        "rawHash": "b4def3e205226b27d6250a630eeb48bf2d9f08ae42980bb35d496f2f9826e4d0"
+    },
+    {
+        "id": "需人工:web/diff.js:653:11",
+        "raw": "${at >= 0 && html`<span class=\"dv-dir\">${path.slice(0, at + 1)}</span>`}",
+        "rawHash": "41c7833d8f7b4a5160e07699c24d2b9a9728256303f2625dd1d4d2a104eb2527"
+    },
+    {
+        "id": "需人工:web/diff.js:653:50",
+        "raw": "${path.slice(0, at + 1)}",
+        "rawHash": "ffcdeef861c5c35279ff3ccf23b945ba9a1aac639485ae9564f9df9bddcd3690"
+    },
+    {
+        "id": "需人工:web/diff.js:654:33",
+        "raw": "${path.slice(at + 1)}",
+        "rawHash": "c91cf61effd1e8239ceb90572b2aaccacad9c40bc2809ca0f9da4045073549df"
+    },
+    {
+        "id": "需人工:web/diff.js:661:11",
+        "raw": "${added > 0 && html`<span class=\"ok\">+${added}</span>`} ${removed > 0 && html`<span class=\"err\">−${removed}</span>`}",
+        "rawHash": "ca2c0e6ba96bb782a8383225694a3cdb54ced71aaec08a81476e7a1c5bd1cbe8"
+    },
+    {
+        "id": "需人工:web/diff.js:661:46",
+        "raw": "+${added}",
+        "rawHash": "43b37dd2d0a9d8eb79a5a3531102a770ee66e4e6995ceddc5c222767fb9232f7"
+    },
+    {
+        "id": "需人工:web/diff.js:662:49",
+        "raw": "−${removed}",
+        "rawHash": "54fa6472fc432c35295ff1955879f4aa469944048c28e13299510d7c0e75cdeb"
+    },
+    {
+        "id": "需人工:web/diff.js:671:50",
+        "raw": "${file.oldPath} →",
+        "rawHash": "7a2fcd0cee9d9b50f9653d16c6e09a0a64f2414e7eede8f8abe5245043fbeae3"
+    },
+    {
+        "id": "需人工:web/diff.js:676:13",
+        "raw": "${onToggle &&\n            html`<button\n                class=\"dv-fold\"\n                type=\"button\"\n                aria-expanded=${open ? \"true\" : \"false\"}\n                aria-label=${open ? \"Fold\" : \"Unfold\"}\n                onClick=${onToggle}\n            >\n                <${Icon} name=\"chevron\" size=${14} class=${`chev ${open ? \"open\" : \"\"}`} />\n            </button>`}",
+        "rawHash": "3d3bb59f7594a7c3e2c0a6e6ea59f9ff7b7cd4f87d0394d21ff7d8e74e0e3af7"
+    },
+    {
+        "id": "需人工:web/diff.js:681:30",
+        "raw": "${open ? \"Fold\" : \"Unfold\"}",
+        "rawHash": "472bcb776759240ed1e62391bbdc02a1802455ca5f9bb3a0ca3c034f1df66ac1"
+    },
+    {
+        "id": "需人工:web/diff.js:687:54",
+        "raw": "${kind}",
+        "rawHash": "e0165d572acb1e2b41995d3a1931796ed87c8f5f8b6c2b2ba09399ca9a0ea949"
+    },
+    {
+        "id": "需人工:web/diff.js:687:62",
+        "raw": "${KIND_LETTERS[kind] ?? \"M\"}",
+        "rawHash": "ab16aa8931a066d15bab2b28d0e8fff0b357b509792bce598e9e71107160bd0e"
+    },
+    {
+        "id": "需人工:web/diff.js:689:13",
+        "raw": "${onToggle\n                ? html`<button class=\"dv-title\" type=\"button\" onClick=${onToggle}>${title}</button>`\n                : html`<span class=\"dv-title\">${title}</span>`} ${note}",
+        "rawHash": "dc0a890b8877882912763eabd43c02bd7091fdf2e3375dfba07de38f56dad625"
+    },
+    {
+        "id": "需人工:web/diff.js:690:85",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/diff.js:691:49",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/diff.js:695:11",
+        "raw": "${tools} ${onViewed &&\n            html`<label class=${`dv-viewed ${viewed ? \"on\" : \"\"}`} title=\"Mark as viewed (v)\">\n                <input\n                    type=\"checkbox\"\n                    aria-label=\"Viewed\"\n                    checked=${Boolean(viewed)}\n                    onChange=${(event) => onViewed(event.currentTarget.checked)}\n                />\n                <span>Viewed</span>\n            </label>`}",
+        "rawHash": "ad0f0212d5880c282bfe5033428e67dfd877b547c3577a2cddbded346d641302"
+    },
+    {
+        "id": "需人工:web/diff.js:722:11",
+        "raw": "${files.map(\n            (file) => html`<${DiffFile}\n                file=${file}\n                path=${bare ? path : \"\"}\n                head=${!bare}\n            />`,\n        )}",
+        "rawHash": "1959cd3639993fb0edc03f1f7ffd046042c5768f3655766b6b89006090fe6677"
+    },
+    {
+        "id": "需人工:web/diff.js:743:11",
+        "raw": "${LAYOUTS.map(\n            ([layout, label]) => html`<button\n                type=\"button\"\n                class=${diffPrefs.layout === layout ? \"on\" : \"\"}\n                aria-pressed=${diffPrefs.layout === layout ? \"true\" : \"false\"}\n                onClick=${() => setDiffPrefs({ layout })}\n            >\n                ${label}\n            </button>`,\n        )}",
+        "rawHash": "b51ae50ebb7a6e5c691ae0fca74200d2917c011d5e379de309ce1b5a0a90b3b8"
+    },
+    {
+        "id": "需人工:web/diff.js:750:19",
+        "raw": "${label}",
+        "rawHash": "45faee322307da46b0027ef1da2bb8ae774b2fd4efa4a2c262fe9364a016d7c6"
+    },
+    {
+        "id": "需人工:web/diff.js:1052:37",
+        "raw": "${dir.name}",
+        "rawHash": "71fd8ea7abb0e23660996f745846e7d83e8841a8840dddb8804e1275b10d5cdc"
+    },
+    {
+        "id": "需人工:web/diff.js:1055:13",
+        "raw": "${open &&\n            html`<${TreeNode}\n                node=${dir}\n                depth=${depth + 1}\n                current=${current}\n                viewed=${viewed}\n                onPick=${onPick}\n            />`}",
+        "rawHash": "50479d8443e023004ae2d3298f2d500abdea0aee9a9029ff844d51e605cdc1b9"
+    },
+    {
+        "id": "需人工:web/diff.js:1068:19",
+        "raw": "${[...node.dirs.values()]\n        .sort((a, b) => a.name.localeCompare(b.name))\n        .map(\n            (dir) => html`<${TreeDir}\n                key=${dir.name}\n                dir=${dir}\n                depth=${depth}\n                current=${current}\n                viewed=${viewed}\n                onPick=${onPick}\n            />`,\n        )} ${node.files.map(\n        (file) => html`<button\n            type=\"button\"\n            key=${file.path}\n            class=${`dr-row file ${current === file.path ? \"on\" : \"\"} ${viewed(file) ? \"seen\" : \"\"}`}\n            aria-current=${current === file.path ? \"true\" : undefined}\n            style=${`--depth:${depth}`}\n            title=${file.path}\n            onClick=${() => onPick(file.path)}\n        >\n            <span class=${`change-kind ${file.kind}`}>${KIND_LETTERS[file.kind]}</span>\n            <span class=\"dr-name\">${file.path.split(\"/\").pop()}</span>\n            ${file.byPi && html`<span class=\"dr-pi\" title=\"Pi edited it\">π</span>`}\n            <span class=\"dr-tail\">${viewed(file) ? html`<${Icon} name=\"check\" size=${13} />` : html`<${ChangeCounts} added=${file.added ?? 0} removed=${file.removed ?? 0} />`}</span>\n        </button>`,\n    )}",
+        "rawHash": "d668ac36734b44a70070d71ba1ba50e0da2fd189c12692b272e280287238e766"
+    },
+    {
+        "id": "需人工:web/diff.js:1087:21",
+        "raw": "${file.path}",
+        "rawHash": "0e7b662dd55b4b5710d2ac433cd062f4ce1deaf7442a41e5d5c0bf815824f861"
+    },
+    {
+        "id": "需人工:web/diff.js:1090:57",
+        "raw": "${KIND_LETTERS[file.kind]}",
+        "rawHash": "f5e40022fda98dd7515411cbd4d07ed1308d47c508a21897d0aab9018ab13456"
+    },
+    {
+        "id": "需人工:web/diff.js:1091:37",
+        "raw": "${file.path.split(\"/\").pop()}",
+        "rawHash": "976abc83da33d31b2e5324f2c6470ca6524dac7947461e762c823848339cb055"
+    },
+    {
+        "id": "需人工:web/diff.js:1092:15",
+        "raw": "${file.byPi && html`<span class=\"dr-pi\" title=\"Pi edited it\">π</span>`}",
+        "rawHash": "8a241491c2a835bcccd45da3c6274a4225e145b0218d8a4e22fc3b6674c117e0"
+    },
+    {
+        "id": "需人工:web/diff.js:1093:37",
+        "raw": "${viewed(file) ? html`<${Icon} name=\"check\" size=${13} />` : html`<${ChangeCounts} added=${file.added ?? 0} removed=${file.removed ?? 0} />`}",
+        "rawHash": "22e87a9ab26649edb63c5a4c9c435310919eed6eaeec07e7a86da11728952e0a"
+    },
+    {
+        "id": "需人工:web/diff.js:1212:9",
+        "raw": "${file.kind !== \"deleted\" &&\n        html`<button\n            class=\"icon-button dv-tool\"\n            type=\"button\"\n            title=\"Open the file\"\n            aria-label=\"Open the file\"\n            onClick=${() => openFile(`${root}/${file.path}`)}\n        >\n            <${Icon} name=\"file\" size=${16} />\n        </button>`} ${canSteer() &&\n        file.kind !== \"renamed\" &&\n        html`<button\n            class=${`icon-button dv-tool ${undoing ? \"danger\" : \"\"}`}\n            type=\"button\"\n            title=${undoing ? (fresh ? \"Tap again to delete this new file\" : \"Tap again to throw these changes away\") : fresh ? \"Delete this new file\" : \"Undo the changes to this file\"}\n            aria-label=\"Undo changes\"\n            onClick=${undo}\n        >\n            ${undoing ? (fresh ? \"Delete?\" : \"Undo?\") : html`<${Icon} name=\"undo\" size=${16} />`}\n        </button>`}",
+        "rawHash": "b08d2e72aef6604b0d7b5f84c9019ca53d9022c97024ce6ec59b28079ba22f5b"
+    },
+    {
+        "id": "需人工:web/diff.js:1229:21",
+        "raw": "${undoing ? (fresh ? \"Tap again to delete this new file\" : \"Tap again to throw these changes away\") : fresh ? \"Delete this new file\" : \"Undo the changes to this file\"}",
+        "rawHash": "c9c7468c8262aa5596d554c14a70b563d3f354afa527dcc67ca3ce64d610521a"
+    },
+    {
+        "id": "需人工:web/diff.js:1233:15",
+        "raw": "${undoing ? (fresh ? \"Delete?\" : \"Undo?\") : html`<${Icon} name=\"undo\" size=${16} />`}",
+        "rawHash": "3be57b301c9948cc693a53cd4f3705965bd526841fe6d109cffe934757f4f7d0"
+    },
+    {
+        "id": "需人工:web/diff.js:1250:27",
+        "raw": "${file.byPi && html`<span class=\"chip dv-chip\">Pi</span>`}${stale && html`<span class=\"chip dv-chip warn\" title=\"It changed after you marked it viewed\">changed</span>`}",
+        "rawHash": "b345837babf110cc34ce0337cf07a39e0edbdc858f9f99afe222db346479246f"
+    },
+    {
+        "id": "需人工:web/diff.js:1462:74",
+        "raw": "${error}",
+        "rawHash": "17a0b469bc440841215eb827cca805761dede6f13ed2a350d072a555a554ad05"
+    },
+    {
+        "id": "需人工:web/diff.js:1474:17",
+        "raw": "${changes.repo\n                    ? html`<span class=\"dr-where mono\">\n                          ${\n                              changes.repo.root !== cwd &&\n                              html`<span class=\"dr-path\">${shortPath(changes.repo.root, server?.home)}</span>`\n                          }${\n                              changes.repo.branch &&\n                              (branchAvailable()\n                                  ? html`<button\n                                        class=\"dr-branch\"\n                                        type=\"button\"\n                                        title=\"Switch or make a branch\"\n                                        onClick=${() => openSheet({ type: \"branch\" })}\n                                    >\n                                        <${Icon} name=\"fork\" size=${12} />\n                                        ${changes.repo.branch}\n                                    </button>`\n                                  : html`<span class=\"dr-branch\" title=\"Branch\">\n                                        <${Icon} name=\"fork\" size=${12} />\n                                        ${changes.repo.branch}\n                                    </span>`)\n                          }\n                      </span>`\n                    : html`<span class=\"muted small\">Not a git repository: only Pi's edits are listed.</span>`} ${all.length > 0 &&\n                html`<span class=\"dr-stats\">\n                    <strong>${files.length} ${files.length === 1 ? \"file\" : \"files\"}</strong>\n                    <${ChangeCounts} added=${added} removed=${removed} />\n                </span>\n                <span class=\"dr-viewed\">${seen} of ${files.length} viewed</span>`}",
+        "rawHash": "2541d1c5109b8b676ba3cd8454979ca620792f3903070facb1228d7be6d4ff0f"
+    },
+    {
+        "id": "需人工:web/diff.js:1477:31",
+        "raw": "${changes.repo.root !== cwd &&\n                              html`<span class=\"dr-path\">${shortPath(changes.repo.root, server?.home)}</span>`}${changes.repo.branch &&\n                              (branchAvailable()\n                                  ? html`<button\n                                        class=\"dr-branch\"\n                                        type=\"button\"\n                                        title=\"Switch or make a branch\"\n                                        onClick=${() => openSheet({ type: \"branch\" })}\n                                    >\n                                        <${Icon} name=\"fork\" size=${12} />\n                                        ${changes.repo.branch}\n                                    </button>`\n                                  : html`<span class=\"dr-branch\" title=\"Branch\">\n                                        <${Icon} name=\"fork\" size=${12} />\n                                        ${changes.repo.branch}\n                                    </span>`)}",
+        "rawHash": "f2941078b77c855d58c4584845891867ef4399d8ee3f7498b51a5d70e4b40bbb"
+    },
+    {
+        "id": "需人工:web/diff.js:1478:60",
+        "raw": "${shortPath(changes.repo.root, server?.home)}",
+        "rawHash": "fbaf78a8b08b12a7436e2e30983bf9ef0e9ef171b4daf3e4cc356611cfb93757"
+    },
+    {
+        "id": "需人工:web/diff.js:1489:43",
+        "raw": "${changes.repo.branch}",
+        "rawHash": "3dbaedcd1954d1c6c3c473c3439c2d6f3adec48a069a0228c70f7f4c1e25e1e1"
+    },
+    {
+        "id": "需人工:web/diff.js:1493:43",
+        "raw": "${changes.repo.branch}",
+        "rawHash": "3dbaedcd1954d1c6c3c473c3439c2d6f3adec48a069a0228c70f7f4c1e25e1e1"
+    },
+    {
+        "id": "需人工:web/diff.js:1502:31",
+        "raw": "${files.length} ${files.length === 1 ? \"file\" : \"files\"}",
+        "rawHash": "dec2940013f8cb4fb461ce4fe7467cd00f675d5708e8d6e28ff949d09c1323df"
+    },
+    {
+        "id": "需人工:web/diff.js:1505:43",
+        "raw": "${seen} of ${files.length} viewed",
+        "rawHash": "81a91f2f74216f176120e777055fed768dfca9deddfbdb0cf29c62ed9004ded2"
+    },
+    {
+        "id": "需人工:web/diff.js:1508:19",
+        "raw": "${all.length > 0 && html`<${LayoutSwitch} />`}",
+        "rawHash": "9a3459e0394da45e79c0338bcbcdec1bf23597a99a9ba33188c56d80f30695d7"
+    },
+    {
+        "id": "需人工:web/diff.js:1521:13",
+        "raw": "${all.length > 0 &&\n            html`<div class=\"dr-tools\">\n                <input\n                    class=\"dr-filter\"\n                    type=\"search\"\n                    placeholder=\"Filter files\"\n                    value=${filter}\n                    onInput=${(event) => setFilter(event.currentTarget.value)}\n                    autocapitalize=\"off\"\n                    autocomplete=\"off\"\n                    spellcheck=\"false\"\n                />\n                ${\n                    all.some((file) => file.byPi) &&\n                    html`<button\n                        type=\"button\"\n                        class=${`chip toggle ${onlyPi ? \"on\" : \"\"}`}\n                        aria-pressed=${onlyPi ? \"true\" : \"false\"}\n                        title=\"Only the files Pi edited\"\n                        onClick=${() => setOnlyPi(!onlyPi)}\n                    >\n                        π only\n                    </button>`\n                }\n                <${WrapToggle} />\n                ${\n                    !wide &&\n                    html`<button\n                        type=\"button\"\n                        class=${`chip toggle ${treeOpen ? \"on\" : \"\"}`}\n                        onClick=${() => setTreeOpen(!treeOpen)}\n                    >\n                        Files\n                    </button>`\n                }\n            </div>`} ${changes.repo &&\n            all.length === 0 &&\n            html`<div class=\"dr-clean\">\n                <${Icon} name=\"check\" size=${22} />\n                <p>No uncommitted changes${changes.repo.branch ? ` on ${changes.repo.branch}` : \"\"}.</p>\n            </div>`} ${all.length > 0 &&\n            html`<div class=\"dr-main\">\n                ${\n                    (wide || treeOpen) &&\n                    html`<nav class=\"dr-tree\" aria-label=\"Changed files\">\n                        <${TreeNode}\n                            node=${tree}\n                            depth=${0}\n                            current=${current}\n                            viewed=${isViewed}\n                            onPick=${scrollTo}\n                        />\n                        ${files.length === 0 && html`<p class=\"muted small\">No file matches.</p>`}\n                    </nav>`\n                }\n                <div class=\"dr-files\">\n                    ${files.map(\n                        (file) => html`<${ReviewFile}\n                            key=${file.path}\n                            id=${id}\n                            file=${file}\n                            root=${changes.repo.root}\n                            base=${changes.repo.head}\n                            open=${!folded[file.path]}\n                            viewedAs=${viewed[file.path]}\n                            onToggle=${() => {\n                                if (isViewed(file)) {\n                                    setViewed(file.path, undefined);\n                                    setFolded((each) => ({ ...each, [file.path]: false }));\n                                } else {\n                                    setFolded((each) => ({\n                                        ...each,\n                                        [file.path]: !each[file.path],\n                                    }));\n                                }\n                            }}\n                            onViewed=${setViewed}\n                            onLoaded=${(path, print) => {\n                                prints.current[path] = print;\n                                // Marked viewed before its diff arrived: as of this one.\n                                setViewedState((before) => {\n                                    if (before[path] !== \"?\") {\n                                        return before;\n                                    }\n\n                                    const next = { ...before, [path]: print };\n\n                                    writeViewed(id, next);\n\n                                    return next;\n                                });\n                            }}\n                            onChanged=${load}\n                        />`,\n                    )}\n                    ${\n                        changes.more > 0 &&\n                        html`<p class=\"muted small\">\n                            And ${changes.more} more changed ${changes.more === 1 ? \"file\" : \"files\"}, not listed here.\n                        </p>`\n                    }\n                </div>\n            </div>`} ${changes.piOnly.length > 0 &&\n            html`<div class=\"dr-pionly\">\n                <div class=\"group-title\">${changes.repo ? \"Pi also edited (no uncommitted change)\" : \"Pi wrote or edited\"}</div>\n                ${changes.piOnly.map(\n                    (\n                        each,\n                    ) => html`<button type=\"button\" class=\"list-item\" onClick=${() => jumpToEntry(each.entryId)}>\n                        <span class=\"mono\">${shortPath(each.path, server?.home)}</span>\n                        <span class=\"muted small\">show</span>\n                    </button>`,\n                )}\n            </div>`}",
+        "rawHash": "17d0e07f87318cd7983f074947aafdbd442ed731ddbb286d7b65508191baab34"
+    },
+    {
+        "id": "需人工:web/diff.js:1534:21",
+        "raw": "${all.some((file) => file.byPi) &&\n                    html`<button\n                        type=\"button\"\n                        class=${`chip toggle ${onlyPi ? \"on\" : \"\"}`}\n                        aria-pressed=${onlyPi ? \"true\" : \"false\"}\n                        title=\"Only the files Pi edited\"\n                        onClick=${() => setOnlyPi(!onlyPi)}\n                    >\n                        π only\n                    </button>`}",
+        "rawHash": "c679ccdf7ea30cf04dd8bcdf92667cdd04832092fa2772d9f4f93cacff884822"
+    },
+    {
+        "id": "需人工:web/diff.js:1547:21",
+        "raw": "${!wide &&\n                    html`<button\n                        type=\"button\"\n                        class=${`chip toggle ${treeOpen ? \"on\" : \"\"}`}\n                        onClick=${() => setTreeOpen(!treeOpen)}\n                    >\n                        Files\n                    </button>`}",
+        "rawHash": "5e4e789cb73cbd84442903c4893ab4e4eb6c4f7b7d64c6d6ebed7e6f6c28a0c0"
+    },
+    {
+        "id": "需人工:web/diff.js:1563:20",
+        "raw": "No uncommitted changes${changes.repo.branch ? ` on ${changes.repo.branch}` : \"\"}.",
+        "rawHash": "f1423067c425d2edf048a8e136a2593ad70c844a52e68aa2c7cecb6309c41c2f"
+    },
+    {
+        "id": "需人工:web/diff.js:1570:21",
+        "raw": "${(wide || treeOpen) &&\n                    html`<nav class=\"dr-tree\" aria-label=\"Changed files\">\n                        <${TreeNode}\n                            node=${tree}\n                            depth=${0}\n                            current=${current}\n                            viewed=${isViewed}\n                            onPick=${scrollTo}\n                        />\n                        ${files.length === 0 && html`<p class=\"muted small\">No file matches.</p>`}\n                    </nav>`}",
+        "rawHash": "a8d7dec0cbf17c70f7edcc204433313581bbac58272411187fd50a268edc4ac4"
+    },
+    {
+        "id": "需人工:web/diff.js:1579:27",
+        "raw": "${files.length === 0 && html`<p class=\"muted small\">No file matches.</p>`}",
+        "rawHash": "f1efc8af11645132ef9417246b3fe35bd8ac6bf09c8e7c8307e555a10107162c"
+    },
+    {
+        "id": "需人工:web/diff.js:1583:23",
+        "raw": "${files.map(\n                        (file) => html`<${ReviewFile}\n                            key=${file.path}\n                            id=${id}\n                            file=${file}\n                            root=${changes.repo.root}\n                            base=${changes.repo.head}\n                            open=${!folded[file.path]}\n                            viewedAs=${viewed[file.path]}\n                            onToggle=${() => {\n                                if (isViewed(file)) {\n                                    setViewed(file.path, undefined);\n                                    setFolded((each) => ({ ...each, [file.path]: false }));\n                                } else {\n                                    setFolded((each) => ({\n                                        ...each,\n                                        [file.path]: !each[file.path],\n                                    }));\n                                }\n                            }}\n                            onViewed=${setViewed}\n                            onLoaded=${(path, print) => {\n                                prints.current[path] = print;\n                                // Marked viewed before its diff arrived: as of this one.\n                                setViewedState((before) => {\n                                    if (before[path] !== \"?\") {\n                                        return before;\n                                    }\n\n                                    const next = { ...before, [path]: print };\n\n                                    writeViewed(id, next);\n\n                                    return next;\n                                });\n                            }}\n                            onChanged=${load}\n                        />`,\n                    )} ${changes.more > 0 &&\n                        html`<p class=\"muted small\">\n                            And ${changes.more} more changed ${changes.more === 1 ? \"file\" : \"files\"}, not listed here.\n                        </p>`}",
+        "rawHash": "11bdc7c40fe8b34d59c6d4fb1de6ae903145d951a1599c52de9c23571d25fb95"
+    },
+    {
+        "id": "需人工:web/diff.js:1625:29",
+        "raw": "And ${changes.more} more changed ${changes.more === 1 ? \"file\" : \"files\"}, not listed here.",
+        "rawHash": "9433d6f38a05eda5acbb481ba79cc10d8ae15f92130d9350e53a68a12eba3058"
+    },
+    {
+        "id": "需人工:web/diff.js:1634:44",
+        "raw": "${changes.repo ? \"Pi also edited (no uncommitted change)\" : \"Pi wrote or edited\"}",
+        "rawHash": "99ed6d1b29ec854c90a5d30d43a6a91e2eb1f86401ab41694183b6de4ff6a92c"
+    },
+    {
+        "id": "需人工:web/diff.js:1635:19",
+        "raw": "${changes.piOnly.map(\n                    (\n                        each,\n                    ) => html`<button type=\"button\" class=\"list-item\" onClick=${() => jumpToEntry(each.entryId)}>\n                        <span class=\"mono\">${shortPath(each.path, server?.home)}</span>\n                        <span class=\"muted small\">show</span>\n                    </button>`,\n                )}",
+        "rawHash": "900728e77e3f4b47fe9d2c7207fcbc15fd45141ed32e203b14c1fb49a93056d1"
+    },
+    {
+        "id": "需人工:web/diff.js:1639:46",
+        "raw": "${shortPath(each.path, server?.home)}",
+        "rawHash": "dae751e02819f762bddef1dd90f31802243fc5441e02ff539b50ff9ccd028ed3"
+    },
+    {
+        "id": "无法映射键:web/diff.js:617:15",
+        "raw": "${`A large diff: ${size.toLocaleString()} changed lines. `}",
+        "rawHash": "c51d479af0e99023beec02456bef4d6010e24c39d731d84e5182363d6221de8a"
+    },
+    {
+        "id": "需人工:web/files-panel.js:166:83",
+        "raw": "${folder.error}",
+        "rawHash": "5ab7bc5e4621709c4b30d4bb7bbee1eb1d3f6ed48e4c737cea1c73ef7e027838"
+    },
+    {
+        "id": "需人工:web/files-panel.js:169:19",
+        "raw": "${folder.entries.map((entry) => {\n        const full = `${path}/${entry.name}`;\n        const open = entry.dir && ctx.expanded.has(full);\n        const change = ctx.changed.get(full);\n        const inside = entry.dir && ctx.changedDirs.has(full);\n\n        return html`<div key=${entry.name} role=\"none\">\n            <button\n                type=\"button\"\n                role=\"treeitem\"\n                aria-expanded=${entry.dir ? (open ? \"true\" : \"false\") : undefined}\n                class=${`ft-row ${entry.dir ? \"dir\" : \"file\"} ${ctx.selected === full ? \"on\" : \"\"} ${entry.name.startsWith(\".\") ? \"dot\" : \"\"} ${change ? `changed ${change}` : \"\"}`}\n                style=${`--depth:${depth}`}\n                data-path=${full}\n                title=${entry.name}\n                onClick=${(event) =>\n                    revealAsked(event)\n                        ? revealFile(full)\n                        : entry.dir\n                          ? ctx.toggle(full)\n                          : ctx.pick(full)}\n            >\n                ${\n                    entry.dir\n                        ? html`<${Icon} name=\"chevron\" size=${11} class=${`chev ${open ? \"open\" : \"\"}`} />`\n                        : html`<span class=\"ft-spacer\"></span>`\n                }\n                <span class=\"ft-name\">${entry.name}</span>\n                ${inside && !open && html`<span class=\"ft-dot\" title=\"Has changes\"></span>`}\n                ${change && html`<span class=${`ft-kind ${change}`}>${KIND_LETTERS[change]}</span>`}\n            </button>\n            ${open && html`<${TreeFolder} path=${full} depth=${depth + 1} ctx=${ctx} />`}\n        </div>`;\n    })} ${folder.truncated &&\n        html`<div class=\"ft-row muted small\" style=${`--depth:${depth}`}>\n            Only the first ${folder.entries.length} are listed.\n        </div>`}",
+        "rawHash": "40389f44e8fda8ecca334354245e06f3dd9748768141a00d2aa78fbaef38ee49"
+    },
+    {
+        "id": "需人工:web/files-panel.js:183:25",
+        "raw": "${entry.name}",
+        "rawHash": "403f7699a396fbd7bd83afa572a093774db7619ae9edf9dedc84d4db0c717235"
+    },
+    {
+        "id": "需人工:web/files-panel.js:192:21",
+        "raw": "${entry.dir\n                        ? html`<${Icon} name=\"chevron\" size=${11} class=${`chev ${open ? \"open\" : \"\"}`} />`\n                        : html`<span class=\"ft-spacer\"></span>`}",
+        "rawHash": "08c8096a87816ea673c3cdc1ec0f478bb5422bb031cfe9e1080efea768ae3fcb"
+    },
+    {
+        "id": "需人工:web/files-panel.js:196:41",
+        "raw": "${entry.name}",
+        "rawHash": "403f7699a396fbd7bd83afa572a093774db7619ae9edf9dedc84d4db0c717235"
+    },
+    {
+        "id": "需人工:web/files-panel.js:197:19",
+        "raw": "${inside && !open && html`<span class=\"ft-dot\" title=\"Has changes\"></span>`} ${change && html`<span class=${`ft-kind ${change}`}>${KIND_LETTERS[change]}</span>`}",
+        "rawHash": "a5e6c7f02b577dc443d0e35c672ab8f36152f4a61e65d6ff3e62131e7242bf82"
+    },
+    {
+        "id": "需人工:web/files-panel.js:198:71",
+        "raw": "${KIND_LETTERS[change]}",
+        "rawHash": "5b71aa906300168af5f06938907c6edc72b29a243f2af3de0e1de76f1788c28d"
+    },
+    {
+        "id": "需人工:web/files-panel.js:200:15",
+        "raw": "${open && html`<${TreeFolder} path=${full} depth=${depth + 1} ctx=${ctx} />`}",
+        "rawHash": "477a603545402c42b61aa39ec8ee0f4e9cee8a8dba8232eb5c3c177930817b10"
+    },
+    {
+        "id": "需人工:web/files-panel.js:206:13",
+        "raw": "Only the first ${folder.entries.length} are listed.",
+        "rawHash": "a53164a253f9c7c3d8d2bd8eab54ee47b51f35065960cd7ac6757e64c51a5b58"
+    },
+    {
+        "id": "需人工:web/files-panel.js:220:52",
+        "raw": "No file matches “${query}”.",
+        "rawHash": "0719c49f73cf29ffc5e067413a8537a27b2e98b14f974107518e1f740fd2c991"
+    },
+    {
+        "id": "需人工:web/files-panel.js:224:11",
+        "raw": "${found.items.map(\n            (entry) => html`<button\n                type=\"button\"\n                class=\"ft-row match\"\n                role=\"option\"\n                data-path=${`${root}/${entry.path.replace(/\\/$/, \"\")}`}\n                onClick=${(event) =>\n                    revealAsked(event)\n                        ? revealFile(event.currentTarget.dataset.path)\n                        : onPick(event.currentTarget.dataset.path, entry.dir)}\n            >\n                <${Icon} name=${entry.dir ? \"folder\" : \"file\"} size=${14} />\n                <span class=\"ft-name\"><${Marked} text=${entry.name} hits=${entry.nameHits} /></span>\n                <span class=\"ft-parent\"><${Marked} text=${entry.parent} hits=${entry.parentHits} /></span>\n            </button>`,\n        )}",
+        "rawHash": "14082b27e369027243d56085a1981e14153532634c44b8805a3a038a4173ea4f"
+    },
+    {
+        "id": "需人工:web/files-panel.js:597:21",
+        "raw": "${query === \"\"\n                        ? html`<${TreeFolder} path=${root} depth=${0} ctx=${ctx} />`\n                        : html`<${Matches}\n                              query=${query}\n                              root=${root}\n                              onPick=${(path, dir) => {\n                                  setQuery(\"\");\n\n                                  if (dir) {\n                                      reveal(path, true);\n                                  } else {\n                                      pick(path);\n                                  }\n                              }}\n                          />`}",
+        "rawHash": "5dd84ccf74e5aa9e7f02f568786f2b84ae532810b8d5703fa758ee918b383c23"
+    },
+    {
+        "id": "需人工:web/files-panel.js:616:13",
+        "raw": "${shown\n                ? html`<div\n                      class=${`ft-view ${selected ? \"\" : \"leaving\"}`}\n                      inert=${!selected}\n                      tabindex=\"-1\"\n                      onKeyDown=${(event) => {\n                          // Esc goes back to the tree, as back does, where the file covers it.\n                          if (covered && event.key === \"Escape\" && !event.defaultPrevented) {\n                              event.preventDefault();\n                              closeFile();\n                          }\n                      }}\n                  >\n                      <div class=\"ft-view-head\">\n                          ${\n                              !side &&\n                              html`<button\n                                  class=\"icon-button\"\n                                  type=\"button\"\n                                  aria-label=${shown.from === \"changes\" ? \"Back to Changes\" : \"Back to the files\"}\n                                  onClick=${closeFile}\n                              >\n                                  <${Icon} name=\"back\" size=${22} />\n                              </button>`\n                          }\n                          <strong class=\"ft-view-name\" title=${shown.path}>${name}</strong>\n                          ${\n                              side &&\n                              html`<button\n                                  class=\"icon-button\"\n                                  type=\"button\"\n                                  aria-label=\"Close the file\"\n                                  title=\"Close the file\"\n                                  onClick=${() => setSelected(null)}\n                              >\n                                  <${Icon} name=\"close\" size=${16} />\n                              </button>`\n                          }\n                      </div>\n                      <${FileView}\n                          key=${`${shown.path}:${shown.line ?? \"\"}:${head}`}\n                          path=${shown.path}\n                          line=${shown.line}\n                          refresh=${shown.n}\n                          onOpen=${(path) => pick(path)}\n                      />\n                  </div>`\n                : side &&\n                  html`<div class=\"ft-view ft-empty\">\n                      <${Icon} name=\"file\" size=${26} />\n                      <p class=\"muted small\">Pick a file to read it here.</p>\n                  </div>`}",
+        "rawHash": "66d40fefe3f72a4a9ce1d88154683e148745ebb8b8a283b80d502cce0cb715f0"
+    },
+    {
+        "id": "需人工:web/files-panel.js:631:31",
+        "raw": "${!side &&\n                              html`<button\n                                  class=\"icon-button\"\n                                  type=\"button\"\n                                  aria-label=${shown.from === \"changes\" ? \"Back to Changes\" : \"Back to the files\"}\n                                  onClick=${closeFile}\n                              >\n                                  <${Icon} name=\"back\" size=${22} />\n                              </button>`}",
+        "rawHash": "e8de22c152dacd3a64402b459f910ee9b544080d1909fb55481b11521326738d"
+    },
+    {
+        "id": "需人工:web/files-panel.js:635:48",
+        "raw": "${shown.from === \"changes\" ? \"Back to Changes\" : \"Back to the files\"}",
+        "rawHash": "f80d4abc21d3532fde25d132b8fe746c222937f01d5d0832a3272f94a3455145"
+    },
+    {
+        "id": "需人工:web/files-panel.js:641:64",
+        "raw": "${shown.path}",
+        "rawHash": "9f3d813118c2fea71a26a1d7a08d416f288883be07a056fb197bab47cae554a4"
+    },
+    {
+        "id": "需人工:web/files-panel.js:641:78",
+        "raw": "${name}",
+        "rawHash": "6d20d61554cd67b2b41dc8bf59061b7273f8909d298a6ef58592fc1173667cc7"
+    },
+    {
+        "id": "需人工:web/files-panel.js:643:31",
+        "raw": "${side &&\n                              html`<button\n                                  class=\"icon-button\"\n                                  type=\"button\"\n                                  aria-label=\"Close the file\"\n                                  title=\"Close the file\"\n                                  onClick=${() => setSelected(null)}\n                              >\n                                  <${Icon} name=\"close\" size=${16} />\n                              </button>`}",
+        "rawHash": "6c56c125f4f756d5e1e4391542ce8b0ba39f6df487574850c08bc2b1652f0b44"
+    },
+    {
+        "id": "需人工:web/files-panel.js:697:17",
+        "raw": "${!beside &&\n                html`<button\n                    class=\"icon-button files-back\"\n                    type=\"button\"\n                    aria-label=\"Back to the conversation\"\n                    title=\"Back (Alt+E)\"\n                    onClick=${() => setFilesOpen(false)}\n                >\n                    <${Icon} name=\"back\" size=${22} />\n                </button>`}",
+        "rawHash": "390acff7a9c396e85244132388ab87831236924be82436ccca9dd19a98a6c402"
+    },
+    {
+        "id": "需人工:web/files-panel.js:725:21",
+        "raw": "Changes ${count > 0 && html`<span class=\"files-count\">${count}</span>`}",
+        "rawHash": "6f8ad82f065fad53942d70ff349e045f4963edb3772183c100cfdf6da367d8a7"
+    },
+    {
+        "id": "需人工:web/files-panel.js:726:69",
+        "raw": "${count}",
+        "rawHash": "a05e4ff08edecf43007836442dd055e3181c65a8dc2651ce5a50f9517b8af263"
+    },
+    {
+        "id": "需人工:web/files-panel.js:729:46",
+        "raw": "${root}",
+        "rawHash": "d0004035b0ca5e0bf5b592dc49118d3997b38cb00b7858118dcf9450ac10bc07"
+    },
+    {
+        "id": "需人工:web/files-panel.js:729:54",
+        "raw": "${shortPath(root, server?.home)}",
+        "rawHash": "6062a204fb90b333799f1f0ec93153d9876a85691718204be905e3dd282918fc"
+    },
+    {
+        "id": "需人工:web/files-panel.js:731:17",
+        "raw": "${beside &&\n                html`<button\n                    class=\"icon-button\"\n                    type=\"button\"\n                    aria-label=\"Close the files\"\n                    title=\"Close (Alt+E)\"\n                    onClick=${() => setFilesOpen(false)}\n                >\n                    <${Icon} name=\"close\" size=${17} />\n                </button>`}",
+        "rawHash": "f1323690470bc58261fb11f5169ffe0903543670e279be747449e26cd4d4ab11"
+    },
+    {
+        "id": "需人工:web/linked-sessions.js:34:17",
+        "raw": "${label}: ${session.title ?? \"New session\"}",
+        "rawHash": "497c39a312a2016c4b44fad085182d07b52de32fb9866268cda626caa83ad7db"
+    },
+    {
+        "id": "需人工:web/linked-sessions.js:40:13",
+        "raw": "${origin\n                ? link(origin, \"Started from\")\n                : (current?.linkedOrigin || current?.linkedFrom) &&\n                  html`<p class=\"muted small\">\n                Started from another session\n            </p>`} ${shown.map((session) => link(session, \"Linked session\"))} ${shown.length < started.length &&\n            html`<button class=\"breadcrumb\" onClick=${() => setOpenFor(conversationId)}>\n                +${started.length - shown.length} more\n            </button>`}",
+        "rawHash": "38df26263b3eb02c856240259c831124d7c222a177d5be99515165d6d1f5e68f"
+    },
+    {
+        "id": "需人工:web/linked-sessions.js:51:17",
+        "raw": "+${started.length - shown.length} more",
+        "rawHash": "af403892fd6238c52dce93932903ee8bc1aafc2c6b3ff2d69c6aff97c78c8a1a"
+    },
+    {
+        "id": "需人工:web/peeks.js:175:17",
+        "raw": "${on ? \"Hide peek tiles (Alt+P)\" : \"Peek at other sessions (Alt+P)\"}",
+        "rawHash": "1849e2d41a20a560698c04c8962ed017f7f7a8aa69e09688e6ebb4ac3347e7c4"
+    },
+    {
+        "id": "需人工:web/peeks.js:203:17",
+        "raw": "${on ? \"Hide peek tiles (Alt+P)\" : \"Peek at other sessions (Alt+P)\"}",
+        "rawHash": "1849e2d41a20a560698c04c8962ed017f7f7a8aa69e09688e6ebb4ac3347e7c4"
+    },
+    {
+        "id": "需人工:web/peeks.js:207:11",
+        "raw": "${waiting && html`<span class=\"peek-dot\" aria-hidden=\"true\"></span>`}",
+        "rawHash": "2413450e5033ed78f2cf4e9fbec6c43197c729d8f48aba90ab10f527931e5cfe"
+    },
+    {
+        "id": "需人工:web/peeks.js:433:43",
+        "raw": "${line.from && html`<b>${line.from}</b> `}${line.text}",
+        "rawHash": "00b5e73530b21145ded6872b55d70360cceb7beb3778cdac92796c2f088a00f9"
+    },
+    {
+        "id": "需人工:web/peeks.js:433:66",
+        "raw": "${line.from}",
+        "rawHash": "4777c363776959094954f6a00f2cead10bf44050dbcf9a39a94b36da2fbe03d7"
+    },
+    {
+        "id": "需人工:web/peeks.js:438:43",
+        "raw": "${line.text}",
+        "rawHash": "2a555ba3482ffe986ead7d66fe4503f433905e071fd4e93a7f2a91d99a1189c7"
+    },
+    {
+        "id": "需人工:web/peeks.js:446:23",
+        "raw": "${call.iconPath ? html`<${Icon} path=${call.iconPath} size=${12} />` : call.icon}",
+        "rawHash": "6e95c088d0ebe8ab5cef085e56c1a2d45205c87619c288bb32f7e4fdcc60fe46"
+    },
+    {
+        "id": "需人工:web/peeks.js:449:23",
+        "raw": "${call.label} ${call.subject}${\" \"}",
+        "rawHash": "04d2d3ad28855c32fe6a1a42bf97c18d925b27b2cc75f4e588297c6617757cf1"
+    },
+    {
+        "id": "需人工:web/peeks.js:458:43",
+        "raw": "${line.command}${\" \"}",
+        "rawHash": "1167f1a637638009cdfee72571a2048d3ed381b1a9badd11b86cac892c6a3759"
+    },
+    {
+        "id": "需人工:web/peeks.js:463:43",
+        "raw": "${line.name}: ${line.text}",
+        "rawHash": "03302242b98e3db526f04fb5659a0666f7b2b898f3d43262162eed68e800c1f5"
+    },
+    {
+        "id": "需人工:web/peeks.js:468:43",
+        "raw": "${line.text}",
+        "rawHash": "2a555ba3482ffe986ead7d66fe4503f433905e071fd4e93a7f2a91d99a1189c7"
+    },
+    {
+        "id": "需人工:web/peeks.js:473:43",
+        "raw": "${line.text}",
+        "rawHash": "2a555ba3482ffe986ead7d66fe4503f433905e071fd4e93a7f2a91d99a1189c7"
+    },
+    {
+        "id": "需人工:web/peeks.js:489:51",
+        "raw": "${approval.tool} ${who !== undefined && html`<span class=\"peek-ask-who\">${who} asks</span>`}",
+        "rawHash": "e52dc034e547040ddb07dfaafe741ee5a69f12fce1f781a12b67cf7c5c1ff27d"
+    },
+    {
+        "id": "需人工:web/peeks.js:490:70",
+        "raw": "${who} asks",
+        "rawHash": "243ea63c97749721eb52d8449ebc2b3c199ee510fe6e3e6a7dadda33f1a702b1"
+    },
+    {
+        "id": "需人工:web/peeks.js:493:15",
+        "raw": "${approval.subject}",
+        "rawHash": "0a2a9ddf46831592347cf24fd5a0aa66b29c6ca9fe154722953a7169e75b1b05"
+    },
+    {
+        "id": "需人工:web/peeks.js:497:13",
+        "raw": "${(!compact || approval.form) &&\n            approval.reason &&\n            html`<div class=\"peek-ask-why\">${approval.reason}</div>`}",
+        "rawHash": "5260cbce19b7a18fc7d5add0dd6a90337fed716aaba48df6d39b66d05ab2288c"
+    },
+    {
+        "id": "需人工:web/peeks.js:499:46",
+        "raw": "${approval.reason}",
+        "rawHash": "08b27ffed03792038666458ba9caf64e8de6846c0919a07fd3cbcf286472d80a"
+    },
+    {
+        "id": "需人工:web/peeks.js:537:13",
+        "raw": "${whole\n                ? !ownCall &&\n                  html`<button\n                      class=\"button small primary\"\n                      disabled=${busy}\n                      onClick=${() => answer(true)}\n                  >\n                      Allow\n                  </button>`\n                : html`<button\n                      class=\"button small primary\"\n                      title=\"See the whole command where it waits\"\n                      onClick=${() => navigate(approval.conversationId)}\n                  >\n                      Open\n                  </button>`}",
+        "rawHash": "b3d67ab2a461a6af3c1f0b8cf87db108184e757985ff2afcaa34096eeadc689c"
+    },
+    {
+        "id": "需人工:web/peeks.js:617:11",
+        "raw": "${shown.map(\n            (agent) =>\n                html`<${AgentTile}\n                    key=${agent.conversationId}\n                    agent=${agent}\n                    folder=${agent.folder}\n                    onActivate=${() => navigate(agent.conversationId)}\n                />`,\n        )} ${more.length > 0 &&\n            html`<button\n                class=${`agent-more ${waitingMore > 0 ? \"waiting\" : \"\"}`}\n                title=\"See them all on the subagents board\"\n                onClick=${() =>\n                    store.set({\n                        board: true,\n                        drawer: false,\n                        page: null,\n                        boardFocus: more[0].conversationId,\n                    })}\n            >\n                <${Icon} name=\"fork\" size=${13} />\n                <span class=\"agent-more-count\">${more.length} more</span>\n                ${waitingMore > 0 && html`<span class=\"agent-more-wait\">${waitWords}</span>`}\n                <${Icon} name=\"chevron\" size=${14} />\n            </button>`}",
+        "rawHash": "f0e85a1bdb8411ba3b3408dfa3472b11c1e9956b6e420b9011e8c94ced0afa88"
+    },
+    {
+        "id": "需人工:web/peeks.js:640:50",
+        "raw": "${more.length} more",
+        "rawHash": "eff0ef5126c4293ce2591a901ae5e6de618ac7e4de194138077374cae9341349"
+    },
+    {
+        "id": "需人工:web/peeks.js:641:19",
+        "raw": "${waitingMore > 0 && html`<span class=\"agent-more-wait\">${waitWords}</span>`}",
+        "rawHash": "3a669bced761d88df140cd1d13ac23ae2eb9e4ff4d5ca30db569abcc6a93f240"
+    },
+    {
+        "id": "需人工:web/peeks.js:641:75",
+        "raw": "${waitWords}",
+        "rawHash": "504ce047fdc509acf5407bf82f7afc13380295e0ba2bfd1efbb70d95c95d73d1"
+    },
+    {
+        "id": "需人工:web/peeks.js:728:48",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/peeks.js:730:25",
+        "raw": "${number !== undefined &&\n                        number < 9 &&\n                        html`<kbd class=\"session-num\">${number + 1}</kbd>`}",
+        "rawHash": "eacc42ea869658392c0a83bbd59ed712bdcbf732396a136e0bbe4b6b7fb11dc2"
+    },
+    {
+        "id": "需人工:web/peeks.js:732:57",
+        "raw": "${number + 1}",
+        "rawHash": "17393d5b9dac711603d30056f3cef2cc3dc7367e52f8fcff46ba6b3ad58dabd4"
+    },
+    {
+        "id": "需人工:web/peeks.js:735:47",
+        "raw": "${shortPath(session.cwd, home)}",
+        "rawHash": "0d0cb066039a630ea372dd3c1d71f0fa035573ce47df336b41b34010790050d6"
+    },
+    {
+        "id": "需人工:web/peeks.js:739:21",
+        "raw": "${shown === undefined\n                        ? html`<span class=\"peek-skeleton\"><i></i><i></i><i></i></span>`\n                        : shown.map(\n                              (line, index) => html`<${PeekLine} key=${index} line=${line} />`,\n                          )}",
+        "rawHash": "bb6b0280094a1cf3e7067d73959f85dad5b6583d9dd773e4cd6aa96f7de8f3aa"
+    },
+    {
+        "id": "需人工:web/peeks.js:746:15",
+        "raw": "${agents.length > 0 && html`<${AgentRows} agents=${agents} compact=${compact} />`} ${approval &&\n                html`<div class=\"peek-ask-host\" onClick=${open}>\n                    <${PeekAsk} approval=${approval} compact=${compact} who=${asker} />\n                </div>`}",
+        "rawHash": "83e8f20174269f250dfdfe31b415093071c78aeb9d3be5bd6a7faaf65c9c1379"
+    },
+    {
+        "id": "需人工:web/peeks.js:754:45",
+        "raw": "${label}",
+        "rawHash": "45faee322307da46b0027ef1da2bb8ae774b2fd4efa4a2c262fe9364a016d7c6"
+    },
+    {
+        "id": "需人工:web/peeks.js:756:21",
+        "raw": "${approval &&\n                    steer &&\n                    html`<${PeekApproval}\n                        key=${approval.id}\n                        approval=${approval}\n                        me=${me}\n                        rule=${rule}\n                        whole=${wholeOnTile(approval) && !this.state.clipped}\n                    />`} ${status === \"done\" &&\n                    html`<button\n                        class=\"icon-button peek-seen\"\n                        title=\"Mark as seen\"\n                        aria-label=\"Mark as seen\"\n                        onClick=${() => markSeen(session.id)}\n                    >\n                        <${Icon} name=\"check\" size=${16} />\n                    </button>`}",
+        "rawHash": "c877a8418e57e9ec82544064273a696e94650fb644194e97b461697e54be2921"
+    },
+    {
+        "id": "需人工:web/peeks.js:883:15",
+        "raw": "${arrow} ${ids.length} ${verb[ids.length === 1 ? 0 : 1]}",
+        "rawHash": "44a4a79bd6b3fc843a69ed295a2c4cbd0828ba2d05967f4864e3fac03cdb9f90"
+    },
+    {
+        "id": "需人工:web/peeks.js:896:15",
+        "raw": "${props.map((each) => html`<${PeekTile} ...${each} />`)} ${props.length === 0 &&\n                html`<div class=\"peeks-empty\">\n                    <${Icon} name=\"tiles\" size=${28} />\n                    <p>Other sessions show here while they work, wait for you, or finish.</p>\n                    <p class=\"muted small\">Pinned sessions stay here. Alt+P hides this.</p>\n                </div>`}",
+        "rawHash": "033180b2dc88537615b403fe0fb6fd603d9e8ecc0f498cdf1e21da4d65514944"
+    },
+    {
+        "id": "需人工:web/peeks.js:906:11",
+        "raw": "${jump(away.up, \"▲\", (ids) => ids.at(-1))} ${jump(away.down, \"▼\", (ids) => ids[0])}",
+        "rawHash": "90a17b8652425bac6ea9ca875c0346d6970e21d87476e845960fa11272b17559"
+    },
+    {
+        "id": "需人工:web/peeks.js:918:11",
+        "raw": "${tileProps(tiles, true).map((each) => html`<${PeekTile} ...${each} />`)}",
+        "rawHash": "99180ee47d4e0c816b12f79c9db7e4108bf8fc7d96ebb13638f7381de61e52ff"
+    },
+    {
+        "id": "无法映射键:web/peeks.js:721:47",
+        "raw": "${`Open ${title}`}",
+        "rawHash": "2e341b81f51d92c0299656d8ee1b7f55ceb4f57402d48d188cf6638591e1233d"
+    },
+    {
+        "id": "需人工:web/pip.js:357:17",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/pip.js:360:11",
+        "raw": "${about}${percent}%",
+        "rawHash": "c96a147aca801ba4116b641d4ca47ae229d30adc1e7f0c9430b593297721fb73"
+    },
+    {
+        "id": "需人工:web/pip.js:413:21",
+        "raw": "${label}",
+        "rawHash": "45faee322307da46b0027ef1da2bb8ae774b2fd4efa4a2c262fe9364a016d7c6"
+    },
+    {
+        "id": "需人工:web/pip.js:421:11",
+        "raw": "${data !== null && html`<pre class=\"pip-report-data\">${data}</pre>`}",
+        "rawHash": "859851e00951eb2a7cbfb3ba258e82ac6857f0bf41a7c79724c4b83b96f294ef"
+    },
+    {
+        "id": "需人工:web/pip.js:487:29",
+        "raw": "${body.slice(SCHEDULED.length)}",
+        "rawHash": "69ddad79e4aafaa3632746b291607effb897a18978c068eb39a49878455eaad6"
+    },
+    {
+        "id": "需人工:web/pip.js:498:19",
+        "raw": "${text && html`<div>${text}</div>`} ${others.length > 0 &&\n                    html`<div class=\"attachments\">\n                        ${others.map((file) => html`<span class=\"chip\">📎 ${file.name}</span>`)}\n                    </div>`} ${(pictures.length > 0 || entry.images > 0) &&\n                    html`<div class=\"thumbs\">\n                        ${\n                            pictures.length > 0\n                                ? pictures.map(\n                                      (picture) => html`<${Thumb}\n                                          src=${fileUrl(picture.path, conversationId)}\n                                          alt=${picture.name}\n                                      />`,\n                                  )\n                                : Array.from(\n                                      { length: entry.images },\n                                      (_, index) => html`<${Thumb}\n                                          src=${entryImageUrl(entry.id, index, conversationId)}\n                                          alt=${`Image ${index + 1}`}\n                                      />`,\n                                  )\n                        }\n                    </div>`}",
+        "rawHash": "02205068633f8ed98b453ad77e3f951d3abc93075b3a20b378973305e2128987"
+    },
+    {
+        "id": "需人工:web/pip.js:498:39",
+        "raw": "${text}",
+        "rawHash": "1cc0991fb972d7fd014f0a1a1d055b4caaa2639be843b28091bbe2ff3d13ad04"
+    },
+    {
+        "id": "需人工:web/pip.js:502:27",
+        "raw": "${others.map((file) => html`<span class=\"chip\">📎 ${file.name}</span>`)}",
+        "rawHash": "4f7de8672227602c358af95d373cce5dec3ec200856f00747b092826bd3fcc4d"
+    },
+    {
+        "id": "需人工:web/pip.js:502:72",
+        "raw": "📎 ${file.name}",
+        "rawHash": "eb948adc29b776f7b694547e1fa2c5e7e9b7c0ba671ca540e8d044665400135b"
+    },
+    {
+        "id": "需人工:web/pip.js:509:29",
+        "raw": "${pictures.length > 0\n                                ? pictures.map(\n                                      (picture) => html`<${Thumb}\n                                          src=${fileUrl(picture.path, conversationId)}\n                                          alt=${picture.name}\n                                      />`,\n                                  )\n                                : Array.from(\n                                      { length: entry.images },\n                                      (_, index) => html`<${Thumb}\n                                          src=${entryImageUrl(entry.id, index, conversationId)}\n                                          alt=${`Image ${index + 1}`}\n                                      />`,\n                                  )}",
+        "rawHash": "60b3e88c6ac168da67366ad37111cf956cb196759e2fef6411981f88caf66f16"
+    },
+    {
+        "id": "需人工:web/pip.js:513:49",
+        "raw": "${picture.name}",
+        "rawHash": "465d179163e758bf148d69901b44e81566610b72c7095b7383f68fbb9ae7f1c7"
+    },
+    {
+        "id": "需人工:web/pip.js:538:60",
+        "raw": "${line}",
+        "rawHash": "3711125ca99c0016de5d4896f854307db4941944b04c643023df63a6851cbe86"
+    },
+    {
+        "id": "需人工:web/pip.js:545:21",
+        "raw": "${summarize([item.step], false)}",
+        "rawHash": "555d4b072cf3b3d5d68f3482ff91b966de91c4d0b4eb524725d4b3ed4b20b339"
+    },
+    {
+        "id": "需人工:web/pip.js:555:15",
+        "raw": "${working ? html`<${Spinner} hidden=${true} />` : html`<span class=\"pip-tick\"><${Icon} name=\"check\" size=${10} /></span>`}",
+        "rawHash": "7c8556a2232fa6ae8f43c58535634b967ae831bcaa4a7e01b4fe9f13419094d2"
+    },
+    {
+        "id": "需人工:web/pip.js:556:21",
+        "raw": "${summarize(item.steps, thinking)}",
+        "rawHash": "2b2b9f28fcfe1f17cf9ece45ecdd3fb188dd004afec899c95dabd607bc626180"
+    },
+    {
+        "id": "需人工:web/pip.js:567:17",
+        "raw": "${text.trim() !== \"\" &&\n                html`<${Markdown}\n                    text=${linkSessions(text)}\n                    cache=${!growing}\n                    conversationId=${conversationId}\n                />`} ${entry?.stopReason === \"aborted\" && html`<div class=\"pip-event\"><span>Stopped</span></div>`} ${entry?.stopReason === \"error\" &&\n                html`<div class=\"pip-error\">${entry.error ?? \"The model request failed.\"}</div>`}",
+        "rawHash": "fa3db38033f064ce72ee28dbec4ae474fdf96f9c30a4d2d6d8d587cc9fadf12d"
+    },
+    {
+        "id": "需人工:web/pip.js:577:47",
+        "raw": "${entry.error ?? \"The model request failed.\"}",
+        "rawHash": "baff9183cec49d809d92f9c475efd26859062c01edafe69c5a964efd2d00ed1c"
+    },
+    {
+        "id": "需人工:web/pip.js:589:30",
+        "raw": "Hi${first ? ` ${first}` : \"\"}. I’m PiP.",
+        "rawHash": "3b012c808be6191210c80d8ce2003f337c0aa6e05aca56e3cb6664ae93888009"
+    },
+    {
+        "id": "需人工:web/pip.js:590:32",
+        "raw": "${INTRO}",
+        "rawHash": "68a557a26f478828a0c66d6384e73b7c68bf763e6b52cf982df88e118fbec751"
+    },
+    {
+        "id": "需人工:web/pip.js:592:13",
+        "raw": "${!hasModel &&\n            html`<p class=\"pip-intro\">\n                <button\n                    type=\"button\"\n                    class=\"button small\"\n                    onClick=${() => openSheet({ type: \"model\", pipId: id })}\n                >\n                    Choose a model to use these suggestions\n                </button>\n            </p>`}",
+        "rawHash": "8d070cda176d2ddef72cb30eda43d16a96f143d5143ac4ee2e5a6e449034ced5"
+    },
+    {
+        "id": "需人工:web/pip.js:604:15",
+        "raw": "${SUGGESTIONS.map(\n                (suggestion) => html`<button\n                    type=\"button\"\n                    class=\"pip-chip\"\n                    key=${suggestion}\n                    disabled=${!hasModel && !suggestion.endsWith(\"…\")}\n                    onClick=${() =>\n                        suggestion.endsWith(\"…\")\n                            ? openPip(suggestion.slice(0, -1))\n                            : send(id, suggestion, false)}\n                >\n                    ${suggestion}\n                </button>`,\n            )}",
+        "rawHash": "1eb2117aac2fea8a57c2fa0b3fe07cd8de2510779083adb8c6e497ec6af503c3"
+    },
+    {
+        "id": "需人工:web/pip.js:615:23",
+        "raw": "${suggestion}",
+        "rawHash": "189f2a76d06fcc5e7c42474660d61df5e68b5676793f0c9cf60c5a60ddd1b01c"
+    },
+    {
+        "id": "需人工:web/pip.js:757:13",
+        "raw": "${files.length > 0 &&\n            html`<div class=\"pip-attachments\" aria-label=\"Files attached to PiP\">\n                ${files.map(\n                    (file) => html`<div class=\"pip-attachment\" key=${file.key}>\n                        ${file.preview && html`<${Thumb} src=${file.preview} alt=${file.name} />`}\n                        <span class=\"pip-attachment-name\">${file.name}</span>\n                        <span class=\"muted\">${formatBytes(file.size)}</span>\n                        ${\n                            file.state === \"uploading\" &&\n                            html`<${Spinner} label=${`Uploading ${file.name}`} />`\n                        }\n                        <button\n                            type=\"button\"\n                            class=\"icon-button pip-attachment-remove\"\n                            aria-label=${`Remove ${file.name}`}\n                            onClick=${() => composerDraft.removeFile(file.key)}\n                        >\n                            <${Icon} name=\"close\" size=${14} />\n                        </button>\n                    </div>`,\n                )}\n            </div>`}",
+        "rawHash": "31014702714b523e56a0a58f21f3fe9324f6aced00fa1f2f6e322cb5946fa5ae"
+    },
+    {
+        "id": "需人工:web/pip.js:759:19",
+        "raw": "${files.map(\n                    (file) => html`<div class=\"pip-attachment\" key=${file.key}>\n                        ${file.preview && html`<${Thumb} src=${file.preview} alt=${file.name} />`}\n                        <span class=\"pip-attachment-name\">${file.name}</span>\n                        <span class=\"muted\">${formatBytes(file.size)}</span>\n                        ${\n                            file.state === \"uploading\" &&\n                            html`<${Spinner} label=${`Uploading ${file.name}`} />`\n                        }\n                        <button\n                            type=\"button\"\n                            class=\"icon-button pip-attachment-remove\"\n                            aria-label=${`Remove ${file.name}`}\n                            onClick=${() => composerDraft.removeFile(file.key)}\n                        >\n                            <${Icon} name=\"close\" size=${14} />\n                        </button>\n                    </div>`,\n                )}",
+        "rawHash": "a79f4d8a5ff65e4e71a58def932ed826855eee48f5a8bcb4cb26d6d32c39153a"
+    },
+    {
+        "id": "需人工:web/pip.js:761:27",
+        "raw": "${file.preview && html`<${Thumb} src=${file.preview} alt=${file.name} />`}",
+        "rawHash": "698af5882268ca364e37bb9944e6aacf623bd7e2b2fcabc8e440e75d79ad617d"
+    },
+    {
+        "id": "需人工:web/pip.js:761:84",
+        "raw": "${file.name}",
+        "rawHash": "e5ae078984f21e6e7b7ef0c2e412f7cef95ff9512651bdfa7577f5f5808f8a52"
+    },
+    {
+        "id": "需人工:web/pip.js:762:61",
+        "raw": "${file.name}",
+        "rawHash": "e5ae078984f21e6e7b7ef0c2e412f7cef95ff9512651bdfa7577f5f5808f8a52"
+    },
+    {
+        "id": "需人工:web/pip.js:763:47",
+        "raw": "${formatBytes(file.size)}",
+        "rawHash": "3b79048cb3fac22385068a675cd4a84b33e281e465f3de5fa585d65f103aa084"
+    },
+    {
+        "id": "需人工:web/pip.js:765:29",
+        "raw": "${file.state === \"uploading\" &&\n                            html`<${Spinner} label=${`Uploading ${file.name}`} />`}",
+        "rawHash": "1f6607e125f1097921ccf948808fe6164807e511bb95a4adef51eee5de653a14"
+    },
+    {
+        "id": "需人工:web/pip.js:807:31",
+        "raw": "${dictation.listening ? \"Listening…\" : busy ? \"Tell PiP more…\" : \"Ask PiP…\"}",
+        "rawHash": "76ed4936af3e83f2908cdc603440f03427381bf8fc51e87130a4bef9f5ec2601"
+    },
+    {
+        "id": "需人工:web/pip.js:837:17",
+        "raw": "${busy && !hasMessage && !pending\n                    ? html`<button\n                          type=\"button\"\n                          class=\"icon-button pip-send\"\n                          aria-label=\"Stop PiP\"\n                          title=\"Stop\"\n                          onClick=${() => attempt(() => api(`c/${id}/abort`, {}))}\n                      >\n                          <${Icon} name=\"stop\" size=${18} />\n                      </button>`\n                    : html`<button\n                          type=\"submit\"\n                          class=\"icon-button pip-send\"\n                          aria-label=\"Send to PiP\"\n                          disabled=${sendDisabled}\n                      >\n                          <${Icon} name=\"send\" size=${18} />\n                      </button>`}",
+        "rawHash": "4daa58fd0250bab1c3bf27cce136c3baf7d370ad9a6b4652dfae518488d75f4f"
+    },
+    {
+        "id": "需人工:web/pip.js:888:19",
+        "raw": "${hint}",
+        "rawHash": "470664c5c8e5bde70d7e8e0cdd292941d86f29c07497ada43ab956f899a703e4"
+    },
+    {
+        "id": "需人工:web/pip.js:1005:67",
+        "raw": "${status}",
+        "rawHash": "f1264399cf970cd1333b96a3f3e0fd9560b9a6066a8a6cf4c36b5c7ac663cbc3"
+    },
+    {
+        "id": "需人工:web/pip.js:1015:27",
+        "raw": "${model.replace(/^(?:anthropic:\\s*)?claude\\s+/i, \"\")}",
+        "rawHash": "78ff37cfa7be2439a073f8d5e594e4f7daf3aa340304208e7c10c311f6ef4a16"
+    },
+    {
+        "id": "需人工:web/pip.js:1017:23",
+        "raw": "${thinking && html`<span class=\"model-level\">${thinking}</span>`}",
+        "rawHash": "29d0fcef35803b0245feac1fa016e213c2dd1f385d77f77201cc44e356b43a06"
+    },
+    {
+        "id": "需人工:web/pip.js:1017:68",
+        "raw": "${thinking}",
+        "rawHash": "2eec841d370d3e06797a68e534954361b597c4f8756f01717e673525750e5217"
+    },
+    {
+        "id": "需人工:web/pip.js:1021:17",
+        "raw": "${ready &&\n                html`<${PipContext} stats=${view.stats} window=${view.agent?.contextWindow} />`}",
+        "rawHash": "398639ea5e01b24f2e73e4ec5ab587a6f4207335162d40f4fa7a3df52b7584b0"
+    },
+    {
+        "id": "需人工:web/pip.js:1071:17",
+        "raw": "${!ready\n                    ? html`<div class=\"pip-loading\"><${Spinner} label=\"Waking PiP\" /></div>`\n                    : rows.length === 0 && !busy\n                      ? html`<${Welcome}\n                            id=${id}\n                            name=${me?.name}\n                            hasModel=${Boolean(view.agent?.model)}\n                        />`\n                      : items.map(\n                            (item, index) =>\n                                html`<${Item}\n                                    key=${item.key}\n                                    item=${item}\n                                    last=${index === items.length - 1}\n                                    busy=${busy}\n                                    conversationId=${id}\n                                />`,\n                        )} ${ready &&\n                busy &&\n                !speaking &&\n                items.at(-1)?.type !== \"activity\" &&\n                html`<div class=\"pip-steps working\">\n                    <${Spinner} hidden=${true} />\n                    <span>Thinking</span>\n                </div>`} ${pending.map(\n                (item) => html`<div class=\"pip-you pending\" key=${`pending-${item.id}`}>\n                    <div>${(item.text ?? \"\").replace(FROM, \"\")}</div>\n                    <div class=\"pip-pending-line\">\n                        <span>${pendingWhen(item, busy)}</span>\n                        <button\n                            type=\"button\"\n                            class=\"pip-pending-withdraw\"\n                            onClick=${() =>\n                                attempt(() => api(`c/${id}/withdraw`, { submissionId: item.id }))}\n                        >\n                            Withdraw\n                        </button>\n                    </div>\n                </div>`,\n            )}",
+        "rawHash": "02ab5e82b8c834125d7787784ef3578b0fabba2c6eca11bfbf0d27c12ed0ead6"
+    },
+    {
+        "id": "需人工:web/pip.js:1102:28",
+        "raw": "${(item.text ?? \"\").replace(FROM, \"\")}",
+        "rawHash": "9ae05ea58749e11cf8c2edbcc7b29d6396968c09adb3dcfcb6261eaa1ae0d056"
+    },
+    {
+        "id": "需人工:web/pip.js:1104:33",
+        "raw": "${pendingWhen(item, busy)}",
+        "rawHash": "55f47500f8bed06d605a5600de64cfdb959d80aed4460a9b086b672600d07167"
+    },
+    {
+        "id": "需人工:web/pip.js:1118:13",
+        "raw": "${waiting.length > 0 &&\n            html`<div class=\"pip-approval\" role=\"status\">\n                <${Icon} name=\"shield\" size=${14} />\n                <span class=\"grow\">PiP waits for your approval: ${waiting[0].tool}</span>\n                <button\n                    type=\"button\"\n                    class=\"button small\"\n                    onClick=${() => {\n                        closePip();\n                        navigate(id);\n                    }}\n                >\n                    Review\n                </button>\n            </div>`} ${ready &&\n            me?.role === \"owner\" &&\n            memoryAvailable(id) &&\n            html`<${PendingMemories} id=${id} />`}",
+        "rawHash": "e198edc735ed5daa814d38ac3ae7e85d30d94ccd24d16d736a147c9b9d0a035c"
+    },
+    {
+        "id": "需人工:web/pip.js:1121:36",
+        "raw": "PiP waits for your approval: ${waiting[0].tool}",
+        "rawHash": "6fed420fd5966f4eb2ec6f0dbb558fa2ea61605065092486aacfa379ff74b8b3"
+    },
+    {
+        "id": "需人工:web/pip.js:1159:22",
+        "raw": "${kept === \"busy\" ? \"PiP is working: open PiP\" : \"PiP has something new: open PiP\"}",
+        "rawHash": "72a717e903ede888c7bb550d4fc35ec6cb9c4d8693911c29579e2f29ab1bf3d9"
+    },
+    {
+        "id": "需人工:web/pip.js:1164:11",
+        "raw": "${kept === \"news\" && html`<span class=\"pip-dot\" aria-hidden=\"true\"></span>`}",
+        "rawHash": "c4fbb991d7f678d29b8da282d9986c427a0e26b61003b09d4327497459186ce9"
+    },
+    {
+        "id": "需人工:web/pip.js:1210:22",
+        "raw": "${[\"PiP\", pip?.busy && \"working\", unread && \"something new\"].filter(Boolean).join(\", \")}",
+        "rawHash": "14130cdd93f05006daea5edaed13fffadd8625e2c66ed6fda219cee46fda4e16"
+    },
+    {
+        "id": "需人工:web/pip.js:1215:11",
+        "raw": "${unread && html`<span class=\"rail-news\" aria-hidden=\"true\"></span>`}",
+        "rawHash": "42dea2ee4ce0903120d2d6d2497ed2f7c4771434fa6d94c138e8ad07fdf1961d"
+    },
+    {
+        "id": "无法映射键:web/pip.js:356:22",
+        "raw": "${`Context ${about}${percent}% full`}",
+        "rawHash": "b88a34aae1b9ab8e5cb059cd63e8c48a07142712a05f1e18634a694bbb419df0"
+    },
+    {
+        "id": "无法映射键:web/pip.js:520:49",
+        "raw": "${`Image ${index + 1}`}",
+        "rawHash": "fbec638f96488108a47b9069f83ec81e3925aedb4827c46f810dfab89ce5cbd0"
+    },
+    {
+        "id": "无法映射键:web/pip.js:771:42",
+        "raw": "${`Remove ${file.name}`}",
+        "rawHash": "aacb6664637405c55628b0034b2e2e612046e6f5f8086046b1be0646f6daf2dc"
+    },
+    {
+        "id": "无法映射键:web/pip.js:1010:34",
+        "raw": "${`PiP model: ${model}${thinking ? ` · ${thinking}` : \"\"}`}",
+        "rawHash": "02031d9c3fcf098c880c59c795004f4d5631173d104849d411bf971d3e570249"
+    },
+    {
+        "id": "需人工:web/rich.js:141:17",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/rich.js:220:19",
+        "raw": "${artifact ? `${artifact.title} · v${artifact.version}` : lang || kind}",
+        "rawHash": "d35921d57a8af0499116c41d95858e713b117f857c4a3e34d3dd64e158d2551e"
+    },
+    {
+        "id": "需人工:web/rich.js:223:17",
+        "raw": "${!streaming &&\n                html`<span class=\"rich-tabs\" role=\"tablist\">\n                    <button\n                        type=\"button\"\n                        role=\"tab\"\n                        aria-selected=${view === \"shown\" ? \"true\" : \"false\"}\n                        class=${view === \"shown\" ? \"on\" : \"\"}\n                        onClick=${() => setView(\"shown\")}\n                    >\n                        ${VIEW_NAMES[kind]}\n                    </button>\n                    <button\n                        type=\"button\"\n                        role=\"tab\"\n                        aria-selected=${view === \"code\" ? \"true\" : \"false\"}\n                        class=${view === \"code\" ? \"on\" : \"\"}\n                        onClick=${() => setView(\"code\")}\n                    >\n                        Code\n                    </button>\n                </span>`}",
+        "rawHash": "9e6c5b60233caeaddcad9c1c8f9f7e5255e99d18c978ee389ccc950ff3d3a863"
+    },
+    {
+        "id": "需人工:web/rich.js:232:27",
+        "raw": "${VIEW_NAMES[kind]}",
+        "rawHash": "fe7067612385acc1eeae78c6e1d06ac60e852f2b42277fe50079cd10b85c9101"
+    },
+    {
+        "id": "需人工:web/rich.js:247:17",
+        "raw": "${kind === \"html\" &&\n                !code &&\n                html`<button\n                    type=\"button\"\n                    class=${`rich-run ${running ? \"on\" : \"\"}`}\n                    title=${running ? \"Stop its scripts\" : \"Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app\"}\n                    onClick=${() => setRunning(!running)}\n                >\n                    ${running ? \"■ Stop\" : \"▶ Run\"}\n                </button>`} ${artifact &&\n                html`<button\n                    type=\"button\"\n                    class=\"copy\"\n                    title=\"Open it in the artifact viewer, at this version\"\n                    onClick=${() => openSheet({ type: \"viewer\", id: artifact.id, version: artifact.version })}\n                >\n                    Open\n                </button>`}",
+        "rawHash": "2d32f7406d19195e505f83b35b94a5398fd5a560d760c0855efcd781306e77ba"
+    },
+    {
+        "id": "需人工:web/rich.js:252:29",
+        "raw": "${running ? \"Stop its scripts\" : \"Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app\"}",
+        "rawHash": "7009cd2288c98a30d0f27134b795cb7a3fe4097c9c0193dda9133421b3e831b0"
+    },
+    {
+        "id": "需人工:web/rich.js:255:23",
+        "raw": "${running ? \"■ Stop\" : \"▶ Run\"}",
+        "rawHash": "036fa3de49d03b1fadfeb9d53b421a97dc3464a1835f86cb8739bd3cc88de356"
+    },
+    {
+        "id": "需人工:web/rich.js:271:11",
+        "raw": "${body}",
+        "rawHash": "65f354ed6429bce886d4c4ff477c208a450086104622c477f83d37126809408b"
+    },
+    {
+        "id": "需人工:web/rich.js:374:39",
+        "raw": "${title} · v${version}",
+        "rawHash": "f2a24be78387f2395be70dffb02f1c4b6ca742813d7d82fe37691639e68a7be2"
+    },
+    {
+        "id": "需人工:web/rich.js:385:15",
+        "raw": "${page.failed ? \"This version could not be loaded.\" : \"Loading…\"}",
+        "rawHash": "18c11add3731bcfcd0998291223e7a4365c5b1b59af83ef85257fe3429bb7bca"
+    },
+    {
+        "id": "需人工:web/run-frame.js:103:17",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:190:22",
+        "raw": "${label}",
+        "rawHash": "45faee322307da46b0027ef1da2bb8ae774b2fd4efa4a2c262fe9364a016d7c6"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:192:17",
+        "raw": "${agent.name}",
+        "rawHash": "fa1aec8cda8f6f3b4beb9a1640e495b7f68b1d7f963698c62de3a49fc1d094c4"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:197:60",
+        "raw": "${needsYou(agent) && \"!\"}",
+        "rawHash": "8506cb81c6c60fb1b4921a60ad5e3475bf8c817c4f4293fa17c3558b874fca1d"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:204:11",
+        "raw": "${glyph && (state === \"waiting\" || state === \"failed\") && \"!\"}",
+        "rawHash": "7110d9a3c6ceb69ae69f8b50686a39d4b5f2ded719538ee2ee363a1c4f84bf57"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:211:72",
+        "raw": "${needs.length}",
+        "rawHash": "96db80af5c3f2be82c2498c21a4ca103eeb77c208929021fb03c832515ed013a"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:212:11",
+        "raw": "${needs.map((agent) => {\n            const state = boardState(agent);\n\n            return html`<button\n                key=${agent.conversationId}\n                class=${`board-need ${state} ${agent.conversationId === selected ? \"on\" : \"\"}`}\n                onClick=${() => onPick(agent.conversationId)}\n            >\n                <${Mark} state=${state} />\n                <span class=\"board-need-main\">\n                    <span class=\"board-need-head\">\n                        <b>${agent.name}</b>${\" \"}<span class=\"board-need-what\">\n                            ${state === \"waiting\" ? \"needs approval\" : \"failed\"}\n                        </span>\n                    </span>\n                    <span class=\"board-need-session\">${titles.get(agent.id)}</span>\n                </span>\n            </button>`;\n        })}",
+        "rawHash": "d89a94da1edeb479a8254d4f1d72190954994e8878d4b9cf6f5a9a82faf78bd0"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:223:30",
+        "raw": "${agent.name}",
+        "rawHash": "fa1aec8cda8f6f3b4beb9a1640e495b7f68b1d7f963698c62de3a49fc1d094c4"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:224:31",
+        "raw": "${state === \"waiting\" ? \"needs approval\" : \"failed\"}",
+        "rawHash": "9280ac062068d342e665e978214c15391f3c24566add6cab4ff6f7d765606fed"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:227:56",
+        "raw": "${titles.get(agent.id)}",
+        "rawHash": "1756359589947d1bbccb768198ae32605d59fc94a2245b6e4bde75c329f4a449"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:297:47",
+        "raw": "${agent.name}",
+        "rawHash": "fa1aec8cda8f6f3b4beb9a1640e495b7f68b1d7f963698c62de3a49fc1d094c4"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:298:60",
+        "raw": "${labelOf(agent)}",
+        "rawHash": "381b35e52d0ad333b336a30c5e328c882510a933b141b9cca4fa75ca1d1a665c"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:302:81",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:303:21",
+        "raw": "${now ? \"Running\" : \"Ended\"}",
+        "rawHash": "dd7368e854654721c29ffd129797b13d1fc2fb28e9aefe5f1fe86142c2348e22"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:304:40",
+        "raw": "${whenOf(agent) || \"—\"}",
+        "rawHash": "2451c989942c8ac92fd32bc701ff8463980de4b66d033a89adc4c1ef4f6223da"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:306:17",
+        "raw": "${agent.asked &&\n                html`<span>Asked</span>\n                    <span class=\"board-asked\">${agent.asked}</span>`} ${now &&\n                html`<span>Now</span>\n                    <span class=${`board-now ${state}`}>${nowOf(agent)}</span>`} ${state === \"failed\" &&\n                agent.error &&\n                html`<span>Error</span><span class=\"board-error\">${agent.error}</span>`}",
+        "rawHash": "fcdedb4ea2b2bc4adf060ec78e06c64a11cdf5942e36147ef9e1cbbc80a92cd5"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:308:49",
+        "raw": "${agent.asked}",
+        "rawHash": "ee80bb4931a3674d722e2d9f77dac7650c027b14f62a869684b57df805c08d00"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:313:59",
+        "raw": "${nowOf(agent)}",
+        "rawHash": "9a206233a23e86ac20dd391c6693c719b6c1831e0a42bd59fdae14b783d5687b"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:318:68",
+        "raw": "${agent.error}",
+        "rawHash": "0e3a4d5be1fea4f28b4257b0b76deb6ada803b359b942af75d028a9e0b024f3e"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:321:11",
+        "raw": "${agent.reporting && html`<span class=\"agent-chip\">report on its way to Pi</span>`}",
+        "rawHash": "c060507d51bb5f144afb35962fbc63c478e3d58c189fdbd97ce1c51e5231883c"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:324:19",
+        "raw": "${state === \"waiting\" ? \"Review the approval\" : \"Open\"}",
+        "rawHash": "b41b3b7ba28563d26bd1a6cb858232dd2d9429bbf1fc34935410a2028a8f813e"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:327:17",
+        "raw": "${now &&\n                canSteer() &&\n                html`<button class=\"button board-stop\" onClick=${() => stop(agent)}>Stop</button>`}",
+        "rawHash": "4836cc22ba07c6d24dce991b559f29263ba69bacbbf3c52ee3b1b23be612382b"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:342:13",
+        "raw": "${agent\n                ? html`<${Mark} state=${state} glyph=${false} />\n                      <span class=\"board-status-name\">${agent.name}</span>\n                      <span class=\"board-status-when\">\n                          ${live(state) ? whenOf(agent) : `${state} ${whenOf(agent)}`}\n                      </span>\n                      <span\n                          class=${`board-status-line ${state}`}\n                          data-peek=${agent.conversationId}\n                          key=${agent.conversationId}\n                      >\n                          ${lineOf(agent)}\n                      </span>`\n                : html`<span class=\"board-status-line\">Hover a square to see what it is doing</span>`}",
+        "rawHash": "1f9936e4d7d9a5a708c9d228219799f7ae5374529cd857e09b0a02ed697c43ba"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:344:57",
+        "raw": "${agent.name}",
+        "rawHash": "fa1aec8cda8f6f3b4beb9a1640e495b7f68b1d7f963698c62de3a49fc1d094c4"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:346:29",
+        "raw": "${live(state) ? whenOf(agent) : `${state} ${whenOf(agent)}`}",
+        "rawHash": "b083b0ed76d6090004ae9e0de57bf721d53946bd9770c71a6bd72c66b69c0c23"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:353:29",
+        "raw": "${lineOf(agent)}",
+        "rawHash": "b22e26d0ae89e9135c1400f09a70765222b21ecde1b9bc3b2e5ee3b62b66adfd"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:368:47",
+        "raw": "${agent.name}",
+        "rawHash": "fa1aec8cda8f6f3b4beb9a1640e495b7f68b1d7f963698c62de3a49fc1d094c4"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:369:60",
+        "raw": "${labelOf(agent)}",
+        "rawHash": "381b35e52d0ad333b336a30c5e328c882510a933b141b9cca4fa75ca1d1a665c"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:370:44",
+        "raw": "${whenOf(agent)}",
+        "rawHash": "eb6f5f85f126c48a7b13089708ed0d4e12bc98d47d2154c045b69340b77ad9c4"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:375:42",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:376:51",
+        "raw": "${lineOf(agent)}",
+        "rawHash": "b22e26d0ae89e9135c1400f09a70765222b21ecde1b9bc3b2e5ee3b62b66adfd"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:379:19",
+        "raw": "${state === \"waiting\" ? \"Review the approval\" : \"Open\"}",
+        "rawHash": "b41b3b7ba28563d26bd1a6cb858232dd2d9429bbf1fc34935410a2028a8f813e"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:382:17",
+        "raw": "${live(state) &&\n                canSteer() &&\n                html`<button class=\"button\" onClick=${() => stop(agent)}>Stop</button>`}",
+        "rawHash": "5c6b483c846eeaa1313d9c94f07669825e3b9e6a1fd6a49dbe0c81a0fc3d1ccd"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:703:60",
+        "raw": "${title}",
+        "rawHash": "f295a19e180db4ffe526caedc0d107a582c543486fa82ea81d7ddb19b58244cb"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:705:29",
+        "raw": "${phone &&\n                            html`<span class=${`board-summary ${tone}`}>\n                                ${summaryOf(own, { short: true })}\n                            </span>`}",
+        "rawHash": "044a876d2a625f7c0c317b32222b8847435f36da7aa313fcf623d902d05cb824"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:707:35",
+        "raw": "${summaryOf(own, { short: true })}",
+        "rawHash": "50186ef64b0f17c3bf3e2f19ed3ad549f33ea5d223c30ee821b11c34feef4df5"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:711:23",
+        "raw": "${!phone && html`<span class=${`board-summary ${tone}`}>${summaryOf(own)}</span>`}",
+        "rawHash": "3a56e2ee1c8434527570ef662ffe8a3b0e6f3e9b2ec3be9d64fe9deffabf5562"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:711:79",
+        "raw": "${summaryOf(own)}",
+        "rawHash": "f85fddac7011e56618dd150fb29a698c772bf99c1cc95abea21b9c9e400bacae"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:714:23",
+        "raw": "${list.map(\n                        (agent) => html`<${Cell}\n                            key=${agent.conversationId}\n                            agent=${agent}\n                            state=${boardState(agent)}\n                            dim=${!matches(agent)}\n                            selected=${agent.conversationId === selected}\n                            onPick=${pick}\n                            onHover=${phone ? () => {} : setHovered}\n                        />`,\n                    )} ${older > 0 &&\n                        html`<span\n                            class=\"board-older\"\n                            title=${`${older} more, finished earlier: open the session to see them`}\n                        >\n                            +${older}\n                        </span>`}",
+        "rawHash": "cb764c34c3d338def8da120c5a183d6cbae78e2b0117ee2b1113f97514a4956f"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:731:29",
+        "raw": "+${older}",
+        "rawHash": "8a991f43dd636efa0c717f92e8e812ffef62e5758d7b3f99d04bd443f34b1aea"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:737:17",
+        "raw": "${active.length > 0 &&\n                html`<div class=\"board-live\" role=\"group\" aria-label=\"Subagents at work\">\n                    ${tiles.map(\n                        (agent) => html`<${AgentTile}\n                            key=${agent.conversationId}\n                            agent=${agent}\n                            folder=${folder}\n                            selected=${agent.conversationId === selected}\n                            onActivate=${() => pick(agent.conversationId)}\n                            onOpen=${() => open(agent)}\n                        />`,\n                    )}\n                    ${\n                        active.length > cap + 1 &&\n                        html`<button class=\"board-live-more\" onClick=${toggle}>\n                            ${all ? \"Show fewer\" : `Show ${active.length - tiles.length} more`}\n                        </button>`\n                    }\n                </div>`}",
+        "rawHash": "ff91da66d3ae32a9169131e3aefb1cc73b2c5a2287adc4d50f628806a7780ff0"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:739:23",
+        "raw": "${tiles.map(\n                        (agent) => html`<${AgentTile}\n                            key=${agent.conversationId}\n                            agent=${agent}\n                            folder=${folder}\n                            selected=${agent.conversationId === selected}\n                            onActivate=${() => pick(agent.conversationId)}\n                            onOpen=${() => open(agent)}\n                        />`,\n                    )} ${active.length > cap + 1 &&\n                        html`<button class=\"board-live-more\" onClick=${toggle}>\n                            ${all ? \"Show fewer\" : `Show ${active.length - tiles.length} more`}\n                        </button>`}",
+        "rawHash": "3eef75508404939892af260bac9952fc70c2b7b2516354447586c101ed2f8975"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:752:31",
+        "raw": "${all ? \"Show fewer\" : `Show ${active.length - tiles.length} more`}",
+        "rawHash": "a79796c8b60632f074f6d51b19c9a5c2a1c3a54b42f5898f28eed814f3b10928"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:779:23",
+        "raw": "${total} in ${sessionCount} session${sessionCount === 1 ? \"\" : \"s\"}",
+        "rawHash": "1b193a4f1a3f2c747596a33235bc4b945183d5d55e4c1cf25bad6f381a0d69de"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:782:15",
+        "raw": "${!phone && html`<${Search} query=${query} setQuery=${setQuery} />`}",
+        "rawHash": "4229833dca82b7839fc458d25ac89a1bcc3e618c99308620abf1ff7441393aa3"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:793:13",
+        "raw": "${phone &&\n            html`<div class=\"board-search-row\">\n                <${Search} query=${query} setQuery=${setQuery} />\n            </div>`} ${agents.length > 0 &&\n            html`<div class=\"board-summary-bar\">\n                <div class=\"board-states\" aria-hidden=\"true\">\n                    ${STATES.filter((state) => counts[state] > 0).map(\n                        (state) => html`<span\n                            class=${`board-state ${state} ${filter === \"all\" || filter === state ? \"\" : \"dim\"}`}\n                            style=${`flex-grow:${counts[state]}`}\n                            title=${`${counts[state]} ${LABELS[state].toLowerCase()}`}\n                        ></span>`,\n                    )}\n                </div>\n                <div class=\"board-legend\" role=\"group\" aria-label=\"Show only\">\n                    ${legend.map(\n                        (item) => html`<button\n                            class=${`board-filter ${item.key} ${filter === item.key ? \"on\" : \"\"}`}\n                            aria-pressed=${filter === item.key}\n                            onClick=${() => setFilter(filter === item.key ? \"all\" : item.key)}\n                        >\n                            ${\n                                item.key !== \"all\" &&\n                                html`<${Mark} state=${item.key} glyph=${false} />`\n                            }\n                            ${item.label}\n                            <span class=\"board-filter-count\">${item.count}</span>\n                        </button>`,\n                    )}\n                </div>\n            </div>`} ${phone\n                ? html`<div class=${`board-list ${chosen ? \"with-bar\" : \"\"}`}>\n                      ${empty}\n                      ${\n                          needs.length > 0 &&\n                          html`<${NeedsYou}\n                              needs=${needs}\n                              titles=${titles}\n                              selected=${selected}\n                              onPick=${pick}\n                          />`\n                      }\n                      ${sessionRows}\n                  </div>\n                  ${\n                      chosen &&\n                      html`<${DetailBar}\n                          key=${chosen.conversationId}\n                          agent=${chosen}\n                          title=${titles.get(chosen.id) ?? \"\"}\n                          onClose=${() => setSelected(null)}\n                      />`\n                  }`\n                : html`<div class=\"board-body\">\n                      <div class=\"board-main\">\n                          <div class=\"board-map\">${empty}${sessionRows}</div>\n                          <${StatusLine} agent=${shown} />\n                      </div>\n                      <aside class=\"board-side\">\n                          ${\n                              needs.length > 0 &&\n                              html`<${NeedsYou}\n                                  needs=${needs}\n                                  titles=${titles}\n                                  selected=${selected}\n                                  onPick=${pick}\n                              />`\n                          }\n                          ${\n                              chosen &&\n                              html`<${Detail}\n                                  key=${chosen.conversationId}\n                                  agent=${chosen}\n                                  title=${titles.get(chosen.id) ?? \"\"}\n                              />`\n                          }\n                      </aside>\n                  </div>`}",
+        "rawHash": "c75b606c1d0d054f493548e17a37f53ab1108f01cdbab7b399ecf94d664dea2c"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:802:23",
+        "raw": "${STATES.filter((state) => counts[state] > 0).map(\n                        (state) => html`<span\n                            class=${`board-state ${state} ${filter === \"all\" || filter === state ? \"\" : \"dim\"}`}\n                            style=${`flex-grow:${counts[state]}`}\n                            title=${`${counts[state]} ${LABELS[state].toLowerCase()}`}\n                        ></span>`,\n                    )}",
+        "rawHash": "e2e9eb766bdc9583e2ba6039eda9f727a95eabdb0a79f66a79413c699e815468"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:811:23",
+        "raw": "${legend.map(\n                        (item) => html`<button\n                            class=${`board-filter ${item.key} ${filter === item.key ? \"on\" : \"\"}`}\n                            aria-pressed=${filter === item.key}\n                            onClick=${() => setFilter(filter === item.key ? \"all\" : item.key)}\n                        >\n                            ${\n                                item.key !== \"all\" &&\n                                html`<${Mark} state=${item.key} glyph=${false} />`\n                            }\n                            ${item.label}\n                            <span class=\"board-filter-count\">${item.count}</span>\n                        </button>`,\n                    )}",
+        "rawHash": "bcd32094ed70b3f82cd6cc5a3d988a9c5345f65c5f54cb981feb91f50b7a8ecb"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:818:33",
+        "raw": "${item.key !== \"all\" &&\n                                html`<${Mark} state=${item.key} glyph=${false} />`} ${item.label}",
+        "rawHash": "c8a188cc115249115ff20397763fb3446602fa1537d6c023899029209526319b"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:822:64",
+        "raw": "${item.count}",
+        "rawHash": "4df70e261951c4c2870a33fa3bad416cbbf2e8b9bf225e8f2497bde80f71bd59"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:831:25",
+        "raw": "${empty} ${needs.length > 0 &&\n                          html`<${NeedsYou}\n                              needs=${needs}\n                              titles=${titles}\n                              selected=${selected}\n                              onPick=${pick}\n                          />`} ${sessionRows}",
+        "rawHash": "d1bc8dec07f647548e1e823a66102d6d8226d30d0ff97fd7975f8ebe341cb823"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:844:23",
+        "raw": "${chosen &&\n                      html`<${DetailBar}\n                          key=${chosen.conversationId}\n                          agent=${chosen}\n                          title=${titles.get(chosen.id) ?? \"\"}\n                          onClose=${() => setSelected(null)}\n                      />`}",
+        "rawHash": "d62127b97b989a1c4dd9f2a273bb66501795da7c6aa85cfe7fbdeee9093f6b88"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:848:35",
+        "raw": "${titles.get(chosen.id) ?? \"\"}",
+        "rawHash": "e57d033cb05265011cdc7e82d59d1ecf4a8f6e36b94bf8ae2a68fc6e1ce428f7"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:854:52",
+        "raw": "${empty}${sessionRows}",
+        "rawHash": "7250d38506e005b7d850321c24283f43b14a3b78eb1548e4733a87a2f4d65b1f"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:859:31",
+        "raw": "${needs.length > 0 &&\n                              html`<${NeedsYou}\n                                  needs=${needs}\n                                  titles=${titles}\n                                  selected=${selected}\n                                  onPick=${pick}\n                              />`} ${chosen &&\n                              html`<${Detail}\n                                  key=${chosen.conversationId}\n                                  agent=${chosen}\n                                  title=${titles.get(chosen.id) ?? \"\"}\n                              />`}",
+        "rawHash": "e50acbaba3318921a36e56ae3c780c79f4b1f678a1f2f39358176adc86395949"
+    },
+    {
+        "id": "需人工:web/subagents-board.js:872:43",
+        "raw": "${titles.get(chosen.id) ?? \"\"}",
+        "rawHash": "e57d033cb05265011cdc7e82d59d1ecf4a8f6e36b94bf8ae2a68fc6e1ce428f7"
+    },
+    {
+        "id": "无法映射键:web/subagents-board.js:698:29",
+        "raw": "${`Open ${title}`}",
+        "rawHash": "2e341b81f51d92c0299656d8ee1b7f55ceb4f57402d48d188cf6638591e1233d"
+    },
+    {
+        "id": "无法映射键:web/subagents-board.js:729:37",
+        "raw": "${`${older} more, finished earlier: open the session to see them`}",
+        "rawHash": "66a3f186f21930db0007a1854f1d586734a9be0f49d6c9cff1a738f817fee653"
+    },
+    {
+        "id": "需人工:web/subagents.js:118:19",
+        "raw": "${agent.busy ? html`<${Spinner} />` : MARKS[status]}",
+        "rawHash": "a763b2640d352f99ef7cf3572e49c1abfbdb32cc3cb27fb373b4a40ac88aad34"
+    },
+    {
+        "id": "需人工:web/subagents.js:122:48",
+        "raw": "${agent.name}",
+        "rawHash": "fa1aec8cda8f6f3b4beb9a1640e495b7f68b1d7f963698c62de3a49fc1d094c4"
+    },
+    {
+        "id": "需人工:web/subagents.js:123:23",
+        "raw": "${when && html`<span class=\"agent-when\">${when}</span>`} ${agent.reporting && html`<span class=\"agent-chip\">report on its way to Pi</span>`}",
+        "rawHash": "fd514294a2768ac5cc491b40a220c23edd85d53be2198a3831fcc027bb241a9a"
+    },
+    {
+        "id": "需人工:web/subagents.js:123:63",
+        "raw": "${when}",
+        "rawHash": "1053c6c5bd77f074188c7f94314136b53dde156fee1ca6e14fb4cccde32bfee9"
+    },
+    {
+        "id": "需人工:web/subagents.js:126:19",
+        "raw": "${agent.busy && html`<span class=\"agent-now\">${nowDoing(agent)}</span>`} ${status === \"failed\" && agent.error && html`<span class=\"agent-error\">${agent.error}</span>`} ${agent.asked && html`<span class=\"agent-asked\">${agent.asked}</span>`}",
+        "rawHash": "fe16014f1d0a1d47348317d8b5105077e31d536d9dfa4f063b422760629af29b"
+    },
+    {
+        "id": "需人工:web/subagents.js:126:64",
+        "raw": "${nowDoing(agent)}",
+        "rawHash": "e8022575216790bde16bc468c26bfe5be2a91ca9c6baa7ec43184505c000fbc9"
+    },
+    {
+        "id": "需人工:web/subagents.js:127:90",
+        "raw": "${agent.error}",
+        "rawHash": "0e3a4d5be1fea4f28b4257b0b76deb6ada803b359b942af75d028a9e0b024f3e"
+    },
+    {
+        "id": "需人工:web/subagents.js:128:67",
+        "raw": "${agent.asked}",
+        "rawHash": "ee80bb4931a3674d722e2d9f77dac7650c027b14f62a869684b57df805c08d00"
+    },
+    {
+        "id": "需人工:web/subagents.js:132:13",
+        "raw": "${agent.busy &&\n            canSteer() &&\n            html`<button\n                class=\"icon-button agent-stop\"\n                aria-label=${`Stop ${agent.name}`}\n                title=\"Stop\"\n                onClick=${stop}\n            >\n                <${Icon} name=\"stop\" size=${13} />\n            </button>`}",
+        "rawHash": "7f84bdf1d95922838f21cd3c7b1274f87c609e26ceb54cc5c5030d66b1bc0aba"
+    },
+    {
+        "id": "需人工:web/subagents.js:153:15",
+        "raw": "Reports wait: ${why}.",
+        "rawHash": "b613a8f06fd98f1511a2a33fae6f2932612319d4779f2e2d3398f7383c73bfc8"
+    },
+    {
+        "id": "需人工:web/subagents.js:155:13",
+        "raw": "${owner\n                ? html`<button class=\"link\" onClick=${() => openSheet({ type: \"spend\" })}>\n                      Raise it\n                  </button>`\n                : html`<span>They go once the owner raises it.</span>`}",
+        "rawHash": "7f43b6e3286dec26a25885e3c27f6d2c8d15251e0d5a7f0d14148beb800677af"
+    },
+    {
+        "id": "需人工:web/subagents.js:204:30",
+        "raw": "${label}",
+        "rawHash": "45faee322307da46b0027ef1da2bb8ae774b2fd4efa4a2c262fe9364a016d7c6"
+    },
+    {
+        "id": "需人工:web/subagents.js:210:23",
+        "raw": "${shown\n                        .slice(0, 6)\n                        .map(\n                            (agent) => html`<span class=${`agents-dot ${stateOf(agent)}`}></span>`,\n                        )} ${shown.length > 6 && html`<span class=\"agents-more\">+${shown.length - 6}</span>`}",
+        "rawHash": "e95c31f2b3c1a16cbc39d60b4741d70c7290b2aeacb233247f84089fae692a20"
+    },
+    {
+        "id": "需人工:web/subagents.js:215:74",
+        "raw": "+${shown.length - 6}",
+        "rawHash": "8158e4c85e91462d33d0814d9227468a9ddbc3516816275c609a0eb26d102b33"
+    },
+    {
+        "id": "需人工:web/subagents.js:217:46",
+        "raw": "${summary}",
+        "rawHash": "02f3c648176035dc7d787de503597c94845da9fec354984dbf62153dc6788e33"
+    },
+    {
+        "id": "需人工:web/subagents.js:219:21",
+        "raw": "${lead &&\n                    !open &&\n                    html`<span class=\"agents-lead\" data-peek=${lead.conversationId}>\n                        ${lead.name}: ${nowDoing(lead)}\n                    </span>`}",
+        "rawHash": "0e1c86c2fe0a21df2cd1365a95eda2491ff33396f4fac4b906f516b9254ea722"
+    },
+    {
+        "id": "需人工:web/subagents.js:222:27",
+        "raw": "${lead.name}: ${nowDoing(lead)}",
+        "rawHash": "e098da87f03bedd1afe38dab630ef2ddcf8ee6c3b517ac40e83756e326603fae"
+    },
+    {
+        "id": "需人工:web/subagents.js:228:17",
+        "raw": "${!active &&\n                html`<button\n                    class=\"icon-button\"\n                    aria-label=\"Put the subagents bar away\"\n                    title=\"Put away\"\n                    onClick=${() => {\n                        putAway(store.state.conversationId, agents);\n                        store.set({ subagentsOpen: null });\n                    }}\n                >\n                    <${Icon} name=\"close\" size=${13} />\n                </button>`}",
+        "rawHash": "640a18a61b99e5bf0644c0dff4b4bab3f59ae8eada99213bf3d6e486abd7550c"
+    },
+    {
+        "id": "需人工:web/subagents.js:242:11",
+        "raw": "${held && html`<${Held} why=${held} />`} ${open &&\n            html`<div class=\"agents-list\">\n                ${shown.map((agent) => html`<${AgentRow} key=${agent.name} agent=${agent} />`)}\n            </div>`}",
+        "rawHash": "27adb0e6f27cb09ba0a0d19803735590141d77fe4020b6860ee44f22a43e95cf"
+    },
+    {
+        "id": "需人工:web/subagents.js:246:19",
+        "raw": "${shown.map((agent) => html`<${AgentRow} key=${agent.name} agent=${agent} />`)}",
+        "rawHash": "0da2f62fa76d8d0c2654af08e746e9d4f2f60d420efb6a568fab3687722e9b3f"
+    },
+    {
+        "id": "无法映射键:web/subagents.js:136:30",
+        "raw": "${`Stop ${agent.name}`}",
+        "rawHash": "74e0d7e190dfc5e0c97b73aed81860cf56f07868cb24b326f53ced831dfb69bc"
+    }
+]

@@ -1071,6 +1071,15 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  */
 export interface WebRequest {
     /**
+     * One immutable language snapshot for this request. Older servers omit it; use English then.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly locale?: {
+        readonly lang: string;
+        t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    };
+    /**
      * Creates a session from an owner-only route.
      * @since 0.28.0
      * @experimental
@@ -1377,6 +1386,15 @@ export interface PublicLinks {
  */
 export interface PublicPageRequest {
     /**
+     * One immutable language snapshot for this request. Older servers omit it; use English then.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly locale?: {
+        readonly lang: string;
+        t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    };
+    /**
      * `GET` shows the page; `POST` is a form on it, sent back to the same address.
      * @since 0.22.0
      * @experimental
@@ -1441,6 +1459,36 @@ export type PublicPageAnswer = string | { html: string; status?: number };
 export type PublicPageHandler = (
     request: PublicPageRequest,
 ) => PublicPageAnswer | Promise<PublicPageAnswer>;
+
+/**
+ * One language's UI text, as a module declares it (`web.uiLocales`): a language tag, the language's own name, and text
+ * for the app's own labels by message key. A module gives a part of them; English, which Pi Pocket keeps, is the
+ * fallback of each key.
+ * @since 0.28.0
+ * @experimental
+ */
+export interface UiLocalePack {
+    /**
+     * The language tag, as `Intl.getCanonicalLocales` writes it: `zh-CN` for `zh-cn`. `"en"` is Pi Pocket's own.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly id: string;
+    /**
+     * The language's name for itself, as the language list shows it: one line, up to 80 characters, as plain text.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly label: string;
+    /**
+     * The app's own labels, by message key, as text: at least one key of its own, and a part of the catalog is enough.
+     * The keys that it leaves out show English. Keys that English does not have are left out, and a message that is
+     * empty or blank counts as none. A translation says the same placeholder names as English (`{name}`).
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly messages: Readonly<Record<string, string>>;
+}
 
 /**
  * How a module's own input shows in the transcript, while the module is on. Nothing here is stored. The model still
@@ -1588,6 +1636,15 @@ export interface Web {
      * @experimental
      */
     onSettings(listener: () => void): () => void;
+    /**
+     * Declares the UI text of other languages, while it loads: 1 to 16 languages, each a language tag, its own name,
+     * and its messages by key, with at least one key each. Core merges them over its English, key by key, in the order
+     * that the modules load. A mistake throws, so the module does not load and the version before it stays. See
+     * [`UiLocalePack`](#uilocalepack).
+     * @since 0.28.0
+     * @experimental
+     */
+    uiLocales(packs: readonly UiLocalePack[]): void;
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -2716,6 +2773,18 @@ export interface Pocket {
      * @since 0.14.0
      */
     readonly title: string;
+    /**
+     * Fixed UI text in the current language, with literal named interpolation and English fallback. Does not escape HTML.
+     * @since 0.28.0
+     * @experimental
+     */
+    t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    /**
+     * Hear language or catalog changes. Not called immediately; removed when this module version goes. Returns a stop function.
+     * @since 0.28.0
+     * @experimental
+     */
+    onLocaleChange(listener: () => void): () => void;
     /**
      * The app's Preact `h`.
      * @since 0.14.0

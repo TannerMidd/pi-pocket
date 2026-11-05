@@ -104,6 +104,7 @@ export function pinsOfReport(report, focus = null) {
 }
 
 export function createCheck(env, DockHead) {
+    const t = env.pocket.t;
     const { pocket, store, systemData } = env;
     const { html, useEffect, useRef, useState } = pocket;
     const { Ico, Segmented, ago } = env.parts;
@@ -156,7 +157,7 @@ export function createCheck(env, DockHead) {
                             html`<button
                                 type="button"
                                 class="dsy-chip"
-                                title="Copy"
+                                title=${t("server.extensions.design.check.create-check.finding.title.copy", "Copy")}
                                 onClick=${async (event) => {
                                     event.stopPropagation();
 
@@ -192,14 +193,14 @@ export function createCheck(env, DockHead) {
                         <button
                             type="button"
                             class="dsy-accept"
-                            title="Accept: this is fine as it is. It leaves the counts, for everyone, until it is undone."
+                            title=${t("server.extensions.design.check.create-check.finding.title.accept-fine-leaves-counts", "Accept: this is fine as it is. It leaves the counts, for everyone, until it is undone.")}
                             aria-label=${`Accept finding ${number}: ${ruleOf(finding)}`}
                             onClick=${(event) => {
                                 event.stopPropagation();
                                 onAccept(finding);
                             }}
                         >
-                            Accept
+                            ${t("server.extensions.design.check.create-check.finding.button.accept", "Accept")}
                         </button>
                     </div>`
                 }
@@ -218,9 +219,13 @@ export function createCheck(env, DockHead) {
                 onClick=${() => setOpen(!open)}
             >
                 <${Ico} name="down" size=${15} />
-                <strong>Accepted</strong>
+                <strong
+                    >${t("server.extensions.design.check.create-check.accepted.strong.accepted", "Accepted")}</strong
+                >
                 <span class="dsn-count">${list.length}</span>
-                <span class="muted small">not in the counts</span>
+                <span class="muted small"
+                    >${t("server.extensions.design.check.create-check.accepted.span.not-counts", "not in the counts")}</span
+                >
             </button>
             ${
                 open &&
@@ -247,11 +252,11 @@ export function createCheck(env, DockHead) {
                                         <button
                                             type="button"
                                             class="dsy-accept"
-                                            title="Undo: it is counted again"
+                                            title=${t("server.extensions.design.check.create-check.accepted.title.undo-counted-again", "Undo: it is counted again")}
                                             aria-label=${`Undo the accept of ${ruleOf(finding)}`}
                                             onClick=${() => env.data.unaccept(design.id, finding.id)}
                                         >
-                                            Undo
+                                            ${t("server.extensions.design.check.create-check.accepted.button.undo", "Undo")}
                                         </button>
                                     </div>`
                                 }
@@ -410,14 +415,14 @@ export function createCheck(env, DockHead) {
                     !report &&
                     entry?.status !== "running" &&
                     html`<button type="button" class="button small" onClick=${() => run()}>
-                        Run the check
+                        ${t("server.extensions.design.check.create-check.check-dock.button.run-check", "Run the check")}
                     </button>`
                 }
             </div>`;
         }
 
         return html`<${DockHead}
-                title="Check"
+                title=${t("server.extensions.design.check.create-check.check-dock.title.check", "Check")}
                 count=${report ? report.summary.errors + report.summary.warnings : 0}
             />
             <div class="dsn-dock-body">
@@ -437,7 +442,7 @@ export function createCheck(env, DockHead) {
                         options.modes.length > 4
                             ? html`<select
                                   class="dsy-modeselect dsy-check-mode"
-                                  aria-label="Mode"
+                                  aria-label=${t("server.extensions.design.check.create-check.check-dock.aria-label.mode", "Mode")}
                                   value=${options.mode}
                                   onChange=${(event) =>
                                       store.set({
@@ -482,7 +487,7 @@ export function createCheck(env, DockHead) {
                             class="dsn-link"
                             onClick=${() => store.set({ checkWith: { ...s.checkWith, mode: null } })}
                         >
-                            Follow the canvas
+                            ${t("server.extensions.design.check.create-check.check-dock.button.follow-canvas", "Follow the canvas")}
                         </button>
                     </p>`
                 }
@@ -513,7 +518,7 @@ export function createCheck(env, DockHead) {
                                     ? html`<div
                                           class="dsy-check-filter"
                                           role="group"
-                                          aria-label="Show"
+                                          aria-label=${t("server.extensions.design.check.create-check.check-dock.aria-label.show", "Show")}
                                       >
                                           ${["all", "error", "warning"].map(
                                               (each) =>

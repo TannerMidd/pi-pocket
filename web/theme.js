@@ -1,3 +1,4 @@
+import { t } from "./ui-locale.js";
 // Appearance: the theme (a folder of CSS the server lists, `themes.ts`), the colors (Omarchy palettes as CSS variables,
 // a theme folder's own, or "Follow desktop": the Omarchy theme this machine runs), tiled windows, motion, text size,
 // density, and the sidebar's shape. Saved per browser. index.html applies the last look before the first paint from
@@ -476,7 +477,9 @@ export function chooseLook(id, event) {
 export function lookLabel() {
     const look = lookOf();
     const palette = paletteOf();
-    const colors = palette.desktop ? `${palette.name} (desktop)` : palette.name;
+    const colors = palette.desktop
+        ? t("web.theme.desktop-name", "{name} (desktop)", { name: palette.name })
+        : palette.name;
 
     return look && prefs().theme.split("@")[0] === look.id
         ? look.name

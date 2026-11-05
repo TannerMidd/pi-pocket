@@ -1,8 +1,13 @@
-/** The pages outside the app: signing in with a link, joining with an invite, and a share that arrived too early. */
+/**
+ * The pages outside the app: signing in with a link, joining with an invite, and a share that arrived too early. Each
+ * shows the fixed words of one language (`RequestLocale`): the catalog snapshot and the language are chosen once for
+ * the request by `http.ts`, and never again while a page waits for a session's title.
+ */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { PocketApp } from "../app.ts";
 import { type Auth, quickTunnelHost, setAuthCookie } from "../auth.ts";
 import { HttpError } from "../errors.ts";
+import type { RequestLocale } from "../ui-locales.ts";
 import { conversationId, escapeHtml, readBody, send } from "./io.ts";
 
 /** A form posted from another site, as browsers report it. Such a post must not sign this browser in or out. */
@@ -17,8 +22,9 @@ function localPath(next: string | null): string {
     return next !== null && /^\/(?![/\\])/.test(next) ? next : "/";
 }
 
-function page(title: string, body: string): string {
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="/style.css"></head><body class="plain-page"><main class="plain">${body}</main></body></html>`;
+/** A page outside the app, in the language of this request. `body` is HTML that core built and escaped already. */
+function page(title: string, body: string, lang: string): string {
+    return `<!doctype html><html lang="${escapeHtml(lang)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="/style.css"></head><body class="plain-page"><main class="plain">${body}</main></body></html>`;
 }
 
 /** `/login`: sign this browser in with a token from a link, after asking when it would switch accounts. */
@@ -27,6 +33,7 @@ export async function login(
     request: IncomingMessage,
     response: ServerResponse,
     url: URL,
+    locale: RequestLocale,
 ): Promise<void> {
     const posted = request.method === "POST";
 
@@ -46,8 +53,9 @@ export async function login(
             response,
             401,
             page(
-                "Pi Pocket",
-                `<h1>Link expired</h1><p>That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.</p>`,
+                locale.t("signin.title", "Pi Pocket"),
+                `<h1>${escapeHtml(locale.t("signin.link-expired-title", "Link expired"))}</h1><p>${escapeHtml(locale.t("signin.link-expired", "That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite."))}</p>`,
+                locale.lang,
             ),
             "text/html; charset=utf-8",
         );
@@ -61,8 +69,9 @@ export async function login(
             response,
             200,
             page(
-                "Switch account? · Pi Pocket",
-                `<h1>Switch account?</h1><p>This browser is signed in as ${escapeHtml(current.name)}. The link you opened signs it in as ${escapeHtml(signingIn.name)} instead.</p><form method="post" action="/login"><input type="hidden" name="token" value="${escapeHtml(token)}"><input type="hidden" name="next" value="${escapeHtml(next)}"><button type="submit">Sign in as ${escapeHtml(signingIn.name)}</button></form><p><a href="/">Stay signed in as ${escapeHtml(current.name)}</a></p>`,
+                locale.t("signin.switch-page-title", "Switch account? · Pi Pocket"),
+                `<h1>${escapeHtml(locale.t("signin.switch-title", "Switch account?"))}</h1><p>${escapeHtml(locale.t("signin.switch-body", "This browser is signed in as {current}. The link you opened signs it in as {next} instead.", { current: current.name, next: signingIn.name }))}</p><form method="post" action="/login"><input type="hidden" name="token" value="${escapeHtml(token)}"><input type="hidden" name="next" value="${escapeHtml(next)}"><button type="submit">${escapeHtml(locale.t("signin.switch-as", "Sign in as {name}", { name: signingIn.name }))}</button></form><p><a href="/">${escapeHtml(locale.t("signin.stay-as", "Stay signed in as {name}", { name: current.name }))}</a></p>`,
+                locale.lang,
             ),
             "text/html; charset=utf-8",
             { "referrer-policy": "no-referrer" },
@@ -83,6 +92,7 @@ export async function join(
     request: IncomingMessage,
     response: ServerResponse,
     code: string,
+    locale: RequestLocale,
 ): Promise<void> {
     if (request.method === "POST") {
         if (crossSite(request)) {
@@ -96,7 +106,11 @@ export async function join(
             return send(
                 response,
                 410,
-                page("Pi Pocket", "<h1>Invite expired</h1><p>Ask for a new one.</p>"),
+                page(
+                    locale.t("signin.title", "Pi Pocket"),
+                    `<h1>${escapeHtml(locale.t("signin.invite-expired-title", "Invite expired"))}</h1><p>${escapeHtml(locale.t("signin.invite-expired", "Ask for a new one."))}</p>`,
+                    locale.lang,
+                ),
                 "text/html; charset=utf-8",
             );
         }
@@ -122,8 +136,9 @@ export async function join(
             response,
             410,
             page(
-                "Pi Pocket",
-                "<h1>Invite expired</h1><p>Each invite works once, and only until it expires. Ask for a new one.</p>",
+                locale.t("signin.title", "Pi Pocket"),
+                `<h1>${escapeHtml(locale.t("signin.invite-expired-title", "Invite expired"))}</h1><p>${escapeHtml(locale.t("signin.invite-used", "Each invite works once, and only until it expires. Ask for a new one."))}</p>`,
+                locale.lang,
             ),
             "text/html; charset=utf-8",
         );
@@ -134,49 +149,63 @@ export async function join(
         // Signed in as someone else: say so, as switching accounts does.
         const switching =
             current !== undefined && current.role !== "owner"
-                ? `<p>This browser is signed in as ${escapeHtml(current.name)}. It will change to the owner.</p>`
+                ? `<p>${escapeHtml(locale.t("signin.owner-switch", "This browser is signed in as {name}. It will change to the owner.", { name: current.name }))}</p>`
                 : "";
 
         return send(
             response,
             200,
             page(
-                "Sign in as owner · Pi Pocket",
-                `<h1>Sign in as owner</h1><p>This device will sign in as you, the owner. It gets full control of Pi Pocket and of this machine.</p>${switching}<form method="post"><button type="submit">Sign in as owner</button></form>`,
+                locale.t("signin.owner-page-title", "Sign in as owner · Pi Pocket"),
+                `<h1>${escapeHtml(locale.t("signin.owner-title", "Sign in as owner"))}</h1><p>${escapeHtml(locale.t("signin.owner-body", "This device will sign in as you, the owner. It gets full control of Pi Pocket and of this machine."))}</p>${switching}<form method="post"><button type="submit">${escapeHtml(locale.t("signin.owner-sign-in", "Sign in as owner"))}</button></form>`,
+                locale.lang,
             ),
             "text/html; charset=utf-8",
             { "referrer-policy": "no-referrer" },
         );
     }
 
+    // The session's title is the person's own words: raw here, and escaped once with the sentence that holds it.
     const where =
         grant.session === undefined
-            ? "every session on this server"
-            : `the session “${escapeHtml(await app.conversationTitle(conversationId(grant.session)))}”`;
+            ? locale.t("signin.join-any", "every session on this server")
+            : locale.t("signin.join-one", "the session “{title}”", {
+                  title: await app.conversationTitle(conversationId(grant.session)),
+              });
     const can =
         grant.role === "viewer"
-            ? `read ${where} and chat with the people there, but not steer Pi`
-            : `read and steer ${where}. Pi can run commands on this machine`;
+            ? locale.t(
+                  "signin.join-read",
+                  "read {where} and chat with the people there, but not steer Pi",
+                  { where },
+              )
+            : locale.t(
+                  "signin.join-steer",
+                  "read and steer {where}. Pi can run commands on this machine",
+                  { where },
+              );
 
     return send(
         response,
         200,
         page(
-            "Join Pi Pocket",
-            `<h1>Join Pi Pocket</h1><p>This device will be able to ${can}.</p><form method="post"><label>Your name<input name="name" maxlength="40" autofocus required placeholder="e.g. Alex"></label><button type="submit">Join</button></form>`,
+            locale.t("signin.join-title", "Join Pi Pocket"),
+            `<h1>${escapeHtml(locale.t("signin.join-title", "Join Pi Pocket"))}</h1><p>${escapeHtml(locale.t("signin.join-body", "This device will be able to {can}.", { can }))}</p><form method="post"><label>${escapeHtml(locale.t("signin.name-label", "Your name"))}<input name="name" maxlength="40" autofocus required placeholder="${escapeHtml(locale.t("signin.name-placeholder", "e.g. Alex"))}"></label><button type="submit">${escapeHtml(locale.t("signin.join", "Join"))}</button></form>`,
+            locale.lang,
         ),
         "text/html; charset=utf-8",
     );
 }
 
 /** `/share`: a share that reached the server, before the service worker that takes shares was installed here. */
-export function sharePage(response: ServerResponse): void {
+export function sharePage(response: ServerResponse, locale: RequestLocale): void {
     return send(
         response,
         200,
         page(
-            "Share to Pi",
-            `<h1>Open Pi Pocket first</h1><p>Sharing works once Pi Pocket has been opened on this device over https. Open it, then share again.</p><p><a href="/">Open Pi Pocket</a></p>`,
+            locale.t("signin.share-page-title", "Share to Pi"),
+            `<h1>${escapeHtml(locale.t("signin.share-title", "Open Pi Pocket first"))}</h1><p>${escapeHtml(locale.t("signin.share-body", "Sharing works once Pi Pocket has been opened on this device over https. Open it, then share again."))}</p><p><a href="/">${escapeHtml(locale.t("signin.share-open", "Open Pi Pocket"))}</a></p>`,
+            locale.lang,
         ),
         "text/html; charset=utf-8",
     );

@@ -8,6 +8,7 @@ import { highlight, langOf } from "./highlight.js";
 import { RunFrame, useFitHeight } from "./run-frame.js";
 import { notify, openSheet } from "./store.js";
 import { COLOR_LIMIT, copyText, html, setRichBlock } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 // ─── A page, previewed ──────────────────────────────────────────────────────────────
 
@@ -80,7 +81,11 @@ export function previewDocument(source) {
  * HTML drawn as a page, with its scripts off: a frame of its own, without `allow-scripts`, so nothing in it runs, and
  * same-origin only so the app can measure it and fit the frame to it. Tap Run (`RunFrame`) for its scripts.
  */
-export function HtmlPreview({ source, title = "Preview" }) {
+export function HtmlPreview({
+    source,
+    // UI: looked up as the frame draws. A title a caller passes (`sheets/file.js`) stays its own.
+    title = t("web.rich.html-preview.text.preview", "Preview"),
+}) {
     const ref = useRef(null);
     const [height, fitHeight, resetFit] = useFitHeight(MIN_HEIGHT * 3, MIN_HEIGHT, MAX_HEIGHT);
     const page = useMemo(() => previewDocument(source), [source]);
@@ -149,19 +154,27 @@ export function HtmlPreview({ source, title = "Preview" }) {
 
 // ─── Blocks ───────────────────────────────────────────────────────────────────────
 
-const VIEW_NAMES = { html: "Preview", svg: "Image", diff: "Diff" };
+/** Each view's name: a key and its English, looked up as it draws, never at load. */
+const VIEW_NAMES = {
+    html: ["web.rich.rich-block.button.preview", "Preview"],
+    svg: ["web.rich.rich-block.button.image", "Image"],
+    diff: ["web.rich.rich-block.button.diff", "Diff"],
+};
 
 /** An SVG as an image: as an image, it runs no scripts and loads nothing. Tap it to see it full screen. */
 function SvgImage({ source }) {
     const [broken, setBroken] = useState(false);
 
     if (broken) {
-        return html`<p class="muted small rich-note">This SVG could not be drawn.</p>`;
+        return html`<p class="muted small rich-note">${t(
+            "web.rich.svg-image.p.svg-not-drawn",
+            "This SVG could not be drawn.",
+        )}</p>`;
     }
 
     return html`<img
         class="rich-svg"
-        alt="SVG image"
+        alt=${t("web.rich.svg-image.alt.svg-image", "SVG image")}
         src=${`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`}
         onError=${() => setBroken(true)}
     />`;
@@ -189,8 +202,8 @@ function RichBlock({ kind, lang, source, streaming, artifact = null }) {
 
     const copy = () =>
         copyText(source).then(
-            () => notify("info", "Copied."),
-            () => notify("error", "Could not copy."),
+            () => notify("info", t("web.rich.rich-block.copy.copied", "Copied.")),
+            () => notify("error", t("web.rich.rich-block.copy.not-copy", "Could not copy.")),
         );
 
     let body;
@@ -229,7 +242,7 @@ function RichBlock({ kind, lang, source, streaming, artifact = null }) {
                         class=${view === "shown" ? "on" : ""}
                         onClick=${() => setView("shown")}
                     >
-                        ${VIEW_NAMES[kind]}
+                        ${t(...VIEW_NAMES[kind])}
                     </button>
                     <button
                         type="button"
@@ -238,7 +251,7 @@ function RichBlock({ kind, lang, source, streaming, artifact = null }) {
                         class=${view === "code" ? "on" : ""}
                         onClick=${() => setView("code")}
                     >
-                        Code
+                        ${t("web.rich.rich-block.button.code", "Code")}
                     </button>
                 </span>`
             }
@@ -249,10 +262,21 @@ function RichBlock({ kind, lang, source, streaming, artifact = null }) {
                 html`<button
                     type="button"
                     class=${`rich-run ${running ? "on" : ""}`}
-                    title=${running ? "Stop its scripts" : "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app"}
+                    title=${
+                        running
+                            ? t("web.rich.rich-block.title.stop-scripts", "Stop its scripts")
+                            : t(
+                                  "web.rich.rich-block.title.run-scripts-sandbox-artifact",
+                                  "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app",
+                              )
+                    }
                     onClick=${() => setRunning(!running)}
                 >
-                    ${running ? "■ Stop" : "▶ Run"}
+                    ${
+                        running
+                            ? t("web.rich.rich-block.button.stop", "■ Stop")
+                            : t("web.rich.rich-block.button.run", "▶ Run")
+                    }
                 </button>`
             }
             ${
@@ -260,13 +284,19 @@ function RichBlock({ kind, lang, source, streaming, artifact = null }) {
                 html`<button
                     type="button"
                     class="copy"
-                    title="Open it in the artifact viewer, at this version"
+                    title=${t(
+                        "web.rich.rich-block.title.open-artifact-viewer-version",
+                        "Open it in the artifact viewer, at this version",
+                    )}
                     onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: artifact.version })}
                 >
-                    Open
+                    ${t("web.rich.rich-block.button.open", "Open")}
                 </button>`
             }
-            <button type="button" class="copy" onClick=${copy}>Copy</button>
+            <button type="button" class="copy" onClick=${copy}>${t(
+                "web.rich.rich-block.button.copy",
+                "Copy",
+            )}</button>
         </div>
         ${body}
     </div>`;
@@ -378,11 +408,18 @@ export function InlineArtifact({ conversationId, id, title, version }) {
                 class="copy"
                 onClick=${() => openSheet({ type: "viewer", id, version })}
             >
-                Open
+                ${t("web.rich.inline-artifact.button.open", "Open")}
             </button>
         </div>
         <p class="muted small rich-note">
-            ${page.failed ? "This version could not be loaded." : "Loading…"}
+            ${
+                page.failed
+                    ? t(
+                          "web.rich.inline-artifact.p.version-not-loaded",
+                          "This version could not be loaded.",
+                      )
+                    : t("web.rich.inline-artifact.p.loading", "Loading…")
+            }
         </p>
     </div>`;
 }

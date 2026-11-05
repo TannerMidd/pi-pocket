@@ -12,6 +12,7 @@ import {
 import type { SystemProblem } from "./system-types.ts";
 
 export function referenceSection(ctx: Ctx, max: number): string {
+    const t = ctx.locale.t;
     const all = ctx.system.tokens;
     const tokens = all.slice(0, max);
     const cut =
@@ -24,9 +25,9 @@ export function referenceSection(ctx: Ctx, max: number): string {
     const tiers = ["primitive", "semantic", "component"].filter((tier) =>
         tokens.some((token) => token.tier === tier),
     );
-    const toolbar = `<div class="toolbar" role="search"><input id="tq" type="search" placeholder="Search names and values" aria-label="Search the table of tokens" autocomplete="off" spellcheck="false"><select id="tt" aria-label="Filter by type">${option("", "All types")}${types.map((type) => option(type, `${type} (${tokens.filter((token) => token.type === type).length})`)).join("")}</select><select id="tr" aria-label="Filter by tier">${option("", "All tiers")}${tiers.map((tier) => option(tier, tier)).join("")}</select><span class="desc" id="tc" aria-live="polite">${plural(tokens.length, "token")}</span></div>`;
+    const toolbar = `<div class="toolbar" role="search"><input id="tq" type="search" placeholder="${esc(t("server.design.docsite-reference.reference-section.placeholder.search-names-values", "Search names and values"))}" aria-label="${esc(t("server.design.docsite-reference.reference-section.aria-label.search-table-tokens", "Search the table of tokens"))}" autocomplete="off" spellcheck="false"><select id="tt" aria-label="${esc(t("server.design.docsite-reference.reference-section.aria-label.filter-type", "Filter by type"))}">${option("", "All types")}${types.map((type) => option(type, `${type} (${tokens.filter((token) => token.type === type).length})`)).join("")}</select><select id="tr" aria-label="${esc(t("server.design.docsite-reference.reference-section.aria-label.filter-tier", "Filter by tier"))}">${option("", "All tiers")}${tiers.map((tier) => option(tier, tier)).join("")}</select><span class="desc" id="tc" aria-live="polite">${plural(tokens.length, "token")}</span></div>`;
 
-    return `<p class="intro">Every token with its CSS variable and its value in each mode. Click a name to copy it.</p>${cut}${toolbar}<div class="table-wrap stack" id="token-table"><table><thead><tr><th>Token</th><th>Type</th>${ctx.modes.map((mode) => `<th>${esc(modeLabel(mode))}</th>`).join("")}</tr></thead><tbody>${tableRows(ctx, tokens)}</tbody></table></div>`;
+    return `<p class="intro">${esc(t("server.design.docsite-reference.reference-section.p.every-token-css-variable", "Every token with its CSS variable and its value in each mode. Click a name to copy it."))}</p>${cut}${toolbar}<div class="table-wrap stack" id="token-table"><table><thead><tr><th>${esc(t("server.design.docsite-core.token-table.th.token", "Token"))}</th><th>${esc(t("server.design.docsite-core.token-table.th.type", "Type"))}</th>${ctx.modes.map((mode) => `<th>${esc(modeLabel(mode))}</th>`).join("")}</tr></thead><tbody>${tableRows(ctx, tokens)}</tbody></table></div>`;
 }
 
 function findings(summary: string, list: SystemProblem[], item: (entry: SystemProblem) => string) {
@@ -39,10 +40,12 @@ function findings(summary: string, list: SystemProblem[], item: (entry: SystemPr
 }
 
 export function problemsHtml(ctx: Ctx): string {
+    const t = ctx.locale.t;
     const { problems, notes = [] } = ctx.system;
     const errors = problems.filter((problem) => problem.level === "error").length;
+    // The words of the problem are the validator's, in English; only where it is placed is the page's own text.
     const where = (entry: SystemProblem) =>
-        `${entry.file === undefined ? "" : ` in <code>${esc(entry.file)}</code>`}${entry.token === undefined ? "" : ` at <code>${esc(entry.token)}</code>`}`;
+        `${entry.file === undefined ? "" : ` ${esc(t("server.design.docsite-reference.problems-html.where.in", "in"))} <code>${esc(entry.file)}</code>`}${entry.token === undefined ? "" : ` ${esc(t("server.design.docsite-reference.problems-html.where.at", "at"))} <code>${esc(entry.token)}</code>`}`;
 
     return (
         findings(
@@ -64,6 +67,8 @@ export function problemsHtml(ctx: Ctx): string {
 const FILE_PREVIEW = 3_000;
 
 export function codeSection(ctx: Ctx): string {
+    const t = ctx.locale.t;
+    const copy = t("ui.copy", "Copy");
     const { compiled } = ctx.system;
     const sample =
         findToken(ctx, BASE_GROUNDS) ??
@@ -101,11 +106,17 @@ export function codeSection(ctx: Ctx): string {
         ["components.css", "The CSS of every component.", compiled.components],
     ].filter(([, , text]) => text!.trim() !== "");
 
-    return `<div class="prose"><p>The system writes these files to <code>.pi/design/dist/</code>. Never copy a value by hand:</p><ul><li>CSS: link <code>tokens.css</code> and read a token with <code>var(${esc(sample?.cssVar ?? "--color-bg-surface")})</code>.${dark === undefined ? "" : ` Set <code>data-theme="${esc(ctx.slug.get(dark)!)}"</code> on <code>&lt;html&gt;</code> for the ${esc(modeLabel(dark).toLowerCase())} mode.`}</li><li>Tailwind v4: import <code>tailwind.css</code> after Tailwind. Each utility reads a token's variable, so it follows the mode.</li><li>Style Dictionary reads a <code>tokens.&lt;mode&gt;.resolved.json</code> file as it is. Tokens Studio loads <code>tokens.studio.json</code>.</li></ul></div>${files
+    // Every word is escaped where it lands, and a code span stays in the markup: a language never brings markup of its own.
+    const darkMode =
+        dark === undefined
+            ? ""
+            : ` ${esc(t("server.design.docsite-reference.code-section.code.set", "Set"))} <code>data-theme="${esc(ctx.slug.get(dark)!)}"</code> ${esc(t("server.design.docsite-reference.code-section.code.on", "on"))} <code>&lt;html&gt;</code> ${esc(t("server.design.docsite-reference.code-section.code.for-mode", "for the {mode} mode.", { mode: modeLabel(dark).toLowerCase() }))}`;
+
+    return `<div class="prose"><p>${esc(t("server.design.docsite-reference.code-section.p.system-writes-files", "The system writes these files to"))} <code>.pi/design/dist/</code>${esc(t("server.design.docsite-reference.code-section.p.never-copy-value", ". Never copy a value by hand:"))}</p><ul><li>${esc(t("server.design.docsite-reference.code-section.li.css-link", "CSS: link"))} <code>tokens.css</code> ${esc(t("server.design.docsite-reference.code-section.code.read-token", "and read a token with"))} <code>var(${esc(sample?.cssVar ?? "--color-bg-surface")})</code>.${darkMode}</li><li>${esc(t("server.design.docsite-reference.code-section.li.tailwind-v4-import", "Tailwind v4: import"))} <code>tailwind.css</code> ${esc(t("server.design.docsite-reference.code-section.code.after-tailwind-utility-reads", "after Tailwind. Each utility reads a token's variable, so it follows the mode."))}</li><li>${esc(t("server.design.docsite-reference.code-section.li.style-dictionary-reads", "Style Dictionary reads a"))} <code>tokens.&lt;mode&gt;.resolved.json</code> ${esc(t("server.design.docsite-reference.code-section.code.file-tokens-studio-loads", "file as it is. Tokens Studio loads"))} <code>tokens.studio.json</code>.</li></ul></div>${files
         .map(([title, note, text]) => {
             const id = `code-${idOf(title!)}`;
 
-            return `<details class="fold"><summary>${esc(title!)} <span class="desc">${esc(note!)}</span></summary>${text!.length > FILE_PREVIEW ? `<p class="sub">The first ${FILE_PREVIEW / 1000} KB of ${Math.round(text!.length / 1024)} KB. The whole file is in <code>.pi/design/dist/</code>, and in the zip that the System view exports.</p>` : ""}${snippet(id, clip(text!, FILE_PREVIEW), title!)}</details>`;
+            return `<details class="fold"><summary>${esc(title!)} <span class="desc">${esc(note!)}</span></summary>${text!.length > FILE_PREVIEW ? `<p class="sub">${esc(t("server.design.docsite-reference.code-section.p.first-kb", "The first {shown} KB of {total} KB. The whole file is in", { shown: String(FILE_PREVIEW / 1000), total: String(Math.round(text!.length / 1024)) }))} <code>.pi/design/dist/</code>${esc(t("server.design.docsite-reference.code-section.p.zip-export", ", and in the zip that the System view exports."))}</p>` : ""}${snippet(id, clip(text!, FILE_PREVIEW), title!, "", copy)}</details>`;
         })
         .join("")}`;
 }
