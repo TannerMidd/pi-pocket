@@ -4,6 +4,7 @@
 import { useRef } from "preact/hooks";
 import { nowDoing } from "./agent-now.js";
 import { store } from "./store.js";
+import { modelText } from "./subagents.js";
 import { html } from "./ui.js";
 
 /** Two clicks (or taps) this close together open the subagent, where `onOpen` is given: the board's. */
@@ -72,7 +73,9 @@ export function AgentTile({ agent, folder, selected = false, onActivate, onOpen 
                 aria-hidden="true"
             ></span>
             <span class="agent-tile-name">${agent.name}</span>
-            <span class="agent-tile-state">${waiting ? "needs approval" : "working"}</span>
+            <span class="agent-tile-state">
+                ${waiting ? "needs approval" : modelText(agent, { thinking: false }) || "working"}
+            </span>
         </span>
         <span class="agent-tile-now">${doing}</span>
     </button>`;

@@ -126,6 +126,8 @@ export function assemble(
     progress?: Progress,
 ): Obj {
     const paths = new Set(entries.map((entry) => entry.path.join(".")));
+    // A token's CSS variable is its path joined by "-": a renamed token must not take another's.
+    const vars = new Set(entries.map((entry) => entry.path.join("-")));
     // Indexed once: asking every path about every entry is quadratic (40 000 variables took 27 s).
     const groups = new Set<string>();
 
@@ -148,7 +150,16 @@ export function assemble(
         let path = entry.path;
 
         if (groups.has(name)) {
-            path = [...entry.path, paths.has(`${name}.default`) ? "base" : "default"];
+            const free = (end: string) =>
+                !vars.has(`${entry.path.join("-")}-${end}`) && !groups.has(`${name}.${end}`);
+            let end = free("default") ? "default" : "base";
+
+            for (let index = 2; !free(end); index += 1) {
+                end = `default-${index}`;
+            }
+
+            path = [...entry.path, end];
+            vars.add(path.join("-"));
             renamed.set(name, path.join("."));
         }
 

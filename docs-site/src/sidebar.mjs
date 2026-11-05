@@ -73,7 +73,7 @@ export const SIDEBAR = [
             ["CONTRIBUTING.md", "Contributing"],
             ["docs/docker.md", "Docker and Podman"],
             ["docs/systemd.md", "systemd service"],
-            ["docs/desktop.md", "Desktop apps"],
+            ["docs/embedders.md", "Embedders"],
             ["docs/self-editing.md", "Changing the code"],
             ["docs/map.md", "Project map"],
             ["docs/architecture.md", "Architecture"],

@@ -1434,6 +1434,29 @@ test("ended tasks past the last few go, with their files", { skip }, async () =>
     }
 });
 
+test("tasks that end while their message is gathered stay until it goes", { skip }, async () => {
+    const id = await session();
+    const sizes = app.background.sizes;
+    const was = sizes.keepEnded;
+
+    sizes.keepEnded = 1;
+
+    try {
+        const first = await app.background.start(id, { command: "echo first" });
+        const second = await app.background.start(id, { command: "sleep 0.3; echo second" });
+        const told = async (taskId: string) =>
+            (await items(id)).find((item) => item.id === taskId)?.toldAt !== undefined;
+
+        await until(() => told(second.id), "the message about the second");
+        const message = (await userTexts(id)).find((text) => text.includes("[background] Task"));
+
+        assert.match(message ?? "", new RegExp(`\\[background\\] Task ${first.id} `));
+        await until(() => !app.isBusy(id), "Pi to answer it");
+    } finally {
+        sizes.keepEnded = was;
+    }
+});
+
 test("waiting leaves no listener on the signal", async () => {
     const controller = new AbortController();
 

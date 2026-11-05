@@ -14,6 +14,7 @@ import {
 import { withQuote } from "./quote-text.js";
 import { loadFiles, mentionAt, mentionText, suggestFiles } from "./files.js";
 import { remember, searchHistory, sentHistory } from "./history.js";
+import { personStorage } from "./person-storage.js";
 import {
     actions,
     attempt,
@@ -23,7 +24,11 @@ import {
     navigate,
     notify,
     openSheet,
+    dropQuote,
+    giveBackQuote,
+    onItsWay,
     store,
+    takeInsert,
     typing,
     uid,
 } from "./store.js";
@@ -32,6 +37,7 @@ import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
+import { fingerprint } from "./text-hash.js";
 import { says } from "./turns.js";
 import { MicButton, useDictation } from "./voice.js";
 import {
@@ -44,6 +50,7 @@ import {
     Icon,
     Marked,
     modelLabel,
+    shortModelName,
     Spinner,
 } from "./ui.js";
 
@@ -75,8 +82,6 @@ const coarse = matchMedia("(pointer: coarse)").matches;
 let openedByAlt = null;
 
 export const openingByAlt = (id) => (openedByAlt = APPLE ? id : null);
-/** The newest "Send to Pi" text already put into a message box (see `insertIntoComposer`). */
-let insertedUpTo = 0;
 
 /** Pasted text this long goes into the box as a placeholder; the message goes out with the text in its place. */
 const PASTE_LINES = 20;
@@ -88,32 +93,22 @@ const REMEMBER_CHARS = 20_000;
 const MENTIONS_FILE = /(?:^|[\s([{])@(?:"[^"\n]+"|[^\s"]*[./][^\s"]*)/;
 const INLINE_KEY = "pocket.inlineFiles";
 
-const pasteKey = (id) => `pocket.pastes.${id ?? "home"}`;
+const pasteKey = (id) => `pastes.${id ?? "home"}`;
 
 /** Each conversation's pastes by number, kept with its draft so a reload keeps them. */
 function loadPastes(id) {
     try {
-        return JSON.parse(localStorage.getItem(pasteKey(id)) ?? "{}");
+        return JSON.parse(personStorage.get(pasteKey(id)) ?? "{}");
     } catch {
         return {};
     }
 }
 
-const attachedKey = (id) => `pocket.attached.${store.state.me?.id}.${id ?? "home"}`;
+const attachedKey = (id) => `attached.${id ?? "home"}`;
 let attachmentsStopped = false;
 
 addEventListener("pocket:signedOut", () => {
     attachmentsStopped = true;
-
-    try {
-        for (const key of Object.keys(localStorage)) {
-            if (key.startsWith("pocket.attached.")) {
-                localStorage.removeItem(key);
-            }
-        }
-    } catch {
-        // Storage can be unavailable.
-    }
 });
 
 /**
@@ -126,7 +121,7 @@ function loadAttached(id) {
     }
 
     try {
-        const list = JSON.parse(localStorage.getItem(attachedKey(id)) ?? "[]");
+        const list = JSON.parse(personStorage.get(attachedKey(id)) ?? "[]");
 
         return list.map((attachment) => ({
             key: uid(),
@@ -150,31 +145,119 @@ function saveAttached(id, files) {
 
     const list = files.filter((file) => file.state === "done").map((file) => file.attachment);
 
-    try {
-        if (list.length === 0) {
-            localStorage.removeItem(attachedKey(id));
-        } else {
-            localStorage.setItem(attachedKey(id), JSON.stringify(list));
-        }
-    } catch {
-        // No room: the files stay attached until the page goes.
-    }
+    personStorage.set(attachedKey(id), list.length === 0 ? null : JSON.stringify(list));
 }
 
 function savePastes(id, pastes) {
-    try {
-        if (Object.keys(pastes).length === 0) {
-            localStorage.removeItem(pasteKey(id));
-        } else {
-            localStorage.setItem(pasteKey(id), JSON.stringify(pastes));
-        }
-    } catch {
+    const saved = personStorage.set(
+        pasteKey(id),
+        Object.keys(pastes).length === 0 ? null : JSON.stringify(pastes),
+    );
+
+    if (!saved) {
         notify("warning", "This browser has no room to keep the paste after a reload.");
     }
 }
 
 /** The message with each paste's placeholder replaced by what was pasted. */
 const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes[n] ?? whole);
+
+/**
+ * Each conversation's message (or command) on its way, by its id: `{ text, quote, files }`, the box's words, its quote,
+ * and the paths of the files that go. It lives here, not in the box: a box shown again meanwhile (another route, Alt+A
+ * twice) holds it as on its way, and cannot send it twice. Its words and files stay in the draft until it went.
+ */
+const onTheWay = new Map();
+/** The boxes shown, each told when a message from its conversation went. */
+const sentListeners = new Set();
+
+const requestKey = (id) => `sendRequest.${id}`;
+
+/** The request id kept for conversation `id`, `{ what, requestId }`, or null. */
+function keptRequest(id) {
+    try {
+        const kept = JSON.parse(personStorage.get(requestKey(id)) ?? "null");
+
+        return typeof kept?.requestId === "string" ? kept : null;
+    } catch {
+        // A damaged value is no request id: a new one replaces it.
+        return null;
+    }
+}
+
+/**
+ * The request id of `message` (what goes: its kind, words, and files) with `quote` from
+ * conversation `id`. It is kept with the draft in the person's storage until the send went
+ * (`endSend`), or the person changes the words (`edit`). Sent again before, from a box shown
+ * again or after a reload, it goes with the same id, and the server gives back its first send
+ * instead of a second; a refusal stored nothing, so the same id goes as new. A reload loses the
+ * quote: the same words without one are the same message, and with another quote a new one.
+ */
+function requestFor(id, message, quote) {
+    const what = fingerprint(JSON.stringify(message));
+    const about = quote ? fingerprint(quote) : null;
+    const kept = keptRequest(id);
+
+    if (kept?.what === what && (about === null || kept.about === about)) {
+        return kept.requestId;
+    }
+
+    const requestId = uid();
+
+    personStorage.set(requestKey(id), JSON.stringify({ what, about, requestId }));
+
+    return requestId;
+}
+
+/**
+ * Start a send of `record` from conversation `id`'s box, with the request id of `message` (`record.requestId`; none for
+ * a command that runs in the browser); null while one is on its way from there.
+ */
+function beginSend(id, record, message) {
+    if (onTheWay.has(id)) {
+        return null;
+    }
+
+    record.requestId = message === null ? undefined : requestFor(id, message, record.quote?.text);
+    onTheWay.set(id, record);
+    store.set({});
+
+    return record;
+}
+
+/**
+ * The send of `record` from `id` ended. Once it went, its words, pastes, and files leave the draft, and what was put in
+ * meanwhile stays; if it did not go, the words and files are still there, and its quote comes back.
+ */
+function endSend(id, record, went) {
+    onTheWay.delete(id);
+
+    // It went: its request id is done with.
+    if (went && keptRequest(id)?.requestId === record.requestId) {
+        personStorage.set(requestKey(id), null);
+    }
+
+    if (went) {
+        // Words put in meanwhile (`takeInsert`) follow the sent ones without their end spaces.
+        const left = drafts.get(id).replace(record.text.trimEnd(), "").trim();
+
+        drafts.set(id, left);
+
+        if (left === "") {
+            savePastes(id, {});
+        }
+
+        saveAttached(
+            id,
+            loadAttached(id).filter((file) => !record.files.includes(file.attachment.path)),
+        );
+        sentListeners.forEach((listener) => listener(id, record));
+    } else {
+        giveBackQuote(record.quote, false, id);
+    }
+
+    store.set({});
+}
 
 /**
  * The subagents a waiting message carries reports from (`extensions/subagents.ts`), as the server reads them from its
@@ -457,7 +540,6 @@ export function Composer() {
     const [reading, setReading] = useState(null);
     // The queued message whose Interrupt was tapped once (`CONFIRM_INTERRUPT`).
     const [interrupting, setInterrupting] = useState(null);
-    const [sending, setSending] = useState(false);
     // Slash command suggestions: the highlighted one, and whether Escape hid the list.
     const [pick, setPick] = useState(0);
     const [hideCommands, setHideCommands] = useState(false);
@@ -498,19 +580,17 @@ export function Composer() {
     // Dictation writes into the box as typing does, so the draft keeps what was heard.
     const dictation = useDictation(box, (value, at) => {
         setBrowsing(null);
-        update(value, at);
+        edit(value, at);
     });
     // What is above the message box, and how it shares the room with the conversation (`dock.js`).
     const dock = useRef(null);
     const picker = useRef(null);
     const list = useRef(null);
-    // One per `!` command: sending it again after a lost reply runs it once. Made when the first is sent, not on each
-    // draw of the message box.
-    const requestId = useRef(null);
-    // An extension's command while its send is unresolved: sending the same text again finds the first run.
-    const commandRequest = useRef(null);
     const busy = view.live.busy;
     const agent = view.agent;
+    // The message on its way from here (`onTheWay`): the box holds it, read only, until it went.
+    const going = onTheWay.get(conversationId);
+    const sending = going !== undefined;
 
     // An Interrupt is for the run it was chosen in: when Pi stops working, an unused one goes back to Steer, so it does
     // not stop the next run. Steer and Queue stay as the person chose.
@@ -537,6 +617,29 @@ export function Composer() {
 
         return () => removeEventListener("pocket:signedOut", clear);
     }, []);
+    // A message from here went (sent by this box, or by the one before it showed again): it leaves the box.
+    useEffect(() => {
+        const went = (id, record) => {
+            if (id !== conversationId) {
+                return;
+            }
+
+            setBrowsing(null);
+            update(drafts.get(id));
+            setPastes(loadPastes(id));
+            setFiles((current) => {
+                const gone = current.filter((file) => record.files.includes(file.attachment?.path));
+
+                forget(gone);
+
+                return current.filter((file) => !gone.includes(file));
+            });
+        };
+
+        sentListeners.add(went);
+
+        return () => sentListeners.delete(went);
+    }, [conversationId]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -570,27 +673,17 @@ export function Composer() {
     const insert = store.state.composerInsert;
 
     useEffect(() => {
-        if (!insert || insert.n <= insertedUpTo) {
+        const taken = insert && takeInsert(drafts.get(conversationId));
+
+        if (taken?.files.length > 0) {
+            addFiles(taken.files);
+        }
+
+        if (!taken?.text) {
             return;
         }
 
-        insertedUpTo = insert.n;
-
-        if (insert.files?.length > 0) {
-            addFiles(insert.files);
-        }
-
-        if (insert.text === "") {
-            return;
-        }
-
-        const current = drafts.get(conversationId);
-
-        update(
-            current.trim() === ""
-                ? insert.text
-                : `${current.replace(/\s+$/, "")}${insert.inline ? " " : "\n\n"}${insert.text}`,
-        );
+        update(taken.text);
         requestAnimationFrame(() => {
             const element = box.current;
 
@@ -634,6 +727,24 @@ export function Composer() {
 
         // A command is not a message to Pi: no "typing to Pi" for it.
         typing(value.trim() === "" || value.startsWith("/") ? null : "pi");
+    };
+
+    /**
+     * The box's own change of its words (typing, dictation, history, a suggestion, a module's key): none while they are
+     * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in.
+     */
+    const edit = (value, at) => {
+        if (onTheWay.has(conversationId)) {
+            return;
+        }
+
+        // Changed words are a new message, also when typed again the same: not one sent again
+        // after a lost answer.
+        if (value !== text && keptRequest(conversationId)) {
+            personStorage.set(requestKey(conversationId), null);
+        }
+
+        update(value, at);
     };
 
     // Ctrl+R: what was sent before that has the words in the box.
@@ -689,43 +800,24 @@ export function Composer() {
 
     /** Run a slash command. The text goes away once it worked; attached files stay for the next message. */
     const runCommand = async ({ command, arg }, sent) => {
-        let request = null;
+        // Only an extension's command runs on the server, which finds a first run by its request id.
+        const record = beginSend(
+            conversationId,
+            { text, quote: null, files: [] },
+            command.extension ? ["command", command.id, sent] : null,
+        );
 
-        if (command.extension) {
-            const kept = commandRequest.current;
-
-            request =
-                kept?.commandId === command.id &&
-                kept.text === sent &&
-                kept.conversationId === conversationId
-                    ? kept
-                    : { requestId: uid(), commandId: command.id, text: sent, conversationId };
-            commandRequest.current = request;
+        if (!record) {
+            return;
         }
 
-        setSending(true);
         const ok = await attempt(async () => {
-            try {
-                await command.run(arg, request?.requestId);
-            } catch (error) {
-                // A 4xx made no run, or refused it for good: the next send is a new request. After a network error
-                // or a 5xx, the run may be there: the same send finds it.
-                if (error.status >= 400 && error.status < 500) {
-                    commandRequest.current = null;
-                }
-
-                throw error;
-            }
+            await command.run(arg, record.requestId);
 
             return true;
         });
 
-        setSending(false);
-
-        if (ok) {
-            commandRequest.current = null;
-            update("");
-        }
+        endSend(conversationId, record, Boolean(ok));
     };
 
     /**
@@ -738,7 +830,7 @@ export function Composer() {
         const space = item.dir || /^\s/.test(rest) ? "" : " ";
         const at = mention.start + written.length + (item.dir ? 0 : 1);
 
-        update(`${text.slice(0, mention.start)}${written}${space}${rest}`, at);
+        edit(`${text.slice(0, mention.start)}${written}${space}${rest}`, at);
         requestAnimationFrame(() => {
             const element = box.current;
 
@@ -754,7 +846,7 @@ export function Composer() {
     /** A tapped suggestion: commands that take text, and prompt templates, fill the box; the others run at once. */
     const choose = (command) => {
         if (command.args || command.template) {
-            update(`/${command.name} `);
+            edit(`/${command.name} `);
             focusEnd();
         } else if (store.state.replyQuote) {
             notify("info", "A quote cannot go with a command. Remove the quote to run it.");
@@ -781,16 +873,11 @@ export function Composer() {
             store.state.replyQuote ||
             files.some((file) => file.state === "done"));
 
-    /** What went out stays for ↑; its pastes are done with. */
+    /** What went out stays for ↑. */
     const sent = (full) => {
         if (full.length <= REMEMBER_CHARS) {
             remember(full, historyScope);
         }
-
-        setPastes({});
-        savePastes(conversationId, {});
-        setBrowsing(null);
-        update("");
     };
 
     /** Run `!command` in the session's folder. Its entry shows once it is done; until then, a row says it runs. */
@@ -801,12 +888,17 @@ export function Composer() {
             return notify("info", "Say which command to run, such as !git status.");
         }
 
-        setSending(true);
+        const record = beginSend(conversationId, { text, quote: null, files: [] }, ["shell", full]);
+
+        if (!record) {
+            return;
+        }
+
         const started = await attempt(() =>
-            actions.shell(command, !full.startsWith("!!"), (requestId.current ??= uid())),
+            actions.shell(command, !full.startsWith("!!"), record.requestId),
         );
 
-        setSending(false);
+        endSend(conversationId, record, Boolean(started));
 
         if (!started) {
             return;
@@ -818,7 +910,6 @@ export function Composer() {
                 { taskId: started.taskId, command, conversationId, at: Date.now() },
             ],
         }));
-        requestId.current = null;
         sent(full);
     };
 
@@ -852,12 +943,28 @@ export function Composer() {
             return runShell(full);
         }
 
-        setSending(true);
-        const going = files.filter((file) => file.state === "done");
-        const attachments = going.map((file) => file.attachment);
+        // The quote goes with the message, out of its box at once: no box shown again meanwhile offers it.
+        const quote = store.state.replyQuote;
+        const attachments = files
+            .filter((file) => file.state === "done")
+            .map((file) => file.attachment);
+        const paths = attachments.map((attachment) => attachment.path);
+        // The message is its words and files, which a reload keeps; its quote, which lives in this
+        // page only, is apart.
+        const record = beginSend(conversationId, { text, quote, files: paths }, [
+            "message",
+            full,
+            paths,
+        ]);
+
+        if (!record) {
+            return;
+        }
+
+        dropQuote(quote);
         const ok = await attempt(() =>
             actions.submit(
-                withQuote(store.state.replyQuote, full),
+                withQuote(quote?.text, full),
                 attachments,
                 busy
                     ? other === true && sendMode !== "interrupt"
@@ -867,10 +974,12 @@ export function Composer() {
                         : sendMode
                     : "followUp",
                 inlineFiles && mentionsFiles,
+                record.requestId,
             ),
         );
 
-        setSending(false);
+        // Files pasted while it went stay for the next message.
+        endSend(conversationId, record, Boolean(ok));
 
         if (ok) {
             // Interrupting stops the run: do not let the next message stop one by habit.
@@ -879,10 +988,6 @@ export function Composer() {
             }
 
             sent(full);
-            store.set({ replyQuote: null });
-            // Files pasted while it went stay for the next message.
-            forget(going);
-            setFiles((current) => current.filter((file) => !going.includes(file)));
 
             if (!coarse) {
                 box.current?.focus();
@@ -923,7 +1028,7 @@ export function Composer() {
 
     /** Put a message sent before into the box, to send again or change. */
     const recall = (value, at = value.length) => {
-        update(value, at);
+        edit(value, at);
         requestAnimationFrame(() => box.current?.setSelectionRange(at, at));
     };
 
@@ -983,7 +1088,7 @@ export function Composer() {
     const onKey = (event) => {
         // A module's key (`pocket.composerKey`) comes first: it may take any key, the box's own too.
         const keyed = keyBox(event.currentTarget, "session", (value, start, end) => {
-            update(value, start);
+            edit(value, start);
             requestAnimationFrame(() => box.current?.setSelectionRange(start, end));
         });
 
@@ -1182,7 +1287,7 @@ export function Composer() {
         const value = event.clipboardData?.getData("text/plain") ?? "";
         const lines = value.replace(/\n$/, "").split("\n").length;
 
-        if (lines <= PASTE_LINES && value.length <= PASTE_CHARS) {
+        if (sending || (lines <= PASTE_LINES && value.length <= PASTE_CHARS)) {
             return;
         }
 
@@ -1202,6 +1307,7 @@ export function Composer() {
         );
     };
 
+    const shownQuote = going?.quote ?? store.state.replyQuote;
     const placeholder = dictation.listening
         ? "Listening…"
         : busy
@@ -1574,6 +1680,7 @@ export function Composer() {
                                     <button
                                         class="icon-button small"
                                         aria-label=${`Remove ${file.name}`}
+                                        disabled=${onItsWay(going?.files, file.attachment?.path)}
                                         onClick=${() => {
                                             forget([file]);
                                             setFiles((current) =>
@@ -1588,14 +1695,15 @@ export function Composer() {
                         </div>`
                     }
                     ${
-                        store.state.replyQuote &&
+                        shownQuote &&
                         html`<div class="quote-strip" data-part="quote-strip">
                             <${Icon} name="reply" size=${13} />
-                            <span class="quote-strip-text">${store.state.replyQuote}</span>
+                            <span class="quote-strip-text">${shownQuote.text}</span>
                             <button
                                 class="icon-button small"
                                 aria-label="Remove the quote"
-                                onClick=${() => store.set({ replyQuote: null })}
+                                disabled=${onItsWay(going && [going.quote], shownQuote)}
+                                onClick=${() => dropQuote(shownQuote)}
                             >
                                 <${Icon} name="close" size=${12} />
                             </button>
@@ -1609,7 +1717,7 @@ export function Composer() {
                         placeholder=${placeholder}
                         onInput=${(event) => {
                             setBrowsing(null);
-                            update(event.currentTarget.value, event.currentTarget.selectionStart);
+                            edit(event.currentTarget.value, event.currentTarget.selectionStart);
                         }}
                         onKeyDown=${onKey}
                         onKeyUp=${(event) => setCaret(event.currentTarget.selectionStart)}
@@ -1677,6 +1785,7 @@ export function Composer() {
                             dictation=${dictation}
                             class="composer-mic"
                             part="composer-button"
+                            disabled=${sending}
                         />
                         <button
                             class=${`send-button ${canSend ? "ready" : ""}`}
@@ -1780,12 +1889,7 @@ function fitBox(element) {
 }
 
 /** A model's short name for the message box: "opus 4.5" for "Claude Opus 4.5". */
-export const shortModel = (agent) =>
-    modelLabel(agent)
-        // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
-        .replace(/^[^:]{1,24}:\s*/, "")
-        .replace(/^(?:anthropic\s+)?claude\s+/i, "")
-        .toLowerCase();
+export const shortModel = (agent) => shortModelName(modelLabel(agent));
 
 /** Stop the run: a square in the failure color. */
 function StopButton() {
@@ -2158,7 +2262,7 @@ defineItem("status", {
 });
 
 /** Under the message box: the `status` slot's items, on one row: a narrow one takes shorter forms (`SHORTER`). */
-function StatusLine() {
+export function StatusLine() {
     const line = useRef(null);
     const items = slotItems("status");
     const parts = items.map(({ node }) => node);

@@ -1,4 +1,4 @@
-// The desktop bridge in a real page, with the host and Window Controls Overlay supplied before the app starts.
+// The app bridge in a real page, with `window.pocketHost` and Window Controls Overlay supplied before the app starts.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -25,22 +25,23 @@ const real = {
     skip: chromium === undefined ? "no Chromium-based browser on this machine" : false,
 } as const;
 
-// A desktop app installs its bridge before the page's modules run. Keep the calls so the test can inspect them.
+// An embedder installs its app bridge before the page's modules run. Keep the calls so the test can inspect them.
 const preload = `<script>
-    const desktop = globalThis.desktopTest = {
+    const embedder = globalThis.embedderTest = {
         notifications: [], badges: [], pinned: [], invoked: [], visible: true, listener: null,
         emit(event) { this.listener(event); },
     };
     globalThis.pocketHost = {
         apiVersion: 1,
         capabilities: ["menu", "badge", "notify", "visibility", "pinned", "open"],
-        subscribe(listener) { desktop.listener = listener; },
-        visible() { return desktop.visible; },
-        notify(message) { desktop.notifications.push(message); },
-        setBadge(count) { desktop.badges.push(count); },
-        setPinned(sessions) { desktop.pinned.push(sessions); },
+        subscribe(listener) { embedder.listener = listener; },
+        visible() { return embedder.visible; },
+        notify(message) { embedder.notifications.push(message); },
+        setBadge(count) { embedder.badges.push(count); },
+        setPinned(sessions) { embedder.pinned.push(sessions); },
+        menuTitle() { return "Pi Pocket GUI"; },
         menuItems() { return [{ id: "settings", label: "Server settings…" }]; },
-        invoke(id) { desktop.invoked.push(id); },
+        invoke(id) { embedder.invoked.push(id); },
     };
     const overlay = globalThis.overlayTest = Object.assign(new EventTarget(), {
         visible: false,
@@ -96,7 +97,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
-        dataDir: mkdtempSync(join(root, "desktop-ui-")),
+        dataDir: mkdtempSync(join(root, "embedder-ui-")),
         load: async () => undefined,
         save: () => {},
     });
@@ -108,7 +109,7 @@ before(async () => {
             inPage<boolean>(
                 `return JSON.stringify((await import("/store.js")).store.state.sessionsLoaded)`,
             ),
-        "the signed-in desktop page",
+        "the signed-in embedded page",
         20_000,
     );
 });
@@ -127,40 +128,40 @@ test(
     async () => {
         const query = queries.at(-1);
 
-        assert.equal(query?.get("host"), "notify");
+        assert.equal(query?.get("embedder"), "notify");
         assert.equal(query?.get("p"), "6");
         await until(
-            () => [...app.clients].some((client) => client.desktop),
-            "the desktop connection",
+            () => [...app.clients].some((client) => client.embedder),
+            "the embedder connection",
         );
         const message = {
             title: "Pi finished",
             body: "done",
             url: `/s/${session}`,
-            tag: "desktop-ui",
+            tag: "embedder-ui",
         };
 
         for (const client of app.clients) {
-            if (client.desktop) {
-                client.send("desktop-notify", message);
+            if (client.embedder) {
+                client.send("embedder-notify", message);
             }
         }
 
         await until(
-            () => inPage<boolean>(`return JSON.stringify(desktopTest.notifications.length === 1)`),
+            () => inPage<boolean>(`return JSON.stringify(embedderTest.notifications.length === 1)`),
             "the native notification",
         );
         assert.deepEqual(
-            await inPage(`return JSON.stringify(desktopTest.notifications[0])`),
+            await inPage(`return JSON.stringify(embedderTest.notifications[0])`),
             message,
         );
         await page.evaluate(`
         const { store } = await import("/store.js");
         store.set({ pinned: [${session}] });
-        const [item] = (await import("/desktop.js")).hostMenuItems();
+        const [item] = (await import("/embedder.js")).hostMenu().items;
         item.run();
     `);
-        assert.deepEqual(await inPage(`return JSON.stringify(desktopTest.invoked)`), ["settings"]);
+        assert.deepEqual(await inPage(`return JSON.stringify(embedderTest.invoked)`), ["settings"]);
         await page.evaluate(`(await import("/store.js")).openSheet({ type: "menu" })`);
         await until(
             () =>
@@ -173,31 +174,35 @@ test(
             `return JSON.stringify([...document.querySelectorAll(".sheet .group-title")].map((each) => each.textContent.trim()))`,
         );
 
-        assert.equal(groups.at(-1), "Desktop", "the desktop app's items come last, below App");
+        assert.equal(
+            groups.at(-1),
+            "Pi Pocket GUI",
+            "the embedder's group comes last, below App, under its title",
+        );
         assert.equal(groups.at(-2), "App");
         await page.evaluate(`(await import("/store.js")).closeSheet()`);
         assert.equal(
-            await inPage(`return JSON.stringify(desktopTest.pinned.at(-1)[0].state)`),
+            await inPage(`return JSON.stringify(embedderTest.pinned.at(-1)[0].state)`),
             "seen",
-            "the bridge keeps its shape names, not the row's new idle theme state",
+            "the app bridge keeps its shape names, not the row's new idle theme state",
         );
-        assert.equal(await inPage(`return JSON.stringify(desktopTest.badges.at(-1))`), 0);
+        assert.equal(await inPage(`return JSON.stringify(embedderTest.badges.at(-1))`), 0);
         await page.evaluate(`
-        desktopTest.visible = false;
-        desktopTest.emit({ type: "visibility", visible: false });
+        embedderTest.visible = false;
+        embedderTest.emit({ type: "visibility", visible: false });
     `);
         assert.equal(
             await inPage(`return JSON.stringify((await import("/host.js")).pageVisible())`),
             false,
         );
         await until(
-            () => [...app.clients].some((client) => client.desktop && client.visible === false),
-            "the hidden desktop connection",
+            () => [...app.clients].some((client) => client.embedder && client.visible === false),
+            "the hidden embedder connection",
         );
         await page.evaluate(`
-        desktopTest.visible = true;
-        desktopTest.emit({ type: "visibility", visible: true });
-        desktopTest.emit({ type: "open", url: "/s/${session}" });
+        embedderTest.visible = true;
+        embedderTest.emit({ type: "visibility", visible: true });
+        embedderTest.emit({ type: "open", url: "/s/${session}" });
     `);
         await until(
             () =>
@@ -219,7 +224,7 @@ test(
         );
         await page.evaluate(`(await import("/store.js")).connect()`);
         await until(() => queries.at(-1)?.has("have") === true, "the kept session query");
-        assert.equal(queries.at(-1)?.get("host"), "notify");
+        assert.equal(queries.at(-1)?.get("embedder"), "notify");
         assert.equal(queries.at(-1)?.get("p"), "6");
     },
 );

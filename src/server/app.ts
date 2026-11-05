@@ -119,10 +119,17 @@ import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { CustomProviders } from "./custom-providers.ts";
-import { type DesktopMessage, PushStore } from "./push.ts";
+import { type EmbedderMessage, PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
-import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
+import {
+    type Client,
+    reportingOf,
+    Room,
+    ROOM_DOCS,
+    type SubagentModel,
+    subagentView,
+} from "./room.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
 import { BackgroundTasks } from "./background.ts";
@@ -480,6 +487,7 @@ export class PocketApp {
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
     #unsubscribeCommits: (() => void) | undefined;
+    #unsubscribeRunEnds: (() => void) | undefined;
     #unsubscribeApprovals: (() => void) | undefined;
     #unsubscribeBrowsers: (() => void) | undefined;
     #lockFile: string;
@@ -1013,6 +1021,7 @@ export class PocketApp {
         });
 
         this.#unsubscribeCommits = () => commits.detach();
+        this.#unsubscribeRunEnds = this.linkedSessions.watch();
         this.#unsubscribeApprovals = this.approvals.subscribe((id) => {
             void this.#rooms.get(id)?.then(
                 (room) => room.schedule(),
@@ -1342,6 +1351,16 @@ export class PocketApp {
                 this.#agents.set(id, value as AgentState);
             }
 
+            const parent = this.#parents.get(id);
+
+            // A subagent's row in its parent's subagents bar shows its model.
+            if (parent !== undefined) {
+                void this.#rooms.get(parent)?.then(
+                    (room) => room.schedule(),
+                    () => {},
+                );
+            }
+
             sessionsChanged = true;
         } else if (kind === SessionsDoc.definition.kind) {
             const before = this.#sessions;
@@ -1453,11 +1472,13 @@ export class PocketApp {
             get retry() {
                 return safe(() => settings.getRetrySettings()) ?? {};
             },
+            // Every message that waits goes in at once, so a queue of agents' messages and reports costs one turn, not
+            // one each. Pi's own setting, when the owner set one, still wins.
             get steeringMode() {
-                return safe(() => settings.getSteeringMode());
+                return safe(() => settings.getSettings().steeringMode) ?? "all";
             },
             get followUpMode() {
-                return safe(() => settings.getFollowUpMode());
+                return safe(() => settings.getSettings().followUpMode) ?? "all";
             },
         } as HarnessSettings;
     }
@@ -2127,12 +2148,12 @@ export class PocketApp {
     }
 
     /**
-     * Send a notification to this person's desktop apps, over their live connections: Web Push
-     * cannot reach them. Each connected one gets it; the app shows one per tag. Returns how many
-     * got it.
+     * Send a notification to this person's embedders (apps that show Pi Pocket and its notifications
+     * themselves), over their live connections: Web Push cannot reach them. Each connected one gets
+     * it; the embedder shows one per tag. Returns how many got it.
      */
-    notifyDesktops(userId: string, message: DesktopMessage): number {
-        // Web Push clips; a desktop app takes the same, and the whole call for an approval.
+    notifyEmbedders(userId: string, message: EmbedderMessage): number {
+        // Web Push clips; an embedder takes the same, and the whole call for an approval.
         message = {
             ...message,
             title: message.title.slice(0, 200),
@@ -2141,8 +2162,8 @@ export class PocketApp {
         let sent = 0;
 
         for (const client of this.#clients) {
-            if (client.user.id === userId && client.desktop === true) {
-                client.send("desktop-notify", message);
+            if (client.user.id === userId && client.embedder !== undefined) {
+                client.send(client.embedder, message);
                 sent += 1;
             }
         }
@@ -2150,10 +2171,10 @@ export class PocketApp {
         return sent;
     }
 
-    /** Whether any desktop app that shows notifications is connected now. */
-    hasDesktops(): boolean {
+    /** Whether any embedder that shows notifications is connected now. */
+    hasEmbedders(): boolean {
         for (const client of this.#clients) {
-            if (client.desktop === true) {
+            if (client.embedder !== undefined) {
                 return true;
             }
         }
@@ -2434,6 +2455,7 @@ export class PocketApp {
                         this.#busy.has(record.conversationId),
                         reporting.has(name),
                         limited.get(Number(record.conversationId)),
+                        this.subagentModel(record.conversationId),
                     ),
                     ...(ask === undefined
                         ? {}
@@ -2819,6 +2841,31 @@ export class PocketApp {
                 };
             })
             .sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+
+    /**
+     * The model a subagent runs on, for its row in the subagents bar and on the board, and whether it is another model
+     * than its parent's; none before its agent is known.
+     */
+    subagentModel(id: ConversationId): SubagentModel | undefined {
+        const agent = this.#agents.get(id);
+        const ref = agent?.model;
+
+        if (ref === undefined) {
+            return undefined;
+        }
+
+        const parent = this.#parents.get(id);
+        const theirs = parent === undefined ? undefined : this.#agents.get(parent)?.model;
+
+        return {
+            name: this.models.getModel(ref.provider, ref.modelId)?.name ?? ref.modelId,
+            ...(agent?.thinkingLevel === undefined ? {} : { thinking: agent.thinkingLevel }),
+            ...(theirs !== undefined &&
+            (theirs.provider !== ref.provider || theirs.modelId !== ref.modelId)
+                ? { other: true as const }
+                : {}),
+        };
     }
 
     isBusy(id: ConversationId): boolean {
@@ -4121,6 +4168,7 @@ export class PocketApp {
             this.limits.close();
             this.background.close();
             this.#unsubscribeCommits?.();
+            this.#unsubscribeRunEnds?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
             this.guard.close();

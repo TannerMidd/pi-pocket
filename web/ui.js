@@ -25,6 +25,54 @@ export const fileUrl = (path, conversationId = currentConversation()) =>
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
 
+/** Attached types that go to a model that takes images, up to this size (`model-images.ts`). */
+const MODEL_IMAGE_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+]);
+const MAX_MODEL_IMAGE = 5 * 1024 * 1024;
+/** Photos a browser cannot show: the server sends them to the model as JPEG. */
+const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
+
+/**
+ * A file named with `@` that can go to the model as an image, before the attached ones. It is not in the entry's `files`,
+ * which lists only the text files sent along.
+ */
+const MENTIONED_IMAGE = /(?:^|[\s([{])@(?:"[^"\n]*|[^\s"]*)\.(?:png|jpe?g|gif|webp|heic|heif)\b/i;
+
+/**
+ * Where a sent attachment's thumbnail loads from, or null when it shows as a file chip. `files` are the message's
+ * attachment lines (`{ path, mime, size, noted }`); `entry` the message, with its text and how many images it stores
+ * (`images`). A HEIC or HEIF photo shows the JPEG the model got, the stored image in its place among the attached ones.
+ * Only when that place is sure: its line says it was converted, no file sent by name can be an image, and every
+ * attached image is stored, so a failed one cannot shift another into its place.
+ */
+export function attachedPictureSrc(file, files, entry, conversationId) {
+    if (!file.path || !file.mime.startsWith("image/")) {
+        return null;
+    }
+
+    if (!HEIC_TYPES.has(file.mime)) {
+        return fileUrl(file.path, conversationId);
+    }
+
+    const sent = files.filter(
+        (each) => MODEL_IMAGE_TYPES.has(each.mime) && each.size <= MAX_MODEL_IMAGE,
+    );
+    const mentioned = MENTIONED_IMAGE.test(entry.text ?? "");
+
+    if (!file.noted || mentioned || (entry.images ?? 0) !== sent.length) {
+        return null;
+    }
+
+    return entryImageUrl(entry.id, sent.indexOf(file), conversationId);
+}
+
 /** Where the browser loads `![alt](src)` from. Web and data URLs stay; paths and file:// URLs point at the server. */
 function imageSource(src, conversationId) {
     const value = String(src ?? "").trim();
@@ -1945,6 +1993,14 @@ export function modelLabel(agent) {
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");
 }
+
+/** A model's name as the composer's chip says it: "opus 5.5" for "Anthropic: Claude Opus 5.5". */
+export const shortModelName = (name) =>
+    name
+        // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
+        .replace(/^[^:]{1,24}:\s*/, "")
+        .replace(/^(?:anthropic\s+)?claude\s+/i, "")
+        .toLowerCase();
 
 /** An on and off switch, named for screen readers by `label`. */
 export function Switch({ on, disabled, label, onChange }) {

@@ -7,6 +7,7 @@ import type { EntryRecord, LiveState, UsageState } from "@earendil-works/pi-dura
 import {
     COMMAND_ENTRY,
     type CommandData,
+    CONTEXT_BLOCK,
     FILE_BLOCK,
     FROM_PI_ENTRY,
     FROM_PREFIX,
@@ -474,11 +475,19 @@ function userPieces(message: Record<string, unknown> | undefined): {
         part.type === "text" &&
         typeof part.text === "string" &&
         part.text.startsWith(FILE_BLOCK);
+    // What Pi Pocket added for the model alone, as where a passage came from: never shown.
+    const isContext = (part: ContentPart, index: number) =>
+        index > 0 &&
+        part.type === "text" &&
+        typeof part.text === "string" &&
+        part.text.startsWith(CONTEXT_BLOCK);
     const files = (parts ?? [])
         .filter(isFile)
         .map((part) => String(part.text).slice(FILE_BLOCK.length).split('"', 1)[0]!);
     const raw = textOfContent(
-        parts === undefined ? content : parts.filter((part, index) => !isFile(part, index)),
+        parts === undefined
+            ? content
+            : parts.filter((part, index) => !isFile(part, index) && !isContext(part, index)),
     );
 
     return files.length === 0 ? { raw, images } : { raw, images, files };

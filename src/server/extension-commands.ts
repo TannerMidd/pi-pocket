@@ -342,11 +342,17 @@ export class ExtensionCommands {
         );
         const outcome = completed.state.outcome;
 
-        if (outcome.result !== undefined) {
-            return { taskId: Number(taskId), ...outcome.result };
-        }
-
-        throw new HttpError(500, "The command could not finish. It was not run again.");
+        // A run that ended with no result failed, as one whose handler threw: an answer that says so, which a browser
+        // does not take for a lost one (its next send of the same command is a new request, and runs it again).
+        return {
+            taskId: Number(taskId),
+            ...(outcome.result ?? {
+                status: "failed",
+                type: "toast",
+                level: "error",
+                message: "The command could not finish, and may have done part of its work.",
+            }),
+        };
     }
 
     /** The task of a request sent before, when it asked for the same; a 409 when the request id was used otherwise. */

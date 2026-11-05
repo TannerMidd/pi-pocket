@@ -1096,7 +1096,7 @@ kbd {
     app-region: drag;
 }
 
-/* The title's button lies over its text, and a desktop app reads drag regions in page order: the whole title is no-drag. */
+/* The title's button lies over its text, and an embedder reads drag regions in page order: the whole title is no-drag. */
 :root:is([data-window-controls="left"], [data-window-controls="right"]) .topbar > .title {
     flex: 0 1 auto;
     margin-right: auto;
@@ -7093,6 +7093,11 @@ div.group-head {
     .sheet.wide {
         max-width: 760px;
     }
+    /* Pending memories (PiP's strip): as tall as a full Memory sheet (its 86dvh, inside the overlay's 7vh and 16px), not
+       a short card high on the screen. */
+    .sheet.pending-memories {
+        min-height: min(86dvh, calc(93dvh - 16px));
+    }
     .leaving .sheet {
         animation: pop-out var(--t-out) linear forwards;
     }
@@ -9507,6 +9512,22 @@ div.group-head {
 .notice.leaving {
     pointer-events: none;
     animation: toast-out var(--t-out) linear forwards;
+}
+
+.account-cover[open] {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+    color: var(--text);
 }
 
 .signin,
@@ -13255,7 +13276,12 @@ textarea.notes {
 }
 
 .agent-tile-state {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 50%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     color: var(--faint);
     font-size: 10.5px;
     letter-spacing: 0.02em;
@@ -16938,6 +16964,21 @@ textarea.notes {
     font-variant-numeric: tabular-nums;
 }
 
+/* The model a subagent runs on: "↗" before it says it is not its session's model; no color of its own. */
+.agent-model {
+    min-width: 0;
+    max-width: 100%;
+    padding: 0 0.45rem;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-pill);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .agent-chip {
     color: var(--accent);
     background: var(--accent-soft);
@@ -17640,6 +17681,11 @@ textarea.notes {
     font-family: var(--mono);
     color: var(--text);
     font-variant-numeric: tabular-nums;
+}
+
+.board-model {
+    font-family: var(--mono);
+    overflow-wrap: anywhere;
 }
 
 .board-asked {
@@ -18365,10 +18411,10 @@ textarea.notes {
     min-height: 40px;
 }
 
-/* Quick access to the owner's private all-project memory approval queue. */
+/* Quick access to the owner's private all-project memory approval queue: the top of PiP's box, in both places. */
 .pip-memory {
     flex: none;
-    margin: 0 12px 6px;
+    margin: 0 0 6px;
 }
 
 .pip-memory .button {
@@ -18408,6 +18454,23 @@ textarea.notes {
     flex: none;
     min-width: 0;
     padding: 4px 12px 12px;
+}
+
+/* PiP's box on its board, in the session composer's place: that place's room, and the status line under it. */
+.pip-board-box > .pip-composer-wrap {
+    padding: 0 0 4px;
+}
+
+/* Over it there, your messages that wait while PiP works, as in its panel. */
+.pip-waiting {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pip-waiting:empty {
+    display: none;
 }
 
 .pip-attachments {
@@ -20644,56 +20707,96 @@ pre.gallery-code {
     position: fixed;
     z-index: 70;
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-width: 84px;
+    align-items: stretch;
     height: 32px;
-    padding: 0 12px 0 10px;
-    border: 0;
     border-radius: var(--r-card);
     background: var(--panel);
     color: var(--text);
-    font: inherit;
     font-size: 13px;
     font-weight: 500;
     box-shadow: var(--pop);
-    cursor: pointer;
     -webkit-user-select: none;
     user-select: none;
     animation: pop 0.2s var(--ease-out);
 }
 
-.quote-reply-button .icon {
+/* Reply, and PiP's orb beside it while PiP is on. */
+.quote-reply-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 84px;
+    padding: 0 12px 0 10px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.quote-reply-action:first-child {
+    border-start-start-radius: inherit;
+    border-end-start-radius: inherit;
+}
+
+.quote-reply-action:last-child {
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+}
+
+.quote-reply-action + .quote-reply-action {
+    border-left: 1px solid var(--hair);
+}
+
+.quote-reply-action.quote-reply-pip {
+    min-width: 40px;
+    padding: 0 12px;
+}
+
+.quote-reply-action .icon {
     color: var(--muted);
 }
 
-/* --hover is see-through: lay it over the panel, or the reply's words show through the button. */
-.quote-reply-button:active {
-    background-image: linear-gradient(var(--hover), var(--hover));
+/* --hover is see-through: it lies over the pill's panel, or the reply's words show through it. */
+.quote-reply-action:active {
+    background: var(--hover);
 }
 
-.quote-reply-button:active .icon {
+.quote-reply-action:active .icon {
     color: var(--accent);
 }
 
 @media (hover: hover) {
-    .quote-reply-button:hover {
-        background-image: linear-gradient(var(--hover), var(--hover));
+    .quote-reply-action:hover {
+        background: var(--hover);
     }
 
-    .quote-reply-button:hover .icon {
+    .quote-reply-action:hover .icon {
         color: var(--accent);
     }
 }
 
-/* A finger needs more than 32 px: the button grows its touch area, not its look. */
+/* A finger needs more than 32 px: each button grows its touch area, not its look. */
 @media (pointer: coarse) {
-    .quote-reply-button::before {
+    .quote-reply-action::before {
         content: "";
         position: absolute;
-        inset: -6px;
+        inset: -6px 0;
     }
+
+    .quote-reply-action:first-child::before {
+        left: -6px;
+    }
+
+    .quote-reply-action:last-child::before {
+        right: -6px;
+    }
+}
+
+.pip-quote-strip {
+    margin: 0 12px 6px;
 }
 
 .quote-strip {

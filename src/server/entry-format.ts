@@ -5,6 +5,11 @@
 
 /** How a file sent along with a message starts (`<file name="path">`): such parts show as the file's name only. */
 export const FILE_BLOCK = '<file name="';
+/**
+ * How what Pi Pocket adds to a message for the model only starts (`<pocket-context …>`), such as where a passage asked
+ * about came from: after the message's first part, such parts never show to people.
+ */
+export const CONTEXT_BLOCK = "<pocket-context";
 /** The entry kind of a note about what a person did (`Commands.note`). */
 export const NOTE_ENTRY = "pocket.note";
 

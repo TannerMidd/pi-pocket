@@ -370,15 +370,22 @@ test("a preview reads only the file's end: the last messages of the current bran
 
     manager.appendMessage({ role: "user", content: "Left behind", timestamp: 2 });
     manager.branch(fork);
-    // Over a megabyte of two-byte characters: the file's end is read in chunks that split some of them.
-    manager.appendMessage({ role: "user", content: "é".repeat(700_000), timestamp: 3 });
-    manager.appendMessage({ ...fauxAssistantMessage("The last answer"), model: "faux-2" });
+    manager.appendMessage({ role: "user", content: "é".repeat(600), timestamp: 3 });
+    manager.appendMessage({
+        ...fauxAssistantMessage(`The last answer ${"y".repeat(1024 * 1024)}`),
+        model: "faux-2",
+    });
     const path = save(manager, "tail");
+    const file = readFileSync(path);
+    // The file's end is read a megabyte at a time: shortened, its last megabyte starts inside the 100th "é".
+    const cut = file.length - 1024 * 1024 - (file.indexOf("é") + 199);
+
+    writeFileSync(path, file.toString().replace("y".repeat(cut), ""));
     const preview = await app.piSessions.preview(owner(app), path);
 
     assert.deepEqual(
         preview.last.map((each) => each.text.slice(0, 20)),
-        ["First question", "An answer on a branc", "é".repeat(20), "The last answer"],
+        ["First question", "An answer on a branc", "é".repeat(20), "The last answer yyyy"],
     );
     assert.equal(preview.last[2]!.text, "é".repeat(600));
     assert.equal(preview.model, "faux/faux-2");

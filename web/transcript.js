@@ -56,11 +56,11 @@ import {
     withoutNotes,
 } from "./turns.js";
 import {
+    attachedPictureSrc,
     Boot,
     clockTime,
     copyText,
     entryImageUrl,
-    fileUrl,
     html,
     Icon,
     Markdown,
@@ -147,7 +147,7 @@ const SKILL = /^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?
 const MENTION = /(^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g;
 
 /** One line of the attachment list the server adds: `- path (name, mime, size bytes)`, then an optional note. */
-const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)(?: \[Image: .*)?$/;
+const ATTACHED = /^- (.*) \(([^,]*), ([^,]*), (\d+) bytes\)( \[Image: .*)?$/;
 
 function parseAttachments(block) {
     return block
@@ -157,7 +157,13 @@ function parseAttachments(block) {
             const match = ATTACHED.exec(line);
 
             return match
-                ? { path: match[1], name: match[2], mime: match[3] }
+                ? {
+                      path: match[1],
+                      name: match[2],
+                      mime: match[3],
+                      size: Number(match[4]),
+                      noted: match[5] !== undefined,
+                  }
                 : { name: line.replace(/^- /, ""), mime: "" };
         });
 }
@@ -180,8 +186,12 @@ function EntryImages({ entryId, count, label }) {
  */
 function MessageExtras({ entry, attachments }) {
     const files = attachments ? parseAttachments(attachments) : [];
-    const pictures = files.filter((file) => file.path && /^image\/(?!heic|heif)/.test(file.mime));
-    const others = files.filter((file) => !pictures.includes(file));
+    const pictures = files.flatMap((file) => {
+        const src = attachedPictureSrc(file, files, entry);
+
+        return src === null ? [] : [{ file, src }];
+    });
+    const others = files.filter((file) => !pictures.some((picture) => picture.file === file));
 
     return html`
         ${
@@ -202,7 +212,7 @@ function MessageExtras({ entry, attachments }) {
         ${
             pictures.length > 0 &&
             html`<div class="thumbs">
-                ${pictures.map((file) => html`<${Thumb} src=${fileUrl(file.path)} alt=${file.name} />`)}
+                ${pictures.map(({ file, src }) => html`<${Thumb} src=${src} alt=${file.name} />`)}
             </div>`
         }
         ${

@@ -13,7 +13,7 @@ import {
     work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -738,7 +738,7 @@ async function noPip(): Promise<void> {
     await page.evaluate(`
         (await import("/pip.js")).closePip();
         sessionStorage.removeItem("pocket.pip");
-        localStorage.removeItem("pocket.pip.draft");
+        (await import("/person-storage.js")).personStorage.set("pip.draft", null);
     `);
     await until(
         async () =>
@@ -756,7 +756,7 @@ test(
         await fresh();
         await page.setViewport(VIEWPORTS.desktop);
         await page.evaluate(`
-        localStorage.setItem("pocket.pip.draft", "a draft");
+        (await import("/person-storage.js")).personStorage.set("pip.draft", "a draft");
         const fetched = window.fetch;
         window.fetch = (url, init) =>
             String(url).endsWith("/submit") ? Promise.reject(new TypeError("offline")) : fetched(url, init);
@@ -1113,6 +1113,120 @@ test(
         );
     },
 );
+
+test("a switch sent while the polling session starts again goes to the new one", real, async () => {
+    // A name that is not local, so the tab polls (`pollHere`); Chromium sends it to this computer.
+    const host = base.replace("127.0.0.1", "pocket.localhost");
+    const polling = await browsers.open(2);
+    const inPolling = async <T>(script: string): Promise<T> =>
+        JSON.parse(await polling.evaluate(script)) as T;
+
+    try {
+        await polling.navigate(`${host}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await until(
+            async () =>
+                (await inPolling<boolean>(`
+                const { store } = await import("/store.js");
+
+                return JSON.stringify(store.state.sessionsLoaded === true);
+            `)) === true,
+            "the signed-in page",
+            20_000,
+        );
+        await polling.evaluate(`localStorage.setItem("pocket.transport", "poll:" + Date.now())`);
+        await polling.navigate(`${host}/s/${first}`);
+        await until(
+            async () =>
+                (await inPolling<boolean>(`
+                const { store } = await import("/store.js");
+
+                const polled = performance.getEntriesByType("resource")
+                    .some((each) => each.name.includes("/api/poll?"));
+
+                return JSON.stringify(store.state.connection === "open" && polled &&
+                    store.state.view.conversation?.id === ${Number(first)});
+            `)) === true,
+            "the session, polled",
+            20_000,
+        );
+        // The next poll finds its session gone, and its answer waits until the tab has switched. That switch fails.
+        await polling.evaluate(`
+            const send = window.fetch;
+
+            window.__switches = [];
+            window.__release = {};
+            window.__asked = new Promise((resolve) => { window.__release.asked = resolve; });
+            window.fetch = async (url, init) => {
+                const path = String(url);
+
+                const again = path.startsWith("/api/poll?") && path.includes("&session=");
+
+                if (again && window.__release.poll === undefined) {
+                    const answer = send(path.replace(/&session=[^&]*&ack=\\d+/, ""), init);
+
+                    await new Promise((resolve) => {
+                        window.__release.poll = resolve;
+                        window.__release.asked();
+                    });
+
+                    return answer;
+                }
+
+                const switches = path.endsWith("/api/switch") &&
+                    window.__switches.push(JSON.parse(init.body).c);
+
+                if (switches === 1) {
+                    await new Promise((resolve) => { window.__release.switch = resolve; });
+
+                    return new Response("{}", { status: 409 });
+                }
+
+                return send(url, init);
+            };
+            "armed";
+        `);
+        // A new session in the list ends the poll on its way, so the next one goes out.
+        const other = await newSession(app);
+        const shown = await inPolling<{ id: number | null; switches: number[] }>(`
+            const { navigate, store } = await import("/store.js");
+            const streamId = store.state.streamId;
+
+            await window.__asked;
+            navigate(${Number(other)});
+
+            while (window.__release.switch === undefined) {
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+
+            window.__release.poll();
+
+            while (store.state.streamId === streamId) {
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+
+            window.__release.switch();
+            const until = Date.now() + 3000;
+
+            while (store.state.view.conversation?.id !== ${Number(other)} && Date.now() < until) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+
+            return JSON.stringify({
+                id: store.state.view.conversation?.id ?? null,
+                switches: window.__switches,
+            });
+        `);
+
+        assert.equal(shown.id, Number(other), "the session switched to shows");
+        assert.deepEqual(
+            shown.switches,
+            [other, other],
+            "the switch goes again, on the new session",
+        );
+    } finally {
+        await browsers.close(2);
+    }
+});
 
 test(
     "a session kept on the device shows after a reload, and the server sends only what is new; another person's, or none when the server says so",
@@ -1788,3 +1902,65 @@ test(
         assert.equal(requests.after, 2, "Refresh asks for the diff again");
     },
 );
+
+test("a sent HEIC photo shows the JPEG the model got", real, async () => {
+    const id = await newSession(app);
+
+    await app.commands.configure(id, owner(app), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+    const photo = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
+    const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+
+    writeFileSync(path, photo);
+    await say(app, id, "look at this", [
+        { path, name: "photo.heic", mime: "image/heic", size: photo.length },
+    ]);
+
+    await fresh();
+    await goTo(id);
+    await until(
+        async () =>
+            (await inPage<string>(
+                `return JSON.stringify(document.querySelector(".thumbs .thumb img")?.alt ?? "")`,
+            )) === "photo.heic",
+        "the HEIC photo's thumbnail",
+    );
+    const thumbnail = await inPage<{ path: string; width: number }>(`
+        const image = document.querySelector(".thumbs .thumb img");
+
+        await image.decode();
+
+        return JSON.stringify({ path: new URL(image.src).pathname, width: image.naturalWidth });
+    `);
+
+    assert.match(thumbnail.path, /\/image\/\d+\/0$/, "the image stored in the message");
+    assert.ok(thumbnail.width > 0);
+});
+
+test("a HEIC photo shows a stored image only where its place is sure", real, async () => {
+    const sources = await inPage<(string | null)[]>(`
+        const { attachedPictureSrc } = await import("/ui.js");
+        const heic = { path: "/u/a.heic", mime: "image/heic", size: 1000, noted: true };
+        const png = { path: "/u/b.png", mime: "image/png", size: 1000, noted: false };
+        const entry = (images, text) => ({ id: 7, images, text });
+
+        return JSON.stringify([
+            attachedPictureSrc(heic, [png, heic], entry(2), 1),
+            attachedPictureSrc({ ...heic, noted: false }, [heic], entry(1), 1),
+            attachedPictureSrc(heic, [png, heic], entry(1), 1),
+            attachedPictureSrc(heic, [heic, png], entry(2, "see @shot.png"), 1),
+            attachedPictureSrc(heic, [heic], entry(1, "see @notes.md"), 1),
+            attachedPictureSrc(png, [png], entry(0), 1),
+        ]);
+    `);
+
+    assert.deepEqual(sources, [
+        "/api/c/1/image/7/1",
+        null,
+        null,
+        null,
+        "/api/c/1/image/7/0",
+        "/api/c/1/file?path=%2Fu%2Fb.png",
+    ]);
+});

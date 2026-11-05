@@ -47,10 +47,11 @@ export function createPipDraft({ loadText, saveText, upload, onError }) {
 
             return () => listeners.delete(listener);
         },
+        /** Follow the person and PiP's id; true when that dropped the draft's files (another person or PiP). */
         scope(nextAccount, nextId) {
             // Unknown authentication during reconnect is not an account change.
             if (nextAccount === undefined) {
-                return;
+                return false;
             }
 
             const changedAccount = account !== undefined && account !== nextAccount;
@@ -62,7 +63,7 @@ export function createPipDraft({ loadText, saveText, upload, onError }) {
             id = nextAccount === null ? undefined : changedAccount ? nextId : (nextId ?? id);
 
             if (!changedAccount && !changedId && !loggedOut) {
-                return;
+                return false;
             }
 
             generation++;
@@ -80,6 +81,8 @@ export function createPipDraft({ loadText, saveText, upload, onError }) {
             } else {
                 emit();
             }
+
+            return true;
         },
         syncText() {
             const saved = loadText();

@@ -2,7 +2,7 @@
  * Push notifications: who hears about what, and when. Pi finished, Pi needs approval, mentions, and chat messages go
  * to the people who take part in a session, unless they are looking at it or turned that kind off.
  * Each goes through Web Push to their subscribed devices, and over the live connection to their
- * desktop apps (`notifyDesktops`).
+ * embedders (`notifyEmbedders`).
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -11,7 +11,7 @@ import { AuthorsDoc, ChatDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
 import { entryText, projectEntry, snippet } from "./projection.ts";
 import { span, type WaitView } from "./limit-gate.ts";
-import { DEFAULT_PREFS, type DesktopMessage, type PushMessage, type PushPrefs } from "./push.ts";
+import { DEFAULT_PREFS, type EmbedderMessage, type PushMessage, type PushPrefs } from "./push.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -37,7 +37,7 @@ export class Alerts {
 
     /**
      * Push to one person about a conversation, unless they cannot see it, turned that kind off, or
-     * are looking at it. `call` is an approval's whole call, for desktop apps, which show it as
+     * are looking at it. `call` is an approval's whole call, for embedders, which show it as
      * their settings say.
      */
     async push(
@@ -61,17 +61,17 @@ export class Alerts {
         }
 
         const { approval, ...rest } = message;
-        const desktop: DesktopMessage = { ...rest, urgency };
+        const embedded: EmbedderMessage = { ...rest, urgency };
 
         if (approval !== undefined) {
-            desktop.approval = {
+            embedded.approval = {
                 ...approval,
                 may: call?.may ?? approval.allow,
                 call: call?.text ?? message.body,
             };
         }
 
-        app.notifyDesktops(userId, desktop);
+        app.notifyEmbedders(userId, embedded);
 
         if (store === undefined || store.subscriptions(userId).length === 0) {
             return;
@@ -268,10 +268,10 @@ export class Alerts {
     }
 
     /**
-     * Nobody can get a notification: push is off on this server, and no desktop app is connected.
+     * Nobody can get a notification: push is off on this server, and no embedder is connected.
      */
     #quiet(): boolean {
-        return this.#app.pushStore === undefined && !this.#app.hasDesktops();
+        return this.#app.pushStore === undefined && !this.#app.hasEmbedders();
     }
 
     /** People who take part in a session: whoever started it, wrote to Pi, or chatted there. */

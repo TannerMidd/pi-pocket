@@ -51,12 +51,14 @@ import {
 } from "./docs.ts";
 import {
     ATTACHMENTS_HEADING,
+    CONTEXT_BLOCK,
     FILE_BLOCK,
     FROM_PREFIX,
     NOTE_ENTRY,
     splitAttachments,
 } from "./entry-format.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
+import { attribute } from "./fence.ts";
 import { homePath } from "./paths.ts";
 import { forModel, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
@@ -128,6 +130,11 @@ export interface SubmitRequest {
     requestId: string;
     /** Send the files the message mentions with `@` along with it, so Pi need not read them first. */
     inlineFiles?: boolean;
+    /**
+     * PiP only: the session a passage quoted in the message came from (Ask PiP by a selection). PiP gets which session
+     * it is, unseen by people (`CONTEXT_BLOCK`).
+     */
+    about?: { session: number };
 }
 
 /** How many `@` mentioned files go along with a message, and how much of them. */
@@ -853,6 +860,7 @@ export class Commands {
             user,
             via === undefined ? written : `[via ${via}] ${written}`,
         );
+        const about = this.#aboutSession(id, user, request.about);
         const mentioned =
             request.inlineFiles === true
                 ? await this.#mentionedFiles(id, user, typed, model.input.includes("image"))
@@ -863,6 +871,7 @@ export class Commands {
             ...mentioned.map((part) =>
                 part.type === "text" ? { ...part, text: app.hidden.replace(part.text, id) } : part,
             ),
+            ...(about === undefined ? [] : [{ type: "text" as const, text: about }]),
         ];
 
         made.forEach((result, index) => {
@@ -935,12 +944,6 @@ export class Commands {
         const titled = app.hidden.replace(typed, id);
 
         await this.#touched(id, titled, text === titled ? undefined : text);
-
-        // A person's own words: linked sessions may message each other again (`linked-sessions.ts`).
-        if (via === undefined) {
-            await app.linkedSessions.personWrote(id);
-        }
-
         this.#reportUnanswered(id, submission.wait(context));
 
         if (failure !== undefined) {
@@ -1099,6 +1102,54 @@ export class Commands {
         }
 
         return answer;
+    }
+
+    /**
+     * For a message to PiP that asks about a passage: which session it came from, for PiP alone (`CONTEXT_BLOCK`). Only
+     * a session its person may see, and never another PiP; nothing for a message to anyone else.
+     */
+    #aboutSession(
+        id: ConversationId,
+        user: User,
+        about: SubmitRequest["about"],
+    ): string | undefined {
+        const app = this.#app;
+
+        if (about === undefined) {
+            return undefined;
+        }
+
+        const session = typeof about === "object" && about !== null ? about.session : undefined;
+
+        if (app.pip.ownerOf(id) === undefined) {
+            throw new HttpError(400, "Only a message to PiP says which session it is about");
+        }
+
+        if (typeof session !== "number" || !Number.isSafeInteger(session) || session <= 0) {
+            throw new HttpError(400, "about.session must be a session's number");
+        }
+
+        const target = session as unknown as ConversationId;
+        const meta = app.sessionMeta(target);
+
+        if (meta === undefined || meta.pip !== undefined) {
+            throw new HttpError(404, "There is no such session.");
+        }
+
+        app.requireSee(user, target);
+
+        // Anyone in that session can name it: no invisible characters carry words past people to PiP.
+        const plain = (text: string, max: number) =>
+            attribute(snippet(text.replace(/\p{Cf}/gu, "").replace(/\p{Cc}/gu, " "), max));
+        const title = plain(app.hidden.replace(meta.title ?? "untitled", target), 120);
+        const folder = plain(meta.cwd, 300);
+
+        return [
+            `${CONTEXT_BLOCK} session="${session}" title="${title}" folder="${folder}">`,
+            `The quoted passage at the start of this message comes from Pi's reply in session ${session}.`,
+            "Read that session with session_read for more context when the question needs it.",
+            "</pocket-context>",
+        ].join("\n");
     }
 
     /**
