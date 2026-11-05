@@ -141,25 +141,33 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     app.approvals.answer("ask-1", { allow: false, by: "Someone else" });
     await until(async () => (await saved()) === null, "the answers gone");
 
-    // It ends while another session shows, and the tab reloads: a later ask with its id does not
-    // get its answers, and they go.
+    // It ends while another session shows: a later ask with its id does not get its answers, and
+    // they go. What another tab typed for the later one stays, though this tab first shows the
+    // session as it kept it, with the ask that ended.
     ask(first + 1);
     await sees(`${card} !== null`);
     await page.type({ selector: "input[name=user]" }, "ann");
     await page.evaluate(`${store}.navigate(${other})`);
     await sees(`${card} === null`);
-    await page.reload();
-    await sees(`${store}.store.state.view.conversation?.id === ${other}`);
     app.approvals.answer("ask-1", { allow: false, by: "Someone else" });
     ask(first + 2);
+    const none = { picked: [], other: "" };
+    const theirs = { db: none, parts: none, user: "cy", password: "" };
+    const typed = JSON.stringify({ [`ask-1@${first + 2}`]: theirs });
+
+    await page.evaluate(`localStorage.setItem(${key}, ${JSON.stringify(typed)})`);
     await page.evaluate(`${store}.navigate(${id})`);
-    await sees(`${card} !== null`);
-    assert.deepEqual(await shown(), ["", "", ""]);
-    assert.equal(await saved(), null, "and they went");
+    await until(
+        async () => (await shown().catch(() => [])).join() === ",cy,",
+        "the other tab's answers",
+    );
+    assert.equal(await saved(), typed, "the ended ask's went");
 
     // The same call asks again, later, as after a restart: what was typed stays.
     ask(first + 3, "call-1");
-    await sees(`${store}.store.state.view.approvals[0]?.createdAt === ${first + 3}`);
+    await until(async () => (await shown().catch(() => [])).join() === ",,", "another ask, empty");
+    // It rises in: typed into once it stands still.
+    await sees(`document.getAnimations().every((each) => each.playState !== "running")`);
     await page.type({ selector: "input[name=user]" }, "bob");
     ask(first + 4, "call-1");
     await sees(`${store}.store.state.view.approvals[0]?.createdAt === ${first + 4}`);

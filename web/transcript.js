@@ -31,7 +31,6 @@ import {
     collab,
     discuss,
     isRow,
-    keptViewOf,
     loadEarlier,
     loadedFrom,
     navigate,
@@ -39,6 +38,7 @@ import {
     openSheet,
     store,
     TRANSCRIPT_ROWS,
+    viewSynced,
 } from "./store.js";
 import { openSubagent, stateOf } from "./subagents.js";
 import { motionLevel, prefs } from "./theme.js";
@@ -2000,17 +2000,17 @@ function choiceValue(field, { picked, other }) {
 const askKey = (conversationId) => `ask.${conversationId}`;
 const askEntry = (approval) => `${approval.id}@${approval.callId ?? approval.createdAt}`;
 
-/** The approvals waiting in `conversationId` as this tab knows them, or undefined when it knows none. */
-function waitingIn(conversationId) {
-    const { view } = store.state;
-
-    return (view.conversation?.id === conversationId ? view : keptViewOf(conversationId))
-        ?.approvals;
-}
+/**
+ * The approvals waiting in `conversationId` as the server last sent them, or undefined while the tab shows a view it
+ * kept, or another session: a kept view may be old, and list asks that ended or miss one asked meanwhile.
+ */
+const waitingIn = (conversationId) =>
+    viewSynced(conversationId) ? (store.state.view.approvals ?? []) : undefined;
 
 /**
  * The unsent answers kept for the session of `approval`, with `change` made to its own (`undefined` leaves it, `null`
- * drops it). What belongs to an approval no longer waiting goes, also one that ended while another session showed.
+ * drops it). With the session's approvals as the server sent them, what belongs to an approval no longer waiting goes,
+ * also one that ended while another session showed; with none, nothing else goes.
  */
 function keptAsks(approval, change) {
     let all = {};
@@ -2024,8 +2024,10 @@ function keptAsks(approval, change) {
     }
 
     const waiting = waitingIn(approval.conversationId);
-    const live = new Set((waiting ?? [approval]).map(askEntry));
-    const kept = Object.fromEntries(Object.entries(all).filter(([entry]) => live.has(entry)));
+    const live = waiting && new Set(waiting.map(askEntry));
+    const kept = Object.fromEntries(
+        Object.entries(all).filter(([entry]) => live === undefined || live.has(entry)),
+    );
 
     if (change === null) {
         delete kept[askEntry(approval)];
@@ -2132,9 +2134,16 @@ function AskCard({ approval }) {
         }
     };
 
-    // The card is shown only while its approval waits. It leaving its session's view (answered elsewhere, cancelled, or
-    // the run stopped) drops what was typed. A switch to another session keeps it: the view this tab kept of the session
-    // it left still lists the approval.
+    // As the server's view of its session comes (also after one this tab kept), asks that ended there go.
+    const synced = viewSynced(approval.conversationId);
+
+    useEffect(() => {
+        if (mine && synced) {
+            keptAsks(approval);
+        }
+    }, [mine, synced]);
+    // The card is shown only while its approval waits. It leaving the server's view of its session (answered elsewhere,
+    // cancelled, or the run stopped) drops what was typed. A switch to another session keeps it.
     useEffect(
         () => () => {
             const waiting = waitingIn(approval.conversationId);
