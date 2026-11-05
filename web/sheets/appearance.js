@@ -155,7 +155,9 @@ function listed(id) {
 
 /** Ask for a new theme's name, and make it from `from`: its id, or a palette's. */
 function Duplicate({ from, label, colors = false, onDone }) {
-    const [name, setName] = useState(`My ${label}`);
+    const [name, setName] = useState(
+        t("web.sheets.appearance.owner.copy-name", "My {name}", { name: label }),
+    );
     const [busy, setBusy] = useState(false);
     const field = useRef(null);
 
@@ -180,7 +182,11 @@ function Duplicate({ from, label, colors = false, onDone }) {
             await listed(made.id);
             notify(
                 "info",
-                `Made “${name}”: its folder is in the data folder's themes/. Edit with Pi changes it.`,
+                t(
+                    "web.sheets.appearance.owner.made",
+                    "Made “{name}”: its folder is in the data folder's themes/. Edit with Pi changes it.",
+                    { name },
+                ),
             );
             onDone(made.id);
         }
@@ -224,7 +230,7 @@ function LookTools() {
     if (naming) {
         return html`<${Duplicate}
             from=${id}
-            label=${look?.name ?? "theme"}
+            label=${look?.name ?? t("web.home.splash.text.theme", "theme")}
             onDone=${(made) => {
                 setNaming(false);
 
@@ -237,7 +243,11 @@ function LookTools() {
 
     const remove = () =>
         confirm(
-            `Remove the theme “${look.name}”?\n\nIts folder moves to themes/.removed/ in the data folder, so you can get it back from there.`,
+            t(
+                "web.sheets.appearance.owner.remove-theme",
+                "Remove the theme “{name}”?\n\nIts folder moves to themes/.removed/ in the data folder, so you can get it back from there.",
+                { name: look.name },
+            ),
         ) &&
         attempt(async () => {
             await api(`themes/${encodeURIComponent(id)}`, undefined, { method: "DELETE" });
@@ -251,7 +261,7 @@ function LookTools() {
         ${
             look && !look.builtIn
                 ? html`<button class="button" onClick=${() => attempt(() => editWithPi(id))}>
-                        <${Icon} name="sparkle" size=${14} /> Edit with Pi
+                        <${Icon} name="sparkle" size=${14} /> ${t("web.sheets.appearance.owner.edit-with-pi", "Edit with Pi")}
                     </button>
                     ${
                         galleryAvailable() &&
@@ -262,7 +272,7 @@ function LookTools() {
                             ${t("web.sheets.appearance.look-tools.button.share", "Share…")}
                         </button>`
                     }
-                    <button class="button ghost" onClick=${remove}>Remove</button>`
+                    <button class="button ghost" onClick=${remove}>${t("web.sheets.hooks.hook-row.button.remove", "Remove")}</button>`
                 : html`<span class="muted small">${t(
                       "web.sheets.appearance.look-tools.span.duplicate-make-theme-own",
                       "Duplicate it to make a theme of your own.",
@@ -346,8 +356,17 @@ const TEXT_FONTS = [
 const CODE_FONTS = TEXT_FONTS.slice(3);
 
 /** A font's name here, by the family a stylesheet names first; the app's own for none. */
+const fontLabel = (name) =>
+    name === "System Sans"
+        ? t("web.sheets.appearance.owner.system-sans", "System Sans")
+        : name === "System Mono"
+          ? t("web.sheets.appearance.owner.system-mono", "System Mono")
+          : name;
+
 const fontName = (fonts, family) =>
-    (fonts.find(([each]) => each === family) ?? (family ? [family, family] : fonts[0]))[1];
+    fontLabel(
+        (fonts.find(([each]) => each === family) ?? (family ? [family, family] : fonts[0]))[1],
+    );
 
 /**
  * The fonts of the theme in use: for words, for code, and ligatures, with a preview. The owner sets them on a theme of
@@ -388,22 +407,23 @@ function FontTools() {
                       onChange=${(event) => save({ [key]: event.currentTarget.value || null })}
                   >
                       ${fonts.map(
-                          ([family, name]) => html`<option value=${family}>${name}</option>`,
+                          ([family, name]) =>
+                              html`<option value=${family}>${fontLabel(name)}</option>`,
                       )}
                       ${theirs && html`<option value="">${theirs}</option>`}
                   </select>
               </label>`;
     };
 
-    return html`<section class="font-tools" aria-label=${`Fonts for ${look.name}`}>
+    return html`<section class="font-tools" aria-label=${t("web.sheets.appearance.owner.fonts-for", "Fonts for {name}", { name: look.name })}>
         <h4 class="font-title">${t("web.sheets.appearance.font-tools.h4.fonts-for", "Fonts for")} <em>${look.name}</em></h4>
-        ${menu("Text font", TEXT_FONTS, "sans")}
-        ${menu("Code font", CODE_FONTS, "mono")}
+        ${menu(t("web.sheets.appearance.owner.text-font", "Text font"), TEXT_FONTS, "sans")}
+        ${menu(t("web.sheets.appearance.owner.code-font", "Code font"), CODE_FONTS, "mono")}
         <div class="font-menu">
-            <span>Ligatures</span>
+            <span>${t("web.sheets.appearance.font-tools.span.ligatures", "Ligatures")}</span>
             ${
                 look.builtIn
-                    ? html`<strong>${set.ligatures ? "On" : "Off"}</strong>`
+                    ? html`<strong>${set.ligatures ? t("web.sheets.appearance.owner.on", "On") : t("web.sheets.appearance.owner.off", "Off")}</strong>`
                     : html`<div class="font-ligatures">
                           <${Switch}
                               on=${set.ligatures}
@@ -420,7 +440,7 @@ function FontTools() {
             }
         </div>
         <div class="font-preview" role="group" aria-label=${t("web.sheets.appearance.font-tools.aria-label.font-preview", "Font preview")}>
-            ${t("web.sheets.appearance.font-tools.div.quick-brown-fox-jumps", "The quick brown fox jumps over the lazy dog.")} <em>Emphasis.</em>
+            ${t("web.sheets.appearance.font-tools.div.quick-brown-fox-jumps", "The quick brown fox jumps over the lazy dog.")} <em>${t("web.sheets.appearance.owner.emphasis", "Emphasis.")}</em>
             <code>const ok = (x) => x !== 42; <span class="hl-com">// a comment</span></code>
         </div>
         ${
@@ -444,7 +464,7 @@ function FontTools() {
                           <${Icon} name="copy" size=${14} /> ${t("web.sheets.appearance.font-tools.text.duplicate-to-change", "Duplicate to change")}
                       </button>
                       <span class="muted small">
-                          ${look.name} comes with the app: its fonts stay as they are.
+                          ${t("web.sheets.appearance.owner.builtin-fonts", "{name} comes with the app: its fonts stay as they are.", { name: look.name })}
                       </span>
                   </div>`)
         }
@@ -483,7 +503,11 @@ function ColorsTools() {
 
     const remove = () =>
         confirm(
-            `Remove the colors “${own.name}”?\n\nTheir folder moves to themes/.removed/ in the data folder, so you can get them back from there.`,
+            t(
+                "web.sheets.appearance.owner.remove-colors",
+                "Remove the colors “{name}”?\n\nTheir folder moves to themes/.removed/ in the data folder, so you can get them back from there.",
+                { name: own.name },
+            ),
         ) &&
         attempt(async () => {
             await api(`themes/${encodeURIComponent(own.id)}`, undefined, { method: "DELETE" });
@@ -497,9 +521,9 @@ function ColorsTools() {
         ${
             own &&
             html`<button class="button" onClick=${() => attempt(() => editWithPi(own.id))}>
-                    <${Icon} name="sparkle" size=${14} /> Edit with Pi
+                    <${Icon} name="sparkle" size=${14} /> ${t("web.sheets.appearance.owner.edit-with-pi", "Edit with Pi")}
                 </button>
-                <button class="button ghost" onClick=${remove}>Remove</button>`
+                <button class="button ghost" onClick=${remove}>${t("web.sheets.hooks.hook-row.button.remove", "Remove")}</button>`
         }
     </div>`;
 }
@@ -526,21 +550,33 @@ function DefaultTools() {
     const name = (look, colors) =>
         colors.split("@")[0] === look
             ? (lookInfo(look)?.name ?? look)
-            : `${lookInfo(look)?.name ?? look} with ${paletteOf(colors).desktop ? "the desktop's colors" : paletteOf(colors).name}`;
+            : t("web.sheets.appearance.owner.look-with-colors", "{look} with {colors}", {
+                  look: lookInfo(look)?.name ?? look,
+                  colors: paletteOf(colors).desktop
+                      ? t("web.sheets.appearance.owner.desktop-colors", "the desktop's colors")
+                      : paletteOf(colors).name,
+              });
     const set = (value) =>
         attempt(async () => {
             await api("themes/default", { default: value }, { method: "PUT" });
             notify(
                 "info",
                 value
-                    ? `Browsers that have not chosen start with ${name(value.look, value.colors)}.`
-                    : "Browsers that have not chosen start with Pocket.",
+                    ? t(
+                          "web.sheets.appearance.owner.default-saved",
+                          "Browsers that have not chosen start with {name}.",
+                          { name: name(value.look, value.colors) },
+                      )
+                    : t(
+                          "web.sheets.appearance.owner.default-reset",
+                          "Browsers that have not chosen start with Pocket.",
+                      ),
             );
         });
 
     return html`<div class="look-tools">
         <span class="muted small grow">
-            ${current ? `For new browsers: ${name(current.look, current.colors)}.` : `New browsers start with ${name(BASE_LOOK, "desktop")}.`}
+            ${current ? t("web.sheets.appearance.owner.default-current", "For new browsers: {name}.", { name: name(current.look, current.colors) }) : t("web.sheets.appearance.owner.default-initial", "New browsers start with {name}.", { name: name(BASE_LOOK, "desktop") })}
         </span>
         ${
             !same &&
@@ -548,7 +584,7 @@ function DefaultTools() {
                 ${t("web.sheets.appearance.default-tools.button.new-browsers", "Use these for new browsers")}
             </button>`
         }
-        ${current && html`<button class="button ghost" onClick=${() => set(null)}>Reset</button>`}
+        ${current && html`<button class="button ghost" onClick=${() => set(null)}>${t("ui.reset", "Reset")}</button>`}
     </div>`;
 }
 

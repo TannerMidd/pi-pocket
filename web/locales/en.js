@@ -3367,4 +3367,28 @@ export const EN = Object.freeze({
     "builtin.command.trust-description": "Whether Pi trusts this project, for its own skills",
     "web.ui.image.unavailable": "🖼 {image} could not be loaded",
     "web.ui.image.name": "Image",
+    "web.sheets.appearance.owner.copy-name": "My {name}",
+    "web.sheets.appearance.owner.made":
+        "Made “{name}”: its folder is in the data folder's themes/. Edit with Pi changes it.",
+    "web.sheets.appearance.owner.remove-theme":
+        "Remove the theme “{name}”?\n\nIts folder moves to themes/.removed/ in the data folder, so you can get it back from there.",
+    "web.sheets.appearance.owner.remove-colors":
+        "Remove the colors “{name}”?\n\nTheir folder moves to themes/.removed/ in the data folder, so you can get them back from there.",
+    "web.sheets.appearance.owner.edit-with-pi": "Edit with Pi",
+    "web.sheets.appearance.owner.system-sans": "System Sans",
+    "web.sheets.appearance.owner.system-mono": "System Mono",
+    "web.sheets.appearance.owner.fonts-for": "Fonts for {name}",
+    "web.sheets.appearance.owner.text-font": "Text font",
+    "web.sheets.appearance.owner.code-font": "Code font",
+    "web.sheets.appearance.owner.on": "On",
+    "web.sheets.appearance.owner.off": "Off",
+    "web.sheets.appearance.owner.emphasis": "Emphasis.",
+    "web.sheets.appearance.owner.builtin-fonts":
+        "{name} comes with the app: its fonts stay as they are.",
+    "web.sheets.appearance.owner.desktop-colors": "the desktop's colors",
+    "web.sheets.appearance.owner.look-with-colors": "{look} with {colors}",
+    "web.sheets.appearance.owner.default-saved": "Browsers that have not chosen start with {name}.",
+    "web.sheets.appearance.owner.default-reset": "Browsers that have not chosen start with Pocket.",
+    "web.sheets.appearance.owner.default-current": "For new browsers: {name}.",
+    "web.sheets.appearance.owner.default-initial": "New browsers start with {name}.",
 });

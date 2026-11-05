@@ -9702,5 +9702,28 @@ export default {
         "builtin.command.trust-description": "设置 Pi 是否信任此项目，以使用项目技能",
         "web.ui.image.unavailable": "🖼 无法加载{image}",
         "web.ui.image.name": "图片",
+        "web.sheets.appearance.owner.copy-name": "我的 {name}",
+        "web.sheets.appearance.owner.made":
+            "已创建“{name}”：文件夹位于数据目录的 themes/ 中。可用 Pi 编辑。",
+        "web.sheets.appearance.owner.remove-theme":
+            "移除主题“{name}”？\n\n文件夹会移至数据目录的 themes/.removed/ 中，可从那里恢复。",
+        "web.sheets.appearance.owner.remove-colors":
+            "移除配色“{name}”？\n\n文件夹会移至数据目录的 themes/.removed/ 中，可从那里恢复。",
+        "web.sheets.appearance.owner.edit-with-pi": "用 Pi 编辑",
+        "web.sheets.appearance.owner.system-sans": "系统无衬线字体",
+        "web.sheets.appearance.owner.system-mono": "系统等宽字体",
+        "web.sheets.appearance.owner.fonts-for": "{name} 的字体",
+        "web.sheets.appearance.owner.text-font": "正文字体",
+        "web.sheets.appearance.owner.code-font": "代码字体",
+        "web.sheets.appearance.owner.on": "开启",
+        "web.sheets.appearance.owner.off": "关闭",
+        "web.sheets.appearance.owner.emphasis": "强调文字。",
+        "web.sheets.appearance.owner.builtin-fonts": "{name} 随应用提供，字体保持原样。",
+        "web.sheets.appearance.owner.desktop-colors": "桌面配色",
+        "web.sheets.appearance.owner.look-with-colors": "{look}，搭配{colors}",
+        "web.sheets.appearance.owner.default-saved": "未自行选择外观的浏览器将使用{name}。",
+        "web.sheets.appearance.owner.default-reset": "未自行选择外观的浏览器将使用 Pocket。",
+        "web.sheets.appearance.owner.default-current": "新浏览器使用：{name}。",
+        "web.sheets.appearance.owner.default-initial": "新浏览器默认使用{name}。",
     },
 };
