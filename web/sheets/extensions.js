@@ -6,6 +6,7 @@ import { api, attempt, closeSheet, openSheet, store } from "../store.js";
 import { html, Icon, Loader, Sheet, shortPath, Switch } from "../ui.js";
 import { accessWords, galleryApi, galleryAvailable, Tile } from "./gallery.js";
 import { t } from "../ui-locale.js";
+import { moduleTitle, moduleSummary } from "../builtin-locales.js";
 
 /** The guide for people who write extensions: its first page, on the docs site, which describes the latest release. */
 const GUIDE = "https://tannermidd.github.io/pi-pocket/docs/extensions/first-extension/";
@@ -13,7 +14,23 @@ const GUIDE = "https://tannermidd.github.io/pi-pocket/docs/extensions/first-exte
 /** What Lancet Guard does here, given the module's switch and Pi's own setting. */
 function guardNote(module, guard) {
     if (!guard.available) {
-        return { warn: true, text: guard.detail };
+        return {
+            warn: true,
+            text:
+                guard.detail ===
+                "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here."
+                    ? t(
+                          "web.guard.disabled-detail",
+                          "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here.",
+                      )
+                    : guard.detail ===
+                        "Lancet Guard is off (PI_POCKET_GUARD=off); tools run unguarded."
+                      ? t(
+                            "web.guard.environment-off",
+                            "Lancet Guard is off (PI_POCKET_GUARD=off); tools run unguarded.",
+                        )
+                      : guard.detail,
+        };
     }
 
     if (!guard.enabled) {
@@ -686,14 +703,19 @@ export function ExtensionsContent({
                             "failed"))) &&
             (!needle ||
                 [
-                    module.title,
+                    moduleTitle(module),
                     module.file,
-                    module.summary ?? "",
+                    moduleSummary(module) ?? "",
                     ...module.extensions.flatMap((extension) => extension.tools),
                 ].some((text) => text.toLowerCase().includes(needle))),
     );
 
-    const row = (module) => {
+    const row = (original) => {
+        const module = {
+            ...original,
+            title: moduleTitle(original),
+            summary: moduleSummary(original),
+        };
         const tools = module.extensions.flatMap((extension) => extension.tools);
         const guard = module.file === "guard.ts";
         const note = guard ? guardNote(module, data.guard) : null;

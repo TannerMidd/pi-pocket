@@ -306,7 +306,9 @@ function actionItems() {
         conversation &&
             branchAvailable() && {
                 label: t("web.launcher.action-items.label.switch-branch", "Switch branch"),
-                detail: `on ${headLabel(view.branch)}`,
+                detail: t("web.launcher.branch-current", "on {branch}", {
+                    branch: headLabel(view.branch),
+                }),
                 icon: "fork",
                 run: () => openSheet({ type: "branch" }),
             },

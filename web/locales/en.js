@@ -1,9 +1,7 @@
-// Generated from the t(key, english) calls in web/**/*.js and src/server/**/*.{js,ts} by dictionary/tools/merge-locales.mjs; do not edit by hand.
+// The app's English catalog. Keep fixed UI call sites and language packs in sync.
 
-/** English's own name, as the language list shows it. */
 export const EN_LABEL = "English";
 
-/** Every key the app's own text has now, and its English. Frozen: the app shares this one object. */
 export const EN = Object.freeze({
     "signin.invite-expired": "Ask for a new one.",
     "signin.invite-expired-title": "Invite expired",
@@ -2739,4 +2737,634 @@ export const EN = Object.freeze({
         "This browser does not allow dictation here.",
     "web.voice.use-dictation.start.text.dictation-not-start": "Dictation did not start: {error}",
     "web.voice.use-dictation.start.text.dictation-stopped": "Dictation stopped: {error}.",
+    "web.sheets.appearance.theme-card.small.light-and-dark": "light and dark",
+    "web.sheets.appearance.theme-card.small.light": "light",
+    "web.sheets.appearance.theme-card.div.follows-desktop-change-omarchy":
+        "Follows your desktop: change the Omarchy theme and Pi Pocket changes with it.",
+    "web.sheets.appearance.look-card.small.built-in": "built in",
+    "web.sheets.appearance.look-card.small.own-colors": "own colors",
+    "web.sheets.appearance.duplicate.aria-label.the-new-theme-s-name": "The new theme's name",
+    "web.sheets.appearance.duplicate.button.make": "Make",
+    "web.sheets.appearance.duplicate.button.cancel": "Cancel",
+    "web.sheets.appearance.look-tools.text.duplicate": "Duplicate",
+    "web.sheets.appearance.look-tools.button.share": "Share…",
+    "web.sheets.appearance.look-tools.span.duplicate-make-theme-own":
+        "Duplicate it to make a theme of your own.",
+    "web.sheets.appearance.text-size.aria-label.text-size-in-pixels": "Text size in pixels",
+    "web.sheets.appearance.text-size.span.px": "px",
+    "web.sheets.appearance.font-tools.h4.fonts-for": "Fonts for",
+    "web.sheets.appearance.font-tools.button.theme-s-own": "Theme's own",
+    "web.sheets.appearance.font-tools.aria-label.font-preview": "Font preview",
+    "web.sheets.appearance.font-tools.div.quick-brown-fox-jumps":
+        "The quick brown fox jumps over the lazy dog.",
+    "web.sheets.appearance.font-tools.text.duplicate-to-change": "Duplicate to change",
+    "web.sheets.appearance.colors-tools.text.duplicate-colors": "Duplicate colors",
+    "web.sheets.appearance.default-tools.button.new-browsers": "Use these for new browsers",
+    "web.sheets.appearance.appearance-sheet.p.running-pi-pocket-omarchy":
+        "Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.",
+    "web.sheets.appearance.appearance-sheet.title.sidebar": "Sidebar",
+    "web.sheets.appearance.appearance-sheet.title.motion": "Motion",
+    "web.sheets.appearance.appearance-sheet.title.width": "Width",
+    "web.sheets.appearance.appearance-sheet.title.density": "Density",
+    "web.sheets.appearance.appearance-sheet.div.conversation": "Conversation",
+    "web.sheets.appearance.appearance-sheet.div.status-line": "Status line",
+    "web.sheets.appearance.appearance-sheet.text.keyboard-shortcuts": "Keyboard shortcuts",
+    "server.extensions.design.index.setup.panel.p.design-not-load": "Design did not load.",
+    "server.extensions.design.index.setup.panel.button.try-again": "Try again",
+    "server.extensions.design.workspace.create-workspace.custom-size.title.swap-width-height":
+        "Swap width and height",
+    "server.extensions.design.workspace.create-workspace.custom-size.aria-label.swap-width-height":
+        "Swap width and height",
+    "server.extensions.design.workspace.create-workspace.custom-size.span.px": "px",
+    "server.extensions.design.workspace.create-workspace.menu.div.backdrop": "Backdrop",
+    "server.extensions.design.workspace.create-workspace.menu.div.design": "Design",
+    "server.extensions.design.workspace.create-workspace.bar.title.more": "More",
+    "server.extensions.design.workspace.create-workspace.bar.aria-label.more": "More",
+    "server.extensions.design.workspace.create-workspace.bar.aria-label.mode": "Mode",
+    "server.extensions.design.workspace.create-workspace.bar.title.compare-versions":
+        "Compare versions",
+    "server.extensions.design.workspace.create-workspace.bar.aria-label.compare-versions":
+        "Compare versions",
+    "server.extensions.design.workspace.create-workspace.bar.title.present": "Present",
+    "server.extensions.design.workspace.create-workspace.bar.aria-label.present": "Present",
+    "server.extensions.design.workspace.create-workspace.empty.h3.no-designs-yet": "No designs yet",
+    "server.extensions.design.workspace.create-workspace.empty.text.design-system":
+        "The design system",
+    "server.extensions.design.workspace.create-workspace.workspace.button.show-newest":
+        "Show the newest",
+    "server.extensions.design.workspace.create-workspace.workspace.button.open-system":
+        "Open the system",
+    "server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom": "Zoom",
+    "server.extensions.design.canvas.create-canvas.zoom-bar.title.zoom-out": "Zoom out",
+    "server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom-out": "Zoom out",
+    "server.extensions.design.canvas.create-canvas.zoom-bar.title.zoom": "Zoom in",
+    "server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom.zoom": "Zoom in",
+    "server.extensions.design.picker.create-picker.picker.placeholder.find-design": "Find a design",
+    "server.extensions.design.picker.create-picker.picker.aria-label.designs": "Designs",
+    "server.extensions.design.picker.create-picker.picker.strong.design-system": "Design system",
+    "server.extensions.design.picker.create-picker.picker.span.deck": "deck",
+    "server.extensions.design.picker.create-picker.picker.li.nothing-name": "Nothing by that name.",
+    "server.extensions.design.docks.create-docks.dock-head.title.close": "Close",
+    "server.extensions.design.docks.create-docks.dock-head.aria-label.close": "Close",
+    "server.extensions.design.docks.create-docks.versions-dock.title.versions": "Versions",
+    "server.extensions.design.docks.create-docks.versions-dock.text.compare": "Compare",
+    "server.extensions.design.docks.create-docks.versions-dock.button.compare": "Compare",
+    "server.extensions.design.docks.create-docks.versions-dock.button.go-back-one":
+        "Go back to this one",
+    "server.extensions.design.docks.create-docks.versions-dock.button.cancel": "Cancel",
+    "server.extensions.design.docks.create-docks.composer.placeholder.change":
+        "What should change here?",
+    "server.extensions.design.docks.create-docks.composer.button.cancel": "Cancel",
+    "server.extensions.design.docks.create-docks.composer.button.add-comment": "Add comment",
+    "server.extensions.design.docks.comments-dock.row.title.delete": "Delete",
+    "server.extensions.design.docks.comments-dock.row.aria-label.delete": "Delete",
+    "server.extensions.design.docks.create-docks.comments-dock.title.comments": "Comments",
+    "server.extensions.design.docks.create-docks.comments-dock.button.done": "All done",
+    "server.extensions.design.docks.create-docks.comments-dock.button.mark-them-done":
+        "mark them done",
+    "server.extensions.design.docks.create-docks.edits-dock.title.text-edits": "Text edits",
+    "server.extensions.design.docks.create-docks.edits-dock.button.discard": "Discard",
+    "server.extensions.design.docks.create-docks.edits-dock.title.leave-one-out-message":
+        "Leave this one out of the message",
+    "server.extensions.design.docks.create-docks.edits-dock.aria-label.leave-one-out-message":
+        "Leave this one out of the message",
+    "server.extensions.design.docks.create-docks.tweaks-dock.title.tweaks": "Tweaks",
+    "server.extensions.design.docks.create-docks.tweaks-dock.button.reset": "Reset",
+    "server.extensions.design.docks.create-docks.tweaks-dock.button.ask-pi-tweaks":
+        "Ask Pi for tweaks",
+    "server.extensions.design.docks.create-docks.tweaks-dock.p.tweaks-people-who-steer":
+        "Tweaks are for people who can steer the session.",
+    "server.extensions.design.docks.create-docks.sheet-handle.aria-label.height-findings-drag-press":
+        "Height of the findings. Drag, or press the arrow keys.",
+    "server.extensions.design.views.create-views.compare-pane.title.swap-two-versions":
+        "Swap the two versions",
+    "server.extensions.design.views.create-views.compare-pane.aria-label.swap-two-versions":
+        "Swap the two versions",
+    "server.extensions.design.views.create-views.thumb.button.open": "Open",
+    "server.extensions.design.views.create-views.thumb.button.one": "Use this one",
+    "server.extensions.design.views.create-views.deck-strip.aria-label.slides": "Slides",
+    "server.extensions.design.views.create-views.deck-strip.title.previous-slide": "Previous slide",
+    "server.extensions.design.views.create-views.deck-strip.aria-label.previous-slide":
+        "Previous slide",
+    "server.extensions.design.views.create-views.deck-strip.title.next-slide": "Next slide",
+    "server.extensions.design.views.create-views.deck-strip.aria-label.next-slide": "Next slide",
+    "server.extensions.design.views.create-views.present.aria-label.present": "Present",
+    "server.extensions.design.views.create-views.present.title.previous-slide": "Previous slide",
+    "server.extensions.design.views.create-views.present.aria-label.previous-slide":
+        "Previous slide",
+    "server.extensions.design.views.create-views.present.title.next-slide": "Next slide",
+    "server.extensions.design.views.create-views.present.aria-label.next-slide": "Next slide",
+    "server.extensions.design.views.create-views.present.title.leave-esc": "Leave (Esc)",
+    "server.extensions.design.views.create-views.present.aria-label.leave-present-mode":
+        "Leave present mode",
+    "server.extensions.design.check.create-check.finding.title.copy": "Copy",
+    "server.extensions.design.check.create-check.finding.title.accept-fine-leaves-counts":
+        "Accept: this is fine as it is. It leaves the counts, for everyone, until it is undone.",
+    "server.extensions.design.check.create-check.finding.button.accept": "Accept",
+    "server.extensions.design.check.create-check.accepted.strong.accepted": "Accepted",
+    "server.extensions.design.check.create-check.accepted.span.not-counts": "not in the counts",
+    "server.extensions.design.check.create-check.accepted.title.undo-counted-again":
+        "Undo: it is counted again",
+    "server.extensions.design.check.create-check.accepted.button.undo": "Undo",
+    "server.extensions.design.check.create-check.check-dock.button.run-check": "Run the check",
+    "server.extensions.design.check.create-check.check-dock.title.check": "Check",
+    "server.extensions.design.check.create-check.check-dock.button.follow-canvas":
+        "Follow the canvas",
+    "server.extensions.design.check.create-check.check-dock.aria-label.show": "Show",
+    "server.extensions.design.system-view.create-system-view.mode-switch.aria-label.mode.mode":
+        "Mode",
+    "server.extensions.design.system-view.create-system-view.modes-popover.div.modes": "Modes",
+    "server.extensions.design.system-view.create-system-view.modes-popover.button.remove": "Remove",
+    "server.extensions.design.system-view.create-system-view.modes-popover.button.delete-file":
+        "Delete its file",
+    "server.extensions.design.system-view.create-system-view.modes-popover.placeholder.add-mode-dark-high":
+        "Add a mode: dark, high-contrast…",
+    "server.extensions.design.system-view.create-system-view.modes-popover.aria-label.name-new-mode":
+        "Name of the new mode",
+    "server.extensions.design.system-view.create-system-view.modes-popover.button.add": "Add",
+    "server.extensions.design.system-view.create-system-view.modes-popover.p.mode-name":
+        "There is a mode by that name.",
+    "server.extensions.design.system-view.create-system-view.section-tabs.aria-label.sections":
+        "Sections",
+    "server.extensions.design.system-view.create-system-view.section-tabs.title.find-token":
+        "Find a token",
+    "server.extensions.design.system-view.create-system-view.section-tabs.aria-label.find-token":
+        "Find a token",
+    "server.extensions.design.system-view.create-system-view.history-buttons.aria-label.undo":
+        "Undo",
+    "server.extensions.design.system-view.create-system-view.history-buttons.aria-label.redo":
+        "Redo",
+    "server.extensions.design.system-view.create-system-view.system-bar.span.design-system":
+        "Design system",
+    "server.extensions.design.system-view.create-system-view.system-bar.title.more": "More",
+    "server.extensions.design.system-view.create-system-view.system-bar.aria-label.more": "More",
+    "server.extensions.design.system-view.create-system-view.save-bar.aria-label.unsaved-changes":
+        "Unsaved changes",
+    "server.extensions.design.system-view.create-system-view.save-bar.button.load-new-version":
+        "Load the new version",
+    "server.extensions.design.system-view.create-system-view.save-bar.aria-label.undo-redo":
+        "Undo and redo",
+    "server.extensions.design.system-view.create-system-view.blank.h3.no-design-system-yet":
+        "No design system yet",
+    "server.extensions.design.system-view.create-system-view.blank.span.project-markdown-design-system":
+        "This project has a Markdown design system (",
+    "server.extensions.design.system-view.create-system-view.blank.button.scan-project-instead":
+        "Scan the project instead",
+    "server.extensions.design.system-view.create-system-view.blank.p.people-who-steer-session":
+        "People who can steer the session can ask Pi to make one.",
+    "server.extensions.design.system-view.create-system-view.preview.code.follow-system":
+        "follow the system.",
+    "server.extensions.design.system-view.create-system-view.preview.text.system": "System",
+    "server.extensions.design.system-view.create-system-view.preview.aria-label.design-preview":
+        "The design to preview",
+    "server.extensions.design.system-view.create-system-view.preview.aria-label.size": "Size",
+    "server.extensions.design.system-view.create-system-view.preview.title.check-design-against-system":
+        "Check this design against the system",
+    "server.extensions.design.system-view.create-system-view.preview.aria-label.check-design":
+        "Check this design",
+    "server.extensions.design.system-view.create-system-view.preview.span.check": "Check",
+    "server.extensions.design.system-view.create-system-view.system-view.h3.design-system-not-read":
+        "The design system could not be read",
+    "server.extensions.design.system-view.create-system-view.system-view.button.try-again":
+        "Try again",
+    "server.extensions.design.system-view.create-system-view.system-view.aria-label.find-token":
+        "Find a token",
+    "server.extensions.design.system-view.create-system-view.system-view.aria-label.clear": "Clear",
+    "server.extensions.design.system-view.create-system-view.system-view.text.look-system-people-who":
+        "You can look at the system here. Only people who can steer the session change it.",
+    "server.extensions.design.system-sections.create-system-sections.token-row.span.deprecated":
+        "deprecated",
+    "server.extensions.design.system-sections.create-system-sections.token-row.span.edited":
+        "edited",
+    "server.extensions.design.system-sections.create-system-sections.overview.strong.card-title":
+        "Card title",
+    "server.extensions.design.system-sections.create-system-sections.overview.span.body-text-reads-glance":
+        "Body text reads at a glance.",
+    "server.extensions.design.system-sections.create-system-sections.overview.span.muted-text-details":
+        "Muted text for the details.",
+    "server.extensions.design.system-sections.create-system-sections.overview.span.primary":
+        "Primary",
+    "server.extensions.design.system-sections.create-system-sections.overview.span.secondary":
+        "Secondary",
+    "server.extensions.design.system-sections.create-system-sections.color-groups.h3.roles":
+        "Roles",
+    "server.extensions.design.system-sections.create-system-sections.type-parts.visual.aa": "Aa",
+    "server.extensions.design.system-sections.create-system-sections.by-step.span.own-value":
+        "Own value",
+    "server.extensions.design.system-sections.create-system-sections.by-step.span.not-step-scale":
+        "not a step of the scale",
+    "server.extensions.design.system-sections.create-system-sections.copy-shadow.title.copy-css-value":
+        "Copy the CSS value",
+    "server.extensions.design.system-sections.create-system-sections.components.text.ask-pi-core-components":
+        "Ask Pi for the core components",
+    "server.extensions.design.system-sections.create-system-sections.components.text.ask-pi-another-component":
+        "Ask Pi for another component",
+    "server.extensions.design.system-sections.create-system-sections.guidelines.aria-label.guidelines-markdown":
+        "Guidelines, in Markdown",
+    "server.extensions.design.system-sections.create-system-sections.guidelines.button.done":
+        "Done",
+    "server.extensions.design.system-sections.create-system-sections.guidelines.h3.no-guidelines-yet":
+        "No guidelines yet",
+    "server.extensions.design.system-sections.create-system-sections.guidelines.text.write-them":
+        "Write them",
+    "server.extensions.design.system-sections.create-system-sections.guidelines.text.ask-pi":
+        "Ask Pi",
+    "server.extensions.design.system-sections.create-system-sections.guidelines.text.edit": "Edit",
+    "server.extensions.design.system-widgets.create-system-widgets.color-field.title.show-hex-oklch-rgb":
+        "Show it as hex, oklch, or rgb",
+    "server.extensions.design.system-widgets.create-system-widgets.alias-picker.aria-label.tokens":
+        "Tokens",
+    "server.extensions.design.system-widgets.create-system-widgets.part-field.button.value":
+        "Use a value",
+    "server.extensions.design.system-widgets.create-system-widgets.shadow-field.input.inset":
+        "Inset",
+    "server.extensions.design.system-widgets.create-system-widgets.shadow-field.button.add-layer":
+        "Add a layer",
+    "server.extensions.design.system-widgets.create-system-widgets.value-field.p.value-no-size-edit":
+        "This value has no size to edit.",
+    "server.extensions.design.system-widgets.create-system-widgets.contrast-list.span.on": "on",
+    "server.extensions.design.system-widgets.create-system-widgets.contrast-list.span.checked-against-page":
+        "checked against the page",
+    "server.extensions.design.system-widgets.create-system-widgets.alias-line.span.value-own":
+        "A value of its own",
+    "server.extensions.design.system-widgets.create-system-widgets.alias-line.button.value":
+        "Use a value",
+    "server.extensions.design.system-widgets.create-system-widgets.token-editor.text.ask-pi":
+        "Ask Pi",
+    "server.extensions.design.system-widgets.create-system-widgets.token-editor.text.reset":
+        "Reset",
+    "server.extensions.session-tags.index.setup.filter-sheet.placeholder.search-tags":
+        "Search tags",
+    "server.extensions.session-tags.index.setup.filter-sheet.aria-label.search-tags": "Search tags",
+    "server.extensions.session-tags.index.setup.filter-sheet.aria-label.tags": "Tags",
+    "server.extensions.session-tags.index.setup.filter-sheet.p.no-tags-match": "No tags match.",
+    "server.extensions.session-tags.index.setup.filter-sheet.button.clear": "Clear",
+    "server.extensions.session-tags.index.setup.filter-sheet.button.done": "Done",
+    "server.extensions.session-tags.index.setup.edit-sheet.aria-label.tags": "Tags",
+    "server.extensions.session-tags.index.setup.edit-sheet.span.no-tags-yet": "No tags yet.",
+    "server.extensions.session-tags.index.setup.edit-sheet.placeholder.add-tag": "Add a tag",
+    "server.extensions.session-tags.index.setup.edit-sheet.aria-label.add-tag": "Add a tag",
+    "server.extensions.session-tags.index.setup.edit-sheet.button.add": "Add",
+    "server.extensions.session-tags.index.setup.edit-sheet.aria-label.tags.tags": "Tags in use",
+    "server.extensions.session-tags.index.setup.edit-sheet.button.cancel": "Cancel",
+    "server.extensions.ask-someone.index.setup.draft.div.draft-people-see":
+        "Draft · only people here can see it",
+    "server.extensions.ask-someone.index.setup.draft.label.title": "Title",
+    "server.extensions.ask-someone.index.setup.draft.label.question": "Question",
+    "server.extensions.ask-someone.index.setup.draft.div.link-stays-open":
+        "The link stays open for",
+    "server.extensions.ask-someone.index.setup.draft.aria-label.link-stays-open":
+        "The link stays open for",
+    "server.extensions.ask-someone.index.setup.draft.button.delete": "Delete",
+    "server.extensions.ask-someone.index.setup.draft.button.copy-text": "Copy text",
+    "server.extensions.ask-someone.index.setup.draft.button.save": "Save",
+    "server.extensions.ask-someone.index.setup.draft.button.create-link": "Create link",
+    "server.extensions.ask-someone.index.setup.sent.summary.what-they-see": "What they see",
+    "server.extensions.ask-someone.index.setup.sent.button.copy-message": "Copy message",
+    "server.extensions.ask-someone.index.setup.sent.button.share": "Share…",
+    "server.extensions.ask-someone.index.setup.sent.button.copy-link": "Copy link",
+    "server.extensions.ask-someone.index.setup.answered.p.anyone-link-write-name":
+        "Anyone with the link could write this, and a name is what they typed.",
+    "server.extensions.ask-someone.index.setup.answered.button.delete": "Delete",
+    "server.extensions.ask-someone.index.setup.questions-sheet.p.open-session-see-questions":
+        "Open a session to see its questions.",
+    "server.extensions.design.index.setup.label.open-design": "Open Design",
+    "server.extensions.design.index.setup.detail.canvas-prototypes-screens-decks":
+        "A canvas for prototypes, screens, and decks",
+    "server.extensions.design.index.setup.label.open-design-system": "Open the design system",
+    "server.extensions.design.index.setup.detail.colors-type-spacing-components":
+        "Colors, type, spacing, and components of the project",
+    "server.extensions.design.app.create-app.send-to-box.env.too-much-one-message":
+        "That is too much for one message. Mark some comments done, and send the rest.",
+    "server.extensions.design.app.create-app.send-to-box.env.message-box-read-send":
+        "In your message box: read it, then send it.",
+    "server.extensions.design.workspace.create-workspace.menu.text.png-image": "PNG image",
+    "server.extensions.design.workspace.create-workspace.menu.text.power-point-pptx":
+        "PowerPoint (PPTX)",
+    "server.extensions.design.workspace.create-workspace.menu.text.html-bundle-zip":
+        "HTML bundle (zip)",
+    "server.extensions.design.workspace.create-workspace.menu.text.code": "for code",
+    "server.extensions.design.workspace.create-workspace.bar.title.custom-size": "Custom size",
+    "server.extensions.design.workspace.create-workspace.bar.label.preview": "Preview",
+    "server.extensions.design.workspace.create-workspace.bar.label.edit-text": "Edit text",
+    "server.extensions.design.workspace.create-workspace.bar.label.tweaks": "Tweaks",
+    "server.extensions.design.workspace.create-workspace.bar.label.check": "Check",
+    "server.extensions.design.workspace.create-workspace.bar.label.versions": "Versions",
+    "server.extensions.design.picker.create-picker.system-note.text.tokens-components-guidelines":
+        "Tokens, components, and guidelines",
+    "server.extensions.design.system-view.system-menu.unless.title.fix-errors-first":
+        "Fix the errors first",
+    "server.extensions.design.system-sections.colors.no-color-matches": "No color matches.",
+    "server.extensions.design.system-sections.colors.system-no-colors-yet":
+        "This system has no colors yet.",
+    "server.extensions.design.system-sections.spacing.no-spacing-token-matches":
+        "No spacing token matches.",
+    "server.extensions.design.system-sections.spacing.system-no-spacing-yet":
+        "This system has no spacing yet.",
+    "server.extensions.design.system-sections.radii.no-radius-matches": "No radius matches.",
+    "server.extensions.design.system-sections.radii.system-no-corner-radii":
+        "This system has no corner radii yet.",
+    "server.extensions.design.system-sections.shadows.no-shadow-matches": "No shadow matches.",
+    "server.extensions.design.system-sections.shadows.system-no-shadows-yet":
+        "This system has no shadows yet.",
+    "server.extensions.design.system-sections.motion.no-motion-token-matches":
+        "No motion token matches.",
+    "server.extensions.design.system-sections.motion.system-no-motion-yet":
+        "This system has no motion yet.",
+    "server.extensions.design.system-sections.roles-note.where-system-uses-step":
+        "where the system uses a step",
+    "server.extensions.design.system-sections.roles-note.under-step-points":
+        "by use, under the step each points at",
+    "server.extensions.session-tags.index.setup.label.filter-sessions-tag":
+        "Filter sessions by tag",
+    "server.extensions.session-tags.index.setup.label.edit-session-s-tags":
+        "Edit this session's tags",
+    "server.extensions.session-tags.index.setup.run.open-session-first-select":
+        "Open a session first, or select sessions in the list.",
+    "server.extensions.ask-someone.index.life.day": "A day",
+    "server.extensions.ask-someone.index.life.week": "A week",
+    "server.extensions.ask-someone.index.life.month": "A month",
+    "server.extensions.ask-someone.index.until.text.within-hour": "within the hour",
+    "server.extensions.ask-someone.index.setup.publish.title.questions-people-outside-chat":
+        "Questions for people outside this chat",
+    "server.extensions.ask-someone.index.draft.share.link-copied-takes-one":
+        "Link copied. It takes one answer.",
+    "server.extensions.ask-someone.index.answered.give.answer-belongs-another-session":
+        "That answer belongs to another session.",
+    "server.extensions.ask-someone.index.setup.hint.share-question-someone-outside":
+        "Share a question with someone outside this chat",
+    "server.extensions.ask-someone.index.setup.detail.drafts-links-answers-session":
+        "Drafts, links, and answers in this session",
+    "web.sheets.appearance.text-size.aria-label.text-size": "Text size",
+    "web.sheets.appearance.font-tools.span.ligatures": "Ligatures",
+    "web.sheets.appearance.appearance-sheet.title.tiled-windows": "Tiled windows",
+    "web.sheets.appearance.appearance-sheet.title.peek-tiles": "Peek tiles",
+    "web.sheets.appearance.appearance-sheet.title.desktop-wallpaper": "Desktop wallpaper",
+    "web.sheets.appearance.appearance-sheet.title.show-thinking": "Show thinking",
+    "web.sheets.appearance.appearance-sheet.title.keep-activity-folded": "Keep activity folded",
+    "web.sheets.appearance.appearance-sheet.title.reply-speed": "Reply speed",
+    "web.sheets.appearance.choice.open": "Open",
+    "web.sheets.appearance.choice.folded": "Folded",
+    "web.sheets.appearance.choice.auto": "Auto",
+    "web.sheets.appearance.choice.full": "Full",
+    "web.sheets.appearance.choice.fluid": "Fluid",
+    "web.sheets.appearance.choice.reduced": "Reduced",
+    "web.sheets.appearance.choice.comfortable": "Comfortable",
+    "web.sheets.appearance.choice.wide": "Wide",
+    "web.sheets.appearance.choice.compact": "Compact",
+    "web.sheets.appearance.choice.tight": "Tight",
+    "web.sheets.appearance.peek-detail":
+        "Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar{shortcut}",
+    "web.sheets.appearance.text-size-detail":
+        "The conversation's, in pixels: any from {min} to {max}",
+    "web.sheets.appearance.thinking-detail":
+        "Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one{shortcut}",
+    "web.sheets.appearance.slot-from": "From {module}",
+    "web.sheets.appearance.slot-hidden": "Hidden by {name}",
+    "web.sheets.appearance.slot-always": "Always shown",
+    "web.sheets.appearance.slot-earlier": "Move {label} earlier",
+    "web.sheets.appearance.slot-later": "Move {label} later",
+    "web.sheets.appearance.slot-show": "Show {label}",
+    "server.extensions.design.index.setup.title.design": "Design",
+    "server.extensions.session-tags.index.setup.title.filter-tag": "Filter by tag",
+    "server.extensions.session-tags.index.setup.title.edit-tags": "Edit tags",
+    "server.extensions.session-tags.index.setup.label.edit-tags": "Edit tags",
+    "server.extensions.ask-someone.index.setup.title.questions-others": "Questions for others",
+    "server.extensions.ask-someone.index.setup.label.questions-others": "Questions for others",
+    "server.extensions.ask-someone.index.setup.label.ask-someone": "Ask someone",
+    "server.extensions.design.workspace.create-workspace.empty.p.ask-pi-design-something":
+        "Ask Pi to design something: a prototype, a screen, a one-pager, or a slide deck. It shows up here, where you can point at things, comment, tweak, and compare versions.",
+    "server.extensions.design.workspace.create-workspace.empty.ideas.design-landing-page-small":
+        "Design a landing page for a small coffee roaster. Make it a single page with a hero, three products, and a signup form.",
+    "server.extensions.design.workspace.create-workspace.empty.ideas.make-habit-clickable":
+        "Make a clickable prototype of a habit tracker app: today, history, and settings screens.",
+    "server.extensions.design.workspace.create-workspace.empty.ideas.make-slide-deck-pitches":
+        "Make a 6-slide deck that pitches a weekend project, with a title, problem, solution, demo, and next steps.",
+    "server.extensions.design.workspace.ui.comment-tab": "Comment",
+    "server.extensions.design.workspace.ui.size": "Size",
+    "server.extensions.design.workspace.ui.phone-size": "Phone, 390 × 844",
+    "server.extensions.design.workspace.ui.tablet-size": "Tablet, 820 × 1180",
+    "server.extensions.design.workspace.ui.slide-size": "Slide, 1280 × 720",
+    "server.extensions.design.workspace.ui.desktop-size": "Desktop, 1280 × 800",
+    "server.extensions.design.workspace.ui.export-share": "Export and share",
+    "server.extensions.design.workspace.ui.toggle-chat": "Show or hide the conversation",
+    "server.extensions.design.workspace.ui.making": "Making the {label}…",
+    "server.extensions.session-tags.ui.tag-name": "Tag: {name}",
+    "server.extensions.session-tags.ui.tag-filter":
+        "Tag: {name}. Tap to show only sessions with it",
+    "server.extensions.session-tags.ui.showing": "Showing sessions tagged {tags}.",
+    "server.extensions.session-tags.ui.choose":
+        "Choose tags to show only the sessions that have all of them.",
+    "server.extensions.session-tags.ui.tag-length": "A tag is 1 to {max} characters.",
+    "server.extensions.session-tags.ui.saving": "Saving…",
+    "server.extensions.session-tags.ui.save": "Save",
+    "server.extensions.ask-someone.ui.in-days": "in {count} days",
+    "server.extensions.ask-someone.ui.in-hours": "in {count} hours",
+    "server.extensions.ask-someone.ui.give-again": "Give to Pi again",
+    "server.extensions.ask-someone.ui.give": "Give to Pi",
+    "server.extensions.ask-someone.ui.draft-question": "draft a question",
+    "server.extensions.ask-someone.ui.back-draft": "Back to draft",
+    "server.extensions.ask-someone.ui.end-link": "End link",
+    "server.extensions.ask-someone.ui.question-copied": "Question copied.",
+    "server.extensions.ask-someone.ui.copy-failed": "Could not copy.",
+    "server.extensions.ask-someone.ui.message-copied": "Message copied.",
+    "server.extensions.ask-someone.ui.link-copied": "Link copied.",
+    "server.http.public-link.closed-title": "This link is not open",
+    "server.http.public-link.closed-text":
+        "It may have closed, taken its answer already, or been ended. Ask whoever sent it for a new one.",
+    "server.http.public-link.not-here": "Not here",
+    "server.http.public-link.read-or-send": "This page is only read or sent.",
+    "server.http.public-link.not-sent": "Not sent",
+    "server.http.public-link.retry": "Try again.",
+    "server.http.public-link.busy": "Busy",
+    "server.http.public-link.retry-later": "Try again in a moment.",
+    "server.http.public-link.error": "Something went wrong",
+    "server.http.public-link.cannot-show": "This page could not be shown. Try again later.",
+    "web.sheets.appearance.detail.setting-1":
+        "Wide screens: the sidebar and the session as Hyprland windows, with gaps and the active border",
+    "web.sheets.appearance.detail.setting-2":
+        "Your wallpaper in the gaps between windows, while following the desktop",
+    "web.sheets.appearance.detail.setting-3": "Folded, it shows numbered sessions like workspaces",
+    "web.sheets.appearance.detail.setting-4":
+        "Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph",
+    "web.sheets.appearance.detail.setting-5":
+        "Wide screens: how much of the window the conversation and the message box take. Comfortable grows with the window",
+    "web.sheets.appearance.detail.setting-6":
+        "Less room around messages, rows, and the message box, to fit more on a screen",
+    "web.sheets.appearance.detail.setting-7":
+        "Pi's thinking and tool calls stay on their one line until you open them, also while it works and in the newest turn",
+    "web.sheets.appearance.detail.setting-8":
+        "Under the message box: how fast the last answer came, in tokens a second, and how long its first token took",
+    "server.extensions.design.system-view.create-system-view.blank.p.design-system-colors-type":
+        "A design system is the colors, type, spacing, and components of a product, kept in the project. Pi reads it before it designs, and checks each design against it. Here you see it, change it, and publish it.",
+    "server.extensions.design.system-view.create-system-view.blank.text.ask-pi-scan-project":
+        "Ask Pi to scan this project",
+    "server.extensions.design.system-view.create-system-view.blank.text.ask-pi-convert":
+        "Ask Pi to convert it",
+    "web.sheets.appearance.builtin.pocket-description":
+        "The app's own look: soft tiles over the colors you choose.",
+    "web.sheets.appearance.builtin.lantern-description":
+        "Calm and dark for long reading: warm brown-grey, warm off-white text, and a muted amber accent. One readable column and quiet tool calls.",
+    "web.sheets.appearance.desktop-follow":
+        "Follow the Omarchy theme of the machine Pi Pocket runs on",
+    "server.extensions.ask-someone.index.setup.draft.p.read-person-send-leave":
+        "Read it as the person you send it to: leave out keys, private data, and what they do not need.",
+    "server.extensions.ask-someone.index.setup.questions-sheet.p.no-questions-yet-under":
+        "No questions yet. Under one of Pi's answers, tap Ask someone, and Pi writes a question that someone outside this chat can answer.",
+    "server.extensions.session-tags.index.setup.filter-sheet.p.no-tags-yet-hold":
+        "No tags yet. Hold a session's row, or select sessions, and choose Edit tags.",
+    "web.ui.code.copy": "Copy",
+    "web.ui.code.show-lines": "Show all {count} lines",
+    "web.ui.code.copied": "Copied",
+    "web.ui.code.copy-failed": "Could not copy.",
+    "web.ui.code.fold": "Fold",
+    "server.extensions.design.workspace.ui.comments-tab": "Comments",
+    "server.extensions.design.workspace.ui.show-chat": "Show the conversation",
+    "server.extensions.design.workspace.ui.hide-chat": "Hide the conversation",
+    "web.commands.no-reply": "Pi has not replied yet.",
+    "web.commands.context-use": "context {percent}% of {window}",
+    "web.guard.disabled-detail":
+        "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here.",
+    "web.sessions.group.matches": "Matches",
+    "web.sessions.group.archived": "Archived",
+    "web.sessions.group.pinned": "Pinned",
+    "ui.role.owner": "owner",
+    "ui.role.viewer": "view only",
+    "ui.role.guest": "guest",
+    "web.sheets.appearance.desktop-name": "Desktop · {name}",
+    "web.theme.desktop-name": "{name} (desktop)",
+    "web.launcher.branch-current": "on {branch}",
+    "web.shortcuts.or": "or",
+    "web.shortcuts.click": "Click",
+    "builtin.design.menu-title": "Design system menu",
+    "builtin.design.read-again": "Read it again",
+    "builtin.design.show-conversation": "Show the conversation",
+    "builtin.design.hide-conversation": "Hide the conversation",
+    "builtin.design.opening": "Opening Design",
+    "builtin.design.no-match": "No design matches “{artifact}”.",
+    "builtin.command.design-open-description":
+        "Open the Design canvas (or the design system, with `system`)",
+    "builtin.command.design-open-args": "[artifact | system]",
+    "builtin.module.prompt.title": "System prompt",
+    "builtin.module.artifacts.title": "Artifacts",
+    "builtin.module.browser.title": "Browser",
+    "builtin.module.subagents.title": "Subagents",
+    "builtin.module.agent-teams.title": "Agent Teams",
+    "builtin.module.schedules.title": "Scheduled messages",
+    "builtin.module.background.title": "Background tasks",
+    "builtin.module.goals.title": "Done when",
+    "builtin.module.plan.title": "Plan mode",
+    "builtin.module.anthropic-subscription.title": "Claude subscription billing",
+    "builtin.module.memory.title": "Memory",
+    "builtin.module.triggers.title": "Triggers",
+    "builtin.module.gallery.title": "Extension gallery",
+    "builtin.module.session-tags.title": "Session tags",
+    "builtin.module.ask.title": "Ask",
+    "builtin.module.ask-someone.title": "Ask someone",
+    "builtin.module.updates.title": "Pi Pocket updates",
+    "builtin.module.tool-search.title": "Tool search",
+    "builtin.module.design.title": "Design",
+    "builtin.module.guard.title": "Lancet Guard",
+    "builtin.module.codemode.title": "Codemode",
+    "builtin.module.pip.title": "PiP",
+    "builtin.module.zh-cn.title": "Zh cn",
+    "builtin.module.prompt.summary":
+        "Who the agent is, how to behave on a phone-sized screen, where Pi Pocket's documentation is, the project's AGENTS.md files, Pi's skills, and the working directory.",
+    "builtin.module.artifacts.summary":
+        "HTML pages, Markdown documents, and SVG images the agent publishes for the user to open in the app, and HTML pages it shows as a card in its reply (`artifact_inline`, the same store).",
+    "builtin.module.browser.summary":
+        "Pi opens, reads, clicks through, and screenshots web pages in a real Chromium on this machine, the same page the people in the conversation watch and use in the Browser panel.",
+    "builtin.module.subagents.summary":
+        "Persistent background subagents, after Pi Durable's example 23.",
+    "builtin.module.agent-teams.summary":
+        "Agent Teams lets Pi start linked sessions, each an ordinary session of its own, and send them tasks, questions, and findings.",
+    "builtin.module.schedules.summary":
+        "Scheduled messages go to Pi later, or on repeat: people set them up with /schedule, and Pi with its schedule tool, to check back on something slow or for a regular job.",
+    "builtin.module.background.summary":
+        "Background tasks let Pi start a command and not wait for it (a dev server, a long build, a test run), read what it printed later, and stop it; Pi gets a message when it ends.",
+    "builtin.module.goals.summary":
+        "Pi keeps working until a session's check command passes, such as npm test, up to five checks.",
+    "builtin.module.plan.summary":
+        "Plan mode lets Pi read and explore but change nothing, so it proposes a plan for people to approve first.",
+    "builtin.module.anthropic-subscription.summary":
+        "Adds the header that makes Anthropic count Pi Pocket's requests against a Claude subscription.",
+    "builtin.module.guard.summary": "Lancet Guard for Pi Pocket's tools.",
+    "builtin.module.codemode.summary":
+        "Codemode lets the agent write JavaScript that calls its other tools, to batch independent calls, chain them, or filter large output before it reaches the model.",
+    "builtin.module.memory.summary":
+        "Memory gives Pi short lessons that last across sessions, for a project or for everywhere: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same project gets them in its system prompt.",
+    "builtin.module.pip.summary":
+        "PiP, the owner's assistant over every screen: it finds out what sessions are doing, starts and messages them, stops and archives them, schedules messages, follows runs until they end, watches the owner's GitHub repositories and pull requests and acts on what happens there, and can deny (never allow) calls waiting for approval.",
+    "builtin.module.triggers.summary":
+        "Triggers start work from outside the app: a PR watch tells Pi when its pull request's checks fail, it has conflicts, or reviewers comment, until it is merged; repository watches tell PiP what happens on the owner's repositories; webhooks turn posts from other services into messages to a session or to PiP.",
+    "builtin.module.gallery.summary":
+        "Find drop-ins and themes other people wrote in a reviewed index, install them (drop-ins off), read their code, ask Pi to review it, update them with a diff, remove them, and share your own.",
+    "builtin.module.session-tags.summary":
+        "Shared labels on sessions, shown on their rows, found by search, and used to filter the session list.",
+    "builtin.module.ask.summary":
+        "Pi asks you up to 4 questions on a card in the session, each with 2 to 4 answers to tap or one of your own.",
+    "builtin.module.ask-someone.summary":
+        "Pi writes a question that someone outside the chat can answer, and you share it by link or as text.",
+    "builtin.module.updates.summary":
+        "Updates of Pi Pocket itself: it looks for a new release every 6 hours, tells the owner, shows its notes, and updates the git checkout or the global npm install to it with one tap, then restarts; it can also install new releases by itself while no session is working.",
+    "builtin.module.design.summary": "A canvas beside the chat for interactive designs.",
+    "builtin.module.tool-search.summary":
+        "Tool search keeps tools that few conversations use out of every request until Pi asks for them.",
+    "builtin.module.zh-cn.summary":
+        "Simplified Chinese UI text, selected in Appearance and removed when this module is off.",
+    "builtin.command.copy-0": "Summarize older messages to free up context",
+    "builtin.command.copy-1": "[what to keep]",
+    "builtin.command.copy-2": "Start a new context: Pi starts fresh, history stays",
+    "builtin.command.copy-3": "[handoff note]",
+    "builtin.command.copy-4": "Set what Pi is told with every message here",
+    "builtin.command.copy-5": "[text]",
+    "builtin.command.copy-6": "Switch the model",
+    "builtin.command.copy-7": "[name]",
+    "builtin.command.copy-8": "Set the thinking level",
+    "builtin.command.copy-9": "[level]",
+    "builtin.command.copy-10": "Start a new session in this folder",
+    "builtin.command.copy-11": "[folder]",
+    "builtin.command.copy-12": "Rename this session",
+    "builtin.command.copy-13": "[title]",
+    "builtin.command.copy-14": "Change the working directory",
+    "builtin.command.copy-15": "Plan mode on or off: Pi reads and proposes, and changes nothing",
+    "builtin.command.copy-16":
+        "Send Pi a message later or on repeat: in 2h …, tomorrow 9:00 …, every weekday 8:00 …",
+    "builtin.command.copy-17": "<when> <message>",
+    "builtin.command.copy-18": "Keep a lesson for Pi in every session of this project",
+    "builtin.command.copy-19": "<lesson>",
+    "builtin.command.copy-20":
+        "Pi keeps going until a check passes, such as npm test (5 checks at most)",
+    "builtin.command.copy-21": "<command>",
+    "builtin.command.copy-22":
+        "Watch this session's pull request: Pi fixes failed checks and answers reviews until it is merged",
+    "builtin.command.copy-23": "[PR number or URL]",
+    "builtin.command.copy-24": "Stop the current run",
+    "builtin.command.copy-25": "Copy Pi’s last reply",
+    "builtin.command.copy-26": "Find in this session’s messages",
+    "builtin.command.copy-27": "Show the model, context use, and cost",
+    "builtin.command.copy-28": "Download this conversation as Markdown",
+    "builtin.command.copy-29": "Switch to another session",
+    "builtin.command.copy-30": "Open the people chat",
+    "builtin.command.copy-31":
+        "Open the browser Pi uses, or an address in it, such as localhost:5173",
+    "builtin.command.copy-32": "[address]",
+    "builtin.command.copy-33": "Show or hide the Files tile: the folder's files, and what changed",
+    "builtin.command.copy-34": "Review the folder's uncommitted changes, file by file",
+    "builtin.command.copy-35": "Switch the folder to another git branch, or make one",
+    "builtin.command.copy-36": "Show or hide peek tiles: other sessions' live work beside this one",
+    "builtin.command.copy-37": "Show artifacts",
+    "builtin.command.copy-38": "Sign in to a model provider",
+    "builtin.command.copy-39": "Open the menu",
+    "builtin.command.copy-40":
+        "Change the theme or the colors: a theme, an Omarchy palette, or desktop to follow yours",
+    "builtin.command.copy-41": "Open the Design canvas (or the design system, with `system`)",
+    "builtin.command.copy-42": "[artifact | system]",
+    "web.guard.environment-off": "Lancet Guard is off (PI_POCKET_GUARD=off); tools run unguarded.",
+    "builtin.command.pip-args": "[message]",
+    "builtin.command.pip-description":
+        "Open PiP, your assistant over every session, or ask it something",
+    "builtin.command.trust-description": "Whether Pi trusts this project, for its own skills",
+    "web.ui.image.unavailable": "🖼 {image} could not be loaded",
+    "web.ui.image.name": "Image",
 });

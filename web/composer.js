@@ -47,6 +47,7 @@ import {
     Spinner,
 } from "./ui.js";
 import { t } from "./ui-locale.js";
+import { levelLabel } from "./sheets/model.js";
 
 /** The explicit route to the parent on every layout, outside the dock and the scrolling conversation. */
 function ParentSessionButton() {
@@ -1360,7 +1361,7 @@ export function Composer() {
     const blocked = collab() && turns?.on && turns.driver !== me?.id;
     const level =
         agent?.thinkingLevel && agent.thinkingLevel !== "off" && agent.reasoning
-            ? agent.thinkingLevel
+            ? levelLabel(agent.thinkingLevel)
             : null;
 
     return html`<footer class="composer-wrap" data-part="composer">
@@ -2473,7 +2474,7 @@ defineItem("status", {
             aria-label=${t("web.composer.render.aria-label.lancet-guard", "Lancet Guard {state}", {
                 state,
             })}
-            title=${guard.detail}
+            title=${guard.detail === "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here." ? t("web.guard.disabled-detail", "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here.") : guard.detail}
             onClick=${() => openSheet({ type: "extensions", tab: "installed", show: "built-in" })}
         >
             <${Icon} name="shield" size=${11} />

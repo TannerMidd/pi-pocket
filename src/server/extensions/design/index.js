@@ -6,6 +6,8 @@
 // workspace (`app.js`) loads when the panel first opens, and its docks and views (`workspace.js`) when first needed.
 import { DESIGN_PATH } from "./paths.js";
 import { createStore, initialState, loadPick, savePrefs, sessionState } from "./state.js";
+import { t } from "/ui-locale.js";
+import { store as app } from "/store.js";
 
 export const pocketApi = 1;
 
@@ -102,7 +104,9 @@ export default function setup(pocket) {
 
         if (failed) {
             return html`<div class="dsn-load-failed">
-                <p>Design did not load.</p>
+                <p>
+                    ${t("server.extensions.design.index.setup.panel.p.design-not-load", "Design did not load.")}
+                </p>
                 <p class="muted small">${String(failed?.message ?? failed)}</p>
                 <button
                     type="button"
@@ -115,14 +119,14 @@ export default function setup(pocket) {
                         });
                     }}
                 >
-                    Try again
+                    ${t("server.extensions.design.index.setup.panel.button.try-again", "Try again")}
                 </button>
             </div>`;
         }
 
         return workspace
             ? html`<${workspace.Workspace} />`
-            : html`<${pocket.Loader} label="Opening Design" />`;
+            : html`<${pocket.Loader} label=${t("builtin.design.opening", "Opening Design")} />`;
     }
 
     let focused = false;
@@ -220,41 +224,96 @@ export default function setup(pocket) {
 
     addEventListener("pocket:design-open", onOpen);
 
-    pocket.panel({
-        id: "design",
-        title: "Design",
-        iconPath: DESIGN_PATH,
-        component: Panel,
-        wide: true,
-    });
-    pocket.rail({ id: "design", title: "Design", iconPath: DESIGN_PATH, panel: "design" });
-    pocket.launcher({
-        id: "design",
-        label: "Open Design",
-        detail: "A canvas for prototypes, screens, and decks",
-        iconPath: DESIGN_PATH,
-        keywords: ["design", "canvas", "prototype", "mockup", "deck", "slides"],
-        panel: "design",
-    });
-    pocket.launcher({
-        id: "design-system",
-        label: "Open the design system",
-        detail: "Colors, type, spacing, and components of the project",
-        icon: "palette",
-        keywords: [
-            "design",
-            "system",
-            "tokens",
-            "colors",
-            "type",
-            "theme",
-            "components",
-            "palette",
-        ],
-        run: () => ask("", null, true),
+    let registeredWords;
+
+    const registerText = () => {
+        const title = t("server.extensions.design.index.setup.title.design", "Design");
+        const label = t("server.extensions.design.index.setup.label.open-design", "Open Design");
+        const detail = t(
+            "server.extensions.design.index.setup.detail.canvas-prototypes-screens-decks",
+            "A canvas for prototypes, screens, and decks",
+        );
+        const systemLabel = t(
+            "server.extensions.design.index.setup.label.open-design-system",
+            "Open the design system",
+        );
+        const systemDetail = t(
+            "server.extensions.design.index.setup.detail.colors-type-spacing-components",
+            "Colors, type, spacing, and components of the project",
+        );
+        const words = [title, label, detail, systemLabel, systemDetail].join("\0");
+
+        if (words === registeredWords) {
+            return false;
+        }
+
+        registeredWords = words;
+        pocket.panel({
+            id: "design",
+            title: t("server.extensions.design.index.setup.title.design", "Design"),
+            iconPath: DESIGN_PATH,
+            component: Panel,
+            wide: true,
+        });
+        pocket.rail({
+            id: "design",
+            title: t("server.extensions.design.index.setup.title.design", "Design"),
+            iconPath: DESIGN_PATH,
+            panel: "design",
+        });
+        pocket.launcher({
+            id: "design",
+            label: t("server.extensions.design.index.setup.label.open-design", "Open Design"),
+            detail: t(
+                "server.extensions.design.index.setup.detail.canvas-prototypes-screens-decks",
+                "A canvas for prototypes, screens, and decks",
+            ),
+            iconPath: DESIGN_PATH,
+            keywords: ["design", "canvas", "prototype", "mockup", "deck", "slides"],
+            panel: "design",
+        });
+        pocket.launcher({
+            id: "design-system",
+            label: t(
+                "server.extensions.design.index.setup.label.open-design-system",
+                "Open the design system",
+            ),
+            detail: t(
+                "server.extensions.design.index.setup.detail.colors-type-spacing-components",
+                "Colors, type, spacing, and components of the project",
+            ),
+            icon: "palette",
+            keywords: [
+                "design",
+                "system",
+                "tokens",
+                "colors",
+                "type",
+                "theme",
+                "components",
+                "palette",
+            ],
+            run: () => ask("", null, true),
+        });
+
+        return true;
+    };
+
+    registerText();
+
+    let localeRevision = app.state.localeRevision;
+    const stopLocale = app.subscribe((state) => {
+        if (state.localeRevision !== localeRevision) {
+            localeRevision = state.localeRevision;
+
+            if (registerText()) {
+                store.set({});
+            }
+        }
     });
 
     return () => {
+        stopLocale();
         removeEventListener("pocket:design-open", onOpen);
         document.documentElement.removeAttribute("data-dsn-focus");
         watchTheme.disconnect();

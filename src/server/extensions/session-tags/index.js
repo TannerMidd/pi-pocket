@@ -1,3 +1,6 @@
+import { t } from "/ui-locale.js";
+import { store as app } from "/store.js";
+
 // Session tags' browser module: each session's tags as chips on its row, as words for the session search and the
 // launcher, a filter beside the search, and sheets to edit tags (Edit tags on a held row, or for selected sessions).
 // It uses only `pocket`. Tags are shared; the filter is this tab's own.
@@ -94,8 +97,12 @@ export default function setup(pocket) {
         (tags.get(session.id) ?? []).map((name) => ({
             label: name,
             title: chosen.has(name)
-                ? `Tag: ${name}`
-                : `Tag: ${name}. Tap to show only sessions with it`,
+                ? t("server.extensions.session-tags.ui.tag-name", "Tag: {name}", { name })
+                : t(
+                      "server.extensions.session-tags.ui.tag-filter",
+                      "Tag: {name}. Tap to show only sessions with it",
+                      { name },
+                  ),
             run: () => choose(name),
         }));
     const wordsOf = () => (session) => tags.get(session.id) ?? [];
@@ -114,7 +121,7 @@ export default function setup(pocket) {
     const words = pocket.sessionSearch({ id: "tags", words: wordsOf() });
     const filter = pocket.sessionFilter({
         id: "filter",
-        title: "Filter by tag",
+        title: t("server.extensions.session-tags.index.setup.title.filter-tag", "Filter by tag"),
         iconPath: FILTER_PATH,
         sheet: "filter",
         badge: chosen.size,
@@ -130,7 +137,14 @@ export default function setup(pocket) {
     function changed() {
         chips.update({ chips: chipsOf() });
         words.update({ words: wordsOf() });
-        filter.update({ match: matchOf(), badge: chosen.size });
+        filter.update({
+            title: t(
+                "server.extensions.session-tags.index.setup.title.filter-tag",
+                "Filter by tag",
+            ),
+            match: matchOf(),
+            badge: chosen.size,
+        });
 
         for (const listener of [...listeners]) {
             listener();
@@ -233,8 +247,8 @@ export default function setup(pocket) {
                 html`<input
                     class="tags-input"
                     type="search"
-                    placeholder="Search tags"
-                    aria-label="Search tags"
+                    placeholder=${t("server.extensions.session-tags.index.setup.filter-sheet.placeholder.search-tags", "Search tags")}
+                    aria-label=${t("server.extensions.session-tags.index.setup.filter-sheet.aria-label.search-tags", "Search tags")}
                     value=${query}
                     onInput=${(event) => setQuery(event.currentTarget.value)}
                 />`
@@ -242,10 +256,13 @@ export default function setup(pocket) {
             ${
                 loaded && all.length === 0
                     ? html`<p class="muted">
-                          No tags yet. Hold a session's row, or select sessions, and choose Edit
-                          tags.
+                          ${t("server.extensions.session-tags.index.setup.filter-sheet.p.no-tags-yet-hold", "No tags yet. Hold a session's row, or select sessions, and choose Edit tags.")}
                       </p>`
-                    : html`<div class="tags-choices" role="group" aria-label="Tags">
+                    : html`<div
+                          class="tags-choices"
+                          role="group"
+                          aria-label=${t("server.extensions.session-tags.index.setup.filter-sheet.aria-label.tags", "Tags")}
+                      >
                           ${shown.map(
                               ([name, count]) =>
                                   html`<label key=${name} class="tags-choice">
@@ -261,25 +278,36 @@ export default function setup(pocket) {
                           ${
                               shown.length === 0 &&
                               all.length > 0 &&
-                              html`<p class="muted small">No tags match.</p>`
+                              html`<p class="muted small">
+                                  ${t("server.extensions.session-tags.index.setup.filter-sheet.p.no-tags-match", "No tags match.")}
+                              </p>`
                           }
                       </div>`
             }
             <p class="muted small">
                 ${
                     chosen.size === 0
-                        ? "Choose tags to show only the sessions that have all of them."
-                        : `Showing sessions tagged ${[...chosen].join(" and ")}.`
+                        ? t(
+                              "server.extensions.session-tags.ui.choose",
+                              "Choose tags to show only the sessions that have all of them.",
+                          )
+                        : t(
+                              "server.extensions.session-tags.ui.showing",
+                              "Showing sessions tagged {tags}.",
+                              { tags: [...chosen].join("、") },
+                          )
                 }
             </p>
             <div class="tags-buttons">
                 ${
                     chosen.size > 0 &&
                     html`<button class="button" onClick=${() => setChosen(new Set())}>
-                        Clear
+                        ${t("server.extensions.session-tags.index.setup.filter-sheet.button.clear", "Clear")}
                     </button>`
                 }
-                <button class="button primary" onClick=${close}>Done</button>
+                <button class="button primary" onClick=${close}>
+                    ${t("server.extensions.session-tags.index.setup.filter-sheet.button.done", "Done")}
+                </button>
             </div>
         </div>`;
     }
@@ -343,7 +371,13 @@ export default function setup(pocket) {
             setError(null);
 
             if (next === "") {
-                setError(`A tag is 1 to ${MAX_LENGTH} characters.`);
+                setError(
+                    t(
+                        "server.extensions.session-tags.ui.tag-length",
+                        "A tag is 1 to {max} characters.",
+                        { max: MAX_LENGTH },
+                    ),
+                );
 
                 return;
             }
@@ -398,7 +432,10 @@ export default function setup(pocket) {
                     off all of them.
                 </p>`
             }
-            <div class="tags-chips" aria-label="Tags">
+            <div
+                class="tags-chips"
+                aria-label=${t("server.extensions.session-tags.index.setup.edit-sheet.aria-label.tags", "Tags")}
+            >
                 ${[...present].map(
                     ([each, count]) =>
                         html`<${Chip}
@@ -421,7 +458,9 @@ export default function setup(pocket) {
                 ${
                     present.size === 0 &&
                     adding.length === 0 &&
-                    html`<span class="muted small">No tags yet.</span>`
+                    html`<span class="muted small"
+                        >${t("server.extensions.session-tags.index.setup.edit-sheet.span.no-tags-yet", "No tags yet.")}</span
+                    >`
                 }
             </div>
             <form
@@ -434,17 +473,22 @@ export default function setup(pocket) {
                 <input
                     ref=${input}
                     class="tags-input"
-                    placeholder="Add a tag"
-                    aria-label="Add a tag"
+                    placeholder=${t("server.extensions.session-tags.index.setup.edit-sheet.placeholder.add-tag", "Add a tag")}
+                    aria-label=${t("server.extensions.session-tags.index.setup.edit-sheet.aria-label.add-tag", "Add a tag")}
                     maxlength=${MAX_LENGTH * 2}
                     value=${text}
                     onInput=${(event) => setText(event.currentTarget.value)}
                 />
-                <button class="button" type="submit" disabled=${name === ""}>Add</button>
+                <button class="button" type="submit" disabled=${name === ""}>
+                    ${t("server.extensions.session-tags.index.setup.edit-sheet.button.add", "Add")}
+                </button>
             </form>
             ${
                 suggestions.length > 0 &&
-                html`<div class="tags-suggestions" aria-label="Tags in use">
+                html`<div
+                    class="tags-suggestions"
+                    aria-label=${t("server.extensions.session-tags.index.setup.edit-sheet.aria-label.tags.tags", "Tags in use")}
+                >
                     ${suggestions.map(
                         (each) =>
                             html`<button
@@ -463,49 +507,94 @@ export default function setup(pocket) {
             }
             ${error && html`<div class="error-box">${error}</div>`}
             <div class="tags-buttons">
-                <button class="button" onClick=${close}>Cancel</button>
+                <button class="button" onClick=${close}>
+                    ${t("server.extensions.session-tags.index.setup.edit-sheet.button.cancel", "Cancel")}
+                </button>
                 <button
                     class="button primary"
                     disabled=${unchanged || saving || after > MAX_TAGS}
                     onClick=${save}
                 >
-                    ${saving ? "Saving…" : "Save"}
+                    ${saving ? t("server.extensions.session-tags.ui.saving", "Saving…") : t("server.extensions.session-tags.ui.save", "Save")}
                 </button>
             </div>
         </div>`;
     }
 
-    pocket.style("style.css");
-    pocket.sheet({ id: "filter", title: "Filter by tag", component: FilterSheet });
-    pocket.launcher({
-        id: "filter",
-        label: "Filter sessions by tag",
-        iconPath: FILTER_PATH,
-        keywords: ["tags", "labels"],
-        sheet: "filter",
-    });
-
-    // Viewers see tags, and filter by them; people who steer edit them (the app shows the action to them alone).
-    pocket.sheet({ id: "edit", title: "Edit tags", component: EditSheet });
-    pocket.sessionAction({ id: "edit", label: "Edit tags", iconPath: TAG_PATH, sheet: "edit" });
-
-    if (pocket.me()?.role !== "viewer") {
-        pocket.launcher({
-            id: "edit",
-            label: "Edit this session's tags",
-            iconPath: TAG_PATH,
-            keywords: ["tags", "labels"],
-            run: () => {
-                const id = pocket.conversationId();
-
-                if (id === null) {
-                    pocket.notify("info", "Open a session first, or select sessions in the list.");
-
-                    return;
-                }
-
-                pocket.openSheet("edit", { sessions: [id] });
-            },
+    const registerText = () => {
+        pocket.style("style.css");
+        pocket.sheet({
+            id: "filter",
+            title: t(
+                "server.extensions.session-tags.index.setup.title.filter-tag",
+                "Filter by tag",
+            ),
+            component: FilterSheet,
         });
-    }
+        pocket.launcher({
+            id: "filter",
+            label: t(
+                "server.extensions.session-tags.index.setup.label.filter-sessions-tag",
+                "Filter sessions by tag",
+            ),
+            iconPath: FILTER_PATH,
+            keywords: ["tags", "labels"],
+            sheet: "filter",
+        });
+
+        // Viewers see tags, and filter by them; people who steer edit them (the app shows the action to them alone).
+        pocket.sheet({
+            id: "edit",
+            title: t("server.extensions.session-tags.index.setup.title.edit-tags", "Edit tags"),
+            component: EditSheet,
+        });
+        pocket.sessionAction({
+            id: "edit",
+            label: t("server.extensions.session-tags.index.setup.label.edit-tags", "Edit tags"),
+            iconPath: TAG_PATH,
+            sheet: "edit",
+        });
+
+        if (pocket.me()?.role !== "viewer") {
+            pocket.launcher({
+                id: "edit",
+                label: t(
+                    "server.extensions.session-tags.index.setup.label.edit-session-s-tags",
+                    "Edit this session's tags",
+                ),
+                iconPath: TAG_PATH,
+                keywords: ["tags", "labels"],
+                run: () => {
+                    const id = pocket.conversationId();
+
+                    if (id === null) {
+                        pocket.notify(
+                            "info",
+                            t(
+                                "server.extensions.session-tags.index.setup.run.open-session-first-select",
+                                "Open a session first, or select sessions in the list.",
+                            ),
+                        );
+
+                        return;
+                    }
+
+                    pocket.openSheet("edit", { sessions: [id] });
+                },
+            });
+        }
+    };
+
+    registerText();
+    let localeRevision = app.state.localeRevision;
+
+    pocket.onDispose(
+        app.subscribe((state) => {
+            if (state.localeRevision !== localeRevision) {
+                localeRevision = state.localeRevision;
+                registerText();
+                changed();
+            }
+        }),
+    );
 }

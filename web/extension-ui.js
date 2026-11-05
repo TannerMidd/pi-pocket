@@ -50,6 +50,7 @@ import {
     writtenText,
 } from "./ui.js";
 import { t } from "./ui-locale.js";
+import { moduleTitle } from "./builtin-locales.js";
 
 /**
  * The version of `pocket`. It goes up only when something extensions use changes in a way that breaks them; additions
@@ -454,7 +455,18 @@ function sync(list, known = true) {
 async function load(entry) {
     const record = {
         module: entry.module,
-        title: entry.title,
+        get title() {
+            return moduleTitle({
+                file: `${entry.module}.ts`,
+                source:
+                    entry.module === "design" ||
+                    entry.module === "ask-someone" ||
+                    entry.module === "session-tags"
+                        ? "built-in"
+                        : "drop-in",
+                title: entry.title,
+            });
+        },
         url: entry.url,
         status: "loading",
         error: null,

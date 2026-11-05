@@ -16,6 +16,7 @@ import { AuthorsDoc } from "./docs.ts";
 import { transcriptMarkdown } from "./export.ts";
 import { homePath } from "./paths.ts";
 import { type ClientEntry, projectEntry } from "./projection.ts";
+import type { RequestLocale } from "./ui-locales.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -173,6 +174,7 @@ export class Transcripts {
     async exportMarkdown(
         id: ConversationId,
         user: User,
+        locale?: RequestLocale,
     ): Promise<{ filename: string; markdown: string }> {
         this.#app.requireSee(user, id);
         const entries = await this.allEntries(id, true);
@@ -186,16 +188,19 @@ export class Transcripts {
 
         const agent = await this.#app.agentState(id);
         const title = await this.#app.conversationTitle(id);
-        const markdown = transcriptMarkdown({
-            title,
-            cwd: homePath(this.#app.cwdOf(id)),
-            ...(agent?.model === undefined
-                ? {}
-                : { model: `${agent.model.provider}/${agent.model.modelId}` }),
-            exportedAt: new Date(),
-            entries,
-            authors,
-        });
+        const markdown = transcriptMarkdown(
+            {
+                title,
+                cwd: homePath(this.#app.cwdOf(id)),
+                ...(agent?.model === undefined
+                    ? {}
+                    : { model: `${agent.model.provider}/${agent.model.modelId}` }),
+                exportedAt: new Date(),
+                entries,
+                authors,
+            },
+            locale,
+        );
         const slug =
             title
                 .toLowerCase()

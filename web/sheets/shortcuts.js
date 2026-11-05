@@ -204,8 +204,10 @@ function Chords({ keys }) {
         .split(" ")
         .map((key) =>
             key === "or" || key === "…"
-                ? html`<span class="muted">${key}</span>`
-                : html`<${Keys} keys=${key} />`,
+                ? html`<span class="muted">${key === "or" ? t("web.shortcuts.or", "or") : key}</span>`
+                : key === "Click"
+                  ? html`<span class="muted">${t("web.shortcuts.click", "Click")}</span>`
+                  : html`<${Keys} keys=${key} />`,
         );
 }
 

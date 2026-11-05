@@ -1250,7 +1250,15 @@ function sameBranches(branches) {
  */
 function groupsOf(shown, { tab, needle, home, pinned, today }) {
     if (needle !== "" || tab === "archived") {
-        return [{ key: "flat", label: needle ? "Matches" : "Archived", rows: shown }];
+        return [
+            {
+                key: "flat",
+                label: needle
+                    ? t("web.sessions.group.matches", "Matches")
+                    : t("web.sessions.group.archived", "Archived"),
+                rows: shown,
+            },
+        ];
     }
 
     const groups = [];
@@ -1259,7 +1267,11 @@ function groupsOf(shown, { tab, needle, home, pinned, today }) {
     const first = pinned.map((id) => byId.get(id)).filter(Boolean);
 
     if (first.length > 0) {
-        groups.push({ key: "pinned", label: "Pinned", rows: first });
+        groups.push({
+            key: "pinned",
+            label: t("web.sessions.group.pinned", "Pinned"),
+            rows: first,
+        });
     }
 
     const rest = shown.filter((session) => !pins.has(session.id));
@@ -1506,6 +1518,7 @@ function AllSessions({ compact = false }) {
         store.state.conversationId,
         store.state.server,
         answered,
+        store.state.localeRevision,
     ]);
 
     // Folded groups: a group's key is in `closed`; Quiet starts folded, and `!key` there says it was opened.
@@ -2645,7 +2658,12 @@ function Rail({ foldable = false, folded = false }) {
         needs > 0 && html`<span class="rail-count attn" data-part="rail-needs">${needs}</span>`;
     const keys = APPLE ? "⌘B" : "Ctrl+B";
     const fold = () => setPrefs({ sidebar: folded ? "open" : "rail" });
-    const role = me?.role === "owner" ? "owner" : me?.role === "viewer" ? "view only" : "guest";
+    const role =
+        me?.role === "owner"
+            ? t("ui.role.owner", "owner")
+            : me?.role === "viewer"
+              ? t("ui.role.viewer", "view only")
+              : t("ui.role.guest", "guest");
     // A rail with more buttons than room scrolls as a whole, and fades the edge where more is.
     const more = useScrollMore();
 

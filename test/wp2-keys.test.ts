@@ -130,7 +130,7 @@ test("WP2 key manifest matches actual t calls, countedText tuples, and placehold
         [...manifest.keys()].sort(),
         "the manifest is neither missing keys nor stale",
     );
-    assert.equal(actual.size, 416);
+    assert.equal(actual.size, 417);
     assert.ok(helperTuples >= 10, "singular and plural tuple keys are included");
 
     for (const row of WP2_KEYS) {
@@ -147,7 +147,7 @@ test("WP2 key manifest matches actual t calls, countedText tuples, and placehold
     const added = WP2_KEYS.filter((row) => row.source === "new").length;
 
     assert.equal(reference, 351);
-    assert.equal(added, 65);
+    assert.equal(added, 66);
     t.diagnostic(
         `Manifest: ${actual.size} keys; ${reference} reference, ${added} new suggestions; ${helperTuples} tuple occurrences. Startup existing-en snapshot not supplied.`,
     );

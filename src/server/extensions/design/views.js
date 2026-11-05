@@ -3,6 +3,7 @@
 import { useArtifactBridge } from "/artifact-bridge.js";
 import { scaleOf, zoomOf } from "./devices.js";
 import { ALLOW, frameUrl, SANDBOX } from "./canvas.js";
+import { t } from "/ui-locale.js";
 
 export function createViews(env, canvas) {
     const { pocket, store, parts } = env;
@@ -37,8 +38,8 @@ export function createViews(env, canvas) {
                     html`<button
                         type="button"
                         class="icon-button"
-                        title="Swap the two versions"
-                        aria-label="Swap the two versions"
+                        title=${t("server.extensions.design.views.create-views.compare-pane.title.swap-two-versions", "Swap the two versions")}
+                        aria-label=${t("server.extensions.design.views.create-views.compare-pane.aria-label.swap-two-versions", "Swap the two versions")}
                         onClick=${onSwap}
                     >
                         <${Ico} name="swap" size=${15} />
@@ -132,7 +133,7 @@ export function createViews(env, canvas) {
                 </div>
                 <div class="dsn-thumb-actions">
                     <button type="button" class="button small" onClick=${() => env.open(each.id)}>
-                        Open
+                        ${t("server.extensions.design.views.create-views.thumb.button.open", "Open")}
                     </button>
                     ${
                         canEdit &&
@@ -141,7 +142,7 @@ export function createViews(env, canvas) {
                             class="button small primary"
                             onClick=${() => env.useVariation(each, others)}
                         >
-                            Use this one
+                            ${t("server.extensions.design.views.create-views.thumb.button.one", "Use this one")}
                         </button>`
                     }
                 </div>
@@ -195,12 +196,16 @@ export function createViews(env, canvas) {
             env.frame.current?.goto(to);
         };
 
-        return html`<div class="dsn-deck" role="group" aria-label="Slides">
+        return html`<div
+            class="dsn-deck"
+            role="group"
+            aria-label=${t("server.extensions.design.views.create-views.deck-strip.aria-label.slides", "Slides")}
+        >
             <button
                 type="button"
                 class="icon-button"
-                title="Previous slide"
-                aria-label="Previous slide"
+                title=${t("server.extensions.design.views.create-views.deck-strip.title.previous-slide", "Previous slide")}
+                aria-label=${t("server.extensions.design.views.create-views.deck-strip.aria-label.previous-slide", "Previous slide")}
                 disabled=${deck.current <= 0}
                 onClick=${() => go(deck.current - 1)}
             >
@@ -225,8 +230,8 @@ export function createViews(env, canvas) {
             <button
                 type="button"
                 class="icon-button"
-                title="Next slide"
-                aria-label="Next slide"
+                title=${t("server.extensions.design.views.create-views.deck-strip.title.next-slide", "Next slide")}
+                aria-label=${t("server.extensions.design.views.create-views.deck-strip.aria-label.next-slide", "Next slide")}
                 disabled=${deck.current >= deck.slides - 1}
                 onClick=${() => go(deck.current + 1)}
             >
@@ -326,7 +331,7 @@ export function createViews(env, canvas) {
             class="dsn-present"
             ref=${wrap}
             role="dialog"
-            aria-label="Present"
+            aria-label=${t("server.extensions.design.views.create-views.present.aria-label.present", "Present")}
             aria-modal="true"
         >
             <iframe
@@ -342,8 +347,8 @@ export function createViews(env, canvas) {
                 <button
                     type="button"
                     class="icon-button"
-                    title="Previous slide"
-                    aria-label="Previous slide"
+                    title=${t("server.extensions.design.views.create-views.present.title.previous-slide", "Previous slide")}
+                    aria-label=${t("server.extensions.design.views.create-views.present.aria-label.previous-slide", "Previous slide")}
                     onClick=${() => go((deck?.current ?? 0) - 1)}
                 >
                     <${Ico} name="left" size=${18} />
@@ -352,8 +357,8 @@ export function createViews(env, canvas) {
                 <button
                     type="button"
                     class="icon-button"
-                    title="Next slide"
-                    aria-label="Next slide"
+                    title=${t("server.extensions.design.views.create-views.present.title.next-slide", "Next slide")}
+                    aria-label=${t("server.extensions.design.views.create-views.present.aria-label.next-slide", "Next slide")}
                     onClick=${() => go((deck?.current ?? 0) + 1)}
                 >
                     <${Ico} name="right" size=${18} />
@@ -361,8 +366,8 @@ export function createViews(env, canvas) {
                 <button
                     type="button"
                     class="icon-button"
-                    title="Leave (Esc)"
-                    aria-label="Leave present mode"
+                    title=${t("server.extensions.design.views.create-views.present.title.leave-esc", "Leave (Esc)")}
+                    aria-label=${t("server.extensions.design.views.create-views.present.aria-label.leave-present-mode", "Leave present mode")}
                     onClick=${leave}
                 >
                     <${Ico} name="close" size=${18} />

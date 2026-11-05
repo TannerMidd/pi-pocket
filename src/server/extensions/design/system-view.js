@@ -12,6 +12,7 @@ import {
     unsavedCount,
     withPart,
 } from "./system.js";
+import { t } from "/ui-locale.js";
 
 const REFRESH_MS = 20_000;
 
@@ -79,7 +80,11 @@ export function createSystemView(env, canvas, sections, widgets) {
                         sheet=${narrow}
                         onClose=${() => setMenu(false)}
                     >
-                        <div class="dsn-menu" role="group" aria-label="Mode">
+                        <div
+                            class="dsn-menu"
+                            role="group"
+                            aria-label=${t("server.extensions.design.system-view.create-system-view.mode-switch.aria-label.mode.mode", "Mode")}
+                        >
                             ${options.map(
                                 (option) =>
                                     html`<button
@@ -103,7 +108,11 @@ export function createSystemView(env, canvas, sections, widgets) {
             </span>`;
         }
 
-        return html`<div class="dsn-seg dsy-modes" role="group" aria-label="Mode">
+        return html`<div
+            class="dsn-seg dsy-modes"
+            role="group"
+            aria-label=${t("server.extensions.design.system-view.create-system-view.mode-switch.aria-label.mode.mode", "Mode")}
+        >
             ${options.map(
                 (option) =>
                     html`<button
@@ -140,11 +149,16 @@ export function createSystemView(env, canvas, sections, widgets) {
             </button>`;
         const unless = (title) => ({
             disabled: busy !== null || errors,
-            title: errors ? "Fix the errors first" : title,
+            title: errors
+                ? t(
+                      "server.extensions.design.system-view.system-menu.unless.title.fix-errors-first",
+                      "Fix the errors first",
+                  )
+                : title,
         });
 
         return html`<${Popover}
-            label="Design system menu"
+            label=${t("builtin.design.menu-title", "Design system menu")}
             onClose=${onClose}
             align="end"
             sheet=${env.sizeClass(s) === "narrow"}
@@ -191,12 +205,14 @@ export function createSystemView(env, canvas, sections, widgets) {
                         }),
                     ]
                 }
-                ${item("reload", "Read it again", null, { onClick: () => run("reload", () => systemData.load()) })}
+                ${item("reload", t("builtin.design.read-again", "Read it again"), null, { onClick: () => run("reload", () => systemData.load()) })}
                 ${
                     env.beside() &&
                     item(
                         s.focus ? "unfocus" : "focus",
-                        s.focus ? "Show the conversation" : "Hide the conversation",
+                        s.focus
+                            ? t("builtin.design.show-conversation", "Show the conversation")
+                            : t("builtin.design.hide-conversation", "Hide the conversation"),
                         null,
                         {
                             onClick: () => {
@@ -224,7 +240,9 @@ export function createSystemView(env, canvas, sections, widgets) {
 
         return html`<${Popover} label="Modes" onClose=${onClose} sheet=${narrow}>
             <div class="dsn-menu dsy-modes-pop">
-                <div class="dsn-menu-label">Modes</div>
+                <div class="dsn-menu-label">
+                    ${t("server.extensions.design.system-view.create-system-view.modes-popover.div.modes", "Modes")}
+                </div>
                 ${data.modes.map(
                     (mode, index) =>
                         html`<div class="dsy-mode-row" key=${mode}>
@@ -241,7 +259,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                                     class="dsn-link"
                                     onClick=${() => setAsking(mode)}
                                 >
-                                    Remove
+                                    ${t("server.extensions.design.system-view.create-system-view.modes-popover.button.remove", "Remove")}
                                 </button>`
                             }
                             ${
@@ -257,7 +275,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                                         setAsking(null);
                                     }}
                                 >
-                                    Delete its file
+                                    ${t("server.extensions.design.system-view.create-system-view.modes-popover.button.delete-file", "Delete its file")}
                                 </button>`
                             }
                         </div>`,
@@ -284,19 +302,19 @@ export function createSystemView(env, canvas, sections, widgets) {
                     <input
                         type="text"
                         class="dsy-text"
-                        placeholder="Add a mode: dark, high-contrast…"
+                        placeholder=${t("server.extensions.design.system-view.create-system-view.modes-popover.placeholder.add-mode-dark-high", "Add a mode: dark, high-contrast…")}
                         value=${name}
                         maxlength="32"
                         autocapitalize="none"
                         spellcheck="false"
-                        aria-label="Name of the new mode"
+                        aria-label=${t("server.extensions.design.system-view.create-system-view.modes-popover.aria-label.name-new-mode", "Name of the new mode")}
                         onInput=${(event) => setName(event.currentTarget.value)}
                     />
                     <button type="submit" class="button small primary" disabled=${!valid || busy}>
-                        Add
+                        ${t("server.extensions.design.system-view.create-system-view.modes-popover.button.add", "Add")}
                     </button>
                 </form>
-                ${slug !== "" && taken && html`<p class="dsy-problem">There is a mode by that name.</p>`}
+                ${slug !== "" && taken && html`<p class="dsy-problem">${t("server.extensions.design.system-view.create-system-view.modes-popover.p.mode-name", "There is a mode by that name.")}</p>`}
                 <p class="muted small dsy-note">
                     A new mode starts with the default's values. Change the tokens that differ, and
                     Save.
@@ -385,7 +403,7 @@ export function createSystemView(env, canvas, sections, widgets) {
             <div
                 class="dsn-tabs dsy-tabs"
                 role="tablist"
-                aria-label="Sections"
+                aria-label=${t("server.extensions.design.system-view.create-system-view.section-tabs.aria-label.sections", "Sections")}
                 ref=${bar}
                 onKeyDown=${move}
             >
@@ -432,8 +450,8 @@ export function createSystemView(env, canvas, sections, widgets) {
                 <button
                     type="button"
                     class=${`icon-button ${s.sysSearch ? "on" : ""}`}
-                    title="Find a token"
-                    aria-label="Find a token"
+                    title=${t("server.extensions.design.system-view.create-system-view.section-tabs.title.find-token", "Find a token")}
+                    aria-label=${t("server.extensions.design.system-view.create-system-view.section-tabs.aria-label.find-token", "Find a token")}
                     aria-pressed=${s.sysSearch}
                     onClick=${() => store.set({ sysSearch: !s.sysSearch, sysQuery: s.sysSearch ? "" : s.sysQuery })}
                 >
@@ -447,7 +465,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                 type="button"
                 class="icon-button"
                 title=${`Undo${undoKeys}`}
-                aria-label="Undo"
+                aria-label=${t("server.extensions.design.system-view.create-system-view.history-buttons.aria-label.undo", "Undo")}
                 disabled=${s.history.past.length === 0 || saving}
                 onClick=${env.undo}
             >
@@ -457,7 +475,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                 type="button"
                 class="icon-button"
                 title=${`Redo${redoKeys}`}
-                aria-label="Redo"
+                aria-label=${t("server.extensions.design.system-view.create-system-view.history-buttons.aria-label.redo", "Redo")}
                 disabled=${s.history.future.length === 0 || saving}
                 onClick=${env.redo}
             >
@@ -480,7 +498,9 @@ export function createSystemView(env, canvas, sections, widgets) {
                     onClick=${() => setOpen("designs")}
                 >
                     <${Ico} name="palette" size=${16} />
-                    <span class="dsn-picker-title">Design system</span>
+                    <span class="dsn-picker-title"
+                        >${t("server.extensions.design.system-view.create-system-view.system-bar.span.design-system", "Design system")}</span
+                    >
                     ${data && !narrow && html`<span class="dsn-version-tag mono">${data.name}</span>`}
                     <${Ico} name="down" size=${14} />
                 </button>
@@ -499,8 +519,8 @@ export function createSystemView(env, canvas, sections, widgets) {
                         html`<button
                             type="button"
                             class=${`icon-button ${s.focus ? "on" : ""}`}
-                            title=${s.focus ? "Show the conversation" : "Hide the conversation"}
-                            aria-label=${s.focus ? "Show the conversation" : "Hide the conversation"}
+                            title=${s.focus ? t("builtin.design.show-conversation", "Show the conversation") : t("builtin.design.hide-conversation", "Hide the conversation")}
+                            aria-label=${s.focus ? t("builtin.design.show-conversation", "Show the conversation") : t("builtin.design.hide-conversation", "Hide the conversation")}
                             aria-pressed=${s.focus}
                             onClick=${env.toggleFocus}
                         >
@@ -510,8 +530,8 @@ export function createSystemView(env, canvas, sections, widgets) {
                     <button
                         type="button"
                         class="icon-button"
-                        title="More"
-                        aria-label="More"
+                        title=${t("server.extensions.design.system-view.create-system-view.system-bar.title.more", "More")}
+                        aria-label=${t("server.extensions.design.system-view.create-system-view.system-bar.aria-label.more", "More")}
                         aria-haspopup="dialog"
                         onClick=${() => setOpen("more")}
                     >
@@ -649,7 +669,7 @@ export function createSystemView(env, canvas, sections, widgets) {
         return html`<footer
             class=${`dsy-savebar ${status}`}
             role="region"
-            aria-label="Unsaved changes"
+            aria-label=${t("server.extensions.design.system-view.create-system-view.save-bar.aria-label.unsaved-changes", "Unsaved changes")}
         >
             ${
                 status === "failed" &&
@@ -668,7 +688,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                         kept.</span
                     >
                     <button type="button" class="dsn-link" onClick=${() => systemData.reload()}>
-                        Load the new version
+                        ${t("server.extensions.design.system-view.create-system-view.save-bar.button.load-new-version", "Load the new version")}
                     </button>
                 </div>`
             }
@@ -684,7 +704,13 @@ export function createSystemView(env, canvas, sections, widgets) {
                 }
                 ${
                     (s.history.past.length > 0 || s.history.future.length > 0) &&
-                    html`<span class="dsy-bar-history" role="group" aria-label="Undo and redo"
+                    html`<span
+                        class="dsy-bar-history"
+                        role="group"
+                        aria-label=${t(
+                            "server.extensions.design.system-view.create-system-view.save-bar.aria-label.undo-redo",
+                            "Undo and redo",
+                        )}
                         >${historyButtons(s, "", "", status === "saving")}</span
                     >`
                 }
@@ -723,19 +749,21 @@ export function createSystemView(env, canvas, sections, widgets) {
 
         return html`<div class="dsy-blank big">
             <span class="dsy-blank-mark"><${Ico} name="palette" size=${30} /></span>
-            <h3>No design system yet</h3>
+            <h3>
+                ${t("server.extensions.design.system-view.create-system-view.blank.h3.no-design-system-yet", "No design system yet")}
+            </h3>
             <p class="muted">
-                A design system is the colors, type, spacing, and components of a product, kept in
-                the project. Pi reads it before it designs, and checks each design against it. Here
-                you see it, change it, and publish it.
+                ${t("server.extensions.design.system-view.create-system-view.blank.p.design-system-colors-type", "A design system is the colors, type, spacing, and components of a product, kept in the project. Pi reads it before it designs, and checks each design against it. Here you see it, change it, and publish it.")}
             </p>
             ${
                 legacy !== null &&
                 html`<p class="dsy-legacy">
                     <${Ico} name="book" size=${15} />
                     <span>
-                        This project has a Markdown design system
-                        (<code>.pi/design-system.md</code>${`, ${legacy < 1024 ? `${legacy} bytes` : `${(legacy / 1024).toFixed(1)} KB`}). `}Pi
+                        ${t(
+                            "server.extensions.design.system-view.create-system-view.blank.span.project-markdown-design-system",
+                            "This project has a Markdown design system (",
+                        )}<code>.pi/design-system.md</code>${`, ${legacy < 1024 ? `${legacy} bytes` : `${(legacy / 1024).toFixed(1)} KB`}). `}Pi
                         still reads it for its designs. Turn it into tokens to see and edit it here.
                     </span>
                 </p>`
@@ -749,7 +777,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                               onClick=${() => env.askPi(legacy === null ? "create" : "convert")}
                           >
                               <${Ico} name="sparkle" size=${15} />
-                              ${legacy === null ? "Ask Pi to scan this project" : "Ask Pi to convert it"}
+                              ${legacy === null ? t("server.extensions.design.system-view.create-system-view.blank.text.ask-pi-scan-project", "Ask Pi to scan this project") : t("server.extensions.design.system-view.create-system-view.blank.text.ask-pi-convert", "Ask Pi to convert it")}
                           </button>
                           ${
                               legacy !== null &&
@@ -758,12 +786,12 @@ export function createSystemView(env, canvas, sections, widgets) {
                                   class="button"
                                   onClick=${() => env.askPi("create")}
                               >
-                                  Scan the project instead
+                                  ${t("server.extensions.design.system-view.create-system-view.blank.button.scan-project-instead", "Scan the project instead")}
                               </button>`
                           }
                       </div>`
                     : html`<p class="muted small">
-                          People who can steer the session can ask Pi to make one.
+                          ${t("server.extensions.design.system-view.create-system-view.blank.p.people-who-steer-session", "People who can steer the session can ask Pi to make one.")}
                       </p>`
             }
         </div>`;
@@ -787,7 +815,8 @@ export function createSystemView(env, canvas, sections, widgets) {
                     <p class="muted">
                         Open a design to see the system's changes on it as you make them. Designs
                         that link
-                        <code>ds/tokens.css</code> follow the system.
+                        <code>ds/tokens.css</code>
+                        ${t("server.extensions.design.system-view.create-system-view.preview.code.follow-system", "follow the system.")}
                     </p>
                 </div>
             </div>`;
@@ -802,18 +831,23 @@ export function createSystemView(env, canvas, sections, widgets) {
                         class="button small"
                         onClick=${() => store.set({ sysPane: "system" })}
                     >
-                        <${Ico} name="left" size=${14} /> System
+                        <${Ico} name="left" size=${14} />
+                        ${t("server.extensions.design.system-view.create-system-view.preview.text.system", "System")}
                     </button>`
                 }
                 <select
                     class="dsy-preview-select"
-                    aria-label="The design to preview"
+                    aria-label=${t("server.extensions.design.system-view.create-system-view.preview.aria-label.design-preview", "The design to preview")}
                     value=${design.id}
                     onChange=${(event) => env.previewDesign(event.currentTarget.value)}
                 >
                     ${designs.map((each) => html`<option value=${each.id}>${each.title}</option>`)}
                 </select>
-                <div class="dsn-seg" role="group" aria-label="Size">
+                <div
+                    class="dsn-seg"
+                    role="group"
+                    aria-label=${t("server.extensions.design.system-view.create-system-view.preview.aria-label.size", "Size")}
+                >
                     ${["mobile", "tablet", "desktop"].map(
                         (device) =>
                             html`<button
@@ -834,12 +868,14 @@ export function createSystemView(env, canvas, sections, widgets) {
                     html`<button
                         type="button"
                         class="button small"
-                        title="Check this design against the system"
-                        aria-label="Check this design"
+                        title=${t("server.extensions.design.system-view.create-system-view.preview.title.check-design-against-system", "Check this design against the system")}
+                        aria-label=${t("server.extensions.design.system-view.create-system-view.preview.aria-label.check-design", "Check this design")}
                         onClick=${() => env.openCheck()}
                     >
                         <${Ico} name="shield" size=${14} />
-                        <span class="dsy-check-label">Check</span>
+                        <span class="dsy-check-label"
+                            >${t("server.extensions.design.system-view.create-system-view.preview.span.check", "Check")}</span
+                        >
                     </button>`
                 }
             </div>
@@ -941,10 +977,12 @@ export function createSystemView(env, canvas, sections, widgets) {
         } else if (system.status === "failed" && !data) {
             body = html`<div class="dsy-blank">
                 <${Ico} name="alert" size=${26} />
-                <h3>The design system could not be read</h3>
+                <h3>
+                    ${t("server.extensions.design.system-view.create-system-view.system-view.h3.design-system-not-read", "The design system could not be read")}
+                </h3>
                 <p class="muted">${system.error}</p>
                 <button type="button" class="button" onClick=${() => systemData.load()}>
-                    Try again
+                    ${t("server.extensions.design.system-view.create-system-view.system-view.button.try-again", "Try again")}
                 </button>
             </div>`;
         } else if (!data) {
@@ -960,7 +998,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                             type="search"
                             value=${s.sysQuery}
                             placeholder=${`Find in ${available.find((section) => section.id === current)?.label ?? "the system"}: a name, a value, a word`}
-                            aria-label="Find a token"
+                            aria-label=${t("server.extensions.design.system-view.create-system-view.system-view.aria-label.find-token", "Find a token")}
                             autofocus
                             onInput=${(event) => store.set({ sysQuery: event.currentTarget.value })}
                         />
@@ -969,7 +1007,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                             html`<button
                                 type="button"
                                 class="icon-button"
-                                aria-label="Clear"
+                                aria-label=${t("server.extensions.design.system-view.create-system-view.system-view.aria-label.clear", "Clear")}
                                 onClick=${() => store.set({ sysQuery: "" })}
                             >
                                 <${Ico} name="close" size=${14} />
@@ -983,7 +1021,7 @@ export function createSystemView(env, canvas, sections, widgets) {
                     narrow=${narrow}
                 />
                 ${current === "colors" && html`<${Notes} notes=${data.notes} has=${(name) => model.has(name)} />`}
-                ${!canEdit && html`<p class="dsy-readonly muted small"><${Ico} name="eye" size=${13} /> You can look at the system here. Only people who can steer the session change it.</p>`}
+                ${!canEdit && html`<p class="dsy-readonly muted small"><${Ico} name="eye" size=${13} /> ${t("server.extensions.design.system-view.create-system-view.system-view.text.look-system-people-who", "You can look at the system here. Only people who can steer the session change it.")}</p>`}
                 <${Section} ctx=${ctx} />`;
         }
 

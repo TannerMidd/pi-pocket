@@ -1,3 +1,6 @@
+import { t } from "/ui-locale.js";
+import { store as app } from "/store.js";
+
 // Ask someone's browser module: "Ask someone" under Pi's answers, the Questions sheet (drafts to edit and share, links
 // waiting for an answer, and answers to give Pi), a status item while a session has any, and how ask_someone's calls
 // show. It uses only `pocket`.
@@ -5,10 +8,10 @@ export const pocketApi = 2;
 
 /** Lucide's message-circle-question icon. */
 const ASK_PATH = "M7.9 20A9 9 0 1 0 4 16.1L2 22Z M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3 M12 17h.01";
-const LIFE = [
-    [24, "A day"],
-    [168, "A week"],
-    [720, "A month"],
+const lifeOptions = () => [
+    [24, t("server.extensions.ask-someone.index.life.day", "A day")],
+    [168, t("server.extensions.ask-someone.index.life.week", "A week")],
+    [720, t("server.extensions.ask-someone.index.life.month", "A month")],
 ];
 const MAX_TITLE = 120;
 const MAX_TEXT = 8000;
@@ -18,14 +21,18 @@ function until(at) {
     const hours = (at - Date.now()) / 3_600_000;
 
     if (hours >= 48) {
-        return `in ${Math.round(hours / 24)} days`;
+        return t("server.extensions.ask-someone.ui.in-days", "in {count} days", {
+            count: Math.round(hours / 24),
+        });
     }
 
     if (hours >= 2) {
-        return `in ${Math.round(hours)} hours`;
+        return t("server.extensions.ask-someone.ui.in-hours", "in {count} hours", {
+            count: Math.round(hours),
+        });
     }
 
-    return "within the hour";
+    return t("server.extensions.ask-someone.index.until.text.within-hour", "within the hour");
 }
 
 /** The answer as a message to Pi: quoted, with who wrote it as they gave it, and as information, not orders. */
@@ -92,8 +99,11 @@ export default function setup(pocket) {
 
         const item = {
             id: "questions",
-            title: "Questions for people outside this chat",
-            label: "Ask someone",
+            title: t(
+                "server.extensions.ask-someone.index.setup.publish.title.questions-people-outside-chat",
+                "Questions for people outside this chat",
+            ),
+            label: t("server.extensions.ask-someone.index.setup.label.ask-someone", "Ask someone"),
             sheet: "questions",
             tone: undefined,
             ...spec,
@@ -193,15 +203,25 @@ export default function setup(pocket) {
                 const { link } = await call(question, `/${question.id}/link`, { hours });
 
                 if (await copy(address(link))) {
-                    pocket.notify("info", "Link copied. It takes one answer.");
+                    pocket.notify(
+                        "info",
+                        t(
+                            "server.extensions.ask-someone.index.draft.share.link-copied-takes-one",
+                            "Link copied. It takes one answer.",
+                        ),
+                    );
                 }
 
                 load(shown);
             });
 
         return html`<div class="ask-card">
-            <div class="ask-state">Draft · only people here can see it</div>
-            <label class="ask-label" for=${`ask-title-${question.id}`}>Title</label>
+            <div class="ask-state">
+                ${t("server.extensions.ask-someone.index.setup.draft.div.draft-people-see", "Draft · only people here can see it")}
+            </div>
+            <label class="ask-label" for=${`ask-title-${question.id}`}
+                >${t("server.extensions.ask-someone.index.setup.draft.label.title", "Title")}</label
+            >
             <input
                 id=${`ask-title-${question.id}`}
                 class="ask-input"
@@ -209,7 +229,12 @@ export default function setup(pocket) {
                 value=${title}
                 onInput=${(event) => setTitle(event.currentTarget.value)}
             />
-            <label class="ask-label" for=${`ask-text-${question.id}`}>Question</label>
+            <label class="ask-label" for=${`ask-text-${question.id}`}
+                >${t(
+                    "server.extensions.ask-someone.index.setup.draft.label.question",
+                    "Question",
+                )}</label
+            >
             <textarea
                 id=${`ask-text-${question.id}`}
                 class="ask-input ask-text"
@@ -218,12 +243,20 @@ export default function setup(pocket) {
                 onInput=${(event) => setText(event.currentTarget.value)}
             ></textarea>
             <p class="muted small">
-                Read it as the person you send it to: leave out keys, private data, and what they do
-                not need.
+                ${t("server.extensions.ask-someone.index.setup.draft.p.read-person-send-leave", "Read it as the person you send it to: leave out keys, private data, and what they do not need.")}
             </p>
-            <div class="ask-label">The link stays open for</div>
-            <div class="ask-life" role="radiogroup" aria-label="The link stays open for">
-                ${LIFE.map(
+            <div class="ask-label">
+                ${t("server.extensions.ask-someone.index.setup.draft.div.link-stays-open", "The link stays open for")}
+            </div>
+            <div
+                class="ask-life"
+                role="radiogroup"
+                aria-label=${t(
+                    "server.extensions.ask-someone.index.setup.draft.aria-label.link-stays-open",
+                    "The link stays open for",
+                )}
+            >
+                ${lifeOptions().map(
                     ([value, label]) =>
                         html`<button
                             key=${value}
@@ -243,7 +276,7 @@ export default function setup(pocket) {
                     disabled=${busy}
                     onClick=${() => run(() => call(question, `/${question.id}`, undefined, "DELETE"))}
                 >
-                    Delete
+                    ${t("server.extensions.ask-someone.index.setup.draft.button.delete", "Delete")}
                 </button>
                 <button
                     class="button"
@@ -252,22 +285,32 @@ export default function setup(pocket) {
                         copy(`${title}\n\n${text}`).then((done) =>
                             pocket.notify(
                                 done ? "info" : "error",
-                                done ? "Question copied." : "Could not copy.",
+                                done
+                                    ? t(
+                                          "server.extensions.ask-someone.ui.question-copied",
+                                          "Question copied.",
+                                      )
+                                    : t(
+                                          "server.extensions.ask-someone.ui.copy-failed",
+                                          "Could not copy.",
+                                      ),
                             ),
                         )}
                 >
-                    Copy text
+                    ${t("server.extensions.ask-someone.index.setup.draft.button.copy-text", "Copy text")}
                 </button>
                 ${
                     edited &&
-                    html`<button class="button" disabled=${busy} onClick=${save}>Save</button>`
+                    html`<button class="button" disabled=${busy} onClick=${save}>
+                        ${t("server.extensions.ask-someone.index.setup.draft.button.save", "Save")}
+                    </button>`
                 }
                 <button
                     class="button primary"
                     disabled=${busy || title.trim() === "" || text.trim() === ""}
                     onClick=${share}
                 >
-                    Create link
+                    ${t("server.extensions.ask-someone.index.setup.draft.button.create-link", "Create link")}
                 </button>
             </div>
         </div>`;
@@ -298,7 +341,9 @@ export default function setup(pocket) {
             </div>
             <div class="ask-title">${question.title}</div>
             <details class="ask-details">
-                <summary>What they see</summary>
+                <summary>
+                    ${t("server.extensions.ask-someone.index.setup.sent.summary.what-they-see", "What they see")}
+                </summary>
                 <div class="ask-quote">${question.text}</div>
             </details>
             ${open && html`<div class="mono small ask-address">${where}</div>`}
@@ -312,7 +357,7 @@ export default function setup(pocket) {
             ${error && html`<div class="error-box">${error}</div>`}
             <div class="ask-buttons">
                 <button class="button" onClick=${end}>
-                    ${open ? "End link" : "Back to draft"}
+                    ${open ? t("server.extensions.ask-someone.ui.end-link", "End link") : t("server.extensions.ask-someone.ui.back-draft", "Back to draft")}
                 </button>
                 ${
                     open &&
@@ -322,17 +367,27 @@ export default function setup(pocket) {
                             copy(`${question.title}\n\nAnswer here: ${where}`).then((done) =>
                                 pocket.notify(
                                     done ? "info" : "error",
-                                    done ? "Message copied." : "Could not copy.",
+                                    done
+                                        ? t(
+                                              "server.extensions.ask-someone.ui.message-copied",
+                                              "Message copied.",
+                                          )
+                                        : t(
+                                              "server.extensions.ask-someone.ui.copy-failed",
+                                              "Could not copy.",
+                                          ),
                                 ),
                             )}
                     >
-                        Copy message
+                        ${t("server.extensions.ask-someone.index.setup.sent.button.copy-message", "Copy message")}
                     </button>`
                 }
                 ${
                     open &&
                     typeof navigator.share === "function" &&
-                    html`<button class="button" onClick=${share}>Share…</button>`
+                    html`<button class="button" onClick=${share}>
+                        ${t("server.extensions.ask-someone.index.setup.sent.button.share", "Share…")}
+                    </button>`
                 }
                 ${
                     open &&
@@ -342,11 +397,19 @@ export default function setup(pocket) {
                             copy(where).then((done) =>
                                 pocket.notify(
                                     done ? "info" : "error",
-                                    done ? "Link copied." : "Could not copy.",
+                                    done
+                                        ? t(
+                                              "server.extensions.ask-someone.ui.link-copied",
+                                              "Link copied.",
+                                          )
+                                        : t(
+                                              "server.extensions.ask-someone.ui.copy-failed",
+                                              "Could not copy.",
+                                          ),
                                 ),
                             )}
                     >
-                        Copy link
+                        ${t("server.extensions.ask-someone.index.setup.sent.button.copy-link", "Copy link")}
                     </button>`
                 }
             </div>
@@ -360,7 +423,13 @@ export default function setup(pocket) {
         const give = async () => {
             // The message box is the session the tab shows: only an answer of that session goes into it.
             if (question.conversation !== pocket.conversationId()) {
-                pocket.notify("warning", "That answer belongs to another session.");
+                pocket.notify(
+                    "warning",
+                    t(
+                        "server.extensions.ask-someone.index.answered.give.answer-belongs-another-session",
+                        "That answer belongs to another session.",
+                    ),
+                );
                 close();
 
                 return;
@@ -384,7 +453,7 @@ export default function setup(pocket) {
             <div class="ask-title">${question.title}</div>
             <div class="ask-quote">${answer.text}</div>
             <p class="muted small">
-                Anyone with the link could write this, and a name is what they typed.
+                ${t("server.extensions.ask-someone.index.setup.answered.p.anyone-link-write-name", "Anyone with the link could write this, and a name is what they typed.")}
             </p>
             ${error && html`<div class="error-box">${error}</div>`}
             <div class="ask-buttons">
@@ -395,10 +464,10 @@ export default function setup(pocket) {
                             setError(failure.message),
                         )}
                 >
-                    Delete
+                    ${t("server.extensions.ask-someone.index.setup.answered.button.delete", "Delete")}
                 </button>
                 <button class="button primary" onClick=${give}>
-                    ${question.used ? "Give to Pi again" : "Give to Pi"}
+                    ${question.used ? t("server.extensions.ask-someone.ui.give-again", "Give to Pi again") : t("server.extensions.ask-someone.ui.give", "Give to Pi")}
                 </button>
             </div>
         </div>`;
@@ -408,15 +477,16 @@ export default function setup(pocket) {
         const list = useQuestions();
 
         if (shown === null) {
-            return html`<p class="muted">Open a session to see its questions.</p>`;
+            return html`<p class="muted">
+                ${t("server.extensions.ask-someone.index.setup.questions-sheet.p.open-session-see-questions", "Open a session to see its questions.")}
+            </p>`;
         }
 
         return html`<div class="ask-sheet">
             ${
                 list.length === 0 &&
                 html`<p class="muted">
-                    No questions yet. Under one of Pi's answers, tap Ask someone, and Pi writes a
-                    question that someone outside this chat can answer.
+                    ${t("server.extensions.ask-someone.index.setup.questions-sheet.p.no-questions-yet-under", "No questions yet. Under one of Pi's answers, tap Ask someone, and Pi writes a question that someone outside this chat can answer.")}
                 </p>`
             }
             ${list.map((question) =>
@@ -436,46 +506,82 @@ export default function setup(pocket) {
         </div>`;
     }
 
-    pocket.style("style.css");
-    pocket.sheet({ id: "questions", title: "Questions for others", component: QuestionsSheet });
-    pocket.menu({
-        id: "questions",
-        label: "Questions for others",
-        hint: "Share a question with someone outside this chat",
-        group: "session",
-        sheet: "questions",
-    });
-    pocket.launcher({
-        id: "questions",
-        label: "Questions for others",
-        detail: "Drafts, links, and answers in this session",
-        iconPath: ASK_PATH,
-        keywords: ["ask", "share", "question", "answer"],
-        sheet: "questions",
-    });
-    pocket.toolCall({
-        tool: "ask_someone",
-        iconPath: ASK_PATH,
-        label: () => "draft a question",
-        subject: (args) => (typeof args.title === "string" ? args.title : ""),
-        summary: () => ({ verb: "drafted", noun: "question" }),
-    });
-
-    if (typeof pocket.replyAction === "function") {
-        pocket.replyAction({
-            id: "ask",
-            label: "Ask someone",
-            iconPath: ASK_PATH,
-            run: (reply) => {
-                const start = reply.text.replace(/\s+/g, " ").trim().slice(0, 80);
-
-                pocket.insertText(
-                    `Use ask_someone to write a question for someone who has not seen this chat, about your answer that starts "${start}${reply.text.length > 80 ? "…" : ""}". Give them the background they need to answer.`,
-                );
-            },
+    const registerText = () => {
+        pocket.style("style.css");
+        pocket.sheet({
+            id: "questions",
+            title: t(
+                "server.extensions.ask-someone.index.setup.title.questions-others",
+                "Questions for others",
+            ),
+            component: QuestionsSheet,
         });
-    }
+        pocket.menu({
+            id: "questions",
+            label: t(
+                "server.extensions.ask-someone.index.setup.label.questions-others",
+                "Questions for others",
+            ),
+            hint: t(
+                "server.extensions.ask-someone.index.setup.hint.share-question-someone-outside",
+                "Share a question with someone outside this chat",
+            ),
+            group: "session",
+            sheet: "questions",
+        });
+        pocket.launcher({
+            id: "questions",
+            label: t(
+                "server.extensions.ask-someone.index.setup.label.questions-others",
+                "Questions for others",
+            ),
+            detail: t(
+                "server.extensions.ask-someone.index.setup.detail.drafts-links-answers-session",
+                "Drafts, links, and answers in this session",
+            ),
+            iconPath: ASK_PATH,
+            keywords: ["ask", "share", "question", "answer"],
+            sheet: "questions",
+        });
+        pocket.toolCall({
+            tool: "ask_someone",
+            iconPath: ASK_PATH,
+            label: () => t("server.extensions.ask-someone.ui.draft-question", "draft a question"),
+            subject: (args) => (typeof args.title === "string" ? args.title : ""),
+            summary: () => ({ verb: "drafted", noun: "question" }),
+        });
 
+        if (typeof pocket.replyAction === "function") {
+            pocket.replyAction({
+                id: "ask",
+                label: t(
+                    "server.extensions.ask-someone.index.setup.label.ask-someone",
+                    "Ask someone",
+                ),
+                iconPath: ASK_PATH,
+                run: (reply) => {
+                    const start = reply.text.replace(/\s+/g, " ").trim().slice(0, 80);
+
+                    pocket.insertText(
+                        `Use ask_someone to write a question for someone who has not seen this chat, about your answer that starts "${start}${reply.text.length > 80 ? "…" : ""}". Give them the background they need to answer.`,
+                    );
+                },
+            });
+        }
+    };
+
+    registerText();
+    let localeRevision = app.state.localeRevision;
+
+    pocket.onDispose(
+        app.subscribe((state) => {
+            if (state.localeRevision !== localeRevision) {
+                localeRevision = state.localeRevision;
+                registerText();
+                publish();
+            }
+        }),
+    );
     pocket.on("changed", ({ conversation }) => {
         if (conversation === shown) {
             load(shown);

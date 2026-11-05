@@ -253,13 +253,13 @@ test("shortcuts redraw in place, keep shortcut keys and extension labels, and fa
         await value(
             `[...${scope}.querySelectorAll('dl.shortcuts dt')].map((each) => each.textContent)`,
         ),
-        keycaps,
+        keycaps.map((text) => text.replaceAll("or", "或").replaceAll("Click", "点击")),
     );
     assert.deepEqual(
         await value(
             `[...${scope}.querySelectorAll('dl.shortcuts dt')].map((each) => [...each.querySelectorAll('kbd')].map((key) => key.textContent))`,
         ),
-        keys,
+        keys.map((chord) => chord.filter((key) => key !== "Click")),
     );
     assert.ok((await sheetText()).includes("Close (wp5-keys)"), "extension text is not translated");
 

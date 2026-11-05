@@ -53,15 +53,15 @@ function ThemeCard({ id, desktop = false }) {
         <div class="tc-win"><i></i><i></i><i class="lit"></i></div>
     </div>`;
     const name = html`<div class="tc-name">
-        ${desktop ? `Desktop · ${palette.name}` : palette.name}
-        ${palette.pair ? html`<small>light and dark</small>` : palette.colors.mode === "light" && html`<small>light</small>`}
+        ${desktop ? t("web.sheets.appearance.desktop-name", "Desktop · {name}", { name: palette.name }) : palette.name}
+        ${palette.pair ? html`<small>${t("web.sheets.appearance.theme-card.small.light-and-dark", "light and dark")}</small>` : palette.colors.mode === "light" && html`<small>${t("web.sheets.appearance.theme-card.small.light", "light")}</small>`}
     </div>`;
 
     return html`<button
         class=${`theme-card ${on ? "on" : ""} ${desktop ? "theme-desktop" : ""}`}
         aria-pressed=${on}
         style=${vars}
-        title=${desktop ? "Follow the Omarchy theme of the machine Pi Pocket runs on" : palette.name}
+        title=${desktop ? t("web.sheets.appearance.desktop-follow", "Follow the Omarchy theme of the machine Pi Pocket runs on") : palette.name}
         onMouseEnter=${() => matchMedia("(hover: hover)").matches && preview(id)}
         onMouseLeave=${() => preview(null)}
         onFocus=${() => preview(id)}
@@ -74,7 +74,7 @@ function ThemeCard({ id, desktop = false }) {
                 ? html`<div class="tc-text">
                     ${name}
                     <div class="tc-note">
-                        Follows your desktop: change the Omarchy theme and Pi Pocket changes with it.
+                        ${t("web.sheets.appearance.theme-card.div.follows-desktop-change-omarchy", "Follows your desktop: change the Omarchy theme and Pi Pocket changes with it.")}
                     </div>
                     <div class="tc-dots">
                         ${dots.map((dot) => html`<i style=${`background:var(${dot})`}></i>`)}
@@ -102,6 +102,19 @@ function LookCard({ id }) {
         return null;
     }
 
+    const description =
+        look.builtIn && id === BASE_LOOK
+            ? t(
+                  "web.sheets.appearance.builtin.pocket-description",
+                  "The app's own look: soft tiles over the colors you choose.",
+              )
+            : look.builtIn && id === "lantern"
+              ? t(
+                    "web.sheets.appearance.builtin.lantern-description",
+                    "Calm and dark for long reading: warm brown-grey, warm off-white text, and a muted amber accent. One readable column and quiet tool calls.",
+                )
+              : look.description;
+
     return html`<button
         class=${`look-card ${on ? "on" : ""} ${look.usable ? "" : "broken"}`}
         aria-pressed=${on}
@@ -110,10 +123,10 @@ function LookCard({ id }) {
     >
         <span class="look-name">
             ${look.name}
-            ${look.builtIn && html`<small>built in</small>`}
-            ${look.colors && html`<small>own colors</small>`}
+            ${look.builtIn && html`<small>${t("web.sheets.appearance.look-card.small.built-in", "built in")}</small>`}
+            ${look.colors && html`<small>${t("web.sheets.appearance.look-card.small.own-colors", "own colors")}</small>`}
         </span>
-        ${look.description && html`<span class="look-detail">${look.description}</span>`}
+        ${description && html`<span class="look-detail">${description}</span>`}
         ${look.problem && html`<span class="look-problem">${look.problem}</span>`}
     </button>`;
 }
@@ -177,12 +190,18 @@ function Duplicate({ from, label, colors = false, onDone }) {
         <input
             ref=${field}
             value=${name}
-            aria-label="The new theme's name"
+            aria-label=${t("web.sheets.appearance.duplicate.aria-label.the-new-theme-s-name", "The new theme's name")}
             maxlength="60"
             onInput=${(event) => setName(event.currentTarget.value)}
         />
-        <button class="button primary" disabled=${busy || name.trim() === ""}>Make</button>
-        <button class="button ghost" type="button" onClick=${() => onDone(null)}>Cancel</button>
+        <button class="button primary" disabled=${busy || name.trim() === ""}>${t(
+            "web.sheets.appearance.duplicate.button.make",
+            "Make",
+        )}</button>
+        <button class="button ghost" type="button" onClick=${() => onDone(null)}>${t(
+            "web.sheets.appearance.duplicate.button.cancel",
+            "Cancel",
+        )}</button>
     </form>`;
 }
 
@@ -227,7 +246,7 @@ function LookTools() {
 
     return html`<div class="look-tools">
         <button class="button" disabled=${!look?.usable} onClick=${() => setNaming(true)}>
-            <${Icon} name="copy" size=${14} /> Duplicate
+            <${Icon} name="copy" size=${14} /> ${t("web.sheets.appearance.look-tools.text.duplicate", "Duplicate")}
         </button>
         ${
             look && !look.builtIn
@@ -240,11 +259,14 @@ function LookTools() {
                             class="button"
                             onClick=${() => openSheet({ type: "gallery-share", id, theme: true })}
                         >
-                            Share…
+                            ${t("web.sheets.appearance.look-tools.button.share", "Share…")}
                         </button>`
                     }
                     <button class="button ghost" onClick=${remove}>Remove</button>`
-                : html`<span class="muted small">Duplicate it to make a theme of your own.</span>`
+                : html`<span class="muted small">${t(
+                      "web.sheets.appearance.look-tools.span.duplicate-make-theme-own",
+                      "Duplicate it to make a theme of your own.",
+                  )}</span>`
         }
     </div>`;
 }
@@ -269,7 +291,7 @@ function TextSize({ size }) {
         setPrefs({ text: textSizeOf(value) });
     };
 
-    return html`<div class="text-size" role="group" aria-label="Text size">
+    return html`<div class="text-size" role="group" aria-label=${t("web.sheets.appearance.text-size.aria-label.text-size", "Text size")}>
         <div class="segmented">
             ${[13, 15, 17, 20].map(
                 (each) => html`<button
@@ -288,7 +310,7 @@ function TextSize({ size }) {
                 min=${MIN_TEXT}
                 max=${MAX_TEXT}
                 step=${STEP_TEXT}
-                aria-label="Text size in pixels"
+                aria-label=${t("web.sheets.appearance.text-size.aria-label.text-size-in-pixels", "Text size in pixels")}
                 value=${draft ?? size}
                 onInput=${(event) => {
                     const value = event.currentTarget.value;
@@ -305,7 +327,7 @@ function TextSize({ size }) {
                 onBlur=${() => setDraft(null)}
                 onKeyDown=${(event) => event.key === "Enter" && event.currentTarget.blur()}
             />
-            <span>px</span>
+            <span>${t("web.sheets.appearance.text-size.span.px", "px")}</span>
         </label>
     </div>`;
 }
@@ -374,7 +396,7 @@ function FontTools() {
     };
 
     return html`<section class="font-tools" aria-label=${`Fonts for ${look.name}`}>
-        <h4 class="font-title">Fonts for <em>${look.name}</em></h4>
+        <h4 class="font-title">${t("web.sheets.appearance.font-tools.h4.fonts-for", "Fonts for")} <em>${look.name}</em></h4>
         ${menu("Text font", TEXT_FONTS, "sans")}
         ${menu("Code font", CODE_FONTS, "mono")}
         <div class="font-menu">
@@ -385,20 +407,20 @@ function FontTools() {
                     : html`<div class="font-ligatures">
                           <${Switch}
                               on=${set.ligatures}
-                              label="Ligatures"
+                              label=${t("web.sheets.appearance.font-tools.span.ligatures", "Ligatures")}
                               onChange=${() => save({ ligatures: !set.ligatures })}
                           />
                           <button
                               class="button small ghost"
                               onClick=${() => save({ ligatures: null })}
                           >
-                              Theme's own
+                              ${t("web.sheets.appearance.font-tools.button.theme-s-own", "Theme's own")}
                           </button>
                       </div>`
             }
         </div>
-        <div class="font-preview" role="group" aria-label="Font preview">
-            The quick brown fox jumps over the lazy dog. <em>Emphasis.</em>
+        <div class="font-preview" role="group" aria-label=${t("web.sheets.appearance.font-tools.aria-label.font-preview", "Font preview")}>
+            ${t("web.sheets.appearance.font-tools.div.quick-brown-fox-jumps", "The quick brown fox jumps over the lazy dog.")} <em>Emphasis.</em>
             <code>const ok = (x) => x !== 42; <span class="hl-com">// a comment</span></code>
         </div>
         ${
@@ -419,7 +441,7 @@ function FontTools() {
                   </div>`
                 : html`<div class="font-duplicate">
                       <button class="button" onClick=${() => setNaming(true)}>
-                          <${Icon} name="copy" size=${14} /> Duplicate to change
+                          <${Icon} name="copy" size=${14} /> ${t("web.sheets.appearance.font-tools.text.duplicate-to-change", "Duplicate to change")}
                       </button>
                       <span class="muted small">
                           ${look.name} comes with the app: its fonts stay as they are.
@@ -470,7 +492,7 @@ function ColorsTools() {
 
     return html`<div class="look-tools">
         <button class="button" onClick=${() => setNaming(true)}>
-            <${Icon} name="copy" size=${14} /> Duplicate colors
+            <${Icon} name="copy" size=${14} /> ${t("web.sheets.appearance.colors-tools.text.duplicate-colors", "Duplicate colors")}
         </button>
         ${
             own &&
@@ -523,7 +545,7 @@ function DefaultTools() {
         ${
             !same &&
             html`<button class="button" onClick=${() => set({ look, colors })}>
-                Use these for new browsers
+                ${t("web.sheets.appearance.default-tools.button.new-browsers", "Use these for new browsers")}
             </button>`
         }
         ${current && html`<button class="button ghost" onClick=${() => set(null)}>Reset</button>`}
@@ -577,9 +599,15 @@ function SlotLayout({ slot }) {
             ${list.map(({ item, hidden, hiddenBy }) => {
                 const at = movable.indexOf(item.id);
                 const detail = [
-                    item.module && `From ${item.module}`,
-                    hiddenBy && `Hidden by ${hiddenBy}`,
-                    item.fixed && "Always shown",
+                    item.module &&
+                        t("web.sheets.appearance.slot-from", "From {module}", {
+                            module: item.module,
+                        }),
+                    hiddenBy &&
+                        t("web.sheets.appearance.slot-hidden", "Hidden by {name}", {
+                            name: hiddenBy,
+                        }),
+                    item.fixed && t("web.sheets.appearance.slot-always", "Always shown"),
                 ]
                     .filter(Boolean)
                     .join(" · ");
@@ -590,7 +618,7 @@ function SlotLayout({ slot }) {
                         html`<div class="slot-moves">
                             <button
                                 class="icon-button"
-                                aria-label=${`Move ${item.label} earlier`}
+                                aria-label=${t("web.sheets.appearance.slot-earlier", "Move {label} earlier", { label: item.label })}
                                 disabled=${at <= 0}
                                 onClick=${() => move(slot, item.id, -1)}
                             >
@@ -598,7 +626,7 @@ function SlotLayout({ slot }) {
                             </button>
                             <button
                                 class="icon-button"
-                                aria-label=${`Move ${item.label} later`}
+                                aria-label=${t("web.sheets.appearance.slot-later", "Move {label} later", { label: item.label })}
                                 disabled=${at === movable.length - 1}
                                 onClick=${() => move(slot, item.id, 1)}
                             >
@@ -607,7 +635,7 @@ function SlotLayout({ slot }) {
                         </div>
                         <${Switch}
                             on=${!hidden}
-                            label=${`Show ${item.label}`}
+                            label=${t("web.sheets.appearance.slot-show", "Show {label}", { label: item.label })}
                             onChange=${() => setShown(slot, item.id, hidden)}
                         />`
                     }
@@ -671,53 +699,53 @@ export function AppearanceSheet() {
         ${
             !desktop &&
             html`<p class="muted small">
-                Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.
+                ${t("web.sheets.appearance.appearance-sheet.p.running-pi-pocket-omarchy", "Running Pi Pocket on an Omarchy desktop adds “Desktop”: the app follows the theme the desktop uses.")}
             </p>`
         }
         <div class="label">${t("appearance.layout", "Layout and motion")}</div>
         <div class="sheet-list">
             <${SettingRow}
-                title="Tiled windows"
-                detail="Wide screens: the sidebar and the session as Hyprland windows, with gaps and the active border"
+                title=${t("web.sheets.appearance.appearance-sheet.title.tiled-windows", "Tiled windows")}
+                detail=${t("web.sheets.appearance.detail.setting-1", "Wide screens: the sidebar and the session as Hyprland windows, with gaps and the active border")}
             >
                 <${Switch}
                     on=${p.tiling}
-                    label="Tiled windows"
+                    label=${t("web.sheets.appearance.appearance-sheet.title.tiled-windows", "Tiled windows")}
                     onChange=${() => setPrefs({ tiling: !p.tiling })}
                 />
             <//>
             <${SettingRow}
-                title="Peek tiles"
-                detail=${`Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar${touch ? "" : ", or Alt+P"}`}
+                title=${t("web.sheets.appearance.appearance-sheet.title.peek-tiles", "Peek tiles")}
+                detail=${t("web.sheets.appearance.peek-detail", "Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar{shortcut}", { shortcut: touch ? "" : "，Alt+P" })}
             >
                 <${Switch}
                     on=${p.peeks}
-                    label="Peek tiles"
+                    label=${t("web.sheets.appearance.appearance-sheet.title.peek-tiles", "Peek tiles")}
                     onChange=${() => setPrefs({ peeks: !p.peeks })}
                 />
             <//>
             ${
                 desktop?.wallpaper &&
                 html`<${SettingRow}
-                    title="Desktop wallpaper"
-                    detail="Your wallpaper in the gaps between windows, while following the desktop"
+                    title=${t("web.sheets.appearance.appearance-sheet.title.desktop-wallpaper", "Desktop wallpaper")}
+                    detail=${t("web.sheets.appearance.detail.setting-2", "Your wallpaper in the gaps between windows, while following the desktop")}
                 >
                     <${Switch}
                         on=${p.wallpaper}
                         disabled=${!p.tiling || p.theme !== "desktop"}
-                        label="Desktop wallpaper"
+                        label=${t("web.sheets.appearance.appearance-sheet.title.desktop-wallpaper", "Desktop wallpaper")}
                         onChange=${() => setPrefs({ wallpaper: !p.wallpaper })}
                     />
                 <//>`
             }
             <${SettingRow}
-                title="Sidebar"
-                detail="Folded, it shows numbered sessions like workspaces"
+                title=${t("web.sheets.appearance.appearance-sheet.title.sidebar", "Sidebar")}
+                detail=${t("web.sheets.appearance.detail.setting-3", "Folded, it shows numbered sessions like workspaces")}
             >
                 <div class="segmented">
                     ${[
-                        ["open", "Open"],
-                        ["rail", "Folded"],
+                        ["open", t("web.sheets.appearance.choice.open", "Open")],
+                        ["rail", t("web.sheets.appearance.choice.folded", "Folded")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -731,15 +759,15 @@ export function AppearanceSheet() {
                 </div>
             <//>
             <${SettingRow}
-                title="Motion"
-                detail="Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph"
+                title=${t("web.sheets.appearance.appearance-sheet.title.motion", "Motion")}
+                detail=${t("web.sheets.appearance.detail.setting-4", "Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph")}
             >
                 <div class="segmented">
                     ${[
-                        ["auto", "Auto"],
-                        ["full", "Full"],
-                        ["fluid", "Fluid"],
-                        ["reduced", "Reduced"],
+                        ["auto", t("web.sheets.appearance.choice.auto", "Auto")],
+                        ["full", t("web.sheets.appearance.choice.full", "Full")],
+                        ["fluid", t("web.sheets.appearance.choice.fluid", "Fluid")],
+                        ["reduced", t("web.sheets.appearance.choice.reduced", "Reduced")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -753,20 +781,23 @@ export function AppearanceSheet() {
                 </div>
             <//>
             <${SettingRow}
-                title="Text size"
-                detail=${`The conversation's, in pixels: any from ${MIN_TEXT} to ${MAX_TEXT}`}
+                title=${t("web.sheets.appearance.text-size.aria-label.text-size", "Text size")}
+                detail=${t("web.sheets.appearance.text-size-detail", "The conversation's, in pixels: any from {min} to {max}", { min: MIN_TEXT, max: MAX_TEXT })}
             >
                 <${TextSize} size=${textSizeOf(p.text)} />
             <//>
             <${SettingRow}
-                title="Width"
-                detail="Wide screens: how much of the window the conversation and the message box take. Comfortable grows with the window"
+                title=${t("web.sheets.appearance.appearance-sheet.title.width", "Width")}
+                detail=${t("web.sheets.appearance.detail.setting-5", "Wide screens: how much of the window the conversation and the message box take. Comfortable grows with the window")}
             >
                 <div class="segmented">
                     ${[
-                        ["comfortable", "Comfortable"],
-                        ["wide", "Wide"],
-                        ["full", "Full"],
+                        [
+                            "comfortable",
+                            t("web.sheets.appearance.choice.comfortable", "Comfortable"),
+                        ],
+                        ["wide", t("web.sheets.appearance.choice.wide", "Wide")],
+                        ["full", t("web.sheets.appearance.choice.full", "Full")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -780,14 +811,17 @@ export function AppearanceSheet() {
                 </div>
             <//>
             <${SettingRow}
-                title="Density"
-                detail="Less room around messages, rows, and the message box, to fit more on a screen"
+                title=${t("web.sheets.appearance.appearance-sheet.title.density", "Density")}
+                detail=${t("web.sheets.appearance.detail.setting-6", "Less room around messages, rows, and the message box, to fit more on a screen")}
             >
                 <div class="segmented">
                     ${[
-                        ["comfortable", "Comfortable"],
-                        ["compact", "Compact"],
-                        ["tight", "Tight"],
+                        [
+                            "comfortable",
+                            t("web.sheets.appearance.choice.comfortable", "Comfortable"),
+                        ],
+                        ["compact", t("web.sheets.appearance.choice.compact", "Compact")],
+                        ["tight", t("web.sheets.appearance.choice.tight", "Tight")],
                     ].map(
                         ([value, label]) =>
                             html`<button
@@ -801,38 +835,38 @@ export function AppearanceSheet() {
                 </div>
             <//>
         </div>
-        <div class="label">Conversation</div>
+        <div class="label">${t("web.sheets.appearance.appearance-sheet.div.conversation", "Conversation")}</div>
         <div class="sheet-list">
             <${SettingRow}
-                title="Show thinking"
-                detail=${`Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one${touch ? "" : ". Also Alt+T"}`}
+                title=${t("web.sheets.appearance.appearance-sheet.title.show-thinking", "Show thinking")}
+                detail=${t("web.sheets.appearance.thinking-detail", "Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one{shortcut}", { shortcut: touch ? "" : "，Alt+T" })}
             >
                 <${Switch}
                     on=${p.showThinking}
-                    label="Show thinking"
+                    label=${t("web.sheets.appearance.appearance-sheet.title.show-thinking", "Show thinking")}
                     onChange=${() => setPrefs({ showThinking: !p.showThinking })}
                 />
             <//>
             <${SettingRow}
-                title="Keep activity folded"
-                detail="Pi's thinking and tool calls stay on their one line until you open them, also while it works and in the newest turn"
+                title=${t("web.sheets.appearance.appearance-sheet.title.keep-activity-folded", "Keep activity folded")}
+                detail=${t("web.sheets.appearance.detail.setting-7", "Pi's thinking and tool calls stay on their one line until you open them, also while it works and in the newest turn")}
             >
                 <${Switch}
                     on=${p.foldActivity}
-                    label="Keep activity folded"
+                    label=${t("web.sheets.appearance.appearance-sheet.title.keep-activity-folded", "Keep activity folded")}
                     onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
                 />
             <//>
         </div>
-        <div class="label">Status line</div>
+        <div class="label">${t("web.sheets.appearance.appearance-sheet.div.status-line", "Status line")}</div>
         <div class="sheet-list">
             <${SettingRow}
-                title="Reply speed"
-                detail="Under the message box: how fast the last answer came, in tokens a second, and how long its first token took"
+                title=${t("web.sheets.appearance.appearance-sheet.title.reply-speed", "Reply speed")}
+                detail=${t("web.sheets.appearance.detail.setting-8", "Under the message box: how fast the last answer came, in tokens a second, and how long its first token took")}
             >
                 <${Switch}
                     on=${p.speed}
-                    label="Reply speed"
+                    label=${t("web.sheets.appearance.appearance-sheet.title.reply-speed", "Reply speed")}
                     onChange=${() => setPrefs({ speed: !p.speed })}
                 />
             <//>
@@ -844,7 +878,7 @@ export function AppearanceSheet() {
                 class="button ghost wide sheet-footer"
                 onClick=${() => openSheet({ type: "shortcuts" })}
             >
-                <${Icon} name="keyboard" size=${16} /> Keyboard shortcuts
+                <${Icon} name="keyboard" size=${16} /> ${t("web.sheets.appearance.appearance-sheet.text.keyboard-shortcuts", "Keyboard shortcuts")}
             </button>`
         }
     <//>`;

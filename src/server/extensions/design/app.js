@@ -1,3 +1,4 @@
+import { t } from "/ui-locale.js";
 // The workspace of Design: `index.js` loads this file when the panel first opens, not at the app's start.
 import { openSheet, store as app } from "/store.js";
 import { createData, designsOf } from "./data.js";
@@ -64,14 +65,23 @@ export function createApp(pocket, store, shell) {
             if (text.length > BOX_LIMIT) {
                 pocket.notify(
                     "error",
-                    "That is too much for one message. Mark some comments done, and send the rest.",
+                    t(
+                        "server.extensions.design.app.create-app.send-to-box.env.too-much-one-message",
+                        "That is too much for one message. Mark some comments done, and send the rest.",
+                    ),
                 );
 
                 return;
             }
 
             pocket.insertText(text);
-            pocket.notify("info", "In your message box: read it, then send it.");
+            pocket.notify(
+                "info",
+                t(
+                    "server.extensions.design.app.create-app.send-to-box.env.message-box-read-send",
+                    "In your message box: read it, then send it.",
+                ),
+            );
 
             if (!env.beside()) {
                 pocket.closePanel();

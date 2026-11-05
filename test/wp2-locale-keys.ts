@@ -1,4 +1,4 @@
-// 416 WP2 keys: reference translations are verbatim; 65 others are proposed Chinese for review.
+// 417 WP2 keys: reference translations are verbatim; 66 others include the reviewed guard detail.
 // Reference SHA-256: en bbcd63f2687b5fbbd0c71d31d1be7e31bbb709900214a4db5718e8f02dd210e9; zh 4f2455d908554b7e41cb80f64f6034e0a1bc7e376e64005a1898a70ac1248612.
 // existingEn=null means unknown: the coordinator has not provided the startup 836-key snapshot.
 export const WP2_KEYS: readonly {
@@ -8,6 +8,14 @@ export const WP2_KEYS: readonly {
     source: "reference" | "new";
     existingEn: boolean | null;
 }[] = [
+    {
+        key: "web.guard.disabled-detail",
+        english:
+            "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here.",
+        zh: "Pi Pocket 中的 Lancet Guard 已关闭：bash、background、write 和 edit 调用不会在此处接受检查。",
+        source: "new",
+        existingEn: null,
+    },
     {
         key: "web.chat.chat-sheet.title.people",
         english: "People",

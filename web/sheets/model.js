@@ -21,7 +21,7 @@ const MODEL_SEARCH_AT = 8;
  * A thinking level as a person reads it: the words of the language, while the value itself, the one the server sends and
  * the app compares and saves, stays as it is.
  */
-const levelLabel = (level) => {
+export const levelLabel = (level) => {
     switch (level) {
         case "off":
             return t("web.sheets.model.model-picker.levels.off", "off");

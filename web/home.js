@@ -99,7 +99,10 @@ export function Splash() {
                     : t("web.home.splash.text.guard-on", "Lancet Guard on")
                 : t("web.home.splash.text.guard-off", "off"),
         ],
-        [t("web.home.splash.text.you", "you"), `${me?.name ?? "?"} (${me?.role ?? "?"})`],
+        [
+            t("web.home.splash.text.you", "you"),
+            `${me?.name ?? "?"} (${me?.role === "viewer" ? t("ui.role.viewer", "view only") : me?.role === "guest" ? t("ui.role.guest", "guest") : t("ui.role.owner", "owner")})`,
+        ],
     ];
     const colors = [
         "--o-red",

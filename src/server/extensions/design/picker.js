@@ -1,6 +1,7 @@
 // The design picker: the session's designs, variations together, with the design system pinned above them.
 import { latestOf } from "./data.js";
 import { unsavedOf } from "./unsaved.js";
+import { t } from "/ui-locale.js";
 
 export function createPicker(env) {
     const { pocket, parts } = env;
@@ -12,7 +13,10 @@ export function createPicker(env) {
 
     function systemNote(system, count) {
         if (system.status === "idle" || system.status === "loading") {
-            return "Tokens, components, and guidelines";
+            return t(
+                "server.extensions.design.picker.create-picker.system-note.text.tokens-components-guidelines",
+                "Tokens, components, and guidelines",
+            );
         }
 
         if (system.data) {
@@ -57,12 +61,15 @@ export function createPicker(env) {
                 html`<input
                     class="dsn-search"
                     type="search"
-                    placeholder="Find a design"
+                    placeholder=${t("server.extensions.design.picker.create-picker.picker.placeholder.find-design", "Find a design")}
                     value=${query}
                     onInput=${(event) => setQuery(event.currentTarget.value)}
                 />`
             }
-            <ul class="dsn-list" aria-label="Designs">
+            <ul
+                class="dsn-list"
+                aria-label=${t("server.extensions.design.picker.create-picker.picker.aria-label.designs", "Designs")}
+            >
                 ${
                     words === "" &&
                     html`<li>
@@ -79,7 +86,9 @@ export function createPicker(env) {
                                 ><${Ico} name="palette" size=${16}
                             /></span>
                             <span class="dsn-list-main">
-                                <strong>Design system</strong>
+                                <strong
+                                    >${t("server.extensions.design.picker.create-picker.picker.strong.design-system", "Design system")}</strong
+                                >
                                 <span class="muted small"
                                     >${systemNote(s.system, unsavedOf(s.system.data, s.history))}</span
                                 >
@@ -107,12 +116,20 @@ export function createPicker(env) {
                                       <strong>${row.title}</strong>
                                       <span class="muted small mono">${listNote(row)}</span>
                                   </span>
-                                  ${row.kind === "deck" && html`<span class="dsn-chip">deck</span>`}
+                                  ${
+                                      row.kind === "deck" &&
+                                      html`<span class="dsn-chip"
+                                          >${t(
+                                              "server.extensions.design.picker.create-picker.picker.span.deck",
+                                              "deck",
+                                          )}</span
+                                      >`
+                                  }
                                   ${!inSystem && row.id === design?.id && html`<${Ico} name="check" size=${15} />`}
                               </button>
                           </li>`,
                 )}
-                ${shown.length === 0 && words !== "" && html`<li class="muted small dsn-empty">Nothing by that name.</li>`}
+                ${shown.length === 0 && words !== "" && html`<li class="muted small dsn-empty">${t("server.extensions.design.picker.create-picker.picker.li.nothing-name", "Nothing by that name.")}</li>`}
             </ul>
         <//>`;
     }

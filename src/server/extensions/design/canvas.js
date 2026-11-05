@@ -7,6 +7,7 @@ import { pinsOf } from "./comments.js";
 import { addEdit } from "./edits.js";
 import { checkKey } from "./system-data.js";
 import { forPage, normalizeKnobs, usable } from "./tweaks.js";
+import { t } from "/ui-locale.js";
 
 /** As the artifact viewer's frame (`web/sheets/viewers.js`): scripts and forms run; the app and its cookies are out of reach. */
 export const SANDBOX =
@@ -71,11 +72,15 @@ export function createCanvas(env) {
         const zoom = zoomOf(s.zoom, narrow);
         const following = zoom === "width" || zoom === "fit";
 
-        return html`<div class="dsn-zoom" role="group" aria-label="Zoom">
+        return html`<div
+            class="dsn-zoom"
+            role="group"
+            aria-label=${t("server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom", "Zoom")}
+        >
             <button
                 type="button"
-                title="Zoom out"
-                aria-label="Zoom out"
+                title=${t("server.extensions.design.canvas.create-canvas.zoom-bar.title.zoom-out", "Zoom out")}
+                aria-label=${t("server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom-out", "Zoom out")}
                 onClick=${() => env.setZoom(stepZoom(scale, -1))}
             >
                 <${Ico} name="minus" size=${14} />
@@ -96,8 +101,8 @@ export function createCanvas(env) {
             </button>
             <button
                 type="button"
-                title="Zoom in"
-                aria-label="Zoom in"
+                title=${t("server.extensions.design.canvas.create-canvas.zoom-bar.title.zoom", "Zoom in")}
+                aria-label=${t("server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom.zoom", "Zoom in")}
                 onClick=${() => env.setZoom(stepZoom(scale, 1))}
             >
                 <${Ico} name="plus" size=${14} />

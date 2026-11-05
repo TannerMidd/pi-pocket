@@ -220,7 +220,7 @@ function codeBlock(pre, fold) {
     copy.className = "copy";
     copy.type = "button";
     copy.dataset.copy = "";
-    copy.textContent = "Copy";
+    copy.textContent = t("web.ui.code.copy", "Copy");
     pre.replaceWith(wrap);
 
     if (kind) {
@@ -247,7 +247,7 @@ function codeBlock(pre, fold) {
         more.className = "code-more";
         more.type = "button";
         more.dataset.more = "";
-        more.textContent = `Show all ${lines} lines`;
+        more.textContent = t("web.ui.code.show-lines", "Show all {count} lines", { count: lines });
         wrap.append(more);
     }
 }
@@ -435,7 +435,7 @@ function markdownParts(
     base = null,
     breaks = true,
 ) {
-    const key = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
+    const key = `${store.state.localeRevision}\u0000${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
     let out = markdownCache.get(key);
 
     if (out !== undefined) {
@@ -528,7 +528,7 @@ export function Markdown({
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+        const settings = `${store.state.localeRevision}\u0000${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -766,7 +766,9 @@ document.addEventListener(
         const note = document.createElement("span");
 
         note.className = "image-missing";
-        note.textContent = `🖼 ${image.alt || "Image"} could not be loaded`;
+        note.textContent = t("web.ui.image.unavailable", "🖼 {image} could not be loaded", {
+            image: image.alt || t("web.ui.image.name", "Image"),
+        });
         image.after(note);
     },
     true,
@@ -784,10 +786,10 @@ document.addEventListener("click", (event) => {
 
     copyText(pre?.innerText ?? "").then(
         () => {
-            button.textContent = "Copied";
-            setTimeout(() => (button.textContent = "Copy"), 1200);
+            button.textContent = t("web.ui.code.copied", "Copied");
+            setTimeout(() => (button.textContent = t("web.ui.code.copy", "Copy")), 1200);
         },
-        () => notify("error", "Could not copy."),
+        () => notify("error", t("web.ui.code.copy-failed", "Could not copy.")),
     );
 });
 
@@ -803,8 +805,10 @@ document.addEventListener("click", (event) => {
     const open = block.classList.toggle("open");
 
     button.textContent = open
-        ? "Fold"
-        : `Show all ${block.querySelector("pre")?.textContent.split("\n").length ?? ""} lines`;
+        ? t("web.ui.code.fold", "Fold")
+        : t("web.ui.code.show-lines", "Show all {count} lines", {
+              count: block.querySelector("pre")?.textContent.split("\n").length ?? "",
+          });
 });
 
 /** Copy text, with a fallback for plain-http addresses, where the clipboard API does not exist. */
