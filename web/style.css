@@ -3292,11 +3292,18 @@ pre.diff .del {
     border: 0;
 }
 
+/* One question's options and its own answer sit close; the next question starts clearly further down. */
+.ask-choices + .ask-choices {
+    margin-top: 12px;
+}
+
+/*
+ * The header tag on a line of its own, then the question, so short and long questions start alike. A fieldset's
+ * legend takes no part in its gap, so it keeps a margin of its own.
+ */
 .ask-question {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 8px;
+    display: block;
+    margin-bottom: 8px;
     padding: 0;
     font-size: 14px;
     font-weight: 600;
@@ -3315,7 +3322,14 @@ pre.diff .del {
     color: var(--muted);
 }
 
+.ask-question .ask-header {
+    display: block;
+    width: fit-content;
+    margin-bottom: 4px;
+}
+
 .ask-hint {
+    margin-left: 8px;
     font-size: 12px;
     font-weight: 400;
     color: var(--muted);
@@ -3331,12 +3345,18 @@ pre.diff .del {
     .ask-options {
         grid-template-columns: 1fr 1fr;
     }
+
+    /* An odd one out takes the whole row rather than leaving a hole beside it. */
+    .ask-option:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+    }
 }
 
+/* Label and description start at the top, so the options in a row line up whatever their length. */
 .ask-option {
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 2px;
     min-width: 0;
     min-height: 44px;
@@ -3394,15 +3414,28 @@ pre.diff .del {
     }
 }
 
+/* A question's own answer: a quiet one-line box under its options, not one more option. */
 .ask-other {
-    min-height: 44px;
-    padding: 8px 12px;
-    border: 1px solid var(--line);
+    min-width: 0;
+    height: 38px;
+    padding: 0 12px;
+    border: 1px solid var(--hair-2);
     border-radius: var(--r-control);
-    background: var(--bg);
+    background: transparent;
     color: var(--text);
     font: inherit;
-    font-size: 15px;
+    font-size: 14px;
+}
+
+.ask-other::placeholder {
+    color: var(--muted);
+}
+
+/* The answers end above a hairline; Decline and Send sit apart below it. */
+.ask .approval-actions {
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--hair);
 }
 
 .ask-answers {
