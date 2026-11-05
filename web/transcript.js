@@ -1993,8 +1993,52 @@ function choiceValue(field, { picked, other }) {
 }
 
 // Unsent answers belong to this approval, and to the person who may answer it. Another approval, or a form that
-// changed, starts empty rather than showing answers that no longer fit.
-const askKey = (id) => `ask.${id}`;
+// changed, starts empty rather than showing answers that no longer fit. They are kept by session, each under its
+// approval's id and the time it asked: an id is unique only while it waits, so a later ask with the same id is another.
+const askKey = (conversationId) => `ask.${conversationId}`;
+const askEntry = (approval) => `${approval.id}@${approval.createdAt}`;
+
+/** The approvals waiting in `conversationId` as this tab knows them, or undefined when it knows none. */
+function waitingIn(conversationId) {
+    const { view } = store.state;
+
+    return (view.conversation?.id === conversationId ? view : keptViewOf(conversationId))
+        ?.approvals;
+}
+
+/**
+ * The unsent answers kept for the session of `approval`, with `change` made to its own (`undefined` leaves it, `null`
+ * drops it). What belongs to an approval no longer waiting goes, also one that ended while another session showed.
+ */
+function keptAsks(approval, change) {
+    let all = {};
+
+    try {
+        const saved = JSON.parse(personStorage.get(askKey(approval.conversationId)) ?? "null");
+
+        all = typeof saved === "object" && saved !== null && !Array.isArray(saved) ? saved : {};
+    } catch {
+        all = {};
+    }
+
+    const waiting = waitingIn(approval.conversationId);
+    const live = new Set((waiting ?? [approval]).map(askEntry));
+    const kept = Object.fromEntries(Object.entries(all).filter(([entry]) => live.has(entry)));
+
+    if (change === null) {
+        delete kept[askEntry(approval)];
+    } else if (change !== undefined) {
+        kept[askEntry(approval)] = change;
+    }
+
+    if (JSON.stringify(kept) !== JSON.stringify(all)) {
+        const empty = Object.keys(kept).length === 0;
+
+        personStorage.set(askKey(approval.conversationId), empty ? null : JSON.stringify(kept));
+    }
+
+    return kept;
+}
 
 function emptyAsk(field) {
     return field.choices ? { picked: [], other: "" } : "";
@@ -2036,12 +2080,8 @@ function keptAsk(form, saved) {
     return values;
 }
 
-function savedAsk(form, id) {
-    try {
-        return keptAsk(form, JSON.parse(personStorage.get(askKey(id)) ?? "null")) ?? null;
-    } catch {
-        return null;
-    }
+function savedAsk(form, approval) {
+    return keptAsk(form, keptAsks(approval)[askEntry(approval)] ?? null) ?? null;
 }
 
 /** Sent only by that person, and declined by anyone who can steer. Only the `ask` tool passes what is typed on to Pi. */
@@ -2051,11 +2091,11 @@ function AskCard({ approval }) {
     const owner = users?.find?.((each) => each.role === "owner")?.id;
     const mine = (approval.requestedBy ?? owner) === me?.id;
     const [values, setValues] = useState(() => {
-        const saved = mine ? savedAsk(form, approval.id) : null;
+        const saved = mine ? savedAsk(form, approval) : null;
 
         // One that does not fit goes, or it would come back if the form fit it again.
         if (mine && saved === null) {
-            personStorage.set(askKey(approval.id), null);
+            keptAsks(approval, null);
         }
 
         return (
@@ -2086,7 +2126,7 @@ function AskCard({ approval }) {
                 field.secret ? "" : next[field.name],
             ]);
 
-            personStorage.set(askKey(approval.id), JSON.stringify(Object.fromEntries(kept)));
+            keptAsks(approval, Object.fromEntries(kept));
         }
     };
 
@@ -2095,18 +2135,14 @@ function AskCard({ approval }) {
     // it left still lists the approval.
     useEffect(
         () => () => {
-            const { view } = store.state;
-            const own =
-                view.conversation?.id === approval.conversationId
-                    ? view
-                    : keptViewOf(approval.conversationId);
+            const waiting = waitingIn(approval.conversationId);
 
             if (
                 mine &&
-                own !== undefined &&
-                !own.approvals?.some((each) => each.id === approval.id)
+                waiting !== undefined &&
+                !waiting.some((each) => askEntry(each) === askEntry(approval))
             ) {
-                personStorage.set(askKey(approval.id), null);
+                keptAsks(approval, null);
             }
         },
         [approval.id, mine],
@@ -2116,7 +2152,7 @@ function AskCard({ approval }) {
         setBusy(true);
         attempt(() => actions.approve(approval.id, allow, allow ? typed : undefined))
             // `attempt` gives undefined when the server turned the answer down: what was typed stays, to try again.
-            .then((done) => done !== undefined && personStorage.set(askKey(approval.id), null))
+            .then((done) => done !== undefined && keptAsks(approval, null))
             .finally(() => setBusy(false));
     };
 
@@ -2218,7 +2254,8 @@ function decided(decision) {
 
 function ApprovalCard({ approval }) {
     if (approval.form) {
-        return html`<${AskCard} approval=${approval} />`;
+        // One card for each ask: a later one with the same id starts anew.
+        return html`<${AskCard} key=${askEntry(approval)} approval=${approval} />`;
     }
 
     const { me, server } = store.state;
