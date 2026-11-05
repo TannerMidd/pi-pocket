@@ -282,7 +282,10 @@ test("R09 and R17: real loader order survives reload and removing an overlay rev
 export default (_host, web) => web.uiLocales([${JSON.stringify({
         id: "fr-ca",
         label,
-        messages: { "ui.close": close, ...(back === undefined ? {} : { "ui.back": back }) },
+        messages: {
+            "ui.close": close,
+            ...(back === undefined ? {} : { "web.ui.sheet.aria-label.back": back }),
+        },
     })}]);
 `;
 
@@ -306,7 +309,10 @@ export default (_host, web) => web.uiLocales([${JSON.stringify({
         await loader.loadAll();
         assert.equal(localeOf(webs, "fr-CA")?.label, "Drop Z");
         assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "drop Z");
-        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.back"], "back from browser");
+        assert.equal(
+            localeOf(webs, "fr-CA")?.messages["web.ui.sheet.aria-label.back"],
+            "back from browser",
+        );
         writeFileSync(join(dropIn, "a-drop.ts"), source("Drop A revised", "drop A revised"));
         await loader.reload("a-drop.ts");
         assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "drop Z");
@@ -323,7 +329,7 @@ export default (_host, web) => web.uiLocales([${JSON.stringify({
         disabled.add("browser.ts");
         await loader.apply("browser.ts");
         assert.equal(localeOf(webs, "fr-CA")?.messages["ui.close"], "builtin prompt");
-        assert.equal(localeOf(webs, "fr-CA")?.messages["ui.back"], undefined);
+        assert.equal(localeOf(webs, "fr-CA")?.messages["web.ui.sheet.aria-label.back"], undefined);
         assert.equal(localeOf(webs, "fr"), undefined, "a parent tag is not substituted for fr-CA");
         assert.equal(
             localeOf(webs, "fr-FR"),

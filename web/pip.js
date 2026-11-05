@@ -31,6 +31,7 @@ import {
     usePresence,
 } from "./ui.js";
 import { MicButton, useDictation } from "./voice.js";
+import { t } from "./ui-locale.js";
 
 const OPEN_KEY = "pocket.pip";
 const SEEN_KEY = "pocket.pip.seen";
@@ -88,16 +89,25 @@ function post(text) {
 
 const SCHEDULED = "[scheduled] ";
 
-const INTRO =
-    "I keep an eye on your sessions and repositories: ask what’s going on, start new work, have me check back later, or watch a repository and act when something happens.";
+/** What PiP says it does, on its first open: a key and its English, looked up as it draws. */
+const INTRO = [
+    "web.pip.intro.i-keep-eye-sessions",
+    "I keep an eye on your sessions and repositories: ask what’s going on, start new work, have me check back later, or watch a repository and act when something happens.",
+];
 
-/** Things to ask PiP on its first open: sent at once, or (ending in "…") put in the box to finish. */
+/**
+ * Things to ask PiP on its first open: a key and the English that is sent, at once, or (ending in "…") put in
+ * the box to finish. Only what shows is in the person's language: PiP reads the English.
+ */
 const SUGGESTIONS = [
-    "What needs me?",
-    "What happened today?",
-    "Start a session to …",
-    "Every weekday at 9:00, tell me what changed overnight",
-    "When CI fails on main in …",
+    ["web.pip.suggestions.needs-me", "What needs me?"],
+    ["web.pip.suggestions.happened-today", "What happened today?"],
+    ["web.pip.suggestions.start-session", "Start a session to …"],
+    [
+        "web.pip.suggestions.every-weekday-tell-me",
+        "Every weekday at 9:00, tell me what changed overnight",
+    ],
+    ["web.pip.suggestions.ci-fails-main", "When CI fails on main in …"],
 ];
 
 /** The server lets this person have a PiP: the owner, while its extension is on. */
@@ -232,7 +242,7 @@ function draftPip(text) {
 /** Send PiP a message from anywhere (`/pip …`), and open the panel to show what it says; true when it went. */
 export async function askPip(text) {
     if (!pipAvailable()) {
-        notify("error", "PiP is not on here.");
+        notify("error", t("web.pip.ask-pip.text.pi-p-not", "PiP is not on here."));
 
         return false;
     }
@@ -247,7 +257,13 @@ export async function askPip(text) {
     }
 
     if (!pip) {
-        notify("error", "PiP is not ready yet: your message waits in its box.");
+        notify(
+            "error",
+            t(
+                "web.pip.ask-pip.text.pi-p-not-ready-yet",
+                "PiP is not ready yet: your message waits in its box.",
+            ),
+        );
     }
 
     // Not sent: the words wait in PiP's box rather than be lost (`send` said why), after what was there already.
@@ -300,7 +316,13 @@ async function send(id, text, busy, attachments = []) {
     }
 
     if (target === undefined) {
-        notify("error", "PiP is not ready yet. Try again in a moment.");
+        notify(
+            "error",
+            t(
+                "web.pip.send.text.pi-p-not-ready-yet",
+                "PiP is not ready yet. Try again in a moment.",
+            ),
+        );
 
         return false;
     }
@@ -340,20 +362,42 @@ function PipContext({ stats, window }) {
     const limit = at > 0 ? Math.min(at, window) : window;
     const percent = Math.min(100, Math.round((used / limit) * 100));
     const about = stats.contextEstimated ? "~" : "";
-    const tokens = `${about}${formatTokens(used)} of ${formatTokens(limit)} tokens in PiP's context.`;
+    const tokens = t(
+        "web.pip.pip-context.tokens.tokens-pi-p-s-context",
+        "{about}{detail} of {count} tokens in PiP's context.",
+        { about, detail: formatTokens(used), count: formatTokens(limit) },
+    );
     const when =
         at > window
-            ? `PiP's idle compaction limit is ${formatTokens(at)} tokens.`
+            ? t(
+                  "web.pip.pip-context.when.pi-p-s-idle-compaction",
+                  "PiP's idle compaction limit is {detail} tokens.",
+                  { detail: formatTokens(at) },
+              )
             : at > 0
-              ? `PiP compacts itself above ${formatTokens(at)} once idle.`
-              : "Compact it when it grows.";
-    const cap = at > window ? " The meter is capped at the model's context window." : "";
-    const title = `${tokens} ${when}${cap}`;
+              ? t(
+                    "web.pip.pip-context.when.pi-p-compacts-itself-above",
+                    "PiP compacts itself above {detail} once idle.",
+                    { detail: formatTokens(at) },
+                )
+              : t("web.pip.pip-context.when.compact-grows", "Compact it when it grows.");
+    const cap =
+        at > window
+            ? t(
+                  "web.pip.pip-context.title.meter-capped",
+                  "The meter is capped at the model's context window.",
+              )
+            : "";
+    const title = [tokens, when, cap].filter(Boolean).join(" ");
 
     return html`<span
         class="pip-context"
         role="img"
-        aria-label=${`Context ${about}${percent}% full`}
+        aria-label=${t(
+            "web.pip.pip-context.aria-label.context-full",
+            "Context {about}{percent}% full",
+            { about, percent },
+        )}
         title=${title}
     >
         <span class=${`meter ${contextLevel(percent)}`}><span style=${`width:${percent}%`}></span></span>
@@ -399,7 +443,13 @@ function sessionOf(anchor) {
 // ─── The panel ──────────────────────────────────────────────────────────────
 
 /** A report from a session PiP follows, or a webhook's post (with what came as `data`): folded until opened. */
-function Report({ text, label = "Report", data = null, conversationId }) {
+function Report({
+    text,
+    // UI: looked up as the report draws.
+    label = t("web.pip.report.text.report", "Report"),
+    data = null,
+    conversationId,
+}) {
     const [open, setOpen] = useState(false);
 
     return html`<div class=${`pip-report ${open ? "open" : ""}`}>
@@ -517,7 +567,9 @@ function Item({ item, last, busy, conversationId }) {
                                       { length: entry.images },
                                       (_, index) => html`<${Thumb}
                                           src=${entryImageUrl(entry.id, index, conversationId)}
-                                          alt=${`Image ${index + 1}`}
+                                          alt=${t("web.pip.item.alt.image", "Image {detail}", {
+                                              detail: index + 1,
+                                          })}
                                       />`,
                                   )
                         }
@@ -528,9 +580,12 @@ function Item({ item, last, busy, conversationId }) {
 
         const line =
             entry.kind === "reset"
-                ? "Fresh start"
+                ? t("web.pip.item.line.fresh-start", "Fresh start")
                 : entry.kind === "compaction"
-                  ? "Earlier messages summarized"
+                  ? t(
+                        "web.pip.item.line.earlier-messages-summarized",
+                        "Earlier messages summarized",
+                    )
                   : entry.kind === "note"
                     ? `${entry.name} ${entry.text}`
                     : null;
@@ -571,10 +626,15 @@ function Item({ item, last, busy, conversationId }) {
                     conversationId=${conversationId}
                 />`
             }
-            ${entry?.stopReason === "aborted" && html`<div class="pip-event"><span>Stopped</span></div>`}
+            ${entry?.stopReason === "aborted" && html`<div class="pip-event"><span>${t("web.pip.item.span.stopped", "Stopped")}</span></div>`}
             ${
                 entry?.stopReason === "error" &&
-                html`<div class="pip-error">${entry.error ?? "The model request failed."}</div>`
+                html`<div class="pip-error">
+                    ${
+                        entry.error ??
+                        t("web.pip.item.text.model-request-failed", "The model request failed.")
+                    }
+                </div>`
             }
         </div>`;
     }
@@ -586,8 +646,12 @@ function Welcome({ id, name, hasModel }) {
     const first = (name ?? "").split(/\s+/)[0];
 
     return html`<div class="pip-welcome">
-        <p class="pip-hello">Hi${first ? ` ${first}` : ""}. I’m PiP.</p>
-        <p class="pip-intro">${INTRO}</p>
+        <p class="pip-hello">
+            ${t("web.pip.welcome.p.hi-i-m-pi-p", "Hi{detail}. I’m PiP.", {
+                detail: first ? ` ${first}` : "",
+            })}
+        </p>
+        <p class="pip-intro">${t(...INTRO)}</p>
         ${
             !hasModel &&
             html`<p class="pip-intro">
@@ -596,25 +660,28 @@ function Welcome({ id, name, hasModel }) {
                     class="button small"
                     onClick=${() => openSheet({ type: "model", pipId: id })}
                 >
-                    Choose a model to use these suggestions
+                    ${t(
+                        "web.pip.welcome.button.choose-model-suggestions",
+                        "Choose a model to use these suggestions",
+                    )}
                 </button>
             </p>`
         }
         <div class="pip-chips">
-            ${SUGGESTIONS.map(
-                (suggestion) => html`<button
+            ${SUGGESTIONS.map(([key, english]) => {
+                const ends = english.endsWith("…");
+
+                return html`<button
                     type="button"
                     class="pip-chip"
-                    key=${suggestion}
-                    disabled=${!hasModel && !suggestion.endsWith("…")}
+                    key=${key}
+                    disabled=${!hasModel && !ends}
                     onClick=${() =>
-                        suggestion.endsWith("…")
-                            ? openPip(suggestion.slice(0, -1))
-                            : send(id, suggestion, false)}
+                        ends ? openPip(english.slice(0, -1)) : send(id, english, false)}
                 >
-                    ${suggestion}
-                </button>`,
-            )}
+                    ${t(key, english)}
+                </button>`;
+            })}
         </div>
     </div>`;
 }
@@ -683,7 +750,13 @@ function Composer({ id, busy }) {
         }
 
         if (compact && id === undefined) {
-            notify("error", "PiP is not ready yet. Try again in a moment.");
+            notify(
+                "error",
+                t(
+                    "web.pip.composer.submit.pi-p-not-ready-yet",
+                    "PiP is not ready yet. Try again in a moment.",
+                ),
+            );
 
             return;
         }
@@ -755,7 +828,10 @@ function Composer({ id, busy }) {
     >
         ${
             files.length > 0 &&
-            html`<div class="pip-attachments" aria-label="Files attached to PiP">
+            html`<div class="pip-attachments" aria-label=${t(
+                "web.pip.composer.aria-label.files-attached-to-pi-p",
+                "Files attached to PiP",
+            )}>
                 ${files.map(
                     (file) => html`<div class="pip-attachment" key=${file.key}>
                         ${file.preview && html`<${Thumb} src=${file.preview} alt=${file.name} />`}
@@ -763,12 +839,18 @@ function Composer({ id, busy }) {
                         <span class="muted">${formatBytes(file.size)}</span>
                         ${
                             file.state === "uploading" &&
-                            html`<${Spinner} label=${`Uploading ${file.name}`} />`
+                            html`<${Spinner}
+                                label=${t("web.pip.composer.label.uploading", "Uploading {name}", {
+                                    name: file.name,
+                                })}
+                            />`
                         }
                         <button
                             type="button"
                             class="icon-button pip-attachment-remove"
-                            aria-label=${`Remove ${file.name}`}
+                            aria-label=${t("web.pip.composer.aria-label.remove", "Remove {name}", {
+                                name: file.name,
+                            })}
                             onClick=${() => composerDraft.removeFile(file.key)}
                         >
                             <${Icon} name="close" size=${14} />
@@ -793,8 +875,14 @@ function Composer({ id, busy }) {
             <button
                 type="button"
                 class="icon-button pip-attach"
-                aria-label="Attach files to PiP"
-                title="Attach files. Images need an image-capable model to be read inline."
+                aria-label=${t(
+                    "web.pip.composer.aria-label.attach-files-to-pi-p",
+                    "Attach files to PiP",
+                )}
+                title=${t(
+                    "web.pip.composer.title.attach-files-images-need",
+                    "Attach files. Images need an image-capable model to be read inline.",
+                )}
                 disabled=${id === undefined}
                 onClick=${() => picker.current?.click()}
             >
@@ -804,8 +892,14 @@ function Composer({ id, busy }) {
                 ref=${ref}
                 rows="1"
                 value=${text}
-                placeholder=${dictation.listening ? "Listening…" : busy ? "Tell PiP more…" : "Ask PiP…"}
-                aria-label="Message to PiP"
+                placeholder=${
+                    dictation.listening
+                        ? t("web.pip.composer.placeholder.listening", "Listening…")
+                        : busy
+                          ? t("web.pip.composer.placeholder.tell-pi-p-more", "Tell PiP more…")
+                          : t("web.pip.composer.placeholder.ask-pi-p", "Ask PiP…")
+                }
+                aria-label=${t("web.pip.composer.aria-label.message-to-pi-p", "Message to PiP")}
                 enterkeyhint="send"
                 onInput=${(event) => change(event.currentTarget.value)}
                 onPaste=${onPaste}
@@ -838,8 +932,8 @@ function Composer({ id, busy }) {
                     ? html`<button
                           type="button"
                           class="icon-button pip-send"
-                          aria-label="Stop PiP"
-                          title="Stop"
+                          aria-label=${t("web.pip.composer.aria-label.stop-pi-p", "Stop PiP")}
+                          title=${t("web.pip.composer.title.stop", "Stop")}
                           onClick=${() => attempt(() => api(`c/${id}/abort`, {}))}
                       >
                           <${Icon} name="stop" size=${18} />
@@ -847,7 +941,7 @@ function Composer({ id, busy }) {
                     : html`<button
                           type="submit"
                           class="icon-button pip-send"
-                          aria-label="Send to PiP"
+                          aria-label=${t("web.pip.composer.aria-label.send-to-pi-p", "Send to PiP")}
                           disabled=${sendDisabled}
                       >
                           <${Icon} name="send" size=${18} />
@@ -862,23 +956,26 @@ function PendingMemories({ id }) {
     const data = useMemory(id, true);
     const count = data?.pendingAll === true ? data.lessons.length : null;
     const hint = data?.restartRequired
-        ? "Restart required"
+        ? t("web.pip.pending-memories.hint.restart-required", "Restart required")
         : count === null
-          ? "Loading…"
-          : `${count} pending`;
+          ? t("web.pip.pending-memories.hint.loading", "Loading…")
+          : t("web.pip.pending-memories.hint.pending", "{count} pending", { count });
 
     return html`<div class="pip-memory">
         <button
             type="button"
             class="button small ghost"
-            aria-label="Pending memories"
+            aria-label=${t(
+                "web.pip.pending-memories.aria-label.pending-memories",
+                "Pending memories",
+            )}
             aria-describedby="pip-memory-count"
             onClick=${() => {
                 closePip();
                 openSheet({ type: "memory", conversationId: id, pendingOnly: true });
             }}
         >
-            <span>Pending memories</span>
+            <span>${t("web.pip.pending-memories.span.pending-memories", "Pending memories")}</span>
             <span
                 id="pip-memory-count"
                 class=${`pip-memory-count ${count > 0 ? "waiting" : ""}`}
@@ -894,10 +991,10 @@ function PendingMemories({ id }) {
 /** When PiP takes a message that waits: a steer at its next pause, a queued one when it finishes its work. */
 const pendingWhen = (item, busy) =>
     !busy
-        ? "Waiting for PiP"
+        ? t("web.pip.pending-when.waiting-pi-p", "Waiting for PiP")
         : item.mode === "steer"
-          ? "PiP reads this at its next pause"
-          : "PiP reads this when it finishes";
+          ? t("web.pip.pending-when.pi-p-reads-next-pause", "PiP reads this at its next pause")
+          : t("web.pip.pending-when.pi-p-reads-finishes", "PiP reads this when it finishes");
 
 /** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
 const FROM = /^\[from: [^\]\n]{1,60}\] /;
@@ -932,7 +1029,13 @@ function PipPanel({ leaving, scrim }) {
     const waiting = ready ? (view.approvals ?? []) : [];
     const compacting = ready && (live.compactions ?? []).length > 0;
     const status =
-        waiting.length > 0 ? "needs you" : compacting ? "compacting…" : busy ? "working…" : "";
+        waiting.length > 0
+            ? t("web.pip.pip-panel.status.needs", "needs you")
+            : compacting
+              ? t("web.pip.pip-panel.status.compacting", "compacting…")
+              : busy
+                ? t("web.pip.pip-panel.status.working", "working…")
+                : "";
     // Where the focus was before the panel: read as it first renders, before its box takes the focus.
     const [before] = useState(() => document.activeElement);
 
@@ -989,7 +1092,7 @@ function PipPanel({ leaving, scrim }) {
         ref=${ref}
         role="dialog"
         aria-modal=${NARROW.matches ? "true" : undefined}
-        aria-label="PiP, your assistant"
+        aria-label=${t("web.pip.pip-panel.aria-label.pi-p-your-assistant", "PiP, your assistant")}
     >
         <div class="pip-resize pip-resize-left" data-pip-resize="left" aria-hidden="true"></div>
         <div class="pip-resize pip-resize-top" data-pip-resize="top" aria-hidden="true"></div>
@@ -1001,14 +1104,21 @@ function PipPanel({ leaving, scrim }) {
             </span>
             <div class="pip-heading">
                 <div class="pip-title-line">
-                    <h2>PiP</h2>
+                    <h2>${t("web.pip.pip-panel.h2.pi-p", "PiP")}</h2>
                     <span class="pip-status" aria-live="polite">${status}</span>
                 </div>
                 <button
                     class="model-chip pip-model"
                     disabled=${!ready || busy || compacting}
-                    aria-label=${`PiP model: ${model}${thinking ? ` · ${thinking}` : ""}`}
-                    title="Change PiP's model and thinking level"
+                    aria-label=${t(
+                        "web.pip.pip-panel.aria-label.pi-p-model",
+                        "PiP model: {model}{detail}",
+                        { model, detail: thinking ? ` · ${thinking}` : "" },
+                    )}
+                    title=${t(
+                        "web.pip.pip-panel.title.change-pi-p-s-model",
+                        "Change PiP's model and thinking level",
+                    )}
                     onClick=${() => openSheet({ type: "model", pipId: id })}
                 >
                     <span class="model-name">
@@ -1023,8 +1133,11 @@ function PipPanel({ leaving, scrim }) {
             }
             <button
                 class="icon-button"
-                aria-label="Compact"
-                title="Compact: PiP keeps a summary of older messages, and reads less each time"
+                aria-label=${t("web.pip.pip-panel.aria-label.compact", "Compact")}
+                title=${t(
+                    "web.pip.pip-panel.title.compact-pi-p-keeps-summary",
+                    "Compact: PiP keeps a summary of older messages, and reads less each time",
+                )}
                 disabled=${!ready || busy || compacting || rows.length === 0}
                 onClick=${() => compactPip(id)}
             >
@@ -1032,19 +1145,32 @@ function PipPanel({ leaving, scrim }) {
             </button>
             <button
                 class="icon-button"
-                aria-label="Start fresh"
-                title="Start fresh: PiP forgets this conversation"
+                aria-label=${t("web.pip.pip-panel.aria-label.start-fresh", "Start fresh")}
+                title=${t(
+                    "web.pip.pip-panel.title.start-fresh-pi-p-forgets",
+                    "Start fresh: PiP forgets this conversation",
+                )}
                 disabled=${!ready || busy || rows.length === 0}
                 onClick=${() =>
-                    confirm("Start fresh? PiP forgets this conversation; you can still read it.") &&
-                    attempt(() => api(`c/${id}/reset`, {}))}
+                    confirm(
+                        t(
+                            "web.pip.pip-panel.confirm.start-fresh-pi-p-forgets",
+                            "Start fresh? PiP forgets this conversation; you can still read it.",
+                        ),
+                    ) && attempt(() => api(`c/${id}/reset`, {}))}
             >
                 <${Icon} name="reload" size=${18} />
             </button>
             <button
                 class="icon-button"
-                aria-label="Open as a conversation"
-                title="Open as a conversation, with every step"
+                aria-label=${t(
+                    "web.pip.pip-panel.aria-label.open-as-a-conversation",
+                    "Open as a conversation",
+                )}
+                title=${t(
+                    "web.pip.pip-panel.title.open-conversation-every-step",
+                    "Open as a conversation, with every step",
+                )}
                 disabled=${!ready}
                 onClick=${() => {
                     closePip();
@@ -1053,7 +1179,7 @@ function PipPanel({ leaving, scrim }) {
             >
                 <${Icon} name="external" size=${18} />
             </button>
-            <button class="icon-button" aria-label="Close PiP" title="Close (Esc)" onClick=${closePip}>
+            <button class="icon-button" aria-label=${t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP")} title=${t("web.pip.pip-panel.title.close-esc", "Close (Esc)")} onClick=${closePip}>
                 <${Icon} name="close" size=${18} />
             </button>
         </header>
@@ -1069,7 +1195,11 @@ function PipPanel({ leaving, scrim }) {
         >
             ${
                 !ready
-                    ? html`<div class="pip-loading"><${Spinner} label="Waking PiP" /></div>`
+                    ? html`<div class="pip-loading">
+                          <${Spinner}
+                              label=${t("web.pip.pip-panel.label.waking-pi-p", "Waking PiP")}
+                          />
+                      </div>`
                     : rows.length === 0 && !busy
                       ? html`<${Welcome}
                             id=${id}
@@ -1094,7 +1224,7 @@ function PipPanel({ leaving, scrim }) {
                 items.at(-1)?.type !== "activity" &&
                 html`<div class="pip-steps working">
                     <${Spinner} hidden=${true} />
-                    <span>Thinking</span>
+                    <span>${t("web.pip.pip-panel.span.thinking", "Thinking")}</span>
                 </div>`
             }
             ${pending.map(
@@ -1108,7 +1238,7 @@ function PipPanel({ leaving, scrim }) {
                             onClick=${() =>
                                 attempt(() => api(`c/${id}/withdraw`, { submissionId: item.id }))}
                         >
-                            Withdraw
+                            ${t("web.pip.pip-panel.button.withdraw", "Withdraw")}
                         </button>
                     </div>
                 </div>`,
@@ -1118,7 +1248,13 @@ function PipPanel({ leaving, scrim }) {
             waiting.length > 0 &&
             html`<div class="pip-approval" role="status">
                 <${Icon} name="shield" size=${14} />
-                <span class="grow">PiP waits for your approval: ${waiting[0].tool}</span>
+                <span class="grow">
+                    ${t(
+                        "web.pip.pip-panel.span.pi-p-waits-approval",
+                        "PiP waits for your approval: {tool}",
+                        { tool: waiting[0].tool },
+                    )}
+                </span>
                 <button
                     type="button"
                     class="button small"
@@ -1127,7 +1263,7 @@ function PipPanel({ leaving, scrim }) {
                         navigate(id);
                     }}
                 >
-                    Review
+                    ${t("web.pip.pip-panel.button.review", "Review")}
                 </button>
             </div>`
         }
@@ -1156,8 +1292,15 @@ function PipBubble() {
 
     return html`<button
         class=${`pip-bubble ${kept} ${leaving ? "leaving" : ""}`}
-        aria-label=${kept === "busy" ? "PiP is working: open PiP" : "PiP has something new: open PiP"}
-        title="PiP (Alt+A)"
+        aria-label=${
+            kept === "busy"
+                ? t("web.pip.pip-bubble.aria-label.pi-p-working-open", "PiP is working: open PiP")
+                : t(
+                      "web.pip.pip-bubble.aria-label.pi-p-something-new-open",
+                      "PiP has something new: open PiP",
+                  )
+        }
+        title=${t("web.pip.pip-bubble.title.pi-p-alt-a", "PiP (Alt+A)")}
         onClick=${() => openPip()}
     >
         <${Icon} name="pip" size=${22} />
@@ -1206,8 +1349,17 @@ export function PipRailButton() {
         class=${`rail-button rail-pip ${pip?.busy ? "lit" : ""} ${pipOpen ? "open" : ""}`}
         data-part="rail-button"
         data-state=${railState(pipOpen, Boolean(pip?.busy))}
-        title="PiP, your assistant (Alt+A)"
-        aria-label=${["PiP", pip?.busy && "working", unread && "something new"].filter(Boolean).join(", ")}
+        title=${t(
+            "web.pip.pip-rail-button.title.pi-p-assistant-alt",
+            "PiP, your assistant (Alt+A)",
+        )}
+        aria-label=${[
+            "PiP",
+            pip?.busy && t("web.pip.pip-rail-button.text.working", "working"),
+            unread && t("web.pip.pip-rail-button.text.something-new", "something new"),
+        ]
+            .filter(Boolean)
+            .join(", ")}
         aria-pressed=${pipOpen}
         onClick=${togglePip}
     >

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, navigate, notify, store } from "../store.js";
 import { html, Sheet, timeAgo } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 /** Memory needs its extension, and a conversation to say which project: `id`, or the one open. */
 export const memoryAvailable = (id) =>
@@ -113,9 +114,17 @@ export function memoryHint(data) {
         ? data.lessons.filter((lesson) => lesson.pending || lesson.proposal).length
         : 0;
     const parts = [
-        data.project ? `${here} here` : null,
-        `${everywhere} everywhere`,
-        waiting > 0 ? `${waiting} to approve` : null,
+        data.project
+            ? t("web.sheets.memory.memory-hint.parts.content", "{here} here", { here })
+            : null,
+        t("web.sheets.memory.memory-hint.parts.everywhere", "{everywhere} everywhere", {
+            everywhere,
+        }),
+        waiting > 0
+            ? t("web.sheets.memory.memory-hint.parts.approve", "{waiting} to approve", {
+                  waiting,
+              })
+            : null,
     ];
 
     return parts.filter(Boolean).join(" · ");
@@ -143,7 +152,11 @@ function approval(lesson) {
 /** Who saved a lesson, and where it came from, in a line. */
 function Source({ lesson }) {
     const { me } = store.state;
-    const who = lesson.byPi ? "Pi" : lesson.by === me?.id ? "you" : lesson.byName;
+    const who = lesson.byPi
+        ? "Pi"
+        : lesson.by === me?.id
+          ? t("web.sheets.memory.source.who.content", "you")
+          : lesson.byName;
 
     const open = (event) => {
         event.preventDefault();
@@ -153,21 +166,24 @@ function Source({ lesson }) {
 
     return html`<div class="muted small lesson-source">
         <span>${who}</span>
-        ${lesson.byPi && lesson.by !== me?.id && html`<span> for ${lesson.byName}</span>`}
+        ${lesson.byPi && lesson.by !== me?.id && html`<span> ${t("web.sheets.memory.source.span.for-name", "for {name}", { name: lesson.byName })}</span>`}
         ${
             lesson.from &&
             html` · <a href=${`/s/${lesson.from.id}`} onClick=${open}>${lesson.from.title}</a>`
         }
         <span> · ${timeAgo(lesson.updatedAt ?? lesson.createdAt)}</span>
-        ${(lesson.pending || lesson.proposal) && html`<span> · for ${reach(lesson)}</span>`}
+        ${(lesson.pending || lesson.proposal) && html`<span> ${t("web.sheets.memory.source.span.content", "· for {detail}", { detail: reach(lesson) })}</span>`}
     </div>`;
 }
 
 /** Where a lesson applies, said where it waits: everywhere's reach every session and PiP. */
 const reach = (lesson) =>
     lesson.scope === "everywhere"
-        ? "everywhere: every session, and PiP"
-        : (lesson.projectName ?? "this project");
+        ? t(
+              "web.sheets.memory.reach.everywhere-every-session-pi-p",
+              "everywhere: every session, and PiP",
+          )
+        : (lesson.projectName ?? t("web.sheets.memory.reach.project", "this project"));
 
 /** One lesson: its text, where it came from, and what this person may do with it. */
 function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
@@ -203,13 +219,16 @@ function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
                 onInput=${(event) => setDraft(event.currentTarget.value)}
             ></textarea>
             <div class="row lesson-actions">
-                <button class="button small ghost" onClick=${() => setDraft(null)}>Cancel</button>
+                <button class="button small ghost" onClick=${() => setDraft(null)}>${t(
+                    "web.sheets.memory.lesson.button.cancel",
+                    "Cancel",
+                )}</button>
                 <button
                     class="button small primary"
                     disabled=${draft.trim() === ""}
                     onClick=${() => act("", { text: draft })}
                 >
-                    Save
+                    ${t("web.sheets.memory.lesson.button.save", "Save")}
                 </button>
             </div>
         </div>`;
@@ -221,7 +240,7 @@ function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
             lesson.proposal &&
             html`<div class="lesson-proposal">
                 <span class="muted small">
-                    ${lesson.proposal.byPi ? "Pi" : lesson.proposal.mine ? "You" : lesson.proposal.byName} ${lesson.proposal.forget ? "proposes forgetting it." : "proposes:"}
+                    ${lesson.proposal.byPi ? "Pi" : lesson.proposal.mine ? t("web.sheets.memory.lesson.span.content", "You") : lesson.proposal.byName} ${lesson.proposal.forget ? t("web.sheets.memory.lesson.span.proposes-forgetting", "proposes forgetting it.") : t("web.sheets.memory.lesson.span.proposes", "proposes:")}
                 </span>
                 ${lesson.proposal.text && html`<div class="lesson-text">${lesson.proposal.text}</div>`}
             </div>`
@@ -229,7 +248,7 @@ function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
         ${
             (lesson.pending || lesson.proposal) &&
             !data.owner &&
-            html`<div class="muted small">Waits for the owner's approval; until then Pi goes on as before.</div>`
+            html`<div class="muted small">${t("web.sheets.memory.lesson.div.waits-owner-s-approval", "Waits for the owner's approval; until then Pi goes on as before.")}</div>`
         }
         <div class="lesson-foot">
             <${Source} lesson=${lesson} />
@@ -244,16 +263,23 @@ function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
                                 act(
                                     "/approve",
                                     approval(lesson),
-                                    "Approved: Pi goes by it from its next message.",
+                                    t(
+                                        "web.sheets.memory.lesson.text.approved-pi-goes-next",
+                                        "Approved: Pi goes by it from its next message.",
+                                    ),
                                 )}
                         >
-                            Approve
+                            ${t("web.sheets.memory.lesson.button.approve", "Approve")}
                         </button>`
                     }
                     ${
                         (approving || withdrawing) &&
                         html`<button class="button small ghost" onClick=${() => act("/discard")}>
-                            ${approving ? "Discard" : "Withdraw"}
+                            ${
+                                approving
+                                    ? t("web.sheets.memory.lesson.button.discard", "Discard")
+                                    : t("web.sheets.memory.lesson.button.withdraw", "Withdraw")
+                            }
                         </button>`
                     }
                     ${
@@ -262,7 +288,7 @@ function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
                             class="button small ghost"
                             onClick=${() => setDraft(lesson.text)}
                         >
-                            Edit
+                            ${t("web.sheets.memory.lesson.button.edit", "Edit")}
                         </button>`
                     }
                     ${
@@ -273,7 +299,11 @@ function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
                             onClick=${() => (forgetting ? act("/remove") : setForgetting(true))}
                             onBlur=${() => setForgetting(false)}
                         >
-                            ${forgetting ? "Forget it" : "Forget"}
+                            ${
+                                forgetting
+                                    ? t("web.sheets.memory.lesson.button.forget", "Forget it")
+                                    : t("web.sheets.memory.lesson.button.forget.forget", "Forget")
+                            }
                         </button>`
                     }
                 </div>`
@@ -312,24 +342,29 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     const [scope, setScope] = useState("project");
     const [busy, setBusy] = useState(false);
 
-    const title = pendingOnly ? "Pending memories" : "Memory";
+    const title = pendingOnly
+        ? t("web.sheets.memory.memory-sheet.title.pending-memories", "Pending memories")
+        : t("web.sheets.memory.memory-sheet.title.memory", "Memory");
 
     if (pendingOnly && store.state.me?.role !== "owner") {
         return html`<${Sheet} title=${title} onClose=${closeSheet}>
-            <p class="muted">Only the owner can review pending memories.</p>
+            <p class="muted">${t(
+                "web.sheets.memory.memory-sheet.p.owner-review-pending-memories",
+                "Only the owner can review pending memories.",
+            )}</p>
         <//>`;
     }
 
     if (!data) {
         return html`<${Sheet} title=${title} onClose=${closeSheet}>
-            <p class="muted">Loading…</p>
+            <p class="muted">${t("web.sheets.memory.memory-sheet.p.loading", "Loading…")}</p>
         <//>`;
     }
 
     if (pendingOnly && data.restartRequired) {
         return html`<${Sheet} title=${title} onClose=${closeSheet}>
             <p class="muted">
-                Restart the server from Menu → Restart server to review pending memories across projects.
+                ${t("web.sheets.memory.memory-sheet.p.restart-server-menu-review", "Restart the server from Menu → Restart server to review pending memories across projects.")}
             </p>
         <//>`;
     }
@@ -354,8 +389,14 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
             notify(
                 "info",
                 lesson.pending
-                    ? "Saved. Pi uses it once the owner approves it."
-                    : "Saved. Pi gets it from its next message.",
+                    ? t(
+                          "web.sheets.memory.memory-sheet.add.saved-pi-uses-once",
+                          "Saved. Pi uses it once the owner approves it.",
+                      )
+                    : t(
+                          "web.sheets.memory.memory-sheet.add.saved-pi-gets-next",
+                          "Saved. Pi gets it from its next message.",
+                      ),
             );
         }).finally(() => setBusy(false));
     };
@@ -363,30 +404,55 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     if (pendingOnly) {
         return html`<${Sheet} title=${title} onClose=${closeSheet}>
             <p class="muted small">
-                Memories waiting for your approval, across every project and everywhere.
-                Approve only what you want Pi to keep; until then Pi goes on as before.
+                ${t(
+                    "web.sheets.memory.memory-sheet.p.memories-waiting-approval-across",
+                    "Memories waiting for your approval, across every project and everywhere. Approve only what you want Pi to keep; until then Pi goes on as before.",
+                )}
             </p>
             <${Group}
-                title=${`To approve · ${waiting.length}`}
+                title=${t("web.sheets.memory.memory-sheet.title.approve", "To approve · {count}", {
+                    count: waiting.length,
+                })}
                 lessons=${waiting}
                 data=${data}
                 conversationId=${id}
                 pendingOnly=${true}
-                empty="No memories waiting for approval."
+                empty=${t(
+                    "web.sheets.memory.memory-sheet.p.no-memories-waiting",
+                    "No memories waiting for approval.",
+                )}
             />
         <//>`;
     }
 
     return html`<${Sheet} title=${title} onClose=${closeSheet}>
         <p class="muted small">
-            Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences. ${project ? html`Those for <b>${project.name}</b> go to every session in it, worktrees too; the rest go everywhere.` : "PiP keeps lessons for everywhere."} Pi proposes one only when asked, or when sure it will help in many later sessions, and the owner approves; yours count at once.
+            ${t(
+                "web.sheets.memory.memory-sheet.p.short-lessons-pi-keeps",
+                "Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences. {name} Pi proposes one only when asked, or when sure it will help in many later sessions, and the owner approves; yours count at once.",
+                {
+                    name: project
+                        ? t(
+                              "web.sheets.memory.memory-sheet.p.those-for-project",
+                              "Those for {name} go to every session in it, worktrees too; the rest go everywhere.",
+                              { name: project.name },
+                          )
+                        : t(
+                              "web.sheets.memory.memory-sheet.p.pi-p-keeps-lessons-everywhere",
+                              "PiP keeps lessons for everywhere.",
+                          ),
+                },
+            )}
         </p>
         ${
             data.canWrite &&
             html`<div class="lesson-add">
                 <textarea
                     rows="2"
-                    placeholder="e.g. Run the tests with npm test; the browser tests need Chromium."
+                    placeholder=${t(
+                        "web.sheets.memory.memory-sheet.placeholder.e-g-run-tests",
+                        "e.g. Run the tests with npm test; the browser tests need Chromium.",
+                    )}
                     maxlength=${data.limits.text}
                     value=${text}
                     onInput=${(event) => setText(event.currentTarget.value)}
@@ -400,14 +466,20 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                 <div class="row">
                     ${
                         project &&
-                        html`<div class="segmented grow" role="radiogroup" aria-label="For">
+                        html`<div class="segmented grow" role="radiogroup" aria-label=${t(
+                            "web.sheets.memory.memory-sheet.aria-label.for",
+                            "For",
+                        )}>
                             <button
                                 role="radio"
                                 aria-checked=${chosen === "project" ? "true" : "false"}
                                 class=${chosen === "project" ? "on" : ""}
                                 onClick=${() => setScope("project")}
                             >
-                                This project
+                                ${t(
+                                    "web.sheets.memory.memory-sheet.button.this-project",
+                                    "This project",
+                                )}
                             </button>
                             <button
                                 role="radio"
@@ -415,7 +487,10 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                                 class=${chosen === "everywhere" ? "on" : ""}
                                 onClick=${() => setScope("everywhere")}
                             >
-                                Everywhere
+                                ${t(
+                                    "web.sheets.memory.memory-sheet.button.everywhere",
+                                    "Everywhere",
+                                )}
                             </button>
                         </div>`
                     }
@@ -424,7 +499,7 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                         disabled=${busy || text.trim() === ""}
                         onClick=${add}
                     >
-                        Remember
+                        ${t("web.sheets.memory.memory-sheet.button.remember", "Remember")}
                     </button>
                 </div>
             </div>`
@@ -432,7 +507,9 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
         ${
             waiting.length > 0 &&
             html`<${Group}
-                title=${`To approve · ${waiting.length}`}
+                title=${t("web.sheets.memory.memory-sheet.title.approve", "To approve · {count}", {
+                    count: waiting.length,
+                })}
                 lessons=${waiting}
                 data=${data}
                 conversationId=${id}
@@ -441,19 +518,21 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
         ${
             project &&
             html`<${Group}
-                title=${`This project: ${project.name}`}
+                title=${t("web.sheets.memory.memory-sheet.title.project", "This project: {name}", {
+                    name: project.name,
+                })}
                 lessons=${shown.filter((lesson) => lesson.scope === "project")}
                 data=${data}
                 conversationId=${id}
-                empty="Nothing yet."
+                empty=${t("web.sheets.memory.memory-sheet.p.nothing-yet", "Nothing yet.")}
             />`
         }
         <${Group}
-            title="Everywhere"
+            title=${t("web.sheets.memory.memory-sheet.title.everywhere", "Everywhere")}
             lessons=${shown.filter((lesson) => lesson.scope === "everywhere")}
             data=${data}
             conversationId=${id}
-            empty="Nothing yet."
+            empty=${t("web.sheets.memory.memory-sheet.p.nothing-yet", "Nothing yet.")}
         />
     <//>`;
 }
@@ -487,24 +566,42 @@ export function LessonCall({ lessonId, conversationId }) {
     // One waiting for the owner is hidden from others: say nothing rather than that it is gone.
     if (!lesson) {
         return data.owner
-            ? html`<div class="lesson-call muted small">No longer in memory.</div>`
+            ? html`<div class="lesson-call muted small">${t(
+                  "web.sheets.memory.lesson-call.div.no-longer-in-memory",
+                  "No longer in memory.",
+              )}</div>`
             : null;
     }
 
     if (!lesson.pending && !lesson.proposal) {
-        return html`<div class="lesson-call muted small">In memory: Pi goes by it.</div>`;
+        return html`<div class="lesson-call muted small">${t(
+            "web.sheets.memory.lesson-call.div.memory-pi-goes",
+            "In memory: Pi goes by it.",
+        )}</div>`;
     }
 
     const what = lesson.pending
-        ? "A new lesson"
+        ? t("web.sheets.memory.lesson-call.what.new-lesson", "A new lesson")
         : lesson.proposal.forget
-          ? "Forgetting this lesson"
-          : "New text for this lesson";
+          ? t("web.sheets.memory.lesson-call.what.forgetting-lesson", "Forgetting this lesson")
+          : t("web.sheets.memory.lesson-call.what.new-text-lesson", "New text for this lesson");
     const text = lesson.pending || lesson.proposal.forget ? lesson.text : lesson.proposal.text;
 
     return html`<div class="lesson-call waiting">
         <div class="grow">
-            <div>${what}, for ${reach(lesson)}, waits for ${data.owner ? "you" : "the owner"}:</div>
+            <div>
+                ${t(
+                    "web.sheets.memory.lesson-call.div.waits",
+                    "{what}, for {detail}, waits for {detail2}:",
+                    {
+                        what,
+                        detail: reach(lesson),
+                        detail2: data.owner
+                            ? t("web.sheets.memory.lesson-call.div.content", "you")
+                            : t("web.sheets.memory.lesson-call.div.owner", "the owner"),
+                    },
+                )}
+            </div>
             <div class="lesson-text">${text}</div>
         </div>
         ${
@@ -515,16 +612,24 @@ export function LessonCall({ lessonId, conversationId }) {
                         act(
                             "/approve",
                             approval(lesson),
-                            "Approved: Pi goes by it from its next message.",
+                            t(
+                                "web.sheets.memory.lesson-call.text.approved-pi-goes-next",
+                                "Approved: Pi goes by it from its next message.",
+                            ),
                         )}
                 >
-                    Approve
+                    ${t("web.sheets.memory.lesson-call.button.approve", "Approve")}
                 </button>
                 <button
                     class="button small ghost"
-                    onClick=${() => act("/discard", {}, "Discarded.")}
+                    onClick=${() =>
+                        act(
+                            "/discard",
+                            {},
+                            t("web.sheets.memory.lesson-call.text.discarded", "Discarded."),
+                        )}
                 >
-                    Discard
+                    ${t("web.sheets.memory.lesson-call.button.discard", "Discard")}
                 </button>`
         }
     </div>`;

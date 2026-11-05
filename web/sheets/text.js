@@ -2,6 +2,7 @@
 import { useState } from "preact/hooks";
 import { attempt, closeSheet } from "../store.js";
 import { html, Sheet } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 export function TextSheet({
     title,
@@ -11,7 +12,7 @@ export function TextSheet({
     placeholder = "",
     submit,
     multiline = false,
-    button = "Save",
+    button = t("web.sheets.text.text-sheet.text.save", "Save"),
     footer = null,
 }) {
     const [value, setValue] = useState(initial);
@@ -45,7 +46,10 @@ export function TextSheet({
             }
         </div>
         <div class="sheet-actions">
-            <button class="button" onClick=${closeSheet}>Cancel</button>
+            <button class="button" onClick=${closeSheet}>${t(
+                "web.sheets.text.text-sheet.button.cancel",
+                "Cancel",
+            )}</button>
             <button class="button primary" onClick=${save}>${button}</button>
         </div>
         ${footer}

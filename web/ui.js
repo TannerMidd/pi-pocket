@@ -59,11 +59,14 @@ function imageSource(src, conversationId) {
 }
 
 /** A tappable image thumbnail that opens full screen, or a chip when the image cannot load. */
-export function Thumb({ src, alt = "image" }) {
+export function Thumb({ src, alt = t("web.ui.thumb.alt.image", "image") }) {
     const [broken, setBroken] = useState(false);
 
     if (broken) {
-        return html`<span class="chip" title="This image could not be loaded">🖼 ${alt}</span>`;
+        return html`<span class="chip" title=${t(
+            "web.ui.thumb.title.image-not-loaded",
+            "This image could not be loaded",
+        )}>🖼 ${alt}</span>`;
     }
 
     return html`<button
@@ -1172,7 +1175,7 @@ export function Icon({ name, path, size = 20, class: className = "", stroke = 2,
  * The app's loaders, after Omarchy's: a quadrant block that steps around a square like a terminal spinner, and a flat
  * bar that eases toward 70% the way Omarchy's boot screen does while it waits.
  */
-export function Spinner({ label = "Working", hidden = false }) {
+export function Spinner({ label = t("sessions.working", "Working"), hidden = false }) {
     // Hidden from screen readers beside words that say the same.
     return hidden
         ? html`<span class="spinner" aria-hidden="true"></span>`
@@ -1180,7 +1183,7 @@ export function Spinner({ label = "Working", hidden = false }) {
 }
 
 /** A spinner with a short line about what is loading, for sheets and panels. */
-export function Loader({ label = "Loading" }) {
+export function Loader({ label = t("web.ui.loader.text.loading", "Loading") }) {
     return html`<div class="loader" role="status">
         <${Spinner} label=${label} />
         <span>${label}…</span>
@@ -1728,7 +1731,10 @@ export function Sheet({ title, onClose, children, wide = false, actions = null, 
                 <div class="grip" aria-hidden="true"></div>
                 ${
                     onBack &&
-                    html`<button class="icon-button sheet-back" onClick=${onBack} aria-label="Back">
+                    html`<button class="icon-button sheet-back" onClick=${onBack} aria-label=${t(
+                        "web.ui.sheet.aria-label.back",
+                        "Back",
+                    )}>
                         <${Icon} name="back" size=${18} />
                     </button>`
                 }
@@ -1852,7 +1858,7 @@ export const anchorStyle = (anchor) =>
 /** The short name of a model for chips: "Claude Opus 5.5" stays, long ids lose their date suffix. */
 export function modelLabel(agent) {
     if (!agent?.model) {
-        return "No model";
+        return t("web.ui.model-label.text.no-model", "No model");
     }
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");

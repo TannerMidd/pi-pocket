@@ -91,12 +91,24 @@ function ChangesButton() {
     const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     const lines = added > 0 || removed > 0;
     const count = files.length + (changes.more ?? 0);
-    const counted = `${count} ${count === 1 ? "file" : "files"}`;
+    const counted =
+        count === 1
+            ? t("web.app.changes-button.text.one-file", "1 file")
+            : t("web.app.changes-button.text.files", "{count} files", { count });
+    const label = lines
+        ? t(
+              "web.app.changes-button.aria-label.changes-counted-lines",
+              "Changes: {counted}, {added} lines added and {removed} removed",
+              { counted, added, removed },
+          )
+        : t("web.app.changes-button.aria-label.changes-counted", "Changes: {counted}", {
+              counted,
+          });
 
     return html`<button
         class="changes-button"
         title=${t("app.changes-uncommitted", "Uncommitted changes in this session's folder")}
-        aria-label=${`Changes: ${counted}${lines ? `, ${added} lines added and ${removed} removed` : ""}`}
+        aria-label=${label}
         onClick=${() => setFilesOpen(true, "changes")}
     >
         ${added > 0 && html`<span class="added">+${added}</span>`}
@@ -244,7 +256,15 @@ function Topbar() {
         <div class="title">
             <button
                 class="title-open"
-                aria-label=${`${title}${folder ? `, in ${folder}` : ""}: ${t("app.session-menu", "Session menu")}`}
+                aria-label=${
+                    folder
+                        ? t(
+                              "web.app.topbar.aria-label.title-in-folder-menu",
+                              "{title}, in {folder}: {menu}",
+                              { title, folder, menu: t("app.session-menu", "Session menu") },
+                          )
+                        : `${title}: ${t("app.session-menu", "Session menu")}`
+                }
                 title=${
                     cwd
                         ? `${shortPath(cwd, server?.home)}\n${t("app.session-menu", "Session menu")}`
@@ -266,12 +286,20 @@ function Topbar() {
                 ${
                     conversation?.kind === "subagent"
                         ? html`<span class="title-folder title-parent">
-                              subagent of ${conversation.parent?.title ?? "?"}
+                              ${t("web.app.topbar.span.subagent-of", "subagent of {title}", {
+                                  title: conversation.parent?.title ?? "?",
+                              })}
                           </span>
                           <button
                               class="title-model"
-                              aria-label=${`Model: ${modelLabel(view.agent)}: change it`}
-                              title=${`Model: ${modelLabel(view.agent)}`}
+                              aria-label=${t(
+                                  "web.app.topbar.aria-label.model-change-it",
+                                  "Model: {model}: change it",
+                                  { model: modelLabel(view.agent) },
+                              )}
+                              title=${t("web.app.topbar.title.model", "Model: {model}", {
+                                  model: modelLabel(view.agent),
+                              })}
                               onClick=${() => openSheet({ type: "model" })}
                           >
                               <span class="title-model-name">${shortModel(view.agent)}</span>
@@ -285,7 +313,19 @@ function Topbar() {
                               (branchAvailable()
                                   ? html`<button
                                         class="title-branch"
-                                        aria-label=${view.branch?.detached ? `No branch, at ${branch}: switch to one` : `Branch ${branch}: switch or make a branch`}
+                                        aria-label=${
+                                            view.branch?.detached
+                                                ? t(
+                                                      "web.app.topbar.aria-label.no-branch-at",
+                                                      "No branch, at {branch}: switch to one",
+                                                      { branch },
+                                                  )
+                                                : t(
+                                                      "web.app.topbar.aria-label.branch-switch-make",
+                                                      "Branch {branch}: switch or make a branch",
+                                                      { branch },
+                                                  )
+                                        }
                                         title=${
                                             view.branch?.detached
                                                 ? t("app.branch-none", "No branch: switch to one")
@@ -301,7 +341,10 @@ function Topbar() {
                           }
                           ${
                               conversation?.worktree &&
-                              html`<span class="title-worktree" aria-hidden="true">worktree</span>`
+                              html`<span class="title-worktree" aria-hidden="true">${t(
+                                  "web.app.topbar.span.worktree",
+                                  "worktree",
+                              )}</span>`
                           }`
                 }
             </span>

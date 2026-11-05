@@ -12,9 +12,35 @@ import {
     popAnchor,
     scrimPress,
 } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 /** Models past this many get a search box in the picker. */
 const MODEL_SEARCH_AT = 8;
+
+/**
+ * A thinking level as a person reads it: the words of the language, while the value itself, the one the server sends and
+ * the app compares and saves, stays as it is.
+ */
+const levelLabel = (level) => {
+    switch (level) {
+        case "off":
+            return t("web.sheets.model.model-picker.levels.off", "off");
+        case "minimal":
+            return t("web.sheets.model.model-picker.levels.minimal", "minimal");
+        case "low":
+            return t("web.sheets.model.model-picker.levels.low", "low");
+        case "medium":
+            return t("web.sheets.model.model-picker.levels.medium", "medium");
+        case "high":
+            return t("web.sheets.model.model-picker.levels.high", "high");
+        case "xhigh":
+            return t("web.sheets.model.model-picker.levels.xhigh", "xhigh");
+        case "max":
+            return t("web.sheets.model.model-picker.levels.max", "max");
+        default:
+            return level;
+    }
+};
 
 /** Over the message box the picker is 330px wide; on a phone, the width `popAnchor` gives. */
 const widthOf = (anchor) =>
@@ -41,10 +67,14 @@ export function defaultLabel(chosen, models) {
     // Not signed in any more, or gone from its provider: new sessions start with it anyway, and say so, rather than
     // with a model nobody chose for them.
     if (!model) {
-        return `${chosen.modelId} (not signed in)`;
+        return t("web.sheets.model.default-label.text.not-signed", "{model} (not signed in)", {
+            model: chosen.modelId,
+        });
     }
 
-    return `${model.name}${model.reasoning ? ` · ${chosen.thinkingLevel ?? "off"}` : ""}${model.signIn ? " (needs sign-in)" : ""}`;
+    return `${model.name}${
+        model.reasoning ? ` · ${levelLabel(chosen.thinkingLevel ?? "off")}` : ""
+    }${model.signIn ? t("web.sheets.model.default-label.text.needs-sign", " (needs sign-in)") : ""}`;
 }
 
 /** Whether a model is one the picker's search finds: each word in its id or name, as `/model` finds them. */
@@ -248,7 +278,11 @@ export function ModelPicker() {
             ref=${box}
             role="dialog"
             aria-modal="true"
-            aria-label=${forDefault ? "Default model" : "Model"}
+            aria-label=${
+                forDefault
+                    ? t("web.sheets.model.model-picker.aria-label.default-model", "Default model")
+                    : t("web.sheets.model.model-picker.aria-label.model", "Model")
+            }
             aria-keyshortcuts=${scopedModels.length > 0 ? "Tab" : undefined}
             tabindex="-1"
             onKeyDown=${onKeyDown}
@@ -256,46 +290,71 @@ export function ModelPicker() {
             <div class="grip" aria-hidden="true"></div>
             <header class="pop-menu-head">
                 <span>
-                    ${forDefault ? "Default model" : "Model"}
-                    ${forDefault && html`<span class="pop-menu-head-sub">for new sessions</span>`}
+                    ${
+                        forDefault
+                            ? t("web.sheets.model.model-picker.span.default-model", "Default model")
+                            : t("web.sheets.model.model-picker.span.model", "Model")
+                    }
+                    ${
+                        forDefault &&
+                        html`<span class="pop-menu-head-sub">${t(
+                            "web.sheets.model.model-picker.span.for-new-sessions",
+                            "for new sessions",
+                        )}</span>`
+                    }
                     ${
                         scopedModels.length > 0 &&
                         html`<span
                             class="model-scope"
                             role="group"
-                            aria-label="Model scope"
-                            title="Tab switches between scoped and all models"
+                            aria-label=${t(
+                                "web.sheets.model.model-picker.aria-label.model-scope",
+                                "Model scope",
+                            )}
+                            title=${t(
+                                "web.sheets.model.model-picker.title.tab-switches-between-scoped",
+                                "Tab switches between scoped and all models",
+                            )}
                         >
                             <span aria-hidden="true">[</span>
                             <button
                                 class=${!showAll ? "on" : ""}
                                 aria-pressed=${!showAll}
-                                title="Models from Pi’s enabledModels setting"
+                                title=${t(
+                                    "web.sheets.model.model-picker.title.models-pi-s-enabled-models",
+                                    "Models from Pi’s enabledModels setting",
+                                )}
                                 onClick=${() => {
                                     setShowAll(false);
                                     setPicked(0);
                                 }}
                             >
-                                scoped
+                                ${t("web.sheets.model.model-picker.button.scoped", "scoped")}
                             </button>
                             <span aria-hidden="true">|</span>
                             <button
                                 class=${showAll ? "on" : ""}
                                 aria-pressed=${showAll}
-                                title="All models with a configured sign-in"
+                                title=${t(
+                                    "web.sheets.model.model-picker.title.models-configured-sign",
+                                    "All models with a configured sign-in",
+                                )}
                                 onClick=${() => {
                                     setShowAll(true);
                                     setPicked(0);
                                 }}
                             >
-                                all
+                                ${t("web.sheets.model.model-picker.button.all", "all")}
                             </button>
                             <span aria-hidden="true">]</span>
                         </span>`
                     }
                 </span>
                 <button class="pop-menu-link" onClick=${() => openSheet({ type: "providers" })}>
-                    <${Icon} name="key" size=${13} /> Providers
+                    <${Icon} name="key" size=${13} /> ${t(
+                        "web.sheets.model.model-picker.text.providers",
+                        "Providers",
+                    )}
                 </button>
             </header>
             ${
@@ -304,7 +363,10 @@ export function ModelPicker() {
                     <${Icon} name="search" size=${15} />
                     <input
                         ref=${search}
-                        placeholder="Search models"
+                        placeholder=${t(
+                            "web.sheets.model.model-picker.placeholder.search-models",
+                            "Search models",
+                        )}
                         aria-keyshortcuts=${scopedModels.length > 0 ? "Tab" : undefined}
                         value=${query}
                         onInput=${(event) => {
@@ -314,17 +376,29 @@ export function ModelPicker() {
                     />
                 </label>`
             }
-            <div class="pop-menu-list" ref=${list} role="listbox" aria-label="Models">
+            <div class="pop-menu-list" ref=${list} role="listbox" aria-label=${t(
+                "web.sheets.model.model-picker.aria-label.models",
+                "Models",
+            )}>
                 ${
                     models.length === 0 &&
                     html`<p class="muted pop-menu-note">
-                        No models are available. Add a provider first.
+                        ${t(
+                            "web.sheets.model.model-picker.p.no-models-available-add",
+                            "No models are available. Add a provider first.",
+                        )}
                     </p>`
                 }
                 ${
                     models.length > 0 &&
                     shown.length === 0 &&
-                    html`<p class="muted pop-menu-note">No model matches “${query.trim()}”.</p>`
+                    html`<p class="muted pop-menu-note">
+                        ${t(
+                            "web.sheets.model.model-picker.p.no-model-matches",
+                            "No model matches “{query}”.",
+                            { query: query.trim() },
+                        )}
+                    </p>`
                 }
                 ${shown.map(
                     (model, index) => html`<button
@@ -333,14 +407,32 @@ export function ModelPicker() {
                         role="option"
                         aria-selected=${isCurrent(model)}
                         disabled=${locked}
-                        title=${`${model.provider}/${model.id} · ${formatTokens(model.contextWindow)} context${model.images ? " · images" : ""}`}
+                        title=${`${model.provider}/${model.id} · ${t(
+                            "web.sheets.model.model-picker.title.context",
+                            "{count} context",
+                            { count: formatTokens(model.contextWindow) },
+                        )}${model.images ? t("web.sheets.model.model-picker.title.images", " · images") : ""}`}
                         onMouseMove=${() => index !== active && setPicked(index)}
                         onClick=${() => pick(model)}
                     >
                         <span class="pop-menu-row-text">
                             <span class="pop-menu-row-name">${model.name}</span>
                             <span class="pop-menu-row-sub">
-                                ${model.provider}${!forDefault && isDefault(model) ? " · default" : ""}${model.signIn ? " · needs sign-in" : ""}
+                                ${model.provider}${
+                                    !forDefault && isDefault(model)
+                                        ? t(
+                                              "web.sheets.model.model-picker.span.default",
+                                              " · default",
+                                          )
+                                        : ""
+                                }${
+                                    model.signIn
+                                        ? t(
+                                              "web.sheets.model.model-picker.span.needs-sign",
+                                              " · needs sign-in",
+                                          )
+                                        : ""
+                                }
                             </span>
                         </span>
                         ${isCurrent(model) && html`<${Icon} name="check" size=${14} />`}
@@ -350,8 +442,14 @@ export function ModelPicker() {
             ${
                 reasoning &&
                 html`<div class="pop-menu-foot">
-                    <div class="label">Thinking</div>
-                    <div class="segmented model-levels" role="radiogroup" aria-label="Thinking">
+                    <div class="label">${t(
+                        "web.sheets.model.model-picker.div.thinking",
+                        "Thinking",
+                    )}</div>
+                    <div class="segmented model-levels" role="radiogroup" aria-label=${t(
+                        "web.sheets.model.model-picker.aria-label.thinking",
+                        "Thinking",
+                    )}>
                         ${levels.map(
                             (each) =>
                                 html`<button
@@ -361,7 +459,7 @@ export function ModelPicker() {
                                     class=${level === each ? "on" : ""}
                                     onClick=${() => think(each)}
                                 >
-                                    ${each}
+                                    ${levelLabel(each)}
                                 </button>`,
                         )}
                     </div>
@@ -373,7 +471,7 @@ export function ModelPicker() {
                     : forDefault
                       ? html`<div class="pop-menu-foot pop-menu-default">
                           <span class="muted">
-                              The owner default wins over project settings. Clear it to use a trusted project's model and thinking defaults for later new sessions. Existing sessions do not change.
+                              ${t("web.sheets.model.model-picker.span.owner-default-wins-over", "The owner default wins over project settings. Clear it to use a trusted project's model and thinking defaults for later new sessions. Existing sessions do not change.")}
                           </span>
                           ${
                               chosen
@@ -381,10 +479,13 @@ export function ModelPicker() {
                                         class="pop-menu-link"
                                         onClick=${() => attempt(() => actions.setDefaultModel(null))}
                                     >
-                                        Clear owner default: use project defaults, then last picked
+                                        ${t(
+                                            "web.sheets.model.model-picker.button.clear-owner-default-project",
+                                            "Clear owner default: use project defaults, then last picked",
+                                        )}
                                     </button>`
                                   : html`<span class="muted">
-                                        No owner default: new sessions use trusted project defaults, then the last model picked, then Pi's global default.
+                                        ${t("web.sheets.model.model-picker.span.no-owner-default-new", "No owner default: new sessions use trusted project defaults, then the last model picked, then Pi's global default.")}
                                     </span>`
                           }
                       </div>`
@@ -395,14 +496,20 @@ export function ModelPicker() {
                             ${
                                 sessionIsDefault
                                     ? html`<span class="pop-menu-default-mark">
-                                          <${Icon} name="check" size=${13} /> Default
+                                          <${Icon} name="check" size=${13} /> ${t(
+                                              "web.sheets.model.model-picker.text.default",
+                                              "Default",
+                                          )}
                                       </span>`
                                     : html`<button
                                           class="pop-menu-link"
-                                          title="New sessions start with this model and thinking level"
+                                          title=${t("web.sheets.model.model-picker.title.new-sessions-start-model", "New sessions start with this model and thinking level")}
                                           onClick=${() => setDefault(agent.model, agent.thinkingLevel ?? "off")}
                                       >
-                                          Make default
+                                          ${t(
+                                              "web.sheets.model.model-picker.button.make-default",
+                                              "Make default",
+                                          )}
                                       </button>`
                             }
                         </div>`

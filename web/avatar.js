@@ -2,6 +2,7 @@
 // colors of folders, which mark their sessions the same way.
 
 import { html } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 // The theme's own colors, so people keep their colors in every theme and each one fits it.
 const COLORS = [
@@ -72,9 +73,9 @@ export function initials(name) {
 export function Avatar({ person, size = 24 }) {
     const state = person.typing ? "typing" : person.away ? "away" : "";
     const title = person.typing
-        ? `${person.name} is typing`
+        ? t("web.avatar.avatar.title.is-typing", "{name} is typing", { name: person.name })
         : person.away
-          ? `${person.name} (away)`
+          ? t("web.avatar.avatar.title.away", "{name} (away)", { name: person.name })
           : person.name;
 
     return html`<span

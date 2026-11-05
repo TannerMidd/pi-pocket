@@ -15,15 +15,32 @@ import {
 } from "./browser.js";
 import { api, attempt, canSteer, notify, panelsBeside, store } from "./store.js";
 import { APPLE, html, Icon, Spinner } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 const WIDTH_KEY = "pocket.browserWidth";
 
 /** Sizes the size button steps through. Fit makes the page the panel's size, as a browser window is. */
 const PRESETS = [
-    { id: "fit", icon: "fit", label: "Fit the panel" },
-    { id: "desktop", icon: "monitor", label: "Desktop 1280×800" },
-    { id: "mobile", icon: "phone", label: "Phone 390×844" },
-    { id: "tablet", icon: "tablet", label: "Tablet 820×1180" },
+    {
+        id: "fit",
+        icon: "fit",
+        label: ["web.browser-panel.fit.label.fit-the-panel", "Fit the panel"],
+    },
+    {
+        id: "desktop",
+        icon: "monitor",
+        label: ["web.browser-panel.desktop.label.desktop-1280-800", "Desktop 1280×800"],
+    },
+    {
+        id: "mobile",
+        icon: "phone",
+        label: ["web.browser-panel.mobile.label.phone-390-844", "Phone 390×844"],
+    },
+    {
+        id: "tablet",
+        icon: "tablet",
+        label: ["web.browser-panel.tablet.label.tablet-820-1180", "Tablet 820×1180"],
+    },
 ];
 
 /** The panel's own size as a viewport, pixel for pixel. */
@@ -297,7 +314,7 @@ function Screen({ frame, interactive, send }) {
         return html`<img
             class="browser-screen"
             src=${frame.src}
-            alt="The page"
+            alt=${t("web.browser-panel.screen.alt.the-page", "The page")}
             draggable="false"
         />`;
     }
@@ -443,7 +460,10 @@ function Screen({ frame, interactive, send }) {
         ref=${ref}
         class="browser-screen live"
         src=${frame.src}
-        alt="The page. Click to use it; once focused, keys go to the page."
+        alt=${t(
+            "web.browser-panel.screen.alt.page-click-once-focused",
+            "The page. Click to use it; once focused, keys go to the page.",
+        )}
         tabindex="0"
         draggable="false"
         onPointerDown=${down}
@@ -480,18 +500,24 @@ function TypeBar({ send, onClose, input, shown }) {
         <input
             ref=${input}
             tabindex=${shown ? "0" : "-1"}
-            placeholder="Type into the page…"
+            placeholder=${t(
+                "web.browser-panel.type-bar.placeholder.type-into-the-page",
+                "Type into the page…",
+            )}
             autocapitalize="off"
             autocomplete="off"
             autocorrect="off"
             spellcheck="false"
             enterkeyhint="send"
         />
-        <button type="submit" class="button small">Send</button>
+        <button type="submit" class="button small">${t(
+            "web.browser-panel.type-bar.button.send",
+            "Send",
+        )}</button>
         <button
             type="button"
             class="key"
-            title="Enter"
+            title=${t("web.browser-panel.type-bar.title.enter", "Enter")}
             onClick=${() => send({ type: "key", key: "Enter" })}
         >
             ⏎
@@ -499,7 +525,7 @@ function TypeBar({ send, onClose, input, shown }) {
         <button
             type="button"
             class="key"
-            title="Backspace"
+            title=${t("web.browser-panel.type-bar.title.backspace", "Backspace")}
             onClick=${() => send({ type: "key", key: "Backspace" })}
         >
             ⌫
@@ -507,7 +533,7 @@ function TypeBar({ send, onClose, input, shown }) {
         <button
             type="button"
             class="key"
-            title="Tab"
+            title=${t("web.browser-panel.type-bar.title.tab", "Tab")}
             onClick=${() => send({ type: "key", key: "Tab" })}
         >
             ⇥
@@ -515,7 +541,10 @@ function TypeBar({ send, onClose, input, shown }) {
         <button
             type="button"
             class="icon-button small"
-            aria-label="Close the keyboard bar"
+            aria-label=${t(
+                "web.browser-panel.type-bar.aria-label.close-the-keyboard-bar",
+                "Close the keyboard bar",
+            )}
             onClick=${onClose}
         >
             <${Icon} name="close" size=${14} />
@@ -563,30 +592,47 @@ function ConsolePane({ conversationId, logs, steer, onClose }) {
     }, [entries]);
     const source = (text) => text?.replace(/^https?:\/\/[^/]+/, "");
 
-    return html`<section class="browser-console" aria-label="Console">
+    return html`<section class="browser-console" aria-label=${t(
+        "web.browser-panel.console-pane.aria-label.console",
+        "Console",
+    )}>
         <header>
-            <strong>Console</strong>
+            <strong>${t("web.browser-panel.console-pane.strong.console", "Console")}</strong>
             <span class="muted small">
-                ${entries ? `${entries.filter((entry) => entry.level !== "nav").length} lines` : ""}
+                ${
+                    entries &&
+                    t("web.browser-panel.console-pane.span.lines", "{count} lines", {
+                        count: entries.filter((entry) => entry.level !== "nav").length,
+                    })
+                }
             </span>
             <span class="spacer"></span>
             ${
                 steer &&
                 html`<button class="link" onClick=${() => attempt(() => browserApi("clear", {}))}>
-                    Clear
+                    ${t("web.browser-panel.console-pane.button.clear", "Clear")}
                 </button>`
             }
-            <button class="icon-button small" aria-label="Close the console" onClick=${onClose}>
+            <button class="icon-button small" aria-label=${t(
+                "web.browser-panel.console-pane.aria-label.close-the-console",
+                "Close the console",
+            )} onClick=${onClose}>
                 <${Icon} name="close" size=${14} />
             </button>
         </header>
         <div class="browser-console-lines mono" ref=${list}>
             ${
                 entries === null
-                    ? html`<div class="muted small">Loading…</div>`
+                    ? html`<div class="muted small">${t(
+                          "web.browser-panel.console-pane.div.loading",
+                          "Loading…",
+                      )}</div>`
                     : entries.length === 0
                       ? html`<div class="muted small">
-                          Nothing yet. Logs, errors, and failed loads show here.
+                          ${t(
+                              "web.browser-panel.console-pane.div.nothing-yet-logs-errors",
+                              "Nothing yet. Logs, errors, and failed loads show here.",
+                          )}
                       </div>`
                       : entries.map((entry) =>
                             entry.level === "nav"
@@ -625,15 +671,37 @@ function StartScreen({ steer }) {
     }, []);
 
     return html`<div class="browser-start">
-        <h2>Browser</h2>
+        <h2>${t("web.browser-panel.start-screen.h2.browser", "Browser")}</h2>
         <p>
-            ${steer ? "Type an address above, such as localhost:5173, or ask Pi to open one." : "Nothing is open yet. Pi, or someone who can steer, opens pages here."}
+            ${
+                steer
+                    ? t(
+                          "web.browser-panel.start-screen.p.type-address-above-such",
+                          "Type an address above, such as localhost:5173, or ask Pi to open one.",
+                      )
+                    : t(
+                          "web.browser-panel.start-screen.p.nothing-open-yet-pi",
+                          "Nothing is open yet. Pi, or someone who can steer, opens pages here.",
+                      )
+            }
         </p>
-        ${owner && servers === null && html`<${Spinner} label="Looking for servers" />`}
+        ${
+            owner &&
+            servers === null &&
+            html`<${Spinner}
+                label=${t(
+                    "web.browser-panel.start-screen.label.looking-for-servers",
+                    "Looking for servers",
+                )}
+            />`
+        }
         ${
             servers?.length > 0 &&
             html`<div class="browser-servers">
-                <div class="browser-servers-label">Running on this machine</div>
+                <div class="browser-servers-label">${t(
+                    "web.browser-panel.start-screen.div.running-on-this-machine",
+                    "Running on this machine",
+                )}</div>
                 <div class="browser-server-list">
                     ${servers.slice(0, 8).map(
                         (server) => html`<button
@@ -696,7 +764,7 @@ function ResizeEdge() {
         class="resize-handle browser-resize"
         role="separator"
         aria-orientation="vertical"
-        title="Drag to resize"
+        title=${t("web.browser-panel.resize-edge.title.drag-to-resize", "Drag to resize")}
         onPointerDown=${start}
         onDblClick=${reset}
     ></div>`;
@@ -791,6 +859,12 @@ export function BrowserPanel({ leaving = false }) {
     // A size that is no preset is a fitted (or Pi's own) one.
     const preset = PRESETS.find((each) => each.id === (state?.preset ?? "fit"));
     const nextPreset = PRESETS[(PRESETS.indexOf(preset) + 1) % PRESETS.length];
+    // The size button names the size that shows and the one it switches to, in this language.
+    const size =
+        preset.id === "fit"
+            ? `${state?.viewport?.width ?? ""}×${state?.viewport?.height ?? ""}`
+            : t(...preset.label);
+    const next = t(...nextPreset.label);
 
     const resize = () => {
         const viewport =
@@ -867,25 +941,42 @@ export function BrowserPanel({ leaving = false }) {
         stage = html`<div class="browser-note">
             <${Icon} name="globe" size=${28} />
             <p>
-                No browser was found on the machine Pi Pocket runs on. Install Chromium or Google Chrome there (or set <code>PI_POCKET_BROWSER</code> to a browser's path), then restart Pi Pocket.
+                ${t("web.browser-panel.browser-panel.p.no-browser-found-machine", "No browser was found on the machine Pi Pocket runs on. Install Chromium or Google Chrome there (or set")} <code>PI_POCKET_BROWSER</code> ${t("web.browser-panel.browser-panel.code.browser-s-path-restart", "to a browser's path), then restart Pi Pocket.")}
             </p>
         </div>`;
     } else if (!open && why) {
         stage = html`<div class="browser-note">
             <p>${why}</p>
-            ${steer && html`<button class="button small" onClick=${retry}>Try again</button>`}
+            ${
+                steer &&
+                html`<button class="button small" onClick=${retry}>${t(
+                    "web.browser-panel.browser-panel.button.try-again",
+                    "Try again",
+                )}</button>`
+            }
         </div>`;
     } else if (!open && !steer) {
         stage = html`<div class="browser-note"><${StartScreen} steer=${false} /></div>`;
     } else if (waiting) {
         stage = html`<div class="browser-note">
-            <p>The page closed.</p>
-            <button class="button small" onClick=${retry}>Open it again</button>
+            <p>${t("web.browser-panel.browser-panel.p.the-page-closed", "The page closed.")}</p>
+            <button class="button small" onClick=${retry}>${t(
+                "web.browser-panel.browser-panel.button.open-it-again",
+                "Open it again",
+            )}</button>
         </div>`;
     } else if (!open || !frame) {
         stage = html`<div class="browser-note">
-            <${Spinner} label="Starting the browser" />
-            <span class="muted small">Starting the browser…</span>
+            <${Spinner}
+                label=${t(
+                    "web.browser-panel.browser-panel.label.starting-the-browser",
+                    "Starting the browser",
+                )}
+            />
+            <span class="muted small">${t(
+                "web.browser-panel.browser-panel.span.starting-the-browser",
+                "Starting the browser…",
+            )}</span>
         </div>`;
     } else {
         stage = html`<div class="browser-frame">
@@ -898,7 +989,7 @@ export function BrowserPanel({ leaving = false }) {
                     ${
                         steer &&
                         html`<button class="button small" onClick=${() => run("reload")}>
-                            Reload
+                            ${t("web.browser-panel.browser-panel.button.reload", "Reload")}
                         </button>`
                     }
                 </div>`
@@ -912,7 +1003,7 @@ export function BrowserPanel({ leaving = false }) {
         data-state=${leaving ? "closing" : undefined}
         role=${beside ? undefined : "dialog"}
         aria-modal=${beside ? undefined : "true"}
-        aria-label="Browser"
+        aria-label=${t("web.browser-panel.browser-panel.aria-label.browser", "Browser")}
         tabindex="-1"
         inert=${leaving}
     >
@@ -920,8 +1011,8 @@ export function BrowserPanel({ leaving = false }) {
         <header class="browser-bar">
             <button
                 class="icon-button"
-                aria-label="Back"
-                title="Back"
+                aria-label=${t("web.browser-panel.browser-panel.aria-label.back", "Back")}
+                title=${t("web.browser-panel.browser-panel.title.back", "Back")}
                 disabled=${!steer || !state?.canGoBack}
                 onClick=${() => run("back")}
             >
@@ -929,8 +1020,8 @@ export function BrowserPanel({ leaving = false }) {
             </button>
             <button
                 class="icon-button browser-forward"
-                aria-label="Forward"
-                title="Forward"
+                aria-label=${t("web.browser-panel.browser-panel.aria-label.forward", "Forward")}
+                title=${t("web.browser-panel.browser-panel.title.forward", "Forward")}
                 disabled=${!steer || !state?.canGoForward}
                 onClick=${() => run("forward")}
             >
@@ -940,8 +1031,11 @@ export function BrowserPanel({ leaving = false }) {
                 state?.loading && open
                     ? html`<button
                         class="icon-button"
-                        aria-label="Stop loading"
-                        title="Stop"
+                        aria-label=${t(
+                            "web.browser-panel.browser-panel.aria-label.stop-loading",
+                            "Stop loading",
+                        )}
+                        title=${t("web.browser-panel.browser-panel.title.stop", "Stop")}
                         disabled=${!steer}
                         onClick=${() => run("stop")}
                     >
@@ -949,8 +1043,11 @@ export function BrowserPanel({ leaving = false }) {
                     </button>`
                     : html`<button
                         class="icon-button"
-                        aria-label="Reload"
-                        title="Reload"
+                        aria-label=${t(
+                            "web.browser-panel.browser-panel.aria-label.reload",
+                            "Reload",
+                        )}
+                        title=${t("web.browser-panel.browser-panel.title.reload", "Reload")}
                         disabled=${!steer || !open}
                         onClick=${() => run("reload")}
                     >
@@ -961,7 +1058,14 @@ export function BrowserPanel({ leaving = false }) {
                 ${open && !blank && html`<span class="browser-live" aria-hidden="true"></span>`}
                 <input
                     value=${address ?? displayUrl(state?.url)}
-                    placeholder=${steer ? "Address, such as localhost:5173" : ""}
+                    placeholder=${
+                        steer
+                            ? t(
+                                  "web.browser-panel.browser-panel.placeholder.address-such-localhost",
+                                  "Address, such as localhost:5173",
+                              )
+                            : ""
+                    }
                     title=${state?.title || state?.url || ""}
                     readonly=${!steer}
                     autocapitalize="off"
@@ -986,8 +1090,15 @@ export function BrowserPanel({ leaving = false }) {
             </form>
             <button
                 class="icon-button"
-                aria-label=${`Size: ${preset.id === "fit" ? `${state?.viewport?.width ?? ""}×${state?.viewport?.height ?? ""}` : preset.label}. Switch to ${nextPreset.label}`}
-                title=${`${preset.id === "fit" ? `${state?.viewport?.width}×${state?.viewport?.height}` : preset.label} · next: ${nextPreset.label}`}
+                aria-label=${t(
+                    "web.browser-panel.browser-panel.aria-label.size-switch",
+                    "Size: {size}. Switch to {next}",
+                    { size, next },
+                )}
+                title=${t("web.browser-panel.browser-panel.title.next", "{size} · next: {next}", {
+                    size,
+                    next,
+                })}
                 disabled=${!steer || !open}
                 onClick=${resize}
             >
@@ -995,8 +1106,8 @@ export function BrowserPanel({ leaving = false }) {
             </button>
             <button
                 class=${`icon-button badge-host ${showConsole ? "on" : ""}`}
-                aria-label="Console"
-                title="Console"
+                aria-label=${t("web.browser-panel.browser-panel.aria-label.console", "Console")}
+                title=${t("web.browser-panel.browser-panel.title.console", "Console")}
                 onClick=${() => setShowConsole(!showConsole)}
             >
                 <${Icon} name="terminal" size=${18} />
@@ -1011,8 +1122,14 @@ export function BrowserPanel({ leaving = false }) {
                 open &&
                 html`<button
                     class=${`icon-button ${typing ? "on" : ""}`}
-                    aria-label="Type into the page"
-                    title="Type into the page"
+                    aria-label=${t(
+                        "web.browser-panel.browser-panel.aria-label.type-into-the-page",
+                        "Type into the page",
+                    )}
+                    title=${t(
+                        "web.browser-panel.browser-panel.title.type-into-the-page",
+                        "Type into the page",
+                    )}
                     onClick=${() => {
                         setTyping(!typing);
 
@@ -1029,8 +1146,14 @@ export function BrowserPanel({ leaving = false }) {
             }
             <button
                 class="icon-button browser-close"
-                aria-label="Close the browser"
-                title="Close the browser (Alt+B)"
+                aria-label=${t(
+                    "web.browser-panel.browser-panel.aria-label.close-the-browser",
+                    "Close the browser",
+                )}
+                title=${t(
+                    "web.browser-panel.browser-panel.title.close-browser-alt-b",
+                    "Close the browser (Alt+B)",
+                )}
                 onClick=${() => setBrowserOpen(false)}
             >
                 <${Icon} name="close" size=${18} />
@@ -1066,7 +1189,17 @@ export function BrowserPanel({ leaving = false }) {
             !steer &&
             open &&
             html`<div class="browser-foot muted small">
-                ${canSteer() ? "Take turns is on: the driver uses the page." : "You can watch; people who can steer use the page."}
+                ${
+                    canSteer()
+                        ? t(
+                              "web.browser-panel.browser-panel.div.take-turns-driver-uses",
+                              "Take turns is on: the driver uses the page.",
+                          )
+                        : t(
+                              "web.browser-panel.browser-panel.div.watch-people-who-steer",
+                              "You can watch; people who can steer use the page.",
+                          )
+                }
             </div>`
         }
     </section>`;
@@ -1086,9 +1219,9 @@ export function BrowserButton() {
     // message box) instead, so the top bar keeps room.
     return html`<button
         class=${`icon-button badge-host ${browserOpen ? "on" : live ? "quiet-phone" : "quiet"}`}
-        aria-label="Browser"
+        aria-label=${t("web.browser-panel.browser-button.aria-label.browser", "Browser")}
         aria-pressed=${browserOpen}
-        title="Browser (Alt+B)"
+        title=${t("web.browser-panel.browser-button.title.browser-alt-b", "Browser (Alt+B)")}
         onClick=${toggleBrowser}
     >
         <${Icon} name="globe" />

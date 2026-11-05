@@ -68,6 +68,7 @@ import {
     shortPath,
     timeAgo,
 } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** How far a letter that does not begin a word may be from the one before it, in a match that is not contiguous. */
 const MAX_GAP = 3;
@@ -140,14 +141,14 @@ function actionItems() {
     const wide = matchMedia("(min-width: 960px)").matches;
     const list = [
         canStart && {
-            label: "New session",
+            label: t("sessions.new", "New session"),
             icon: "plus",
             keys: "Alt N",
             run: () => openSheet({ type: "cwd", mode: "new" }),
         },
         canStart &&
             here !== null && {
-                label: "New session here",
+                label: t("web.launcher.action-items.label.new-session-here", "New session here"),
                 detail: shortPath(here, server?.home),
                 keywords: "in this folder",
                 icon: "plus",
@@ -159,78 +160,118 @@ function actionItems() {
                     }),
             },
         piSessionsAvailable() && {
-            label: "Continue a Pi session",
-            detail: "from Pi in the terminal",
+            label: t(
+                "web.sheets.pi-sessions.pi-sessions-sheet.title.continue-a-pi-session",
+                "Continue a Pi session",
+            ),
+            detail: t(
+                "web.launcher.action-items.detail.from-pi-terminal",
+                "from Pi in the terminal",
+            ),
             icon: "terminal",
             run: () => openSheet({ type: "pi-sessions" }),
         },
         conversationId !== null && {
-            label: "All sessions",
-            detail: "home",
+            label: t("web.sheets.people.people-list.button.all-sessions", "All sessions"),
+            detail: t("web.launcher.action-items.detail.home", "home"),
             icon: "home",
             run: () => navigate(null),
         },
         wide && {
-            label: prefs().sidebar === "rail" ? "Unfold the sidebar" : "Fold the sidebar",
+            label:
+                prefs().sidebar === "rail"
+                    ? t("web.launcher.action-items.label.unfold-sidebar", "Unfold the sidebar")
+                    : t("web.launcher.action-items.label.fold-sidebar", "Fold the sidebar"),
             icon: "sidebar",
             keys: "Mod B",
             run: () => setPrefs({ sidebar: prefs().sidebar === "rail" ? "open" : "rail" }),
         },
         {
-            label: "Appearance",
-            detail: "theme, colors, tiling, motion, text size, thinking, reply speed",
+            label: t("menu.appearance", "Appearance"),
+            detail: t(
+                "web.launcher.action-items.detail.appearance",
+                "theme, colors, tiling, motion, text size, thinking, reply speed",
+            ),
             icon: "palette",
             run: () => openSheet({ type: "appearance" }),
         },
         wide && {
-            label: prefs().tiling ? "Turn tiling off" : "Turn tiling on",
-            detail: "gaps and window borders",
+            label: prefs().tiling
+                ? t("web.launcher.action-items.label.turn-tiling-off", "Turn tiling off")
+                : t("web.launcher.action-items.label.turn-tiling-on", "Turn tiling on"),
+            detail: t("web.launcher.action-items.detail.gaps-borders", "gaps and window borders"),
             icon: "swatch",
             run: () => setPrefs({ tiling: !prefs().tiling }),
         },
         {
-            label: prefs().peeks ? "Hide peek tiles" : "Show peek tiles",
-            detail: "Peeks: other sessions' live work beside this one",
+            label: prefs().peeks
+                ? t("web.launcher.action-items.label.hide-peek-tiles", "Hide peek tiles")
+                : t("web.launcher.action-items.label.show-peek-tiles", "Show peek tiles"),
+            detail: t(
+                "web.launcher.action-items.detail.peeks-live-work",
+                "Peeks: other sessions' live work beside this one",
+            ),
             icon: "tiles",
             keys: "Alt P",
             run: togglePeeks,
         },
         {
-            label: prefs().showThinking ? "Hide thinking" : "Show thinking",
-            detail: "Pi's thoughts above the live line and in the conversation",
+            label: prefs().showThinking
+                ? t("web.launcher.action-items.label.hide-thinking", "Hide thinking")
+                : t("web.launcher.action-items.label.show-thinking", "Show thinking"),
+            detail: t(
+                "web.launcher.action-items.detail.thinking-above-line",
+                "Pi's thoughts above the live line and in the conversation",
+            ),
             icon: "sparkle",
             keys: "Alt T",
             run: () => setPrefs({ showThinking: !prefs().showThinking }),
         },
         {
-            label: prefs().speed ? "Hide reply speed" : "Show reply speed",
-            detail: "how fast the last answer came, under the message box",
+            label: prefs().speed
+                ? t("web.launcher.action-items.label.hide-reply-speed", "Hide reply speed")
+                : t("web.launcher.action-items.label.show-reply-speed", "Show reply speed"),
+            detail: t(
+                "web.launcher.action-items.detail.reply-speed",
+                "how fast the last answer came, under the message box",
+            ),
             icon: "pulse",
             run: () => setPrefs({ speed: !prefs().speed }),
         },
         conversation &&
             steer && {
-                label: "Switch model",
+                label: t("web.launcher.action-items.label.switch-model", "Switch model"),
                 icon: "sparkle",
                 run: () => openSheet({ type: "model" }),
             },
         store.state.me?.role === "owner" &&
             store.state.server?.defaultModel !== undefined && {
-                label: "Default model",
-                detail: "owner default first; otherwise project, last picked, then Pi global",
+                label: t("web.launcher.action-items.label.default-model", "Default model"),
+                detail: t(
+                    "web.launcher.action-items.detail.default-model-order",
+                    "owner default first; otherwise project, last picked, then Pi global",
+                ),
                 icon: "sparkle",
                 run: () => openSheet({ type: "model", id: "default", forDefault: true }),
             },
         conversation &&
             browserAvailable() && {
-                label: store.state.browserOpen ? "Close the browser" : "Open the browser",
-                detail: "see and test pages with Pi",
+                label: store.state.browserOpen
+                    ? t(
+                          "web.browser-panel.browser-panel.aria-label.close-the-browser",
+                          "Close the browser",
+                      )
+                    : t("web.launcher.action-items.label.open-the-browser", "Open the browser"),
+                detail: t(
+                    "web.launcher.action-items.detail.browser-pages",
+                    "see and test pages with Pi",
+                ),
                 icon: "globe",
                 keys: "Alt B",
                 run: toggleBrowser,
             },
         conversation && {
-            label: "Artifacts",
+            label: t("app.artifacts", "Artifacts"),
             icon: "artifact",
             run: () => openSheet({ type: "artifacts" }),
         },
@@ -238,37 +279,49 @@ function actionItems() {
             filesAvailable() && {
                 label:
                     store.state.filesOpen && store.state.filesTab === "files"
-                        ? "Close the files"
-                        : "Files",
-                detail: "browse the folder, read files",
+                        ? t(
+                              "web.files-panel.files-panel.aria-label.close-the-files",
+                              "Close the files",
+                          )
+                        : t("app.files", "Files"),
+                detail: t(
+                    "web.launcher.action-items.detail.browse-folder",
+                    "browse the folder, read files",
+                ),
                 icon: "folder",
                 keys: "Alt E",
                 run: () => toggleFiles("files"),
             },
         conversation &&
             filesAvailable() && {
-                label: "Changes",
-                detail: "review what changed, file by file",
+                label: t("app.changes", "Changes"),
+                detail: t(
+                    "web.launcher.action-items.detail.review-changes",
+                    "review what changed, file by file",
+                ),
                 keywords: "diff",
                 icon: "fork",
                 run: () => toggleFiles("changes"),
             },
         conversation &&
             branchAvailable() && {
-                label: "Switch branch",
+                label: t("web.launcher.action-items.label.switch-branch", "Switch branch"),
                 detail: `on ${headLabel(view.branch)}`,
                 icon: "fork",
                 run: () => openSheet({ type: "branch" }),
             },
         conversation &&
             collab() && {
-                label: "Chat with people here",
+                label: t(
+                    "web.launcher.action-items.label.chat-people-here",
+                    "Chat with people here",
+                ),
                 icon: "chat",
                 run: () => openSheet({ type: "chat" }),
             },
         conversation && {
-            label: "Find in this session",
-            detail: "messages, by words",
+            label: t("web.launcher.action-items.label.find-in-session", "Find in this session"),
+            detail: t("web.launcher.action-items.detail.find-by-words", "messages, by words"),
             keywords: "search",
             icon: "search",
             keys: "Mod F",
@@ -277,36 +330,57 @@ function actionItems() {
         conversation &&
             collab() &&
             canToggleTurns() && {
-                label: view.turns?.on ? "Turn off take turns" : "Take turns",
+                label: view.turns?.on
+                    ? t(
+                          "web.launcher.action-items.label.turn-off-take-turns",
+                          "Turn off take turns",
+                      )
+                    : t("web.launcher.action-items.label.take-turns", "Take turns"),
                 detail: view.turns?.on
-                    ? "anyone here can send to Pi again"
-                    : "one person drives Pi at a time",
+                    ? t(
+                          "web.launcher.action-items.detail.take-turns-on",
+                          "anyone here can send to Pi again",
+                      )
+                    : t(
+                          "web.launcher.action-items.detail.take-turns-off",
+                          "one person drives Pi at a time",
+                      ),
                 icon: "users",
                 run: () => attempt(() => actions.turns(view.turns?.on ? "off" : "on")),
             },
         session &&
             steer && {
-                label: "Rename session",
+                label: t("web.launcher.action-items.label.rename-session", "Rename session"),
                 icon: "sparkle",
                 run: () => openSheet({ type: "rename" }),
             },
         session &&
             steer &&
             planAvailable() && {
-                label: view.plan?.on ? "Turn plan mode off" : "Turn plan mode on",
-                detail: "Pi proposes, changes nothing",
+                label: view.plan?.on
+                    ? t("web.launcher.action-items.label.turn-plan-off", "Turn plan mode off")
+                    : t("web.launcher.action-items.label.turn-plan-on", "Turn plan mode on"),
+                detail: t(
+                    "web.launcher.action-items.detail.plan-mode",
+                    "Pi proposes, changes nothing",
+                ),
                 icon: "shield",
                 run: () => attempt(() => actions.setPlan(!view.plan?.on)),
             },
         session && {
-            label: isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
-            detail: "this browser",
+            label: isPinned(conversation.id)
+                ? t("web.launcher.action-items.label.unpin-from-top", "Unpin from the top")
+                : t("web.sessions.session-row.title.pin-to-the-top", "Pin to the top"),
+            detail: t("web.launcher.action-items.detail.this-browser", "this browser"),
             icon: "pin",
             run: () => togglePin(conversation.id),
         },
         session && {
-            label: "Mark unread",
-            detail: "this browser; opening it again clears it",
+            label: t("web.sessions.session-row.title.mark-unread", "Mark unread"),
+            detail: t(
+                "web.launcher.action-items.detail.mark-unread-browser",
+                "this browser; opening it again clears it",
+            ),
             icon: "chat",
             run: () => {
                 setUnread(conversation.id, true);
@@ -315,7 +389,7 @@ function actionItems() {
         },
         conversation?.worktree && steer
             ? {
-                  label: "Worktree",
+                  label: t("web.sheets.worktree.worktree-sheet.title.worktree", "Worktree"),
                   detail: conversation.worktree.branch,
                   keywords: "git branch",
                   icon: "fork",
@@ -325,7 +399,10 @@ function actionItems() {
               steer &&
               driving &&
               !scoped() && {
-                  label: "Working directory",
+                  label: t(
+                      "web.launcher.action-items.label.working-directory",
+                      "Working directory",
+                  ),
                   detail: shortPath(view.agent?.cwd, server?.home),
                   keywords: "folder cwd",
                   icon: "folder",
@@ -333,16 +410,21 @@ function actionItems() {
               },
         conversation &&
             trustAvailable() && {
-                label: "Project trust",
-                detail: "the project's own skills and model settings",
+                label: t("menu.trust", "Project trust"),
+                detail: t(
+                    "web.launcher.action-items.detail.project-skills",
+                    "the project's own skills and model settings",
+                ),
                 icon: "shield",
                 run: () => openSheet({ type: "trust" }),
             },
         session &&
             steer &&
             driving && {
-                label: "Instructions for Pi",
-                detail: view.agent?.instructions ? "on" : "none",
+                label: t("menu.instructions", "Instructions for Pi"),
+                detail: view.agent?.instructions
+                    ? t("web.launcher.action-items.detail.on", "on")
+                    : t("web.launcher.action-items.detail.none", "none"),
                 keywords: "prompt system",
                 icon: "sparkle",
                 run: () => openSheet({ type: "instructions" }),
@@ -350,39 +432,51 @@ function actionItems() {
         conversation &&
             steer &&
             driving && {
-                label: "Compact context",
-                detail: "summarize older messages",
+                label: t("menu.compact", "Compact context"),
+                detail: t(
+                    "web.launcher.action-items.detail.summarize-older",
+                    "summarize older messages",
+                ),
                 icon: "sparkle",
                 run: () => openSheet({ type: "compact" }),
             },
         conversation &&
             steer &&
             driving && {
-                label: "New context",
-                detail: "Pi starts fresh; history stays",
+                label: t("menu.new-context", "New context"),
+                detail: t(
+                    "web.launcher.action-items.detail.pi-starts-fresh",
+                    "Pi starts fresh; history stays",
+                ),
                 keywords: "reset clear",
                 icon: "reload",
                 run: () => openSheet({ type: "reset" }),
             },
         conversation &&
             memoryAvailable() && {
-                label: "Memory",
-                detail: "lessons Pi keeps across sessions",
+                label: t("menu.memory", "Memory"),
+                detail: t(
+                    "web.launcher.action-items.detail.lessons-across",
+                    "lessons Pi keeps across sessions",
+                ),
                 icon: "sparkle",
                 run: () => openSheet({ type: "memory" }),
             },
         watchAvailable() &&
             steer &&
             view.watch?.status !== "watching" && {
-                label: "Watch pull request",
-                detail: "fix CI, answer reviews",
+                label: t(
+                    "web.launcher.action-items.label.watch-pull-request",
+                    "Watch pull request",
+                ),
+                detail: t("web.launcher.action-items.detail.fix-ci", "fix CI, answer reviews"),
                 keywords: "github pr",
                 icon: "fork",
                 run: () => attempt(() => watchPr()),
             },
         conversation && {
-            label: "Export as Markdown",
-            detail: "the whole history",
+            label: t("web.sheets.menu.menu-sheet.span.export-as-markdown", "Export as Markdown"),
+            detail: t("web.sheets.menu.menu-sheet.span.the-whole-history", "the whole history"),
             keywords: "download",
             icon: "external",
             run: () => {
@@ -394,109 +488,153 @@ function actionItems() {
             },
         },
         schedulesAvailable() && {
-            label: "Scheduled messages",
+            label: t("menu.schedules", "Scheduled messages"),
             icon: "pulse",
             run: () => openSheet({ type: "schedules" }),
         },
         conversation && {
-            label: "Copy link to this session",
+            label: t(
+                "web.launcher.action-items.label.copy-link-session",
+                "Copy link to this session",
+            ),
             icon: "external",
             run: () => copyText(location.href).then(() => notify("info", "Link copied.")),
         },
         conversation && {
-            label: "Session menu",
+            label: t("app.session-menu", "Session menu"),
             icon: "more",
             run: () => openSheet({ type: "menu" }),
         },
         session &&
             steer && {
-                label: conversation.archived ? "Unarchive session" : "Archive session",
+                label: conversation.archived
+                    ? t("web.launcher.action-items.label.unarchive-session", "Unarchive session")
+                    : t("web.launcher.action-items.label.archive-session", "Archive session"),
                 icon: "archive",
                 run: () => setArchived([conversation.id], !conversation.archived),
             },
         pipAvailable() && {
-            label: "Ask PiP",
-            detail: "your assistant, over any screen",
+            label: t("web.launcher.action-items.label.ask-pip", "Ask PiP"),
+            detail: t(
+                "web.launcher.action-items.detail.ask-pip",
+                "your assistant, over any screen",
+            ),
             icon: "pip",
             keys: "Alt A",
             run: () => openPip(),
         },
         {
-            label: "Running now",
-            detail: "everything Pi is doing",
+            label: t("menu.running", "Running now"),
+            detail: t(
+                "web.launcher.action-items.detail.everything-pi-doing",
+                "everything Pi is doing",
+            ),
             icon: "pulse",
             run: () => openSheet({ type: "running" }),
         },
         {
-            label: store.state.board ? "Close the subagents board" : "Subagents",
-            detail: "subagents in every session",
+            label: store.state.board
+                ? t(
+                      "web.launcher.action-items.label.close-subagents-board",
+                      "Close the subagents board",
+                  )
+                : t("web.subagents-board.subagents-board.h2.subagents", "Subagents"),
+            detail: t(
+                "web.launcher.action-items.detail.subagents-every",
+                "subagents in every session",
+            ),
             icon: "fork",
             run: toggleBoard,
         },
         collab() && {
-            label: "Notifications",
-            detail: "Pi finished, approvals, chat",
+            label: t("menu.notifications", "Notifications"),
+            detail: t(
+                "web.launcher.action-items.detail.notifications-kinds",
+                "Pi finished, approvals, chat",
+            ),
             icon: "pulse",
             run: () => openSheet({ type: "notifications" }),
         },
         triggersOn() &&
             me?.role !== "viewer" && {
-                label: "Webhooks and watches",
-                detail: "GitHub, other services",
+                label: t("menu.webhooks", "Webhooks and watches"),
+                detail: t(
+                    "web.launcher.action-items.detail.github-services",
+                    "GitHub, other services",
+                ),
                 keywords: "hooks triggers watch pull request",
                 icon: "external",
                 run: () => openSheet({ type: "hooks" }),
             },
         me?.role === "owner" && {
-            label: "Providers",
-            detail: "sign in to model providers",
+            label: t("menu.providers", "Providers"),
+            detail: t(
+                "web.launcher.action-items.detail.sign-in-providers",
+                "sign in to model providers",
+            ),
             icon: "key",
             run: () => openSheet({ type: "providers" }),
         },
         modelRefreshAvailable() && {
-            label: "Refresh models",
+            label: t("menu.refresh-models", "Refresh models"),
             detail: store.state.modelRefresh.loading
-                ? "refresh in progress"
-                : "reload configured models and check providers",
+                ? t("web.launcher.action-items.detail.refresh-in-progress", "refresh in progress")
+                : t(
+                      "web.launcher.action-items.detail.reload-models",
+                      "reload configured models and check providers",
+                  ),
             icon: "reload",
             run: refreshModels,
         },
-        { label: "Extensions", icon: "shield", run: () => openSheet({ type: "extensions" }) },
+        {
+            label: t("web.sheets.extensions.extensions-sheet.title.extensions", "Extensions"),
+            icon: "shield",
+            run: () => openSheet({ type: "extensions" }),
+        },
         galleryAvailable() && {
-            label: "Find extensions",
-            detail: "browse and install drop-ins",
+            label: t(
+                "web.sheets.extensions.extensions-content.text.find-extensions",
+                "Find extensions",
+            ),
+            detail: t(
+                "web.launcher.action-items.detail.browse-drop-ins",
+                "browse and install drop-ins",
+            ),
             keywords: "gallery",
             icon: "search",
             run: () => openSheet({ type: "gallery" }),
         },
-        { label: "Spend", icon: "pulse", run: () => openSheet({ type: "spend" }) },
+        { label: t("menu.spend", "Spend"), icon: "pulse", run: () => openSheet({ type: "spend" }) },
         collab()
             ? {
-                  label: "People and invites",
+                  label: t("web.sessions.rail.title.people-and-invites", "People and invites"),
                   icon: "users",
                   run: () => openSheet({ type: "people" }),
               }
             : {
-                  label: "Sign in another device",
+                  label: t("menu.devices", "Sign in another device"),
                   icon: "users",
                   run: () => openSheet({ type: "invite" }),
               },
         {
-            label: "Keyboard shortcuts",
+            label: t("menu.shortcuts", "Keyboard shortcuts"),
             icon: "keyboard",
             keys: "?",
             run: () => openSheet({ type: "shortcuts" }),
         },
         {
-            label: "Your name",
+            label: t("menu.your-name", "Your name"),
             detail: me?.name,
             icon: "users",
             run: () => openSheet({ type: "name" }),
         },
         me?.role === "owner" &&
             server?.supervised && {
-                label: "Restart server",
-                detail: "running work resumes",
+                label: t("web.launcher.action-items.label.restart-server", "Restart server"),
+                detail: t(
+                    "web.launcher.action-items.detail.running-work-resumes",
+                    "running work resumes",
+                ),
                 icon: "reload",
                 run: () =>
                     attempt(async () => {
@@ -504,14 +642,23 @@ function actionItems() {
                         notify("info", "Restarting. Running work continues after the restart.");
                     }),
             },
-        { label: "Sign out", detail: "this browser", icon: "logout", run: signOut },
+        {
+            label: t("web.sheets.menu.menu-sheet.span.sign-out", "Sign out"),
+            detail: t("web.launcher.action-items.detail.this-browser", "this browser"),
+            icon: "logout",
+            run: signOut,
+        },
         // What extensions' browser modules added (`extension-ui.js`).
         ...extensionLauncherItems(),
         // Last: a list that is cut keeps the actions above, however many favorites there are (up to 100).
         ...(canStart
             ? folderFavorites.map((path, index) => ({
                   key: `action:new-favorite:${path}`,
-                  label: `New session in ${favoriteNames[index]}`,
+                  label: t(
+                      "web.launcher.action-items.label.new-session-in",
+                      "New session in {where}",
+                      { where: favoriteNames[index] },
+                  ),
                   detail: shortPath(path, server?.home),
                   icon: "star",
                   run: () =>
@@ -547,17 +694,25 @@ function sessionItems() {
         return {
             kind: "session",
             key: `session:${session.id}`,
-            label: session.title ?? "New session",
+            label: session.title ?? t("sessions.new", "New session"),
             detail: shortPath(session.cwd, server?.home),
             status:
                 [
-                    session.id === store.state.conversationId ? "Current" : null,
-                    session.waiting ? "Waiting" : session.busy ? "Working" : null,
-                    session.archived ? "Archived" : null,
+                    session.id === store.state.conversationId
+                        ? t("web.launcher.session-items.text.current", "Current")
+                        : null,
+                    session.waiting
+                        ? t("web.launcher.session-items.text.waiting", "Waiting")
+                        : session.busy
+                          ? t("sessions.working", "Working")
+                          : null,
+                    session.archived
+                        ? t("web.launcher.session-items.text.archived", "Archived")
+                        : null,
                 ]
                     .filter(Boolean)
                     .join(" · ") || timeAgo(session.updatedAt),
-            text: `${session.title ?? "New session"} ${shortPath(session.cwd, server?.home)}${words.length > 0 ? ` ${words.join(" ")}` : ""}`,
+            text: `${session.title ?? t("sessions.new", "New session")} ${shortPath(session.cwd, server?.home)}${words.length > 0 ? ` ${words.join(" ")}` : ""}`,
             words,
             keys: number >= 0 && number < 9 ? `Alt ${number + 1}` : undefined,
             rank: session.archived ? -20 : -number * 0.01,
@@ -583,7 +738,9 @@ function lookItems() {
             kind: "theme",
             key: `look:${look.id}`,
             label: look.name,
-            detail: look.builtIn ? "theme, built in" : "theme",
+            detail: look.builtIn
+                ? t("web.launcher.action-items.detail.theme-built-in", "theme, built in")
+                : t("web.launcher.action-items.detail.theme", "theme"),
             text: `theme ${look.name} ${look.id}`,
             look: look.id,
             vars,
@@ -606,10 +763,13 @@ function themeItems() {
                 label: name,
                 detail:
                     id === "desktop"
-                        ? "follows your Omarchy theme"
+                        ? t(
+                              "web.launcher.action-items.detail.follows-omarchy",
+                              "follows your Omarchy theme",
+                          )
                         : palette.colors.mode === "light"
-                          ? "light"
-                          : "dark",
+                          ? t("web.launcher.action-items.detail.light", "light")
+                          : t("web.launcher.action-items.detail.dark", "dark"),
                 text: `theme ${name} ${id}`,
                 theme: id,
                 vars: themeVars(palette),
@@ -618,7 +778,20 @@ function themeItems() {
     ];
 }
 
-const GROUP_NAMES = { session: "Sessions", action: "Actions", theme: "Themes" };
+/** Each result group's name: its key and English, read when it draws so a new language shows at once. */
+const GROUP_NAMES = {
+    session: ["app.sessions", "Sessions"],
+    action: ["web.launcher.launcher.text.actions", "Actions"],
+    theme: ["web.sheets.gallery.gallery-sheet.title.themes", "Themes"],
+};
+
+/** The name of one group of results, in this language. */
+function groupName(kind) {
+    const [key, english] = GROUP_NAMES[kind];
+
+    return t(key, english);
+}
+
 const PREFIXES = { ">": "action", "@": "session", "#": "theme" };
 
 /** Hits in one displayed field, without changing the text or score used by the fuzzy matcher. */
@@ -696,8 +869,12 @@ export function Launcher({ leaving, returnTo }) {
             const matchNote =
                 match.hits.length > 0 && hits.length === 0 && detailHits.length === 0
                     ? item.kind === "theme"
-                        ? "Theme name or ID match"
-                        : (item.words?.find((word) => word.includes(needle)) ?? "Keyword match")
+                        ? t(
+                              "web.launcher.result.text.theme-name-id-match",
+                              "Theme name or ID match",
+                          )
+                        : (item.words?.find((word) => word.includes(needle)) ??
+                          t("web.launcher.result.text.keyword-match", "Keyword match"))
                     : null;
 
             scored.push({
@@ -761,6 +938,7 @@ export function Launcher({ leaving, returnTo }) {
         store.state.server,
         store.state.folderFavorites,
         store.state.extensionsRev,
+        store.state.localeRevision,
     ]);
 
     const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
@@ -916,13 +1094,23 @@ export function Launcher({ leaving, returnTo }) {
         const timer = setTimeout(() => {
             setAnnouncement(
                 flat.length === 0
-                    ? `No results for ${needle}.`
-                    : `${flat.length} results${prefix ? ` in ${GROUP_NAMES[prefix].toLowerCase()}` : ""}.`,
+                    ? t("web.launcher.launcher.text.no-results", "No results for {needle}.", {
+                          needle,
+                      })
+                    : prefix
+                      ? t(
+                            "web.launcher.launcher.text.results-in-group",
+                            "{count} results in {group}.",
+                            { count: flat.length, group: groupName(prefix).toLowerCase() },
+                        )
+                      : t("web.launcher.launcher.text.results", "{count} results.", {
+                            count: flat.length,
+                        }),
             );
         }, 150);
 
         return () => clearTimeout(timer);
-    }, [flat.length, needle, prefix]);
+    }, [flat.length, needle, prefix, store.state.localeRevision]);
 
     const changeQuery = (next) => {
         setQuery(next);
@@ -1056,7 +1244,7 @@ export function Launcher({ leaving, returnTo }) {
             ref=${dialog}
             role="dialog"
             aria-modal="true"
-            aria-label="Launcher"
+            aria-label=${t("web.launcher.launcher.aria-label.launcher", "Launcher")}
             tabindex="-1"
             onKeyDown=${onKey}
             onMouseDown=${(event) => event.target !== input.current && event.preventDefault()}
@@ -1067,8 +1255,14 @@ export function Launcher({ leaving, returnTo }) {
                 <input
                     ref=${input}
                     value=${query}
-                    placeholder="Sessions, actions, themes…"
-                    aria-label="Search sessions, actions, and themes"
+                    placeholder=${t(
+                        "web.launcher.launcher.placeholder.sessions-actions-themes",
+                        "Sessions, actions, themes…",
+                    )}
+                    aria-label=${t(
+                        "web.launcher.launcher.aria-label.search-sessions-actions-themes",
+                        "Search sessions, actions, and themes",
+                    )}
                     autocomplete="off"
                     autocapitalize="none"
                     spellcheck=${false}
@@ -1079,8 +1273,14 @@ export function Launcher({ leaving, returnTo }) {
                     aria-activedescendant=${selected ? optionId(selected) : undefined}
                     onInput=${(event) => changeQuery(event.currentTarget.value)}
                 />
-                <kbd class="launcher-escape" aria-hidden="true">esc</kbd>
-                <button class="launcher-close" aria-label="Close launcher" onClick=${close}>
+                <kbd class="launcher-escape" aria-hidden="true">${t(
+                    "web.launcher.launcher.kbd.esc",
+                    "esc",
+                )}</kbd>
+                <button class="launcher-close" aria-label=${t(
+                    "web.launcher.launcher.aria-label.close-launcher",
+                    "Close launcher",
+                )} onClick=${close}>
                     <${Icon} name="close" size=${18} />
                 </button>
             </div>
@@ -1088,13 +1288,13 @@ export function Launcher({ leaving, returnTo }) {
                 class="launcher-types"
                 data-part="launcher-filters"
                 role="group"
-                aria-label="Search type"
+                aria-label=${t("web.launcher.launcher.aria-label.search-type", "Search type")}
             >
                 ${[
-                    ["", "All"],
-                    ["@", "Sessions"],
-                    [">", "Actions"],
-                    ["#", "Themes"],
+                    ["", t("web.launcher.launcher.text.all", "All")],
+                    ["@", t("app.sessions", "Sessions")],
+                    [">", t("web.launcher.launcher.text.actions", "Actions")],
+                    ["#", t("web.sheets.gallery.gallery-sheet.title.themes", "Themes")],
                 ].map(
                     ([token, label]) => html`<button
                         aria-pressed=${(prefix ? query[0] : "") === token}
@@ -1109,16 +1309,31 @@ export function Launcher({ leaving, returnTo }) {
                 html`<div
                     class="launcher-summary"
                     role="group"
-                    aria-label="Recent session options"
+                    aria-label=${t(
+                        "web.launcher.launcher.aria-label.recent-session-options",
+                        "Recent session options",
+                    )}
                 >
                     <div class="launcher-group" data-part="launcher-group">
-                        <span id="launcher-group-session">Recent sessions</span>
+                        <span id="launcher-group-session">${t(
+                            "web.launcher.launcher.span.recent-sessions",
+                            "Recent sessions",
+                        )}</span>
                         <span class="launcher-count">
-                            ${recent.items.length} of ${recent.total}
+                            ${t("web.launcher.launcher.span.count-of-total", "{shown} of {total}", {
+                                shown: recent.items.length,
+                                total: recent.total,
+                            })}
                         </span>
                     </div>
-                    <button aria-label="Show all sessions" onClick=${() => chooseType("@")}>
-                        Show all <span aria-hidden="true">@</span>
+                    <button aria-label=${t(
+                        "web.launcher.launcher.aria-label.show-all-sessions",
+                        "Show all sessions",
+                    )} onClick=${() => chooseType("@")}>
+                        ${t(
+                            "web.launcher.launcher.button.show-all",
+                            "Show all",
+                        )} <span aria-hidden="true">@</span>
                     </button>
                 </div>`
             }
@@ -1127,7 +1342,7 @@ export function Launcher({ leaving, returnTo }) {
                 id="launcher-results"
                 ref=${list}
                 role="listbox"
-                aria-label="Search results"
+                aria-label=${t("web.launcher.launcher.aria-label.search-results", "Search results")}
             >
                 ${groups.map(
                     (group) => html`
@@ -1138,15 +1353,25 @@ export function Launcher({ leaving, returnTo }) {
                                     <span id=${`launcher-group-${group.kind}`}>
                                         ${
                                             group.kind === "session" && recent
-                                                ? "Recent sessions"
-                                                : GROUP_NAMES[group.kind]
+                                                ? t(
+                                                      "web.launcher.launcher.span.recent-sessions",
+                                                      "Recent sessions",
+                                                  )
+                                                : groupName(group.kind)
                                         }
                                     </span>
                                     <span class="launcher-count">
-                                        ${group.items.length}${
+                                        ${
                                             group.total > group.items.length
-                                                ? ` of ${group.total}`
-                                                : ""
+                                                ? t(
+                                                      "web.launcher.launcher.span.count-of-total",
+                                                      "{shown} of {total}",
+                                                      {
+                                                          shown: group.items.length,
+                                                          total: group.total,
+                                                      },
+                                                  )
+                                                : group.items.length
                                         }
                                     </span>
                                 </div>`
@@ -1247,7 +1472,10 @@ export function Launcher({ leaving, returnTo }) {
                                         (item.look
                                             ? item.look === prefs().look
                                             : item.theme === prefs().theme) &&
-                                        html`<span class="hint">current</span>`
+                                        html`<span class="hint">${t(
+                                            "web.launcher.launcher.span.current",
+                                            "current",
+                                        )}</span>`
                                     }
                                     ${
                                         item.keys &&
@@ -1264,9 +1492,19 @@ export function Launcher({ leaving, returnTo }) {
             ${
                 flat.length === 0 &&
                 html`<div class="launcher-empty">
-                    <strong>No matches for “${needle}”.</strong>
-                    <span>Try fewer words, or search all types.</span>
-                    <button class="button" onClick=${clear}>Clear search</button>
+                    <strong>${t(
+                        "web.launcher.launcher.strong.no-matches",
+                        "No matches for “{needle}”.",
+                        { needle },
+                    )}</strong>
+                    <span>${t(
+                        "web.launcher.launcher.span.try-fewer-words-search",
+                        "Try fewer words, or search all types.",
+                    )}</span>
+                    <button class="button" onClick=${clear}>${t(
+                        "web.launcher.launcher.button.clear-search",
+                        "Clear search",
+                    )}</button>
                 </div>`
             }
             <div
@@ -1279,13 +1517,28 @@ export function Launcher({ leaving, returnTo }) {
             </div>
             <div class="launcher-foot">
                 <span class="launcher-key-help">
-                    <kbd>↑</kbd><kbd>↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close
+                    <kbd>↑</kbd><kbd>↓</kbd> ${t(
+                        "web.launcher.launcher.kbd.move",
+                        "move",
+                    )} <kbd>↵</kbd> ${t("web.launcher.launcher.kbd.open", "open")} <kbd>${t(
+                        "web.launcher.launcher.kbd.esc",
+                        "esc",
+                    )}</kbd> ${t("web.launcher.launcher.kbd.close", "close")}
                 </span>
                 <span class="launcher-prefix-help">
-                    <kbd>></kbd> actions <kbd>@</kbd> sessions <kbd>#</kbd> themes
+                    <kbd>></kbd> ${t(
+                        "web.launcher.launcher.kbd.actions",
+                        "actions",
+                    )} <kbd>@</kbd> ${t(
+                        "web.launcher.launcher.kbd.sessions",
+                        "sessions",
+                    )} <kbd>#</kbd> ${t("web.launcher.launcher.kbd.themes", "themes")}
                 </span>
                 <span class="launcher-touch-help">
-                    Tap a result · > actions, @ sessions, # themes
+                    ${t(
+                        "web.launcher.launcher.span.tap-result-actions-sessions",
+                        "Tap a result · > actions, @ sessions, # themes",
+                    )}
                 </span>
             </div>
         </section>

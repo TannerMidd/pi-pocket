@@ -49,6 +49,7 @@ import {
     Switch,
     writtenText,
 } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /**
  * The version of `pocket`. It goes up only when something extensions use changes in a way that breaks them; additions
@@ -317,7 +318,9 @@ function reason(error) {
         text = "";
     }
 
-    return text.trim() === "" ? "it gave no reason" : text;
+    return text.trim() === ""
+        ? t("web.extension-ui.reason.text.it-gave-no-reason", "it gave no reason")
+        : text;
 }
 
 /** Run a cleanup; one that fails says so in the console, and the rest still run. */
@@ -536,6 +539,20 @@ async function load(entry) {
  * A module failed, while it loaded or later (`how`): what it added goes, its cleanups run, what it tries next does
  * nothing, and a notice, its page or sheet, and the Extensions sheet say why.
  */
+/** How a module failed, as this module names it, in this language: the record keeps the English name. */
+const FAIL_WORDS = {
+    "failed to load": ["web.extension-ui.fail.text.failed-to-load", "failed to load"],
+    "was stopped": ["web.extension-ui.fail.text.was-stopped", "was stopped"],
+    failed: ["web.extension-ui.fail.text.failed", "failed"],
+};
+
+/** One of `FAIL_WORDS`, read as it draws so a new language shows at once. */
+function failWord(word) {
+    const [key, english] = FAIL_WORDS[word] ?? FAIL_WORDS["failed to load"];
+
+    return t(key, english);
+}
+
 function fail(record, error, how) {
     record.dead = true;
     teardown(record);
@@ -543,7 +560,14 @@ function fail(record, error, how) {
     record.error = reason(error);
     record.how = how;
     console.error(`${record.title}'s browser module ${how}`, error);
-    notify("error", `${record.title} ${how} in this browser: ${record.error}`);
+    notify(
+        "error",
+        t(
+            "web.extension-ui.fail.notice.title-how-browser",
+            "{title} {how} in this browser: {error}",
+            { title: record.title, how: failWord(how), error: record.error },
+        ),
+    );
     redraw();
 }
 
@@ -2320,7 +2344,14 @@ class Guard extends Component {
     }
 
     render({ children, name }, { failed, message }) {
-        return failed ? html`<div class="error-box">${name} failed: ${message}</div>` : children;
+        return failed
+            ? html`<div class="error-box">
+                  ${t("web.extension-ui.guard.div.name-failed", "{name} failed: {message}", {
+                      name,
+                      message,
+                  })}
+              </div>`
+            : children;
     }
 }
 
@@ -2339,7 +2370,8 @@ const DIFF_HOOK = "__b";
 const RENDER_HOOK = "__r";
 const COMPONENT = "__c";
 const PARENT = "__";
-const NO_REASON = "it gave no reason";
+/** What a failure that threw nothing at all says, in this language. */
+const noReason = () => t("web.extension-ui.reason.text.it-gave-no-reason", "it gave no reason");
 /** What Preact calls of a component while it draws, besides its class's getDerivedStateFromProps. */
 const DRAWING = [
     "render",
@@ -2368,7 +2400,7 @@ function throwsSomething(run) {
         try {
             return run.apply(this, args);
         } catch (error) {
-            throw error ?? new Error(NO_REASON);
+            throw error ?? new Error(noReason());
         }
     };
 
@@ -2521,7 +2553,7 @@ options[RENDER_HOOK] = (vnode) => {
         try {
             beforeRender(vnode);
         } catch (error) {
-            throw error ?? new Error(NO_REASON);
+            throw error ?? new Error(noReason());
         }
     }
 };
@@ -2546,19 +2578,40 @@ function componentId(component) {
 /** What a page or sheet shows: its component once its module is ready, else why not. */
 function Body({ record, spec, title, props, close }) {
     if (record === undefined) {
-        return html`<p class="muted">This extension is off.</p>`;
+        return html`<p class="muted">${t(
+            "web.extension-ui.body.p.this-extension-is-off",
+            "This extension is off.",
+        )}</p>`;
     }
 
     if (record.status === "failed") {
         return html`<div class="error-box">
-            ${record.title} ${record.how ?? "failed to load"} in this browser: ${record.error}
+            ${t(
+                "web.extension-ui.body.div.title-how-browser",
+                "{title} {how} in this browser: {error}",
+                {
+                    title: record.title,
+                    how: failWord(record.how ?? "failed to load"),
+                    error: record.error,
+                },
+            )}
         </div>`;
     }
 
     if (spec === undefined) {
         return record.status === "ready"
-            ? html`<p class="muted">${record.title} no longer has this.</p>`
-            : html`<${Loader} label=${`Loading ${title}`} />`;
+            ? html`<p class="muted">
+                  ${t(
+                      "web.extension-ui.body.p.title-no-longer-has",
+                      "{title} no longer has this.",
+                      { title: record.title },
+                  )}
+              </p>`
+            : html`<${Loader}
+                  label=${t("web.extension-ui.body.loader.label.loading-title", "Loading {title}", {
+                      title,
+                  })}
+              />`;
     }
 
     // A Guard that caught a failure stays with it until its component changes (the page added again, or updated).
@@ -2575,7 +2628,10 @@ export function ExtensionPage() {
     const target = store.state.page;
     const record = modules.get(target?.module);
     const spec = record?.adds.page.get(target?.id);
-    const title = spec?.title ?? record?.title ?? "Extension";
+    const title =
+        spec?.title ??
+        record?.title ??
+        t("web.sheets.gallery.gallery-entry-sheet.title.extension", "Extension");
     // A page that keeps Esc for itself (`escape: false`): read as the key comes, as it may change.
     const keepsEscape = useRef(false);
     const close = useMemo(() => pageCloser(record, target?.id), [record, target?.id]);
@@ -2629,8 +2685,11 @@ export function ExtensionPage() {
             </div>
             <button
                 class="icon-button"
-                title="Back to the conversation (Esc)"
-                aria-label="Close"
+                title=${t(
+                    "web.extension-ui.extension-page.title.back-conversation-esc",
+                    "Back to the conversation (Esc)",
+                )}
+                aria-label=${t("web.extension-ui.extension-page.aria-label.close", "Close")}
                 onClick=${closePage}
             >
                 <${Icon} name="close" />
@@ -2646,7 +2705,10 @@ export function ExtensionPage() {
 export function ExtensionSheet({ sheet }) {
     const record = modules.get(sheet.module);
     const spec = record?.adds.sheet.get(sheet.sheetId);
-    const title = spec?.title ?? record?.title ?? "Extension";
+    const title =
+        spec?.title ??
+        record?.title ??
+        t("web.sheets.gallery.gallery-entry-sheet.title.extension", "Extension");
     const close = useMemo(() => sheetCloser(record, sheet.sheetId), [record, sheet.sheetId]);
 
     return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${spec?.wide === true}>
@@ -2676,7 +2738,10 @@ export function ExtensionPanel({ leaving = false }) {
     const target = last.current;
     const record = modules.get(target?.module);
     const spec = record?.adds.panel.get(target?.id);
-    const title = spec?.title ?? record?.title ?? "Extension";
+    const title =
+        spec?.title ??
+        record?.title ??
+        t("web.sheets.gallery.gallery-entry-sheet.title.extension", "Extension");
     const close = useMemo(() => panelCloser(record, target?.id), [record, target?.id]);
     const beside = panelsBeside();
 
@@ -2699,8 +2764,11 @@ export function ExtensionPanel({ leaving = false }) {
                 html`<button
                     class="icon-button ext-panel-back"
                     type="button"
-                    aria-label="Back to the conversation"
-                    title="Back"
+                    aria-label=${t(
+                        "web.extension-ui.extension-panel.aria-label.back-to-the-conversation",
+                        "Back to the conversation",
+                    )}
+                    title=${t("web.extension-ui.extension-panel.title.back", "Back")}
                     onClick=${closeExtPanel}
                 >
                     <${Icon} name="back" size=${22} />
@@ -2719,8 +2787,12 @@ export function ExtensionPanel({ leaving = false }) {
                 html`<button
                     class="icon-button"
                     type="button"
-                    aria-label=${`Close ${title}`}
-                    title="Close"
+                    aria-label=${t(
+                        "web.extension-ui.extension-panel.aria-label.close-title",
+                        "Close {title}",
+                        { title },
+                    )}
+                    title=${t("web.extension-ui.extension-panel.title.close", "Close")}
                     onClick=${closeExtPanel}
                 >
                     <${Icon} name="close" size=${17} />

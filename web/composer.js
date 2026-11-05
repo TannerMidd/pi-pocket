@@ -46,6 +46,7 @@ import {
     modelLabel,
     Spinner,
 } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** The explicit route to the parent on every layout, outside the dock and the scrolling conversation. */
 function ParentSessionButton() {
@@ -57,12 +58,21 @@ function ParentSessionButton() {
 
     return html`<button
         class="parent-session"
-        aria-label=${`Back to main session: ${parent.title}`}
-        title=${`Return to ${parent.title}`}
+        aria-label=${t(
+            "web.composer.parent-session-button.aria-label.back-main-session",
+            "Back to main session: {title}",
+            { title: parent.title },
+        )}
+        title=${t("web.composer.parent-session-button.title.return", "Return to {title}", {
+            title: parent.title,
+        })}
         onClick=${() => navigate(parent.id)}
     >
         <${Icon} name="back" size=${16} />
-        <span>Back to main session</span>
+        <span>${t(
+            "web.composer.parent-session-button.span.back-to-main-session",
+            "Back to main session",
+        )}</span>
         <span class="parent-session-title">${parent.title}</span>
     </button>`;
 }
@@ -107,7 +117,13 @@ function savePastes(id, pastes) {
             localStorage.setItem(pasteKey(id), JSON.stringify(pastes));
         }
     } catch {
-        notify("warning", "This browser has no room to keep the paste after a reload.");
+        notify(
+            "warning",
+            t(
+                "web.composer.save-pastes.text.browser-no-room-keep",
+                "This browser has no room to keep the paste after a reload.",
+            ),
+        );
     }
 }
 
@@ -122,21 +138,42 @@ const queuedReports = (item) => item.reports ?? null;
 
 /** How a message can go while Pi works: the value the server takes, its label, and what it does. */
 const SEND_MODES = [
-    ["steer", "Steer", "Pi reads it now, between steps"],
-    ["followUp", "Queue", "Pi reads it when this run ends"],
+    [
+        "steer",
+        () => t("web.composer.send-modes.steer", "Steer"),
+        () => t("web.composer.send-modes.pi-reads-between-steps", "Pi reads it now, between steps"),
+    ],
+    [
+        "followUp",
+        () => t("web.composer.send-modes.queue", "Queue"),
+        () => t("web.composer.send-modes.pi-reads-run-ends", "Pi reads it when this run ends"),
+    ],
     [
         "interrupt",
-        "Interrupt",
-        "Stops the run right now (also its tool call) and clears the queue, then sends it",
+        () => t("web.composer.send-modes.interrupt", "Interrupt"),
+        () =>
+            t(
+                "web.composer.send-modes.stops-run-right-also",
+                "Stops the run right now (also its tool call) and clears the queue, then sends it",
+            ),
     ],
 ];
 
+/**
+ * A send mode's words, read as it draws: the module loads before the app knows its language, so what it holds is
+ * how to ask for them, never the words themselves.
+ */
+const modeLabel = (mode) => SEND_MODES.find(([value]) => value === mode)[1]();
+
 /** What a send mode does, for a queued message's buttons. */
-const modeHint = (mode) => SEND_MODES.find(([value]) => value === mode)[2];
+const modeHint = (mode) => SEND_MODES.find(([value]) => value === mode)[2]();
 
 /** What Interrupt does to a message waiting in the queue: the others there stay, unlike the composer's Interrupt. */
-const QUEUED_INTERRUPT_HINT =
-    "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued";
+const queuedInterruptHint = () =>
+    t(
+        "web.composer.queued-interrupt-hint.stops-run-right-also",
+        "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued",
+    );
 
 /**
  * Whether a queued message's Interrupt asks first: the first tap reads "Interrupt?", a second within 4 s sends it.
@@ -149,10 +186,14 @@ function queuedMode(item) {
     const names = queuedReports(item);
 
     if (names) {
-        return names.length === 1 ? "Report" : "Reports";
+        return names.length === 1
+            ? t("web.composer.queued-mode.text.report", "Report")
+            : t("web.composer.queued-mode.text.reports", "Reports");
     }
 
-    return item.mode === "steer" ? "Steer" : item.mode === "followUp" ? "Queue" : "Note";
+    return item.mode === "steer" || item.mode === "followUp"
+        ? modeLabel(item.mode)
+        : t("web.composer.queued-mode.text.note", "Note");
 }
 
 /** Who sent a message, as the server writes it at the start when several people use Pi (`FROM_PREFIX`). */
@@ -166,7 +207,13 @@ function queuedText(item) {
         return (item.text ?? "").replace(FROM, "");
     }
 
-    return `from ${names.join(", ")}, on ${names.length === 1 ? "its" : "their"} way to Pi`;
+    return names.length === 1
+        ? t("web.composer.queued-text.text.way-pi", "from {name}, on its way to Pi", {
+              name: names.join(", "),
+          })
+        : t("web.composer.queued-text.text.from-their-way", "from {names}, on their way to Pi", {
+              names: names.join(", "),
+          });
 }
 
 /** Take turns: who drives, who asked, and the buttons to hand over, ask, or take the wheel. */
@@ -179,7 +226,9 @@ function DriverBar() {
         return null;
     }
 
-    const name = (id) => users.find((user) => user.id === id)?.name ?? "someone";
+    const name = (id) =>
+        users.find((user) => user.id === id)?.name ??
+        t("web.composer.driver-bar.name.someone", "someone");
     const driving = turns.driver === me?.id;
     const driverHere =
         turns.driver !== undefined && presence.some((person) => person.id === turns.driver);
@@ -192,20 +241,26 @@ function DriverBar() {
         );
 
         return html`<div class="driver-bar mine">
-            <span class="driver-label"><${Icon} name="wheel" size=${14} /> You're driving</span>
+            <span class="driver-label"><${Icon} name="wheel" size=${14} /> ${t(
+                "web.composer.driver-bar.text.you-re-driving",
+                "You're driving",
+            )}</span>
             ${turns.asks.map(
                 (id) => html`<span class="driver-ask">
-                    ${name(id)} asks to drive <button class="link small" onClick=${() => run("handover", id)}>Hand over</button>
+                    ${t("web.composer.driver-bar.span.asks-drive", "{name} asks to drive", { name: name(id) })} <button class="link small" onClick=${() => run("handover", id)}>${t("web.composer.driver-bar.button.hand-over", "Hand over")}</button>
                 </span>`,
             )}
             <span class="grow"></span>
             ${
                 others.length > 0 &&
                 html`<button class="link small" onClick=${() => setHanding(!handing)}>
-                    Hand over…
+                    ${t("web.composer.driver-bar.button.hand-over.hand", "Hand over…")}
                 </button>`
             }
-            <button class="link small" onClick=${() => run("release")}>Let go</button>
+            <button class="link small" onClick=${() => run("release")}>${t(
+                "web.composer.driver-bar.button.let-go",
+                "Let go",
+            )}</button>
             ${
                 handing &&
                 html`<div class="driver-pick">
@@ -228,20 +283,38 @@ function DriverBar() {
     return html`<div class="driver-bar">
         <span class="driver-label">
             <${Icon} name="wheel" size=${14} />
-            ${turns.driver === undefined ? "No one is driving" : `${name(turns.driver)} is driving${driverHere ? "" : " (away)"}`}
+            ${
+                turns.driver === undefined
+                    ? t("web.composer.driver-bar.text.no-one-driving", "No one is driving")
+                    : driverHere
+                      ? t("web.composer.driver-bar.span.is-driving", "{name} is driving", {
+                            name: name(turns.driver),
+                        })
+                      : t(
+                            "web.composer.driver-bar.span.is-driving-away",
+                            "{name} is driving (away)",
+                            {
+                                name: name(turns.driver),
+                            },
+                        )
+            }
         </span>
         <span class="grow"></span>
         ${
             turns.driver !== undefined &&
             driverHere &&
             html`<button class="button small" disabled=${asked} onClick=${() => run("ask")}>
-                ${asked ? "Asked ✓" : "Ask to drive"}
+                ${
+                    asked
+                        ? t("web.composer.driver-bar.button.asked", "Asked ✓")
+                        : t("web.composer.driver-bar.button.ask-drive", "Ask to drive")
+                }
             </button>`
         }
         ${
             canTake &&
             html`<button class="button small primary" onClick=${() => run("claim")}>
-                Take the wheel
+                ${t("web.composer.driver-bar.button.take-the-wheel", "Take the wheel")}
             </button>`
         }
     </div>`;
@@ -270,21 +343,38 @@ function PlanBar({ blocked }) {
 
     return html`<div class="plan-bar">
         <span class="grow">
-            <strong>Plan mode.</strong> ${subagent ? "This subagent follows its session: it reads, and changes nothing." : "Pi reads and proposes; nothing changes until you approve."}
+            <strong>${t("web.composer.plan-bar.strong.plan-mode", "Plan mode.")}</strong> ${
+                subagent
+                    ? t(
+                          "web.composer.plan-bar.strong.subagent-follows-session-reads",
+                          "This subagent follows its session: it reads, and changes nothing.",
+                      )
+                    : t(
+                          "web.composer.plan-bar.strong.pi-reads-proposes-nothing",
+                          "Pi reads and proposes; nothing changes until you approve.",
+                      )
+            }
         </span>
         ${
             !blocked &&
             !subagent &&
             html`<button class="link small" onClick=${() => attempt(() => actions.setPlan(false))}>
-                Turn off
+                ${t("web.composer.plan-bar.button.turn-off", "Turn off")}
             </button>
             <button
                 class="button small primary"
                 disabled=${view.live.busy || !proposed}
-                title=${proposed ? undefined : "Pi has not proposed a plan yet."}
+                title=${
+                    proposed
+                        ? undefined
+                        : t(
+                              "web.composer.plan-bar.text.pi-not-proposed-plan",
+                              "Pi has not proposed a plan yet.",
+                          )
+                }
                 onClick=${() => attempt(actions.approvePlan)}
             >
-                Approve plan
+                ${t("web.composer.plan-bar.button.approve-plan", "Approve plan")}
             </button>`
         }
     </div>`;
@@ -301,17 +391,43 @@ function GoalBar() {
     const command = html`<span class="mono">${goal.command}</span>`;
     const text =
         goal.status === "met"
-            ? html`<strong>Done:</strong> ${command} passes (check ${goal.tries} of ${goal.max}).`
+            ? html`<strong>${t(
+                  "web.composer.goal-bar.strong.done",
+                  "Done:",
+              )}</strong> ${command}${" "}${t(
+                  "web.composer.goal-bar.span.passes-check",
+                  "passes (check {done} of {max}).",
+                  { done: goal.tries, max: goal.max },
+              )}`
             : goal.status === "gave-up"
-              ? html`<strong>Stopped:</strong> ${command} still fails after ${goal.max} checks.`
-              : html`<strong>Until</strong> ${command} passes${goal.tries > 0 ? ` · check ${goal.tries} of ${goal.max} failed` : ""}.`;
+              ? html`<strong>${t(
+                    "web.composer.goal-bar.strong.stopped",
+                    "Stopped:",
+                )}</strong> ${command}${" "}${t(
+                    "web.composer.goal-bar.span.still-fails",
+                    "still fails after {max} checks.",
+                    { max: goal.max },
+                )}`
+              : html`<strong>${t("web.composer.goal-bar.strong.until", "Until")}</strong> ${command}${" "}${
+                    goal.tries > 0
+                        ? t(
+                              "web.composer.goal-bar.span.check-failed",
+                              "passes · check {done} of {max} failed.",
+                              { done: goal.tries, max: goal.max },
+                          )
+                        : t("web.composer.goal-bar.span.passes", "passes.")
+                }`;
 
     return html`<div class=${`goal-bar ${goal.status}`}>
         <span class="grow">${text}</span>
         ${
             canSteer() &&
             html`<button class="link small" onClick=${() => attempt(actions.clearGoal)}>
-                ${goal.status === "working" ? "Drop" : "Dismiss"}
+                ${
+                    goal.status === "working"
+                        ? t("web.composer.goal-bar.button.drop", "Drop")
+                        : t("web.composer.goal-bar.button.dismiss", "Dismiss")
+                }
             </button>`
         }
     </div>`;
@@ -319,23 +435,41 @@ function GoalBar() {
 
 /** How a watch's last look found the PR's checks, and why a watch ended. */
 const WATCH_CHECKS = {
-    pending: "checks running",
-    passed: "checks pass",
-    failed: "checks failed",
+    pending: () => t("web.composer.pending.checks-running", "checks running"),
+    passed: () => t("web.composer.passed.checks-pass", "checks pass"),
+    failed: () => t("web.composer.failed.checks-failed", "checks failed"),
 };
 
 function watchEnded(watch) {
     switch (watch.status) {
         case "merged":
-            return "was merged.";
+            return t("web.composer.watch-ended.text.merged", "was merged.");
         case "closed":
-            return "was closed.";
+            return t("web.composer.watch-ended.text.closed", "was closed.");
         case "gave-up":
-            return `had more to tell than ${watch.max} messages: watch stopped.`;
+            return t(
+                "web.composer.watch-ended.text.more-tell-messages-watch",
+                "had more to tell than {max} messages: watch stopped.",
+                { max: watch.max },
+            );
         case "expired":
-            return "had nothing new for two weeks: watch stopped.";
+            return t(
+                "web.composer.watch-ended.text.nothing-new-two-weeks",
+                "had nothing new for two weeks: watch stopped.",
+            );
         default:
-            return `could not be watched: ${watch.note ?? "something went wrong"}.`;
+            return t(
+                "web.composer.watch-ended.text.not-watched",
+                "could not be watched: {detail}.",
+                {
+                    detail:
+                        watch.note ??
+                        t(
+                            "web.composer.watch-ended.fallback.something-wrong",
+                            "something went wrong",
+                        ),
+                },
+            );
     }
 }
 
@@ -347,11 +481,37 @@ function WatchBar() {
         return null;
     }
 
-    const pr = html`<a href=${watch.url} target="_blank" rel="noopener">PR #${watch.number}</a>`;
-    const checks = WATCH_CHECKS[watch.checks];
+    const pr = html`<a href=${watch.url} target="_blank" rel="noopener">${t(
+        "web.composer.watch-bar.a.pr",
+        "PR #{number}",
+        { number: watch.number },
+    )}</a>`;
+    const checks = WATCH_CHECKS[watch.checks]?.();
     const text =
         watch.status === "watching"
-            ? html`<strong>Watching</strong> ${pr}${checks ? ` · ${checks}` : ""}${watch.sent > 0 ? ` · ${watch.sent} of ${watch.max} sent` : ""}${watch.unchecked ? " · owner's comments only" : ""}${watch.errors > 0 ? " · last look failed" : watch.note ? " · waiting" : ""}`
+            ? html`<strong>${t("web.composer.watch-bar.strong.watching", "Watching")}</strong> ${pr}${
+                  checks ? ` · ${checks}` : ""
+              }${
+                  watch.sent > 0
+                      ? t("web.composer.watch-bar.strong.sent", " · {sent} of {max} sent", {
+                            sent: watch.sent,
+                            max: watch.max,
+                        })
+                      : ""
+              }${
+                  watch.unchecked
+                      ? t(
+                            "web.composer.watch-bar.strong.owner-s-comments",
+                            " · owner's comments only",
+                        )
+                      : ""
+              }${
+                  watch.errors > 0
+                      ? t("web.composer.watch-bar.strong.last-look-failed", " · last look failed")
+                      : watch.note
+                        ? t("web.composer.watch-bar.strong.waiting", " · waiting")
+                        : ""
+              }`
             : html`${pr} ${watchEnded(watch)}`;
 
     return html`<div
@@ -359,7 +519,10 @@ function WatchBar() {
         title=${[
             watch.title,
             watch.unchecked &&
-                "Only the repository owner's comments count: gh cannot push there, so GitHub does not say who else can write.",
+                t(
+                    "web.composer.watch-bar.text.repository-owner-s-comments",
+                    "Only the repository owner's comments count: gh cannot push there, so GitHub does not say who else can write.",
+                ),
             watch.note,
         ]
             .filter(Boolean)
@@ -369,7 +532,11 @@ function WatchBar() {
         ${
             canSteer() &&
             html`<button class="link small" onClick=${() => attempt(actions.unwatchPr)}>
-                ${watch.status === "watching" ? "Stop" : "Dismiss"}
+                ${
+                    watch.status === "watching"
+                        ? t("web.composer.watch-bar.button.stop", "Stop")
+                        : t("web.composer.watch-bar.button.dismiss", "Dismiss")
+                }
             </button>`
         }
     </div>`;
@@ -678,7 +845,13 @@ export function Composer() {
             update(`/${command.name} `);
             focusEnd();
         } else if (store.state.replyQuote) {
-            notify("info", "A quote cannot go with a command. Remove the quote to run it.");
+            notify(
+                "info",
+                t(
+                    "web.composer.composer.choose.quote-go-command-remove",
+                    "A quote cannot go with a command. Remove the quote to run it.",
+                ),
+            );
         } else {
             runCommand({ command, arg: "" }, `/${command.name}`);
         }
@@ -719,7 +892,13 @@ export function Composer() {
         const command = full.replace(/^!!?/, "").trim();
 
         if (command === "") {
-            return notify("info", "Say which command to run, such as !git status.");
+            return notify(
+                "info",
+                t(
+                    "web.composer.composer.run-shell.say-command-run-such",
+                    "Say which command to run, such as !git status.",
+                ),
+            );
         }
 
         setSending(true);
@@ -753,7 +932,13 @@ export function Composer() {
             store.state.replyQuote &&
             (parsed || shell || template || text.trimStart().startsWith("/skill:"))
         ) {
-            return notify("info", "A quote cannot go with a command. Remove the quote to run it.");
+            return notify(
+                "info",
+                t(
+                    "web.composer.composer.send.quote-go-command-remove",
+                    "A quote cannot go with a command. Remove the quote to run it.",
+                ),
+            );
         }
 
         // What shows is what goes: words still coming would land in the emptied box.
@@ -1062,7 +1247,14 @@ export function Composer() {
                         ),
                     ),
                 (error) => {
-                    notify("error", `Upload failed: ${error.message}`);
+                    notify(
+                        "error",
+                        t(
+                            "web.composer.composer.add-files.upload-failed",
+                            "Upload failed: {error}",
+                            { error: error.message },
+                        ),
+                    );
 
                     if (preview) {
                         URL.revokeObjectURL(preview);
@@ -1109,22 +1301,28 @@ export function Composer() {
     };
 
     const placeholder = dictation.listening
-        ? "Listening…"
+        ? t("web.composer.composer.placeholder.listening", "Listening…")
         : busy
           ? sendMode === "steer"
-              ? "Steer the current run…"
+              ? t("web.composer.composer.placeholder.steer-current-run", "Steer the current run…")
               : sendMode === "interrupt"
-                ? "Stop the run and send this now…"
-                : "Queue a message for after this run…"
-          : "Ask Pi anything…";
+                ? t(
+                      "web.composer.composer.placeholder.stop-run-send",
+                      "Stop the run and send this now…",
+                  )
+                : t(
+                      "web.composer.composer.placeholder.queue-message-after-run",
+                      "Queue a message for after this run…",
+                  )
+          : t("web.composer.composer.placeholder.ask-pi-anything", "Ask Pi anything…");
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
         item.by === undefined
             ? ""
             : item.by === me?.id
-              ? " · you"
-              : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`;
+              ? ` · ${t("web.composer.composer.span.you", "you")}`
+              : ` · ${users.find((user) => user.id === item.by)?.name ?? t("web.composer.driver-bar.name.someone", "someone")}`;
 
     useDock(dock);
     // View only now, or someone else took the wheel: the box goes, and dictation with it.
@@ -1145,10 +1343,13 @@ export function Composer() {
             <${ParentSessionButton} />
             <div class="view-only">
                 <span>
-                    <strong>View only.</strong> You can read along, react, and chat with the people here.
+                    <strong>${t("web.composer.composer.strong.view-only", "View only.")}</strong> ${t("web.composer.composer.strong.read-along-react-chat", "You can read along, react, and chat with the people here.")}
                 </span>
                 <button class="button small" onClick=${() => openSheet({ type: "chat" })}>
-                    <${Icon} name="chat" size=${15} /> Chat
+                    <${Icon} name="chat" size=${15} /> ${t(
+                        "web.composer.composer.text.chat",
+                        "Chat",
+                    )}
                 </button>
             </div>
             <${StatusLine} />
@@ -1169,7 +1370,19 @@ export function Composer() {
                 // How many wait: shown when the queue does not show them all (`dock.js`).
                 inbox.length > 0 &&
                 html`<div class="inbox-count">
-                    ${inbox.length} ${inbox.length === 1 ? "message" : "messages"} waiting for Pi
+                    ${
+                        inbox.length === 1
+                            ? t(
+                                  "web.composer.composer.div.one-message-waiting",
+                                  "{count} message waiting for Pi",
+                                  { count: inbox.length },
+                              )
+                            : t(
+                                  "web.composer.composer.div.waiting-pi",
+                                  "{count} messages waiting for Pi",
+                                  { count: inbox.length },
+                              )
+                    }
                 </div>`
             }
             ${
@@ -1193,8 +1406,25 @@ export function Composer() {
                                 (!blocked || item.by === me?.id) &&
                                 html`<button
                                     class="icon-button small queued-remove"
-                                    aria-label=${queuedReports(item) ? "Discard these reports" : "Withdraw"}
-                                    title=${queuedReports(item) ? "Discard these reports: Pi will not get them" : "Withdraw"}
+                                    aria-label=${
+                                        queuedReports(item)
+                                            ? t(
+                                                  "web.composer.composer.aria-label.discard-reports",
+                                                  "Discard these reports",
+                                              )
+                                            : t(
+                                                  "web.composer.composer.aria-label.withdraw",
+                                                  "Withdraw",
+                                              )
+                                    }
+                                    title=${
+                                        queuedReports(item)
+                                            ? t(
+                                                  "web.composer.composer.title.discard-reports-pi-not",
+                                                  "Discard these reports: Pi will not get them",
+                                              )
+                                            : t("web.composer.composer.title.withdraw", "Withdraw")
+                                    }
                                     onClick=${() => attempt(() => actions.withdraw(item.id))}
                                 >
                                     <${Icon} name="close" size=${13} />
@@ -1211,10 +1441,13 @@ export function Composer() {
                                 html`<div class="queued-actions">
                                     <button
                                         class="button small"
-                                        title="Take it back into the message box to change it"
+                                        title=${t(
+                                            "web.composer.composer.title.take-back-message-box",
+                                            "Take it back into the message box to change it",
+                                        )}
                                         onClick=${() => editQueued(item)}
                                     >
-                                        Edit
+                                        ${t("web.composer.composer.button.edit", "Edit")}
                                     </button>
                                     <button
                                         class="button small"
@@ -1227,14 +1460,27 @@ export function Composer() {
                                                 ),
                                             )}
                                     >
-                                        ${item.mode === "steer" ? "Move to queue" : "Steer now"}
+                                        ${
+                                            item.mode === "steer"
+                                                ? t(
+                                                      "web.composer.composer.button.move-queue",
+                                                      "Move to queue",
+                                                  )
+                                                : t(
+                                                      "web.composer.composer.button.steer",
+                                                      "Steer now",
+                                                  )
+                                        }
                                     </button>
                                     <button
                                         class=${`button small ${interrupting === item.id ? "danger" : ""}`}
                                         title=${
                                             interrupting === item.id
-                                                ? "Tap again to stop the run and send this now. The other queued messages stay queued"
-                                                : QUEUED_INTERRUPT_HINT
+                                                ? t(
+                                                      "web.composer.composer.text.tap-again-stop-run",
+                                                      "Tap again to stop the run and send this now. The other queued messages stay queued",
+                                                  )
+                                                : queuedInterruptHint()
                                         }
                                         onClick=${() => {
                                             if (CONFIRM_INTERRUPT && interrupting !== item.id) {
@@ -1248,7 +1494,17 @@ export function Composer() {
                                             void attempt(() => actions.move(item.id, "interrupt"));
                                         }}
                                     >
-                                        ${interrupting === item.id ? "Interrupt?" : "Interrupt"}
+                                        ${
+                                            interrupting === item.id
+                                                ? t(
+                                                      "web.composer.composer.button.interrupt",
+                                                      "Interrupt?",
+                                                  )
+                                                : t(
+                                                      "web.composer.composer.button.interrupt.interrupt",
+                                                      "Interrupt",
+                                                  )
+                                        }
                                     </button>
                                 </div>`
                             }
@@ -1269,7 +1525,10 @@ export function Composer() {
                 ? html`${
                       busy &&
                       html`<div class="composer-row stop-only">
-                          <span class="muted small grow">Pi is working…</span>
+                          <span class="muted small grow">${t(
+                              "web.composer.composer.span.pi-is-working",
+                              "Pi is working…",
+                          )}</span>
                           <${StopButton} />
                       </div>`
                   }`
@@ -1278,11 +1537,25 @@ export function Composer() {
                       html`<div
                           class="commands history-options"
                           role="listbox"
-                          aria-label="Sent before"
+                          aria-label=${t(
+                              "web.composer.composer.aria-label.sent-before",
+                              "Sent before",
+                          )}
                           ref=${list}
                       >
                           <div class="file-note">
-                              Sent in this session${text.trim() ? ` with “${text.trim()}”` : ""} · Enter puts it in the box · Esc closes
+                              ${
+                                  text.trim()
+                                      ? t(
+                                            "web.composer.composer.div.sent-in-this-session-with",
+                                            "Sent in this session with “{query}” · Enter puts it in the box · Esc closes",
+                                            { query: text.trim() },
+                                        )
+                                      : t(
+                                            "web.composer.composer.div.sent-in-this-session",
+                                            "Sent in this session · Enter puts it in the box · Esc closes",
+                                        )
+                              }
                           </div>
                           ${recalled.map(
                               (each) => html`<button
@@ -1303,7 +1576,10 @@ export function Composer() {
                           ${
                               recalled.length === 0 &&
                               html`<div class="file-note">
-                                  Nothing you sent from this browser in this session matches.
+                                  ${t(
+                                      "web.composer.composer.div.nothing-sent-browser-session",
+                                      "Nothing you sent from this browser in this session matches.",
+                                  )}
                               </div>`
                           }
                       </div>`
@@ -1311,14 +1587,31 @@ export function Composer() {
                 ${
                     shell &&
                     html`<div class="command-hint">
-                        <span class="command-name">${shell.context ? "!" : "!!"}</span> <span class="muted">· runs in this session's folder · ${shell.context ? "Pi sees the output (!! to keep it from Pi)" : "only the people here see the output"}</span>
+                        <span class="command-name">${shell.context ? "!" : "!!"}</span> <span class="muted">· ${t(
+                            "web.composer.composer.span.runs-in-folder",
+                            "runs in this session's folder · {visibility}",
+                            {
+                                visibility: shell.context
+                                    ? t(
+                                          "web.composer.composer.span.pi-sees-output-keep",
+                                          "Pi sees the output (!! to keep it from Pi)",
+                                      )
+                                    : t(
+                                          "web.composer.composer.span.people-see-output",
+                                          "only the people here see the output",
+                                      ),
+                            },
+                        )}</span>
                     </div>`
                 }
                 ${
                     pasted &&
                     !shell &&
                     html`<div class="command-hint muted">
-                        Pasted text goes out in full where its placeholder is.
+                        ${t(
+                            "web.composer.composer.div.pasted-text-goes-out",
+                            "Pasted text goes out in full where its placeholder is.",
+                        )}
                     </div>`
                 }
                 ${
@@ -1327,7 +1620,17 @@ export function Composer() {
                     !searching &&
                     html`<div class="command-hint wraps">
                         <span class="muted">
-                            ${inlineFiles ? "Mentioned files go with the message." : "Pi reads the files you mention."}
+                            ${
+                                inlineFiles
+                                    ? t(
+                                          "web.composer.composer.span.mentioned-files-go-message",
+                                          "Mentioned files go with the message.",
+                                      )
+                                    : t(
+                                          "web.composer.composer.span.pi-reads-files-mention",
+                                          "Pi reads the files you mention.",
+                                      )
+                            }
                         </span>
                         ${" "}
                         <button
@@ -1338,7 +1641,17 @@ export function Composer() {
                                 setInlineFiles(!inlineFiles);
                             }}
                         >
-                            ${inlineFiles ? "Let Pi read them" : "Send them along"}
+                            ${
+                                inlineFiles
+                                    ? t(
+                                          "web.composer.composer.button.let-pi-read-them",
+                                          "Let Pi read them",
+                                      )
+                                    : t(
+                                          "web.composer.composer.button.send-them-along",
+                                          "Send them along",
+                                      )
+                            }
                         </button>
                     </div>`
                 }
@@ -1348,7 +1661,7 @@ export function Composer() {
                     html`<div
                         class="commands file-options"
                         role="listbox"
-                        aria-label="Files"
+                        aria-label=${t("web.composer.composer.aria-label.files", "Files")}
                         ref=${list}
                     >
                         ${matches.map(
@@ -1374,11 +1687,20 @@ export function Composer() {
                                 </span>
                             </button>`,
                         )}
-                        ${matches.length === 0 && html`<div class="file-note">Finding files…</div>`}
+                        ${
+                            matches.length === 0 &&
+                            html`<div class="file-note">${t(
+                                "web.composer.composer.div.finding-files",
+                                "Finding files…",
+                            )}</div>`
+                        }
                         ${
                             found.truncated &&
                             html`<div class="file-note">
-                                A large folder: only the files nearest its top are listed.
+                                ${t(
+                                    "web.composer.composer.div.large-folder-files-nearest",
+                                    "A large folder: only the files nearest its top are listed.",
+                                )}
                             </div>`
                         }
                     </div>`
@@ -1412,7 +1734,10 @@ export function Composer() {
                         ${
                             parsed.command.args &&
                             html` <span class="command-args">${parsed.command.args}</span>`
-                        } <span class="muted">· ${parsed.command.description} · not sent to Pi</span>
+                        } <span class="muted">· ${parsed.command.description} · ${t(
+                            "web.composer.composer.span.not-sent-to-pi",
+                            "not sent to Pi",
+                        )}</span>
                     </div>`
                 }
                 ${
@@ -1423,7 +1748,17 @@ export function Composer() {
                         ${
                             template.args &&
                             html` <span class="command-args">${template.args}</span>`
-                        } <span class="muted">· ${template.skill ? "skill · Pi gets its instructions with your request" : "prompt template · Pi gets it filled in"}</span>
+                        } <span class="muted">· ${
+                            template.skill
+                                ? t(
+                                      "web.composer.composer.span.skill-pi-gets-instructions",
+                                      "skill · Pi gets its instructions with your request",
+                                  )
+                                : t(
+                                      "web.composer.composer.span.prompt-template-pi-gets",
+                                      "prompt template · Pi gets it filled in",
+                                  )
+                        }</span>
                     </div>`
                 }
                 <div
@@ -1462,7 +1797,11 @@ export function Composer() {
                                     <span class="muted">${formatBytes(file.size)}</span>
                                     <button
                                         class="icon-button small"
-                                        aria-label=${`Remove ${file.name}`}
+                                        aria-label=${t(
+                                            "web.composer.composer.aria-label.remove",
+                                            "Remove {name}",
+                                            { name: file.name },
+                                        )}
                                         onClick=${() => {
                                             forget([file]);
                                             setFiles((current) =>
@@ -1483,7 +1822,10 @@ export function Composer() {
                             <span class="quote-strip-text">${store.state.replyQuote}</span>
                             <button
                                 class="icon-button small"
-                                aria-label="Remove the quote"
+                                aria-label=${t(
+                                    "web.composer.composer.aria-label.remove-quote",
+                                    "Remove the quote",
+                                )}
                                 onClick=${() => store.set({ replyQuote: null })}
                             >
                                 <${Icon} name="close" size=${12} />
@@ -1525,7 +1867,10 @@ export function Composer() {
                                 class="mode-switch"
                                 data-part="composer-button mode-switch"
                                 role="radiogroup"
-                                aria-label="Send as"
+                                aria-label=${t(
+                                    "web.composer.composer.aria-label.send-as",
+                                    "Send as",
+                                )}
                                 onKeyDown=${(event) => {
                                     // Arrows move between them, as in any group of radio buttons.
                                     if (/^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
@@ -1552,11 +1897,11 @@ export function Composer() {
                                         aria-checked=${sendMode === value ? "true" : "false"}
                                         tabindex=${sendMode === value ? "0" : "-1"}
                                         class=${`${sendMode === value ? "on" : ""} ${value === "interrupt" ? "interrupt" : ""}`}
-                                        title=${tip}
+                                        title=${tip()}
                                         onMouseDown=${(event) => event.preventDefault()}
                                         onClick=${() => setSendMode(value)}
                                     >
-                                        ${label}
+                                        ${label()}
                                     </button>`,
                                 )}
                             </div>`
@@ -1570,8 +1915,12 @@ export function Composer() {
                             class=${`send-button ${canSend ? "ready" : ""}`}
                             data-part="send-button"
                             data-state=${canSend ? "ready" : undefined}
-                            aria-label="Send"
-                            title=${coarse ? "Send" : "Send (Enter)"}
+                            aria-label=${t("web.composer.composer.aria-label.send", "Send")}
+                            title=${
+                                coarse
+                                    ? t("web.composer.composer.title.send", "Send")
+                                    : t("web.composer.composer.title.send-enter", "Send (Enter)")
+                            }
                             disabled=${!canSend}
                             onClick=${send}
                         >
@@ -1595,20 +1944,20 @@ export function Composer() {
 // right, always.
 defineItem("composer", {
     id: "core:places",
-    label: "Places (phones)",
+    label: () => t("web.composer.label.places-phones", "Places (phones)"),
     order: 100,
     render: () => html`<${PlacesButton} />`,
 });
 defineItem("composer", {
     id: "core:attach",
-    label: "Attach files",
+    label: () => t("web.composer.label.attach-files", "Attach files"),
     order: 200,
     render: ({ picker }) =>
         html`<button
             class="icon-button attach-button"
             data-part="composer-button"
-            aria-label="Attach files"
-            title="Attach files"
+            aria-label=${t("web.composer.render.aria-label.attach-files", "Attach files")}
+            title=${t("web.composer.render.title.attach-files", "Attach files")}
             onClick=${() => picker.current?.click()}
         >
             <${Icon} name="clip" size=${17} />
@@ -1616,14 +1965,34 @@ defineItem("composer", {
 });
 defineItem("composer", {
     id: "core:model",
-    label: "Model",
+    label: () => t("web.composer.label.model", "Model"),
     order: 300,
     render: ({ agent, level }) =>
         html`<button
             class=${`model-chip ${agent?.available === false ? "warn" : ""}`}
             data-part="model-chip"
-            aria-label=${`Model: ${modelLabel(agent)}${level ? `, thinking ${level}` : ""}`}
-            title=${`Model and thinking: ${modelLabel(agent)}${level ? `, ${level}` : ""}`}
+            aria-label=${
+                level
+                    ? t(
+                          "web.composer.model-chip.aria-label.model-thinking",
+                          "Model: {model}, thinking {level}",
+                          { model: modelLabel(agent), level },
+                      )
+                    : t("web.composer.model-chip.aria-label.model", "Model: {model}", {
+                          model: modelLabel(agent),
+                      })
+            }
+            title=${
+                level
+                    ? t(
+                          "web.composer.model-chip.title.model-thinking",
+                          "Model and thinking: {model}, {level}",
+                          { model: modelLabel(agent), level },
+                      )
+                    : t("web.composer.model-chip.title.model", "Model and thinking: {model}", {
+                          model: modelLabel(agent),
+                      })
+            }
             onClick=${() => openSheet({ type: "model" })}
         >
             <${Icon} name="sparkle" size=${12} class="model-spark" />
@@ -1634,7 +2003,7 @@ defineItem("composer", {
 });
 defineItem("composer", {
     id: "core:plan",
-    label: "Plan",
+    label: () => t("web.composer.label.plan", "Plan"),
     order: 400,
     render: ({ view }) =>
         planAvailable() &&
@@ -1643,11 +2012,14 @@ defineItem("composer", {
             class=${`plan-chip ${view.plan?.on ? "on" : ""}`}
             data-part="composer-button plan-chip"
             aria-pressed=${view.plan?.on === true}
-            title="Plan mode: Pi reads and proposes, and changes nothing until you approve"
+            title=${t(
+                "web.composer.render.plan-mode-pi-reads",
+                "Plan mode: Pi reads and proposes, and changes nothing until you approve",
+            )}
             onMouseDown=${(event) => event.preventDefault()}
             onClick=${() => attempt(() => actions.setPlan(!view.plan?.on))}
         >
-            Plan
+            ${t("web.composer.render.button.plan", "Plan")}
         </button>`,
 });
 
@@ -1680,8 +2052,8 @@ function StopButton() {
     return html`<button
         class="stop-button"
         data-part="composer-button stop-button"
-        aria-label="Stop"
-        title="Stop (Esc twice)"
+        aria-label=${t("web.composer.stop-button.aria-label.stop", "Stop")}
+        title=${t("web.composer.stop-button.title.stop-esc-twice", "Stop (Esc twice)")}
         onClick=${() => attempt(actions.abort)}
     >
         <span class="stop-square" aria-hidden="true"></span>
@@ -1701,8 +2073,11 @@ function PlacesButton() {
     return html`<button
         class="icon-button places-button badge-host"
         data-part="composer-button"
-        aria-label="Places: Files, Changes, Browser, and more"
-        title="Places (or swipe up here)"
+        aria-label=${t(
+            "web.composer.places-button.aria-label.places-files-changes-browser",
+            "Places: Files, Changes, Browser, and more",
+        )}
+        title=${t("web.composer.places-button.title.places-swipe-up", "Places (or swipe up here)")}
         onClick=${() => openSheet({ type: "places" })}
     >
         <${Icon} name="grid" />
@@ -1814,28 +2189,52 @@ function SpeedPart({ stats }) {
     }
 
     const title = [
-        rate !== undefined && `${rate.toFixed(1)} tokens a second`,
-        wait !== undefined && `its first token after ${(wait / 1000).toFixed(2)}s`,
+        rate !== undefined &&
+            t("web.composer.speed-part.title.tokens-second", "{detail} tokens a second", {
+                detail: rate.toFixed(1),
+            }),
+        wait !== undefined &&
+            t(
+                "web.composer.speed-part.title.first-token-after-s",
+                "its first token after {detail}s",
+                {
+                    detail: (wait / 1000).toFixed(2),
+                },
+            ),
     ]
         .filter(Boolean)
         .join(", ");
 
     return html`<span
         class=${`speed ${rate === undefined ? "wait-only" : ""}`}
-        title=${`How fast the last answer came: ${title}`}
+        title=${t(
+            "web.composer.speed-part.title.fast-last-answer-came",
+            "How fast the last answer came: {title}",
+            { title },
+        )}
     >
         ${
             rate !== undefined &&
             html`<span class="rate">
                 <span class="num">${rate < 9.95 ? rate.toFixed(1) : Math.round(rate)}</span>${" "}
-                <span class="long">tokens/s</span>
-                <span class="short">tok/s</span>
+                <span class="long">${t(
+                    "web.composer.speed-part.span.tokens-per-second",
+                    "tokens/s",
+                )}</span>
+                <span class="short">${t(
+                    "web.composer.speed-part.span.tok-per-second",
+                    "tok/s",
+                )}</span>
             </span>`
         }
         ${
             wait !== undefined &&
             html`<span class="wait">
-                <span class="word">first token${" "}</span>
+                <span class="word">${t(
+                    "web.composer.speed-part.span.first-token",
+                    "first token{detail}",
+                    { detail: " " },
+                )}</span>
                 <span class="num">${seconds(wait)}</span>
             </span>`
         }
@@ -1846,7 +2245,7 @@ function SpeedPart({ stats }) {
 // Appearance, with extensions' before the spend. The connection's warning leads and Lancet Guard ends it, always.
 defineItem("status", {
     id: "core:connection",
-    label: "Connection",
+    label: () => t("web.composer.label.connection", "Connection"),
     order: 0,
     fixed: true,
     render() {
@@ -1855,14 +2254,18 @@ defineItem("status", {
         return (
             connection !== "open" &&
             html`<span class="warn">
-                ${connection === "connecting" ? "connecting…" : "reconnecting…"}
+                ${
+                    connection === "connecting"
+                        ? t("web.composer.render.span.connecting", "connecting…")
+                        : t("web.composer.render.span.reconnecting", "reconnecting…")
+                }
             </span>`
         );
     },
 });
 defineItem("status", {
     id: "core:here",
-    label: "People here",
+    label: () => t("web.composer.label.people-here", "People here"),
     order: 100,
     render() {
         const { view, presence } = store.state;
@@ -1871,15 +2274,15 @@ defineItem("status", {
 
         return html`<span
             class=${`here ${here === 1 ? "alone" : ""}`}
-            title=${`${(view.viewers ?? []).join(", ")}${view.clients > here ? ` · ${view.clients} tabs` : ""}`}
+            title=${`${(view.viewers ?? []).join(", ")}${view.clients > here ? ` · ${t("web.composer.here.span.tabs", "{count} tabs", { count: view.clients })}` : ""}`}
         >
-            ${here} here
+            ${t("web.composer.render.span.content", "{here} here", { here })}
         </span>`;
     },
 });
 defineItem("status", {
     id: "core:speed",
-    label: "Reply speed",
+    label: () => t("web.composer.label.reply-speed", "Reply speed"),
     order: 200,
     render: () =>
         prefs().speed === true && html`<${SpeedPart} stats=${store.state.view.stats ?? {}} />`,
@@ -1906,11 +2309,14 @@ function contextFill() {
 }
 
 const contextTitle = ({ used, window, about }) =>
-    `${about}${formatTokens(used)} of ${formatTokens(window)} tokens in context`;
+    t("web.composer.context.text.tokens-in-context", "{used} of {window} tokens in context", {
+        used: `${about}${formatTokens(used)}`,
+        window: formatTokens(window),
+    });
 
 defineItem("status", {
     id: "core:context",
-    label: "Context",
+    label: () => t("web.composer.label.context", "Context"),
     order: 300,
     render() {
         const fill = contextFill();
@@ -1918,7 +2324,7 @@ defineItem("status", {
         return (
             fill &&
             html`<span class="context" title=${contextTitle(fill)}>
-                <span class="word">context</span>
+                <span class="word">${t("web.composer.render.span.context", "context")}</span>
                 <span class=${`meter ${contextLevel(fill.percent)}`} aria-hidden="true">
                     <span style=${`width:${fill.percent}%`}></span>
                 </span>
@@ -1937,16 +2343,21 @@ const cacheRate = () => store.state.view.stats?.cacheRate;
 
 defineItem("status", {
     id: "core:cache",
-    label: "Cache",
+    label: () => t("web.composer.label.cache", "Cache"),
     order: 400,
     render: () =>
         cacheRate() !== undefined &&
         html`<span class="cache">
-            cache <span class="num">${Math.round(cacheRate() * 100)}%</span>
+            ${t(
+                "web.composer.render.span.cache",
+                "cache",
+            )} <span class="num">${Math.round(cacheRate() * 100)}%</span>
         </span>`,
     detail: () =>
         cacheRate() !== undefined &&
-        `${Math.round(cacheRate() * 100)}% of the input came from the cache`,
+        t("web.composer.detail.input-came-cache", "{detail}% of the input came from the cache", {
+            detail: Math.round(cacheRate() * 100),
+        }),
 });
 
 /**
@@ -1962,7 +2373,7 @@ function spendNow() {
 
 defineItem("status", {
     id: "core:spend",
-    label: "Spend",
+    label: () => t("web.composer.label.spend", "Spend"),
     order: 600,
     render() {
         const { spent, budget } = spendNow();
@@ -1976,7 +2387,14 @@ defineItem("status", {
     detail() {
         const { spent, budget } = spendNow();
 
-        return `$${spent.toFixed(2)} spent${budget !== undefined ? ` of $${budget.toFixed(2)}` : ""}`;
+        return budget !== undefined
+            ? t("web.composer.render.text.spent-of", "{spent} spent of {budget}", {
+                  spent: `$${spent.toFixed(2)}`,
+                  budget: `$${budget.toFixed(2)}`,
+              })
+            : t("web.composer.render.text.spent", "{spent} spent", {
+                  spent: `$${spent.toFixed(2)}`,
+              });
     },
 });
 
@@ -1988,11 +2406,21 @@ function backgroundNow() {
 }
 
 const backgroundTitle = (count) =>
-    `${count} ${count === 1 ? "command runs" : "commands run"} in the background: open Running now to see or stop ${count === 1 ? "it" : "them"}`;
+    count === 1
+        ? t(
+              "web.composer.render.text.one-command-background",
+              "{count} command runs in the background: open Running now to see or stop it",
+              { count },
+          )
+        : t(
+              "web.composer.render.text.commands-background",
+              "{count} commands run in the background: open Running now to see or stop them",
+              { count },
+          );
 
 defineItem("status", {
     id: "core:background",
-    label: "Background tasks",
+    label: () => t("web.composer.label.background-tasks", "Background tasks"),
     order: 650,
     render() {
         const count = backgroundNow();
@@ -2007,7 +2435,10 @@ defineItem("status", {
             >
                 <span class="dot" aria-hidden="true"></span>
                 <span class="num">${count}</span>
-                <span class="word">${" "}in background</span>
+                <span class="word">${" "}${t(
+                    "web.composer.render.span.in-background",
+                    "in background",
+                )}</span>
             </button>`
         );
     },
@@ -2019,7 +2450,7 @@ defineItem("status", {
 });
 defineItem("status", {
     id: "core:guard",
-    label: "Lancet Guard",
+    label: () => t("web.composer.label.lancet-guard", "Lancet Guard"),
     order: 700,
     fixed: true,
     render() {
@@ -2031,16 +2462,25 @@ defineItem("status", {
             return null;
         }
 
-        const state = failed ? "failed" : guard.enabled ? "on" : "off";
+        const state = failed
+            ? t("web.composer.render.state.failed", "failed")
+            : guard.enabled
+              ? t("web.composer.render.state.content", "on")
+              : t("web.composer.render.state.off", "off");
 
         return html`<button
             class=${`guard ${guard.enabled && !failed ? "" : "off"}`}
-            aria-label=${`Lancet Guard ${state}`}
+            aria-label=${t("web.composer.render.aria-label.lancet-guard", "Lancet Guard {state}", {
+                state,
+            })}
             title=${guard.detail}
             onClick=${() => openSheet({ type: "extensions", tab: "installed", show: "built-in" })}
         >
             <${Icon} name="shield" size=${11} />
-            <span><span class="word">guard${" "}</span>${state}</span>
+            <span><span class="word">${t(
+                "web.composer.shorter.guard",
+                "guard",
+            )}${" "}</span>${state}</span>
         </button>`;
     },
 });

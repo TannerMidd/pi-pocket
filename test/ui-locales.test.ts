@@ -381,10 +381,10 @@ test("R03: the 1 MiB raw JSON limit includes unknown keys", () => {
 test("R04 and R09: ordered overlays reveal the earlier layer and then English", () => {
     const locales = new UiLocales();
     const low = checkUiLocales("low.ts", [
-        pack({ "ui.close": "Fermer", "ui.back": "Retour" }, "fr", "Lower"),
+        pack({ "ui.close": "Fermer", "web.ui.sheet.aria-label.back": "Retour" }, "fr", "Lower"),
     ]);
     const high = checkUiLocales("high.ts", [
-        pack({ "ui.close": "Quitter", "ui.back": "  " }, "fr", "Higher"),
+        pack({ "ui.close": "Quitter", "web.ui.sheet.aria-label.back": "  " }, "fr", "Higher"),
     ]);
 
     locales.orderedBy(() => ["low.ts", "high.ts"]);
@@ -398,11 +398,18 @@ test("R04 and R09: ordered overlays reveal the earlier layer and then English", 
     assert.equal(french.label, "Higher");
     assert.equal(french.messages["ui.close"], "Quitter", "completion order does not set priority");
     assert.equal(
-        french.messages["ui.back"],
+        french.messages["web.ui.sheet.aria-label.back"],
         "Retour",
         "blank upper messages expose the lower layer",
     );
-    assert.equal(translate(french.messages, "ui.cancel", EN["ui.cancel"]!), "Cancel");
+    assert.equal(
+        translate(
+            french.messages,
+            "web.sheets.text.text-sheet.button.cancel",
+            EN["web.sheets.text.text-sheet.button.cancel"]!,
+        ),
+        "Cancel",
+    );
     const replacement = checkUiLocales("low.ts", [
         pack({ "ui.close": "Fermer encore" }, "fr", "Lower 2"),
     ]);

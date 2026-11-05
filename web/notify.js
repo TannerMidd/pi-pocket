@@ -2,6 +2,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, notify, sessionUnread } from "./store.js";
 import { html, Loader, Sheet, Switch } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 const supported =
     "serviceWorker" in navigator && "PushManager" in globalThis && "Notification" in globalThis;
@@ -84,34 +85,66 @@ function sameKey(subscription, publicKey) {
 /** Why this device cannot get notifications, or null when it can. */
 function blocker() {
     if (!isSecureContext) {
-        return "Notifications need a secure (https) address. Open Pi Pocket through the Cloudflare Tunnel, or through tailscale serve, on this device.";
+        return t(
+            "web.notify.blocker.text.secure-address",
+            "Notifications need a secure (https) address. Open Pi Pocket through the Cloudflare Tunnel, or through tailscale serve, on this device.",
+        );
     }
 
     if (!supported) {
-        return "This browser cannot receive notifications. On iPhone and iPad, add Pi Pocket to the home screen first, then open it from there.";
+        return t(
+            "web.notify.blocker.text.browser-cannot-receive",
+            "This browser cannot receive notifications. On iPhone and iPad, add Pi Pocket to the home screen first, then open it from there.",
+        );
     }
 
     if (Notification.permission === "denied") {
-        return "Notifications are blocked for this site. Allow them in the browser's site settings, then come back.";
+        return t(
+            "web.notify.blocker.text.blocked-site-settings",
+            "Notifications are blocked for this site. Allow them in the browser's site settings, then come back.",
+        );
     }
 
     return null;
 }
 
+/** Each kind a person can pick: its setting, then the key and English of its name, then those of its hint. */
 const KINDS = [
-    ["done", "Pi finished", "when a run you took part in ends"],
+    [
+        "done",
+        "web.notify.kinds.done.title",
+        "Pi finished",
+        "web.notify.kinds.done.hint",
+        "when a run you took part in ends",
+    ],
     [
         "approval",
+        "web.notify.kinds.approval.title",
         "Approvals",
+        "web.notify.kinds.approval.hint",
         "when Lancet Guard asks before a command; allow or deny it from the notification",
     ],
     [
         "limit",
+        "web.notify.kinds.limit.title",
         "Waiting for a limit",
+        "web.notify.kinds.limit.hint",
         "when a run waits more than ten minutes for a provider's limit to clear",
     ],
-    ["mention", "Mentions", "when someone writes @your name in a chat"],
-    ["chat", "Chat messages", "in sessions you take part in"],
+    [
+        "mention",
+        "web.notify.kinds.mention.title",
+        "Mentions",
+        "web.notify.kinds.mention.hint",
+        "when someone writes @your name in a chat",
+    ],
+    [
+        "chat",
+        "web.notify.kinds.chat.title",
+        "Chat messages",
+        "web.notify.kinds.chat.hint",
+        "in sessions you take part in",
+    ],
 ];
 
 export function NotificationsSheet() {
@@ -193,47 +226,85 @@ export function NotificationsSheet() {
     const on = Boolean(subscription);
 
     return html`<${Sheet}
-        title="Notifications"
+        title=${t("web.notify.notifications-sheet.title.notifications", "Notifications")}
         onClose=${closeSheet}
         className="notifications-sheet"
     >
         <p class="muted small">
-            Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.
+            ${t("web.notify.notifications-sheet.p.get-notification-device-not", "Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.")}
         </p>
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${
             !info || subscription === undefined
-                ? html`<${Loader} label="Checking this device" />`
+                ? html`<${Loader}
+                      label=${t(
+                          "web.notify.notifications-sheet.loader.label.checking-this-device",
+                          "Checking this device",
+                      )}
+                  />`
                 : html`<div class="sheet-list">
                     <div class="extension">
                         <div class="extension-main">
-                            <div class="extension-title">This device</div>
+                            <div class="extension-title">${t(
+                                "web.notify.notifications-sheet.div.this-device",
+                                "This device",
+                            )}</div>
                             <div class="muted small">
-                                ${on ? "Notifications are on." : "Notifications are off."} ${info.devices > 0 ? `${info.devices} device${info.devices === 1 ? "" : "s"} of yours ${info.devices === 1 ? "gets" : "get"} them.` : ""}
+                                ${
+                                    on
+                                        ? t(
+                                              "web.notify.notifications-sheet.div.notifications-are-on",
+                                              "Notifications are on.",
+                                          )
+                                        : t(
+                                              "web.notify.notifications-sheet.div.notifications-are-off",
+                                              "Notifications are off.",
+                                          )
+                                }
+                                ${
+                                    info.devices === 1
+                                        ? t(
+                                              "web.notify.notifications-sheet.div.one-device-gets-them",
+                                              "1 device of yours gets them.",
+                                          )
+                                        : info.devices > 1
+                                          ? t(
+                                                "web.notify.notifications-sheet.div.devices-get-them",
+                                                "{count} devices of yours get them.",
+                                                { count: info.devices },
+                                            )
+                                          : ""
+                                }
                             </div>
                         </div>
                         <div class="extension-actions">
                             <${Switch}
                                 on=${on}
                                 disabled=${busy || (!on && problem !== null)}
-                                label="Notifications on this device"
+                                label=${t(
+                                    "web.notify.notifications-sheet.switch.label.notifications-on-this-device",
+                                    "Notifications on this device",
+                                )}
                                 onChange=${on ? disable : enable}
                             />
                         </div>
                     </div>
                 </div>
-                <div class="group-title">Notify me about</div>
+                <div class="group-title">${t(
+                    "web.notify.notifications-sheet.div.notify-me-about",
+                    "Notify me about",
+                )}</div>
                 <div class="sheet-list">
                     ${KINDS.map(
-                        ([key, title, hint]) => html`<div class="extension">
+                        ([key, titleKey, title, hintKey, hint]) => html`<div class="extension">
                             <div class="extension-main">
-                                <div>${title}</div>
-                                <div class="muted small">${hint}</div>
+                                <div>${t(titleKey, title)}</div>
+                                <div class="muted small">${t(hintKey, hint)}</div>
                             </div>
                             <div class="extension-actions">
                                 <${Switch}
                                     on=${info.prefs[key]}
-                                    label=${title}
+                                    label=${t(titleKey, title)}
                                     onChange=${() => setPref(key, !info.prefs[key])}
                                 />
                             </div>
@@ -243,7 +314,10 @@ export function NotificationsSheet() {
                 ${
                     on &&
                     html`<button class="button wide" onClick=${test}>
-                        Send a test notification
+                        ${t(
+                            "web.notify.notifications-sheet.button.send-a-test-notification",
+                            "Send a test notification",
+                        )}
                     </button>`
                 }`
         }

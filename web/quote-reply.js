@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { quoteReply } from "./store.js";
 import { html, Icon } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 const coarse = matchMedia("(pointer: coarse)").matches;
 const WIDTH = 92;
@@ -104,6 +105,6 @@ export function QuoteReplyButton() {
         onClick=${reply}
     >
         <${Icon} name="reply" size=${14} stroke=${2} />
-        <span>Reply</span>
+        <span>${t("web.quote-reply.quote-reply-button.span.reply", "Reply")}</span>
     </button>`;
 }

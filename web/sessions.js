@@ -67,7 +67,10 @@ export const toSessions = () => goHome(() => navigate(null, { replace: true }));
 
 /** The session list on its way: rows shaped like sessions, lit in turn. */
 function LoadingSessions() {
-    return html`<div role="status" aria-label="Loading sessions">
+    return html`<div role="status" aria-label=${t(
+        "web.sessions.loading-sessions.aria-label.loading-sessions",
+        "Loading sessions",
+    )}>
         ${[72, 54, 64, 46, 58].map(
             (width, index) =>
                 html`<div
@@ -190,12 +193,15 @@ const readClosed = () => {
 
 /** The fold's name for a screen reader: how many, and what its dot says (`aria-expanded` says whether they show). */
 function foldLabel(kids, trouble) {
-    const count = `${kids} linked ${kids === 1 ? "session" : "sessions"}`;
+    const count =
+        kids === 1
+            ? t("web.sessions.fold-label.text.one-session", "1 linked session")
+            : t("web.sessions.fold-label.text.sessions", "{kids} linked sessions", { kids });
 
     return trouble === "waiting"
-        ? `${count}, one needs you`
+        ? t("web.sessions.fold-label.text.one-needs-you", "{count}, one needs you", { count })
         : trouble === "failed"
-          ? `${count}, one failed`
+          ? t("web.sessions.fold-label.text.one-failed", "{count}, one failed", { count })
           : count;
 }
 
@@ -513,8 +519,22 @@ function subagentsTip(counts) {
     const shown = { ...counts, failed: failing(counts) };
     const kinds = ["working", "waiting", "failed"].filter((kind) => shown[kind] > 0);
     const total = kinds.reduce((sum, kind) => sum + shown[kind], 0);
+    const words = {
+        working: t("web.sessions.subagents-tip.text.working", "{count} working", {
+            count: shown.working,
+        }),
+        waiting: t("web.sessions.subagents-tip.text.waiting", "{count} waiting", {
+            count: shown.waiting,
+        }),
+        failed: t("web.sessions.subagents-tip.text.failed", "{count} failed", {
+            count: shown.failed,
+        }),
+    };
+    const list = kinds.map((kind) => words[kind]).join(" · ");
 
-    return `${kinds.map((kind) => `${shown[kind]} ${kind}`).join(" · ")} subagent${total === 1 ? "" : "s"}`;
+    return total === 1
+        ? t("web.sessions.subagents-tip.text.one-subagent", "{list} subagent", { list })
+        : t("web.sessions.subagents-tip.text.subagents", "{list} subagents", { list });
 }
 
 /**
@@ -657,7 +677,7 @@ function SessionRow({
     useLayoutEffect(() => {
         shownRows.add(session.id);
     }, []);
-    const title = session.title ?? "New session";
+    const title = session.title ?? t("sessions.new", "New session");
     const path = shortPath(session.cwd, home);
     const where = [
         session.worktree ? `${path} ⎇ ${session.worktree.branch}` : path,
@@ -700,11 +720,23 @@ function SessionRow({
         need === "ask"
             ? ask && `${ask.tool} · ${ask.subject}`
             : need === "failed"
-              ? `Run failed${session.failure ? `: ${session.failure}` : ""}`
+              ? session.failure
+                  ? t("web.sessions.session-row.text.run-failed-why", "Run failed: {failure}", {
+                        failure: session.failure,
+                    })
+                  : t("web.sessions.session-row.text.run-failed", "Run failed")
               : need === "agents"
                 ? failed === 1 && names.length > 0
-                    ? `Subagent ${names[0]} failed`
-                    : `${failed} subagents failed`
+                    ? t("web.sessions.session-row.text.subagent-failed", "Subagent {name} failed", {
+                          name: names[0],
+                      })
+                    : t(
+                          "web.sessions.session-row.text.subagents-failed",
+                          "{count} subagents failed",
+                          {
+                              count: failed,
+                          },
+                      )
                 : undefined;
     // A failed subagent is dealt with by someone who steers; a failed run is only seen, which anyone can do.
     const dismisses =
@@ -753,7 +785,10 @@ function SessionRow({
             <span class="session-mark">
                 ${
                     selected
-                        ? html`<span class="state-check" role="img" aria-label="Selected">
+                        ? html`<span class="state-check" role="img" aria-label=${t(
+                              "web.sessions.session-row.aria-label.selected",
+                              "Selected",
+                          )}>
                             <${Icon} name="check" size=${9} />
                         </span>`
                         : html`<span
@@ -790,7 +825,19 @@ function SessionRow({
                     session.background > 0 &&
                     html`<span
                         class="session-background"
-                        title=${`${session.background} ${session.background === 1 ? "command runs" : "commands run"} in the background`}
+                        title=${
+                            session.background === 1
+                                ? t(
+                                      "web.sessions.session-row.title.one-command-runs",
+                                      "{count} command runs in the background",
+                                      { count: session.background },
+                                  )
+                                : t(
+                                      "web.sessions.session-row.title.commands-run",
+                                      "{count} commands run in the background",
+                                      { count: session.background },
+                                  )
+                        }
                     >
                         <${Icon} name="terminal" size=${10} />${session.background}
                     </span>`
@@ -807,13 +854,20 @@ function SessionRow({
                     !session.waiting &&
                     session.limited === undefined &&
                     !fork &&
-                    html`<span class="session-working" title="Working"></span>`
+                    html`<span class="session-working" title=${t("sessions.working", "Working")}></span>`
                 }
                 ${
                     slot === undefined &&
                     session.waiting &&
-                    html`<span class="session-needs" title="Waiting for approval">
-                        ${steers ? "needs you" : "waiting"}
+                    html`<span
+                        class="session-needs"
+                        title=${t("sessions.waiting-approval", "Waiting for approval")}
+                    >
+                        ${
+                            steers
+                                ? t("web.sessions.session-row.span.needs-you", "needs you")
+                                : t("web.sessions.session-row.span.waiting", "waiting")
+                        }
                     </span>`
                 }
                 ${
@@ -821,7 +875,14 @@ function SessionRow({
                     (unread || marked) &&
                     html`<span
                         class="unread-dot"
-                        title=${marked ? "Marked unread" : "New chat messages"}
+                        title=${
+                            marked
+                                ? t("web.sessions.session-row.title.marked-unread", "Marked unread")
+                                : t(
+                                      "web.sessions.session-row.title.new-chat-messages",
+                                      "New chat messages",
+                                  )
+                        }
                     ></span>`
                 }
                 ${
@@ -829,7 +890,11 @@ function SessionRow({
                     html`<span
                         class="session-limit"
                         data-part="session-limit"
-                        title=${`Waiting for a usage limit to clear, at ${limit}`}
+                        title=${t(
+                            "web.sessions.session-row.title.waiting-limit-at",
+                            "Waiting for a usage limit to clear, at {limit}",
+                            { limit },
+                        )}
                     >
                         <${Icon} name="clock" size=${10} />${limit}
                     </span>`
@@ -855,8 +920,31 @@ function SessionRow({
                 aria-label=${foldLabel(kids, foldTrouble)}
                 title=${
                     foldHeld
-                        ? "The open session is among them, so they show"
-                        : `${folded ? "Show" : "Hide"} ${kids} linked ${kids === 1 ? "session" : "sessions"}`
+                        ? t(
+                              "web.sessions.session-row.title.fold-held",
+                              "The open session is among them, so they show",
+                          )
+                        : folded
+                          ? kids === 1
+                              ? t(
+                                    "web.sessions.session-row.title.show-one-linked",
+                                    "Show 1 linked session",
+                                )
+                              : t(
+                                    "web.sessions.session-row.title.show-linked",
+                                    "Show {kids} linked sessions",
+                                    { kids },
+                                )
+                          : kids === 1
+                            ? t(
+                                  "web.sessions.session-row.title.hide-one-linked",
+                                  "Hide 1 linked session",
+                              )
+                            : t(
+                                  "web.sessions.session-row.title.hide-linked",
+                                  "Hide {kids} linked sessions",
+                                  { kids },
+                              )
                 }
                 disabled=${foldHeld}
                 onClick=${() => onFold(session.id)}
@@ -905,10 +993,13 @@ function SessionRow({
                     data-part="session-review"
                     data-review=${session.id}
                     aria-expanded=${expanded}
-                    title="See the call, then allow or deny it"
+                    title=${t(
+                        "web.sessions.session-row.title.see-call-allow-deny",
+                        "See the call, then allow or deny it",
+                    )}
                     onClick=${() => onReview(session.id)}
                 >
-                    Review
+                    ${t("web.sessions.session-row.button.review", "Review")}
                 </button>
             </span>`
         }
@@ -920,8 +1011,10 @@ function SessionRow({
                 <button
                     class="quick-pill icon-only"
                     data-part="session-dismiss"
-                    title=${`Dismiss: ${why}`}
-                    aria-label=${`Dismiss: ${why}`}
+                    title=${t("web.sessions.session-row.title.dismiss", "Dismiss: {why}", { why })}
+                    aria-label=${t("web.sessions.session-row.title.dismiss", "Dismiss: {why}", {
+                        why,
+                    })}
                     onClick=${() => onDismiss(session.id)}
                 >
                     <${Icon} name="close" size=${12} />
@@ -947,8 +1040,16 @@ function SessionRow({
                 steers &&
                 html`<button
                     class="session-act"
-                    title=${session.archived ? "Unarchive" : "Archive"}
-                    aria-label=${session.archived ? "Unarchive" : "Archive"}
+                    title=${
+                        session.archived
+                            ? t("web.sessions.session-row.title.unarchive", "Unarchive")
+                            : t("web.sessions.session-row.title.archive", "Archive")
+                    }
+                    aria-label=${
+                        session.archived
+                            ? t("web.sessions.session-row.title.unarchive", "Unarchive")
+                            : t("web.sessions.session-row.title.archive", "Archive")
+                    }
                     onClick=${() => setArchived([session.id], !session.archived)}
                 >
                     <${Icon} name=${session.archived ? "unarchive" : "archive"} size=${14} />
@@ -959,8 +1060,8 @@ function SessionRow({
                 html`<button
                     class="session-act"
                     data-part="session-read"
-                    title="Mark read"
-                    aria-label="Mark read"
+                    title=${t("web.sessions.session-row.title.mark-read", "Mark read")}
+                    aria-label=${t("web.sessions.session-row.title.mark-read", "Mark read")}
                     onClick=${() => onRead(session.id)}
                 >
                     <${Icon} name="check" size=${14} />
@@ -971,8 +1072,16 @@ function SessionRow({
                 !session.archived &&
                 html`<button
                     class=${`session-act session-pin ${pinned ? "on" : ""}`}
-                    title=${pinned ? "Unpin" : "Pin to the top"}
-                    aria-label=${pinned ? "Unpin" : "Pin"}
+                    title=${
+                        pinned
+                            ? t("web.sessions.session-row.title.unpin", "Unpin")
+                            : t("web.sessions.session-row.title.pin-to-the-top", "Pin to the top")
+                    }
+                    aria-label=${
+                        pinned
+                            ? t("web.sessions.session-row.title.unpin", "Unpin")
+                            : t("web.sessions.session-row.title.pin", "Pin")
+                    }
                     onClick=${() => togglePin(session.id)}
                 >
                     <${Icon} name="pin" size=${14} />
@@ -983,8 +1092,16 @@ function SessionRow({
                 !session.archived &&
                 html`<button
                     class=${`session-act session-unread ${marked ? "on" : ""}`}
-                    title=${marked ? "Mark read" : "Mark unread"}
-                    aria-label=${marked ? "Mark read" : "Mark unread"}
+                    title=${
+                        marked
+                            ? t("web.sessions.session-row.title.mark-read", "Mark read")
+                            : t("web.sessions.session-row.title.mark-unread", "Mark unread")
+                    }
+                    aria-label=${
+                        marked
+                            ? t("web.sessions.session-row.title.mark-read", "Mark read")
+                            : t("web.sessions.session-row.title.mark-unread", "Mark unread")
+                    }
                     onClick=${() => setUnread(session.id, !marked)}
                 >
                     <${Icon} name=${marked ? "check" : "unread"} size=${14} />
@@ -1016,7 +1133,12 @@ function NeedAsk({ session, ask, steers, ownCall, answering, onAnswer }) {
     const ago = timeAgo(fromServer(ask.at));
     const more = ask.count > 1 ? ` · +${ask.count - 1}` : "";
     const tooLong =
-        ask.form || whole ? "" : `${ask.reason ? " · " : ""}too long to allow from here`;
+        ask.form || whole
+            ? ""
+            : `${ask.reason ? " · " : ""}${t(
+                  "web.sessions.need-ask.text.too-long-allow",
+                  "too long to allow from here",
+              )}`;
 
     return html`<div class="need-ask" data-part="session-ask">
         <div
@@ -1033,8 +1155,20 @@ function NeedAsk({ session, ask, steers, ownCall, answering, onAnswer }) {
         <div class="need-foot">
             <span
                 class="need-when"
-                title=${ask.count > 1 ? `${ask.count - 1} more waiting in this session` : undefined}
-            >${ago === "now" ? "just now" : `${ago} ago`}${more}</span>
+                title=${
+                    ask.count > 1
+                        ? t(
+                              "web.sessions.need-ask.title.more-waiting",
+                              "{count} more waiting in this session",
+                              { count: ask.count - 1 },
+                          )
+                        : undefined
+                }
+            >${
+                ago === "now"
+                    ? t("web.sessions.need-ask.span.just-now", "just now")
+                    : t("web.sessions.need-ask.span.ago", "{ago} ago", { ago })
+            }${more}</span>
             ${
                 steers &&
                 !ask.form &&
@@ -1044,7 +1178,7 @@ function NeedAsk({ session, ask, steers, ownCall, answering, onAnswer }) {
                     disabled=${answering}
                     onClick=${() => onAnswer(session.id, ask.id, false)}
                 >
-                    Deny
+                    ${t("web.sessions.need-ask.button.deny", "Deny")}
                 </button>`
             }
             ${
@@ -1053,11 +1187,14 @@ function NeedAsk({ session, ask, steers, ownCall, answering, onAnswer }) {
                 html`<button
                     class="need-button"
                     data-part="session-decline"
-                    title="Decline it from here; answer it where it waits"
+                    title=${t(
+                        "web.sessions.need-ask.title.decline-answer-where-waits",
+                        "Decline it from here; answer it where it waits",
+                    )}
                     disabled=${answering}
                     onClick=${() => onAnswer(session.id, ask.id, false)}
                 >
-                    Decline
+                    ${t("web.sessions.need-ask.button.decline", "Decline")}
                 </button>`
             }
             ${
@@ -1068,15 +1205,18 @@ function NeedAsk({ session, ask, steers, ownCall, answering, onAnswer }) {
                           disabled=${answering}
                           onClick=${() => onAnswer(session.id, ask.id, true)}
                       >
-                          Allow
+                          ${t("web.sessions.need-ask.button.allow", "Allow")}
                       </button>`
                     : html`<button
                           class=${`need-button ${steers && !ask.form ? "" : "primary"}`}
                           data-part="session-ask-open"
-                          title="See the whole call where it waits"
+                          title=${t(
+                              "web.sessions.need-ask.title.see-whole-call-where",
+                              "See the whole call where it waits",
+                          )}
                           onClick=${() => navigate(ask.conversationId)}
                       >
-                          Open
+                          ${t("web.sessions.need-ask.button.open", "Open")}
                       </button>`
             }
         </div>
@@ -1146,12 +1286,22 @@ function groupsOf(shown, { tab, needle, home, pinned, today }) {
     return [...groups, ...byKey.values()];
 }
 
-const TABS = [
-    ["priority", "Priority"],
-    ["recent", "Recent"],
-    ["folders", "Folders"],
-    ["archived", "Archived"],
-];
+/** Each tab's name: the key and English, read as the tab draws so a new language shows at once. */
+const TAB_NAMES = {
+    priority: ["web.sessions.tabs.text.priority", "Priority"],
+    recent: ["web.sheets.folder.cwd-sheet.div.recent", "Recent"],
+    folders: ["web.sheets.folder.cwd-sheet.aria-label.folders", "Folders"],
+    archived: ["web.sessions.tabs.text.archived", "Archived"],
+};
+
+/** A tab's name, in this language. */
+function tabName(key) {
+    const [word, english] = TAB_NAMES[key];
+
+    return t(word, english);
+}
+
+const TABS = ["priority", "recent", "folders", "archived"];
 
 const tabOf = (group) =>
     group === "folder" ? "folders" : group === "priority" ? "priority" : "recent";
@@ -1980,7 +2130,10 @@ function AllSessions({ compact = false }) {
         data-part="session-list"
     >
         <div class="sessions-head">
-            <span class="sessions-name" data-part="session-list-title">Sessions</span>
+            <span class="sessions-name" data-part="session-list-title">${t(
+                "app.sessions",
+                "Sessions",
+            )}</span>
             <span class="sessions-count">${sessionsLoaded ? count : ""}</span>
             ${
                 canStart &&
@@ -1990,7 +2143,7 @@ function AllSessions({ compact = false }) {
                     onClick=${() => openSheet({ type: "cwd", mode: "new", fromList: true })}
                 >
                     <${Icon} name="plus" size=${14} />
-                    New
+                    ${t("web.sessions.all-sessions.text.new", "New")}
                 </button>`
             }
         </div>
@@ -2015,14 +2168,14 @@ function AllSessions({ compact = false }) {
                 query
                     ? html`<button
                         class="search-clear"
-                        aria-label="Clear"
+                        aria-label=${t("web.sessions.all-sessions.aria-label.clear", "Clear")}
                         onClick=${() => setQuery("")}
                     >
                         <${Icon} name="close" size=${13} />
                     </button>`
                     : html`<span
                             class="search-keys"
-                            title="Launcher"
+                            title=${t("menu.launcher", "Launcher")}
                             aria-hidden="true"
                             onClick=${(event) => {
                                 event.preventDefault();
@@ -2033,8 +2186,11 @@ function AllSessions({ compact = false }) {
                         </span>
                         <button
                             class="search-launcher"
-                            title="Launcher"
-                            aria-label="Open the launcher"
+                            title=${t("menu.launcher", "Launcher")}
+                            aria-label=${t(
+                                "web.sessions.all-sessions.aria-label.open-the-launcher",
+                                "Open the launcher",
+                            )}
                             onClick=${(event) => {
                                 event.preventDefault();
                                 store.set({ launcher: true, drawer: false });
@@ -2050,7 +2206,7 @@ function AllSessions({ compact = false }) {
                     data-part="session-filter"
                     data-state=${filter.on ? "on" : "off"}
                     title=${filter.title}
-                    aria-label=${[filter.title, filter.badge, filter.on ? "on" : ""].filter(Boolean).join(", ")}
+                    aria-label=${[filter.title, filter.badge, filter.on ? t("web.sessions.all-sessions.text.on", "on") : ""].filter(Boolean).join(", ")}
                     onClick=${(event) => {
                         event.preventDefault();
                         filter.run();
@@ -2063,7 +2219,7 @@ function AllSessions({ compact = false }) {
         </label>
         <div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
             ${TABS.map(
-                ([key, label]) => html`<button
+                (key) => html`<button
                     key=${key}
                     role="tab"
                     data-part="session-tab"
@@ -2071,16 +2227,29 @@ function AllSessions({ compact = false }) {
                     aria-selected=${tab === key}
                     aria-label=${
                         key === "archived"
-                            ? "Archived"
+                            ? tabName("archived")
                             : key === "priority" && needCount > 0
-                              ? `Priority, ${needCount} ${needCount === 1 ? "needs" : "need"} you`
+                              ? needCount === 1
+                                  ? t(
+                                        "web.sessions.tabs.aria-label.one-needs-you",
+                                        "Priority, 1 needs you",
+                                    )
+                                  : t(
+                                        "web.sessions.tabs.aria-label.needs-you",
+                                        "Priority, {count} need you",
+                                        { count: needCount },
+                                    )
                               : undefined
                     }
-                    title=${key === "archived" ? "Archived" : undefined}
+                    title=${key === "archived" ? tabName("archived") : undefined}
                     class=${tab === key ? "on" : ""}
                     onClick=${() => setTab(key)}
                 >
-                    ${key === "archived" ? html`<${Icon} name="archive" size=${14} />` : label}
+                    ${
+                        key === "archived"
+                            ? html`<${Icon} name="archive" size=${14} />`
+                            : tabName(key)
+                    }
                     ${
                         key === "priority" &&
                         needCount > 0 &&
@@ -2126,7 +2295,10 @@ function AllSessions({ compact = false }) {
                 !groups.some((group) => group.slot === "needs") &&
                 html`<div class="priority-clear" data-part="session-clear">
                     <${Icon} name="check" size=${13} />
-                    <span>Nothing needs you</span>
+                    <span>${t(
+                        "web.sessions.all-sessions.span.nothing-needs",
+                        "Nothing needs you",
+                    )}</span>
                 </div>`
             }
             ${groups.map((group) => {
@@ -2152,12 +2324,19 @@ function AllSessions({ compact = false }) {
                 const action =
                     group.slot === "needs" && failedRows.length > 1
                         ? {
-                              label: `Dismiss ${failedRows.length} failed`,
+                              label: t(
+                                  "web.sessions.session-group.button.dismiss-failed",
+                                  "Dismiss {count} failed",
+                                  { count: failedRows.length },
+                              ),
                               run: () => dismissAll(failedRows),
                           }
                         : group.slot === "ready"
                           ? {
-                                label: "Mark all read",
+                                label: t(
+                                    "web.sessions.session-group.button.mark-all-read",
+                                    "Mark all read",
+                                ),
                                 run: () => markRead(group.rows.map((row) => row.session)),
                             }
                           : undefined;
@@ -2188,8 +2367,28 @@ function AllSessions({ compact = false }) {
                                   html`<span
                                       class=${`group-trouble ${trouble}`}
                                       role="img"
-                                      aria-label=${trouble === "waiting" ? "A session needs you" : "A session failed"}
-                                      title=${trouble === "waiting" ? "A session here needs you" : "A session here failed"}
+                                      aria-label=${
+                                          trouble === "waiting"
+                                              ? t(
+                                                    "web.sessions.session-group.aria-label.session-needs-you",
+                                                    "A session needs you",
+                                                )
+                                              : t(
+                                                    "web.sessions.session-group.aria-label.session-failed",
+                                                    "A session failed",
+                                                )
+                                      }
+                                      title=${
+                                          trouble === "waiting"
+                                              ? t(
+                                                    "web.sessions.session-group.title.session-here-needs-you",
+                                                    "A session here needs you",
+                                                )
+                                              : t(
+                                                    "web.sessions.session-group.title.session-here-failed",
+                                                    "A session here failed",
+                                                )
+                                      }
                                   ></span>`
                               }
                               <span class="group-count" data-part="session-group-count">
@@ -2229,7 +2428,11 @@ function AllSessions({ compact = false }) {
                                     data-part="session-more"
                                     onClick=${() => setAllNeeds(true)}
                                 >
-                                    Show ${group.rows.length - rows.length} more
+                                    ${t(
+                                        "web.sessions.session-group.button.show-more",
+                                        "Show {count} more",
+                                        { count: group.rows.length - rows.length },
+                                    )}
                                 </button>`
                             }
                         </div>
@@ -2239,21 +2442,35 @@ function AllSessions({ compact = false }) {
         </div>
         ${
             chosen.length > 0 &&
-            html`<div class="select-bar" role="group" aria-label="Selected sessions">
+            html`<div class="select-bar" role="group" aria-label=${t(
+                "web.sessions.all-sessions.aria-label.selected-sessions",
+                "Selected sessions",
+            )}>
                 <span class="select-count">
                     <b>${chosen.length}</b>
-                    <span class="select-word"> selected</span>
+                    <span class="select-word"> ${t(
+                        "web.sessions.all-sessions.span.selected",
+                        "selected",
+                    )}</span>
                 </span>
                 ${
                     canSteer() &&
                     html`<button class="button" onClick=${archiveChosen}>
-                        ${archived ? "Unarchive" : "Archive"}
+                        ${
+                            archived
+                                ? t("web.sessions.session-row.title.unarchive", "Unarchive")
+                                : t("web.sessions.session-row.title.archive", "Archive")
+                        }
                     </button>`
                 }
                 ${
                     !archived &&
                     html`<button class="button" onClick=${pinChosen}>
-                        ${allPinned ? "Unpin" : "Pin"}
+                        ${
+                            allPinned
+                                ? t("web.sessions.session-row.title.unpin", "Unpin")
+                                : t("web.sessions.session-row.title.pin", "Pin")
+                        }
                     </button>`
                 }
                 ${extActions.map(
@@ -2271,8 +2488,14 @@ function AllSessions({ compact = false }) {
                 )}
                 <button
                     class="select-clear"
-                    title="Clear the selection (Esc)"
-                    aria-label="Clear the selection"
+                    title=${t(
+                        "web.sessions.all-sessions.title.clear-the-selection-esc",
+                        "Clear the selection (Esc)",
+                    )}
+                    aria-label=${t(
+                        "web.sessions.all-sessions.aria-label.clear-the-selection",
+                        "Clear the selection",
+                    )}
                     onClick=${clearSelection}
                 >
                     <${Icon} name="close" size=${14} />
@@ -2365,8 +2588,16 @@ function RailTiles() {
                 key=${session.id}
                 class=${`ws ${session.id === conversationId ? "active" : ""} ${session.busy ? "busy" : ""} ${session.waiting ? "waiting" : ""} ${session.background > 0 ? "has-background" : ""}`}
                 style=${`--i:${index}`}
-                title=${`${session.title ?? "New session"}${index < 9 ? ` (Alt+${index + 1})` : ""}`}
-                aria-label=${`${session.title ?? "New session"}${session.waiting ? ", needs you" : session.busy ? ", working" : session.background > 0 ? ", running commands in the background" : ""}`}
+                title=${`${session.title ?? t("sessions.new", "New session")}${index < 9 ? ` (Alt+${index + 1})` : ""}`}
+                aria-label=${`${session.title ?? t("sessions.new", "New session")}${
+                    session.waiting
+                        ? `, ${t("web.sessions.session-row.span.needs-you", "needs you")}`
+                        : session.busy
+                          ? `, ${t("sessions.working", "Working")}`
+                          : session.background > 0
+                            ? `, ${t("web.sessions.rail-tiles.text.running-background", "running commands in the background")}`
+                            : ""
+                }`}
                 aria-current=${session.id === conversationId ? "page" : undefined}
                 onClick=${() => navigate(session.id)}
             >
@@ -2403,7 +2634,13 @@ function Rail({ foldable = false, folded = false }) {
     const { unread, peekSeen, server } = store.state;
     const needs = useMemo(() => needsYouCount(sessions), [sessions, unread, peekSeen, server]);
     const sessionsLabel =
-        needs > 0 ? `Sessions, ${needs} ${needs === 1 ? "needs" : "need"} you` : "Sessions";
+        needs === 1
+            ? t("web.sessions.rail.aria-label.one-needs-you", "Sessions, 1 needs you")
+            : needs > 0
+              ? t("web.sessions.rail.aria-label.needs-you", "Sessions, {count} need you", {
+                    count: needs,
+                })
+              : t("app.sessions", "Sessions");
     const needsBadge =
         needs > 0 && html`<span class="rail-count attn" data-part="rail-needs">${needs}</span>`;
     const keys = APPLE ? "⌘B" : "Ctrl+B";
@@ -2412,14 +2649,17 @@ function Rail({ foldable = false, folded = false }) {
     // A rail with more buttons than room scrolls as a whole, and fades the edge where more is.
     const more = useScrollMore();
 
-    return html`<nav class="rail" data-part="rail" aria-label="Sessions and tools" ref=${more}>
+    return html`<nav class="rail" data-part="rail" aria-label=${t(
+        "web.sessions.rail.aria-label.sessions-and-tools",
+        "Sessions and tools",
+    )} ref=${more}>
         ${
             foldable
                 ? html`<button
                     class="rail-brand"
                     data-part="brand-mark"
-                    title="Home"
-                    aria-label="Home"
+                    title=${t("web.sessions.rail.title.home", "Home")}
+                    aria-label=${t("web.sessions.rail.title.home", "Home")}
                     onClick=${toSessions}
                 >
                     π
@@ -2433,7 +2673,19 @@ function Rail({ foldable = false, folded = false }) {
                     class=${`rail-button ${folded ? "" : "on"}`}
                     data-part="rail-button"
                     data-state=${railState(!folded)}
-                    title=${`Sessions (${keys} ${folded ? "unfolds" : "folds"} the list)`}
+                    title=${
+                        folded
+                            ? t(
+                                  "web.sessions.rail.title.sessions-unfolds",
+                                  "Sessions ({keys} unfolds the list)",
+                                  { keys },
+                              )
+                            : t(
+                                  "web.sessions.rail.title.sessions-folds",
+                                  "Sessions ({keys} folds the list)",
+                                  { keys },
+                              )
+                    }
                     aria-label=${sessionsLabel}
                     aria-expanded=${!folded}
                     onClick=${fold}
@@ -2445,7 +2697,7 @@ function Rail({ foldable = false, folded = false }) {
                     class="rail-button on"
                     data-part="rail-button"
                     data-state="open"
-                    title="Sessions"
+                    title=${t("app.sessions", "Sessions")}
                     aria-current="page"
                 >
                     <${Icon} name="chat" size=${19} />
@@ -2473,8 +2725,14 @@ function Rail({ foldable = false, folded = false }) {
             class=${`rail-button rail-running ${busy > 0 ? "lit" : ""}`}
             data-part="rail-button"
             data-state=${railState(false, busy > 0)}
-            title="Running now"
-            aria-label=${busy > 0 ? `Running now, ${busy}` : "Running now"}
+            title=${t("web.sessions.rail.title.running-now", "Running now")}
+            aria-label=${
+                busy > 0
+                    ? t("web.sessions.rail.aria-label.running-now-count", "Running now, {count}", {
+                          count: busy,
+                      })
+                    : t("web.sessions.rail.title.running-now", "Running now")
+            }
             onClick=${() => openSheet({ type: "running" })}
         >
             <${Icon} name="pulse" size=${19} />
@@ -2484,12 +2742,22 @@ function Rail({ foldable = false, folded = false }) {
             class=${`rail-button rail-agents ${live > 0 ? "lit" : ""} ${board ? "open" : ""}`}
             data-part="rail-button"
             data-state=${railState(board, live > 0)}
-            title="Subagents in every session"
+            title=${t(
+                "web.sessions.rail.title.subagents-in-every-session",
+                "Subagents in every session",
+            )}
             aria-label=${[
-                "Subagents",
-                live > 0 && `${live} at work`,
-                agents.waiting > 0 && `${agents.waiting} waiting for approval`,
-                failed > 0 && `${failed} failed`,
+                t("web.subagents-board.subagents-board.h2.subagents", "Subagents"),
+                live > 0 &&
+                    t("web.sessions.rail.aria-label.at-work", "{count} at work", { count: live }),
+                agents.waiting > 0 &&
+                    t(
+                        "web.sessions.rail.aria-label.waiting-for-approval",
+                        "{count} waiting for approval",
+                        { count: agents.waiting },
+                    ),
+                failed > 0 &&
+                    t("web.sessions.rail.aria-label.failed", "{count} failed", { count: failed }),
             ]
                 .filter(Boolean)
                 .join(", ")}
@@ -2509,8 +2777,12 @@ function Rail({ foldable = false, folded = false }) {
                 ? html`<button
                     class="rail-button"
                     data-part="rail-button"
-                    title=${canStart ? "People and invites" : "People"}
-                    aria-label="People"
+                    title=${
+                        canStart
+                            ? t("web.sessions.rail.title.people-and-invites", "People and invites")
+                            : t("app.people", "People")
+                    }
+                    aria-label=${t("web.sessions.rail.aria-label.people", "People")}
                     onClick=${() => openSheet({ type: "people" })}
                 >
                     <${Icon} name="users" size=${19} />
@@ -2518,8 +2790,11 @@ function Rail({ foldable = false, folded = false }) {
                 : html`<button
                     class="rail-button"
                     data-part="rail-button"
-                    title="Sign in another device"
-                    aria-label="Devices"
+                    title=${t(
+                        "web.sessions.rail.title.sign-in-another-device",
+                        "Sign in another device",
+                    )}
+                    aria-label=${t("web.sessions.rail.aria-label.devices", "Devices")}
                     onClick=${() => openSheet({ type: "invite" })}
                 >
                     <${Icon} name="users" size=${19} />
@@ -2530,8 +2805,8 @@ function Rail({ foldable = false, folded = false }) {
             html`<button
                 class="rail-button"
                 data-part="rail-button"
-                title="Model providers"
-                aria-label="Providers"
+                title=${t("web.sessions.rail.title.model-providers", "Model providers")}
+                aria-label=${t("web.sessions.rail.aria-label.providers", "Providers")}
                 onClick=${() => openSheet({ type: "providers" })}
             >
                 <${Icon} name="key" size=${19} />
@@ -2540,8 +2815,8 @@ function Rail({ foldable = false, folded = false }) {
         <button
             class="rail-button"
             data-part="rail-button"
-            title="Theme, tiling, motion"
-            aria-label="Theme"
+            title=${t("web.sessions.rail.title.theme-tiling-motion", "Theme, tiling, motion")}
+            aria-label=${t("web.sessions.rail.aria-label.theme", "Theme")}
             onClick=${() => openSheet({ type: "appearance" })}
         >
             <${Icon} name="palette" size=${19} />
@@ -2550,7 +2825,7 @@ function Rail({ foldable = false, folded = false }) {
             class="rail-button rail-me"
             data-part="rail-button"
             title=${`${me?.name ?? ""} · ${role}`}
-            aria-label="Your name"
+            aria-label=${t("web.sessions.rail.aria-label.your-name", "Your name")}
             onClick=${() => openSheet({ type: "name" })}
         >
             ${me && html`<${Avatar} person=${me} size=${30} />`}
@@ -2643,7 +2918,7 @@ export function ResizeHandle() {
         ref=${ref}
         role="separator"
         aria-orientation="vertical"
-        title="Drag to resize"
+        title=${t("web.sessions.resize-handle.title.drag-to-resize", "Drag to resize")}
         onPointerDown=${start}
         onDblClick=${() => setPrefs({ sidebarWidth: SIDEBAR_WIDTH })}
     ></div>`;

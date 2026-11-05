@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { browserModuleState, leaveSafeMode, safeMode } from "../extension-ui.js";
 import { api, attempt, closeSheet, openSheet, store } from "../store.js";
 import { html, Icon, Loader, Sheet, shortPath, Switch } from "../ui.js";
-import { ACCESS_WORDS, galleryApi, galleryAvailable, Tile } from "./gallery.js";
+import { accessWords, galleryApi, galleryAvailable, Tile } from "./gallery.js";
+import { t } from "../ui-locale.js";
 
 /** The guide for people who write extensions: its first page, on the docs site, which describes the latest release. */
 const GUIDE = "https://tannermidd.github.io/pi-pocket/docs/extensions/first-extension/";
@@ -18,20 +19,29 @@ function guardNote(module, guard) {
     if (!guard.enabled) {
         return {
             warn: true,
-            text: "Off in Pi's own settings (~/.pi/lancet-guard.json), so it does not run here either.",
+            text: t(
+                "web.sheets.extensions.guard-note.text.off-pi-s-own",
+                "Off in Pi's own settings (~/.pi/lancet-guard.json), so it does not run here either.",
+            ),
         };
     }
 
     if (!module.enabled) {
         return {
             warn: true,
-            text: "Off in Pi Pocket: bash, background, write, and edit calls run unchecked here. Pi itself still uses it.",
+            text: t(
+                "web.sheets.extensions.guard-note.text.off-pi-pocket-bash",
+                "Off in Pi Pocket: bash, background, write, and edit calls run unchecked here. Pi itself still uses it.",
+            ),
         };
     }
 
     return {
         warn: false,
-        text: "Checks bash, background, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        text: t(
+            "web.sheets.extensions.guard-note.text.checks-bash-background-write",
+            "Checks bash, background, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        ),
     };
 }
 
@@ -45,21 +55,34 @@ function GuardModel({ owner, model, onStart }) {
 
     return html`<div class="setting">
         <div class="grow">
-            <div class="small">LANCET model</div>
+            <div class="small">${t(
+                "web.sheets.extensions.guard-model.div.lancet-model",
+                "LANCET model",
+            )}</div>
             <div class=${`small ${model.state === "failed" ? "warn" : "muted"}`}>
                 ${
                     model.state === "missing"
-                        ? "Not downloaded yet. The guard needs it to score commands. The download (about 109 MB) comes from the LANCET-model GitHub release, is checked against fixed checksums, and Pi uses it too."
+                        ? t(
+                              "web.sheets.extensions.guard-model.text.not-downloaded-yet-guard",
+                              "Not downloaded yet. The guard needs it to score commands. The download (about 109 MB) comes from the LANCET-model GitHub release, is checked against fixed checksums, and Pi uses it too.",
+                          )
                         : model.detail
                 }
             </div>
         </div>
         ${
             downloading
-                ? html`<${Loader} label="Downloading" />`
+                ? html`<${Loader} label=${t(
+                      "web.sheets.extensions.guard-model.label.downloading",
+                      "Downloading",
+                  )} />`
                 : owner &&
                   html`<button class="button small primary" onClick=${onStart}>
-                      ${model.state === "failed" ? "Try again" : "Download"}
+                      ${
+                          model.state === "failed"
+                              ? t("web.sheets.extensions.guard-model.button.try-again", "Try again")
+                              : t("web.sheets.extensions.guard-model.button.download", "Download")
+                      }
                   </button>`
         }
     </div>`;
@@ -73,15 +96,29 @@ function ApprovalRule({ owner }) {
 
     return html`<div class="setting">
         <div class="grow">
-            <div class="small">Approvals need someone else</div>
+            <div class="small">${t(
+                "web.sheets.extensions.approval-rule.div.approvals-need-someone-else",
+                "Approvals need someone else",
+            )}</div>
             <div class="muted small">
-                A guest cannot allow a call that their own message led to. You always can.
+                ${t(
+                    "web.sheets.extensions.approval-rule.div.guest-allow-call-their",
+                    "A guest cannot allow a call that their own message led to. You always can.",
+                )}
             </div>
         </div>
         <${Switch}
             on=${others}
             disabled=${!owner}
-            label=${`Approvals need someone else: ${others ? "on" : "off"}`}
+            label=${t(
+                "web.sheets.extensions.approval-rule.label.approvals-need-someone-else",
+                "Approvals need someone else: {detail}",
+                {
+                    detail: others
+                        ? t("web.sheets.extensions.approval-rule.label.content", "on")
+                        : t("web.sheets.extensions.approval-rule.label.off", "off"),
+                },
+            )}
             onChange=${change}
         />
     </div>`;
@@ -120,7 +157,10 @@ function ModuleSettings({ module }) {
     }
 
     if (!shown) {
-        return html`<${Loader} label="Settings" />`;
+        return html`<${Loader} label=${t(
+            "web.sheets.extensions.module-settings.label.settings",
+            "Settings",
+        )} />`;
     }
 
     // What a field shows: the owner's change, the default when they asked for it back (null), or the value now.
@@ -147,7 +187,15 @@ function ModuleSettings({ module }) {
         );
 
         if (unreadable !== undefined) {
-            setError(`${unreadable.label} must be a number.`);
+            setError(
+                t(
+                    "web.sheets.extensions.module-settings.save.number",
+                    "{label} must be a number.",
+                    {
+                        label: unreadable.label,
+                    },
+                ),
+            );
 
             return;
         }
@@ -177,17 +225,31 @@ function ModuleSettings({ module }) {
     };
 
     return html`<div class="ext-settings">
-        <div class="small"><b>Settings</b></div>
+        <div class="small"><b>${t(
+            "web.sheets.extensions.module-settings.b.settings",
+            "Settings",
+        )}</b></div>
         ${shown.fields.map((field) => {
             const secret = field.type === "text" && field.secret;
             const id = `ext-setting-${module}-${field.name}`;
+            const any = t(
+                "web.sheets.extensions.module-settings.range.content.fallback.any",
+                "any",
+            );
             const range =
                 field.type === "number" && (field.min !== undefined || field.max !== undefined)
-                    ? `From ${field.min ?? "any"} to ${field.max ?? "any"}`
+                    ? t(
+                          "web.sheets.extensions.module-settings.range.content",
+                          "From {detail} to {detail2}",
+                          { detail: field.min ?? any, detail2: field.max ?? any },
+                      )
                     : undefined;
             const hint =
                 secret && shown.set.includes(field.name)
-                    ? "Set: type to replace"
+                    ? t(
+                          "web.sheets.extensions.module-settings.hint.set-type-replace",
+                          "Set: type to replace",
+                      )
                     : (field.placeholder ?? "");
 
             return html`<div class="setting wrap" key=${field.name}>
@@ -229,11 +291,21 @@ function ModuleSettings({ module }) {
                     shown.set.includes(field.name) &&
                     html`<button
                         class="button small"
-                        title="Put its default back"
+                        title=${t(
+                            "web.sheets.extensions.module-settings.title.put-default-back",
+                            "Put its default back",
+                        )}
                         disabled=${busy}
                         onClick=${() => set(field.name, null)}
                     >
-                        ${secret ? "Clear" : "Default"}
+                        ${
+                            secret
+                                ? t("web.sheets.extensions.module-settings.button.clear", "Clear")
+                                : t(
+                                      "web.sheets.extensions.module-settings.button.default",
+                                      "Default",
+                                  )
+                        }
                     </button>`
                 }
             </div>`;
@@ -245,7 +317,14 @@ function ModuleSettings({ module }) {
                 disabled=${busy || Object.keys(draft).length === 0}
                 onClick=${save}
             >
-                ${busy ? "Saving…" : "Save settings"}
+                ${
+                    busy
+                        ? t("web.sheets.extensions.module-settings.button.saving", "Saving…")
+                        : t(
+                              "web.sheets.extensions.module-settings.button.save-settings",
+                              "Save settings",
+                          )
+                }
             </button>
         </div>
     </div>`;
@@ -264,20 +343,47 @@ function WebPart({ module }) {
 
     const here = browserModuleState(module.file.replace(/\.ts$/, ""));
     const parts = [
-        web.routes.length > 0 && `routes: ${web.routes.join(", ")}`,
-        web.commands?.length > 0 && `commands: ${web.commands.join(", ")}`,
-        web.client && `browser module for ${ACCESS_WORDS[web.client] ?? web.client}`,
-        web.publicPage && "pages for anyone with a link, no sign-in",
-        web.service && "a service for other modules",
-        here?.status === "loading" && "loading here",
-        here?.status === "off" && "off in this tab",
+        web.routes.length > 0 &&
+            t("web.sheets.extensions.web-part.parts.routes", "routes: {list}", {
+                list: web.routes.join(", "),
+            }),
+        web.commands?.length > 0 &&
+            t("web.sheets.extensions.web-part.parts.commands", "commands: {list}", {
+                list: web.commands.join(", "),
+            }),
+        web.client &&
+            t(
+                "web.sheets.extensions.web-part.parts.browser-module",
+                "browser module for {client}",
+                {
+                    client: accessWords(web.client),
+                },
+            ),
+        web.publicPage &&
+            t(
+                "web.sheets.extensions.web-part.parts.pages-anyone-link-no",
+                "pages for anyone with a link, no sign-in",
+            ),
+        web.service &&
+            t(
+                "web.sheets.extensions.web-part.parts.service-other-modules",
+                "a service for other modules",
+            ),
+        here?.status === "loading" &&
+            t("web.sheets.extensions.web-part.parts.loading", "loading here"),
+        here?.status === "off" &&
+            t("web.sheets.extensions.web-part.parts.off-tab", "off in this tab"),
     ].filter(Boolean);
 
     return html`${parts.length > 0 && html`<div class="muted small mono">${parts.join(" · ")}</div>`}
     ${
         here?.status === "failed" &&
         html`<div class="error-box small">
-            In this browser: ${here.error}. An edit to it, or reloading the page, tries again.
+            ${t(
+                "web.sheets.extensions.web-part.div.browser-edit-reloading-page",
+                "In this browser: {error}. An edit to it, or reloading the page, tries again.",
+                { error: here.error },
+            )}
         </div>`
     }`;
 }
@@ -292,8 +398,11 @@ function SafeMode() {
     }
 
     return html`<div class="setting wrap safe-mode">
-        <div class="grow small">Extensions' browser parts are off in this tab, and so is the theme.</div>
-        <button class="button" onClick=${leaveSafeMode}>Turn them back on</button>
+        <div class="grow small">${t("web.sheets.extensions.safe-mode.div.extensions-browser-parts-off", "Extensions' browser parts are off in this tab, and so is the theme.")}</div>
+        <button class="button" onClick=${leaveSafeMode}>${t(
+            "web.sheets.extensions.safe-mode.button.turn-them-back-on",
+            "Turn them back on",
+        )}</button>
     </div>`;
 }
 
@@ -312,7 +421,7 @@ function GalleryPart({ module, installed, busy, turnOff }) {
                 class="link small"
                 onClick=${() => openSheet({ type: "gallery-share", id: module.file })}
             >
-                Share…
+                ${t("web.sheets.extensions.gallery-part.button.share", "Share…")}
             </button>
         </div>`;
     }
@@ -320,20 +429,34 @@ function GalleryPart({ module, installed, busy, turnOff }) {
     return html`${
         installed.revoked !== null &&
         html`<div class="error-box small">
-            The gallery revoked this version: ${installed.revoked}
+            ${t(
+                "web.sheets.extensions.gallery-part.div.gallery-revoked-version",
+                "The gallery revoked this version: {revoked} {detail}",
+                { revoked: installed.revoked, detail: "" },
+            )}
             ${
                 module.enabled &&
                 html`<div class="sheet-actions">
                     <button class="button small primary" disabled=${busy} onClick=${turnOff}>
-                        Turn it off
+                        ${t("web.sheets.extensions.gallery-part.button.turn-it-off", "Turn it off")}
                     </button>
                 </div>`
             }
         </div>`
     }
     <div class="extension-gallery">
-        <span class="pi-tag gallery-plain">from the gallery · ${installed.version}</span>
-        ${installed.update && html`<span class="pi-tag behind">update available</span>`}
+        <span class="pi-tag gallery-plain">${t(
+            "web.sheets.extensions.gallery-part.span.gallery",
+            "from the gallery · {version}",
+            { version: installed.version },
+        )}</span>
+        ${
+            installed.update &&
+            html`<span class="pi-tag behind">${t(
+                "web.sheets.extensions.gallery-part.span.update-available",
+                "update available",
+            )}</span>`
+        }
         <button
             class="link small"
             onClick=${() =>
@@ -344,17 +467,17 @@ function GalleryPart({ module, installed, busy, turnOff }) {
                     origin: store.state.sheet?.origin ?? "extensions",
                 })}
         >
-            Details
+            ${t("web.sheets.extensions.gallery-part.button.details", "Details")}
         </button>
     </div>`;
 }
 
 /** When PiP compacts its own context: once idle above so many tokens (`pip-compact.ts`), or only as sessions do. */
 const PIP_COMPACT = [
-    [0, "As sessions do"],
-    [40000, "Above 40k tokens"],
-    [60000, "Above 60k tokens"],
-    [100000, "Above 100k tokens"],
+    [0, () => t("web.sheets.extensions.pip-compact.sessions", "As sessions do")],
+    [40000, () => t("web.sheets.extensions.pip-compact.above-k-tokens", "Above 40k tokens")],
+    [60000, () => t("web.sheets.extensions.pip-compact.above-k-tokens.above", "Above 60k tokens")],
+    [100000, () => t("web.sheets.extensions.pip-compact.above-k-tokens.k", "Above 100k tokens")],
 ];
 
 function PipCompactAt({ owner }) {
@@ -363,13 +486,21 @@ function PipCompactAt({ owner }) {
 
     return html`<div class="setting wrap">
         <div class="grow">
-            <div class="small">Compact PiP's context</div>
+            <div class="small">${t(
+                "web.sheets.extensions.pip-compact-at.div.compact-pi-p-s-context",
+                "Compact PiP's context",
+            )}</div>
             <div class="muted small">
-                When PiP's older messages become a short summary: as a session's do, or sooner,
-                once PiP is idle above a limit, which keeps each reply cheaper.
+                ${t(
+                    "web.sheets.extensions.pip-compact-at.div.pi-p-s-older-messages",
+                    "When PiP's older messages become a short summary: as a session's do, or sooner, once PiP is idle above a limit, which keeps each reply cheaper.",
+                )}
             </div>
         </div>
-        <div class="segmented" role="group" aria-label="Compact PiP's context">
+        <div class="segmented" role="group" aria-label=${t(
+            "web.sheets.extensions.pip-compact-at.aria-label.compact-pi-p-s-context",
+            "Compact PiP's context",
+        )}>
             ${PIP_COMPACT.map(
                 ([value, label]) => html`<button
                     class=${at === value ? "on" : ""}
@@ -377,7 +508,7 @@ function PipCompactAt({ owner }) {
                     disabled=${!owner}
                     onClick=${() => change(value)}
                 >
-                    ${label}
+                    ${label()}
                 </button>`,
             )}
         </div>
@@ -385,7 +516,10 @@ function PipCompactAt({ owner }) {
 }
 
 export function ExtensionsSheet() {
-    return html`<${Sheet} title="Extensions" onClose=${closeSheet} wide=${true}>
+    return html`<${Sheet} title=${t(
+        "web.sheets.extensions.extensions-sheet.title.extensions",
+        "Extensions",
+    )} onClose=${closeSheet} wide=${true}>
         <${ExtensionsContent} />
     <//>`;
 }
@@ -464,7 +598,10 @@ export function ExtensionsContent({
             (error) =>
                 setProblem(
                     error.status === 404
-                        ? "Restart the server (menu → Restart server) to manage extensions from here."
+                        ? t(
+                              "web.sheets.extensions.extensions-content.load.restart-server-menu-manage",
+                              "Restart the server (menu → Restart server) to manage extensions from here.",
+                          )
                         : error.message,
                 ),
         );
@@ -581,18 +718,37 @@ export function ExtensionsContent({
                     <${Icon} name="down" size=${14} class="ext-row-chevron" />
                 </span>
                 ${module.summary && html`<span class="ext-row-desc">${summaryOf(module)}</span>`}
-                ${module.error && html`<span class="ext-row-meta warn">Did not load</span>`}
-                ${installed?.revoked && html`<span class="ext-row-meta warn">The gallery revoked this version</span>`}
-                ${installed?.update && html`<span class="ext-row-meta accent">An update is ready</span>`}
+                ${
+                    module.error &&
+                    html`<span class="ext-row-meta warn">${t(
+                        "web.sheets.extensions.extensions-content.row.span.did-not-load",
+                        "Did not load",
+                    )}</span>`
+                }
+                ${installed?.revoked && html`<span class="ext-row-meta warn">${t("web.sheets.extensions.extensions-content.row.span.gallery-revoked-version", "The gallery revoked this version")}</span>`}
+                ${installed?.update && html`<span class="ext-row-meta accent">${t("web.sheets.extensions.extensions-content.row.span.an-update-is-ready", "An update is ready")}</span>`}
             </button>
             <div class="ext-row-end">
                 ${
                     module.required
-                        ? html`<span class="ext-state">Always on</span>`
+                        ? html`<span class="ext-state">${t(
+                              "web.sheets.extensions.extensions-content.row.span.always-on",
+                              "Always on",
+                          )}</span>`
                         : html`<${Switch}
                               on=${module.enabled}
                               disabled=${!owner || busy !== null}
-                              label=${`${module.title}: ${module.enabled ? "on" : "off"}`}
+                              label=${`${module.title}: ${
+                                  module.enabled
+                                      ? t(
+                                            "web.sheets.extensions.extensions-content.row.label.content",
+                                            "on",
+                                        )
+                                      : t(
+                                            "web.sheets.extensions.extensions-content.row.label.off",
+                                            "off",
+                                        )
+                              }`}
                               onChange=${(event) => toggle(module, event.currentTarget)}
                           />`
                 }
@@ -615,7 +771,10 @@ export function ExtensionsContent({
                 html`<div
                     class="guard-confirm ext-row-under"
                     role="alertdialog"
-                    aria-label="Turn off Lancet Guard?"
+                    aria-label=${t(
+                        "web.sheets.extensions.extensions-content.row.aria-label.turn-off-lancet-guard",
+                        "Turn off Lancet Guard?",
+                    )}
                     aria-describedby="guard-confirm-warning"
                     onKeyDown=${(event) => {
                         if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
@@ -625,14 +784,17 @@ export function ExtensionsContent({
                         }
                     }}
                 >
-                    <span id="guard-confirm-warning">bash, background, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.</span>
+                    <span id="guard-confirm-warning">${t("web.sheets.extensions.extensions-content.row.span.bash-background-write-edit", "bash, background, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.")}</span>
                     <div class="sheet-actions">
                         <button
                             class="button small"
                             ref=${guardCancel}
                             onClick=${() => setConfirmGuard(false)}
                         >
-                            Keep it on
+                            ${t(
+                                "web.sheets.extensions.extensions-content.row.button.keep-it-on",
+                                "Keep it on",
+                            )}
                         </button>
                         <button
                             class="button small primary"
@@ -642,7 +804,10 @@ export function ExtensionsContent({
                                 change(module, "", { enabled: false });
                             }}
                         >
-                            Turn off
+                            ${t(
+                                "web.sheets.extensions.extensions-content.row.button.turn-off",
+                                "Turn off",
+                            )}
                         </button>
                     </div>
                 </div>`
@@ -650,10 +815,14 @@ export function ExtensionsContent({
             ${
                 confirmOn === module.file &&
                 !module.enabled &&
-                html`<div class="ext-confirm ext-row-under" role="group" aria-label=${`Turn on ${module.title}?`}>
-                    <span>It runs inside the server with your rights, in every session. Turn it on only if you trust its code.</span>
+                html`<div class="ext-confirm ext-row-under" role="group" aria-label=${t(
+                    "web.sheets.extensions.extensions-content.row.aria-label.turn",
+                    "Turn on {title}?",
+                    { title: module.title },
+                )}>
+                    <span>${t("web.sheets.extensions.extensions-content.row.span.runs-inside-server-rights", "It runs inside the server with your rights, in every session. Turn it on only if you trust its code.")}</span>
                     <div class="sheet-actions">
-                        <button class="button small" onClick=${() => setConfirmOn(null)}>Not now</button>
+                        <button class="button small" onClick=${() => setConfirmOn(null)}>${t("web.sheets.extensions.extensions-content.row.button.not-now", "Not now")}</button>
                         <button
                             class="button small primary"
                             disabled=${busy !== null}
@@ -662,7 +831,10 @@ export function ExtensionsContent({
                                 change(module, "", { enabled: true });
                             }}
                         >
-                            Turn on
+                            ${t(
+                                "web.sheets.extensions.extensions-content.row.button.turn-on",
+                                "Turn on",
+                            )}
                         </button>
                     </div>
                 </div>`
@@ -688,8 +860,28 @@ export function ExtensionsContent({
                         turnOff=${() => change(module, "", { enabled: false })}
                     />
                     <div class="muted small mono">
-                        ${module.source === "drop-in" ? `drop-in${module.path ? ` · ${shortPath(module.path, store.state.server?.home)}` : ""}` : module.file}
-                        ${tools.length > 0 ? ` · tools: ${tools.join(", ")}` : ""}
+                        ${
+                            module.source === "drop-in"
+                                ? t(
+                                      "web.sheets.extensions.extensions-content.row.drop",
+                                      "drop-in{path}",
+                                      {
+                                          path: module.path
+                                              ? ` · ${shortPath(module.path, store.state.server?.home)}`
+                                              : "",
+                                      },
+                                  )
+                                : module.file
+                        }
+                        ${
+                            tools.length > 0
+                                ? t(
+                                      "web.sheets.extensions.extensions-content.row.div.tools",
+                                      " · tools: {detail}",
+                                      { detail: tools.join(", ") },
+                                  )
+                                : ""
+                        }
                     </div>
                     ${
                         owner &&
@@ -700,7 +892,10 @@ export function ExtensionsContent({
                                 disabled=${busy !== null}
                                 onClick=${() => change(module, "/reload", {})}
                             >
-                                <${Icon} name="reload" size=${14} /> Reload
+                                <${Icon} name="reload" size=${14} /> ${t(
+                                    "web.sheets.extensions.extensions-content.row.text.reload",
+                                    "Reload",
+                                )}
                             </button>
                         </div>`
                     }
@@ -720,13 +915,20 @@ export function ExtensionsContent({
             ${
                 (beforeCount > 0 || yours.length > 0) &&
                 html`<section class="ext-section">
-                    <h3 class="ext-section-title">Extensions <span>${beforeCount + yours.length}</span></h3>
+                    <h3 class="ext-section-title">${t("web.sheets.extensions.extensions-content.h3.extensions", "Extensions")} <span>${beforeCount + yours.length}</span></h3>
                     ${before}
                     ${yours.length > 0 && html`<div class="ext-list">${yours.map(row)}</div>`}
                 </section>`
             }
             ${between}
-            ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
+            ${
+                !data &&
+                !problem &&
+                html`<${Loader} label=${t(
+                    "web.sheets.extensions.extensions-content.label.loading-extensions",
+                    "Loading extensions",
+                )} />`
+            }
             ${
                 builtIn.length > 0 &&
                 html`<details
@@ -735,8 +937,15 @@ export function ExtensionsContent({
                     onToggle=${(event) => setBuiltInOpen(event.currentTarget.open)}
                 >
                     <summary>
-                        <h3 class="ext-section-title">Built in <span>${builtIn.length}</span></h3>
-                        <span class="muted small">${on} on, ${builtIn.length - on} off</span>
+                        <h3 class="ext-section-title">${t(
+                            "web.sheets.extensions.extensions-content.h3.built-in",
+                            "Built in",
+                        )} <span>${builtIn.length}</span></h3>
+                        <span class="muted small">${t(
+                            "web.sheets.extensions.extensions-content.span.off",
+                            "{on} on, {count} off",
+                            { on, count: builtIn.length - on },
+                        )}</span>
                         <${Icon} name="down" size=${14} />
                     </summary>
                     <div class="ext-list">${builtIn.map(row)}</div>
@@ -747,7 +956,10 @@ export function ExtensionsContent({
                 needle &&
                 managed.length === 0 &&
                 beforeCount === 0 &&
-                html`<p class="muted small">Nothing installed matches.</p>`
+                html`<p class="muted small">${t(
+                    "web.sheets.extensions.extensions-content.p.nothing-installed-matches",
+                    "Nothing installed matches.",
+                )}</p>`
             }
             ${
                 owner &&
@@ -755,11 +967,14 @@ export function ExtensionsContent({
                     ${
                         data?.dropIns &&
                         html`<span>
-                            Make your own: a <span class="mono">.ts</span> module in <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span> stays off until you turn it on.
+                            ${t("web.sheets.extensions.extensions-content.span.make-own", "Make your own: a")} <span class="mono">.ts</span> ${t("web.sheets.extensions.extensions-content.span.module-in", "module in")} <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span> ${t("web.sheets.extensions.extensions-content.span.stays-off-until-turn", "stays off until you turn it on.")}
                         </span>`
                     }
                     <a class="link small" href=${GUIDE} target="_blank" rel="noopener noreferrer">
-                        How to write one <${Icon} name="external" size=${13} />
+                        ${t(
+                            "web.sheets.extensions.extensions-content.a.how-to-write-one",
+                            "How to write one",
+                        )} <${Icon} name="external" size=${13} />
                     </a>
                 </footer>`
             }
@@ -768,16 +983,40 @@ export function ExtensionsContent({
 
     return html`<div class="extension-management">
         <p class="ext-intro">
-            Tools, checks, and app features. A change reaches every session at once and stays after restarts.${owner ? "" : " Only the owner can change them."}
+            ${t(
+                "web.sheets.extensions.extensions-content.p.tools-checks-app-features",
+                "Tools, checks, and app features. A change reaches every session at once and stays after restarts.{detail}",
+                {
+                    detail: owner
+                        ? ""
+                        : t(
+                              "web.sheets.extensions.extensions-content.p.owner-change-them",
+                              " Only the owner can change them.",
+                          ),
+                },
+            )}
         </p>
         <${SafeMode} />
         ${problem && html`<div class="error-box">${problem}</div>`}
-        ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
+        ${
+            !data &&
+            !problem &&
+            html`<${Loader} label=${t(
+                "web.sheets.extensions.extensions-content.label.loading-extensions",
+                "Loading extensions",
+            )} />`
+        }
         ${
             data &&
             [
-                ["Built in", managed.filter((module) => module.source !== "drop-in")],
-                ["Yours", managed.filter((module) => module.source === "drop-in")],
+                [
+                    t("web.sheets.extensions.extensions-content.text.built", "Built in"),
+                    managed.filter((module) => module.source !== "drop-in"),
+                ],
+                [
+                    t("web.sheets.extensions.extensions-content.text.yours", "Yours"),
+                    managed.filter((module) => module.source === "drop-in"),
+                ],
             ]
                 .filter(([, modules]) => modules.length > 0)
                 .map(
@@ -791,7 +1030,10 @@ export function ExtensionsContent({
             data &&
             needle &&
             managed.length === 0 &&
-            html`<p class="muted small">No built-in extensions or drop-ins match.</p>`
+            html`<p class="muted small">${t(
+                "web.sheets.extensions.extensions-content.p.no-built-extensions-drop",
+                "No built-in extensions or drop-ins match.",
+            )}</p>`
         }
         ${
             owner &&
@@ -800,17 +1042,26 @@ export function ExtensionsContent({
                     galleryInstalled === undefined &&
                     galleryAvailable() &&
                     html`<button class="link small" onClick=${() => openSheet({ type: "gallery" })}>
-                        <${Icon} name="search" size=${14} /> Find extensions
+                        <${Icon} name="search" size=${14} /> ${t(
+                            "web.sheets.extensions.extensions-content.text.find-extensions",
+                            "Find extensions",
+                        )}
                     </button>`
                 }
                 ${
                     data?.dropIns &&
                     html`<span>
-                        Make your own: put a <span class="mono">.ts</span> module in <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. It stays off until you turn it on.
+                        ${t("web.sheets.extensions.extensions-content.span.make-own-put", "Make your own: put a")} <span class="mono">.ts</span> ${t("web.sheets.extensions.extensions-content.span.module-in", "module in")} <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. ${t(
+                            "web.sheets.extensions.extensions-content.span.it-stays-off-until-turn",
+                            "It stays off until you turn it on.",
+                        )}
                     </span>`
                 }
                 <a class="link small" href=${GUIDE} target="_blank" rel="noopener noreferrer">
-                    How to write one <${Icon} name="external" size=${13} />
+                    ${t(
+                        "web.sheets.extensions.extensions-content.a.how-to-write-one",
+                        "How to write one",
+                    )} <${Icon} name="external" size=${13} />
                 </a>
             </footer>`
         }

@@ -19,6 +19,7 @@ import {
     shortPath,
     usePresence,
 } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 const OPEN_KEY = "pocket.files";
 const TAB_KEY = "pocket.filesTab";
@@ -194,7 +195,14 @@ function TreeFolder({ path, depth, ctx }) {
                         : html`<span class="ft-spacer"></span>`
                 }
                 <span class="ft-name">${entry.name}</span>
-                ${inside && !open && html`<span class="ft-dot" title="Has changes"></span>`}
+                ${
+                    inside &&
+                    !open &&
+                    html`<span class="ft-dot" title=${t(
+                        "web.files-panel.tree-folder.title.has-changes",
+                        "Has changes",
+                    )}></span>`
+                }
                 ${change && html`<span class=${`ft-kind ${change}`}>${KIND_LETTERS[change]}</span>`}
             </button>
             ${open && html`<${TreeFolder} path=${full} depth=${depth + 1} ctx=${ctx} />`}
@@ -203,7 +211,11 @@ function TreeFolder({ path, depth, ctx }) {
     ${
         folder.truncated &&
         html`<div class="ft-row muted small" style=${`--depth:${depth}`}>
-            Only the first ${folder.entries.length} are listed.
+            ${t(
+                "web.files-panel.tree-folder.div.first-listed",
+                "Only the first {count} are listed.",
+                { count: folder.entries.length },
+            )}
         </div>`
     }`;
 }
@@ -213,11 +225,18 @@ function Matches({ query, root, onPick }) {
     const found = suggestFiles(query);
 
     if (found.loading && found.items.length === 0) {
-        return html`<p class="muted small ft-note">Listing the folder…</p>`;
+        return html`<p class="muted small ft-note">${t(
+            "web.files-panel.matches.p.listing-the-folder",
+            "Listing the folder…",
+        )}</p>`;
     }
 
     if (found.items.length === 0) {
-        return html`<p class="muted small ft-note">No file matches “${query}”.</p>`;
+        return html`<p class="muted small ft-note">
+            ${t("web.files-panel.matches.p.no-file-matches", "No file matches “{query}”.", {
+                query,
+            })}
+        </p>`;
     }
 
     return html`<div class="ft-matches" role="listbox">
@@ -286,7 +305,7 @@ function ResizeEdge() {
         class="resize-handle files-resize"
         role="separator"
         aria-orientation="vertical"
-        title="Drag to resize"
+        title=${t("web.files-panel.resize-edge.title.drag-to-resize", "Drag to resize")}
         onPointerDown=${start}
         onDblClick=${reset}
     ></div>`;
@@ -553,7 +572,10 @@ function FilesTab({ changes, covering }) {
                 <input
                     type="search"
                     class="ft-filter"
-                    placeholder="Go to file"
+                    placeholder=${t(
+                        "web.files-panel.files-tab.placeholder.go-to-file",
+                        "Go to file",
+                    )}
                     value=${query}
                     onInput=${(event) => setQuery(event.currentTarget.value)}
                     onKeyDown=${(event) => {
@@ -572,8 +594,14 @@ function FilesTab({ changes, covering }) {
                 <button
                     class="icon-button"
                     type="button"
-                    title="Fold every folder"
-                    aria-label="Fold every folder"
+                    title=${t(
+                        "web.files-panel.files-tab.title.fold-every-folder",
+                        "Fold every folder",
+                    )}
+                    aria-label=${t(
+                        "web.files-panel.files-tab.aria-label.fold-every-folder",
+                        "Fold every folder",
+                    )}
                     onClick=${() => update(() => new Set())}
                 >
                     <${Icon} name="down" size=${15} />
@@ -581,8 +609,8 @@ function FilesTab({ changes, covering }) {
                 <button
                     class="icon-button"
                     type="button"
-                    title="Look again"
-                    aria-label="Refresh"
+                    title=${t("web.files-panel.files-tab.title.look-again", "Look again")}
+                    aria-label=${t("web.files-panel.files-tab.aria-label.refresh", "Refresh")}
                     onClick=${() => {
                         folders.clear();
                         setVersion(version + 1);
@@ -592,7 +620,10 @@ function FilesTab({ changes, covering }) {
                     <${Icon} name="reload" size=${15} />
                 </button>
             </div>
-            <div class="ft-tree" role="tree" aria-label="Files" onKeyDown=${onTreeKey}>
+            <div class="ft-tree" role="tree" aria-label=${t(
+                "web.files-panel.files-tab.aria-label.files",
+                "Files",
+            )} onKeyDown=${onTreeKey}>
                 ${
                     query === ""
                         ? html`<${TreeFolder} path=${root} depth=${0} ctx=${ctx} />`
@@ -632,7 +663,17 @@ function FilesTab({ changes, covering }) {
                               html`<button
                                   class="icon-button"
                                   type="button"
-                                  aria-label=${shown.from === "changes" ? "Back to Changes" : "Back to the files"}
+                                  aria-label=${
+                                      shown.from === "changes"
+                                          ? t(
+                                                "web.files-panel.files-tab.aria-label.back-changes",
+                                                "Back to Changes",
+                                            )
+                                          : t(
+                                                "web.files-panel.files-tab.aria-label.back-files",
+                                                "Back to the files",
+                                            )
+                                  }
                                   onClick=${closeFile}
                               >
                                   <${Icon} name="back" size=${22} />
@@ -644,8 +685,14 @@ function FilesTab({ changes, covering }) {
                               html`<button
                                   class="icon-button"
                                   type="button"
-                                  aria-label="Close the file"
-                                  title="Close the file"
+                                  aria-label=${t(
+                                      "web.files-panel.files-tab.aria-label.close-the-file",
+                                      "Close the file",
+                                  )}
+                                  title=${t(
+                                      "web.files-panel.files-tab.title.close-the-file",
+                                      "Close the file",
+                                  )}
                                   onClick=${() => setSelected(null)}
                               >
                                   <${Icon} name="close" size=${16} />
@@ -663,7 +710,10 @@ function FilesTab({ changes, covering }) {
                 : side &&
                   html`<div class="ft-view ft-empty">
                       <${Icon} name="file" size=${26} />
-                      <p class="muted small">Pick a file to read it here.</p>
+                      <p class="muted small">${t(
+                          "web.files-panel.files-tab.p.pick-file-read",
+                          "Pick a file to read it here.",
+                      )}</p>
                   </div>`
         }
     </div>`;
@@ -687,7 +737,7 @@ export function FilesPanel({ leaving = false }) {
         data-state=${leaving ? "closing" : undefined}
         role=${beside ? undefined : "dialog"}
         aria-modal=${beside ? undefined : "true"}
-        aria-label="Files"
+        aria-label=${t("web.files-panel.files-panel.aria-label.files", "Files")}
         tabindex="-1"
         inert=${leaving}
     >
@@ -698,8 +748,11 @@ export function FilesPanel({ leaving = false }) {
                 html`<button
                     class="icon-button files-back"
                     type="button"
-                    aria-label="Back to the conversation"
-                    title="Back (Alt+E)"
+                    aria-label=${t(
+                        "web.files-panel.files-panel.aria-label.back-to-the-conversation",
+                        "Back to the conversation",
+                    )}
+                    title=${t("web.files-panel.files-panel.title.back-alt-e", "Back (Alt+E)")}
                     onClick=${() => setFilesOpen(false)}
                 >
                     <${Icon} name="back" size=${22} />
@@ -713,7 +766,7 @@ export function FilesPanel({ leaving = false }) {
                     class=${filesTab === "files" ? "on" : ""}
                     onClick=${() => setTab("files")}
                 >
-                    Files
+                    ${t("web.files-panel.files-panel.button.files", "Files")}
                 </button>
                 <button
                     type="button"
@@ -722,7 +775,7 @@ export function FilesPanel({ leaving = false }) {
                     class=${filesTab === "changes" ? "on" : ""}
                     onClick=${() => setTab("changes")}
                 >
-                    Changes
+                    ${t("web.files-panel.files-panel.button.changes", "Changes")}
                     ${count > 0 && html`<span class="files-count">${count}</span>`}
                 </button>
             </div>
@@ -732,21 +785,27 @@ export function FilesPanel({ leaving = false }) {
                 html`<button
                     class="icon-button"
                     type="button"
-                    aria-label="Close the files"
-                    title="Close (Alt+E)"
+                    aria-label=${t(
+                        "web.files-panel.files-panel.aria-label.close-the-files",
+                        "Close the files",
+                    )}
+                    title=${t("web.files-panel.files-panel.title.close-alt-e", "Close (Alt+E)")}
                     onClick=${() => setFilesOpen(false)}
                 >
                     <${Icon} name="close" size=${17} />
                 </button>`
             }
         </header>
-        <div class="files-body" role="tabpanel" aria-label="Files" hidden=${filesTab !== "files"}>
+        <div class="files-body" role="tabpanel" aria-label=${t(
+            "web.files-panel.files-panel.aria-label.files",
+            "Files",
+        )} hidden=${filesTab !== "files"}>
             <${FilesTab} changes=${changes} covering=${!beside && !leaving} />
         </div>
         <div
             class="files-body"
             role="tabpanel"
-            aria-label="Changes"
+            aria-label=${t("web.files-panel.files-panel.aria-label.changes", "Changes")}
             hidden=${filesTab !== "changes"}
         >
             <${DiffReview} active=${filesTab === "changes"} covering=${!beside && !leaving} />
@@ -765,9 +824,12 @@ export function FilesButton() {
     // Out of the top bar where its pane is narrow (a phone's): the menu's tiles, Alt+E, and a swipe left open it.
     return html`<button
         class=${`icon-button top-toggle ${filesOpen ? "on" : ""}`}
-        aria-label="Files"
+        aria-label=${t("web.files-panel.files-button.aria-label.files", "Files")}
         aria-pressed=${filesOpen}
-        title="Files and changes (Alt+E)"
+        title=${t(
+            "web.files-panel.files-button.title.files-changes-alt-e",
+            "Files and changes (Alt+E)",
+        )}
         onClick=${() => toggleFiles()}
     >
         <${Icon} name="folder" size=${18} />

@@ -13,6 +13,7 @@ import {
     shortPath,
     timeAgo,
 } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 const coarsePointer = matchMedia("(pointer: coarse)").matches;
 
@@ -33,19 +34,31 @@ function whyNot() {
     const { view, me } = store.state;
 
     if (!canSteer()) {
-        return "Viewers can see the branch, not switch it.";
+        return t(
+            "web.sheets.branch.why-not.text.viewers-see-branch-not",
+            "Viewers can see the branch, not switch it.",
+        );
     }
 
     if (scoped()) {
-        return "You were invited to one session: switching the branch changes the whole folder.";
+        return t(
+            "web.sheets.branch.why-not.text.invited-one-session-switching",
+            "You were invited to one session: switching the branch changes the whole folder.",
+        );
     }
 
     if (view.turns?.on && view.turns.driver !== me?.id) {
-        return "Take turns is on: the driver switches branches.";
+        return t(
+            "web.sheets.branch.why-not.text.take-turns-driver-switches",
+            "Take turns is on: the driver switches branches.",
+        );
     }
 
     if (view.live?.busy) {
-        return "Pi is working: switch once it is done, or stop it.";
+        return t(
+            "web.sheets.branch.why-not.text.pi-working-switch-once",
+            "Pi is working: switch once it is done, or stop it.",
+        );
     }
 
     return null;
@@ -58,12 +71,20 @@ function Track({ upstream }) {
     }
 
     if (upstream.gone) {
-        return html`<span class="branch-track warn" title=${`${upstream.name} is gone`}>gone</span>`;
+        return html`<span class="branch-track warn" title=${t(
+            "web.sheets.branch.track.title.gone",
+            "{name} is gone",
+            { name: upstream.name },
+        )}>${t("web.sheets.branch.track.span.gone", "gone")}</span>`;
     }
 
     return (
         (upstream.ahead > 0 || upstream.behind > 0) &&
-        html`<span class="branch-track" title=${`Against ${upstream.name}`}>
+        html`<span class="branch-track" title=${t(
+            "web.sheets.branch.track.title.against",
+            "Against {name}",
+            { name: upstream.name },
+        )}>
             ${upstream.ahead > 0 ? `↑${upstream.ahead}` : ""}${upstream.ahead > 0 && upstream.behind > 0 ? " " : ""}${upstream.behind > 0 ? `↓${upstream.behind}` : ""}
         </span>`
     );
@@ -183,7 +204,14 @@ export function BranchPicker() {
         if (row.kind === "local" && row.branch.worktree) {
             notify(
                 "info",
-                `${row.branch.name} is checked out in ${shortPath(row.branch.worktree, server?.home)}: git switches to it only there.`,
+                t(
+                    "web.sheets.branch.branch-picker.pick.checked-out-git-switches",
+                    "{branch} is checked out in {path}: git switches to it only there.",
+                    {
+                        branch: row.branch.name,
+                        path: shortPath(row.branch.worktree, server?.home),
+                    },
+                ),
             );
 
             return;
@@ -206,25 +234,50 @@ export function BranchPicker() {
         attempt(async () => {
             const { branch } = await actions.switchBranch(target);
 
-            notify("info", `On ${branch} now.`);
+            notify(
+                "info",
+                t("web.sheets.branch.branch-picker.pick.content", "On {branch} now.", {
+                    branch,
+                }),
+            );
             closeSheet();
         }).then(() => setSwitching(false));
     };
 
     const rowBody = (each) => {
         if (each.kind === "make") {
+            const from = headLabel(view.branch)
+                ? headLabel(view.branch)
+                : t("web.sheets.branch.branch-picker.row-body.content", "here");
+
             return html`<${Icon} name="plus" size=${14} />
                 <span class="pop-menu-row-text">
-                    <span class="pop-menu-row-name">Make the branch <span class="mono">${each.name}</span></span>
-                    <span class="pop-menu-row-sub">from ${headLabel(view.branch) || "here"}${branches.changed > 0 ? ", with your uncommitted changes" : ""}</span>
+                    <span class="pop-menu-row-name">${t("web.sheets.branch.branch-picker.row-body.span.make-the-branch", "Make the branch")} <span class="mono">${each.name}</span></span>
+                    <span class="pop-menu-row-sub">${t(
+                        "web.sheets.branch.branch-picker.row-body.sub.from-here",
+                        "from {place}",
+                        { place: from },
+                    )}${branches.changed > 0 ? t("web.sheets.branch.branch-picker.row-body.span.uncommitted-changes", ", with your uncommitted changes") : ""}</span>
                 </span>`;
         }
 
         const { branch } = each;
         const sub =
             each.kind === "local" && branch.worktree
-                ? `in another worktree: ${shortPath(branch.worktree, server?.home)}`
-                : [branch.subject, branch.at ? timeAgo(branch.at) : "no commits yet"]
+                ? t(
+                      "web.sheets.branch.branch-picker.row-body.sub.another-worktree",
+                      "in another worktree: {path}",
+                      { path: shortPath(branch.worktree, server?.home) },
+                  )
+                : [
+                      branch.subject,
+                      branch.at
+                          ? timeAgo(branch.at)
+                          : t(
+                                "web.sheets.branch.branch-picker.row-body.sub.no-commits-yet",
+                                "no commits yet",
+                            ),
+                  ]
                       .filter(Boolean)
                       .join(" · ");
 
@@ -287,22 +340,35 @@ export function BranchPicker() {
             ref=${box}
             role="dialog"
             aria-modal="true"
-            aria-label="Branch"
+            aria-label=${t("web.sheets.branch.branch-picker.aria-label.branch", "Branch")}
             tabindex="-1"
             onKeyDown=${onKeyDown}
         >
             <div class="grip" aria-hidden="true"></div>
             <header class="pop-menu-head">
-                <span>Branch</span>
-                <span class="branch-head mono" title=${view.branch?.detached ? "No branch: a commit" : "Checked out"}>
-                    <${Icon} name="fork" size=${12} /> ${headLabel(view.branch) || "none"}
+                <span>${t("web.sheets.branch.branch-picker.span.branch", "Branch")}</span>
+                <span class="branch-head mono" title=${
+                    view.branch?.detached
+                        ? t(
+                              "web.sheets.branch.branch-picker.title.no-branch-commit",
+                              "No branch: a commit",
+                          )
+                        : t("web.sheets.branch.branch-picker.title.checked-out", "Checked out")
+                }>
+                    <${Icon} name="fork" size=${12} /> ${
+                        headLabel(view.branch) ||
+                        t("web.sheets.branch.branch-picker.text.none", "none")
+                    }
                 </span>
             </header>
             <label class="search pop-menu-search">
                 <${Icon} name="search" size=${15} />
                 <input
                     ref=${search}
-                    placeholder="Switch to or make a branch"
+                    placeholder=${t(
+                        "web.sheets.branch.branch-picker.placeholder.switch-make-branch",
+                        "Switch to or make a branch",
+                    )}
                     value=${query}
                     autocapitalize="off"
                     autocomplete="off"
@@ -313,18 +379,37 @@ export function BranchPicker() {
                     }}
                 />
             </label>
-            <div class="pop-menu-list" ref=${list} role="listbox" aria-label="Branches">
+            <div class="pop-menu-list" ref=${list} role="listbox" aria-label=${t(
+                "web.sheets.branch.branch-picker.aria-label.branches",
+                "Branches",
+            )}>
                 ${error && html`<p class="muted pop-menu-note">${error}</p>`}
-                ${!branches && !error && html`<p class="muted pop-menu-note">Asking git…</p>`}
+                ${
+                    !branches &&
+                    !error &&
+                    html`<p class="muted pop-menu-note">${t(
+                        "web.sheets.branch.branch-picker.p.asking-git",
+                        "Asking git…",
+                    )}</p>`
+                }
                 ${
                     branches &&
                     rows.length === 0 &&
-                    html`<p class="muted pop-menu-note">No branch matches “${query.trim()}”.</p>`
+                    html`<p class="muted pop-menu-note">
+                        ${t(
+                            "web.sheets.branch.branch-picker.p.no-branch-matches",
+                            "No branch matches “{query}”.",
+                            { query: query.trim() },
+                        )}
+                    </p>`
                 }
                 ${rows.flatMap((each, index) => [
                     each.kind === "remote" &&
                         rows[index - 1]?.kind !== "remote" &&
-                        html`<div class="pop-menu-label" key="remote">Remote</div>`,
+                        html`<div class="pop-menu-label" key="remote">${t(
+                            "web.sheets.branch.branch-picker.div.remote",
+                            "Remote",
+                        )}</div>`,
                     row(each, index, rowBody(each)),
                 ])}
             </div>
@@ -337,13 +422,29 @@ export function BranchPicker() {
                         !blocked &&
                         branches.changed > 0 &&
                         html`<p class="muted">
-                            ${branches.changed} ${branches.changed === 1 ? "file has" : "files have"} uncommitted changes: they come along, unless the other branch changes them too.
+                            ${
+                                branches.changed === 1
+                                    ? t(
+                                          "web.sheets.branch.branch-picker.p.one-file-uncommitted",
+                                          "{count} file has uncommitted changes: they come along, unless the other branch changes them too.",
+                                          { count: branches.changed },
+                                      )
+                                    : t(
+                                          "web.sheets.branch.branch-picker.p.files-uncommitted",
+                                          "{count} files have uncommitted changes: they come along, unless the other branch changes them too.",
+                                          { count: branches.changed },
+                                      )
+                            }
                         </p>`
                     }
                     ${
                         branches.more > 0 &&
                         html`<p class="muted">
-                            ${`${branches.more.toLocaleString()} older branches are not listed.`}
+                            ${t(
+                                "web.sheets.branch.branch-picker.p.older-branches-not-listed-count",
+                                "{count} older branches are not listed.",
+                                { count: branches.more.toLocaleString() },
+                            )}
                         </p>`
                     }
                 </div>`

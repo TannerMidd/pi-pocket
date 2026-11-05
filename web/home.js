@@ -6,6 +6,7 @@ import { sessionMark } from "./sessions.js";
 import { canSteer, navigate, openSheet, scoped, store, workspaceOrder } from "./store.js";
 import { lookLabel, prefs } from "./theme.js";
 import { html, Icon, Keys, shortPath, timeAgo } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 const LOGO = [
     "▗▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▖",
@@ -63,26 +64,42 @@ export function Splash() {
         return () => removeEventListener("keydown", onKey);
     }, []);
     const rows = [
-        ["theme", lookLabel()],
+        [t("web.home.splash.text.theme", "theme"), lookLabel()],
         [
-            "layout",
-            `${p.tiling ? "tiled windows" : "flat"}, sidebar ${p.sidebar === "rail" ? "folded" : "open"}`,
+            t("web.home.splash.text.layout", "layout"),
+            t("web.home.splash.text.layout-value", "{windows}, sidebar {sidebar}", {
+                windows: p.tiling
+                    ? t("web.home.splash.text.tiled-windows", "tiled windows")
+                    : t("web.home.splash.text.flat", "flat"),
+                sidebar:
+                    p.sidebar === "rail"
+                        ? t("web.home.splash.text.folded", "folded")
+                        : t("web.home.splash.text.open", "open"),
+            }),
         ],
         [
-            "sessions",
-            `${sessions.filter((session) => !session.archived).length}${busy > 0 ? `, ${busy} running` : ""}`,
+            t("web.home.splash.text.sessions", "sessions"),
+            busy > 0
+                ? t("web.home.splash.text.sessions-running", "{sessions}, {busy} running", {
+                      sessions: sessions.filter((session) => !session.archived).length,
+                      busy,
+                  })
+                : String(sessions.filter((session) => !session.archived).length),
         ],
-        ["models", String(models.length)],
-        ["folder", shortPath(server?.defaultCwd, server?.home) || "~"],
+        [t("web.home.splash.text.models", "models"), String(models.length)],
         [
-            "guard",
+            t("web.home.splash.text.folder", "folder"),
+            shortPath(server?.defaultCwd, server?.home) || "~",
+        ],
+        [
+            t("web.home.splash.text.guard", "guard"),
             guard?.enabled
                 ? guard.available === false
-                    ? "failed to load"
-                    : "Lancet Guard on"
-                : "off",
+                    ? t("web.home.splash.text.guard-failed", "failed to load")
+                    : t("web.home.splash.text.guard-on", "Lancet Guard on")
+                : t("web.home.splash.text.guard-off", "off"),
         ],
-        ["you", `${me?.name ?? "?"} (${me?.role ?? "?"})`],
+        [t("web.home.splash.text.you", "you"), `${me?.name ?? "?"} (${me?.role ?? "?"})`],
     ];
     const colors = [
         "--o-red",
@@ -102,7 +119,7 @@ export function Splash() {
             <pre class="fetch-logo" data-part="home-logo" aria-hidden="true">${LOGO}</pre>
             <div class="fetch-info">
                 <div class="fetch-title" data-part="home-title" style=${`--i:${line++}`}>
-                    <b>${(me?.name ?? "you").toLowerCase().replace(/\s+/g, "-")}</b>@<b>pi-pocket</b>
+                    <b>${(me?.name ?? "you").toLowerCase().replace(/\s+/g, "-")}</b>@<b>${t("web.home.splash.b.pi-pocket", "pi-pocket")}</b>
                 </div>
                 ${rows.map(
                     ([key, value]) => html`<dl
@@ -129,20 +146,32 @@ export function Splash() {
                     class="button primary"
                     onClick=${() => openSheet({ type: "cwd", mode: "new" })}
                 >
-                    <${Icon} name="plus" size=${16} /> New session <${Keys} keys="Alt N" />
+                    <${Icon} name="plus" size=${16} /> ${t(
+                        "web.home.splash.text.new-session",
+                        "New session",
+                    )} <${Keys} keys="Alt N" />
                 </button>`
             }
             <button class="button" onClick=${() => store.set({ launcher: true })}>
-                <${Icon} name="command" size=${16} /> Launcher <${Keys} keys="Mod K" />
+                <${Icon} name="command" size=${16} /> ${t(
+                    "web.home.splash.text.launcher",
+                    "Launcher",
+                )} <${Keys} keys="Mod K" />
             </button>
             <button class="button" onClick=${() => openSheet({ type: "appearance" })}>
-                <${Icon} name="palette" size=${16} /> Appearance
+                <${Icon} name="palette" size=${16} /> ${t(
+                    "web.home.splash.text.appearance",
+                    "Appearance",
+                )}
             </button>
         </div>
         ${
             recent.length > 0 &&
             html`<div class="splash-recent" data-part="home-recent">
-                <div class="splash-heading" data-part="home-heading">Jump back in</div>
+                <div class="splash-heading" data-part="home-heading">${t(
+                    "web.home.splash.div.jump-back-in",
+                    "Jump back in",
+                )}</div>
                 ${recent.map(
                     (session, index) => html`<button
                         class="splash-row"
@@ -156,9 +185,9 @@ export function Splash() {
                             style=${`--folder:${folderColor(session.cwd)}`}
                             aria-hidden="true"
                         ></span>
-                        <span class="splash-title">${session.title ?? "New session"}</span>
+                        <span class="splash-title">${session.title ?? t("web.home.splash.text.new-session", "New session")}</span>
                         <span class="splash-meta">
-                            ${session.waiting ? html`<span class="session-needs">${canSteer() ? "needs you" : "waiting"}</span>` : session.busy ? "working · " : ""}
+                            ${session.waiting ? html`<span class="session-needs">${canSteer() ? t("web.home.splash.span.needs-you", "needs you") : t("web.home.splash.span.waiting", "waiting")}</span>` : session.busy ? `${t("web.home.splash.span.working", "working")} · ` : ""}
                             ${!session.waiting && timeAgo(session.updatedAt)}
                         </span>
                     </button>`,

@@ -42,6 +42,7 @@ import { TrustSheet } from "./trust.js";
 import { addLayer, goBack, removeLayer } from "./back.js";
 import { actions, api, signOut, store } from "./store.js";
 import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
@@ -289,8 +290,8 @@ function sheetBody(sheet) {
             body =
                 renamed &&
                 html`<${TextSheet}
-                title="Rename"
-                label="Session title"
+                title=${t("web.sheets.sheet-body.title.rename", "Rename")}
+                label=${t("web.sheets.sheet-body.label.session-title", "Session title")}
                 initial=${renamed.title ?? ""}
                 submit=${(value) => actions.updateSession(renamed.id, { title: value })}
             />`;
@@ -358,43 +359,67 @@ function sheetBody(sheet) {
             break;
         case "reset":
             body = html`<${TextSheet}
-                title="New context"
-                hint="Pi starts fresh: it no longer sees the messages so far, though everyone here still does."
-                label="Handoff note (optional)"
-                placeholder="e.g. We fixed the login bug; next is the signup form."
+                title=${t("web.sheets.sheet-body.title.new-context", "New context")}
+                hint=${t(
+                    "web.sheets.sheet-body.hint.pi-starts-fresh",
+                    "Pi starts fresh: it no longer sees the messages so far, though everyone here still does.",
+                )}
+                label=${t("web.sheets.sheet-body.label.handoff-note", "Handoff note (optional)")}
+                placeholder=${t(
+                    "web.sheets.sheet-body.placeholder.e-g-we-fixed",
+                    "e.g. We fixed the login bug; next is the signup form.",
+                )}
                 multiline=${true}
-                button="Start a new context"
+                button=${t("web.sheets.sheet-body.button.start-a-new-context", "Start a new context")}
                 submit=${(value) => actions.reset(value)}
             />`;
             break;
         case "instructions":
             body = html`<${TextSheet}
-                title="Instructions for Pi"
-                hint="Pi gets these with every message in this session, after its own instructions. Everyone here can see them. Leave empty for none."
-                label="Instructions"
+                title=${t("web.sheets.sheet-body.title.instructions-for-pi", "Instructions for Pi")}
+                hint=${t(
+                    "web.sheets.sheet-body.hint.pi-gets-these",
+                    "Pi gets these with every message in this session, after its own instructions. Everyone here can see them. Leave empty for none.",
+                )}
+                label=${t("web.sheets.sheet-body.label.instructions", "Instructions")}
                 initial=${view.agent?.instructions ?? ""}
-                placeholder="e.g. Use pnpm, not npm. Ask before adding dependencies."
+                placeholder=${t(
+                    "web.sheets.sheet-body.placeholder.e-g-pnpm-not",
+                    "e.g. Use pnpm, not npm. Ask before adding dependencies.",
+                )}
                 multiline=${true}
                 submit=${(value) => actions.setInstructions(value)}
             />`;
             break;
         case "compact":
             body = html`<${TextSheet}
-                title="Compact context"
-                label="What should the summary keep? (optional)"
-                placeholder="e.g. the failing test names"
+                title=${t("web.sheets.sheet-body.title.compact-context", "Compact context")}
+                label=${t(
+                    "web.sheets.sheet-body.label.what-should-summary-keep",
+                    "What should the summary keep? (optional)",
+                )}
+                placeholder=${t(
+                    "web.sheets.sheet-body.placeholder.e-g-failing-test",
+                    "e.g. the failing test names",
+                )}
                 multiline=${true}
-                button="Compact"
+                button=${t("web.pip.pip-panel.aria-label.compact", "Compact")}
                 submit=${(value) => actions.compact(value)}
             />`;
             break;
         case "name":
             body = html`<${TextSheet}
-                title="Your name"
-                label="Shown on your messages to others"
+                title=${t("web.sheets.sheet-body.title.your-name", "Your name")}
+                label=${t(
+                    "web.sheets.sheet-body.label.shown-on-your-messages",
+                    "Shown on your messages to others",
+                )}
                 initial=${me?.name ?? ""}
                 footer=${html`<button class="button ghost wide sheet-footer signout" onClick=${signOut}>
-                    <${Icon} name="logout" size=${16} /> Sign out
+                    <${Icon} name="logout" size=${16} /> ${t(
+                        "web.sheets.sheet-body.text.sign-out",
+                        "Sign out",
+                    )}
                 </button>`}
                 submit=${async (value) => {
                     await api("me", { name: value });

@@ -39,10 +39,10 @@ before(async () => {
         join(dropIns, "a-locale.ts"),
         `/** Lower public language layer. */
 export default (_host, web) => web.uiLocales([{ id: "fr", label: "Français", messages: {
-    "ui.close": "Fermer", "ui.back": "Retour", "app.menu": "Menu français", "app.back-to-sessions": "Retour aux sessions", "app.files": "Fichiers",
+    "ui.close": "Fermer", "web.ui.sheet.aria-label.back": "Retour", "app.menu": "Menu français", "app.back-to-sessions": "Retour aux sessions", "app.files": "Fichiers",
     "menu.appearance": "Apparence", "appearance.title": "Apparence", "appearance.language": "Langue",
     "sessions.new": "Nouvelle session", "sessions.search": "Rechercher des sessions",
-    "sessions.mark-read": "Marquer comme lu", "sessions.recent": "Récent", "sessions.selected": "Sélectionné", "sessions.not-read": "Non lu", "menu.mark-unread": "Marquer non lu",
+    "web.sheets.folder.cwd-sheet.div.recent": "Récent", "web.sessions.session-row.aria-label.selected": "Sélectionné", "sessions.not-read": "Non lu",
     "slots.topbar": "Boutons du haut", "slots.places": "Emplacements",
     "signin.switch-title": "Changer de compte ?", "signin.switch-page-title": "Changer de compte ? · Pi Pocket",
     "signin.switch-body": "Compte {current} vers {next}.", "signin.switch-as": "Continuer comme {name}", "signin.stay-as": "Rester comme {name}",
@@ -158,6 +158,21 @@ async function appearance(page: BrowserPage, installed = true): Promise<void> {
         ),
         "the language selector offers the installed French locale",
     );
+}
+
+async function keyboardFrench(page: BrowserPage): Promise<void> {
+    const index = await pageScript<number>(
+        page,
+        `const select = document.activeElement;
+        return JSON.stringify([...select.options].findIndex((option) => option.value === "fr"));`,
+    );
+
+    assert.ok(index > 0, "French follows built-in English in the focused selector");
+    await page.press("Home");
+
+    for (let step = 0; step < index; step++) {
+        await page.press("ArrowDown");
+    }
 }
 
 async function chooseFrench(page: BrowserPage): Promise<void> {
@@ -946,13 +961,31 @@ test("R13: same-revision catalog bytes redraw without any later unrelated store 
             `(await import('/store.js')).store.state.connection === 'open'`,
             "the reconnect has settled",
         );
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        // Close the real event stream after reconnect; pending app work must settle before the isolated catalog arrives.
+        await page.evaluate(`
+            dispatchEvent(new PageTransitionEvent("pagehide"));
+            const store = (await import("/store.js")).store;
+            window.isolatedLastChange = performance.now();
+            window.stopIsolatedSettling = store.subscribe(() => window.isolatedLastChange = performance.now());
+        `);
+        await see(
+            page,
+            `performance.now() - window.isolatedLastChange > 250 && (await Promise.all((await import("/store.js")).store.state.server.ui.map(async (entry) => (await import("/extension-ui.js")).browserModuleState(entry.module)?.status))).every((status) => status !== "loading")`,
+            "the isolated page has no pending store updates",
+        );
         const before = await pageScript<{ revision: number; sheet: string; lang: string }>(
             page,
             `
             const store = (await import('/store.js')).store;
+            window.stopIsolatedSettling();
             window.isolatedStoreChanges = [];
-            window.stopIsolatedChanges = store.subscribe((state) => window.isolatedStoreChanges.push(state.localeRevision));
+            window.isolatedStoreKeys = [];
+            let previous = store.state;
+            window.stopIsolatedChanges = store.subscribe((state) => {
+                window.isolatedStoreChanges.push(state.localeRevision);
+                window.isolatedStoreKeys.push(Object.keys(state).filter((key) => state[key] !== previous[key]));
+                previous = state;
+            });
             window.isolatedSheet = document.querySelector('[data-sheet=appearance]');
             return JSON.stringify({ revision: store.state.localeRevision, sheet: window.isolatedSheet.textContent, lang: document.documentElement.lang });
         `,
@@ -975,6 +1008,7 @@ test("R13: same-revision catalog bytes redraw without any later unrelated store 
             sameSheet: boolean;
             draw: number;
             changes: number[];
+            updates: string[][];
             lang: string;
         }>(
             page,
@@ -983,7 +1017,7 @@ test("R13: same-revision catalog bytes redraw without any later unrelated store 
             window.stopIsolatedChanges();
             return JSON.stringify({ changed: document.querySelector('[data-sheet=appearance]')?.textContent.includes('Thème isolé') && document.querySelector('[data-sheet=appearance]')?.textContent.includes('Couleurs isolées'),
                 sameSheet: document.querySelector('[data-sheet=appearance]') === window.isolatedSheet,
-                draw: store.state.localeRevision, changes: window.isolatedStoreChanges, lang: document.documentElement.lang });
+                draw: store.state.localeRevision, changes: window.isolatedStoreChanges, updates: window.isolatedStoreKeys, lang: document.documentElement.lang });
         `,
         );
 
@@ -998,7 +1032,7 @@ test("R13: same-revision catalog bytes redraw without any later unrelated store 
         assert.deepEqual(
             after.changes,
             [before.revision + 1],
-            "no unrelated store update causes the redraw",
+            `no unrelated store update causes the redraw; updates: ${JSON.stringify(after.updates)}`,
         );
     } finally {
         secondServer.closeAllConnections();
@@ -1285,7 +1319,7 @@ test("R21: the mobile language selector is keyboard accessible and has no horizo
     assert.equal(selector.disabled, false);
     assert.equal(selector.focus, true);
     assert.equal(selector.overflow, false);
-    await page.press("End");
+    await keyboardFrench(page);
     await see(page, `document.documentElement.lang === 'fr'`, "keyboard selects French");
     assert.equal(
         await pageScript<boolean>(
@@ -1553,7 +1587,7 @@ for (const viewport of ["mobile", "desktop"] as const) {
         assert.equal(selector.focus, true, "the language selector accepts keyboard focus");
         await page.press("Home");
         await see(page, `document.documentElement.lang === "en"`, "the keyboard changes language");
-        await page.press("End");
+        await keyboardFrench(page);
         await see(page, `document.documentElement.lang === "fr"`, "the keyboard restores French");
     });
 }

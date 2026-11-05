@@ -21,6 +21,7 @@ import {
     revealFile,
     Sheet,
 } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 /** How many lines of a file show at first: a long file draws the rest on request. */
 const FILE_LINES = 3000;
@@ -117,7 +118,21 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
             <span class="muted small mono file-path" title=${file?.path ?? path}>
                 ${shown}
                 ${file?.size !== undefined ? ` · ${formatBytes(file.size)}` : ""}
-                ${file?.kind === "text" ? ` · ${lines.length} ${lines.length === 1 ? "line" : "lines"}` : ""}
+                ${
+                    file?.kind === "text"
+                        ? ` · ${
+                              lines.length === 1
+                                  ? t("web.sheets.file.file-view.text.one-line", "{count} line", {
+                                        count: lines.length,
+                                    })
+                                  : t(
+                                        "web.sheets.file.file-view.text.lines-count",
+                                        "{count} lines",
+                                        { count: lines.length },
+                                    )
+                          }`
+                        : ""
+                }
             </span>
             <${FileActions}
                 file=${file}
@@ -130,23 +145,36 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
             />
         </div>
         ${error && html`<p class="muted">${error}</p>`}
-        ${!file && !error && html`<${Loader} label="Opening" />`}
+        ${
+            !file &&
+            !error &&
+            html`<${Loader} label=${t("web.sheets.file.file-view.label.opening", "Opening")} />`
+        }
         ${
             file?.kind === "image" &&
             html`<img class="file-image" src=${fileUrl(file.path)} alt=${name} />`
         }
         ${
             file?.kind === "binary" &&
-            html`<p class="muted">A binary file: nothing to show as text.</p>`
+            html`<p class="muted">${t(
+                "web.sheets.file.file-view.p.binary-file-nothing-show",
+                "A binary file: nothing to show as text.",
+            )}</p>`
         }
         ${
             file?.kind === "other" &&
-            html`<p class="muted">Not a regular file (a pipe or a device, say): nothing to show.</p>`
+            html`<p class="muted">${t("web.sheets.file.file-view.p.not-regular-file-pipe", "Not a regular file (a pipe or a device, say): nothing to show.")}</p>`
         }
         ${
             file?.kind === "folder" &&
             html`<div class="group">
-                ${file.entries.length === 0 && html`<p class="muted">An empty folder.</p>`}
+                ${
+                    file.entries.length === 0 &&
+                    html`<p class="muted">${t(
+                        "web.sheets.file.file-view.p.an-empty-folder",
+                        "An empty folder.",
+                    )}</p>`
+                }
                 ${file.entries.map((entry) =>
                     item(
                         html`<span class="file-entry">
@@ -159,7 +187,11 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
                 ${
                     file.truncated &&
                     html`<p class="muted small">
-                        Only the first ${file.entries.length} are listed.
+                        ${t(
+                            "web.sheets.file.file-view.p.first-listed",
+                            "Only the first {count} are listed.",
+                            { count: file.entries.length },
+                        )}
                     </p>`
                 }
             </div>`
@@ -188,12 +220,18 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
                     : html`<${HtmlPreview} source=${file.text} title=${name} />`
             }
             <p class="muted small file-note">
-                The files it links to (styles, scripts, images) do not load here.
+                ${t(
+                    "web.sheets.file.file-view.p.files-links-do-not-load",
+                    "The files it links to (styles, scripts, images) do not load here.",
+                )}
                 ${
                     store.state.me?.role === "owner" &&
                     browserAvailable() &&
                     html` <button class="link small" onClick=${() => openInBrowser(file.path)}>
-                        Open it in the browser
+                        ${t(
+                            "web.sheets.file.file-view.button.open-browser",
+                            "Open it in the browser",
+                        )}
                     </button>`
                 }
             </p>`
@@ -206,7 +244,9 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
                 !all &&
                 lines.length > FILE_LINES &&
                 html`<button class="link" onClick=${() => setAll(true)}>
-                    Show all ${lines.length} lines
+                    ${t("web.sheets.file.file-view.button.show-lines", "Show all {count} lines", {
+                        count: lines.length,
+                    })}
                 </button>`
             }`
         }
@@ -214,7 +254,11 @@ export function FileView({ path, line, refresh, onOpen = openFile, onLoad }) {
             file?.kind === "text" &&
             file.truncated &&
             html`<p class="muted small">
-                Only the first ${formatBytes(file.text.length)} are shown.
+                ${t(
+                    "web.sheets.file.file-view.p.first-shown",
+                    "Only the first {count} are shown.",
+                    { count: formatBytes(file.text.length) },
+                )}
             </p>`
         }
     </div>`;
@@ -251,26 +295,44 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         running !== null &&
         html`<button
             class=${`button small ${running ? "on" : ""}`}
-            title=${running ? "Stop its scripts" : "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app"}
+            title=${
+                running
+                    ? t("web.sheets.file.file-actions.title.stop-scripts", "Stop its scripts")
+                    : t(
+                          "web.sheets.file.file-actions.title.run-scripts-sandbox-artifact",
+                          "Run its scripts in a sandbox, as an artifact runs: it can reach the internet, not the app",
+                      )
+            }
             onClick=${() => onRun(!running)}
         >
-            ${running ? "■ Stop" : "▶ Run"}
+            ${
+                running
+                    ? t("web.sheets.file.file-actions.button.stop", "■ Stop")
+                    : t("web.sheets.file.file-actions.button.run", "▶ Run")
+            }
         </button>`
     }
     ${
         file?.kind === "text" &&
         previewable &&
         html`<button class="button small" onClick=${() => onPreview(!preview)}>
-            ${preview ? "Source" : "Preview"}
+            ${
+                preview
+                    ? t("web.sheets.file.file-actions.button.source", "Source")
+                    : t("web.sheets.file.file-actions.button.preview", "Preview")
+            }
         </button>`
     }
     ${
         file?.kind === "text" &&
         html`<button
             class="icon-button"
-            title="Copy"
-            aria-label="Copy"
-            onClick=${() => copyText(file.text).then(() => notify("info", "Copied."))}
+            title=${t("web.sheets.file.file-actions.title.copy", "Copy")}
+            aria-label=${t("web.sheets.file.file-actions.aria-label.copy", "Copy")}
+            onClick=${() =>
+                copyText(file.text).then(() =>
+                    notify("info", t("web.chat.render.text.copied", "Copied.")),
+                )}
         >
             <${Icon} name="copy" size=${16} />
         </button>`
@@ -280,10 +342,13 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         canSteer() &&
         html`<button
             class="button small"
-            title="Mention it in the message box"
+            title=${t(
+                "web.sheets.file.file-actions.title.mention-message-box",
+                "Mention it in the message box",
+            )}
             onClick=${() => insertIntoComposer(`${mentionText(shown)} `, [], { inline: true })}
         >
-            @ Mention
+            ${t("web.sheets.file.file-actions.button.mention", "@ Mention")}
         </button>`
     }
     ${
@@ -294,8 +359,15 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         matchMedia("(pointer: fine)").matches &&
         html`<button
             class="icon-button"
-            title=${`Show in the file manager (${APPLE ? "⌘" : "Ctrl"}+click a path)`}
-            aria-label="Show in the file manager"
+            title=${t(
+                "web.sheets.file.file-actions.title.show-file-manager-click",
+                "Show in the file manager ({detail}+click a path)",
+                { detail: APPLE ? "⌘" : "Ctrl" },
+            )}
+            aria-label=${t(
+                "web.sheets.file.file-actions.aria-label.show-file-manager",
+                "Show in the file manager",
+            )}
             onClick=${() => revealFile(file.path)}
         >
             <${Icon} name="folder" size=${16} />
