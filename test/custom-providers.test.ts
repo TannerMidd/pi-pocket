@@ -16,7 +16,13 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { HttpError } from "../src/server/errors.ts";
-import { idFor, parseModelList } from "../src/server/custom-providers.ts";
+import {
+    DEFAULT_TIERS,
+    idFor,
+    parseModelList,
+    tiersOf,
+    tiersOfEntry,
+} from "../src/server/custom-providers.ts";
 
 const agentDir = process.env.PI_CODING_AGENT_DIR!;
 const modelsFile = join(agentDir, "models.json");
@@ -107,7 +113,10 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
 
     assert.equal(made.id, "home-llm");
     assert.equal(made.key, "stored");
-    assert.deepEqual(made.models, ["qwen-big", "typed-by-hand"]);
+    assert.deepEqual(
+        made.models.map((model) => model.id),
+        ["qwen-big", "typed-by-hand"],
+    );
     assert.equal(statSync(modelsFile).mode & 0o777, 0o600);
 
     const entry = readModels().providers["home-llm"];
@@ -208,7 +217,10 @@ test("an edit keeps what it does not change; no key uses the placeholder; removi
         noKey: true,
     });
 
-    assert.deepEqual(edited.models, ["qwen-big", "llama-small"]);
+    assert.deepEqual(
+        edited.models.map((model) => model.id),
+        ["qwen-big", "llama-small"],
+    );
     assert.equal(edited.key, "none");
 
     const entry = readModels().providers["home-llm"];
@@ -405,4 +417,154 @@ test("Find models sends one Authorization header, also for an endpoint with auth
     await app.models.refresh({ allowNetwork: false });
     await app.customProviders.discover({ baseUrl, id: "bearer" });
     assert.equal(seenAuth, "Bearer sk-bearer");
+});
+
+test("discovery reads images and thinking where the list says them", () => {
+    assert.deepEqual(
+        parseModelList({
+            data: [
+                {
+                    id: "router/vision",
+                    architecture: { input_modalities: ["text", "image"] },
+                    supported_parameters: ["tools", "reasoning"],
+                },
+                { id: "ollama/qwen", capabilities: ["completion", "vision", "thinking"] },
+                { id: "plain" },
+            ],
+        }),
+        [
+            { id: "ollama/qwen", images: true, reasoning: true },
+            { id: "plain" },
+            { id: "router/vision", images: true, reasoning: true },
+        ],
+    );
+});
+
+test("thinking levels: each of Pi's levels once, in Pi's order, each sending a value", () => {
+    assert.equal(tiersOf("m", null), null);
+    assert.deepEqual(
+        tiersOf("m", [
+            { level: "high", value: " hard " },
+            { level: "low", value: "low" },
+            { level: "off", value: "" },
+        ]),
+        [
+            { level: "off", value: "" },
+            { level: "low", value: "low" },
+            { level: "high", value: "hard" },
+        ],
+    );
+    assert.throws(() => tiersOf("m", []), /thinking levels/);
+    assert.throws(() => tiersOf("m", [{ level: "turbo", value: "x" }]), /one of/);
+    assert.throws(
+        () =>
+            tiersOf("m", [
+                { level: "low", value: "a" },
+                { level: "low", value: "b" },
+            ]),
+        /twice/,
+    );
+    assert.throws(() => tiersOf("m", [{ level: "low", value: " " }]), /needs a value/);
+
+    // Read back as Pi reads an entry: a level the map leaves out sends its name, but xhigh and max then are not there.
+    assert.equal(tiersOfEntry({ id: "m" }), null);
+    assert.deepEqual(tiersOfEntry({ id: "m", reasoning: true }), [
+        { level: "off", value: "" },
+        { level: "minimal", value: "minimal" },
+        { level: "low", value: "low" },
+        { level: "medium", value: "medium" },
+        { level: "high", value: "high" },
+    ]);
+});
+
+test("a model's images and thinking levels go into models.json, and Pi offers what they say", async () => {
+    await app.customProviders.create({
+        name: "Caps",
+        baseUrl,
+        noKey: true,
+        models: [
+            { id: "seer", images: true, thinking: DEFAULT_TIERS },
+            {
+                id: "own-names",
+                thinking: [
+                    { level: "low", value: "quick" },
+                    { level: "high", value: "deep" },
+                ],
+            },
+            { id: "plain" },
+        ],
+    });
+
+    const models = readModels().providers.caps.models;
+
+    assert.deepEqual(models[0], {
+        id: "seer",
+        input: ["text", "image"],
+        reasoning: true,
+        thinkingLevelMap: {
+            off: null,
+            minimal: null,
+            low: "low",
+            medium: "medium",
+            high: "high",
+            xhigh: "xhigh",
+            max: "max",
+        },
+    });
+    assert.deepEqual(models[2], { id: "plain" });
+
+    const seer = app.models.getModel("caps", "seer");
+
+    assert.deepEqual(seer?.input, ["text", "image"]);
+    assert.equal(seer?.reasoning, true);
+    assert.deepEqual(app.models.getModel("caps", "plain")?.input, ["text"]);
+    assert.deepEqual(app.models.getModel("caps", "own-names")?.thinkingLevelMap, {
+        off: null,
+        minimal: null,
+        low: "quick",
+        medium: null,
+        high: "deep",
+        xhigh: null,
+        max: null,
+    });
+
+    const listed = app.customProviders.list().find((each) => each.id === "caps")!;
+
+    assert.deepEqual(listed.models, [
+        { id: "seer", images: true, thinking: DEFAULT_TIERS },
+        {
+            id: "own-names",
+            images: false,
+            thinking: [
+                { level: "low", value: "quick" },
+                { level: "high", value: "deep" },
+            ],
+        },
+        { id: "plain", images: false, thinking: null },
+    ]);
+
+    // An edit changes what it is given, keeps a model's hand-made fields, and leaves out-of-form models as they were.
+    const config = readModels();
+
+    config.providers.caps.models[0].cost = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 };
+    writeFileSync(modelsFile, JSON.stringify(config));
+    await app.customProviders.update("caps", {
+        models: [{ id: "seer", images: false, thinking: null }, { id: "own-names" }, "plain"],
+    });
+
+    const after = readModels().providers.caps.models;
+
+    assert.deepEqual(after[0], {
+        id: "seer",
+        cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+    });
+    assert.equal(after[1].thinkingLevelMap.low, "quick", "a model sent without them keeps them");
+    assert.equal(app.models.getModel("caps", "seer")?.reasoning, false);
+    await assert.rejects(
+        app.customProviders.update("caps", {
+            models: [{ id: "seer", thinking: [{ level: "low", value: "" }] }],
+        }),
+        /needs a value/,
+    );
+    await app.customProviders.remove("caps");
 });
