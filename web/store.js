@@ -1060,9 +1060,6 @@ function keptRecord(view) {
 /** Whether the session `id` shows with a view the server sent since: not one this tab kept, which may be old. */
 export const viewSynced = (id) => synced === id && store.state.view.conversation?.id === id;
 
-/** The view this tab kept of a session it left (`keepView`), read only: undefined when it kept none. */
-export const keptViewOf = (id) => keptViews.get(id)?.view;
-
 /** Keep the view of the session this tab leaves, to show it again at once (`keptView`), here and on the device. */
 function keepView(view) {
     const id = view.conversation?.id;
