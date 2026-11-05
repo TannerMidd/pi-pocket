@@ -43,6 +43,7 @@ import {
 export { type Gh, runGh } from "./github.ts";
 import { snippet } from "./projection.ts";
 import { clientKey, requestFor } from "./requests.ts";
+import type { RequestLocale } from "./ui-locales.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -1090,7 +1091,7 @@ export class Watches {
 }
 
 /** Why a watch ended, as the rest of a sentence. */
-export function endedText(watch: PrWatch): string {
+export function endedText(watch: PrWatch, locale?: RequestLocale): string {
     switch (watch.status) {
         case "merged":
             return "until it was merged";
@@ -1100,8 +1101,20 @@ export function endedText(watch: PrWatch): string {
             return `until there was more to tell than its ${watch.max} messages`;
         case "expired":
             return "for two weeks with nothing new, then stopped";
-        case "failed":
-            return `until it had to stop: ${watch.note ?? "something went wrong"}`;
+
+        case "failed": {
+            const reason =
+                watch.note ??
+                locale?.t("server.watches.ended.unknown-reason", "something went wrong") ??
+                "something went wrong";
+
+            return (
+                locale?.t("server.watches.ended.failed", "until it had to stop: {reason}", {
+                    reason,
+                }) ?? `until it had to stop: ${reason}`
+            );
+        }
+
         default:
             return "";
     }

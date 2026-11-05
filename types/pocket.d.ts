@@ -968,6 +968,15 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  */
 export interface WebRequest {
     /**
+     * One immutable language snapshot for this request. Older servers omit it; use English then.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly locale?: {
+        readonly lang: string;
+        t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    };
+    /**
      * The request's method.
      * @since 0.14.0
      */
@@ -1225,6 +1234,15 @@ export interface PublicLinks {
  * @experimental
  */
 export interface PublicPageRequest {
+    /**
+     * One immutable language snapshot for this request. Older servers omit it; use English then.
+     * @since 0.28.0
+     * @experimental
+     */
+    readonly locale?: {
+        readonly lang: string;
+        t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    };
     /**
      * `GET` shows the page; `POST` is a form on it, sent back to the same address.
      * @since 0.22.0

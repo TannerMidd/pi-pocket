@@ -12,6 +12,7 @@ import { describe, HttpError } from "../errors.ts";
 import { exposedError } from "../extension-web.ts";
 import type { PublicPageRequest } from "../host.ts";
 import { escapeHtml, readBody, send } from "./io.ts";
+import { pageLocale } from "./locale.ts";
 
 /** The largest form a public page takes: answers in words, not files. */
 export const MAX_FORM = 64 * 1024;
@@ -154,6 +155,7 @@ export async function linkRoute(
     token: string | undefined,
     url: URL,
 ): Promise<void> {
+    const locale = pageLocale(app, request, url);
     const method = request.method === "HEAD" ? "GET" : request.method;
 
     if (method !== "GET" && method !== "POST") {
@@ -232,6 +234,7 @@ export async function linkRoute(
     });
 
     const input: PublicPageRequest = {
+        locale,
         method,
         link: Object.freeze(link),
         query: url.searchParams,

@@ -11,12 +11,15 @@ import { ExtensionRequest } from "../extension-request.ts";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { ConversationWebRequest, WebSession } from "../host.ts";
 import { type ApiRequest, json, readChecked, readJson, send, SVG_CSP } from "./io.ts";
+import { pageLocale } from "./locale.ts";
 
 /** A request to a module's route: `parts` is the path after `/api/x/`. */
 export async function extensionRoute(
     { app, request, response, url, user }: ApiRequest,
     parts: string[],
 ): Promise<void> {
+    const locale = pageLocale(app, request, url);
+
     // First, on a GET too: the sign-in cookie goes along with a link from another site, and a module's GET may change
     // things. The app's own calls always send the header. Before the route is looked up, so such a request learns
     // nothing of the routes.
@@ -114,6 +117,7 @@ export async function extensionRoute(
                       linkedSessions: app.linkedSessions.forRequest(id, scope),
                   };
         const input = {
+            locale,
             method: route.method,
             params,
             query: url.searchParams,

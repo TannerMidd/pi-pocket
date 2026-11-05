@@ -5,13 +5,15 @@
 import { createHash } from "node:crypto";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineExtension, defineTool } from "@earendil-works/pi-durable";
-// Types only: at run time this module uses nothing of Pi Pocket's but the host and web, as a drop-in would.
+// Types and the locale lookup only: at run time this module uses nothing of Pi Pocket's but the host, web, and
+// `ui-locales.ts`, as a drop-in would.
 import type {
     ConversationWebRequest,
     ExtensionWeb,
     PocketHost,
     PublicPageRequest,
 } from "../host.ts";
+import { requestLocale, type RequestLocale } from "../ui-locales.ts";
 
 /** A question for someone outside the chat, and what became of it. */
 type Question = {
@@ -152,9 +154,19 @@ button { margin-top: 18px; width: 100%; min-height: 48px; font: inherit; font-we
 }
 `;
 
-function page(title: string, content: string): string {
+/** A public page request with a language: a host that has none yet leaves the field out. */
+type LocalizedPage = PublicPageRequest & { readonly locale?: RequestLocale };
+
+/** English, for a page that no request language asked for: made for that page, so no language outlives it. */
+const englishPage = (): RequestLocale => requestLocale({ revision: 0, locales: [] }, undefined);
+
+/** The words of one public page: the request's language when the host names one, else English. */
+const pageWords = (request: PublicPageRequest): RequestLocale =>
+    (request as LocalizedPage).locale ?? englishPage();
+
+function page(locale: RequestLocale, title: string, content: string): string {
     return `<!doctype html>
-<html lang="en">
+<html lang="${escape(locale.lang)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -169,13 +181,26 @@ ${content}
 }
 
 function questionPage(
+    locale: RequestLocale,
     question: Question,
     error?: string,
     form?: { name?: string; answer?: string },
 ) {
-    const from = question.sentBy ? `${escape(question.sentBy)} asks you` : "A question for you";
+    const t = locale.t;
+    const from = escape(
+        question.sentBy
+            ? t("server.extensions.ask-someone.question-page.from.asks", "{detail} asks you", {
+                  detail: question.sentBy,
+              })
+            : t("server.extensions.ask-someone.question-page.from.question", "A question for you"),
+    );
+    const asked = t(
+        "server.extensions.ask-someone.question-page.p.person-who-sent",
+        "the person who sent this",
+    );
 
     return page(
+        locale,
         question.title,
         `<p class="from">${from}</p>
 <h1>${escape(question.title)}</h1>
@@ -184,12 +209,12 @@ ${render(question.text)}
 </div>
 <form method="post">
 ${error ? `<p class="error">${escape(error)}</p>` : ""}
-<label for="answer">Your answer</label>
+<label for="answer">${escape(t("server.extensions.ask-someone.question-page.label.answer", "Your answer"))}</label>
 <textarea id="answer" name="answer" required maxlength="${MAX_ANSWER}">${escape(form?.answer ?? "")}</textarea>
-<label for="name">Your name (optional)</label>
+<label for="name">${escape(t("server.extensions.ask-someone.question-page.label.name-optional", "Your name (optional)"))}</label>
 <input id="name" name="name" maxlength="${MAX_NAME}" autocomplete="name" value="${escape(form?.name ?? "")}">
-<button type="submit">Send answer</button>
-<p class="note">Your answer goes back to ${question.sentBy ? escape(question.sentBy) : "the person who sent this"}. This link takes one answer, then closes.</p>
+<button type="submit">${escape(t("server.extensions.ask-someone.question-page.button.send-answer", "Send answer"))}</button>
+<p class="note">${escape(t("server.extensions.ask-someone.question-page.p.answer-goes-back-link", "Your answer goes back to {detail}. This link takes one answer, then closes.", { detail: question.sentBy ?? asked }))}</p>
 </form>`,
     );
 }
@@ -413,6 +438,12 @@ export default function createAskSomeone(host: PocketHost, web?: ExtensionWeb) {
 
     // The page for anyone with a question's link: the question, and a form for one answer.
     web.publicPage(async (request: PublicPageRequest) => {
+        const locale = pageWords(request);
+        const t = locale.t;
+        const open = t(
+            "server.extensions.ask-someone.create-ask-someone.html.question-not-open",
+            "This question is not open",
+        );
         const id = (request.link.data as { id?: unknown } | null)?.id;
         const found =
             typeof id === "string" && ID.test(id)
@@ -423,14 +454,15 @@ export default function createAskSomeone(host: PocketHost, web?: ExtensionWeb) {
             return {
                 status: 404,
                 html: page(
-                    "This question is not open",
-                    "<h1>This question is not open</h1><p>It may have been withdrawn. Ask whoever sent it for a new link.</p>",
+                    locale,
+                    open,
+                    `<h1>${escape(open)}</h1><p>${escape(t("server.extensions.ask-someone.create-ask-someone.html.withdrawn-ask-whoever-sent", "It may have been withdrawn. Ask whoever sent it for a new link."))}</p>`,
                 ),
             };
         }
 
         if (request.method === "GET") {
-            return questionPage(found);
+            return questionPage(locale, found);
         }
 
         const answer = body(request.form.answer, MAX_ANSWER);
@@ -439,7 +471,15 @@ export default function createAskSomeone(host: PocketHost, web?: ExtensionWeb) {
         if (answer === "") {
             return {
                 status: 400,
-                html: questionPage(found, "Write an answer before you send it.", { name }),
+                html: questionPage(
+                    locale,
+                    found,
+                    t(
+                        "server.extensions.ask-someone.create-ask-someone.html.write-answer-before-send",
+                        "Write an answer before you send it.",
+                    ),
+                    { name },
+                ),
             };
         }
 
@@ -469,8 +509,9 @@ export default function createAskSomeone(host: PocketHost, web?: ExtensionWeb) {
             return {
                 status: 410,
                 html: page(
-                    "This question is not open",
-                    "<h1>This question is not open</h1><p>It was withdrawn while you wrote. Ask whoever sent it for a new link.</p>",
+                    locale,
+                    open,
+                    `<h1>${escape(open)}</h1><p>${escape(t("server.extensions.ask-someone.create-ask-someone.html.withdrawn-while-wrote-ask", "It was withdrawn while you wrote. Ask whoever sent it for a new link."))}</p>`,
                 ),
             };
         }
@@ -492,8 +533,9 @@ export default function createAskSomeone(host: PocketHost, web?: ExtensionWeb) {
         }
 
         return page(
-            "Answer sent",
-            `<h1>Thank you</h1><p>Your answer went to ${saved.sentBy ? escape(saved.sentBy) : "the person who asked"}. You can close this page.</p>`,
+            locale,
+            t("server.extensions.ask-someone.create-ask-someone.text.answer-sent", "Answer sent"),
+            `<h1>${escape(t("server.extensions.ask-someone.create-ask-someone.h1.thank", "Thank you"))}</h1><p>${escape(t("server.extensions.ask-someone.create-ask-someone.p.answer-went-close-page", "Your answer went to {detail}. You can close this page.", { detail: saved.sentBy ?? t("server.extensions.ask-someone.create-ask-someone.p.person-who-asked", "the person who asked") }))}</p>`,
         );
     });
 

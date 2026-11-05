@@ -18,22 +18,7 @@ import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 import { themeFile } from "./http/theme-routes.ts";
-import { localeCookie, requestLocale, type RequestLocale } from "./ui-locales.ts";
-
-/** Which `?noext=` values turn safe mode off, as `web/safe-mode.js` has them: any other value turns it on. */
-const SAFE_OFF: ReadonlySet<string> = new Set(["0", "false", "off", "no"]);
-
-/**
- * The language of a page outside the app: one catalog snapshot and one language, fixed for this request, even while the
- * page waits for a session's title. A page opened with `?noext=1` shows English and keeps the person's choice.
- */
-function pageLocale(app: PocketApp, request: IncomingMessage, url: URL): RequestLocale {
-    const safe = url.searchParams.has("noext")
-        ? !SAFE_OFF.has((url.searchParams.get("noext") ?? "").trim().toLowerCase())
-        : false;
-
-    return requestLocale(app.webs.locales.snapshot(), localeCookie(request.headers.cookie), safe);
-}
+import { pageLocale } from "./http/locale.ts";
 
 /**
  * The app's own UI text in other languages (`ui-locales.ts`): the catalog that its tabs and sign-in pages read. It is
