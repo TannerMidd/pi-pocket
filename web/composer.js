@@ -177,6 +177,8 @@ const sentListeners = new Set();
 const takingBack = new Set();
 /** How many queued messages were taken back (`keepBack`): a box looks for one when it grows. */
 let takenBack = 0;
+/** The request ids of the sends that ended in this page (`endSend`). */
+const ended = new Set();
 
 const requestKey = (id) => `sendRequest.${id}`;
 const backKey = (id) => `takenBack.${id}`;
@@ -195,10 +197,13 @@ function keptBack(id) {
 /**
  * Keep `back`, a queued message of conversation `id` taken back (`{ text, attachments }`), in the
  * person's storage until a box of `id` with no send on its way takes it: the box that asked can
- * go meanwhile (another route, a session switch), or the page reload.
+ * go meanwhile (another route, a session switch), or the page reload. Taken back during a send
+ * (`after`, its request id), it waits until that send ended: in this page, or elsewhere (another
+ * tab, before a reload) once its request id is gone. Before, the words of the box may go again.
  */
 function keepBack(id, back) {
-    const kept = { text: back.text, attachments: back.attachments };
+    const after = onTheWay.get(id)?.requestId ?? null;
+    const kept = { text: back.text, attachments: back.attachments, after };
 
     personStorage.set(backKey(id), JSON.stringify([...keptBack(id), kept]));
     takenBack += 1;
@@ -263,6 +268,7 @@ function beginSend(id, record, message) {
  */
 function endSend(id, record, went) {
     onTheWay.delete(id);
+    ended.add(record.requestId);
 
     // It went: its request id is done with.
     if (went && keptRequest(id)?.requestId === record.requestId) {
@@ -669,16 +675,28 @@ export function Composer() {
 
         return () => sentListeners.delete(went);
     }, [conversationId]);
+    // The request id kept for the box's words: a change ends the wait of what was taken back.
+    const request = keptRequest(conversationId)?.requestId;
+
     // The queued messages of this conversation taken back (`keepBack`) go before the box's words,
     // once no send is on its way.
     useEffect(() => {
-        const list = sending ? [] : keptBack(conversationId);
+        // Read now, not at the render: a send can begin between the two.
+        const all = onTheWay.has(conversationId) ? [] : keptBack(conversationId);
+        const now = keptRequest(conversationId)?.requestId;
+        const ready = (back) => !back.after || back.after !== now || ended.has(back.after);
+        const list = all.filter(ready);
 
         if (list.length === 0) {
             return;
         }
 
-        personStorage.set(backKey(conversationId), null);
+        const waiting = all.filter((back) => !ready(back));
+
+        personStorage.set(
+            backKey(conversationId),
+            waiting.length === 0 ? null : JSON.stringify(waiting),
+        );
         let words = drafts.get(conversationId);
         let chips = [];
 
@@ -696,7 +714,7 @@ export function Composer() {
             box.current?.focus();
             box.current?.setSelectionRange(at, at);
         });
-    }, [conversationId, sending, takenBack]);
+    }, [conversationId, sending, takenBack, request]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 

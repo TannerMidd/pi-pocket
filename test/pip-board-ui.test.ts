@@ -598,7 +598,15 @@ test("A queued message's Edit during a send: kept through a reload or a move", r
     const queued = `[...document.querySelectorAll('.pane .queued-text')]
         .find((each) => each.textContent.includes('tell him'))`;
     const EDIT = "document.querySelector('.pane .queued-actions .button')";
-    const both = "tell him hello from me\\nhello";
+    const back = (words: string, what: string) =>
+        see(`document.querySelector('${BOX}').value === '${words}'`, what);
+
+    const edit = async (twice = false) => {
+        await page.evaluate(`${queued}.click()`);
+        await see(EDIT, "its Edit");
+        await page.evaluate(`${EDIT}.click()${twice ? `; ${EDIT}.click()` : ""}`);
+        await see(`!${queued}`, "taken back");
+    };
 
     let answer = () => {};
 
@@ -609,51 +617,75 @@ test("A queued message's Edit during a send: kept through a reload or a move", r
         for (const words of ["start", "tell him hello from me"]) {
             await type(BOX, words);
             await page.press("Enter");
-            await see(`document.querySelector('${BOX}').value === ''`, `"${words}" went`);
+            await back("", `"${words}" went`);
         }
 
-        // Edit, tapped twice, while "hello" goes; then a reload (the send never reached the
-        // server), or the box shown again (it went). The words come back whole, and go once.
-        for (const reload of [true, false]) {
-            await type(BOX, "hello");
-            await holdingSends(async () => {
-                await page.press("Enter");
-                await see(`window.sends === 1`, "on its way");
-                await page.evaluate(`${queued}.click()`);
-                await see(EDIT, "its Edit");
-                await page.evaluate(`${EDIT}.click(); ${EDIT}.click()`);
-                await see(`!${queued}`, "taken back");
-
-                if (reload) {
-                    await page.evaluate(`location.reload()`);
-                    await see(`${STORE}.store.state.streamId`, "loaded again");
-
-                    return;
+        // Edit while "hello" reaches the server, its answer lost; then a reload. The message waits
+        // until "hello", sent again, is known to have gone: it goes once.
+        await type(BOX, "hello");
+        await page.evaluate(`const real = window.fetch;
+            window.fetch = async (url, init) => {
+                if (!String(url).includes('/submit')) {
+                    return real(url, init);
                 }
 
-                await page.press("Alt+a");
-                await boarded("PiP's board over the session");
-                await page.press("Alt+a");
-                await backTo(background, "the session again");
-                await page.evaluate(`window.release()`);
-            });
+                window.fetch = real;
+                await real(url, init);
+                window.reached = true;
 
-            await see(`document.querySelector('${BOX}').value === '${both}'`, "taken back whole");
-
-            if (reload) {
-                await page.press("Enter");
-                await see(queued, "queued again");
-            }
-        }
-
-        // And with no send on its way, as it always went.
+                return new Promise(() => {});
+            };`);
+        await page.press("Enter");
+        await see(`window.reached`, "on the server, its answer lost");
+        await edit(true);
+        await see(`Object.keys(localStorage).some((key) => key.includes(':takenBack.'))`, "kept");
+        await page.evaluate(`location.reload()`);
+        await see(`${STORE}.store.state.streamId`, "loaded again");
+        await back("hello", "only the words of the send");
+        await page.press("Enter");
+        await back("tell him hello from me", "taken back after a reload");
+        assert.deepEqual(await inPage(`${STORE}.store.state.view.inbox.map((i) => i.text)`), [
+            "hello",
+        ]);
         await page.press("Enter");
         await see(queued, "queued again");
-        await page.evaluate(`${queued}.click()`);
-        await see(EDIT, "its Edit");
-        await page.evaluate(`${EDIT}.click()`);
-        await see(`document.querySelector('${BOX}').value === '${both}'`, "taken back at once");
-        assert.deepEqual(await inPage(`${STORE}.store.state.notices.map((n) => n.message)`), []);
+
+        // Edit, tapped twice, while "hello" goes and fails; the box shown again meanwhile.
+        await type(BOX, "hello");
+        await holdingSends(async () => {
+            await page.press("Enter");
+            await see(`window.sends === 1`, "on its way");
+            await edit(true);
+            await page.press("Alt+a");
+            await boarded("PiP's board over the session");
+            await page.press("Alt+a");
+            await backTo(background, "the session again");
+            await page.evaluate(`window.release()`);
+        }, true);
+        await back("tell him hello from me\\nhello", "taken back after a move");
+        await page.press("Enter");
+        await see(queued, "queued again");
+
+        // With no send on its way, also when one begins in the frame it comes back in.
+        await type(BOX, "x");
+        await page.evaluate(`const storage = (await import('/person-storage.js')).personStorage;
+            const set = storage.set;
+            storage.set = (key, value) => {
+                if (key.startsWith('takenBack.') && value !== null) {
+                    storage.set = set;
+                    setTimeout(() => document.querySelector('.pane .send-button').click());
+                }
+
+                return set(key, value);
+            };`);
+        await edit();
+        await see(`${STORE}.store.state.view.inbox.some((item) => item.text === 'x')`, "x went");
+        await back("tell him hello from me\\nhello", "taken back, without x");
+        assert.deepEqual(
+            await inPage(`${STORE}.store.state.notices.map((n) => n.message)`),
+            ["HTTP 400"],
+            "only the failed send's",
+        );
     } finally {
         answer();
     }
