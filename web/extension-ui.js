@@ -51,6 +51,7 @@ import {
 } from "./ui.js";
 import { t } from "./ui-locale.js";
 import { moduleTitle } from "./builtin-locales.js";
+import { useArtifactBridge } from "./artifact-bridge.js";
 
 /**
  * The version of `pocket`. It goes up only when something extensions use changes in a way that breaks them; additions
@@ -522,7 +523,22 @@ async function load(entry) {
             throw new Error("it has no default export function");
         }
 
-        const dispose = await loaded.default(record.pocket);
+        // Design predates the public module boundary. Core supplies its internal integrations, not importable files.
+        const integration =
+            entry.module === "design"
+                ? {
+                      app: Object.freeze({
+                          get state() {
+                              return store.state;
+                          },
+                          subscribe: (listener) => store.subscribe(listener),
+                      }),
+                      share: (id, version) =>
+                          openSheet({ type: "artifact-share", id, version, back: "design" }),
+                      useArtifactBridge,
+                  }
+                : undefined;
+        const dispose = await loaded.default(record.pocket, integration);
 
         if (typeof dispose === "function") {
             record.disposers.push(dispose);
@@ -935,6 +951,37 @@ function pocketFor(record) {
         },
         module: record.module,
         title: record.title,
+        /** Fixed UI text only: the current language, with literal named interpolation and English fallback. */
+        t,
+        /** A language or catalog revision changed; listeners are removed with this module version. */
+        onLocaleChange(listener) {
+            tick(record);
+
+            if (typeof listener !== "function") {
+                throw new Error("pocket.onLocaleChange: give it a function");
+            }
+
+            if (!live()) {
+                return () => {};
+            }
+
+            let revision = store.state.localeRevision;
+            const stop = store.subscribe((state) => {
+                if (state.localeRevision !== revision && live()) {
+                    revision = state.localeRevision;
+
+                    try {
+                        listener();
+                    } catch (error) {
+                        console.error(`${record.title}: an onLocaleChange listener failed`, error);
+                    }
+                }
+            });
+
+            record.disposers.push(stop);
+
+            return stop;
+        },
         // Drawing: the app's own Preact and htm, so components and hooks work with its renderer.
         h,
         html,

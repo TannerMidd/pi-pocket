@@ -272,6 +272,10 @@ Answers the requests of a route. The value that it returns goes back as JSON, an
 
 ```ts
 interface WebRequest {
+    readonly locale?: {
+        readonly lang: string;
+        t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    };
     readonly method: WebMethod;
     readonly params: Readonly<Record<string, string>>;
     readonly query: URLSearchParams;
@@ -289,6 +293,7 @@ Since 0.14.0 · Stable
 
 What a handler gets.
 
+- Since 0.28.0 (experimental), `locale` is an immutable snapshot for this request. `lang` is the exact available language selected by `pocket_locale`, or `en` for a missing, invalid, unavailable, or safe-mode choice. `t(key, english, values?)` returns plain text with English fallback and literal named values. It does not escape HTML; escape it for the output context. Older servers omit `locale`; use English then. Do not keep it as a global current language or translate user content or model instructions.
 - `method`: the request's method.
 - `params`: the values of the path's `:name` parts, by name. They are text from outside: check a value before you make a file path from it.
 - `query`: the query string. `pocket.api("usage?days=7")` sends `days`.
@@ -456,6 +461,10 @@ The page's HTML, or its HTML with a status from 200 to 599 (200 when not given),
 
 ```ts
 interface PublicPageRequest {
+    readonly locale?: {
+        readonly lang: string;
+        t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    };
     readonly method: "GET" | "POST";
     readonly link: PublicLinkInfo;
     readonly query: URLSearchParams;
@@ -471,6 +480,7 @@ Since 0.22.0 · Experimental
 
 A request to a public page, from anyone with its address. It has no person.
 
+- Since 0.28.0 (experimental), `locale` is one immutable request snapshot with the same selection and fallback as [`WebRequest.locale`](#webrequest). Older servers omit it; use English then. `t` returns text, not escaped HTML. Escape the result, including interpolated values, before inserting it in the page. It never authorizes access or changes the meaning of the link.
 - `method`: `"GET"` to show the page (`HEAD` comes as `"GET"`), `"POST"` for a form on it.
 - `link`: the link that the address names. It is still open.
 - `query`: the query string.

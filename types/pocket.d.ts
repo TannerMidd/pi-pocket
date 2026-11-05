@@ -2548,6 +2548,18 @@ export interface Pocket {
      */
     readonly title: string;
     /**
+     * Fixed UI text in the current language, with literal named interpolation and English fallback. Does not escape HTML.
+     * @since 0.28.0
+     * @experimental
+     */
+    t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+    /**
+     * Hear language or catalog changes. Not called immediately; removed when this module version goes. Returns a stop function.
+     * @since 0.28.0
+     * @experimental
+     */
+    onLocaleChange(listener: () => void): () => void;
+    /**
      * The app's Preact `h`.
      * @since 0.14.0
      */

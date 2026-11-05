@@ -62,7 +62,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `provide`, `use`, `onService`, `settings`, `setting`, and `onSettings` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md)).
 - `publicPage` and `links` (experimental, since 0.22.0): pages at `/l/<token>` for anyone with a module's link, what a page handler gets (`PublicPageRequest`), and what its answer does ([Public pages](../public-pages.md)).
 - `uiLocales` (experimental, since 0.28.0): the UI text of other languages, as data-only packs that core merges over its English, which stays the fallback of every key, with `UiLocalePack` ([Languages](../reference/web.md#uilocales)).
-- What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`), and what its answer does.
+- What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`; since 0.28.0 optional experimental `locale`), and what its answer does. Public pages have the same optional request locale.
 - A conversation-bound request's `conversation` metadata and human `linkedSessions.start` / `list`, with their authenticated-actor, receipt, and admission checks (since 0.16.0).
 - The route paths, the methods, the `access` values (`owner`, `steer`, `view`), and the `X-Pocket` header that every call to a route must have.
 
@@ -77,6 +77,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `version`, `module`, `title`, and `pocketVersion` (connected-server package version, since 0.16.0; not the API level).
 - `h`, `html`, `Fragment`, and the hooks: `useState`, `useEffect`, `useLayoutEffect`, `useRef`, `useMemo`, `useCallback`, and `useReducer`.
 - The pieces `Icon`, `Loader`, `Spinner`, `Markdown`, and `Switch`, with the props that [pocket](../reference/pocket.md) gives.
+- `t` and `onLocaleChange` (experimental, since 0.28.0): fixed UI lookup and module-lifetime language notifications, with explicit English fallback.
 - `api`, `on`, `rail`, `menu`, `launcher`, `page`, `sheet`, `toolCall`, `openPage`, `closePage`, `openSheet`, `closeSheet`, `notify`, `me`, `conversationId`, `openConversation` (since 0.16.0), `style`, and `onDispose`.
 - What a page's or a sheet's component gets: `pocket`, `close`, and a sheet's `props`.
 - The icon names that [pocket](../reference/pocket.md) lists. Other icon names can go. An unknown name shows `grid`, so a module does not fail.
