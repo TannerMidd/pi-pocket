@@ -135,7 +135,7 @@ test("R23: the real catalog is public to every role without exposing private fie
     assert.deepEqual(Object.keys(catalog).sort(), ["locales", "revision"]);
     assert.deepEqual(
         catalog.locales.map((each) => each.id),
-        ["en", "fr"],
+        ["en", "fr", "zh-CN"],
     );
     assert.equal(catalog.locales[1]?.messages["ui.close"], "Fermer");
 

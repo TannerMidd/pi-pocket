@@ -632,6 +632,7 @@ function LanguageSection() {
             <label class="label setting">
                 <span>${t("appearance.language", "Language")}</span>
                 <select
+                    style="min-height:40px;max-width:100%"
                     value=${localeId()}
                     onChange=${(event) => setLocale(event.currentTarget.value)}
                 >
