@@ -1791,48 +1791,41 @@ export function drawnFor(keys, component) {
     return Wrapped;
 }
 
-class Memo extends Component {
-    // Without making arrays: the session list asks this of each of its rows at every draw.
-    shouldComponentUpdate(next) {
-        const before = this.props.props;
-        const after = next.props;
-        let count = 0;
-
-        if (next.component !== this.props.component) {
-            return true;
-        }
-
-        for (const key in after) {
-            count++;
-
-            if (!Object.is(before[key], after[key]) && !next.ignored.includes(key)) {
-                return true;
-            }
-        }
-
-        for (const key in before) {
-            count--;
-        }
-
-        return count !== 0;
-    }
-
-    render({ component, props }) {
-        return h(component, props);
-    }
-}
-
 /**
  * `component`, drawn again only when its props change (each compared with `Object.is`) or its own state does. It must
  * read nothing else as it draws, such as `store.state`: what it needs comes as props. `ignored` names props it reads
- * only as it mounts, whose change alone does not draw it again.
+ * only as it mounts, whose change alone does not draw it again. One component around it, not two: the session list
+ * makes one for each of its hundreds of rows.
  */
 export function memo(component, ignored = []) {
-    const Wrapped = (props) => h(Memo, { component, props, ignored });
+    class Memo extends Component {
+        // Without making arrays: the session list asks this of each of its rows at every draw.
+        shouldComponentUpdate(next) {
+            let count = 0;
 
-    Wrapped.displayName = component.name;
+            for (const key in next) {
+                count++;
 
-    return Wrapped;
+                if (!Object.is(this.props[key], next[key]) && !ignored.includes(key)) {
+                    return true;
+                }
+            }
+
+            for (const key in this.props) {
+                count--;
+            }
+
+            return count !== 0;
+        }
+
+        render(props) {
+            return h(component, props);
+        }
+    }
+
+    Memo.displayName = component.name;
+
+    return Memo;
 }
 
 /** Phones: sheets from the bottom edge, which drag back down to close, and menus that a swipe closes. */

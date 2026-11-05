@@ -5652,22 +5652,28 @@ pre.diff .del {
     grid-template-rows: 0fr;
 }
 
+/* The list's own groups while a search shows its matches: kept as they were, out of sight and with no room. */
+.session-group.kept {
+    content-visibility: hidden;
+    contain-intrinsic-size: 0 0;
+}
+
 /*
  * A row out of sight is not styled or laid out (`content-visibility`): with hundreds of sessions, each restyle and each
- * width change (the sidebar's drag, the window's) paid for every row. Meanwhile it keeps the size it last had, or a
- * row's usual one. It clips what it draws to its box, so the 2px between rows is its own padding, and linked rows'
- * branch lines run on from one row into the next.
+ * width change (the sidebar's drag, the window's) paid for every row. Meanwhile it keeps the size it last had, or its
+ * button's usual height, which its padding adds to. It clips what it draws to its box, so the 2px between rows is that
+ * padding, and linked rows' branch lines run on from one row into the next.
  */
 .session-row {
     position: relative;
     padding-block: 1px;
     padding-inline-start: calc(var(--linked-depth, 0) * 14px);
     content-visibility: auto;
-    contain-intrinsic-size: auto calc(26px + 12px * var(--space-y));
+    contain-intrinsic-size: auto calc(24px + 12px * var(--space-y));
 }
 
 .session-row.with-chips {
-    contain-intrinsic-size: auto calc(46px + 12px * var(--space-y));
+    contain-intrinsic-size: auto calc(44px + 12px * var(--space-y));
 }
 
 /* A row new to this page rises in, the rows in turn. Back to the list builds it again: those rows show as they were,
@@ -6036,6 +6042,13 @@ pre.diff .del {
 .session-row.marked-unread .session-title,
 .session-row.unseen .session-title {
     font-weight: 600;
+}
+
+/* A search's match in a row, marked by the browser (`searchMarks` in sessions.js), which cannot make it bold. */
+::highlight(session-search) {
+    color: var(--accent);
+    text-decoration: underline 1px;
+    text-underline-offset: 2px;
 }
 
 .session-title mark,
@@ -16274,7 +16287,7 @@ textarea.notes {
         height: calc(30px + 10px * var(--space-y));
     }
     .session-row {
-        contain-intrinsic-size: auto calc(32px + 10px * var(--space-y));
+        contain-intrinsic-size: auto calc(30px + 10px * var(--space-y));
     }
     .session:active {
         background: var(--pressed);

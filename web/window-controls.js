@@ -296,10 +296,13 @@ function moves(records) {
         node !== drag &&
         (node.matches(LAYOUT) || node.querySelector(LAYOUT) !== null);
 
-    return records.some((record) =>
-        record.type === "attributes"
-            ? layout(record.target)
-            : [...record.addedNodes, ...record.removedNodes].some(layout),
+    // The session list holds no window or bar, and hundreds of its rows change at once.
+    return records.some(
+        (record) =>
+            !record.target.closest?.(".session-items") &&
+            (record.type === "attributes"
+                ? layout(record.target)
+                : [...record.addedNodes, ...record.removedNodes].some(layout)),
     );
 }
 
