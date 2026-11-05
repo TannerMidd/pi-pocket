@@ -3,6 +3,7 @@ import { t } from "./ui-locale.js";
 import { browserAvailable, openInBrowser, toggleBrowser } from "./browser.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { branchAvailable } from "./sheets/branch.js";
+import { levelLabel } from "./sheets/model.js";
 import { memoryAvailable, remember } from "./sheets/memory.js";
 import { togglePeeks } from "./peeks.js";
 import { askPip, openPip, pipAvailable } from "./pip.js";
@@ -212,7 +213,7 @@ function showSession() {
     const window = view.agent?.contextWindow;
     const level =
         view.agent?.reasoning && view.agent.thinkingLevel !== "off"
-            ? ` (${view.agent.thinkingLevel})`
+            ? ` (${levelLabel(view.agent.thinkingLevel)})`
             : "";
     const parts = [`${modelLabel(view.agent)}${level}`];
 

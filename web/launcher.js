@@ -757,7 +757,12 @@ function themeItems() {
         ...lookItems(),
         ...ids.map((id) => {
             const palette = paletteOf(id);
-            const name = id === "desktop" ? `Desktop · ${palette.name}` : palette.name;
+            const name =
+                id === "desktop"
+                    ? t("web.sheets.appearance.desktop-name", "Desktop · {name}", {
+                          name: palette.name,
+                      })
+                    : palette.name;
 
             return {
                 kind: "theme",

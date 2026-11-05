@@ -9633,7 +9633,7 @@ export default {
         "builtin.module.codemode.summary":
             "Codemode 让代理编写 JavaScript 调用其他工具，以批量执行独立调用、串联调用或在输出进入模型前过滤大量结果。",
         "builtin.module.memory.summary":
-            "记忆让 Pi 提出跨会话保留的项目或全局经验。Owner 在工具调用下方或菜单中的记忆页批准后，后续会话的系统提示会包含这些经验。",
+            "记忆让 Pi 提出跨会话保留的项目或全局经验。所有者在工具调用下方或菜单中的记忆页批准后，后续会话的系统提示会包含这些经验。",
         "builtin.module.pip.summary":
             "PiP 是跨界面的个人助手。它查看会话状态、创建和发送任务、停止或归档会话、设置定时消息、跟进任务、监视 GitHub 仓库和拉取请求，并可拒绝等待审批的调用，但不能批准。",
         "builtin.module.triggers.summary":
@@ -9646,7 +9646,7 @@ export default {
         "builtin.module.ask-someone.summary":
             "Pi 起草可由聊天外的人回答的问题，成员通过链接或文本分享。",
         "builtin.module.updates.summary":
-            "每 6 小时检查 Pi Pocket 新版本，通知 Owner 并显示更新说明。可一键更新 Git 工作树或全局 npm 安装并重启，也可在没有会话工作时自动安装。",
+            "每 6 小时检查 Pi Pocket 新版本，通知所有者并显示更新说明。可一键更新 Git 工作树或全局 npm 安装并重启，也可在没有会话工作时自动安装。",
         "builtin.module.design.summary": "在聊天旁提供交互式设计画布。",
         "builtin.module.tool-search.summary":
             "工具搜索把少数会话才使用的工具移出常规请求，直到 Pi 主动请求。",

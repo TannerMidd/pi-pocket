@@ -12,6 +12,7 @@ import { usePipResize } from "./pip-window.js";
 import { api, attempt, isRow, navigate, notify, openSheet, store, uid } from "./store.js";
 import { spendTap } from "./taps.js";
 import { memoryAvailable, useMemory } from "./sheets/memory.js";
+import { levelLabel } from "./sheets/model.js";
 import { itemsOf, says, summarize } from "./turns.js";
 import {
     contextLevel,
@@ -1024,7 +1025,8 @@ function PipPanel({ leaving, scrim }) {
     const speaking = blocks.some(says);
     const busy = live.busy === true;
     const model = modelLabel(view.agent);
-    const thinking = view.agent?.thinkingLevel === "off" ? "" : (view.agent?.thinkingLevel ?? "");
+    const thinking =
+        view.agent?.thinkingLevel === "off" ? "" : levelLabel(view.agent?.thinkingLevel ?? "");
     // Calls of PiP's held for approval: the panel cannot answer them, so it says so and leads to where they can be.
     const waiting = ready ? (view.approvals ?? []) : [];
     const compacting = ready && (live.compactions ?? []).length > 0;
