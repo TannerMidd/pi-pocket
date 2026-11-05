@@ -125,8 +125,8 @@ export function moduleSummary(module) {
             );
         case "anthropic-subscription.ts":
             return t(
-                "builtin.module.anthropic-subscription.summary",
-                "Adds the header that makes Anthropic count Pi Pocket's requests against a Claude subscription.",
+                "builtin.module.anthropic-subscription.release028.summary-risk",
+                "Claude subscription billing: at your own risk, as Anthropic's terms and its help pages disagree on it, Anthropic counts Pi Pocket's requests against a Claude subscription.",
             );
         case "guard.ts":
             return t("builtin.module.guard.summary", "Lancet Guard for Pi Pocket's tools.");

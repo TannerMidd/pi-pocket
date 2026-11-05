@@ -1,7 +1,7 @@
 // 417 WP2 keys: reference translations are verbatim; 66 others include the reviewed guard detail.
 // Reference SHA-256: en bbcd63f2687b5fbbd0c71d31d1be7e31bbb709900214a4db5718e8f02dd210e9; zh 4f2455d908554b7e41cb80f64f6034e0a1bc7e376e64005a1898a70ac1248612.
 // existingEn=null means unknown: the coordinator has not provided the startup 836-key snapshot.
-export const WP2_KEYS: readonly {
+export const WP2_HISTORY: readonly {
     key: string;
     english: string;
     zh: string;
@@ -2934,4 +2934,138 @@ export const WP2_KEYS: readonly {
         source: "reference",
         existingEn: null,
     },
+];
+
+// Release integration keeps the original 417-row history above, including superseded keys.
+export const WP2_RETIRED_KEYS = [
+    "web.composer.composer.button.interrupt",
+    "web.composer.composer.button.interrupt.interrupt",
+    "web.composer.render.text.commands-background",
+    "web.composer.render.text.one-command-background",
+] as const;
+export const WP2_RELEASE_KEYS: readonly {
+    key: string;
+    english: string;
+    zh: string;
+    source: "release-0.28";
+    existingEn: boolean | null;
+}[] = [
+    {
+        key: "web.chat.notes-warning.clear",
+        english: "This browser could not clear its kept notes draft. It may return after a reload.",
+        zh: "浏览器无法清除保留的笔记草稿，重新加载后可能再次出现。",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.chat.notes-warning.write",
+        english: "This browser cannot keep this draft after a reload. Save it before you reload.",
+        zh: "浏览器无法在重新加载后保留此草稿，请先保存。",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.interrupt-now.confirm",
+        english: "Interrupt now?",
+        zh: "立即中断？",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.interrupt-now",
+        english: "Interrupt now",
+        zh: "立即中断",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.background.one",
+        english:
+            "{count} command runs in the background: open Background to watch it, or Running now to stop one",
+        zh: "{count} 个命令正在后台运行：打开“后台”查看输出，或打开“正在运行”停止命令",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.background.many",
+        english:
+            "{count} commands run in the background: open Background to watch them, or Running now to stop one",
+        zh: "{count} 个命令正在后台运行：打开“后台”查看输出，或打开“正在运行”停止命令",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.presented.more",
+        english: "{label}: show, fold, or hide, copy, and more",
+        zh: "{label}：显示、折叠、隐藏、复制及更多操作",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.presented.more-title",
+        english: "Show, fold, or hide inputs like this; copy, and more",
+        zh: "显示、折叠或隐藏此类输入；复制及更多操作",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "sessions.new",
+        english: "New session",
+        zh: "新建会话",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.linked.actions",
+        english: "Edit, send again, or copy",
+        zh: "编辑、重新发送或复制",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.linked.label",
+        english: "Linked session",
+        zh: "关联会话",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.linked.unavailable",
+        english: "A session you cannot open",
+        zh: "无法打开的会话",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.linked.open",
+        english: "Open {name}",
+        zh: "打开 {name}",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "menu.open",
+        english: "Open",
+        zh: "打开",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.linked.show-all",
+        english: "Show all · {count} lines",
+        zh: "显示全部 · {count} 行",
+        source: "release-0.28",
+        existingEn: true,
+    },
+    {
+        key: "web.ask.send",
+        english: "Send",
+        zh: "发送",
+        source: "release-0.28",
+        existingEn: true,
+    },
+];
+export const WP2_KEYS = [
+    ...WP2_HISTORY.filter((row) => !(WP2_RETIRED_KEYS as readonly string[]).includes(row.key)),
+    ...WP2_RELEASE_KEYS,
 ];

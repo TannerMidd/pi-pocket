@@ -3767,4 +3767,6 @@ export const EN = Object.freeze({
         "the session that started this one reached its {amount} spend limit",
     "web.running-board.held.person-limit": "{name} reached their {amount} spend limit",
     "web.extension-ui.fence.name": "Fence {id}",
+    "builtin.module.anthropic-subscription.release028.summary-risk":
+        "Claude subscription billing: at your own risk, as Anthropic's terms and its help pages disagree on it, Anthropic counts Pi Pocket's requests against a Claude subscription.",
 });

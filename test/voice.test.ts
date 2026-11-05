@@ -12,6 +12,7 @@ const STUBS: Record<string, string> = {
     "./store.js": `
         export const notify = () => {};
         export const onHello = () => {};
+        export const setFixedText = () => {};
         export const store = { state: { localeRevision: 0 }, set(value) { Object.assign(this.state, value); } };
     `,
     "./safe-mode.js": `export const safeMode = () => true; export const onSafeModeEnd = () => {};`,

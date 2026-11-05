@@ -603,6 +603,7 @@ export function ProvidersSheet() {
                         onInput=${(event) => setQuery(event.currentTarget.value)}
                     />
                 </label>
+                ${groups.length === 0 && note}
                 ${
                     providers === null &&
                     html`<${Loader}

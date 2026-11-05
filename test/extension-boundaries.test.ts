@@ -4,6 +4,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
+import { modulesWith } from "../src/server/config.ts";
+import { VENDOR } from "../src/server/http/assets.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const extensions = join(root, "src/server/extensions");
@@ -17,6 +19,64 @@ function sources(directory: string): string[] {
               : [],
     );
 }
+
+function runtimeImportAllowed(file: string, specifier: string): boolean {
+    if (specifier.startsWith("/")) {
+        const name = /^\/vendor\/([^/]+)$/.exec(specifier)?.[1];
+
+        return name !== undefined && Object.hasOwn(VENDOR, name) && existsSync(VENDOR[name]!);
+    }
+
+    return (
+        !specifier.startsWith(".") || resolve(dirname(file), specifier).startsWith(extensions + "/")
+    );
+}
+
+test("C10 permits only exact third-party vendor mappings and rejects core imports", () => {
+    const expected: Record<string, [string, string]> = {
+        "preact.mjs": ["preact", "dist/preact.mjs"],
+        "preact-hooks.mjs": ["preact", "hooks/dist/hooks.mjs"],
+        "htm.mjs": ["htm", "dist/htm.module.js"],
+        "marked.mjs": ["marked", "lib/marked.esm.js"],
+        "purify.mjs": ["dompurify", "dist/purify.es.mjs"],
+        "pele.mjs": ["pele", "dist/pele.js"],
+        "katex.mjs": ["katex", "dist/katex.mjs"],
+    };
+    const dependencies = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies;
+    const file = join(extensions, "diagrams", "index.js");
+
+    assert.deepEqual(Object.keys(VENDOR).sort(), Object.keys(expected).sort());
+
+    for (const [name, [dependency, path]] of Object.entries(expected)) {
+        const packageRoot = join(modulesWith(dependency), dependency);
+
+        assert.ok(Object.hasOwn(dependencies, dependency), dependency);
+        assert.equal(
+            JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).name,
+            dependency,
+        );
+        assert.equal(VENDOR[name], join(packageRoot, path));
+        assert.ok(existsSync(VENDOR[name]!), name);
+        assert.equal(runtimeImportAllowed(file, `/vendor/${name}`), true);
+    }
+
+    for (const specifier of [
+        "/ui-locale.js",
+        "/store.js",
+        "/vendor/nope.mjs",
+        "/vendor/../store.js",
+        "/vendor/pele.mjs/extra",
+        "/vendor/pele.mjs?core=1",
+        "/vendor/%2e%2e/store.js",
+        "/vendor/__proto__",
+        "../../ui-locales.ts",
+        "../diagrams/../../ui-locales.ts",
+    ]) {
+        assert.equal(runtimeImportAllowed(file, specifier), false, specifier);
+    }
+
+    assert.equal(runtimeImportAllowed(file, "./local.js"), true);
+});
 
 test("browser extensions import their own modules, not core internals at runtime", () => {
     const violations: string[] = [];
@@ -47,17 +107,8 @@ test("browser extensions import their own modules, not core internals at runtime
                 specifier = node.arguments[0].text;
             }
 
-            if (specifier) {
-                if (specifier.startsWith("/")) {
-                    violations.push(`${relative(root, file)}: ${specifier}`);
-                }
-
-                if (
-                    specifier.startsWith(".") &&
-                    !resolve(dirname(file), specifier).startsWith(extensions + "/")
-                ) {
-                    violations.push(`${relative(root, file)}: ${specifier}`);
-                }
+            if (specifier && !runtimeImportAllowed(file, specifier)) {
+                violations.push(`${relative(root, file)}: ${specifier}`);
             }
 
             ts.forEachChild(node, inspect);

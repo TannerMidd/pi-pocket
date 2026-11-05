@@ -10090,5 +10090,7 @@ export default {
         "web.running-board.held.team-limit": "启动此会话的会话已达到 {amount} 的花费上限",
         "web.running-board.held.person-limit": "{name} 已达到 {amount} 的花费上限",
         "web.extension-ui.fence.name": "代码围栏 {id}",
+        "builtin.module.anthropic-subscription.release028.summary-risk":
+            "风险自负，Anthropic 的条款与帮助页面对此说法不一致；Anthropic 会将 Pi Pocket 的请求计入 Claude 订阅额度。",
     },
 };

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import ts from "typescript";
 import { calls, DYNAMIC_COUNT_ARGS } from "./wp2-keys.mjs";
-import { WP2_KEYS } from "./wp2-locale-keys.ts";
+import { WP2_HISTORY, WP2_KEYS, WP2_RELEASE_KEYS, WP2_RETIRED_KEYS } from "./wp2-locale-keys.ts";
 
 test("WP2 key extraction reads AST fallbacks, ignores examples, and reports dynamic calls", () => {
     const source = `
@@ -130,10 +130,24 @@ test("WP2 key manifest matches actual t calls, countedText tuples, and placehold
         [...manifest.keys()].sort(),
         "the manifest is neither missing keys nor stale",
     );
-    assert.equal(actual.size, 417);
+    assert.equal(WP2_HISTORY.length, 417, "the original WP2 history remains intact");
+    assert.equal(WP2_RELEASE_KEYS.length, 16, "reviewed release additions");
+    assert.equal(
+        WP2_RETIRED_KEYS.length,
+        4,
+        "only explicitly superseded keys leave the live manifest",
+    );
+    assert.deepEqual(
+        WP2_HISTORY.filter((row) => !actual.has(row.key))
+            .map((row) => row.key)
+            .sort(),
+        [...WP2_RETIRED_KEYS].sort(),
+        "every historical key is still live or explicitly retired",
+    );
+    assert.equal(actual.size, 417 - 4 + 16);
     assert.ok(helperTuples >= 10, "singular and plural tuple keys are included");
 
-    for (const row of WP2_KEYS) {
+    for (const row of [...WP2_HISTORY, ...WP2_RELEASE_KEYS]) {
         assert.match(row.key, /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
         assert.ok(row.zh.trim(), `${row.key}: Chinese suggestion is not empty`);
         assert.deepEqual(
@@ -143,12 +157,12 @@ test("WP2 key manifest matches actual t calls, countedText tuples, and placehold
         );
     }
 
-    const reference = WP2_KEYS.filter((row) => row.source === "reference").length;
-    const added = WP2_KEYS.filter((row) => row.source === "new").length;
+    const reference = WP2_HISTORY.filter((row) => row.source === "reference").length;
+    const added = WP2_HISTORY.filter((row) => row.source === "new").length;
 
     assert.equal(reference, 351);
     assert.equal(added, 66);
     t.diagnostic(
-        `Manifest: ${actual.size} keys; ${reference} reference, ${added} new suggestions; ${helperTuples} tuple occurrences. Startup existing-en snapshot not supplied.`,
+        `Manifest: ${actual.size} live keys; original ${reference} reference and ${added} new suggestions retained; ${WP2_RELEASE_KEYS.length} release additions, ${WP2_RETIRED_KEYS.length} retired; ${helperTuples} tuple occurrences. Startup existing-en snapshot not supplied.`,
     );
 });
