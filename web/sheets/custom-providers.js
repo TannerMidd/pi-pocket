@@ -27,7 +27,7 @@ const order = (tiers) => LEVELS.flatMap(([level]) => tiers.filter((tier) => tier
 
 /** What a model's Thinking button says: off, or its levels from first to last. */
 function tierSummary(thinking) {
-    if (thinking === null) {
+    if (!Array.isArray(thinking) || thinking.length === 0) {
         return "No thinking";
     }
 
@@ -143,7 +143,11 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             new Map(
                 (editing?.models ?? []).map((model) => [
                     model.id,
-                    { images: model.images, thinking: model.thinking },
+                    // A server from before these fields sends neither: no images, no thinking.
+                    {
+                        images: model.images === true,
+                        thinking: Array.isArray(model.thinking) ? model.thinking : null,
+                    },
                 ]),
             ),
     );
