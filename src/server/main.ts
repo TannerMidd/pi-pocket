@@ -35,6 +35,7 @@ function parseArgs(argv: string[]) {
         cwd: process.cwd(),
         data: dataDir(),
         rotateToken: false,
+        keepAliveSeconds: Number(process.env.PI_POCKET_KEEPALIVE_SECONDS?.trim() || 5),
     };
 
     for (let index = 0; index < argv.length; index++) {
@@ -72,6 +73,16 @@ function parseArgs(argv: string[]) {
 
     if (!Number.isInteger(options.port) || options.port <= 0) {
         throw new Error("--port must be a number");
+    }
+
+    if (
+        !Number.isInteger(options.keepAliveSeconds) ||
+        options.keepAliveSeconds < 1 ||
+        options.keepAliveSeconds > 3600
+    ) {
+        throw new Error(
+            "PI_POCKET_KEEPALIVE_SECONDS must be a whole number of seconds from 1 to 3600",
+        );
     }
 
     return options;
@@ -162,7 +173,14 @@ const server = createServer((request, response) => {
 // The whole request must arrive within this: long enough for a 50 MB upload on a slow phone connection. Event streams
 // and long polls are GET requests without a body, so their time on the connection does not count.
 server.requestTimeout = 15 * 60_000;
-server.headersTimeout = 60_000;
+// How long an idle connection stays open for its next request: Node's 5 seconds unless PI_POCKET_KEEPALIVE_SECONDS
+// says otherwise. A reverse proxy in front (Caddy, cloudflared, tailscale serve) keeps idle connections to use again:
+// when it keeps them longer than this, it can send a request on one as it closes here, and answers that with a 502.
+// Set this above the proxy's idle timeout. Headers may take as long, so a connection is not cut while its next
+// request arrives.
+server.keepAliveTimeout = options.keepAliveSeconds * 1000;
+server.headersTimeout = Math.max(60_000, server.keepAliveTimeout + 1000);
+server.requestTimeout = Math.max(server.requestTimeout, server.headersTimeout);
 
 // Take the port before opening the database: opening resumes interrupted work, which must not start in a process
 // that then exits because it cannot serve.
