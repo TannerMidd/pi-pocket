@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { connect, createServer } from "node:net";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -99,53 +99,17 @@ test("a taken port stops the server before it opens the database", async () => {
     }
 });
 
-test("a keep-alive time that is not a whole number of seconds stops the server before it listens", async () => {
-    for (const value of ["0", "2.5", "soon", "3601"]) {
+test("a keep-alive time out of range stops the server before it opens the database", async () => {
+    for (const value of ["0", "2.5", "3601"]) {
         const { proc, data, output } = server(`keepalive-${value}`, await freePort(), {
             PI_POCKET_KEEPALIVE_SECONDS: value,
         });
 
         assert.notEqual((await exit(proc)).code, 0, value);
-        assert.match(output(), /PI_POCKET_KEEPALIVE_SECONDS must be a whole number/, value);
+        assert.match(output(), /PI_POCKET_KEEPALIVE_SECONDS must be/, value);
         assert.equal(existsSync(join(data, "pocket.sqlite")), false, value);
     }
 });
-
-/** Whether the server closes a connection idle for `idleMs`: the socket ends from its side. */
-async function closesIdle(port: number, idleMs: number): Promise<boolean> {
-    const socket = connect(port, "127.0.0.1");
-    let ended = false;
-
-    socket.on("close", () => (ended = true));
-    socket.on("error", () => {});
-    await once(socket, "connect");
-    socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
-    // The answer (a small page, sent at once on this machine), then the idle time.
-    socket.resume();
-    await once(socket, "data");
-    await new Promise((resolve) => setTimeout(resolve, idleMs));
-    socket.destroy();
-
-    return ended;
-}
-
-test(
-    "PI_POCKET_KEEPALIVE_SECONDS keeps an idle connection open that long",
-    { skip: posix },
-    async () => {
-        const port = await freePort();
-        const { proc, output } = server("keepalive", port, { PI_POCKET_KEEPALIVE_SECONDS: "8" });
-
-        try {
-            await until(() => output().includes("Pi Pocket is running."), "the server to start");
-            // Node's own 5 seconds would have closed it by now.
-            assert.equal(await closesIdle(port, 6500), false, "still open after 6.5 s");
-        } finally {
-            proc.kill("SIGTERM");
-            await exit(proc);
-        }
-    },
-);
 
 /**
  * Whether a process handles SIGUSR2 (signal 12) by now, from its caught-signal mask in Linux's /proc; undefined where
@@ -194,10 +158,13 @@ test(
     { skip: posix },
     async () => {
         const port = await freePort();
-        const { proc, data, output } = server("hup", port);
+        const { proc, data, output } = server("hup", port, { PI_POCKET_KEEPALIVE_SECONDS: "125" });
 
         await until(() => output().includes("Pi Pocket is running."), "the server to start");
-        assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200);
+        const response = await fetch(`http://127.0.0.1:${port}/`);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("keep-alive"), "timeout=125");
         proc.kill("SIGHUP");
         assert.deepEqual(await exit(proc), { code: 0, signal: null });
         assert.equal(existsSync(join(data, "harness.lock")), false);

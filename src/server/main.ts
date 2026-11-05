@@ -173,14 +173,11 @@ const server = createServer((request, response) => {
 // The whole request must arrive within this: long enough for a 50 MB upload on a slow phone connection. Event streams
 // and long polls are GET requests without a body, so their time on the connection does not count.
 server.requestTimeout = 15 * 60_000;
-// How long an idle connection stays open for its next request: Node's 5 seconds unless PI_POCKET_KEEPALIVE_SECONDS
-// says otherwise. A reverse proxy in front (Caddy, cloudflared, tailscale serve) keeps idle connections to use again:
-// when it keeps them longer than this, it can send a request on one as it closes here, and answers that with a 502.
-// Set this above the proxy's idle timeout. Headers may take as long, so a connection is not cut while its next
-// request arrives.
+server.headersTimeout = 60_000;
+// How long an idle connection stays open for its next request: Node's 5 seconds by default. A reverse proxy
+// that keeps idle connections longer can send a request on one as it closes here, and answers with a 502.
+// The timeouts above count from a request's first byte, not from the idle time before it.
 server.keepAliveTimeout = options.keepAliveSeconds * 1000;
-server.headersTimeout = Math.max(60_000, server.keepAliveTimeout + 1000);
-server.requestTimeout = Math.max(server.requestTimeout, server.headersTimeout);
 
 // Take the port before opening the database: opening resumes interrupted work, which must not start in a process
 // that then exits because it cannot serve.
