@@ -9,7 +9,6 @@ import { checkKey } from "./system-data.js";
 import { changed } from "./tweaks.js";
 import { resolveDevice, useStore } from "./state.js";
 import { unsavedOf } from "./unsaved.js";
-import { t } from "/ui-locale.js";
 
 /** The sheet's own width classes: below 560 px it stacks; from 900 px the side panel sits beside the canvas. */
 const NARROW = 560;
@@ -17,6 +16,7 @@ const SIDE = 900;
 const STACK = 560;
 
 export function createWorkspace(env) {
+    const t = env.pocket.t;
     const { pocket, store, data, parts, app } = env;
     const { html, useEffect, useMemo, useRef, useState } = pocket;
     const { Ico, Popover, Segmented, useSize } = parts;

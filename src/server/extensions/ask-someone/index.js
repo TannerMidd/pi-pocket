@@ -1,6 +1,3 @@
-import { t } from "/ui-locale.js";
-import { store as app } from "/store.js";
-
 // Ask someone's browser module: "Ask someone" under Pi's answers, the Questions sheet (drafts to edit and share, links
 // waiting for an answer, and answers to give Pi), a status item while a session has any, and how ask_someone's calls
 // show. It uses only `pocket`.
@@ -8,7 +5,7 @@ export const pocketApi = 2;
 
 /** Lucide's message-circle-question icon. */
 const ASK_PATH = "M7.9 20A9 9 0 1 0 4 16.1L2 22Z M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3 M12 17h.01";
-const lifeOptions = () => [
+const lifeOptions = (t) => [
     [24, t("server.extensions.ask-someone.index.life.day", "A day")],
     [168, t("server.extensions.ask-someone.index.life.week", "A week")],
     [720, t("server.extensions.ask-someone.index.life.month", "A month")],
@@ -17,7 +14,7 @@ const MAX_TITLE = 120;
 const MAX_TEXT = 8000;
 
 /** "in 3 days", "in 5 hours", "in a few minutes", from now to `at`. */
-function until(at) {
+function until(at, t) {
     const hours = (at - Date.now()) / 3_600_000;
 
     if (hours >= 48) {
@@ -59,6 +56,7 @@ async function copy(text) {
 }
 
 export default function setup(pocket) {
+    const t = pocket.t;
     const { html, useEffect, useState } = pocket;
 
     /** The questions of the session the tab shows, newest first, and the session they are of. */
@@ -256,7 +254,7 @@ export default function setup(pocket) {
                     "The link stays open for",
                 )}
             >
-                ${lifeOptions().map(
+                ${lifeOptions(t).map(
                     ([value, label]) =>
                         html`<button
                             key=${value}
@@ -337,7 +335,7 @@ export default function setup(pocket) {
 
         return html`<div class="ask-card">
             <div class="ask-state">
-                ${open ? `Waiting for an answer · closes ${until(link.expiresAt)}` : "The link closed without an answer"}
+                ${open ? `Waiting for an answer · closes ${until(link.expiresAt, t)}` : "The link closed without an answer"}
             </div>
             <div class="ask-title">${question.title}</div>
             <details class="ask-details">
@@ -571,15 +569,10 @@ export default function setup(pocket) {
     };
 
     registerText();
-    let localeRevision = app.state.localeRevision;
-
     pocket.onDispose(
-        app.subscribe((state) => {
-            if (state.localeRevision !== localeRevision) {
-                localeRevision = state.localeRevision;
-                registerText();
-                publish();
-            }
+        pocket.onLocaleChange(() => {
+            registerText();
+            publish();
         }),
     );
     pocket.on("changed", ({ conversation }) => {

@@ -1,9 +1,9 @@
 // The design picker: the session's designs, variations together, with the design system pinned above them.
 import { latestOf } from "./data.js";
 import { unsavedOf } from "./unsaved.js";
-import { t } from "/ui-locale.js";
 
 export function createPicker(env) {
+    const t = env.pocket.t;
     const { pocket, parts } = env;
     const { html, useState } = pocket;
     const { Ico, Popover, ago } = parts;

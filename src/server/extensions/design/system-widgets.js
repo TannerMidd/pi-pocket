@@ -9,7 +9,6 @@ import {
     withPart,
     writeAmount,
 } from "./system.js";
-import { t } from "/ui-locale.js";
 
 export async function copyText(text) {
     try {
@@ -54,6 +53,7 @@ const FORMATS = Object.keys(SHOW_COLOR);
 const round = (value) => Math.round(value * 10000) / 10000;
 
 export function createSystemWidgets(env) {
+    const t = env.pocket.t;
     const { pocket } = env;
     const { html, useState } = pocket;
     const { Ico, Popover } = env.parts;

@@ -17,11 +17,10 @@ import {
     typographyStyleOf,
 } from "./system.js";
 import { copyText, modeTitle, plural, verdictOf } from "./system-widgets.js";
-import { t } from "/ui-locale.js";
 
 const SAMPLE = "Sphinx of black quartz, judge my vow";
 
-const emptyText = () => ({
+const emptyText = (t) => ({
     colors: [
         t("server.extensions.design.system-sections.colors.no-color-matches", "No color matches."),
         t(
@@ -69,7 +68,7 @@ const emptyText = () => ({
     ],
 });
 
-const scaleText = () => ({
+const scaleText = (t) => ({
     spacing: {
         stepKind: "steps",
         size: "space",
@@ -114,6 +113,7 @@ function styleMeta(value) {
 }
 
 export function createSystemSections(env, widgets) {
+    const t = env.pocket.t;
     const { pocket, store } = env;
     const { html, useEffect, useRef, useState, Markdown } = pocket;
     const { Ico } = env.parts;
@@ -236,7 +236,7 @@ export function createSystemSections(env, widgets) {
             const groups = groupsFor(ctx, section);
 
             return groups.length === 0
-                ? html`<p class="dsy-empty muted">${emptyText()[section][ctx.query ? 0 : 1]}</p>`
+                ? html`<p class="dsy-empty muted">${emptyText(t)[section][ctx.query ? 0 : 1]}</p>`
                 : render(ctx, groups);
         };
 
@@ -698,7 +698,7 @@ export function createSystemSections(env, widgets) {
     }
 
     function scaleGroups(ctx, groups, section, tile) {
-        const { stepKind, size, rolesNote } = scaleText()[section];
+        const { stepKind, size, rolesNote } = scaleText(t)[section];
 
         return groups.map(
             (group) =>

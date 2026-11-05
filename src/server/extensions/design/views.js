@@ -1,11 +1,11 @@
 // What can fill the canvas besides the live page: two versions side by side, a group's variations as a grid, the slide
 // strip of a deck, and the full-screen present mode.
-import { useArtifactBridge } from "/artifact-bridge.js";
 import { scaleOf, zoomOf } from "./devices.js";
 import { ALLOW, frameUrl, SANDBOX } from "./canvas.js";
-import { t } from "/ui-locale.js";
 
 export function createViews(env, canvas) {
+    const { useArtifactBridge } = env;
+    const t = env.pocket.t;
     const { pocket, store, parts } = env;
     const { html, useEffect, useRef, useState } = pocket;
     const { Ico, useSize, ago } = parts;

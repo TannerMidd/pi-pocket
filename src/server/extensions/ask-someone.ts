@@ -5,15 +5,14 @@
 import { createHash } from "node:crypto";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineExtension, defineTool } from "@earendil-works/pi-durable";
-// Types and the locale lookup only: at run time this module uses nothing of Pi Pocket's but the host, web, and
-// `ui-locales.ts`, as a drop-in would.
+// Only host and web are used at runtime, as in a drop-in.
 import type {
     ConversationWebRequest,
     ExtensionWeb,
     PocketHost,
     PublicPageRequest,
 } from "../host.ts";
-import { requestLocale, type RequestLocale } from "../ui-locales.ts";
+import type { RequestLocale } from "../ui-locales.ts";
 
 /** A question for someone outside the chat, and what became of it. */
 type Question = {
@@ -158,7 +157,13 @@ button { margin-top: 18px; width: 100%; min-height: 48px; font: inherit; font-we
 type LocalizedPage = PublicPageRequest & { readonly locale?: RequestLocale };
 
 /** English, for a page that no request language asked for: made for that page, so no language outlives it. */
-const englishPage = (): RequestLocale => requestLocale({ revision: 0, locales: [] }, undefined);
+const englishPage = (): RequestLocale => ({
+    lang: "en",
+    t: (_key, english, values) =>
+        english.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (whole, name) =>
+            values !== undefined && Object.hasOwn(values, name) ? String(values[name]) : whole,
+        ),
+});
 
 /** The words of one public page: the request's language when the host names one, else English. */
 const pageWords = (request: PublicPageRequest): RequestLocale =>

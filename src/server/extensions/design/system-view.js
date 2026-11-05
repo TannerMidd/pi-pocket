@@ -12,7 +12,6 @@ import {
     unsavedCount,
     withPart,
 } from "./system.js";
-import { t } from "/ui-locale.js";
 
 const REFRESH_MS = 20_000;
 
@@ -34,6 +33,7 @@ function sectionsOf(tokens) {
 const currentOf = (list, id) => (list.some((section) => section.id === id) ? id : list[0].id);
 
 export function createSystemView(env, canvas, sections, widgets) {
+    const t = env.pocket.t;
     const { pocket, store, parts, systemData } = env;
     const { html, useEffect, useMemo, useRef, useState } = pocket;
     const { Ico, Popover } = parts;

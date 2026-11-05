@@ -1,6 +1,3 @@
-import { t } from "/ui-locale.js";
-import { store as app } from "/store.js";
-
 // Session tags' browser module: each session's tags as chips on its row, as words for the session search and the
 // launcher, a filter beside the search, and sheets to edit tags (Edit tags on a held row, or for selected sessions).
 // It uses only `pocket`. Tags are shared; the filter is this tab's own.
@@ -40,6 +37,7 @@ function readKept() {
 }
 
 export default function setup(pocket) {
+    const t = pocket.t;
     const { html, useEffect, useMemo, useRef, useState } = pocket;
 
     // An app older than 0.20.0 has no place for tags in its session list.
@@ -586,15 +584,10 @@ export default function setup(pocket) {
     };
 
     registerText();
-    let localeRevision = app.state.localeRevision;
-
     pocket.onDispose(
-        app.subscribe((state) => {
-            if (state.localeRevision !== localeRevision) {
-                localeRevision = state.localeRevision;
-                registerText();
-                changed();
-            }
+        pocket.onLocaleChange(() => {
+            registerText();
+            changed();
         }),
     );
 }

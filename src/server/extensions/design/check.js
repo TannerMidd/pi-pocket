@@ -4,7 +4,6 @@ import { exportViewport, sizeOf } from "./devices.js";
 import { checkMessage } from "./messages.js";
 import { resolveDevice } from "./state.js";
 import { checkKey } from "./system-data.js";
-import { t } from "/ui-locale.js";
 
 /** The modes a check can be made in: the design system's, or light and dark when there is none. */
 const modesOf = (s) => {
@@ -105,6 +104,7 @@ export function pinsOfReport(report, focus = null) {
 }
 
 export function createCheck(env, DockHead) {
+    const t = env.pocket.t;
     const { pocket, store, systemData } = env;
     const { html, useEffect, useRef, useState } = pocket;
     const { Ico, Segmented, ago } = env.parts;

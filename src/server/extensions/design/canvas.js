@@ -1,13 +1,11 @@
 // The canvas: a design's page in the artifact sandbox frame (the same frame and bridge as the artifact viewer), scaled to
 // fit, with the page's side of Design mode (inspect, edit text, tweaks, pins, slides) spoken through the bridge.
-import { useArtifactBridge } from "/artifact-bridge.js";
 import { nextZoom, percent, scaleOf, stepZoom, zoomOf, zoomWord } from "./devices.js";
 import { checkOptions, pinsOfReport } from "./check.js";
 import { pinsOf } from "./comments.js";
 import { addEdit } from "./edits.js";
 import { checkKey } from "./system-data.js";
 import { forPage, normalizeKnobs, usable } from "./tweaks.js";
-import { t } from "/ui-locale.js";
 
 /** As the artifact viewer's frame (`web/sheets/viewers.js`): scripts and forms run; the app and its cookies are out of reach. */
 export const SANDBOX =
@@ -29,6 +27,8 @@ const BATCH = 100;
 const num = (value) => typeof value === "number" && Number.isFinite(value);
 
 export function createCanvas(env) {
+    const { useArtifactBridge } = env;
+    const t = env.pocket.t;
     const { pocket, store, data, parts } = env;
     const { html, useEffect, useRef, useState } = pocket;
     const { Ico, useSize } = parts;

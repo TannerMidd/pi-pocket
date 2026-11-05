@@ -6,12 +6,12 @@
 // workspace (`app.js`) loads when the panel first opens, and its docks and views (`workspace.js`) when first needed.
 import { DESIGN_PATH } from "./paths.js";
 import { createStore, initialState, loadPick, savePrefs, sessionState } from "./state.js";
-import { t } from "/ui-locale.js";
-import { store as app } from "/store.js";
 
 export const pocketApi = 1;
 
-export default function setup(pocket) {
+export default function setup(pocket, integration) {
+    const t = pocket.t;
+
     if (typeof pocket.panel !== "function") {
         // An app from before panels (0.19.0): nothing to add.
         return undefined;
@@ -76,7 +76,7 @@ export default function setup(pocket) {
 
     const load = () => {
         loading ??= Promise.all([import("./app.js"), style("style.css")]).then(([module]) => {
-            ready = module.createApp(pocket, store, { style });
+            ready = module.createApp(pocket, store, { style, ...integration });
 
             if (store.get().conversation !== null) {
                 void ready.data.list();
@@ -301,14 +301,9 @@ export default function setup(pocket) {
 
     registerText();
 
-    let localeRevision = app.state.localeRevision;
-    const stopLocale = app.subscribe((state) => {
-        if (state.localeRevision !== localeRevision) {
-            localeRevision = state.localeRevision;
-
-            if (registerText()) {
-                store.set({});
-            }
+    const stopLocale = pocket.onLocaleChange(() => {
+        if (registerText()) {
+            store.set({});
         }
     });
 

@@ -5,9 +5,9 @@ import { openOf, pinNumber } from "./comments.js";
 import { nameOf } from "./edits.js";
 import { commentsMessage, editsMessage, tweaksMessage } from "./messages.js";
 import { changed, coerce, show } from "./tweaks.js";
-import { t } from "/ui-locale.js";
 
 export function createDocks(env) {
+    const t = env.pocket.t;
     const { pocket, store, data, parts } = env;
     const { html, useEffect, useRef, useState, Switch } = pocket;
     const { Ico, ago } = parts;
