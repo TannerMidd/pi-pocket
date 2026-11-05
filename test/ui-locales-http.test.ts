@@ -158,6 +158,25 @@ test("R23: the real catalog is public to every role without exposing private fie
     assert.equal((await request("/api/x/synthetic-locale/view")).status, 401);
 });
 
+test("the public app bridge and locale catalog coexist without opening other API routes", async () => {
+    const [info, catalog, me, wrongMethod, wrongPath] = await Promise.all([
+        request("/api/pocket/info"),
+        request("/ui-locales.json"),
+        request("/api/me"),
+        request("/api/pocket/info", undefined, "POST"),
+        request("/api/pocket/info/extra"),
+    ]);
+
+    assert.equal(info.status, 200);
+    assert.deepEqual(await info.json(), { name: "pi-pocket", bridge: 1 });
+    assert.equal(catalog.status, 200);
+    assert.ok((await catalog.json()).locales.some((each: { id: string }) => each.id === "zh-CN"));
+    assert.equal(me.status, 401);
+    assert.equal(wrongMethod.status, 401);
+    assert.equal(wrongPath.status, 401);
+    assert.equal((await request("/ui-locales.json", undefined, "POST")).status, 405);
+});
+
 test("R25: the installed pack supplies the same text to the catalog and SSR, and removal falls back", async () => {
     const getCatalog = async () =>
         (await (await page("/ui-locales.json")).json()) as {

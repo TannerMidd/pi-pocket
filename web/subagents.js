@@ -4,10 +4,11 @@
 // as tiles have), for how long, whether its report is on its way, Stop, and a tap to open it.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { nowDoing } from "./agent-now.js";
+import { levelLabel } from "./sheets/model.js";
 import { useOnScreen } from "./peeks.js";
 import { fromServer } from "./seen.js";
 import { api, attempt, canSteer, navigate, openSheet, store } from "./store.js";
-import { html, Icon, Spinner, timeAgo } from "./ui.js";
+import { html, Icon, shortModelName, Spinner, timeAgo } from "./ui.js";
 import { t } from "./ui-locale.js";
 
 /**
@@ -110,6 +111,29 @@ export function ordered(agents) {
     );
 }
 
+/** The model a subagent runs on, and its thinking level but "off", in words: "↗ gpt-6.1-sol · max". */
+export function modelText(agent, { thinking = true } = {}) {
+    const model = agent.runsOn;
+
+    if (!model) {
+        return "";
+    }
+
+    const level = thinking && model.thinking !== "off" ? model.thinking : undefined;
+
+    return `${model.other ? "↗ " : ""}${shortModelName(model.name)}${level ? ` · ${levelLabel(level)}` : ""}`;
+}
+
+/**
+ * The model a subagent runs on, in a small pill: "↗" before it when it is not its session's model. Nothing before the
+ * server knows it.
+ */
+export function SubagentModel({ agent, thinking = true }) {
+    const text = modelText(agent, { thinking });
+
+    return text && html`<span class="agent-model">${text}</span>`;
+}
+
 function AgentRow({ agent }) {
     const stop = () => attempt(() => api(`c/${agent.conversationId}/abort`, {}));
     const status = stateOf(agent);
@@ -138,6 +162,7 @@ function AgentRow({ agent }) {
                 <span class="agent-head">
                     <span class="agent-name">${agent.name}</span>
                     ${when && html`<span class="agent-when">${when}</span>`}
+                    <${SubagentModel} agent=${agent} />
                     ${agent.reporting && html`<span class="agent-chip">${t("web.subagents.agent-row.span.report-way-pi", "report on its way to Pi")}</span>`}
                 </span>
                 ${agent.busy && html`<span class="agent-now">${nowDoing(agent)}</span>`}

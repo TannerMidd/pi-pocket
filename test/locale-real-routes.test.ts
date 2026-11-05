@@ -2,6 +2,7 @@
 import {
     type App,
     cleanUp,
+    context,
     newSession,
     openApp,
     owner,
@@ -17,6 +18,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import { createHandler } from "../src/server/http.ts";
+import { escapeHtml } from "../src/server/http/io.ts";
 import { endedText } from "../src/server/watches.ts";
 import { describeWatch } from "../src/server/extensions/triggers.ts";
 import { prWatchLine } from "../src/server/extensions/pip.ts";
@@ -131,6 +133,82 @@ test("a real export escapes a hostile translated HTML heading, but preserves the
         assert.ok(body.includes(`Keep the exact user words: ${hostile}`));
     } finally {
         await app.setExtensionEnabled(owner(app), "zz-export-escape.ts", false);
+    }
+});
+
+test("real concurrent export routes preserve presented inputs and escape each request's translated heading", async () => {
+    const extensions = join(data, "extensions");
+    const label = "<b>Literal presentation</b>";
+    const summary = "summary & literal";
+    const heading = '<img src=x onerror="alert(1)"> & translated heading';
+    const content =
+        "Full presented input stays literal, including \u0060code\u0060 and <user-content>.";
+
+    mkdirSync(extensions, { recursive: true });
+    writeFileSync(
+        join(extensions, "zz-presented-export.ts"),
+        `/** Presented input and request-locale export integration. */
+export default (_host, web) => {
+    web.presentEntry({ kind: "x.zz-presented-export.note", label: ${JSON.stringify(label)} });
+    web.uiLocales([{ id: "zh-CN", label: "简体中文", messages: { "server.export.context-compacted": ${JSON.stringify(heading)} } }]);
+};
+`,
+    );
+    await app.setExtensionEnabled(owner(app), "zz-presented-export.ts", true);
+
+    try {
+        const submission = await (
+            await app.conversation(session)
+        ).submit(
+            {
+                type: "input",
+                content,
+                requestId: crypto.randomUUID(),
+                entry: { kind: "x.zz-presented-export.note", data: { summary } },
+            },
+            context,
+        );
+
+        await submission.wait(context);
+        const stored = await app.transcripts.allEntries(session, true);
+
+        assert.ok(
+            stored.some(
+                (entry) =>
+                    entry.kind === "user" &&
+                    entry.presentation?.entryKind === "x.zz-presented-export.note" &&
+                    entry.text === content,
+            ),
+        );
+        const responses = await Promise.all(
+            ["zh-CN", "en"].map((locale) => exportFile(`pocket_locale=${locale}`)),
+        );
+        const bodies = await Promise.all(responses.map((response) => response.text()));
+
+        for (const [index, body] of bodies.entries()) {
+            assert.equal(responses[index]!.status, 200);
+            assert.match(responses[index]!.headers.get("content-type") ?? "", /^text\/markdown/);
+            assert.ok(
+                body.includes(
+                    "<summary>&#60;b&#62;Literal presentation&#60;/b&#62; · summary &#38; literal</summary>",
+                ),
+            );
+            assert.ok(
+                body.includes(content),
+                "the actual stored input is not clipped or translated",
+            );
+            assert.ok(!body.includes(`<summary>${label}`));
+            assert.ok(
+                body.includes(
+                    index === 0
+                        ? `<summary>${escapeHtml(heading)}</summary>`
+                        : "<summary>Context compacted</summary>",
+                ),
+            );
+            assert.ok(!body.includes(`<summary>${heading}</summary>`));
+        }
+    } finally {
+        await app.setExtensionEnabled(owner(app), "zz-presented-export.ts", false);
     }
 });
 

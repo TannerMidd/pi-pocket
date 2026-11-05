@@ -110,6 +110,26 @@ test("a retried request runs its handler once, and a restart does not run it aga
     assert.equal(await runs(id), 2);
 });
 
+test("a run that ended with no result answers that it failed, and runs again", async () => {
+    const id = await newSession(app);
+    const wait = app.harness.waitForTask;
+
+    // Its task ended with no result, as a failure in Pi Durable leaves it.
+    app.harness.waitForTask = (async (...args: Parameters<typeof wait>) => {
+        app.harness.waitForTask = wait;
+        const done = await wait.apply(app.harness, args);
+
+        return { ...done, state: { ...done.state, outcome: { status: "failed" } } };
+    }) as typeof wait;
+    assert.equal(
+        (await app.extensionCommands.run(id, owner(app), request("count-here"))).status,
+        "failed",
+    );
+    // An answer: the browser sends the same command again as a new request, and it runs.
+    await app.extensionCommands.run(id, owner(app), request("count-here"));
+    assert.equal(await runs(id), 2);
+});
+
 test("a viewer runs no command, and a global command is the owner's alone", async () => {
     const id = await newSession(app);
     const viewer = app.config.addUser("Viewer", "viewer").user;

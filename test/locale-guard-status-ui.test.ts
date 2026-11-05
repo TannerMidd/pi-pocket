@@ -29,6 +29,7 @@ const previous = Object.fromEntries(
     ]),
 );
 const records: unknown[] = [];
+const completed = new Set<"mobile" | "desktop">();
 let app: App;
 let server: Server;
 let browsers: Browsers;
@@ -93,7 +94,15 @@ after(async () => {
         writeFileSync(
             join(evidence, "guard-status-results.json"),
             JSON.stringify(
-                { status: unavailable ? "未验证" : "通过", reason: unavailable, records },
+                {
+                    status: unavailable
+                        ? "未验证"
+                        : completed.size === 2 && records.length === 2
+                          ? "通过"
+                          : "失败",
+                    reason: unavailable,
+                    records,
+                },
                 null,
                 2,
             ),
@@ -182,5 +191,6 @@ for (const viewport of ["mobile", "desktop"] as const) {
             "English Guard title fallback",
         );
         page.close();
+        completed.add(viewport);
     });
 }

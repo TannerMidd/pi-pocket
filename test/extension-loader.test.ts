@@ -14,7 +14,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { createRegistry, UsageDoc } from "@earendil-works/pi-durable";
@@ -131,6 +131,60 @@ export default (_host, web) => {
         assert.equal(info?.enabled, true);
         assert.equal(info?.error, undefined);
         assert.ok(info?.web, "the module's locale declaration counts as web content");
+    } finally {
+        await loader.close();
+    }
+});
+
+test("presentations and locales install, reject updates, and unload as one module version", async () => {
+    const { dropIn, disabled, loader, webs, installed } = setUp();
+    const file = join(dropIn, "combined.ts");
+    const source = (
+        version: number,
+        extra = "",
+    ) => `/** Combined presentation and locale registration. */
+export default (_host, web) => {
+    web.presentEntry({ kind: "x.combined.note", label: "Note ${version}", userPrefix: "COMBINED " });
+    web.uiLocales([{ id: "fr", label: "Français", messages: { "ui.close": "Close ${version}" } }]);
+    web.route("GET", "v", () => ({ v: ${version} }));
+    ${extra}
+    return { name: "t-combined", v: ${version} };
+};
+`;
+
+    try {
+        writeFileSync(file, source(1));
+        await loader.reload("combined.ts");
+        const before = webs.locales.snapshot();
+
+        assert.equal(webs.presentations().byKind.get("x.combined.note")?.label, "Note 1");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "Close 1");
+        assert.deepEqual(installed(), ["t-combined@1"]);
+
+        for (const extra of [
+            'web.presentEntry({ kind: "x.combined.note", label: "Duplicate" });',
+            'web.uiLocales([{ id: "de", label: "Deutsch", messages: {} }]);',
+            'throw new Error("after both declarations");',
+        ]) {
+            writeFileSync(file, source(2, extra));
+            await assert.rejects(loader.reload("combined.ts"));
+            assert.deepEqual(webs.locales.snapshot(), before);
+            assert.equal(webs.presentations().byKind.get("x.combined.note")?.label, "Note 1");
+            assert.deepEqual(answer(webs, "combined"), { v: 1 });
+            assert.deepEqual(installed(), ["t-combined@1"]);
+        }
+
+        writeFileSync(file, source(3));
+        await loader.reload("combined.ts");
+        assert.equal(webs.presentations().byKind.get("x.combined.note")?.label, "Note 3");
+        assert.equal(localeOf(webs)?.messages["ui.close"], "Close 3");
+        assert.deepEqual(answer(webs, "combined"), { v: 3 });
+        disabled.add("combined.ts");
+        await loader.apply("combined.ts");
+        assert.equal(webs.presentations().byKind.size, 0);
+        assert.equal(localeOf(webs), undefined);
+        assert.equal(answer(webs, "combined"), undefined);
+        assert.deepEqual(installed(), []);
     } finally {
         await loader.close();
     }
@@ -576,6 +630,27 @@ test("while paused for an update, an edited module loads nothing; after the paus
         loader.pause(false);
         writeFileSync(join(dropIn, "paused.ts"), gated("paused", 3));
         await until(() => installed().includes("t-paused@3"), "the edit after the pause loads");
+    } finally {
+        await loader.close();
+    }
+});
+
+test("an event that leaves a module's file as it was loads nothing: Windows reports a read too", async () => {
+    const { dropIn, loader, notices, installed } = setUp();
+    const file = join(dropIn, "still.ts");
+
+    writeFileSync(file, gated("still", 1));
+    await loader.reload("still.ts");
+    loader.watch();
+
+    try {
+        // New permissions: Linux reports them, as Windows reports a read.
+        chmodSync(file, 0o600);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        assert.ok(!notices.some((each) => /Reloaded still\.ts/.test(each.message)));
+
+        writeFileSync(file, gated("still", 2));
+        await until(() => installed().includes("t-still@2"), "the edit loads");
     } finally {
         await loader.close();
     }

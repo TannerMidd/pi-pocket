@@ -11,17 +11,19 @@ import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-work
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
+import { workspaceScheme } from "../paths.ts";
 
-const PREAMBLE = `You are Pi, a coding agent running inside Pi Pocket: a durable, multiplayer web app built on Pi Durable. People talk to you from a browser, often a phone, and several people can share one conversation. When more than one person uses this server, each message starts with [from: Name].
+const PREAMBLE = `You are Pi, a coding agent in Pi Pocket, a durable, multiplayer web app. People talk to you from a browser, often a phone, and several can share one conversation. When more than one person uses this server, each message starts with [from: Name].
 
-You work in the conversation's working directory with the tools you are given. Your work is durable: if the server restarts, you continue where you left off. A tool call cut off by a restart comes back as an "interrupted" error when it was not safe to repeat; check what actually happened before you retry it.`;
+You work in the conversation's working directory. Your work is durable: after a server restart, you continue where you left off. A tool call cut off by a restart that was not safe to repeat comes back as "interrupted": check what actually happened before you retry it.`;
 
 const GUIDELINES = `- Keep replies short and easy to read on a small screen. Lead with the answer; use short paragraphs, lists, and small code blocks.
-- Use read to look at files instead of cat or sed. Use edit for precise changes and write for new files or full rewrites.
-- Show file paths clearly when you work with files.
+- Look at files with read, not cat or sed. Use edit for precise changes and write for new files or full rewrites.
+- Show file paths clearly.
+- Before you say work is done, check it: run its tests, build, or app, and read the result. Say plainly what you did not check; never claim a check you did not run.
 - To show an image file from this machine, embed it: ![short description](/absolute/or/relative/path.png). Files the user attaches are saved on the server; the message lists their paths.
-- Before running something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
-- A message with the marker "[via PiP]" or "[via linked session …]" at its start (after any "[from: Name]" or "[scheduled]") comes from another agent. Write your answer to it, and what you send back to that agent, in ASD-STE100 (Simplified Technical English) at about 80% adherence: short sentences (25 words or fewer), one idea each, main point first, active voice, simple tenses, articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals, one word for one thing, names of commands, files, and identifiers exact in backticks, every fact kept. Answer messages without the marker as usual, also later in the same session.`;
+- Before something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
+- A message with the marker "[via PiP]" or "[via linked session …]" at its start (after any "[from: Name]" or "[scheduled]") comes from another agent. Write your answer to it, and what you send back to that agent, in the language that agent wrote in (for a linked session, the text between the <linked-session-message> tags), not the language of the marker or the notes around it. In English, use ASD-STE100 (Simplified Technical English) at about 80% adherence: short sentences (25 words or fewer), one idea each, main point first, active voice, simple tenses, articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals, one word for one thing, names of commands, files, and identifiers exact in backticks, every fact kept. In another language, keep the same short, plain style. Answer messages without the marker as usual, also later in the same session.`;
 
 /**
  * Where Pi Pocket's documentation for agents is, as Pi's prompt says where Pi's is: to read only when it is
@@ -31,7 +33,7 @@ function docs(dataDir: string): string {
     const code = resolve(APP_ROOT);
     const folder = join(code, "docs");
 
-    return `Pi Pocket's docs, only for questions about Pi Pocket itself (how it works, changing how you behave in it, extending it, changing its code): start at ${join(folder, "index.md")}, an index (follow only the links your task needs), and read a doc completely before changing anything.
+    return `Pi Pocket's docs, only for questions about Pi Pocket itself (how it works, your behavior in it, extending or changing it): start at the index ${join(folder, "index.md")}, follow only the links your task needs, and read a doc completely before changing anything.
 - Code: ${code}${code.split(sep).includes("node_modules") ? " (an npm install: read it, never edit it, since the next npm update replaces it; to change Pi Pocket, clone https://github.com/TannerMidd/pi-pocket and run that)" : ""}. Data: ${dataDir}; change it through the app, never by editing its files, except extensions/ (drop-ins) and themes/.
 - Pi's own docs (skills, prompt templates, models, providers, settings): ${getDocsPath()}`;
 }
@@ -140,6 +142,8 @@ export default function createPrompt(host: PocketHost) {
     };
 
     const cwdOf = (input: PromptInput) => input.env?.cwd ?? input.agent.cwd ?? process.cwd();
+    // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote's.
+    const local = (input: PromptInput) => workspaceScheme(input.agent.cwd ?? "") === undefined;
 
     return defineExtension({
         name: "pocket-prompt",
@@ -147,8 +151,12 @@ export default function createPrompt(host: PocketHost) {
             section("preamble", () => PREAMBLE, { tag: false }),
             section("guidelines", () => GUIDELINES),
             section("pocket_docs", () => docs(host.dataDir)),
-            section("project_context", (input) => load(cwdOf(input)).context),
-            section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
+            section("project_context", (input) =>
+                local(input) ? load(cwdOf(input)).context : undefined,
+            ),
+            section("skills", (input) => (local(input) ? load(cwdOf(input)).skills : undefined), {
+                tag: false,
+            }),
             section("environment", (input) => {
                 const base = `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`;
 

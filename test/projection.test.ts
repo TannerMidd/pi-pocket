@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EntryRecord } from "@earendil-works/pi-durable";
+import { compilePresentations } from "../src/server/entry-presentation.ts";
 import {
     type ClientBlock,
     liveMessageDelta,
+    peekLines,
     projectEntry,
     projectStats,
 } from "../src/server/projection.ts";
@@ -78,4 +80,82 @@ test("a live update that does not fit what the browser has is refused, not shown
         ),
         { blocks: [{ type: "text", text: "abc" }] },
     );
+});
+
+const presentations = compilePresentations([
+    {
+        presentations: [{ kind: "x.quiet-input.note", label: "Note", userPrefix: "NOTE " }],
+    },
+]);
+
+const noted = (text: string, data?: unknown, kind = "x.quiet-input.note") =>
+    ({
+        id: 7,
+        conversationId: 2,
+        kind,
+        data,
+        model: [{ role: "user", content: text, timestamp: 5 }],
+    }) as unknown as EntryRecord;
+
+test("a registered kind projects as a user row and clips until a full read", () => {
+    const text = `body ${"n".repeat(9000)}`;
+    const live = projectEntry(noted(text, { summary: "saved" }), false, { presentations });
+    const full = projectEntry(noted(text, { summary: "saved" }), true, { presentations });
+
+    assert.equal(live?.kind, "user");
+    assert.equal(full?.kind, "user");
+
+    if (live?.kind !== "user" || full?.kind !== "user") {
+        return;
+    }
+
+    assert.equal(live.presentation?.entryKind, "x.quiet-input.note");
+    assert.equal(live.presentation?.label, "Note");
+    assert.equal(live.presentation?.summary, "saved");
+    assert.equal(live.presentation?.clipped, text.length);
+    assert.ok(live.text.length < text.length);
+    assert.equal(full.text, text);
+    assert.equal(full.presentation?.clipped, undefined);
+    // Stored as the module's own kind: not a message that can go to Pi again.
+    assert.equal(live.presentation?.prefixed, undefined);
+    assert.deepEqual(peekLines([live], { busy: false }), [
+        { kind: "presented", label: "Note", summary: "saved" },
+    ]);
+});
+
+test("an unregistered kind stays other", () => {
+    assert.deepEqual(projectEntry(noted("hello", undefined, "x.quiet-input.other")), {
+        id: 7,
+        kind: "other",
+        entryKind: "x.quiet-input.other",
+    });
+});
+
+test("a registered kind that is not a user message stays other", () => {
+    const assistant = {
+        ...noted("hello"),
+        model: [{ role: "assistant", content: "hello" }],
+    } as unknown as EntryRecord;
+
+    assert.equal(projectEntry(assistant, false, { presentations })?.kind, "other");
+});
+
+test("a prefix matches only a user message nobody wrote, and leaves the prefix in the text", () => {
+    const row = entry("pi.user", { role: "user", content: "NOTE hello" });
+    const open = projectEntry(row, false, { presentations, authored: false });
+    const written = projectEntry(row, false, { presentations, authored: true });
+
+    assert.equal(open?.kind, "user");
+    assert.equal(written?.kind, "user");
+
+    if (open?.kind !== "user" || written?.kind !== "user") {
+        return;
+    }
+
+    assert.equal(open.presentation?.label, "Note");
+    // A `pi.user` message: it can be sent again.
+    assert.equal(open.presentation?.prefixed, true);
+    assert.equal(open.text, "NOTE hello");
+    assert.equal(written.presentation, undefined);
+    assert.equal(written.text, "NOTE hello");
 });

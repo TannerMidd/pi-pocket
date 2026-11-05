@@ -6,7 +6,7 @@ import { canGoBack, goBack, replaceAddress, startHistory, useBack } from "./back
 import { BrowserButton, BrowserPanel } from "./browser-panel.js";
 import { browserAvailable, setBrowserOpen, toggleBrowser } from "./browser.js";
 import { PeopleButton, PeoplePanel } from "./chat.js";
-import { Composer, openingByAlt, shortModel } from "./composer.js";
+import { Composer, openingByAlt, shortModel, StatusLine } from "./composer.js";
 import { useChanges } from "./diff.js";
 import {
     FilesButton,
@@ -19,6 +19,8 @@ import { ExtensionPage, ExtensionPanel, extPanelShown } from "./extension-ui.js"
 import { startEdgeBack, startSwipes, useDragToClose } from "./gestures.js";
 import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
+import "./embedder.js";
+import "./window-controls.js";
 import { registerWorker, updateBadge } from "./notify.js";
 import {
     PEEK_WIDE,
@@ -29,8 +31,17 @@ import {
     peeksWanted,
     togglePeeks,
 } from "./peeks.js";
-import { closePip, openPip, PipHost, pipAvailable, togglePip } from "./pip.js";
+import {
+    closePip,
+    openPip,
+    PipBoardBox,
+    PipHost,
+    pipAvailable,
+    pipBoard,
+    togglePip,
+} from "./pip.js";
 import { Drawer, RailNav, ResizeHandle, SessionList, toSessions } from "./sessions.js";
+import { SessionTabs } from "./session-tabs.js";
 // Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
 import "./rich.js";
 import { takeShare } from "./share.js";
@@ -40,6 +51,7 @@ import { defineItem, slotItems } from "./slots.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { SignIn } from "./signin.js";
 import { openSubagents } from "./subagents.js";
+import { RunningBoard } from "./running-board.js";
 import { SubagentsBoard } from "./subagents-board.js";
 import {
     actions,
@@ -50,6 +62,7 @@ import {
     holdNotice,
     navigate,
     notify,
+    openId,
     openSheet,
     panelsBeside,
     peopleDocked,
@@ -205,6 +218,24 @@ defineItem("topbar", {
             onClick=${() => openSheet({ type: "menu" })}
         >
             <${Icon} name="more" />
+        </button>`,
+});
+
+// PiP opened as a board (Appearance → PiP → Board): its × closes it, back to what was in the session's place.
+defineItem("topbar", {
+    id: "core:pip-close",
+    label: () => t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP"),
+    order: 1100,
+    fixed: true,
+    render: () =>
+        pipBoard() &&
+        html`<button
+            class="icon-button"
+            aria-label=${t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP")}
+            title=${t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP")}
+            onClick=${closePip}
+        >
+            <${Icon} name="close" />
         </button>`,
 });
 
@@ -604,12 +635,14 @@ function App() {
         </aside>
         <div class=${`pane window ${placed ? "boarded" : ""}`} data-part="pane">
             ${
-                board
-                    ? html`<${SubagentsBoard} />`
-                    : page
-                      ? html`<${ExtensionPage} key=${`${state.page.module}:${state.page.id}`} />`
-                      : inConversation
-                        ? html`<${Topbar} />
+                board === "running"
+                    ? html`<${RunningBoard} />`
+                    : board
+                      ? html`<${SubagentsBoard} />`
+                      : page
+                        ? html`<${ExtensionPage} key=${`${state.page.module}:${state.page.id}`} />`
+                        : inConversation
+                          ? html`${prefs().sessionTabs && html`<${SessionTabs} />`}<${Topbar} />
                     ${
                         peeking &&
                         tiles.length > 0 &&
@@ -620,9 +653,12 @@ function App() {
                     ${
                         state.view.conversation &&
                         !state.missing &&
-                        html`<${Composer} key=${state.conversationId} />`
+                        // PiP's conversation as a board has PiP's own box, the one its panel has.
+                        (pipBoard()
+                            ? html`<${PipBoardBox}><${StatusLine} /><//>`
+                            : html`<${Composer} key=${state.conversationId} />`)
                     }`
-                        : html`<div class="home-list" data-part="home-list">
+                          : html`<div class="home-list" data-part="home-list">
                           <${RailNav} />
                           <${SessionList} />
                       </div>
@@ -711,7 +747,7 @@ function step(by) {
         return;
     }
 
-    const at = order.findIndex((session) => session.id === store.state.conversationId);
+    const at = order.findIndex((session) => session.id === openId());
 
     const next = order[(at + by + order.length) % order.length].id;
 
@@ -967,7 +1003,13 @@ startSwipes((where) => {
     // The subagents board or an extension's page in the conversation's place (or the home screen's): right goes back,
     // as its × does.
     if (where === "board") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return {
+            right: {
+                path: iconPath("back"),
+                label: t("web.ui.sheet.aria-label.back", "Back"),
+                run: goBack,
+            },
+        };
     }
 
     if (conversationId === null || !view.conversation || missing) {
@@ -975,7 +1017,13 @@ startSwipes((where) => {
     }
 
     if (where === "files") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return {
+            right: {
+                path: iconPath("back"),
+                label: t("web.ui.sheet.aria-label.back", "Back"),
+                run: goBack,
+            },
+        };
     }
 
     // Back to the list, or to the session before when that is where back goes.
@@ -984,11 +1032,17 @@ startSwipes((where) => {
     return {
         right: {
             path: iconPath("back"),
-            label: toList ? "Sessions" : "Back",
+            label: toList
+                ? t("app.sessions", "Sessions")
+                : t("web.ui.sheet.aria-label.back", "Back"),
             run: () => (canGoBack() ? goBack() : toSessions()),
         },
         left: filesAvailable()
-            ? { path: iconPath("folder"), label: "Files", run: () => setFilesOpen(true) }
+            ? {
+                  path: iconPath("folder"),
+                  label: t("app.files", "Files"),
+                  run: () => setFilesOpen(true),
+              }
             : null,
         up: () => openSheet({ type: "places" }),
     };

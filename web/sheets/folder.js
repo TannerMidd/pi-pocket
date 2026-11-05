@@ -23,6 +23,8 @@ import { t } from "../ui-locale.js";
 
 /** Whether hidden folders show: kept for the next time the picker opens. */
 const HIDDEN_KEY = "pocket.folderHidden";
+/** Whether new sessions always open in the server's default workspace: kept per browser. */
+const ALWAYS_DEFAULT_KEY = "pocket.folderAlwaysDefault";
 /** Touch screens go into a folder on a tap; a mouse selects on a click and goes in on a double click. */
 const touch = matchMedia("(pointer: coarse)").matches;
 
@@ -125,8 +127,14 @@ function LineInput({ value, placeholder, label, onSubmit, onCancel, class: class
 export function CwdSheet({ mode, fromList = false }) {
     const { view, server, folderFavorites: favorites } = store.state;
     const changing = mode === "change";
-    // Where it opens: the folder of the session you are in (New session here), else the server's own. Issue #96.
-    const initial = view.agent?.cwd ?? server?.defaultCwd ?? "~";
+    const [alwaysDefault, setAlwaysDefault] = useState(
+        () => localStorage.getItem(ALWAYS_DEFAULT_KEY) === "1",
+    );
+    // Where it opens: default workspace if pinned, else the folder of the session you are in (Issue #96).
+    const initial =
+        !changing && alwaysDefault && server?.defaultCwd
+            ? server.defaultCwd
+            : (view.agent?.cwd ?? server?.defaultCwd ?? "~");
     const [listing, setListing] = useState(null);
     const [failed, setFailed] = useState(null);
     // The folder a click selected (mouse only): Open takes it over the one you are in.
@@ -342,6 +350,14 @@ export function CwdSheet({ mode, fromList = false }) {
         }
     };
 
+    const toggleAlwaysDefault = (event) => {
+        event.stopPropagation();
+        const next = !alwaysDefault;
+
+        localStorage.setItem(ALWAYS_DEFAULT_KEY, next ? "1" : "0");
+        setAlwaysDefault(next);
+    };
+
     /** A path typed: whole, or from the folder you are in. */
     const goTo = (text) => load(/^[~/]/.test(text) ? text : joined(folder, text));
 
@@ -413,23 +429,30 @@ export function CwdSheet({ mode, fromList = false }) {
     const favoriteLabels = recentLabels(favorites, home);
     const labels = recentLabels(recent, home);
     const places = [
-        ...(home
+        ...(server?.defaultCwd && server.defaultCwd !== home && server.defaultCwd !== "/"
             ? [
                   {
-                      path: home,
-                      name: t("web.sheets.folder.cwd-sheet.place.home", "Home"),
-                      icon: "home",
+                      path: server.defaultCwd,
+                      name: t(
+                          "web.sheets.folder.release028.default-workspace",
+                          "Default workspace",
+                      ),
+                      icon: "folder",
+                      pin: !changing,
                   },
               ]
             : []),
+        ...(home
+            ? [{ path: home, name: t("web.sheets.folder.release028.home", "Home"), icon: "home" }]
+            : []),
         {
             path: "/",
-            name: t("web.sheets.folder.cwd-sheet.place.computer", "Computer"),
+            name: t("web.sheets.folder.release028.computer", "Computer"),
             icon: "monitor",
         },
     ];
 
-    const place = (path, name, icon, key = null) => html`<button
+    const place = (path, name, icon, key = null, pin = false) => html`<button
         key=${path}
         type="button"
         class=${`fp-place ${path === folder ? "on" : ""}`}
@@ -439,6 +462,19 @@ export function CwdSheet({ mode, fromList = false }) {
     >
         <${Icon} name=${icon} size=${15} />
         <span>${name}</span>
+        ${
+            pin &&
+            html`<span
+                role="button"
+                tabindex="-1"
+                class=${`fp-pin ${alwaysDefault ? "on" : ""}`}
+                title=${alwaysDefault ? t("web.sheets.folder.release028.always-default", "Always open new sessions here") : t("web.sheets.folder.release028.make-default", "Open new sessions here by default")}
+                aria-label=${alwaysDefault ? t("web.sheets.folder.release028.always-default", "Always open new sessions here") : t("web.sheets.folder.release028.make-default", "Open new sessions here by default")}
+                onClick=${toggleAlwaysDefault}
+            >
+                <${Icon} name="pin" size=${13} />
+            </span>`
+        }
         ${key && html`<span class="fp-key">${key}</span>`}
     </button>`;
 
@@ -597,18 +633,9 @@ export function CwdSheet({ mode, fromList = false }) {
             </div>`
         }
         <div class="fp-main">
-            <nav class="fp-places" aria-label=${t(
-                "web.sheets.folder.cwd-sheet.aria-label.places",
-                "Places",
-            )}>
-                ${places.map((each) => place(each.path, each.name, each.icon))}
-                ${
-                    favorites.length > 0 &&
-                    html`<div class="fp-places-title">${t(
-                        "web.sheets.folder.cwd-sheet.div.favorites",
-                        "Favorites",
-                    )}</div>`
-                }
+            <nav class="fp-places" aria-label="Places">
+                ${places.map((each) => place(each.path, each.name, each.icon, null, each.pin))}
+                ${favorites.length > 0 && html`<div class="fp-places-title">Favorites</div>`}
                 ${favorites.map((path, index) =>
                     place(
                         path,

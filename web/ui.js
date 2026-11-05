@@ -7,6 +7,8 @@ import { Component, createContext, h } from "preact";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useDragToClose } from "./gestures.js";
 import { highlight, langOf } from "./highlight.js";
+import { blockMath, inlineMath } from "./math.js";
+import { fenceFor, markdownRevision, mathOn, mountMath } from "./markdown-ext.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
 import { t } from "./ui-locale.js";
 
@@ -23,6 +25,54 @@ export const fileUrl = (path, conversationId = currentConversation()) =>
 /** The `index`th image stored in a message: a pasted image or one a tool returned. */
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
+
+/** Attached types that go to a model that takes images, up to this size (`model-images.ts`). */
+const MODEL_IMAGE_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+]);
+const MAX_MODEL_IMAGE = 5 * 1024 * 1024;
+/** Photos a browser cannot show: the server sends them to the model as JPEG. */
+const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
+
+/**
+ * A file named with `@` that can go to the model as an image, before the attached ones. It is not in the entry's `files`,
+ * which lists only the text files sent along.
+ */
+const MENTIONED_IMAGE = /(?:^|[\s([{])@(?:"[^"\n]*|[^\s"]*)\.(?:png|jpe?g|gif|webp|heic|heif)\b/i;
+
+/**
+ * Where a sent attachment's thumbnail loads from, or null when it shows as a file chip. `files` are the message's
+ * attachment lines (`{ path, mime, size, noted }`); `entry` the message, with its text and how many images it stores
+ * (`images`). A HEIC or HEIF photo shows the JPEG the model got, the stored image in its place among the attached ones.
+ * Only when that place is sure: its line says it was converted, no file sent by name can be an image, and every
+ * attached image is stored, so a failed one cannot shift another into its place.
+ */
+export function attachedPictureSrc(file, files, entry, conversationId) {
+    if (!file.path || !file.mime.startsWith("image/")) {
+        return null;
+    }
+
+    if (!HEIC_TYPES.has(file.mime)) {
+        return fileUrl(file.path, conversationId);
+    }
+
+    const sent = files.filter(
+        (each) => MODEL_IMAGE_TYPES.has(each.mime) && each.size <= MAX_MODEL_IMAGE,
+    );
+    const mentioned = MENTIONED_IMAGE.test(entry.text ?? "");
+
+    if (!file.noted || mentioned || (entry.images ?? 0) !== sent.length) {
+        return null;
+    }
+
+    return entryImageUrl(entry.id, sent.indexOf(file), conversationId);
+}
 
 /** Where the browser loads `![alt](src)` from. Web and data URLs stay; paths and file:// URLs point at the server. */
 function imageSource(src, conversationId) {
@@ -97,7 +147,47 @@ const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[
 /** A fence's language as it may be kept: a short name of safe characters, or nothing. */
 const FENCE_NAME = /^[\w+#.-]{1,24}$/;
 
+// Markers are unpredictable and exist only for one parse, so reply HTML cannot impersonate math.
+let mathMarkers = null;
+
+function mathMarker(text, display) {
+    const marker = `pocket-math-${[...crypto.getRandomValues(new Uint32Array(4))].join("-")}`;
+
+    mathMarkers?.set(marker, { text, display });
+
+    return `<code>${marker}</code>`;
+}
+
 marked.use({
+    extensions: [
+        {
+            name: "pocketBlockMath",
+            level: "block",
+            // Only `$$` at the start of a line: marked cuts the paragraph there, and joins its parts with a line break.
+            start: (src) => {
+                const found = mathOn() ? /\n {0,3}\$\$/.exec(src) : null;
+
+                return found === null ? undefined : found.index + 1;
+            },
+            tokenizer(src) {
+                const found = mathOn() && blockMath(src);
+
+                return found ? { type: "pocketBlockMath", ...found } : undefined;
+            },
+            renderer: (token) => `<p>${mathMarker(token.text, true)}</p>`,
+        },
+        {
+            name: "pocketInlineMath",
+            level: "inline",
+            start: (src) => (mathOn() ? src.indexOf("$") : undefined),
+            tokenizer(src) {
+                const found = mathOn() && inlineMath(src);
+
+                return found ? { type: "pocketInlineMath", ...found } : undefined;
+            },
+            renderer: (token) => mathMarker(token.text, token.display),
+        },
+    ],
     renderer: {
         // Task list boxes as characters: the sanitizer drops form controls.
         checkbox: ({ checked }) => (checked ? "☑ " : "☐ "),
@@ -163,6 +253,8 @@ const localImage = (src) =>
     /^\/a\/\d+\//.test(src) ||
     /^data:image\//i.test(src);
 
+/** Model lists past this many get a box to find a model by. */
+export const MODEL_SEARCH_AT = 8;
 /** Code blocks past this size show without colors: coloring them would hold up the conversation. */
 export const COLOR_LIMIT = 200_000;
 /** Code blocks longer than this many lines fold to their first lines, once they are written whole. */
@@ -208,7 +300,7 @@ function codeBlock(pre, fold) {
     const code = pre.querySelector("code") ?? pre;
     const wrap = document.createElement("div");
     const copy = document.createElement("button");
-    const kind = richKind(name, source);
+    const kind = fenceFor(name) ? "extension" : richKind(name, source);
 
     // The highlighter's output is the source, escaped, in spans of its own: nothing from the reply becomes markup.
     if (lang && source.length <= COLOR_LIMIT) {
@@ -262,6 +354,15 @@ function sanitize(html, fold) {
 
     // `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
     for (const code of fragment.querySelectorAll("code")) {
+        const math = mathMarkers?.get(code.textContent ?? "");
+
+        if (math !== undefined && !code.closest("pre")) {
+            code.textContent = math.text;
+            code.dataset.part = "inline-math";
+            code.dataset.lang = math.display ? "math-display" : "math-inline";
+            continue;
+        }
+
         // Code in a line of words, for themes; a code block is `code-block`.
         if (!code.closest("pre")) {
             code.dataset.part = "inline-code";
@@ -435,7 +536,14 @@ function markdownParts(
     base = null,
     breaks = true,
 ) {
-    const key = `${store.state.localeRevision}\u0000${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
+    const key = [
+        store.state.localeRevision,
+        markdownRevision(),
+        conversationId ?? "",
+        base ?? "",
+        breaks ? "br" : "",
+        text,
+    ].join("\u0000");
     let out = markdownCache.get(key);
 
     if (out !== undefined) {
@@ -463,9 +571,12 @@ function renderParts(text, conversationId, base, breaks, fold) {
     rendering = conversationId ?? null;
     linkBase = base;
 
+    mathMarkers = new Map();
+
     try {
         return partsOf(sanitize(marked.parse(text, { async: false, breaks }), fold));
     } finally {
+        mathMarkers = null;
         rendering = null;
         linkBase = null;
     }
@@ -525,10 +636,19 @@ export function Markdown({
     conversationId = currentConversation(),
 }) {
     const live = useRef(null);
+    const root = useRef(null);
+
+    useEffect(() => mountMath(root.current));
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = `${store.state.localeRevision}\u0000${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+        const settings = [
+            store.state.localeRevision,
+            markdownRevision(),
+            conversationId ?? "",
+            base ?? "",
+            breaks,
+        ].join("\u0000");
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -536,7 +656,11 @@ export function Markdown({
 
         const blocks = liveBlocks(text, conversationId, base, breaks, live.current.kept);
 
-        return html`<div class=${`md ${className}`}>
+        return html`<div
+            key=${markdownRevision()}
+            ref=${root}
+            class=${`md ${className}`}
+        >
             ${blocks.flatMap(({ key, parts }) =>
                 parts
                     .filter((part) => part.kind !== undefined || part.html.trim() !== "")
@@ -550,25 +674,43 @@ export function Markdown({
 
     if (parts.length === 1 && parts[0].kind === undefined) {
         return html`<div
+            key=${markdownRevision()}
+            ref=${root}
             class=${`md ${className}`}
             dangerouslySetInnerHTML=${{ __html: parts[0].html }}
         ></div>`;
     }
 
-    return html`<div class=${`md ${className}`}>
+    return html`<div
+        key=${markdownRevision()}
+        ref=${root}
+        class=${`md ${className}`}
+    >
         ${parts.map((part, index) => drawPart(part, index, !cache))}
     </div>`;
 }
 
 /** One part of rendered markdown (`partsOf`): a run of HTML, or a code block that shows more than code. */
-const drawPart = (part, key, streaming) =>
-    part.kind === undefined || RichBlock === null
+const drawPart = (part, key, streaming) => {
+    const extension = part.kind === "extension" ? fenceFor(part.lang) : undefined;
+
+    if (extension !== undefined) {
+        return html`<${extension.component}
+            key=${key}
+            source=${part.source}
+            lang=${part.lang}
+            streaming=${streaming}
+        />`;
+    }
+
+    return part.kind === undefined || part.kind === "extension" || RichBlock === null
         ? html`<div
               key=${key}
               class="md-part"
               dangerouslySetInnerHTML=${{ __html: part.html }}
           ></div>`
         : html`<${RichBlock} key=${key} ...${part} streaming=${streaming} />`;
+};
 
 /** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
 const FILE_TYPES = new Set(
@@ -1602,7 +1744,7 @@ class DrawnFor extends Component {
  * does not count. Its own state draws it again as usual.
  */
 export function drawnFor(keys, component) {
-    const set = new Set(keys);
+    const set = new Set([...keys, "localeRevision"]);
     const Wrapped = (props) => h(DrawnFor, { component, props, keys: set, state: store.state });
 
     Wrapped.displayName = component.name;
@@ -1619,6 +1761,7 @@ class Memo extends Component {
 
         return (
             next.component !== this.props.component ||
+            next.localeRevision !== this.props.localeRevision ||
             Object.keys(before).length !== Object.keys(after).length ||
             keys.some((key) => !Object.is(before[key], after[key]))
         );
@@ -1635,7 +1778,8 @@ class Memo extends Component {
  * only as it mounts, whose change alone does not draw it again.
  */
 export function memo(component, ignored = []) {
-    const Wrapped = (props) => h(Memo, { component, props, ignored });
+    const Wrapped = (props) =>
+        h(Memo, { component, props, ignored, localeRevision: store.state.localeRevision });
 
     Wrapped.displayName = component.name;
 
@@ -1867,6 +2011,14 @@ export function modelLabel(agent) {
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");
 }
+
+/** A model's name as the composer's chip says it: "opus 5.5" for "Anthropic: Claude Opus 5.5". */
+export const shortModelName = (name) =>
+    name
+        // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
+        .replace(/^[^:]{1,24}:\s*/, "")
+        .replace(/^(?:anthropic\s+)?claude\s+/i, "")
+        .toLowerCase();
 
 /** An on and off switch, named for screen readers by `label`. */
 export function Switch({ on, disabled, label, onChange }) {

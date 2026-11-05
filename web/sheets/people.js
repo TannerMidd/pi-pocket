@@ -1,6 +1,6 @@
 // People with access to this server, and invites for more.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Avatar } from "../avatar.js";
+import { Avatar, avatarBlob } from "../avatar.js";
 import {
     actions,
     api,
@@ -435,6 +435,40 @@ function lastSeen(person) {
         : t("web.sheets.people.last-seen.text.seen-ago", "seen {when} ago", {
               when: timeAgo(person.lastSeen),
           });
+}
+
+/** Your own picture: choose one (cropped and shrunk here before it is sent), or take it away. */
+export function MyPhoto() {
+    const { me, users } = store.state;
+    const person = users.find((each) => each.id === me?.id) ?? me;
+    const input = useRef(null);
+
+    const choose = (event) => {
+        const file = event.currentTarget.files?.[0];
+
+        event.currentTarget.value = "";
+
+        if (file) {
+            attempt(async () => api("me/avatar", await avatarBlob(file)));
+        }
+    };
+
+    return html`<div class="my-photo">
+        <${Avatar} person=${person} size=${48} />
+        <input ref=${input} type="file" accept="image/*" hidden onChange=${choose} />
+        <button class="button" onClick=${() => input.current.click()}>
+            ${person.avatar ? t("web.sheets.people.release028.change-photo", "Change photo") : t("web.sheets.people.release028.add-photo", "Add photo")}
+        </button>
+        ${
+            person.avatar &&
+            html`<button
+                class="button ghost"
+                onClick=${() => attempt(() => api("me/avatar", undefined, { method: "DELETE" }))}
+            >
+                ${t("web.sheets.people.release028.remove-photo", "Remove photo")}
+            </button>`
+        }
+    </div>`;
 }
 
 /** Everyone with access: who is online, when the others were last here, and (for the owner) what each may do. */

@@ -4,6 +4,7 @@ import { browserAvailable, displayUrl, setBrowserOpen } from "../browser.js";
 import { chatUnread } from "../chat.js";
 import { schedulesAvailable, triggersOn, watchAvailable, watchPr } from "../commands.js";
 import { extensionMenuItems, safeMode } from "../extension-ui.js";
+import { hostMenu } from "../embedder.js";
 import { useChanges } from "../diff.js";
 import { filesAvailable, setFilesOpen } from "../files-panel.js";
 import { peeksOn, togglePeeks } from "../peeks.js";
@@ -21,6 +22,7 @@ import {
     collab,
     navigate,
     notify,
+    openRunning,
     openSheet,
     scoped,
     setUnread,
@@ -426,6 +428,9 @@ export function MenuSheet({ places = true }) {
     const instructions = view.agent?.instructions;
     const memory = useMemory();
 
+    // The embedder this page runs in adds its own group at the end, below App, under its own title (`embedder.js`).
+    const embedder = hostMenu();
+
     return html`<${MenuFrame} title=${conversation?.title ?? t("web.sheets.menu.menu-sheet.text.menu", "Menu")}>
         ${places && html`<${Places} />`}
         <div class="menu-session">
@@ -684,9 +689,10 @@ export function MenuSheet({ places = true }) {
             }
             ${item(
                 t("menu.running", "Running now"),
-                () => openSheet({ type: "running" }),
+                openRunning,
                 t("web.sheets.menu.menu-sheet.text.everything-pi-doing", "everything Pi is doing"),
             )}
+            ${view.conversation && item(t("web.sheets.menu.background", "Background"), () => openSheet({ type: "background" }), t("web.sheets.menu.background-detail", "what commands print as they run"))}
             ${item(
                 t("menu.spend", "Spend"),
                 () => openSheet({ type: "spend" }),
@@ -756,5 +762,12 @@ export function MenuSheet({ places = true }) {
                 signOut,
             )}
         </div>
+        ${
+            embedder.items.length > 0 &&
+            html`<div class="group">
+                ${embedder.title && html`<div class="group-title">${embedder.title}</div>`}
+                ${embedder.items.map((each) => item(each.label, each.run, each.hint))}
+            </div>`
+        }
     <//>`;
 }

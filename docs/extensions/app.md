@@ -9,6 +9,7 @@ The second argument of the default export, `web`, registers these parts while th
 - **Routes** on the server, under `/api/x/<module>/`. The browser module calls them. Keys and other secrets stay on the server. See [Routes](routes.md).
 - **A browser module**: a `.js` file that the app loads in the tabs of the people that it is for. Through `pocket`, the app's API for extensions, it adds rail buttons, pages, sheets, panels, status-line items, menu rows, and launcher actions, and says how its tools' calls show. See [Browser modules](browser-modules.md).
 - **Commands** for the message box (`/name`). They run on the server, and need no browser module. See [Slash commands](commands.md).
+- **A presentation** (since 0.28.0, experimental) for an input this module sends. The transcript shows one line, which opens to the message, or hides it until Find. The model still reads the message in full. See [`web.presentEntry`](reference/web.md#presententry). Each browser chooses open, folded, or hidden: a person in the row's message sheet, and a browser module, for its own kinds, with [`pocket.entryPresentation`](reference/pocket.md#entrypresentation), which also reads the choice. An input stored as the module's own kind is not a person's message: it cannot be sent again, and `pocket.messages` leaves it out.
 - **Public pages** (since 0.22.0, experimental) for anyone with one of the module's links, with no sign-in. See [Public pages](public-pages.md).
 
 ```typescript

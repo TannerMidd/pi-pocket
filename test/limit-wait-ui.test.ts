@@ -107,9 +107,35 @@ test(
             true,
             "Retry now is on screen and the conversation does not scroll sideways",
         );
+        assert.equal(
+            await page.evaluate(
+                `return String(!!document.querySelector('[data-part="live-stop"]'))`,
+            ),
+            "true",
+            "Stop is available on a phone",
+        );
 
         state.limited = false;
         await page.click({ selector: ".live-retry" });
         await until(() => state.answered, "the answer");
     },
 );
+
+test("Stop cancels a usage wait on a phone", real, async () => {
+    state.limited = true;
+    const id = await newSession(app);
+
+    await app.commands.submit(id, owner(app), { text: "stop me", requestId: "w-2" });
+    await until(() => app.limits.waitFor(Number(id)) !== undefined, "the wait");
+    await page.setViewport(VIEWPORTS.mobile);
+    await page.navigate(`${base}/s/${id}`);
+    await until(
+        async () =>
+            (await page.evaluate(`return !!document.querySelector('[data-part="live-stop"]')`)) ===
+            "true",
+        "the Stop button",
+        20_000,
+    );
+    await page.click({ selector: '[data-part="live-stop"]' });
+    await until(() => app.limits.waitFor(Number(id)) === undefined, "the wait ends");
+});

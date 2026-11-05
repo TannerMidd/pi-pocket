@@ -218,6 +218,63 @@ test("the Keyboard shortcuts sheet lists the modules' keys", real, async () => {
 });
 
 test(
+    "Ctrl/⌘+Enter sends the other way round while Pi works, and leaves Interrupt alone",
+    real,
+    async () => {
+        const busy = (on: boolean) =>
+            inPage(`
+            const { store } = await import("/store.js");
+            store.set((state) => ({ view: { ...state.view, live: { ...state.view.live, busy: ${on} } } }));
+            return "null";
+        `);
+        const chip = (name: string) =>
+            inPage(`
+            [...document.querySelectorAll('.composer [role="radio"]')].find((each) => each.textContent.includes(${JSON.stringify(name)})).click();
+            return "null";
+        `);
+
+        const sentMode = async (init: KeyboardEventInit) => {
+            await typeInBox("hello");
+            await inPage(`
+            globalThis.modes = [];
+            globalThis.fetch = async (url, init) => {
+                if (String(url).endsWith("/submit")) {
+                    globalThis.modes.push(JSON.parse(init.body).mode);
+                }
+
+                return new Response("{}", { headers: { "content-type": "application/json" } });
+            };
+            return "null";
+        `);
+            await key({ key: "Enter", code: "Enter", ...init });
+            await until(
+                async () =>
+                    (await inPage<string[]>(`return JSON.stringify(globalThis.modes)`)).length > 0,
+                "a send",
+            );
+
+            return (await inPage<string[]>(`return JSON.stringify(globalThis.modes)`))[0];
+        };
+
+        await busy(true);
+        assert.equal(await sentMode({ ctrlKey: true }), "followUp", "Steer: queued");
+        await chip("Queue");
+        assert.equal(await sentMode({ metaKey: true }), "steer", "Queue: steers");
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector('[aria-checked="true"]').textContent)`,
+            ),
+            "Queue",
+            "the chip stays",
+        );
+        await chip("Interrupt");
+        assert.equal(await sentMode({ ctrlKey: true }), "interrupt", "Interrupt: as Enter");
+        await busy(false);
+        assert.equal(await sentMode({ ctrlKey: true }), "followUp", "idle: as Enter");
+    },
+);
+
+test(
     "Alt+↓ in the model menu still switches sessions: the list keeps only plain arrows",
     real,
     async () => {

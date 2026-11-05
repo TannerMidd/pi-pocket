@@ -53,6 +53,7 @@ const shape = (items: Items) =>
             ? `${item.key}[${item.steps!.length}${item.before?.length ? `+${item.before.length}` : ""}]`
             : item.key,
     );
+/** The tool of that name before 0.28: its calls are still in old sessions. */
 const INLINE = "artifact_inline";
 
 test("Pi's calls across answers fold into one group, and words end it", () => {
@@ -120,6 +121,29 @@ test("an artifact_inline call is its own item between the words and the steps ar
 
     assert.equal(writing.at(-1)!.key, "ipage");
     assert.equal(writing.at(-1)!.step!.entry, undefined);
+});
+
+test("an artifact call with inline: true is an inline item, as artifact_inline was; without it, a step", () => {
+    const page = (id: string, args: Record<string, unknown>) => call(id, "artifact", args);
+    const rows = [
+        user(1),
+        answer(2, [said("Here:"), page("new", { inline: true }), page("plain", { id: "a" })]),
+        answer(3, [said("Try it.")], "stop"),
+    ];
+    const items = turns.itemsOf(rows, null);
+
+    assert.deepEqual(
+        items.map((item) => item.type),
+        ["row", "reply", "inline", "activity", "reply"],
+    );
+    assert.equal(items[2]!.key, "inew");
+    // Streaming, the same call is a card as soon as its arguments say so.
+    const writing = turns.itemsOf(rows.slice(0, 1), {
+        kind: "assistant",
+        blocks: [said("Here:"), page("new", { inline: true })],
+    });
+
+    assert.equal(writing.at(-1)!.type, "inline");
 });
 
 test("a jump to an answer lands on its words, or on its card when it has none", () => {

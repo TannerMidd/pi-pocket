@@ -20,7 +20,45 @@ function copy(text, what) {
  * One hook: where it sends, what Pi is told to do, how it has been used; its address (and a signed one's secret), a new
  * secret, and removing it.
  */
-function HookRow({ hook, base, fresh, onRemove, onRotate }) {
+function HookRow({ hook, base, fresh, editable, onSaved, onRemove, onRotate }) {
+    const [draft, setDraft] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const savingNow = useRef(false);
+    const field = useRef(null);
+    const change = useRef(null);
+    const edited = useRef(false);
+    const editing = draft !== null;
+
+    useEffect(() => {
+        if (editing) {
+            field.current?.focus();
+        } else if (edited.current) {
+            change.current?.focus();
+        }
+
+        edited.current = editing;
+    }, [editing]);
+
+    const save = () => {
+        if (savingNow.current) {
+            return;
+        }
+
+        savingNow.current = true;
+        setSaving(true);
+        attempt(async () => {
+            const updated = await api(`hooks/${encodeURIComponent(hook.id)}`, {
+                instructions: draft,
+            });
+
+            onSaved(updated);
+            setDraft(null);
+        }).finally(() => {
+            savingNow.current = false;
+            setSaving(false);
+        });
+    };
+
     const open = (event) => {
         event.preventDefault();
         closeSheet();
@@ -40,6 +78,14 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
                     last: formatWhen(hook.lastAt),
                 });
 
+    const status = [
+        hook.signed
+            ? t("web.sheets.hooks.hook-row.span.git-hub-signed", "GitHub, signed")
+            : t("web.sheets.hooks.hook-row.span.secret-address", "secret in the address"),
+        ...(hook.anyone ? [t("web.sheets.hooks.hook-row.from-anyone", "from anyone")] : []),
+        used,
+    ].join(" · ");
+
     return html`<div class=${`hook ${fresh ? "fresh" : ""}`}>
         <div class="hook-head">
             <strong class="grow">${hook.name}</strong>
@@ -51,7 +97,48 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
                 }
             </span>
         </div>
-        ${hook.instructions && html`<div class="hook-text">${hook.instructions}</div>`}
+        ${
+            editing
+                ? html`<div class="field">
+                    <div class="label">${t("web.sheets.hooks.release028.prompt-heading", "What Pi should do with each post")}</div>
+                    <textarea
+                        aria-label=${t("web.sheets.hooks.release028.edit-prompt-label", "Edit the prompt of {name}", { name: hook.name })}
+                        rows="4"
+                        maxlength="2000"
+                        ref=${field}
+                        disabled=${saving}
+                        value=${draft}
+                        onInput=${(event) => setDraft(event.currentTarget.value)}
+                        onKeyDown=${(event) => {
+                            // Esc cancels the edit, as Cancel does; the sheet closes on the next Esc.
+                            if (
+                                event.key === "Escape" &&
+                                !event.isComposing &&
+                                event.keyCode !== 229
+                            ) {
+                                event.stopPropagation();
+                                setDraft(null);
+                            }
+                        }}
+                    ></textarea>
+                    <div class="muted small">
+                        ${t("web.sheets.hooks.release028.future-posts", "Applies to future posts. Leave empty for the default instructions.")}
+                    </div>
+                    <div class="hook-actions">
+                        <button
+                            class="button small ghost"
+                            disabled=${saving}
+                            onClick=${() => setDraft(null)}
+                        >
+                            ${t("web.sheets.hooks.release028.cancel", "Cancel")}
+                        </button>
+                        <button class="button small primary" disabled=${saving} onClick=${save}>
+                            ${saving ? t("web.sheets.hooks.release028.saving", "Saving…") : t("web.sheets.hooks.release028.save", "Save")}
+                        </button>
+                    </div>
+                </div>`
+                : hook.instructions && html`<div class="hook-text">${hook.instructions}</div>`
+        }
         ${
             fresh &&
             html`<div class="mono small hook-address">${addressOf(base, hook)}</div>
@@ -65,11 +152,7 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
                 }`
         }
         <div class="hook-actions">
-            <span class="muted small grow">${
-                hook.signed
-                    ? t("web.sheets.hooks.hook-row.span.git-hub-signed", "GitHub, signed")
-                    : t("web.sheets.hooks.hook-row.span.secret-address", "secret in the address")
-            }${hook.anyone ? t("web.sheets.hooks.hook-row.span.anyone", " · from anyone") : ""} · ${used}</span>
+            <span class="muted small grow hook-status">${status}</span>
             <button
                 class="button small"
                 onClick=${() =>
@@ -104,14 +187,23 @@ function HookRow({ hook, base, fresh, onRemove, onRotate }) {
                     ${t("web.sheets.hooks.hook-row.button.copy-secret", "Copy secret")}
                 </button>`
             }
-            <button class="button small ghost" onClick=${onRotate}>${t(
-                "web.sheets.hooks.hook-row.button.new-secret",
-                "New secret",
-            )}</button>
-            <button class="button small ghost" onClick=${onRemove}>${t(
-                "web.sheets.hooks.hook-row.button.remove",
-                "Remove",
-            )}</button>
+            ${
+                editable &&
+                draft === null &&
+                html`<button
+                    class="button small ghost"
+                    ref=${change}
+                    onClick=${() => setDraft(hook.instructions)}
+                >
+                    ${t("web.sheets.hooks.release028.edit-prompt", "Edit prompt")}
+                </button>`
+            }
+            <button class="button small ghost" disabled=${saving} onClick=${onRotate}>
+                ${t("web.sheets.hooks.release028.new-secret", "New secret")}
+            </button>
+            <button class="button small ghost" disabled=${saving} onClick=${onRemove}>
+                ${t("web.sheets.hooks.release028.remove", "Remove")}
+            </button>
         </div>
     </div>`;
 }
@@ -528,6 +620,14 @@ export function HooksSheet() {
                 hook=${hook}
                 base=${list.base}
                 fresh=${hook.id === fresh}
+                editable=${steer}
+                onSaved=${(updated) =>
+                    setList((current) => ({
+                        ...current,
+                        hooks: current.hooks.map((each) =>
+                            each.id === updated.id ? { ...each, ...updated } : each,
+                        ),
+                    }))}
                 onRemove=${() => remove(hook)}
                 onRotate=${() => rotate(hook)}
             />`,

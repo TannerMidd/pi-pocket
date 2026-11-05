@@ -9,6 +9,9 @@ export function SchedulesSheet() {
     const { view, users, me } = store.state;
     const [when, setWhen] = useState("");
     const steer = canSteer();
+    const archived = store.state.sessions.some(
+        (session) => session.id === store.state.conversationId && session.archived,
+    );
     const setBy = (id) =>
         id === undefined
             ? t("web.sheets.schedules.schedules-sheet.set-by.pi", "Pi")
@@ -69,7 +72,7 @@ export function SchedulesSheet() {
                                     "web.sheets.schedules.schedules-sheet.div.set-by",
                                     "{when} · set by {who}",
                                     { when: nextLine(schedule), who: setBy(schedule.by) },
-                                )}
+                                )}${archived ? t("web.sheets.schedules.archived", " · session archived") : ""}
                             </div>
                         </div>
                         ${

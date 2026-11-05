@@ -3,7 +3,8 @@
  * memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same
  * project gets them in its system prompt.
  */
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { Lesson } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
@@ -51,20 +52,23 @@ export default function createMemory(host: PocketHost) {
     const tool = defineTool({
         name: "memory",
         description: DESCRIPTION,
-        parameters: Type.Object({
-            action: StringEnum(["add", "update", "remove", "list"] as const),
-            text: Type.Optional(
-                Type.String({
-                    description: `add, update: the lesson, one or two sentences (${String(MAX_LESSON)} characters at most)`,
-                }),
-            ),
-            scope: Type.Optional(
-                StringEnum(["project", "everywhere"] as const, {
-                    description: "add: project (default) or everywhere",
-                }),
-            ),
-            id: Type.Optional(Type.String({ description: "update, remove: the lesson's id" })),
-        }),
+        parameters: obj(
+            {
+                action: StringEnum(["add", "update", "remove", "list"] as const),
+                text: opt(
+                    str({
+                        description: `add, update: the lesson (${String(MAX_LESSON)} characters at most)`,
+                    }),
+                ),
+                scope: opt(
+                    StringEnum(["project", "everywhere"] as const, {
+                        description: "add: project (default) or everywhere",
+                    }),
+                ),
+                id: opt(str({ description: "update, remove: the lesson's id" })),
+            },
+            { open: true },
+        ),
         // Safe to run again: an add finds the lesson this very call saved, an update sets the same text, and removing one
         // that is gone changes nothing.
         replay: "safe",

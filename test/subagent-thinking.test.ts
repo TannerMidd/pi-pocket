@@ -1,6 +1,16 @@
 // A subagent thinks at the level Pi asks, also above its session's; a level its model lacks becomes a lower one, and a
 // level raised by hand stays as work is sent.
-import { type App, cleanUp, context, lastText, openApp, owner, until, work } from "./helpers.ts";
+import {
+    type App,
+    cleanUp,
+    context,
+    lastText,
+    openApp,
+    owner,
+    until,
+    work,
+    offerSubagents,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
@@ -60,6 +70,7 @@ let app: App;
 
 before(async () => {
     app = await openApp(faux);
+    offerSubagents(app);
 });
 
 after(async () => {

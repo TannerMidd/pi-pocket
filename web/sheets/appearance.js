@@ -34,6 +34,7 @@ import {
 import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
 import { languages, localeId, setLocale, t } from "../ui-locale.js";
+import { pipAvailable } from "../pip.js";
 import { galleryAvailable } from "./gallery.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
@@ -752,7 +753,7 @@ export function AppearanceSheet() {
             <//>
             <${SettingRow}
                 title=${t("web.sheets.appearance.appearance-sheet.title.peek-tiles", "Peek tiles")}
-                detail=${t("web.sheets.appearance.peek-detail", "Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar{shortcut}", { shortcut: touch ? "" : "，Alt+P" })}
+                detail=${t("web.sheets.appearance.peek-detail", "Other sessions beside this one, live while on screen: working, waiting for you, done since you looked, and pinned. Also the tiles button in the top bar{shortcut}", { shortcut: touch ? "" : ", Alt+P" })}
             >
                 <${Switch}
                     on=${p.peeks}
@@ -775,8 +776,33 @@ export function AppearanceSheet() {
                 <//>`
             }
             <${SettingRow}
-                title=${t("web.sheets.appearance.appearance-sheet.title.sidebar", "Sidebar")}
-                detail=${t("web.sheets.appearance.detail.setting-3", "Folded, it shows numbered sessions like workspaces")}
+                title=${t("web.sheets.appearance.release028.switch-with", "Switch sessions with")}
+                detail=${t("web.sheets.appearance.release028.tabs-detail", "Tabs: a strip above the session, one segment for each of the first nine sessions. Choosing Tabs folds the sidebar to its rail, and Sidebar unfolds it")}
+            >
+                <div class="segmented">
+                    ${[
+                        [false, t("web.sheets.appearance.release028.sidebar", "Sidebar")],
+                        [true, t("web.sheets.appearance.release028.tabs", "Tabs")],
+                    ].map(
+                        ([value, label]) =>
+                            html`<button
+                                class=${Boolean(p.sessionTabs) === value ? "on" : ""}
+                                aria-pressed=${Boolean(p.sessionTabs) === value}
+                                onClick=${() =>
+                                    Boolean(p.sessionTabs) !== value &&
+                                    setPrefs({
+                                        sessionTabs: value,
+                                        sidebar: value ? "rail" : "open",
+                                    })}
+                            >
+                                ${label}
+                            </button>`,
+                    )}
+                </div>
+            <//>
+            <${SettingRow}
+                title=${t("web.sheets.appearance.release028.sidebar", "Sidebar")}
+                detail=${t("web.sheets.appearance.release028.sidebar-detail", "Folded, it shows numbered sessions like workspaces")}
             >
                 <div class="segmented">
                     ${[
@@ -794,6 +820,32 @@ export function AppearanceSheet() {
                     )}
                 </div>
             <//>
+            ${
+                pipAvailable() &&
+                html`<${SettingRow}
+                    title="PiP"
+                    detail=${t("web.sheets.appearance.release028.pip-detail", "Floating: a window in the corner, or a sheet on a phone. Board: its conversation in the session's place, with every step and its menu")}
+                >
+                    <div class="segmented">
+                        ${[
+                            [
+                                "floating",
+                                t("web.sheets.appearance.release028.floating", "Floating"),
+                            ],
+                            ["board", t("web.sheets.appearance.release028.board", "Board")],
+                        ].map(
+                            ([value, label]) =>
+                                html`<button
+                                    class=${p.pip === value ? "on" : ""}
+                                    aria-pressed=${p.pip === value}
+                                    onClick=${() => setPrefs({ pip: value })}
+                                >
+                                    ${label}
+                                </button>`,
+                        )}
+                    </div>
+                <//>`
+            }
             <${SettingRow}
                 title=${t("web.sheets.appearance.appearance-sheet.title.motion", "Motion")}
                 detail=${t("web.sheets.appearance.detail.setting-4", "Auto follows your system's reduced-motion setting. Fluid adds springs, staggered entrances, and layout changes that morph")}
@@ -875,7 +927,7 @@ export function AppearanceSheet() {
         <div class="sheet-list">
             <${SettingRow}
                 title=${t("web.sheets.appearance.appearance-sheet.title.show-thinking", "Show thinking")}
-                detail=${t("web.sheets.appearance.thinking-detail", "Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one{shortcut}", { shortcut: touch ? "" : "，Alt+T" })}
+                detail=${t("web.sheets.appearance.thinking-detail", "Shows Pi's current thought above the live line as it comes, and its finished thoughts. The chevron before the line folds the live one{shortcut}", { shortcut: touch ? "" : ", Alt+T" })}
             >
                 <${Switch}
                     on=${p.showThinking}
@@ -891,6 +943,39 @@ export function AppearanceSheet() {
                     on=${p.foldActivity}
                     label=${t("web.sheets.appearance.appearance-sheet.title.keep-activity-folded", "Keep activity folded")}
                     onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
+                />
+            <//>
+            <${SettingRow}
+                title=${t("web.sheets.appearance.release028.quote", "Reply to a passage")}
+                detail=${t("web.sheets.appearance.release028.quote-detail", "Select words in one of Pi's replies, and a Reply button by them quotes them in your next message")}
+            >
+                <${Switch}
+                    on=${p.quoteReply}
+                    label=${t("web.sheets.appearance.release028.quote", "Reply to a passage")}
+                    onChange=${() => setPrefs({ quoteReply: !p.quoteReply })}
+                />
+            <//>
+            ${
+                pipAvailable() &&
+                html`<${SettingRow}
+                    title=${t("web.sheets.appearance.release028.pip-quote", "Ask PiP about a passage")}
+                    detail=${t("web.sheets.appearance.release028.pip-quote-detail", "Select words in one of Pi's replies, and PiP's orb by them asks PiP about them, and tells it which session they came from")}
+                >
+                    <${Switch}
+                        on=${p.askPipQuote}
+                        label=${t("web.sheets.appearance.release028.pip-quote", "Ask PiP about a passage")}
+                        onChange=${() => setPrefs({ askPipQuote: !p.askPipQuote })}
+                    />
+                <//>`
+            }
+            <${SettingRow}
+                title=${t("web.sheets.appearance.release028.wait", "Wait for updates")}
+                detail=${t("web.sheets.appearance.release028.wait-detail", "Going back to a session that changed while you were away: show it once its updates have come, instead of your last copy at once with the updates sliding in")}
+            >
+                <${Switch}
+                    on=${p.waitForUpdates}
+                    label=${t("web.sheets.appearance.release028.wait", "Wait for updates")}
+                    onChange=${() => setPrefs({ waitForUpdates: !p.waitForUpdates })}
                 />
             <//>
         </div>

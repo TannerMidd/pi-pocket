@@ -2,13 +2,13 @@
  * One conversation's shared live view: the committed Pi Durable view plus Pi Pocket's own documents, projected into
  * small updates for every browser tab attached to it, and who is here and typing (memory only).
  */
-import type { AttachedReplicatedState } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
     AgentState,
     Conversation,
     ConversationId,
     ConversationView,
+    ConversationWatch,
     EntryRecord,
     InboxItem,
     InboxState,
@@ -28,6 +28,7 @@ import {
     DecisionsDoc,
     type Goal,
     GoalDoc,
+    LinkedSessionPeersDoc,
     type Notes,
     NotesDoc,
     type Pin,
@@ -45,6 +46,8 @@ import {
     WatchDoc,
 } from "./docs.ts";
 import { COMMAND_ENTRY, SHELL_ENTRY } from "./entry-format.ts";
+import { describe } from "./errors.ts";
+import { presentationOptions, queuePresentation } from "./entry-presentation.ts";
 import { agentInfo } from "./models.ts";
 import {
     type ClientBlock,
@@ -64,6 +67,7 @@ import {
     turnStart,
 } from "./projection.ts";
 import { describeRepeat } from "./when.ts";
+import { fingerprint } from "../../web/text-hash.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -83,6 +87,7 @@ export const ROOM_DOCS = new Set(
         ScheduleDoc,
         GoalDoc,
         WatchDoc,
+        LinkedSessionPeersDoc,
     ].map((doc) => doc.definition.kind),
 );
 /** A typing indicator lasts this long unless the browser renews it. */
@@ -139,9 +144,17 @@ export interface Client {
     close?(): void;
     /** False while the tab is hidden: the person is away, and push notifications may reach them. */
     visible?: boolean;
+    /**
+     * The tab runs in an embedder that shows notifications itself (`web/host.js`): Web Push
+     * cannot reach it, so the server sends it each notification over this connection, as this
+     * event. A page from before 0.28.0-beta.7, still open after an update, hears `desktop-notify`.
+     */
+    readonly embedder?: "embedder-notify" | "desktop-notify";
     /** Entries this client has, so updates carry only new ones. */
     readonly sentEntries: Set<number>;
     orderKey: string;
+    /** How many ids the order this tab has holds (`orderKey`), for an update that sends only the ones after them. */
+    orderCount?: number;
     /** The JSON of each slow-changing view field this client last got, so updates repeat only those that changed. */
     sentFields?: Map<string, string>;
     /**
@@ -154,6 +167,13 @@ export interface Client {
     /** The blocks of the live message this tab has, for protocol 3: undefined when it has none. */
     liveBlocks?: ClientBlock[];
     /**
+     * What a tab of protocol 6 kept of the session it opens, from an earlier visit or before a reconnect (`have` in
+     * `web/store.js`): the first `count` ids of the order, which join to `key` (`fingerprint`), and the entries from
+     * `from` to `count` whole, as a server of build `build` (`serverBuild`) sent them. Its first full view (`Room.push`)
+     * then leaves those out, with that part of the order. Used once, then cleared.
+     */
+    have?: { from: number; count: number; key: string; build: string };
+    /**
      * This connection, apart from others of the same tab id: a duplicated browser tab keeps the id, and a reconnect
      * briefly overlaps the old connection. Sent in `hello`; peek lists name it.
      */
@@ -162,6 +182,10 @@ export interface Client {
     peeks?: Set<ConversationId>;
     /** The number of the last peek list taken, so one that arrives late does not undo a newer one. */
     peekSeq?: number;
+    /** The number of the last switch taken (`PocketApp.switchTo`), so one that arrives late does not undo a newer one. */
+    switchSeq?: number;
+    /** Counts the times the tab entered a session: a room that opens after a later switch is not entered. */
+    visit?: number;
     /** This tab shows the subagents board: it gets every subagent with each session list (`PocketApp.setBoard`). */
     board?: boolean;
     /** The number of the last board request taken, so one that arrives late does not undo a newer one. */
@@ -272,9 +296,15 @@ function failureDealtWith(record: SubagentRecord): boolean {
 }
 
 /**
+ * The model a subagent runs on, as its row shows it: the model's name (its id when the model is not known here), its
+ * thinking level, and `other` when it is not the model of the conversation that started it.
+ */
+export type SubagentModel = { name: string; thinking?: string; other?: true };
+
+/**
  * One subagent as the web app shows it, in its parent's subagents bar and on the subagents board: what it was asked and
  * when, whether it works, and how it ended (`stopped` is a `failed` that was stopped; `dealt`, a failure a person
- * dealt with, which needs nobody now).
+ * dealt with, which needs nobody now), and the model it runs on (`runsOn`).
  */
 export function subagentView(
     name: string,
@@ -282,11 +312,13 @@ export function subagentView(
     busy: boolean,
     reporting: boolean,
     limited?: number,
+    runsOn?: SubagentModel,
 ) {
     return {
         name,
         conversationId: record.conversationId,
         busy,
+        ...(runsOn === undefined ? {} : { runsOn }),
         // Its request waits for its provider's limit to clear: when the next request goes out.
         ...(limited === undefined ? {} : { limited }),
         ...(record.asked === undefined ? {} : { asked: record.asked }),
@@ -302,6 +334,15 @@ export function subagentView(
     };
 }
 
+/**
+ * A conversation's view as a room keeps it: Pi Durable's view, with the active transcript in place of the view's window
+ * of the newest entries.
+ */
+export type ActiveView = Omit<ConversationView, "entries" | "before"> & {
+    /** The active transcript, as `Conversation.context()` reads it: the head marker, then the entries from its head on. */
+    readonly entries: readonly EntryRecord[];
+};
+
 /** The view of one conversation, shared by every client attached to it. */
 export class Room {
     readonly id: ConversationId;
@@ -312,8 +353,8 @@ export class Room {
     readonly #peekSent = new WeakMap<Client, string>();
     #peekTimer: NodeJS.Timeout | undefined;
     readonly #app: PocketApp;
-    #view: AttachedReplicatedState<ConversationView> | undefined;
-    #unsubscribe: (() => void) | undefined;
+    #view: ActiveView | undefined;
+    #watch: ConversationWatch | undefined;
     #timer: NodeJS.Timeout | undefined;
     #closeTimer: NodeJS.Timeout | undefined;
     #headTimer: NodeJS.Timeout | undefined;
@@ -341,6 +382,8 @@ export class Room {
     schedules: Record<string, Schedule> = {};
     goal: Goal | undefined;
     watch: PrWatch | undefined;
+    /** The sessions this one knows by an address (`linked-sessions.ts`): whom each linked session's message is from. */
+    peers: Record<string, number> = {};
     /** Who is typing where, by user id. Memory only: it means nothing after a restart. */
     readonly #typing = new Map<string, { where: TypingPlace; timer: NodeJS.Timeout }>();
     parent: { id: ConversationId; title: string } | undefined;
@@ -352,8 +395,32 @@ export class Room {
     }
 
     async open(conversation: Conversation): Promise<void> {
-        this.#view = await conversation.viewState(context);
-        this.#unsubscribe = this.#view.subscribe(() => this.schedule());
+        try {
+            await this.#open(conversation);
+        } catch (error) {
+            // A room that failed to open follows nothing: a retry opens its own watch.
+            void this.#watch?.stop();
+            this.#watch = undefined;
+
+            throw error;
+        }
+    }
+
+    async #open(conversation: Conversation): Promise<void> {
+        const watch = await conversation.watch(context);
+
+        this.#watch = watch;
+        // Read after the watch starts: what lands between the two comes again as the window's appends.
+        this.#view = {
+            conversation: watch.value.conversation,
+            docs: watch.value.docs,
+            entries: (await conversation.context(context)).entries,
+        };
+        watch.start(async (call) => {
+            if (call.kind === "value") {
+                await this.#follow(conversation, call.value);
+            }
+        });
         const harness = this.#app.harness;
 
         this.authors = {
@@ -379,7 +446,7 @@ export class Room {
         this.notes = {
             ...((await harness.snapshot(NotesDoc, this.id, context)) ?? { text: "", rev: 0 }),
         };
-        const owner = this.#view.value.conversation.owner;
+        const owner = this.#view.conversation.owner;
         // Take turns belongs to the session: a subagent's view shows (and follows) its session's.
         const root = owner === undefined ? this.id : this.#app.rootOf(owner.conversationId);
 
@@ -395,6 +462,9 @@ export class Room {
         };
         this.goal = (await harness.snapshot(GoalDoc, this.id, context))?.goal;
         this.watch = (await harness.snapshot(WatchDoc, this.id, context))?.watch;
+        this.peers = {
+            ...((await harness.snapshot(LinkedSessionPeersDoc, this.id, context))?.peers ?? {}),
+        };
 
         if (owner !== undefined) {
             const siblings =
@@ -466,10 +536,30 @@ export class Room {
             this.goal = (value?.goal as Goal | undefined) ?? undefined;
         } else if (kind === WatchDoc.definition.kind) {
             this.watch = (value?.watch as PrWatch | undefined) ?? undefined;
+        } else if (kind === LinkedSessionPeersDoc.definition.kind) {
+            this.peers = { ...((value?.peers as Record<string, number>) ?? {}) };
         }
 
         if (kind === AuthorsDoc.definition.kind) {
+            const before = this.authors;
+
             this.authors = { ...((value?.entries as Record<string, string>) ?? {}) };
+
+            // Who wrote an entry decides only whether a `userPrefix` matches it: with none registered, nothing shows
+            // differently. Otherwise only the entries whose author changed project again.
+            if (this.#app.webs.presentations().prefixes.length > 0) {
+                const changed = new Set<number>();
+
+                for (const id of new Set([...Object.keys(before), ...Object.keys(this.authors)])) {
+                    if (before[id] !== this.authors[id]) {
+                        changed.add(Number(id));
+                    }
+                }
+
+                if (changed.size > 0) {
+                    this.#reprojectEntries(changed);
+                }
+            }
         } else if (kind === ArtifactsDoc.definition.kind) {
             this.artifacts = { ...((value?.items as Record<string, ArtifactMeta>) ?? {}) };
         } else if (kind === SubagentsDoc.definition.kind) {
@@ -490,8 +580,48 @@ export class Room {
         return head;
     }
 
-    get value(): ConversationView | undefined {
-        return this.#view?.value;
+    get value(): ActiveView | undefined {
+        return this.#view;
+    }
+
+    /**
+     * The view's next value: its documents, and the active transcript with the entries the window added. A new head
+     * marker (a compaction, a reset), or a window that starts after the newest entry this room has, reads the active
+     * transcript again.
+     */
+    async #follow(conversation: Conversation, view: ConversationView): Promise<void> {
+        try {
+            const held = this.#view;
+
+            if (held === undefined) {
+                return;
+            }
+
+            // The head marker leads the transcript and is newer than the entries it keeps: the newest is first or last.
+            const newest = Math.max(
+                held.entries[0]?.id ?? Number.NEGATIVE_INFINITY,
+                held.entries.at(-1)?.id ?? Number.NEGATIVE_INFINITY,
+            );
+            const added = view.entries.filter((entry) => entry.id > newest);
+            let entries = held.entries;
+
+            if (
+                (view.before !== undefined && view.before > newest) ||
+                added.some((entry) => entry.head !== undefined)
+            ) {
+                entries = (await conversation.context(context)).entries;
+            } else if (added.length > 0) {
+                entries = [...held.entries, ...added];
+            }
+
+            if (this.#view !== undefined) {
+                this.#view = { conversation: view.conversation, docs: view.docs, entries };
+                this.schedule();
+            }
+        } catch (error) {
+            // A listener that throws would end the watch: the view keeps what it has, and the next value tries again.
+            this.#app.log(`The view of session ${this.id} did not update: ${describe(error)}`);
+        }
     }
 
     /** Coalesce bursts of commits (streaming commits land every 100 ms) into one update per client. */
@@ -511,12 +641,75 @@ export class Room {
         }, 90);
     }
 
+    /** Presentations changed: every entry projects again, and open tabs get the ones that now show differently. */
+    reproject(): void {
+        this.#reprojectEntries(undefined);
+        // The queue is projected with each update (`#inbox`): a waiting input's label changes with the registry even
+        // when no committed row does.
+        this.schedule();
+    }
+
+    /**
+     * Project these entries again (every one without `only`). A tab was sent each entry once (`sentEntries`), so one
+     * that now shows differently is marked unsent in every tab, and the next update brings it: the browser replaces it
+     * by id.
+     */
+    #reprojectEntries(only: ReadonlySet<number> | undefined): void {
+        const view = this.#view;
+
+        if (view === undefined) {
+            this.#projected.clear();
+
+            return;
+        }
+
+        const changed: number[] = [];
+
+        for (const record of view.entries) {
+            const id = record.id as unknown as number;
+
+            if (only !== undefined && !only.has(id)) {
+                continue;
+            }
+
+            const before = this.#projected.get(id);
+
+            this.#projected.delete(id);
+
+            // Never projected, so never sent: its first projection is already the new one.
+            if (before === undefined) {
+                continue;
+            }
+
+            if (JSON.stringify(before) !== JSON.stringify(this.#entry(record))) {
+                changed.push(id);
+            }
+        }
+
+        if (changed.length === 0) {
+            return;
+        }
+
+        for (const client of this.clients) {
+            for (const id of changed) {
+                client.sentEntries.delete(id);
+            }
+        }
+
+        this.schedule();
+    }
+
     #entry(entry: EntryRecord): ClientEntry | null {
         const id = entry.id as unknown as number;
         let projected = this.#projected.get(id);
 
         if (projected === undefined) {
-            projected = projectEntry(entry) ?? null;
+            projected =
+                projectEntry(
+                    entry,
+                    false,
+                    presentationOptions(this.#app.webs.presentations(), this.authors, id),
+                ) ?? null;
             this.#projected.set(id, projected);
         }
 
@@ -531,7 +724,7 @@ export class Room {
      * what shows only when a step is opened was most of what it waited for.
      */
     push(client: Client, full: boolean): void {
-        const view = this.#view?.value;
+        const view = this.#view;
 
         if (view === undefined) {
             return;
@@ -548,6 +741,8 @@ export class Room {
 
         const projected = this.#projectedEntries(view.entries);
         const order = projected.map((entry) => entry.id);
+        // What the tab kept from before, when it is what this server would send it: those entries count as sent.
+        const kept = full ? this.#kept(client, order) : 0;
         const from = full && (client.protocol ?? 1) >= 4 ? firstEntries(projected) : 0;
         const light = full && (client.protocol ?? 1) >= 5;
         const entries: ClientEntry[] = [];
@@ -588,8 +783,23 @@ export class Room {
 
         const orderKey = order.join(",");
         const orderChanged = orderKey !== client.orderKey;
+        // A tab of protocol 6 that has the start of the order gets the rest of it, with `orderFrom` where it goes on:
+        // what it kept (`have`), or, in an update, the order it had when entries were only added. A long session's order
+        // has thousands of ids, and every entry added sent them all again.
+        const goesOn =
+            kept > 0
+                ? kept
+                : !full &&
+                    (client.protocol ?? 1) >= 6 &&
+                    client.orderKey !== "" &&
+                    orderKey.startsWith(`${client.orderKey},`)
+                  ? (client.orderCount ?? 0)
+                  : 0;
+        const orderPart =
+            goesOn > 0 ? { order: order.slice(goesOn), orderFrom: goesOn } : { order };
 
         client.orderKey = orderKey;
+        client.orderCount = order.length;
         const agentState = (view.docs["pi.agent"] ?? {}) as AgentState;
         const inbox = (view.docs["pi.inbox"] ?? { items: [] }) as unknown as InboxState;
         // These grow with the session (authors has one item per message) but rarely change: streaming sends an update
@@ -617,11 +827,18 @@ export class Room {
                     this.#app.isBusy(record.conversationId),
                     this.#reporting.has(name),
                     this.#app.limits.waitFor(Number(record.conversationId))?.until,
+                    this.#app.subagentModel(record.conversationId),
                 ),
             ),
             // Reports on their way that a spend limit holds back, and why: the subagents bar says so.
             subagentsHeld: this.#reporting.size > 0 ? (this.#held ?? null) : null,
             authors: this.authors,
+            // The session each linked session's message is from, by its address: only those this person may open.
+            linkedPeers: Object.fromEntries(
+                Object.entries(this.peers).filter(([, id]) =>
+                    this.#app.canSee(client.user, id as unknown as ConversationId),
+                ),
+            ),
             reactions: this.reactions,
             pins: this.pins,
             turns: this.turns,
@@ -690,7 +907,7 @@ export class Room {
             full,
             conversation: this.#app.conversationInfo(this),
             entries,
-            ...(orderChanged || full ? { order } : {}),
+            ...(orderChanged || full ? orderPart : {}),
             // Last, so that nothing that throws before the send leaves the server thinking the tab has these blocks.
             live: this.#liveFor(client, view.docs["pi.live"] as LiveState | undefined),
             agent: agentInfo(
@@ -705,6 +922,36 @@ export class Room {
             approvals: this.#app.approvals.forConversation(this.id),
             ...fields,
         });
+    }
+
+    /**
+     * How much of the order's start a tab kept (`Client.have`), with its entries from `have.from` on, which then count as
+     * sent: 0 when it kept nothing this server would send it now. Only entries a server of this build sent (an entry's
+     * projection is this code's: a restart with the same code sends them the same) and an order that still starts with
+     * them (no compaction since) count. The rest goes as for any first view: the newest rows' entries the tab lacks, and what is new.
+     */
+    #kept(client: Client, order: readonly number[]): number {
+        const have = client.have;
+
+        client.have = undefined;
+
+        if (
+            have === undefined ||
+            (client.protocol ?? 1) < 6 ||
+            have.build !== this.#app.build ||
+            have.count <= 0 ||
+            have.count > order.length ||
+            have.from > have.count ||
+            fingerprint(order.slice(0, have.count).join(",")) !== have.key
+        ) {
+            return 0;
+        }
+
+        for (const id of order.slice(have.from, have.count)) {
+            client.sentEntries.add(id);
+        }
+
+        return have.count;
     }
 
     /** The active context's entries as tabs get them, oldest first; the ones tabs do not show are left out. */
@@ -731,7 +978,7 @@ export class Room {
         before: number,
         { rows, from }: { rows?: number; from?: number } = {},
     ): ClientEntry[] {
-        const view = this.#view?.value;
+        const view = this.#view;
 
         if (view === undefined) {
             return [];
@@ -765,9 +1012,13 @@ export class Room {
         before: number | undefined,
         limit: number,
     ): { messages: ClientEntry[]; before: number | null } | null {
-        const view = this.#view?.value;
+        const view = this.#view;
+        // An input stored as a module's own kind is not a person's message: it stays out, as it did before modules
+        // could present one. A `pi.user` message a module's prefix matched stays in, and says so (`presentation`).
         const all = (view === undefined ? [] : this.#projectedEntries(view.entries)).filter(
-            (entry) => entry.kind === "user",
+            (entry) =>
+                entry.kind === "user" &&
+                (entry.presentation === undefined || entry.presentation.prefixed === true),
         );
         const end =
             before === undefined ? all.length : all.findIndex((entry) => entry.id === before);
@@ -869,16 +1120,32 @@ export class Room {
             }
 
             const submitter = this.#app.attribution.submitterOf(id, this);
+            const presented = queuePresentation(
+                item.entry?.kind,
+                queuedText(item.content),
+                item.entry?.data,
+                this.#app.webs.presentations(),
+                submitter.by !== undefined,
+            );
 
             return {
                 id,
                 mode: item.mode,
-                text: queued.text,
                 ...submitter,
-                // A person's message is not one of reports, whatever it starts with.
-                ...(submitter.by === undefined && queued.reports !== undefined
-                    ? { reports: queued.reports }
-                    : {}),
+                ...(presented === undefined
+                    ? {
+                          text: queued.text,
+                          // A person's message is not one of reports, whatever it starts with.
+                          ...(submitter.by === undefined && queued.reports !== undefined
+                              ? { reports: queued.reports }
+                              : {}),
+                      }
+                    : {
+                          label: presented.label,
+                          ...(presented.summary === undefined
+                              ? {}
+                              : { summary: presented.summary }),
+                      }),
             };
         });
 
@@ -935,7 +1202,7 @@ export class Room {
 
     /** This session as a peek tile shows it, from the newest few entries: cheap however long the session is. */
     peek(): PeekSummary | undefined {
-        const view = this.#view?.value;
+        const view = this.#view;
 
         if (view === undefined) {
             return undefined;
@@ -1123,8 +1390,8 @@ export class Room {
         }
 
         this.#typing.clear();
-        this.#unsubscribe?.();
-        this.#view?.dispose();
+        void this.#watch?.stop();
+        this.#watch = undefined;
         this.#view = undefined;
         this.#projected.clear();
         this.#queued.clear();

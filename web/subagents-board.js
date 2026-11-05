@@ -11,7 +11,15 @@ import { useBack } from "./back.js";
 import { useOnScreen } from "./peeks.js";
 import { fromServer } from "./seen.js";
 import { api, attempt, canSteer, navigate, notify, store } from "./store.js";
-import { dismiss, elapsed, ordered, seeFailure, stateOf, unresolved } from "./subagents.js";
+import {
+    dismiss,
+    elapsed,
+    modelText,
+    ordered,
+    seeFailure,
+    stateOf,
+    unresolved,
+} from "./subagents.js";
 import { html, Icon, timeAgo } from "./ui.js";
 import { t } from "./ui-locale.js";
 
@@ -66,14 +74,15 @@ const labelOf = (agent) => {
 const PHONE = matchMedia("(max-width: 699px)");
 
 // While the board shows, this tab gets every subagent with each session list: the server is told which connection
-// wants them, again on each new one (a session switch reconnects, as does a restart), and when the board closes.
+// wants them, again on each new one (a reconnect or a restart; a session switch keeps the connection), and when the
+// board closes.
 let told = null;
 /** Numbers each request, so the server drops one that arrives after a newer one. */
 let seq = 0;
 
 /** Tell the server whether this tab's connection wants every subagent, when that changed. */
 function sync(state) {
-    const wanted = state.board && state.streamId ? state.streamId : null;
+    const wanted = state.board === "subagents" && state.streamId ? state.streamId : null;
 
     if (wanted === told) {
         return;
@@ -347,6 +356,11 @@ function Detail({ agent, title }) {
         <div class="board-facts">
             <span>${t("web.subagents-board.detail.span.session", "Session")}</span>
             <button class="board-link" onClick=${() => openSession(agent.id)}>${title}</button>
+            ${
+                agent.runsOn &&
+                html`<span>${t("web.subagents-board.model", "Model")}</span>
+                    <span class="board-model">${modelText(agent)}</span>`
+            }
             <span>${
                 now
                     ? t("web.subagents-board.detail.span.running", "Running")
@@ -459,7 +473,9 @@ function DetailBar({ agent, title, onClose }) {
                 <${Icon} name="close" size=${16} />
             </button>
         </div>
-        <div class="board-bar-session">${title}</div>
+        <div class="board-bar-session">
+            ${title}${agent.runsOn && html`<span class="board-model"> · ${modelText(agent)}</span>`}
+        </div>
         <div class=${`board-bar-line ${state}`}>${lineOf(agent)}</div>
         <div class="board-bar-actions">
             <button class="button primary" onClick=${() => open(agent)}>

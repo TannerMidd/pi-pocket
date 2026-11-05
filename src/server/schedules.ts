@@ -260,6 +260,11 @@ export class Schedules {
         return why === undefined ? undefined : { who, why };
     }
 
+    /** Why a schedule would not go out now, were it its time: a spend limit, or nobody left to steer. */
+    held(conversationId: ConversationId, schedule: Schedule): string | undefined {
+        return this.#stopped(conversationId, schedule)?.why;
+    }
+
     /** Whether schedules run now: their extension is on. */
     get running(): boolean {
         return this.#app.loader.extensionNames().includes(SCHEDULES_EXTENSION);

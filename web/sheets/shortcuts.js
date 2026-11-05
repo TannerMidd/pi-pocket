@@ -129,6 +129,13 @@ const shortcuts = () => [
                 ),
             ],
             [
+                "Mod Enter",
+                t(
+                    "web.sheets.shortcuts.send-other-way",
+                    "Send the other way: queue when Steer is chosen, steer when Queue is",
+                ),
+            ],
+            [
                 "Ctrl R",
                 t(
                     "web.sheets.shortcuts.shortcuts.search-sent-before",

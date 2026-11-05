@@ -40,8 +40,8 @@ const PAGE =
     '<!doctype html><html><head><link rel="stylesheet" href="assets/style.css"></head><body><img src="assets/pixel.png"><a href="nested/about.html">About</a></body></html>';
 
 async function publish(args: Record<string, unknown>, call = String(++calls), inline = false) {
-    return tools[inline ? 1 : 0]!.execute(
-        args as never,
+    return tools[0]!.execute(
+        (inline ? { ...args, inline: true } : args) as never,
         {
             conversationId: session,
             taskId: 9876,

@@ -23,7 +23,7 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 const dataDir = join(root, "data");
 const dropIns = join(dataDir, "extensions");
 
-/** A drop-in that imports Pi Durable and pi-ai by name, offers a tool (with the old `content` result, which Pi Pocket still reads), and blocks bash with a hook. It returns a frozen list. */
+/** A drop-in that imports Pi Durable and pi-ai by name (with TypeBox's `Type`, which drop-ins still get from pi-ai), offers a tool (with the old `content` result, which Pi Pocket still reads), and blocks bash with a hook. It returns a frozen list. */
 const shout = (suffix: string) => `/** Shout offers a tool that shouts${suffix}. */
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";

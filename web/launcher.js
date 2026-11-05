@@ -37,6 +37,7 @@ import {
     sessionOrder,
     setUnread,
     signOut,
+    openId,
     store,
     workspaceOrder,
 } from "./store.js";
@@ -274,6 +275,15 @@ function actionItems() {
             label: t("app.artifacts", "Artifacts"),
             icon: "artifact",
             run: () => openSheet({ type: "artifacts" }),
+        },
+        {
+            label: t("web.launcher.all-artifacts", "All artifacts"),
+            detail: t(
+                "web.launcher.all-artifacts.detail",
+                "every session, with its current version",
+            ),
+            icon: "artifact",
+            run: () => openSheet({ type: "all-artifacts" }),
         },
         conversation &&
             filesAvailable() && {
@@ -532,21 +542,28 @@ function actionItems() {
                 "everything Pi is doing",
             ),
             icon: "pulse",
-            run: () => openSheet({ type: "running" }),
+            run: () => toggleBoard("running"),
+        },
+        session && {
+            label: t("web.launcher.background", "Background"),
+            detail: t("web.launcher.background.detail", "what commands print as they run"),
+            icon: "terminal",
+            run: () => openSheet({ type: "background" }),
         },
         {
-            label: store.state.board
-                ? t(
-                      "web.launcher.action-items.label.close-subagents-board",
-                      "Close the subagents board",
-                  )
-                : t("web.subagents-board.subagents-board.h2.subagents", "Subagents"),
+            label:
+                store.state.board === "subagents"
+                    ? t(
+                          "web.launcher.action-items.label.close-subagents-board",
+                          "Close the subagents board",
+                      )
+                    : t("web.subagents-board.subagents-board.h2.subagents", "Subagents"),
             detail: t(
                 "web.launcher.action-items.detail.subagents-every",
                 "subagents in every session",
             ),
             icon: "fork",
-            run: toggleBoard,
+            run: () => toggleBoard("subagents"),
         },
         collab() && {
             label: t("menu.notifications", "Notifications"),
@@ -700,7 +717,7 @@ function sessionItems() {
             detail: shortPath(session.cwd, server?.home),
             status:
                 [
-                    session.id === store.state.conversationId
+                    session.id === openId()
                         ? t("web.launcher.session-items.text.current", "Current")
                         : null,
                     session.waiting

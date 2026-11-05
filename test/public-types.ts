@@ -11,7 +11,10 @@ import type {
     ExtensionModule,
     ExtensionWeb,
     LinkedSession as RealLinkedSession,
+    LinkedSessionsApi as RealLinkedSessions,
+    SessionsApi as RealSessions,
     PocketHost,
+    PresentEntry as RealPresentEntry,
     AppEvents as RealAppEvents,
     SettingField as RealSettingField,
     AskRequest as RealAskRequest,
@@ -37,6 +40,8 @@ import type {
     HumanLinkedSessions,
     Host,
     LinkedSession,
+    LinkedSessions,
+    Sessions,
     Module,
     AppEvents,
     SettingField,
@@ -55,6 +60,7 @@ import type {
     Web,
     WebRequest,
     UiLocalePack,
+    PresentEntry,
 } from "../types/pocket.d.ts";
 
 /**
@@ -74,7 +80,8 @@ type Internal =
     | "background"
     | "goals"
     | "browsers"
-    | "memory";
+    | "memory"
+    | "toolNames";
 
 type PublicHost = Pick<PocketHost, keyof Host>;
 
@@ -140,10 +147,18 @@ export const settingField = (real: RealSettingField): SettingField => real;
 export const settingFieldBack = (types: SettingField): RealSettingField => types;
 export const linked = (real: RealLinkedSession): LinkedSession => real;
 export const linkedBack = (types: LinkedSession): RealLinkedSession => types;
+export const links = (real: RealLinkedSessions): LinkedSessions => real;
+export const linksBack = (types: LinkedSessions): RealLinkedSessions => types;
+export const sessions = (real: RealSessions): Sessions => real;
+export const sessionsBack = (types: Sessions): RealSessions => types;
 
 /** A module written against the public types is one the loader takes. */
 export const module = (types: Module): ExtensionModule => types;
 export const moduleDefaultBack = (real: ExtensionModule["default"]): Module["default"] => real;
+
+// Both declarations remain public when a module registers them together.
+export const presentEntry = (real: RealPresentEntry): PresentEntry => real;
+export const presentEntryBack = (types: PresentEntry): RealPresentEntry => types;
 
 // R18: Compare the actual registered pack types, not just the bivariant methods that accept them.
 type RealUiLocalePack = Parameters<ExtensionWeb["uiLocales"]>[0][number];
@@ -154,6 +169,7 @@ export const uiLocaleDeclaration = (web: Web, packs: readonly UiLocalePack[]): v
 export const uiLocaleModule: Module = {
     default(_host, web) {
         web.uiLocales([{ id: "fr", label: "Français", messages: { "action.save": "Sauver" } }]);
+        web.presentEntry({ kind: `x.${web.module}.note`, label: "Note" });
     },
 };
 export const oldVoidModule: Module = { default: () => {} };

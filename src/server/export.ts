@@ -2,10 +2,11 @@
  * A session as one Markdown file: every message in order, who wrote it, and each tool call folded into a
  * `<details>` block, so it reads well on GitHub or in any Markdown viewer. Pi's thinking is left out.
  */
-import type { ClientBlock, ClientEntry } from "./projection.ts";
+import { presentationLine } from "./entry-presentation.ts";
 import { FROM_PREFIX, splitAttachments } from "./entry-format.ts";
 import { escapeHtml } from "./http/io.ts";
 import type { RequestLocale } from "./ui-locales.ts";
+import type { ClientBlock, ClientEntry } from "./projection.ts";
 
 /** Tool output beyond this keeps its start and end. */
 const MAX_OUTPUT = 4000;
@@ -44,6 +45,10 @@ function clipped(text: string): string {
     return `${text.slice(0, half)}\n… ${text.length - MAX_OUTPUT} characters left out …\n${text.slice(-half)}`;
 }
 
+/** Text for a `<summary>`, which is HTML. */
+const escapeSummary = (text: string) =>
+    text.replace(/[&<>]/g, (char) => `&#${char.charCodeAt(0)};`);
+
 /** One line naming a tool call, for its `<summary>`. HTML-escaped: summaries are HTML. */
 function summary(call: Extract<ClientBlock, { type: "toolCall" }>): string {
     const args = call.args;
@@ -60,7 +65,7 @@ function summary(call: Extract<ClientBlock, { type: "toolCall" }>): string {
     const line = `${call.name}${subject === "" ? "" : `: ${subject.replace(/\s+/g, " ")}`}`;
     const short = line.length > 120 ? `${line.slice(0, 119)}…` : line;
 
-    return short.replace(/[&<>]/g, (char) => `&#${char.charCodeAt(0)};`);
+    return escapeSummary(short);
 }
 
 /** What a tool call did: its arguments as they matter to a reader, then its result. */
@@ -118,6 +123,20 @@ function userMarkdown(
     return lines.join("\n");
 }
 
+/** A presented input: the label opens to the full message, which stays in the file. */
+function presentedMarkdown(
+    entry: Extract<ClientEntry, { kind: "user" }>,
+    author: string | undefined,
+): string {
+    const presentation = entry.presentation;
+    const summary =
+        presentation === undefined
+            ? "Input"
+            : presentationLine(presentation.label, presentation.summary);
+
+    return `<details><summary>${escapeSummary(summary)}</summary>\n\n${userMarkdown(entry, author)}\n\n</details>`;
+}
+
 export function transcriptMarkdown(input: ExportInput, locale?: RequestLocale): string {
     const results = new Map<string, Extract<ClientEntry, { kind: "toolResult" }>>();
 
@@ -166,7 +185,11 @@ export function transcriptMarkdown(input: ExportInput, locale?: RequestLocale): 
         }
 
         if (entry.kind === "user") {
-            sections.push(userMarkdown(entry, input.authors[entry.id]));
+            sections.push(
+                entry.presentation === undefined
+                    ? userMarkdown(entry, input.authors[entry.id])
+                    : presentedMarkdown(entry, input.authors[entry.id]),
+            );
         } else if (entry.kind === "compaction") {
             const title =
                 locale?.t("server.export.context-compacted", "Context compacted") ??

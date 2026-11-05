@@ -141,11 +141,83 @@ function ApprovalRule({ owner }) {
     </div>`;
 }
 
+/** Translate only settings owned by these built-in modules; drop-in metadata stays literal. */
+function settingWords(module, field, builtIn) {
+    if (!builtIn) {
+        return field;
+    }
+
+    switch (module + "." + field.name) {
+        case "background.running":
+            return {
+                ...field,
+                label: t(
+                    "web.sheets.extensions.release028.settings.background.running.label",
+                    "Running tasks per session",
+                ),
+                description: t(
+                    "web.sheets.extensions.release028.settings.background.running.description",
+                    "How many commands Pi can run in the background at once in one session. Each keeps running until it ends or is stopped, also across a restart of the server.",
+                ),
+            };
+        case "schedules.perSession":
+            return {
+                ...field,
+                label: t(
+                    "web.sheets.extensions.release028.settings.schedules.per-session.label",
+                    "Schedules per session",
+                ),
+                description: t(
+                    "web.sheets.extensions.release028.settings.schedules.per-session.description",
+                    "How many scheduled messages one session can have at once.",
+                ),
+            };
+        case "schedules.chars":
+            return {
+                ...field,
+                label: t(
+                    "web.sheets.extensions.release028.settings.schedules.chars.label",
+                    "Longest message (characters)",
+                ),
+                description: t(
+                    "web.sheets.extensions.release028.settings.schedules.chars.description",
+                    "The longest text a scheduled message can have.",
+                ),
+            };
+        case "schedules.repeatMinutes":
+            return {
+                ...field,
+                label: t(
+                    "web.sheets.extensions.release028.settings.schedules.repeat-minutes.label",
+                    "Shortest repeat (minutes)",
+                ),
+                description: t(
+                    "web.sheets.extensions.release028.settings.schedules.repeat-minutes.description",
+                    "The least time between two sendings of a repeat, such as every 10m. A short repeat can cost money: each sending is a model call.",
+                ),
+            };
+        case "schedules.aheadDays":
+            return {
+                ...field,
+                label: t(
+                    "web.sheets.extensions.release028.settings.schedules.ahead-days.label",
+                    "Furthest ahead (days)",
+                ),
+                description: t(
+                    "web.sheets.extensions.release028.settings.schedules.ahead-days.description",
+                    "How far ahead a message can be set with “in …”, such as in 30d.",
+                ),
+            };
+        default:
+            return field;
+    }
+}
+
 /**
  * A module's settings (`web.settings`), for the owner: each field as the module declared it, saved together. A secret
  * shows only whether it is set; typing a new one replaces it, and Clear puts its default back.
  */
-function ModuleSettings({ module }) {
+function ModuleSettings({ module, builtIn = false }) {
     const [shown, setShown] = useState(null);
     const [draft, setDraft] = useState({});
     const [error, setError] = useState(null);
@@ -209,7 +281,7 @@ function ModuleSettings({ module }) {
                     "web.sheets.extensions.module-settings.save.number",
                     "{label} must be a number.",
                     {
-                        label: unreadable.label,
+                        label: settingWords(module, unreadable, builtIn).label,
                     },
                 ),
             );
@@ -246,7 +318,8 @@ function ModuleSettings({ module }) {
             "web.sheets.extensions.module-settings.b.settings",
             "Settings",
         )}</b></div>
-        ${shown.fields.map((field) => {
+        ${shown.fields.map((original) => {
+            const field = settingWords(module, original, builtIn);
             const secret = field.type === "text" && field.secret;
             const id = `ext-setting-${module}-${field.name}`;
             const any = t(
@@ -541,6 +614,19 @@ export function ExtensionsSheet() {
     <//>`;
 }
 
+/** Claude subscription billing: what the owner must know before it is on, and a line while it is. */
+const CLAUDE_BILLING = "anthropic-subscription.ts";
+const claudeRisk = () =>
+    t(
+        "web.sheets.extensions.release028.claude-risk",
+        "Anthropic's terms forbid using Claude through scripts or other automated means, except with an API key or where Anthropic explicitly allows it. Its help pages say third-party apps can use your subscription limits, but its servers often bill such requests as extra usage. This makes Pi Pocket's requests look like Claude Code's. Anthropic could refuse them, bill them, or act on your account. Turn it on only if you accept that risk.",
+    );
+const claudeOn = () =>
+    t(
+        "web.sheets.extensions.release028.claude-on",
+        "On at your own risk: Anthropic's terms and its help pages disagree on using a subscription in third-party apps.",
+    );
+
 /** Built-in modules' marks, by file; drop-ins show their first letter. */
 const ICONS = {
     "prompt.ts": "chat",
@@ -577,7 +663,6 @@ export function ExtensionsContent({
     before = null,
     beforeCount = 0,
     between = null,
-    show = null,
 }) {
     const { me } = store.state;
     const owner = me?.role === "owner";
@@ -589,7 +674,6 @@ export function ExtensionsContent({
     const [confirmOn, setConfirmOn] = useState(null);
     // The rows opened to show their settings and details, by file.
     const [open, setOpen] = useState(new Set());
-    const [builtInOpen, setBuiltInOpen] = useState(show === "built-in");
     const guardCancel = useRef(null);
     const guardSwitch = useRef(null);
     // What the gallery installed, by module file: read after the list, and never in the way of it.
@@ -664,8 +748,9 @@ export function ExtensionsContent({
             return;
         }
 
-        // A drop-in runs with the owner's rights: it asks first, in its own row, not in a dialog over the app.
-        if (module.source === "drop-in" && !module.enabled) {
+        // A drop-in runs with the owner's rights, and Claude subscription billing has risks of its own: each asks first,
+        // in its own row, not in a dialog over the app.
+        if ((module.source === "drop-in" || module.file === CLAUDE_BILLING) && !module.enabled) {
             setConfirmOn(confirmOn === module.file ? null : module.file);
 
             return;
@@ -739,7 +824,7 @@ export function ExtensionsContent({
                     ${module.source === "drop-in" && html`<span class="ext-row-by mono">${module.file}</span>`}
                     <${Icon} name="down" size=${14} class="ext-row-chevron" />
                 </span>
-                ${module.summary && html`<span class="ext-row-desc">${summaryOf(module)}</span>`}
+                ${module.summary && html`<span class="ext-row-desc" title=${summaryOf(module)}>${summaryOf(module)}</span>`}
                 ${
                     module.error &&
                     html`<span class="ext-row-meta warn">${t(
@@ -776,6 +861,11 @@ export function ExtensionsContent({
                 }
             </div>
             ${note?.warn && html`<div class="ext-row-under small warn">${note.text}</div>`}
+            ${
+                module.file === CLAUDE_BILLING &&
+                module.enabled &&
+                html`<div class="ext-row-under small warn">${claudeOn()}</div>`
+            }
             ${
                 guard &&
                 html`<div class="ext-row-under">
@@ -837,12 +927,17 @@ export function ExtensionsContent({
             ${
                 confirmOn === module.file &&
                 !module.enabled &&
-                html`<div class="ext-confirm ext-row-under" role="group" aria-label=${t(
-                    "web.sheets.extensions.extensions-content.row.aria-label.turn",
-                    "Turn on {title}?",
-                    { title: module.title },
-                )}>
-                    <span>${t("web.sheets.extensions.extensions-content.row.span.runs-inside-server-rights", "It runs inside the server with your rights, in every session. Turn it on only if you trust its code.")}</span>
+                html`<div class="ext-confirm ext-row-under" role="group" aria-label=${t("web.sheets.extensions.extensions-content.row.aria-label.turn", "Turn on {title}?", { title: module.title })}>
+                    <span>
+                        ${
+                            module.file === CLAUDE_BILLING
+                                ? claudeRisk()
+                                : t(
+                                      "web.sheets.extensions.release028.trust-code",
+                                      "It runs inside the server with your rights, in every session. Turn it on only if you trust its code.",
+                                  )
+                        }
+                    </span>
                     <div class="sheet-actions">
                         <button class="button small" onClick=${() => setConfirmOn(null)}>${t("web.sheets.extensions.extensions-content.row.button.not-now", "Not now")}</button>
                         <button
@@ -873,7 +968,7 @@ export function ExtensionsContent({
                         owner &&
                         module.enabled &&
                         module.web?.settings &&
-                        html`<${ModuleSettings} module=${module.file.replace(/\.ts$/, "")} />`
+                        html`<${ModuleSettings} module=${module.file.replace(/\.ts$/, "")} builtIn=${module.source === "built-in"} />`
                     }
                     <${GalleryPart}
                         module=${module}
@@ -934,6 +1029,17 @@ export function ExtensionsContent({
         return html`<div class="extension-management hub">
             <${SafeMode} />
             ${problem && html`<div class="error-box">${problem}</div>`}
+            ${!data && !problem && html`<${Loader} label=${t("web.sheets.extensions.release028.loading", "Loading extensions")} />`}
+            ${
+                builtIn.length > 0 &&
+                html`<section class="ext-section ext-builtins">
+                    <div class="ext-section-head">
+                        <h3 class="ext-section-title">${t("web.sheets.extensions.extensions-content.h3.built-in", "Built in")} <span>${builtIn.length}</span></h3>
+                        <span class="muted small">${t("web.sheets.extensions.extensions-content.span.off", "{on} on, {count} off", { on, count: builtIn.length - on })}</span>
+                    </div>
+                    <div class="ext-list">${builtIn.map(row)}</div>
+                </section>`
+            }
             ${
                 (beforeCount > 0 || yours.length > 0) &&
                 html`<section class="ext-section">
@@ -943,36 +1049,6 @@ export function ExtensionsContent({
                 </section>`
             }
             ${between}
-            ${
-                !data &&
-                !problem &&
-                html`<${Loader} label=${t(
-                    "web.sheets.extensions.extensions-content.label.loading-extensions",
-                    "Loading extensions",
-                )} />`
-            }
-            ${
-                builtIn.length > 0 &&
-                html`<details
-                    class="ext-section ext-builtins"
-                    open=${builtInOpen || needle !== "" || builtIn.some((module) => module.error)}
-                    onToggle=${(event) => setBuiltInOpen(event.currentTarget.open)}
-                >
-                    <summary>
-                        <h3 class="ext-section-title">${t(
-                            "web.sheets.extensions.extensions-content.h3.built-in",
-                            "Built in",
-                        )} <span>${builtIn.length}</span></h3>
-                        <span class="muted small">${t(
-                            "web.sheets.extensions.extensions-content.span.off",
-                            "{on} on, {count} off",
-                            { on, count: builtIn.length - on },
-                        )}</span>
-                        <${Icon} name="down" size=${14} />
-                    </summary>
-                    <div class="ext-list">${builtIn.map(row)}</div>
-                </details>`
-            }
             ${
                 data &&
                 needle &&

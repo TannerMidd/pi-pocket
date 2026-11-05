@@ -12,7 +12,9 @@
  * finished gets a result saying so (Pi's says "No result provided"). Where Pi would send a tool result whose call is
  * not there (a stray one, or one whose call a context edit took out), Pi Durable leaves it out, as providers refuse it.
  */
-import { readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import type { Message } from "@earendil-works/pi-ai";
 import {
     buildSessionProjection,
@@ -20,7 +22,9 @@ import {
     CURRENT_SESSION_VERSION,
     migrateSessionEntries,
     parseSessionEntries,
+    type FileEntry,
     type SessionEntry,
+    type SessionHeader,
     sessionEntryToContextMessages,
     type SessionInfo,
     SessionManager,
@@ -42,8 +46,6 @@ import { HttpError } from "./errors.ts";
 
 /** Pi's variable for its sessions folder (`ENV_SESSION_DIR` in its config, which the package does not export). */
 const SESSION_DIR_VARIABLE = "PI_CODING_AGENT_SESSION_DIR";
-/** The largest session file read: images make big ones. */
-const MAX_SESSION_BYTES = 32 * 1024 * 1024;
 /** How long a list of Pi's sessions answers "is this one of them?" for a preview or a continue after it. */
 const FOUND_FOR_MS = 5_000;
 /** How many sessions a list holds, newest first: a search looks through them all first. */
@@ -51,6 +53,10 @@ const MAX_LISTED = 300;
 /** How many of its last messages a session's preview shows. */
 const PREVIEW_MESSAGES = 6;
 const PREVIEW_TEXT = 600;
+/** How much of a file a preview reads at a time, from its end. */
+const TAIL_CHUNK = 1024 * 1024;
+/** How much of a file's start holds its header line, at most. */
+const HEADER_BYTES = 64 * 1024;
 const TITLE_LENGTH = 80;
 /** What a tool call that never finished in Pi gets as its result. */
 const NOT_RUN = "Not run: the Pi session ended before this call finished.";
@@ -147,11 +153,99 @@ function textOf(message: Message): string {
         .trim();
 }
 
-/** A Pi session's file, read: the conversation on its current branch, and what Pi's context of it is. */
-export function readPiSession(text: string): PiSession {
-    const file = parseSessionEntries(text);
-    const header = file[0];
+/**
+ * A session file's entries, read a line at a time, as `parseSessionEntries` reads them: a line that is not JSON (a
+ * last one cut off while Pi writes it) is skipped. A file is never held whole as text, so its size has no limit but
+ * the memory its entries take: big files are mostly images, kept once as their entries' strings.
+ */
+async function readSessionEntries(path: string): Promise<FileEntry[]> {
+    const entries: FileEntry[] = [];
+    const lines = createInterface({
+        input: createReadStream(path, { encoding: "utf8" }),
+        crlfDelay: Infinity,
+    });
 
+    for await (const line of lines) {
+        if (line.trim() === "") {
+            continue;
+        }
+
+        try {
+            entries.push(JSON.parse(line));
+        } catch {
+            // As Pi reads it: the line is left out.
+        }
+    }
+
+    return entries;
+}
+
+/**
+ * A file's lines from its end, last first, read a chunk at a time: a preview needs only the last few messages, so a
+ * big file is not read whole for them. A line is decoded once whole, so a character split between chunks stays whole.
+ */
+async function* linesFromEnd(path: string): AsyncGenerator<string> {
+    const handle = await open(path, "r");
+
+    try {
+        let position = (await handle.stat()).size;
+        // The bytes of the line being read, from its first chunk read so far to its end.
+        let rest: Buffer[] = [];
+
+        while (position > 0) {
+            const size = Math.min(TAIL_CHUNK, position);
+            const part = Buffer.allocUnsafe(size);
+
+            position -= size;
+
+            // A file rewritten shorter while it is read (Pi migrates an old one in place) ends the walk: the rest of
+            // the chunk would be memory never written, not the file.
+            if ((await handle.read(part, 0, size, position)).bytesRead < size) {
+                return;
+            }
+
+            let end = size;
+
+            while (end > 0) {
+                const at = part.lastIndexOf(10, end - 1);
+
+                if (at === -1) {
+                    break;
+                }
+
+                yield Buffer.concat([part.subarray(at + 1, end), ...rest]).toString("utf8");
+                rest = [];
+                end = at;
+            }
+
+            rest.unshift(part.subarray(0, end));
+        }
+
+        yield Buffer.concat(rest).toString("utf8");
+    } finally {
+        await handle.close();
+    }
+}
+
+/** A file's first line, as JSON, or undefined when it is not. */
+async function firstEntry(path: string): Promise<FileEntry | undefined> {
+    const handle = await open(path, "r");
+
+    try {
+        const start = Buffer.allocUnsafe(HEADER_BYTES);
+        const { bytesRead } = await handle.read(start, 0, HEADER_BYTES, 0);
+        const end = start.subarray(0, bytesRead).indexOf(10);
+
+        return JSON.parse(start.subarray(0, end === -1 ? bytesRead : end).toString("utf8"));
+    } catch {
+        return undefined;
+    } finally {
+        await handle.close();
+    }
+}
+
+/** Whether a session file's header is one this Pi Pocket reads; why not, in words for people. */
+function checkHeader(header: FileEntry | undefined): asserts header is SessionHeader {
     if (header?.type !== "session" || typeof header.id !== "string") {
         throw new PiSessionError("This is not a Pi session file.");
     }
@@ -159,6 +253,119 @@ export function readPiSession(text: string): PiSession {
     if ((header.version ?? 1) > CURRENT_SESSION_VERSION) {
         throw new PiSessionError("A newer Pi wrote this session. Update Pi Pocket to continue it.");
     }
+}
+
+/** What a preview shows of a session's current branch: its model, and its last messages with text, in order. */
+type Tail = {
+    model: { provider: string; modelId: string } | null;
+    last: { role: "user" | "assistant"; text: string }[];
+};
+
+/**
+ * A session's tail, read from the end of its file: its current branch goes back from the last entry along
+ * `parentId`, and a parent is always written before its children, so a walk back through the file finds the branch
+ * in order and stops at the last few messages. Files from before entries had ids (version 1) are read whole.
+ */
+async function readPiTail(path: string): Promise<Tail> {
+    const header = await firstEntry(path);
+
+    checkHeader(header);
+
+    if ((header.version ?? 1) < 2) {
+        const session = piSessionOf(await readSessionEntries(path));
+
+        return { model: session.model, last: lastTexts(session.entries) };
+    }
+
+    let want: string | undefined;
+    let model: Tail["model"] = null;
+    const last: Tail["last"] = [];
+
+    for await (const line of linesFromEnd(path)) {
+        if (line.trim() === "") {
+            continue;
+        }
+
+        let entry: SessionEntry | { type: "session" };
+
+        try {
+            entry = JSON.parse(line);
+        } catch {
+            // A line cut off, as a `pi` still writing it leaves it: as Pi reads it, it is not there.
+            continue;
+        }
+
+        if (entry.type === "session") {
+            break;
+        }
+
+        want ??= entry.id;
+
+        if (entry.id !== want) {
+            continue;
+        }
+
+        if (model === null && entry.type === "model_change") {
+            model = { provider: entry.provider, modelId: entry.modelId };
+        } else if (
+            model === null &&
+            entry.type === "message" &&
+            entry.message.role === "assistant"
+        ) {
+            model = { provider: entry.message.provider, modelId: entry.message.model };
+        }
+
+        if (
+            last.length < PREVIEW_MESSAGES &&
+            (entry.type === "message" ||
+                entry.type === "custom_message" ||
+                entry.type === "branch_summary")
+        ) {
+            const texts = lastTexts(
+                forModel(sessionEntryToContextMessages(entry)).map((message) => ({
+                    kind: message.role as PiEntry["kind"],
+                    message,
+                })) as PiEntry[],
+            );
+
+            last.unshift(...texts.slice(-(PREVIEW_MESSAGES - last.length)));
+        }
+
+        if ((last.length >= PREVIEW_MESSAGES && model !== null) || entry.parentId === null) {
+            break;
+        }
+
+        want = entry.parentId;
+    }
+
+    return { model, last };
+}
+
+/** The last messages of people and the agent with text, for a preview. */
+function lastTexts(entries: readonly PiEntry[]): Tail["last"] {
+    return entries
+        .flatMap((entry) => {
+            if (entry.kind !== "user" && entry.kind !== "assistant") {
+                return [];
+            }
+
+            const text = textOf(entry.message);
+
+            return text === "" ? [] : [{ role: entry.kind, text: text.slice(0, PREVIEW_TEXT) }];
+        })
+        .slice(-PREVIEW_MESSAGES);
+}
+
+/** A Pi session's file, read: the conversation on its current branch, and what Pi's context of it is. */
+export function readPiSession(text: string): PiSession {
+    return piSessionOf(parseSessionEntries(text));
+}
+
+/** A Pi session from its file's entries, header first; they are changed (migrated) in place. */
+function piSessionOf(file: FileEntry[]): PiSession {
+    const header = file[0];
+
+    checkHeader(header);
 
     // In memory only: older files get the current format, as Pi gives them when it opens one.
     migrateSessionEntries(file);
@@ -286,7 +493,10 @@ export function readPiSession(text: string): PiSession {
     };
 }
 
-/** Write a Pi session's copy into a new conversation, from its `init`: its messages, then where it came from. */
+/**
+ * Write a Pi session's copy into a new conversation, from its `init`: its messages, then where it came from. One
+ * commit, so a copy is whole or not there at all (a big one too: its text is held once already).
+ */
 export async function writePiSession(
     tx: Tx,
     id: ConversationId,
@@ -338,6 +548,13 @@ export async function writePiSession(
         data,
         ...(edits.length === 0 ? {} : { edits }),
     });
+}
+
+/** A session's title as `pi -r` shows it: its name, or the first line of what it was first asked. */
+function titleOf(info: SessionInfo): string {
+    const first = info.firstMessage.split("\n")[0]!.slice(0, TITLE_LENGTH).trim();
+
+    return info.name ?? (first || "Pi session");
 }
 
 /** A Pi session as the list shows it. */
@@ -454,11 +671,10 @@ export class PiSessions {
         return {
             sessions: found.slice(0, MAX_LISTED).map((info) => {
                 const pocket = continued.get(info.id);
-                const first = info.firstMessage.split("\n")[0]!.slice(0, TITLE_LENGTH).trim();
 
                 return {
                     path: info.path,
-                    title: info.name ?? (first || "Pi session"),
+                    title: titleOf(info),
                     cwd: info.cwd,
                     modified: info.modified.getTime(),
                     messages: info.messageCount,
@@ -470,36 +686,32 @@ export class PiSessions {
         };
     }
 
-    /** One of Pi's sessions, read: only a file Pi lists, so nothing else can be read through this. */
-    async read(user: User, path: string): Promise<PiSession> {
+    /** What Pi lists of one of its sessions: only a file Pi lists is read, so nothing else can be read through this. */
+    async #listed(user: User, path: string): Promise<SessionInfo> {
         this.#requireOwner(user);
 
-        const listed = async (fresh: boolean) =>
-            (await this.#find(fresh)).some((each) => each.info.path === path);
-
+        const find = async (fresh: boolean) =>
+            (await this.#find(fresh)).find((each) => each.info.path === path)?.info;
         // The list the sheet just showed, or, for a session new since, the list as it is now.
-        if (!(await listed(false)) && !(await listed(true))) {
+        const info = (await find(false)) ?? (await find(true));
+
+        if (info === undefined) {
             throw new HttpError(404, "Pi has no such session. It may have been deleted.");
         }
 
-        // Gone since the list was read (it is kept a few seconds), or unreadable: as Pi not having it.
-        const missing = (error: unknown) => {
+        return info;
+    }
+
+    /** Read one of Pi's listed sessions with `read`, in words for people when it cannot be. */
+    async #reading<T>(path: string, read: () => Promise<T>): Promise<T> {
+        try {
+            return await read();
+        } catch (error) {
+            // Gone since the list was read (it is kept a few seconds): as Pi not having it.
             if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
                 throw new HttpError(404, "Pi has no such session. It may have been deleted.");
             }
 
-            throw error;
-        };
-
-        if ((await stat(path).catch(missing)).size > MAX_SESSION_BYTES) {
-            throw new HttpError(413, "This Pi session is too large to continue here.");
-        }
-
-        const text = await readFile(path, "utf8").catch(missing);
-
-        try {
-            return readPiSession(text);
-        } catch (error) {
             if (error instanceof PiSessionError) {
                 throw new HttpError(400, error.message);
             }
@@ -508,31 +720,29 @@ export class PiSessions {
         }
     }
 
-    /** One of Pi's sessions, to decide whether to continue it: where it worked, and its last messages. */
+    /** One of Pi's sessions, read whole, to continue it. */
+    async read(user: User, path: string): Promise<PiSession> {
+        await this.#listed(user, path);
+
+        return this.#reading(path, async () => piSessionOf(await readSessionEntries(path)));
+    }
+
+    /**
+     * One of Pi's sessions, to decide whether to continue it: where it worked, and its last messages. Quick for a big
+     * one: what Pi lists of it, and its file's end.
+     */
     async preview(user: User, path: string) {
-        const session = await this.read(user, path);
-        const pocket = this.#continued().get(session.id);
+        const info = await this.#listed(user, path);
+        const { model, last } = await this.#reading(path, () => readPiTail(path));
+        const pocket = this.#continued().get(info.id);
         let cwdExists = true;
 
         try {
-            this.#app.workspace.checkDirectory(session.cwd);
+            this.#app.workspace.checkDirectory(info.cwd);
         } catch {
             cwdExists = false;
         }
 
-        const last = session.entries
-            .flatMap((entry) => {
-                if (entry.kind !== "user" && entry.kind !== "assistant") {
-                    return [];
-                }
-
-                const text = textOf(entry.message);
-
-                return text === "" ? [] : [{ role: entry.kind, text: text.slice(0, PREVIEW_TEXT) }];
-            })
-            .slice(-PREVIEW_MESSAGES);
-
-        const { model } = session;
         const modelHere =
             model !== null &&
             this.#app.models
@@ -541,16 +751,16 @@ export class PiSessions {
 
         return {
             path,
-            title: session.title,
-            cwd: session.cwd,
+            title: titleOf(info),
+            cwd: info.cwd,
             cwdExists,
-            messages: session.count,
+            messages: info.messageCount,
             model: model === null ? null : `${model.provider}/${model.modelId}`,
             modelHere,
             last,
             ...(pocket === undefined
                 ? {}
-                : { pocket: { id: pocket.id, behind: session.count > pocket.count } }),
+                : { pocket: { id: pocket.id, behind: info.messageCount > pocket.count } }),
         };
     }
 }

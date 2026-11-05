@@ -14,7 +14,10 @@ export async function refreshModels() {
     }
 
     store.set({ modelRefresh: { loading: true, result: null, error: null } });
-    notify("info", "Refreshing models…");
+    notify(
+        "info",
+        t("web.model-refresh.refresh-models.button.refreshing-models", "Refreshing models…"),
+    );
 
     try {
         const result = await api("models/refresh", {});
@@ -22,7 +25,7 @@ export async function refreshModels() {
         store.set({ modelRefresh: { loading: false, result, error: null } });
         notify(
             result.errors.length > 0 ? "error" : "info",
-            `${completion(result)}${result.errors.length > 0 ? " Some providers could not refresh. See Providers for details." : ""}`,
+            `${completion(result)}${result.errors.length > 0 ? t("web.model-refresh.partial-failure", " Some providers could not refresh. See Providers for details.") : ""}`,
         );
 
         return result;
@@ -30,7 +33,14 @@ export async function refreshModels() {
         const message = error.message ?? String(error);
 
         store.set({ modelRefresh: { loading: false, result: null, error: message } });
-        notify("error", `Could not refresh models: ${message}`);
+        notify(
+            "error",
+            t(
+                "web.model-refresh.refresh-models.p.could-not-refresh-models",
+                "Could not refresh models: {error}",
+                { error: message },
+            ),
+        );
     }
 }
 
@@ -60,54 +70,44 @@ function completion({ added, removed, total, offline }) {
     return `${reloaded} ${counts}`;
 }
 
+/** A small icon button for a heading: the same action, with its state in its label and a turning icon. */
+export function RefreshModelsButton() {
+    if (!modelRefreshAvailable()) {
+        return null;
+    }
+
+    const { loading } = store.state.modelRefresh;
+    const label = loading
+        ? t("web.model-refresh.refresh-models.button.refreshing-models", "Refreshing models…")
+        : t("menu.refresh-models", "Refresh models");
+
+    return html`<button
+        class="icon-button model-refresh-button"
+        type="button"
+        aria-label=${label}
+        title=${label}
+        disabled=${loading}
+        aria-busy=${loading}
+        onClick=${refreshModels}
+    >
+        <${Icon} name="reload" size=${16} />
+    </button>`;
+}
+
 /** The same loading state and last result survive closing or switching sheets in this tab. */
-export function RefreshModels() {
+export function RefreshModelsStatus() {
     if (!modelRefreshAvailable()) {
         return null;
     }
 
     const { loading, result, error } = store.state.modelRefresh;
 
-    return html`<div class="model-refresh">
-        <button
-            class="button small model-refresh-button"
-            type="button"
-            disabled=${loading}
-            aria-busy=${loading}
-            onClick=${refreshModels}
-        >
-            <${Icon} name="reload" size=${15} />
-            ${
-                loading
-                    ? t(
-                          "web.model-refresh.refresh-models.button.refreshing-models",
-                          "Refreshing models…",
-                      )
-                    : t("menu.refresh-models", "Refresh models")
-            }
-        </button>
-        <div class="model-refresh-status small" role="status" aria-live="polite">
-            ${
-                loading &&
-                html`<p class="muted">${t(
-                    "web.model-refresh.refresh-models.p.checking-configured-providers",
-                    "Checking configured providers…",
-                )}</p>`
-            }
-            ${
-                error &&
-                html`<p class="warn">
-                    ${t(
-                        "web.model-refresh.refresh-models.p.could-not-refresh-models",
-                        "Could not refresh models: {error}",
-                        { error },
-                    )}
-                </p>`
-            }
-            ${result && html`<p class="muted">${completion(result)}</p>`}
-            ${result?.errors.map(
-                ({ provider, message }) => html`<p class="warn">${provider}: ${message}</p>`,
-            )}
-        </div>
+    return html`<div class="model-refresh-status small" role="status" aria-live="polite">
+        ${loading && html`<p class="muted">${t("web.model-refresh.refresh-models.p.checking-configured-providers", "Checking configured providers…")}</p>`}
+        ${error && html`<p class="warn">${t("web.model-refresh.refresh-models.p.could-not-refresh-models", "Could not refresh models: {error}", { error })}</p>`}
+        ${result && html`<p class="muted">${completion(result)}</p>`}
+        ${result?.errors.map(
+            ({ provider, message }) => html`<p class="warn">${provider}: ${message}</p>`,
+        )}
     </div>`;
 }

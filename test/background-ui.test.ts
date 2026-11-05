@@ -12,12 +12,13 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { wait } from "../src/server/background.ts";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
@@ -186,3 +187,115 @@ test("output whose own line says it is the end is not taken for a cut one", real
         null,
     );
 });
+
+test("tasks that ended together show a card each, in one group", real, async () => {
+    const id = await newSession(app);
+
+    await page.setViewport(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${id}`);
+    await see(
+        `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+        "the session",
+    );
+    const first = await app.background.start(id, { command: "echo one; exit 1" });
+    const second = await app.background.start(id, { command: "echo two; exit 2" });
+
+    // Both ended, so Pi got one message about the two: a card each, in one group.
+    await see(
+        `return JSON.stringify(document.querySelectorAll(".report-group .background-report").length === 2)`,
+        "a card each",
+        20_000,
+    );
+
+    const heads = await inPage<string[]>(
+        `return JSON.stringify([...document.querySelectorAll(".report-group .background-report .report-head")].map((head) => head.textContent.replace(/\\s+/g, " ").trim()))`,
+    );
+    const both = heads.join("\n");
+
+    // Each card says which task it is, how it ended, and how long it took.
+    assert.match(both, new RegExp(`${first.id} exited with code 1 · \\d+s`));
+    assert.match(both, new RegExp(`${second.id} exited with code 2 · \\d+s`));
+});
+
+test(
+    "the count on the status line opens Background, which shows a task's output as it comes",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await loadTools(app, id, "background");
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/s/${id}`);
+        await see(
+            `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+            "the session",
+        );
+        await app.commands.submit(id, owner(app), {
+            text: "start a background task: echo one; while [ ! -f go-bg ]; do sleep 0.1; done; echo two; sleep 60",
+            requestId: `look-${id}`,
+        });
+        await app.commands.submit(id, owner(app), {
+            text: "start a background task: echo three; sleep 60",
+            requestId: `quiet-look-${id}`,
+        });
+
+        /** The commands the sheet offers, and what the open one's log says. */
+        const chips = () =>
+            inPage<string[]>(
+                `return JSON.stringify([...document.querySelectorAll(".background-task")].map((chip) => chip.textContent.replace(/\\s+/g, " ").trim()))`,
+            );
+        const log = () =>
+            inPage<string | null>(
+                `return JSON.stringify(document.querySelector(".background-log pre")?.textContent ?? null)`,
+            );
+
+        try {
+            // The status line counts them once the session list knows: a tap opens the sheet.
+            await see(
+                `return JSON.stringify(document.querySelector(".status-line .background-now") !== null)`,
+                "the count on the status line",
+                20_000,
+            );
+            await page.click({ selector: ".status-line .background-now" });
+            await see(
+                `return JSON.stringify(document.querySelector('.sheet[data-sheet="background"]') !== null)`,
+                "the Background sheet",
+            );
+            await see(
+                `return JSON.stringify(document.querySelectorAll(".background-task").length === 2)`,
+                "both tasks",
+            );
+
+            // The newest first, with what it printed so far.
+            assert.match((await chips())[0] ?? "", /echo three/);
+            await see(
+                `return JSON.stringify(document.querySelector(".background-log pre")?.textContent.includes("three") === true)`,
+                "three",
+            );
+
+            // A press just after the sheet rose is let go, as the app holds back a tap on what just moved: wait it out.
+            await wait(500);
+            await page.click({ selector: ".background-task:nth-child(2)" });
+            await see(
+                `return JSON.stringify(document.querySelector(".background-log pre")?.textContent === "one\\n")`,
+                "one",
+            );
+
+            // What it prints next comes without a tap: the sheet follows the task.
+            writeFileSync(
+                join(app.sessions().find((each) => each.id === Number(id))!.cwd, "go-bg"),
+                "",
+            );
+            await see(
+                `return JSON.stringify(document.querySelector(".background-log pre")?.textContent === "one\\ntwo\\n")`,
+                "two, as it comes",
+                20_000,
+            );
+            assert.equal(await log(), "one\ntwo\n");
+        } finally {
+            for (const task of await app.background.list(id)) {
+                await app.background.stop(id, task.id);
+            }
+        }
+    },
+);

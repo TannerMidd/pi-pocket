@@ -2458,8 +2458,15 @@
                         name: "Launcher",
                         path: "src/launcher/",
                         c: "var(--ink-2)",
-                        text: "The launcher runs the server as a child process. It starts the server again after exit code 75 or after a crash. It also sets how other devices get access: this device only, the local network, a Cloudflare tunnel, or Tailscale. A tunnel stays open during a restart.",
-                        owns: ["access menu", "supervisor", "cloudflared", "QR code", "owner link"],
+                        text: "The launcher runs the server as a child process. It starts the server again after exit code 75 or after a crash. It also sets how other devices get access: this device only, the local network, a Cloudflare tunnel, Tailscale, or Tailscale Serve. A tunnel stays open during a restart.",
+                        owns: [
+                            "access menu",
+                            "supervisor",
+                            "cloudflared",
+                            "tailscale serve",
+                            "QR code",
+                            "owner link",
+                        ],
                     },
                     exts: {
                         name: "Extensions",

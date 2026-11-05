@@ -27,7 +27,7 @@ test("Pi Pocket's TypeScript runs from a node_modules folder with bin/strip-type
     // reload.ts imports extension modules with a query, so each edit loads anew.
     writeFileSync(
         join(app, "src", "a.ts"),
-        "const { b } = await import('./b.ts?v=1');\nconst a: number = 1;\nconsole.log(a, b);\n",
+        "const { b } = await import('./b.ts?v=1');\nconst a: number = 1;\nconsole.log(`${a} ${b}`);\n",
     );
 
     const main = join(app, "src", "a.ts");

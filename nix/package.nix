@@ -15,6 +15,8 @@
   chromium,
   makeFontsConf,
   dejavu_fonts,
+  fontconfig,
+  util-linux,
 }:
 let
   package = lib.importJSON ../package.json;
@@ -75,7 +77,12 @@ stdenv.mkDerivation {
   dontStrip = true;
 
   doCheck = true;
-  nativeCheckInputs = runtimePackages;
+  nativeCheckInputs =
+    runtimePackages
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      (lib.getBin fontconfig)
+      (lib.getBin util-linux)
+    ];
   checkPhase = ''
     runHook preCheck
     ${lib.optionalString stdenv.hostPlatform.isLinux ''
@@ -83,6 +90,12 @@ stdenv.mkDerivation {
       export PI_POCKET_BROWSER_ARGS="--no-sandbox --disable-dev-shm-usage"
       # Plain HTML in the browser tests needs fonts, even without a desktop installed.
       export FONTCONFIG_FILE=${makeFontsConf { fontDirectories = [ dejavu_fonts ]; }}
+    ''}
+    ${lib.optionalString stdenv.hostPlatform.isDarwin ''
+      # nixpkgs has no Chromium for macOS, and Nix does not sandbox builds there: the tests would find the Chrome in
+      # /Applications, which cannot start with the build's home folder. A browser that is not there makes the browser
+      # tests skip.
+      export PI_POCKET_BROWSER=/no-browser-in-the-nix-build
     ''}
     npm run check
     npm run lint

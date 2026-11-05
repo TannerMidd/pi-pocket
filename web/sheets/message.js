@@ -22,22 +22,62 @@ import {
     Switch,
     writtenText,
 } from "../ui.js";
+import {
+    choosePresentationMode,
+    onPresentationMode,
+    PRESENTATION_MODES,
+    presentationMode,
+    promptBefore,
+    resendable,
+} from "../entry-presentation.js";
 import { memoryAvailable } from "./memory.js";
 import { t } from "../ui-locale.js";
 
-/** The message to Pi a reply answers: the newest one before it. */
-function promptBefore(entryId) {
-    const { view } = store.state;
+/** What each mode is called where a person chooses it. */
+const modeNames = () => ({
+    open: t("web.sheets.message.release028.show", "Show"),
+    folded: t("web.sheets.message.release028.fold", "Fold"),
+    hidden: t("web.sheets.message.release028.hide", "Hide"),
+});
 
-    for (let index = view.order.indexOf(entryId) - 1; index >= 0; index--) {
-        const entry = view.entries.get(view.order[index]);
+/**
+ * How this browser shows inputs of one kind a module presents: as messages, folded to a line, or hidden until Find.
+ * It changes every row of that kind in this browser.
+ */
+function PresentationChoice({ presentation }) {
+    const kind = presentation.entryKind;
+    const [mode, setMode] = useState(() => presentationMode(kind));
 
-        if (entry?.kind === "user") {
-            return entry;
-        }
-    }
+    useEffect(
+        () =>
+            onPresentationMode((changed, next) => {
+                if (changed === kind) {
+                    setMode(next);
+                }
+            }),
+        [kind],
+    );
 
-    return undefined;
+    return html`<div class="setting wrap presented-choice" data-part="presented-choice">
+        <div class="grow">
+            <div class="small">${t("web.sheets.message.release028.show-inputs", "Show inputs like this")}</div>
+            <div class="muted small">
+                ${t("web.sheets.message.release028.every-input", "Every “{label}” in this browser. Pi still reads them in full.", { label: presentation.label })}
+            </div>
+        </div>
+        <div class="segmented" role="group" aria-label=${t("web.sheets.message.release028.show-label", "Show “{label}” inputs", { label: presentation.label })}>
+            ${PRESENTATION_MODES.map(
+                (value) => html`<button
+                    type="button"
+                    class=${mode === value ? "on" : ""}
+                    aria-pressed=${mode === value ? "true" : "false"}
+                    onClick=${() => attempt(async () => choosePresentationMode(kind, value))}
+                >
+                    ${modeNames()[value]}
+                </button>`,
+            )}
+        </div>
+    </div>`;
 }
 
 /** A message as the start of a lesson: one line, cut to a lesson's length. */
@@ -156,9 +196,32 @@ export function MessageSheet({ entryId }) {
         view.entries.get(entryId) ?? store.state.history?.find((each) => each.id === entryId);
     const [draft, setDraft] = useState(null);
     const [worktree, setWorktree] = useState(false);
+    // A presented input the view clipped: its whole text, for Copy and Remember.
+    const [whole, setWhole] = useState(undefined);
     const field = useRef(null);
+    const clipped = entry?.kind === "user" && entry.presentation?.clipped !== undefined;
 
     useFocus(field, draft !== null);
+    useEffect(() => {
+        if (!clipped) {
+            return;
+        }
+
+        let gone = false;
+
+        actions.fullEntry(entryId).then(
+            (full) => {
+                if (!gone && full?.kind === "user") {
+                    setWhole(writtenText(full));
+                }
+            },
+            () => {},
+        );
+
+        return () => {
+            gone = true;
+        };
+    }, [entryId, clipped]);
 
     if (entry?.kind !== "user" && entry?.kind !== "assistant") {
         return html`<${Sheet} title=${t(
@@ -176,10 +239,14 @@ export function MessageSheet({ entryId }) {
     const canBranch = canSteer() && !scoped() && view.conversation?.kind === "session";
     // A message to Pi (from anyone), or one of its replies.
     const toPi = entry.kind === "user";
-    const text = toPi ? writtenText(entry) : replyText(entry);
+    // An input a module stored as its own kind is shown, copied, and remembered, never sent again.
+    const again = !toPi || resendable(entry);
+    const text = toPi ? (whole ?? writtenText(entry)) : replyText(entry);
+    // Until its whole text is here, a clipped input has nothing to copy or remember.
+    const waiting = clipped && whole === undefined;
     // A message of files alone has no words: its preview says so, and there is nothing to copy or remember.
     const filesAlone = toPi && text.trim() === "";
-    const prompt = toPi ? entry : promptBefore(entryId);
+    const prompt = toPi ? entry : promptBefore(entryId, view);
 
     const copy = () => {
         closeSheet();
@@ -235,6 +302,7 @@ export function MessageSheet({ entryId }) {
                 ? t("web.sheets.message.message-sheet.text.attachments", "(attachments)")
                 : text
         }</div>
+        ${toPi && entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
         ${
             canBranch &&
             view.conversation.inRepository &&
@@ -271,6 +339,8 @@ export function MessageSheet({ entryId }) {
             ${
                 canBranch &&
                 toPi &&
+                again &&
+                !waiting &&
                 item(
                     t(
                         "web.sheets.message.message-sheet.text.edit-send-again",
@@ -279,11 +349,12 @@ export function MessageSheet({ entryId }) {
                     () => setDraft(text),
                 )
             }
-            ${canBranch && prompt && html`<${SendAgain} prompt=${prompt} worktree=${worktree} />`}
+            ${canBranch && again && prompt && html`<${SendAgain} prompt=${prompt} worktree=${worktree} />`}
             ${
                 memoryAvailable() &&
                 canSteer() &&
                 !filesAlone &&
+                !waiting &&
                 item(
                     t("web.sheets.message.message-sheet.text.remember", "Remember…"),
                     () => openSheet({ type: "memory", draft: lessonFrom(text) }),
@@ -295,6 +366,7 @@ export function MessageSheet({ entryId }) {
             }
             ${
                 !filesAlone &&
+                !waiting &&
                 item(t("web.sheets.message.message-sheet.text.copy-text", "Copy text"), copy)
             }
         </div>

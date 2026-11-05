@@ -1,6 +1,13 @@
 // Only built-in display metadata is translated. Drop-in names, identifiers and model instructions stay literal.
 import { t } from "./ui-locale.js";
 
+/** Only the built-in ask form has this fixed title; its generated questions and answers stay literal. */
+export function askTitle(approval) {
+    return approval.tool === "ask" && approval.form?.title === "Pi asks"
+        ? t("web.ask.title", "Pi asks")
+        : (approval.form?.title ?? approval.subject);
+}
+
 export function moduleTitle(module) {
     if (module.source !== "built-in") {
         return module.title;
@@ -13,6 +20,8 @@ export function moduleTitle(module) {
             return t("builtin.module.artifacts.title", "Artifacts");
         case "browser.ts":
             return t("builtin.module.browser.title", "Browser");
+        case "diagrams.ts":
+            return t("builtin.module.diagrams.title", "Diagrams");
         case "subagents.ts":
             return t("builtin.module.subagents.title", "Subagents");
         case "agent-teams.ts":
@@ -78,6 +87,11 @@ export function moduleSummary(module) {
             return t(
                 "builtin.module.browser.summary",
                 "Pi opens, reads, clicks through, and screenshots web pages in a real Chromium on this machine, the same page the people in the conversation watch and use in the Browser panel.",
+            );
+        case "diagrams.ts":
+            return t(
+                "builtin.module.diagrams.summary",
+                "Mermaid diagrams and inline math render with local browser libraries.",
             );
         case "subagents.ts":
             return t(

@@ -114,11 +114,21 @@ export function nodeFor(category: Category, text: string, colorText?: string): O
     }
 }
 
+export interface Progress {
+    until: number;
+    read: number;
+    stopped: boolean;
+}
+
 export function assemble(
     entries: { path: string[]; node: Obj }[],
     renamed: Map<string, string>,
+    progress?: Progress,
 ): Obj {
     const paths = new Set(entries.map((entry) => entry.path.join(".")));
+    // A token's CSS variable is its path joined by "-": a renamed token must not take another's.
+    const vars = new Set(entries.map((entry) => entry.path.join("-")));
+    // Indexed once: asking every path about every entry is quadratic (40 000 variables took 27 s).
     const groups = new Set<string>();
 
     for (const other of paths) {
@@ -130,11 +140,26 @@ export function assemble(
     const root: Obj = {};
 
     for (const entry of entries) {
+        if (progress !== undefined && Date.now() >= progress.until) {
+            progress.stopped = true;
+
+            break;
+        }
+
         const name = entry.path.join(".");
         let path = entry.path;
 
         if (groups.has(name)) {
-            path = [...entry.path, paths.has(`${name}.default`) ? "base" : "default"];
+            const free = (end: string) =>
+                !vars.has(`${entry.path.join("-")}-${end}`) && !groups.has(`${name}.${end}`);
+            let end = free("default") ? "default" : "base";
+
+            for (let index = 2; !free(end); index += 1) {
+                end = `default-${index}`;
+            }
+
+            path = [...entry.path, end];
+            vars.add(path.join("-"));
             renamed.set(name, path.join("."));
         }
 
@@ -146,6 +171,10 @@ export function assemble(
         }
 
         node[path.at(-1)!] = entry.node;
+
+        if (progress !== undefined) {
+            progress.read += 1;
+        }
     }
 
     return root;

@@ -4,6 +4,7 @@
 import { useRef } from "preact/hooks";
 import { nowDoing } from "./agent-now.js";
 import { store } from "./store.js";
+import { modelText } from "./subagents.js";
 import { html } from "./ui.js";
 import { t } from "./ui-locale.js";
 
@@ -84,7 +85,7 @@ export function AgentTile({ agent, folder, selected = false, onActivate, onOpen 
                 aria-hidden="true"
             ></span>
             <span class="agent-tile-name">${agent.name}</span>
-            <span class="agent-tile-state">${stateWords}</span>
+            <span class="agent-tile-state">${waiting ? stateWords : modelText(agent, { thinking: false }) || stateWords}</span>
         </span>
         <span class="agent-tile-now">${doing}</span>
     </button>`;

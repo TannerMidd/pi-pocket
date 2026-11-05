@@ -5,6 +5,7 @@
 // Kept per browser, in localStorage, like pins and marks. To share it between someone's devices, the server would keep
 // each person's marks (a per-user document beside `SessionsDoc`), `markSeen` would send them, and the session list
 // would carry them back; `finishedUnseen` would not change.
+import { onPageVisibility, pageVisible } from "./host.js";
 import { serverClockOffset, store } from "./store.js";
 
 /** Each session's seen mark is a key of its own, so tabs that mark different sessions at once keep both. */
@@ -13,7 +14,7 @@ const SEEN_PREFIX = "pocket.peekSeen.";
 const SEEN_KEEP_MS = 30 * 24 * 60 * 60_000;
 const SINCE_KEY = "pocket.peekSince";
 
-const hidden = () => document.visibilityState === "hidden";
+const hidden = () => !pageVisible();
 
 /** The server's time now: runs end by the server's clock, which each hello gives (`serverClockOffset`). */
 const serverNow = () => Date.now() + serverClockOffset();
@@ -166,4 +167,4 @@ store.subscribe((state) => {
     seeOpen(store.state);
 });
 
-document.addEventListener("visibilitychange", () => seeOpen(store.state));
+onPageVisibility(() => seeOpen(store.state));

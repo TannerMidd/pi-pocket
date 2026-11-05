@@ -1199,11 +1199,13 @@ kbd {
     font-size: 14.5px;
 }
 
-/* Access: four ways to connect. */
+/* Access: five ways to connect. */
 
 .access {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* Five modes read as 3 + 2: wide enough for a code line and a sentence, and the narrower
+       breakpoints below collapse to 2 and then 1. */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
 }
 

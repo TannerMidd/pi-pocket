@@ -10,7 +10,7 @@
 import { EN, EN_LABEL } from "./locales/en.js";
 import { translate } from "./locale.js";
 import { onSafeModeEnd, safeMode } from "./safe-mode.js";
-import { onHello, store } from "./store.js";
+import { onHello, setFixedText, store } from "./store.js";
 
 /** This browser's choice of language: this cookie, and no other copy of it. */
 const COOKIE = "pocket_locale";
@@ -149,6 +149,7 @@ function publish() {
     publishedWords = words;
     publishedId = id;
     document.documentElement.lang = id;
+    setFixedText(t);
     store.set({ localeRevision: store.state.localeRevision + 1 });
 }
 

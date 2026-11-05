@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import { type ToolCall, Type } from "@earendil-works/pi-ai";
+import { type ToolCall } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import {
     type CodemodeResult,
@@ -31,10 +32,12 @@ import {
     type ToolHooks,
     type ToolRegistration,
     ToolTask,
+    wrapTool,
 } from "@earendil-works/pi-durable";
+import { TOOL_SEARCH_TOOL_NAME } from "@earendil-works/pi-durable/tool-search";
 import { CodemodeStoreDoc } from "../docs.ts";
 import { describe } from "../errors.ts";
-import type { PocketHost } from "../host.ts";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 
 export const CODEMODE_TOOL = "codemode";
 /** Output budget of a script, in estimated tokens (4 characters each), unless its options line sets another. */
@@ -44,15 +47,20 @@ const CHARS_PER_TOKEN = 4;
 const MAX_NESTED_CHARS = 1_000_000;
 const MEMORY_LIMIT_BYTES = 256 * 1024 * 1024;
 const MAX_NESTED_IMAGES = 4;
+/** How much of the request the Only listing can take: Pi's default `codemode.inlineBudget`, 3,000 tokens. */
+const INLINE_BUDGET = 3_000 * CHARS_PER_TOKEN;
+/**
+ * Declared in Only mode too: tool search loads waiting tools. The cards of `artifact`, `ask`, and `memory` read their
+ * call's details, and a script's nested call keeps its details to itself.
+ */
+const DECLARED = new Set([CODEMODE_TOOL, TOOL_SEARCH_TOOL_NAME, "artifact", "ask", "memory"]);
+const ONLY_GUIDE = `Your other tools are not declared. Call them only from a codemode script: \`await tools.<name>({ ...args })\`. Where this prompt says to use one of them, call it from a script. Use one script to batch independent calls (Promise.allSettled), chain them, or filter large output.`;
 
-const DESCRIPTION = `Run JavaScript that calls your other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level \`await\` and \`return\` work. No Node, file system, network, or timers.
-- \`await tools.<name>({ ...args })\` takes the same arguments as calling the tool directly, resolves to its text output, and rejects with an Error when the call fails or is blocked. Calls still running when the script ends are cancelled.
-- Each call is checked like a direct call: Lancet Guard may block it or wait for a person to approve it.
+const DESCRIPTION = `Run JavaScript that calls your other tools: raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox, where top-level \`await\` and \`return\` work. No Node, file system, network, or timers.
+- \`await tools.<name>({ ...args })\` takes a tool's usual arguments and resolves to its text output; it rejects with an Error when the call fails or is blocked. Calls still running at the end are cancelled.
+- Each call is checked like a direct call: Lancet Guard may block it or ask a person.
 - Optional first line: \`// @options: {"max_output_tokens": 10000, "timeout_ms": 60000}\`
-Globals:
-- \`text(value)\`, \`image(dataUrlOrImageBlock)\`, \`console.log(...)\`, and top-level \`return\` add output; \`exit()\` ends the script.
-- \`store(key, value)\` and \`load(key)\` keep JSON values across codemode calls in this conversation.
-- \`ALL_TOOLS\` lists the tools a script can call.`;
+Globals: \`text(value)\`, \`image(dataUrlOrImageBlock)\`, \`console.log(...)\`, and \`return\` add output; \`exit()\` ends the script; \`store(key, value)\` and \`load(key)\` keep JSON across codemode calls in this conversation; \`ALL_TOOLS\` lists the tools a script can call.`;
 
 /** One call a script made. `path`: the file it worked on, when it names one; Changes looks for writes. */
 type CallRecord = {
@@ -182,11 +190,77 @@ async function budget(
     };
 }
 
-export default function createCodemode(_host: PocketHost) {
+/** The Only section: each tool that only scripts can call, smallest first within the budget as Pi does, then names. */
+function listing(tools: readonly ToolRegistration[]): string | undefined {
+    if (tools.length === 0) {
+        return undefined;
+    }
+
+    const entries = tools.map(
+        (tool) =>
+            `## ${tool.name}\n${tool.description}\nParameters (JSON Schema): ${JSON.stringify(tool.parameters)}`,
+    );
+    const shown = new Set<string>();
+    let left = INLINE_BUDGET;
+
+    for (const entry of [...entries].sort((a, b) => a.length - b.length)) {
+        if (entry.length > left) {
+            break;
+        }
+
+        left -= entry.length;
+        shown.add(entry);
+    }
+
+    const rest = tools.filter((_, at) => !shown.has(entries[at]!)).map((tool) => tool.name);
+
+    return [
+        ONLY_GUIDE,
+        ...entries.filter((entry) => shown.has(entry)),
+        ...(rest.length === 0 ? [] : [`Also callable, not listed: ${rest.join(", ")}`]),
+    ].join("\n\n");
+}
+
+export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
+    web?.settings([
+        {
+            name: "mode",
+            label: "Mode",
+            description:
+                "On: Pi calls its tools directly or from scripts. Only: Pi calls them only from scripts.",
+            type: "choice",
+            default: "on",
+            choices: [
+                { value: "on", label: "On" },
+                { value: "only", label: "Only" },
+            ],
+        },
+    ]);
+    const only = () => web?.setting("mode") === "only";
+
+    // Tool search asks it, to send the tools it loads through codemode.
+    web?.provide({ only });
+
+    // Modules reload into the running server before its host changes: until a restart, Only hides nothing.
+    const toolNames = host.toolNames as PocketHost["toolNames"] | undefined;
+
+    /**
+     * Only mode: each other tool is for scripts alone, also one that waits for tool search or that a conversation
+     * loaded. The names come at each resolve, so later modules count too.
+     */
+    const hide = () =>
+        (toolNames?.() ?? [])
+            .filter((name) => !DECLARED.has(name))
+            .map((name) =>
+                wrapTool({ name } as ToolRegistration, (tool) =>
+                    tool.callers === undefined ? { ...tool, callers: ["tools"] } : tool,
+                ),
+            );
+
     const codemode = defineTool({
         name: CODEMODE_TOOL,
         description: DESCRIPTION,
-        parameters: Type.Object({ code: Type.String({ description: "Raw JavaScript source." }) }),
+        parameters: obj({ code: str({ description: "Raw JavaScript source." }) }, { open: true }),
         // A script's nested calls (bash, writes) are not safe to run twice.
         replay: "unsafe",
         execute: async (args, api: ToolExecutionApi<CodemodeDetails>, context) => {
@@ -233,7 +307,10 @@ export default function createCodemode(_host: PocketHost) {
                         `codemode/${n}/${name}`,
                         ...rest,
                     )) as ToolExecutionApi["memo"];
-                const hookApi: HookApi = { ...api, memo };
+                // A tool's api cannot read the conversation's entries: hooks get them for a model's calls only.
+                const noEntries = (): Promise<never> =>
+                    Promise.reject(new Error("A hook cannot read entries in a codemode call"));
+                const hookApi: HookApi = { ...api, memo, entry: noEntries, entries: noEntries };
                 const check = (value: unknown): JsonObject =>
                     validateToolArguments(tool, {
                         ...call,
@@ -424,8 +501,25 @@ export default function createCodemode(_host: PocketHost) {
     return defineExtension({
         name: "pocket-codemode",
         tools: [codemode],
+        get wraps() {
+            return only() ? hide() : [];
+        },
         sections: [
             section("codemode", ({ agent }) => {
+                if (only() && agent.tools.some((tool) => tool.name === CODEMODE_TOOL)) {
+                    const search = agent.tools.some((tool) => tool.name === TOOL_SEARCH_TOOL_NAME);
+
+                    return listing(
+                        // A tool that waits shows in the tool search section, where there is one.
+                        agent.callable.filter(
+                            (tool) =>
+                                tool.name !== CODEMODE_TOOL &&
+                                tool.callers?.includes("model") === false &&
+                                (tool.deferred !== true || !search),
+                        ),
+                    );
+                }
+
                 const names = agent.tools
                     .map((tool) => tool.name)
                     .filter((name) => name !== CODEMODE_TOOL);
@@ -437,7 +531,7 @@ export default function createCodemode(_host: PocketHost) {
                     return undefined;
                 }
 
-                return `Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of making many separate calls${names.includes("subagent") ? ", for example to start several subagents at once" : ""}.`;
+                return `Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output${names.includes("subagent") ? ", for example to start several subagents at once" : ""}.`;
             }),
         ],
     });
