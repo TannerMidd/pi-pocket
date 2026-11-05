@@ -2113,9 +2113,19 @@ function cutText(text, max) {
         : characters.join("");
 }
 
+/** Chips stay valid until the server replaces the session or an extension changes what it adds, as words do. */
+const cachedChips = new WeakMap();
+
 /** The chips that extensions put on a session's row: `{ key, label, title, run }`, `run` only for one that does something. */
 export function sessionChips(session) {
-    return added("sessionChips").flatMap(({ record, spec }) => {
+    const { extensionsRev: revision, localeRevision } = store.state;
+    const cached = cachedChips.get(session);
+
+    if (cached?.revision === revision && cached.localeRevision === localeRevision) {
+        return cached.chips;
+    }
+
+    const chips = added("sessionChips").flatMap(({ record, spec }) => {
         const chips = drawCall(record, spec.chips, session, [], "sessionChips.chips");
 
         if (!Array.isArray(chips)) {
@@ -2135,6 +2145,10 @@ export function sessionChips(session) {
                         : undefined,
             }));
     });
+
+    cachedChips.set(session, { revision, localeRevision, chips });
+
+    return chips;
 }
 
 /** Words stay valid until the server replaces the session or an extension changes what it adds. */
@@ -2142,10 +2156,10 @@ const cachedWords = new WeakMap();
 
 /** The words that extensions give a session for the session list's search and the launcher's, lowercased. */
 export function sessionWords(session) {
-    const revision = store.state.extensionsRev;
+    const { extensionsRev: revision, localeRevision } = store.state;
     const cached = cachedWords.get(session);
 
-    if (cached?.revision === revision) {
+    if (cached?.revision === revision && cached.localeRevision === localeRevision) {
         return cached.words;
     }
 
@@ -2160,7 +2174,7 @@ export function sessionWords(session) {
             : [];
     });
 
-    cachedWords.set(session, { revision, words });
+    cachedWords.set(session, { revision, localeRevision, words });
 
     return words;
 }

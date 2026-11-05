@@ -20,6 +20,7 @@ import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
 import { markdownRevision } from "./markdown-ext.js";
+import { personStorage } from "./person-storage.js";
 import { splitQuote } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
@@ -31,6 +32,7 @@ import {
     collab,
     discuss,
     isRow,
+    keptViewOf,
     loadEarlier,
     loadedFrom,
     navigate,
@@ -2208,21 +2210,77 @@ function choiceValue(field, { picked, other }) {
         .join("\n");
 }
 
+// Unsent answers belong to this approval, and to the person who may answer it. Another approval, or a form that
+// changed, starts empty rather than showing answers that no longer fit.
+const askKey = (id) => `ask.${id}`;
+
+function emptyAsk(field) {
+    return field.choices ? { picked: [], other: "" } : "";
+}
+
+function keptAsk(form, saved) {
+    if (typeof saved !== "object" || saved === null || Array.isArray(saved)) {
+        return null;
+    }
+
+    const values = {};
+
+    for (const field of form.fields) {
+        const value = saved[field.name];
+
+        if (field.choices) {
+            const picked = Array.isArray(value?.picked) ? value.picked : null;
+            const other = typeof value?.other === "string" ? value.other : null;
+            const labels = new Set(field.choices.map((choice) => choice.label));
+
+            if (
+                picked === null ||
+                other === null ||
+                picked.some((label) => typeof label !== "string" || !labels.has(label)) ||
+                (!field.multiple && picked.length > 1) ||
+                (!field.other && other !== "")
+            ) {
+                return null;
+            }
+
+            values[field.name] = { picked, other };
+        } else if (typeof value === "string") {
+            values[field.name] = value;
+        } else {
+            return null;
+        }
+    }
+
+    return values;
+}
+
+function savedAsk(form, id) {
+    try {
+        return keptAsk(form, JSON.parse(personStorage.get(askKey(id)) ?? "null")) ?? null;
+    } catch {
+        return null;
+    }
+}
+
 /** Sent only by that person, and declined by anyone who can steer. Only the `ask` tool passes what is typed on to Pi. */
 function AskCard({ approval }) {
     const { me, users } = store.state;
     const form = approval.form;
-    const [values, setValues] = useState(() =>
-        Object.fromEntries(
-            form.fields.map((field) => [
-                field.name,
-                field.choices ? { picked: [], other: "" } : "",
-            ]),
-        ),
-    );
-    const [busy, setBusy] = useState(false);
     const owner = users?.find?.((each) => each.role === "owner")?.id;
     const mine = (approval.requestedBy ?? owner) === me?.id;
+    const [values, setValues] = useState(() => {
+        const saved = mine ? savedAsk(form, approval.id) : null;
+
+        // One that does not fit goes, or it would come back if the form fit it again.
+        if (mine && saved === null) {
+            personStorage.set(askKey(approval.id), null);
+        }
+
+        return (
+            saved ?? Object.fromEntries(form.fields.map((field) => [field.name, emptyAsk(field)]))
+        );
+    });
+    const [busy, setBusy] = useState(false);
     const who =
         users?.find?.((each) => each.id === approval.requestedBy)?.name ??
         t("web.transcript.ask-card.who.person-pi-works", "the person Pi works for");
@@ -2236,11 +2294,48 @@ function AskCard({ approval }) {
     // Only a card of plain fields hides what is typed from Pi: the `ask` tool's answers are for Pi.
     const plain = form.fields.some((field) => !field.choices);
 
+    const change = (next) => {
+        setValues(next);
+
+        // A secret is typed again after a switch or a reload: it never goes to the browser's storage.
+        if (mine) {
+            const kept = form.fields.map((field) => [
+                field.name,
+                field.secret ? "" : next[field.name],
+            ]);
+
+            personStorage.set(askKey(approval.id), JSON.stringify(Object.fromEntries(kept)));
+        }
+    };
+
+    // The card is shown only while its approval waits. It leaving its session's view (answered elsewhere, cancelled, or
+    // the run stopped) drops what was typed. A switch to another session keeps it: the view this tab kept of the session
+    // it left still lists the approval.
+    useEffect(
+        () => () => {
+            const { view } = store.state;
+            const own =
+                view.conversation?.id === approval.conversationId
+                    ? view
+                    : keptViewOf(approval.conversationId);
+
+            if (
+                mine &&
+                own !== undefined &&
+                !own.approvals?.some((each) => each.id === approval.id)
+            ) {
+                personStorage.set(askKey(approval.id), null);
+            }
+        },
+        [approval.id, mine],
+    );
+
     const answer = (allow) => {
         setBusy(true);
-        attempt(() => actions.approve(approval.id, allow, allow ? typed : undefined)).finally(() =>
-            setBusy(false),
-        );
+        attempt(() => actions.approve(approval.id, allow, allow ? typed : undefined))
+            // `attempt` gives undefined when the server turned the answer down: what was typed stays, to try again.
+            .then((done) => done !== undefined && personStorage.set(askKey(approval.id), null))
+            .finally(() => setBusy(false));
     };
 
     return html`<form
@@ -2271,7 +2366,7 @@ function AskCard({ approval }) {
                                 builtin=${approval.tool === "ask" && form.title === "Pi asks"}
                                 chosen=${values[field.name]}
                                 busy=${busy}
-                                onChange=${(chosen) => setValues({ ...values, [field.name]: chosen })}
+                                onChange=${(chosen) => change({ ...values, [field.name]: chosen })}
                             />`
                           : html`<label class="ask-field" key=${field.name}>
                                 <span>${field.label}</span>
@@ -2285,7 +2380,7 @@ function AskCard({ approval }) {
                                     spellcheck="false"
                                     disabled=${busy}
                                     onInput=${(event) =>
-                                        setValues({
+                                        change({
                                             ...values,
                                             [field.name]: event.currentTarget.value,
                                         })}

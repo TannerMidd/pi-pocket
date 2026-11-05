@@ -31,6 +31,7 @@ async function freePort(): Promise<number> {
 function server(
     name: string,
     port: number,
+    env: Record<string, string> = {},
 ): { proc: ChildProcess; data: string; output: () => string } {
     const data = join(root, name, "data");
     const proc = spawn(
@@ -43,6 +44,7 @@ function server(
                 PI_POCKET_GUARD: "off",
                 PI_POCKET_LAUNCHER: "",
                 PI_POCKET_SUPERVISED: "",
+                ...env,
             },
             stdio: ["ignore", "pipe", "pipe"],
         },
@@ -97,6 +99,18 @@ test("a taken port stops the server before it opens the database", async () => {
     }
 });
 
+test("a keep-alive time out of range stops the server before it opens the database", async () => {
+    for (const value of ["0", "2.5", "3601"]) {
+        const { proc, data, output } = server(`keepalive-${value}`, await freePort(), {
+            PI_POCKET_KEEPALIVE_SECONDS: value,
+        });
+
+        assert.notEqual((await exit(proc)).code, 0, value);
+        assert.match(output(), /PI_POCKET_KEEPALIVE_SECONDS must be/, value);
+        assert.equal(existsSync(join(data, "pocket.sqlite")), false, value);
+    }
+});
+
 /**
  * Whether a process handles SIGUSR2 (signal 12) by now, from its caught-signal mask in Linux's /proc; undefined where
  * that cannot be read. Node takes a while to start on a busy machine: until then, the signal's default would end it.
@@ -144,10 +158,13 @@ test(
     { skip: posix },
     async () => {
         const port = await freePort();
-        const { proc, data, output } = server("hup", port);
+        const { proc, data, output } = server("hup", port, { PI_POCKET_KEEPALIVE_SECONDS: "125" });
 
         await until(() => output().includes("Pi Pocket is running."), "the server to start");
-        assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200);
+        const response = await fetch(`http://127.0.0.1:${port}/`);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("keep-alive"), "timeout=125");
         proc.kill("SIGHUP");
         assert.deepEqual(await exit(proc), { code: 0, signal: null });
         assert.equal(existsSync(join(data, "harness.lock")), false);

@@ -1,5 +1,6 @@
 // The sidebar: the rail (Pi, the tools, and you; folded, numbered sessions too) and the session list beside it, in the
 // sidebar, the drawer, and a phone's home screen; and the order and archiving of sessions.
+import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Avatar, folderColor, initials } from "./avatar.js";
 import { goHome, useBack } from "./back.js";
@@ -43,6 +44,7 @@ import { finishedUnseen, fromServer, markSeen, restoreSeen, seenSnapshot } from 
 import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
 import {
     APPLE,
+    dragWidth,
     drawnFor,
     formatWhen,
     html,
@@ -286,25 +288,25 @@ function todayStart() {
     return today.getTime();
 }
 
-/** Which day bucket a time falls in, in this device's time zone: `start` is when today began (`todayStart`). */
+/** The stable day bucket and its text key: `start` is when today began in this device's time zone. */
 function dayGroup(ms, start) {
     if (ms >= start) {
-        return t("sessions.today", "Today");
+        return ["sessions.today", "Today"];
     }
 
     if (ms >= start - DAY) {
-        return t("sessions.yesterday", "Yesterday");
+        return ["sessions.yesterday", "Yesterday"];
     }
 
     if (ms >= start - 6 * DAY) {
-        return t("sessions.this-week", "This week");
+        return ["sessions.this-week", "This week"];
     }
 
     if (ms >= start - 29 * DAY) {
-        return t("sessions.this-month", "This month");
+        return ["sessions.this-month", "This month"];
     }
 
-    return t("sessions.earlier", "Earlier");
+    return ["sessions.earlier", "Earlier"];
 }
 
 /** `~/Development/pi-pocket` with its last part bold, for a folder group's name. */
@@ -320,21 +322,122 @@ function FolderName({ path }) {
         <b class="last">${path.slice(at + 1)}</b>`;
 }
 
-/** The text with what matched the search marked. */
-function Highlight({ text, needle }) {
-    if (!needle) {
-        return text;
+/**
+ * What a search matched, marked by the browser (the CSS Custom Highlight API, `::highlight(session-search)`) rather than
+ * drawn in the rows: a key then draws again only the rows that come and go, not each row it keeps. Null in a browser
+ * without it: there the rows draw the mark themselves (`withMark`).
+ */
+const searchMarks =
+    typeof Highlight === "function" && globalThis.CSS?.highlights ? new Highlight() : null;
+
+if (searchMarks) {
+    CSS.highlights.set("session-search", searchMarks);
+}
+
+/** Its children as they were while `hidden` stays true: what a search hides of the list is not drawn again meanwhile. */
+class Kept extends Component {
+    shouldComponentUpdate(next) {
+        return !(
+            this.props.hidden &&
+            next.hidden &&
+            this.props.localeRevision === next.localeRevision
+        );
     }
 
-    const at = text.toLowerCase().indexOf(needle);
+    render({ children }) {
+        return children;
+    }
+}
+
+/** Mark `needle` in the titles and hits of the rows that show in `box`, in place of `ranges`, the list's marks before. */
+function markMatches(box, needle, ranges) {
+    for (const range of ranges.splice(0)) {
+        searchMarks.delete(range);
+    }
+
+    if (!needle || !box) {
+        return;
+    }
+
+    for (const words of box.querySelectorAll(
+        "section:not(.kept) :is(.session-title:not(.with-hit), .session-hit)",
+    )) {
+        const text = words.firstChild;
+        const at = text?.nodeType === Node.TEXT_NODE ? text.data.toLowerCase().indexOf(needle) : -1;
+
+        // Static: a live range is kept up to date by every change to the page, hundreds of rows going included.
+        if (at !== -1) {
+            const range = new StaticRange({
+                startContainer: text,
+                startOffset: at,
+                endContainer: text,
+                endOffset: Math.min(text.length, at + needle.length),
+            });
+
+            searchMarks.add(range);
+            ranges.push(range);
+        }
+    }
+}
+
+/** The text with what matched the search marked, where the browser cannot mark it (`searchMarks`). */
+function withMark(text, needle) {
+    const at = needle ? text.toLowerCase().indexOf(needle) : -1;
 
     if (at === -1) {
         return text;
     }
 
-    return html`${text.slice(0, at)}
-    <mark>${text.slice(at, at + needle.length)}</mark>
-    ${text.slice(at + needle.length)}`;
+    const end = at + needle.length;
+
+    return html`${text.slice(0, at)}<mark>${text.slice(at, end)}</mark>${text.slice(end)}`;
+}
+
+/** What a search looks through in each session, lowercased: made once for each version of it and of its words. */
+const haystacks = new WeakMap();
+
+function haystackOf(session, home) {
+    const words = sessionWords(session);
+    let kept = haystacks.get(session);
+
+    if (kept?.words !== words || kept.home !== home) {
+        kept = {
+            words,
+            home,
+            text: `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, home)} ${session.model ?? ""} ${words.join(" ")}`.toLowerCase(),
+        };
+        haystacks.set(session, kept);
+    }
+
+    return kept.text;
+}
+
+/**
+ * What a search matched in a session other than its title, for its row to show: its folder (from the part that
+ * matched), its model, or a word an extension gave it, such as a tag. Undefined when the title matched.
+ */
+function hitOf(session, needle, home) {
+    if (
+        !needle ||
+        (session.title ?? t("sessions.new", "New session")).toLowerCase().includes(needle)
+    ) {
+        return undefined;
+    }
+
+    const path = shortPath(session.cwd, home);
+    const hit = [path, session.cwd, session.model].find((text) =>
+        text?.toLowerCase().includes(needle),
+    );
+
+    // A path from the folder: its start is the same in every row, and would push the match out of sight.
+    if (hit && hit !== session.model) {
+        const parts = hit.split("/");
+        const at = parts.findLastIndex((part) => part.toLowerCase().includes(needle));
+
+        return at > 0 ? `…/${parts.slice(at).join("/")}` : hit;
+    }
+
+    return hit ?? sessionWords(session).find((word) => word.includes(needle));
 }
 
 /** Failed subagents nobody has dealt with (seen or dismissed), of a session's counts or the rail's totals. */
@@ -695,6 +798,12 @@ const ROW_STATES = {
  */
 const shownRows = new Set();
 
+/**
+ * Rows past this place show at once. They are out of sight as the list first draws, and each row that rose in was styled
+ * again at every frame of its animation: hundreds of them, in a long list.
+ */
+const RISING_ROWS = 30;
+
 /** A session's square, as its row in the list draws it (the home screen's Jump back in too). */
 export function sessionMark(session) {
     const counts = session.subagents ?? {};
@@ -723,7 +832,8 @@ function teamOf(sessions) {
  * One session on one line: its folder's color in the shape of its state, its title, and on the right what goes on there (its working subagents,
  * who else is in it, Pi working, a call waiting for you), unread chat, and how long ago. Its folder and model are in
  * its tooltip. Memoized (`memo`): it reads nothing of the store as it draws, only its props, which `AllSessions` works
- * out for it. `minute` and `extensionsRev` draw it again as time passes and as extensions' chips and words change.
+ * out for it. `ago` draws it again as its time ago changes, `minute` as the minute turns (only for a row that shows a
+ * call's age or a limit's time), and `extensionsRev` as extensions' chips and words change.
  */
 function SessionRow({
     session,
@@ -735,9 +845,10 @@ function SessionRow({
     onFold,
     index,
     number,
+    ago,
+    hit,
     needle,
     selected,
-    pressing,
     folders,
     onPick,
     onSelect,
@@ -767,38 +878,21 @@ function SessionRow({
     onRead,
 }) {
     // Where it rises in, in turn, when it is new to this page; null when it shows as it was.
-    const [arrival] = useState(() => (shownRows.has(session.id) ? null : index));
+    const [arrival] = useState(() => {
+        const fresh = !shownRows.has(session.id) && index < RISING_ROWS;
 
-    useLayoutEffect(() => {
         shownRows.add(session.id);
-    }, []);
+
+        return fresh ? index : null;
+    });
+    // A finger held on it, before its actions open: the list's press sets it, and only this row draws again.
+    const [pressing, setPressing] = useState(false);
     const title = session.title ?? t("sessions.new", "New session");
     const path = shortPath(session.cwd, home);
     const where = [
         session.worktree ? `${path} ⎇ ${session.worktree.branch}` : path,
         session.model,
     ].filter(Boolean);
-    // A search can match the folder or model instead of the title: the row shows which.
-    let hit =
-        needle && !title.toLowerCase().includes(needle)
-            ? [path, session.cwd, session.model].find((text) =>
-                  text?.toLowerCase().includes(needle),
-              )
-            : undefined;
-
-    // A path from the folder that matched: its start is the same in every row, and would push the match out of sight.
-    if (hit && hit !== session.model) {
-        const parts = hit.split("/");
-        const at = parts.findLastIndex((part) => part.toLowerCase().includes(needle));
-
-        hit = at > 0 ? `…/${parts.slice(at).join("/")}` : hit;
-    }
-
-    // Or a word an extension gave it, such as a tag.
-    if (needle && hit === undefined && !title.toLowerCase().includes(needle)) {
-        hit = sessionWords(session).find((word) => word.includes(needle));
-    }
-
     // What extensions show on the row, under its title.
     const chips = sessionChips(session);
 
@@ -872,7 +966,7 @@ function SessionRow({
             class=${`session ${unread ? "unread" : ""}`}
             data-part="session-button"
             aria-current=${open ? "page" : undefined}
-            onPointerDown=${(event) => onSelect(event, session.id)}
+            onPointerDown=${(event) => onSelect(event, session.id, setPressing)}
             onClick=${(event) => onPick(event, session.id)}
             onContextMenu=${(event) => onMenu(event, session.id)}
             title=${tip}
@@ -900,10 +994,8 @@ function SessionRow({
                 ${
                     hit
                         ? html`<span class="session-name">${title}</span>
-                            <span class="session-hit">
-                                <${Highlight} text=${hit} needle=${needle} />
-                            </span>`
-                        : html`<${Highlight} text=${title} needle=${needle} />`
+                            <span class="session-hit">${withMark(hit, needle)}</span>`
+                        : withMark(title, needle)
                 }
             </span>
             <span class="session-side">
@@ -994,11 +1086,7 @@ function SessionRow({
                         <${Icon} name="clock" size=${10} />${limit}
                     </span>`
                 }
-                ${
-                    slot !== "needs" &&
-                    !limit &&
-                    html`<span class="session-time">${timeAgo(session.updatedAt)}</span>`
-                }
+                ${slot !== "needs" && !limit && html`<span class="session-time">${ago}</span>`}
                 ${
                     number !== undefined &&
                     number < 9 &&
@@ -1373,16 +1461,19 @@ function groupsOf(shown, { tab, needle, home, pinned, today }) {
     const byKey = new Map();
 
     for (const session of rest) {
-        const day = tab === "folders" ? "" : dayGroup(session.updatedAt, today);
-        const key = tab === "folders" ? `dir:${session.cwd}` : `day:${day}`;
+        const day = tab === "folders" ? null : dayGroup(session.updatedAt, today);
+        const label = day === null ? null : t(...day);
+        // Fold keys are already stored with their translated labels; only the DOM identity must stay stable.
+        const key = day === null ? `dir:${session.cwd}` : `day:${label}`;
 
         if (!byKey.has(key)) {
             byKey.set(key, {
                 key,
+                renderKey: day === null ? key : `day:${day[1]}`,
                 label:
                     tab === "folders"
                         ? html`<${FolderName} path=${shortPath(session.cwd, home)} />`
-                        : day,
+                        : label,
                 rows: [],
             });
         }
@@ -1391,6 +1482,14 @@ function groupsOf(shown, { tab, needle, home, pinned, today }) {
     }
 
     return [...groups, ...byKey.values()];
+}
+
+/**
+ * The marker under the open tab, measured again when `at` changes and as the tabs resize: in a component of its own, so
+ * that a resize, a sidebar's drag at every frame, draws only the marker and not the whole list.
+ */
+function TabMarker({ tabs, at }) {
+    return html`<${Slide} box=${useSlide(tabs, "button.on", "x", at)} axis="x" />`;
 }
 
 /** Each tab's name: the key and English, read as the tab draws so a new language shows at once. */
@@ -1419,8 +1518,50 @@ const tabOf = (group) =>
  */
 const listKept = { query: "", scroll: 0 };
 
+/**
+ * Rows are `ROW_FLOOR` px tall at least. As the list's rows change wholly (it opens, another tab, a search starts or
+ * ends), a screenful of them draws at once (`firstRows`), and the rest follow, `ROWS_PER_FRAME` at each frame: hundreds
+ * of rows held the first frame up. They draw down to where the list was scrolled at once, as it opens and for a tab.
+ */
+const ROW_FLOOR = 28;
+const ROWS_PER_FRAME = 40;
+const firstRows = () => Math.ceil(innerHeight / ROW_FLOOR);
+
+/**
+ * How long the search's matches past the first screenful wait after a key: each key then changes the screenful only,
+ * and the rest come once the typing pauses.
+ */
+const TYPING_PAUSE = 300;
+
+/** Whether `after` holds the same values as `before`, key by key (both with the same keys). */
+function sameValues(before, after) {
+    for (const key in after) {
+        if (!Object.is(before[key], after[key])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/** The store's keys rows depend on, through what `AllSessions` works out for them (`LIST_KEYS` but the sessions). */
+const ROW_KEYS = [
+    "server",
+    "me",
+    "pinned",
+    "unread",
+    "moving",
+    "conversationId",
+    "over",
+    "chatRead",
+    "chatReads",
+    "peekSeen",
+    "extensionsRev",
+    "localeRevision",
+];
+
 function AllSessions({ compact = false }) {
-    const { sessions, sessionsLoaded, server, pinned } = store.state;
+    const { sessions, sessionsLoaded, server, pinned, localeRevision } = store.state;
     const team = teamOf(sessions);
     const canStart = canSteer() && !scoped();
     const [query, setQueryState] = useState(() => (compact ? "" : listKept.query));
@@ -1456,8 +1597,6 @@ function AllSessions({ compact = false }) {
     const [selected, setSelectedState] = useState(() => new Set());
     // Taps select rows instead of opening them: a selection started from a long press's sheet, on a touch screen.
     const [tapSelects, setTapSelects] = useState(false);
-    // The row a finger holds down, before its actions open.
-    const [pressing, setPressing] = useState(null);
     // The selection as drags and clicks see it between renders; the row a Shift+click extends from; the row a Ctrl/⌘ press
     // already selected, whose click then does nothing; the rows in view, in order.
     const picked = useRef(selected);
@@ -1468,12 +1607,45 @@ function AllSessions({ compact = false }) {
     const tabs = useRef(null);
     const needle = query.trim().toLowerCase();
     const archived = tab === "archived";
+    const searching = needle !== "";
+    // How many rows draw now in each view, in its order (`firstRows`): the list's (`base`), again from the start with
+    // each tab, and a search's (`matches`), with each search.
+    const fills = useRef(null);
+    const [, grow] = useState(0);
+    // The list's sections while a search hides them (`Kept`), not drawn again until it ends.
+    const wasSearching = useRef(false);
+    // When a key last changed the search: its matches past the first screenful wait until the typing pauses.
+    const typedAt = useRef(0);
+    // What the search matched, marked by the browser (`searchMarks`).
+    const marks = useRef([]);
+    const drawnRows = useRef({ base: null, matches: null });
+    const opening = fills.current === null;
+    // The rows down to `scrolled` draw at once: where the list was as it opens, where it is for another tab.
+    const startFill = (scrolled) => ({ rows: firstRows() + Math.ceil(scrolled / ROW_FLOOR) });
+    const reopened = opening && !compact ? listKept.scroll : 0;
+    const fullScroll = useRef(reopened);
+    const restoringFull = wasSearching.current && !searching;
+
+    if (opening || fills.current.tab !== tab) {
+        fills.current = {
+            tab,
+            base: startFill(opening ? reopened : list.current.scrollTop),
+            matches: null,
+        };
+    }
+
+    fills.current.matches = searching ? (fills.current.matches ?? startFill(reopened)) : null;
 
     const setQuery = (next) => {
+        if (!searching && next.trim() !== "") {
+            fullScroll.current = list.current.scrollTop;
+        }
+
         if (!compact) {
             listKept.query = next;
         }
 
+        typedAt.current = performance.now();
         setQueryState(next);
     };
 
@@ -1483,6 +1655,12 @@ function AllSessions({ compact = false }) {
             list.current.scrollTop = listKept.scroll;
         }
     }, [sessionsLoaded]);
+    // Search collapses the kept rows and clamps their scroller: restore only after the full rows return.
+    useLayoutEffect(() => {
+        if (restoringFull) {
+            list.current.scrollTop = fullScroll.current;
+        }
+    }, [searching]);
 
     const setSelected = (next) => {
         picked.current = next;
@@ -1541,16 +1719,14 @@ function AllSessions({ compact = false }) {
     const minute = useMinute();
     const today = useMemo(todayStart, [minute]);
     const home = server?.home;
-    const { shown, kept, groups } = useMemo(() => {
+
+    const listFor = (needle) => {
         // Extensions' filters that are on (`pocket.sessionFilter`): a session shows only when each keeps it.
         const kept = sessionFilterTest();
         const shown = sessions.filter(
             (session) =>
                 Boolean(session.archived) === archived &&
-                (needle === "" ||
-                    `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, home)} ${session.model ?? ""} ${sessionWords(session).join(" ")}`
-                        .toLowerCase()
-                        .includes(needle)) &&
+                (needle === "" || haystackOf(session, home).includes(needle)) &&
                 (kept === null || kept(session)),
         );
 
@@ -1599,11 +1775,12 @@ function AllSessions({ compact = false }) {
         });
 
         return { shown, kept, groups };
-    }, [
+    };
+
+    const from = [
         sessions,
         pinned,
         tab,
-        needle,
         home,
         today,
         extensionsRev,
@@ -1616,11 +1793,68 @@ function AllSessions({ compact = false }) {
         store.state.server,
         answered,
         store.state.localeRevision,
-    ]);
+    ];
+    // The list as it is with no search (`base`), and a search's matches (`found`): a search keeps the list, hidden.
+    const base = useMemo(() => listFor(""), from);
+    const found = useMemo(() => (searching ? listFor(needle) : null), [...from, needle]);
+    const { shown, kept, groups } = found ?? base;
 
     // Folded groups: a group's key is in `closed`; Quiet starts folded, and `!key` there says it was opened.
     const isClosed = (key) =>
         key !== "flat" && (closed.has(key) || (FOLDED_AT_FIRST.has(key) && !closed.has(`!${key}`)));
+
+    const total = groups.reduce(
+        (sum, group) => sum + visibleRows(group, asking, allNeeds).length,
+        0,
+    );
+
+    // The rest of the rows of the view that shows, a frame's worth at a time, until all are in.
+    useLayoutEffect(() => {
+        const fill = searching ? fills.current.matches : fills.current.base;
+
+        if (fill.rows >= total) {
+            fill.rows = Math.max(firstRows(), total);
+
+            return undefined;
+        }
+
+        let frame = 0;
+
+        const more = () => {
+            frame = requestAnimationFrame(() => {
+                fill.rows += ROWS_PER_FRAME;
+                grow((count) => count + 1);
+            });
+        };
+
+        const typing = searching ? typedAt.current + TYPING_PAUSE - performance.now() : 0;
+        let timer = 0;
+
+        if (typing > 0) {
+            timer = setTimeout(more, typing);
+        } else {
+            more();
+        }
+
+        return () => {
+            clearTimeout(timer);
+            cancelAnimationFrame(frame);
+        };
+    });
+    // Marked again after each draw while it searches, as rows come and go.
+    useLayoutEffect(() => {
+        if (searchMarks) {
+            markMatches(list.current, needle, marks.current);
+        }
+    });
+    useEffect(
+        () => () => {
+            if (searchMarks) {
+                markMatches(null, "", marks.current);
+            }
+        },
+        [],
+    );
 
     visible.current = useMemo(
         () =>
@@ -1713,7 +1947,7 @@ function AllSessions({ compact = false }) {
      * the page can be selected: the sheet rises under the finger, and Android's own long press would otherwise select
      * the word there and raise its Copy bar over the sheet.
      */
-    const press = (event, id) => {
+    const press = (event, id, setPressing) => {
         const session = sessions.find((each) => each.id === id);
 
         // Nothing to offer: an archived session, for someone who cannot bring it back.
@@ -1725,7 +1959,7 @@ function AllSessions({ compact = false }) {
         let fired = false;
         let after = 0;
         const root = document.documentElement;
-        const shows = setTimeout(() => setPressing(id), PRESS_SHOWS_MS);
+        const shows = setTimeout(() => setPressing(true), PRESS_SHOWS_MS);
 
         const open = setTimeout(() => {
             // Gone meanwhile (someone deleted it): nothing to open.
@@ -1734,7 +1968,7 @@ function AllSessions({ compact = false }) {
             }
 
             fired = true;
-            setPressing(null);
+            setPressing(false);
             pressedIn = startSelect;
             // Over the drawer, which stays: Select goes on there.
             store.set({ sheet: { type: "session", id } });
@@ -1790,7 +2024,7 @@ function AllSessions({ compact = false }) {
             clearTimeout(shows);
             clearTimeout(open);
             clearTimeout(after);
-            setPressing((now) => (now === id ? null : now));
+            setPressing(false);
             root.classList.remove("holding");
             removeEventListener("pointermove", move, true);
             removeEventListener("pointerup", lift, true);
@@ -1837,7 +2071,7 @@ function AllSessions({ compact = false }) {
      * between it and the pointer. Once the pointer moves, the list scrolls along near its top or bottom edge. A finger
      * held on a row opens its actions instead.
      */
-    const select = (event, id) => {
+    const select = (event, id, setPressing) => {
         held.current = null;
 
         if (event.button !== 0) {
@@ -1845,7 +2079,7 @@ function AllSessions({ compact = false }) {
         }
 
         if (event.pointerType !== "mouse") {
-            press(event, id);
+            press(event, id, setPressing);
 
             return;
         }
@@ -1951,6 +2185,9 @@ function AllSessions({ compact = false }) {
             under();
         };
 
+        // No text selection meanwhile, on the rows or past them.
+        const noText = (each) => each.preventDefault();
+
         const stop = () => {
             cancelAnimationFrame(frame);
             root.classList.remove("selecting");
@@ -1958,6 +2195,7 @@ function AllSessions({ compact = false }) {
             removeEventListener("pointerup", stop);
             removeEventListener("pointercancel", stop);
             removeEventListener("blur", stop);
+            removeEventListener("selectstart", noText, true);
         };
 
         root.classList.add("selecting");
@@ -1966,6 +2204,7 @@ function AllSessions({ compact = false }) {
         addEventListener("pointerup", stop);
         addEventListener("pointercancel", stop);
         addEventListener("blur", stop);
+        addEventListener("selectstart", noText, true);
     };
 
     const archiveChosen = () => {
@@ -2145,12 +2384,11 @@ function AllSessions({ compact = false }) {
         () => needsYouCount(sessions),
         [sessions, unread, peekSeen, store.state.server],
     );
-    const tabBar = useSlide(tabs, "button.on", "x", `${tab}:${needCount}`);
     const count = useMemo(() => sessions.filter((session) => !session.archived).length, [sessions]);
     const filters = sessionFilters();
     const steers = canSteer();
     // Made again only when extensions or this person's steering change: rows keep the same action while they do not.
-    const extActions = useMemo(sessionActions, [extensionsRev, steers]);
+    const extActions = useMemo(sessionActions, [extensionsRev, steers, localeRevision]);
     const hoverAction = extActions.find((action) => action.iconPath !== null);
     // Rows' handlers that stay the same from draw to draw, so a row draws again only when what it shows changes. They
     // call this draw's `pick` and `select`, which see this draw's selection.
@@ -2158,7 +2396,9 @@ function AllSessions({ compact = false }) {
 
     handlers.current = { pick, select, menu, toggleFold, review, answer, dismissOne, readOne };
     const [onPick] = useState(() => (event, id) => handlers.current.pick(event, id));
-    const [onSelect] = useState(() => (event, id) => handlers.current.select(event, id));
+    const [onSelect] = useState(
+        () => (event, id, setPressing) => handlers.current.select(event, id, setPressing),
+    );
     const [onMenu] = useState(() => (event, id) => handlers.current.menu(event, id));
     const [onFold] = useState(() => (id) => handlers.current.toggleFold(id));
     const [onReview] = useState(() => (id) => handlers.current.review(id));
@@ -2175,28 +2415,83 @@ function AllSessions({ compact = false }) {
     // Row buttons that only a hovering pointer shows (`NO_HOVER`): touch screens draw none.
     const hovers = !NO_HOVER.matches;
 
-    const rowOf = ({ session, branches, descendants }, index, group) => {
-        const open = session.id === conversationId && !session.archived;
+    // Rows as they were last drawn in each view, by session, with what each was drawn from. A row whose session and place
+    // are as they were, in a view whose rows read all else as before (`shared`), is the same element again, which Preact
+    // passes over: a search key, or the next frame's rows, then costs nothing for the hundreds of rows it keeps.
+    const before = drawnRows.current;
+    const shared = [
+        tab,
+        selected,
+        hoverAction,
+        minute,
+        asking,
+        answered,
+        moved,
+        steers,
+        hovers,
+        ...ROW_KEYS.map((key) => store.state[key]),
+    ];
+    const drawing = (view) =>
+        before[view] && shared.every((value, at) => Object.is(value, before[view].shared[at]))
+            ? before[view].rows
+            : new Map();
+    // The list's rows are not drawn while a search hides them, past the draw that hides them.
+    const frozen =
+        searching && wasSearching.current && before.base?.localeRevision === localeRevision;
+
+    drawnRows.current = {
+        base: frozen ? before.base : { shared, rows: new Map(), localeRevision },
+        matches: searching ? { shared, rows: new Map() } : null,
+    };
+    const last = { base: drawing("base"), matches: drawing("matches") };
+
+    const rowOf = ({ session, branches, descendants }, index, group, needle, view) => {
         // Linked sessions fold under the one that started them; a search shows them all, with nothing to fold.
         const kids = needle === "" ? descendants : 0;
         const isFolded = kids > 0 && folded.has(session.id);
+        // What the row shows of its place, which the list's own changes can move.
+        const place = {
+            session,
+            shape: sameBranches(branches),
+            kids,
+            isFolded,
+            foldHeld: holdsOpen.has(session.id),
+            foldTrouble: isFolded ? hiddenTrouble(group, session.id) : undefined,
+            // Only the first nine show their number: a session moving up renumbers the rows it passes.
+            number: numbers.get(session.id) < 9 ? numbers.get(session.id) : undefined,
+            inTeam: team.has(session.id),
+            slot: group.slot,
+            hit: hitOf(session, needle, home),
+            needle: searchMarks ? undefined : needle,
+            folders: tab === "folders" && needle === "",
+        };
+        const kept = last[view].get(session.id);
 
-        return html`<${MemoRow}
+        if (kept && sameValues(kept.place, place)) {
+            drawnRows.current[view].rows.set(session.id, kept);
+
+            return kept.row;
+        }
+
+        const open = session.id === conversationId && !session.archived;
+        const expanded = asking === session.id && group.slot === "needs";
+        const row = html`<${MemoRow}
             key=${session.id}
             session=${session}
-            branches=${sameBranches(branches)}
+            branches=${place.shape}
             kids=${kids}
             folded=${isFolded}
-            foldHeld=${holdsOpen.has(session.id)}
-            foldTrouble=${isFolded ? hiddenTrouble(group, session.id) : undefined}
+            foldHeld=${place.foldHeld}
+            foldTrouble=${place.foldTrouble}
             onFold=${onFold}
             index=${index}
             localeRevision=${store.state.localeRevision}
-            number=${numbers.get(session.id)}
-            needle=${needle}
+            number=${place.number}
+            ago=${timeAgo(session.updatedAt)}
+            hit=${place.hit}
+            needle=${place.needle}
             selected=${selected.has(session.id)}
-            pressing=${pressing === session.id}
-            folders=${tab === "folders" && needle === ""}
+            folders=${place.folders}
             onPick=${onPick}
             onSelect=${onSelect}
             onMenu=${onMenu}
@@ -2212,12 +2507,12 @@ function AllSessions({ compact = false }) {
             collabs=${collabs}
             steers=${steers}
             hovers=${hovers}
-            minute=${minute}
+            minute=${expanded || session.limited !== undefined ? minute : undefined}
             extensionsRev=${extensionsRev}
             slot=${group.slot}
-            team=${team.has(session.id)}
+            team=${place.inTeam}
             need=${group.slot === "needs" ? needOf(session) : null}
-            expanded=${asking === session.id && group.slot === "needs"}
+            expanded=${expanded}
             answering=${session.approval !== undefined && answered.has(session.approval.id)}
             glow=${moved === session.id && group.slot !== "needs"}
             ownCall=${
@@ -2233,9 +2528,143 @@ function AllSessions({ compact = false }) {
             onDismiss=${onDismiss}
             onRead=${onRead}
         />`;
+
+        drawnRows.current[view].rows.set(session.id, { place, row });
+
+        return row;
     };
 
-    let index = 0;
+    /**
+     * The sections of one view (`base` or `matches`, for `needle`), with the rows its fill has drawn so far. The list's
+     * own, while a search hides it, keeps its last ones (`Kept`).
+     */
+    const sectionsOf = (groups, needle, fill, view) => {
+        let index = 0;
+
+        return groups.map((group) => {
+            const folded = isClosed(group.key);
+            // Needs you does not fold: what waits there must show.
+            const still = group.slot === "needs";
+            const foldable = group.key !== "flat" && !still;
+            const toggle = still ? undefined : () => foldable && toggleGroup(group.key);
+            const rows = visibleRows(group, asking, allNeeds);
+            const first = index;
+
+            index += rows.length;
+            const failedRows =
+                group.slot === "needs"
+                    ? group.rows.filter((row) => {
+                          const need = needOf(row.session);
+
+                          return (
+                              need === "failed" ||
+                              (need === "agents" &&
+                                  steers &&
+                                  (row.session.failedAgents ?? []).length > 0)
+                          );
+                      })
+                    : [];
+            const action =
+                group.slot === "needs" && failedRows.length > 1
+                    ? {
+                          label: t(
+                              "web.sessions.session-group.button.dismiss-failed",
+                              "Dismiss {count} failed",
+                              { count: failedRows.length },
+                          ),
+                          run: () => dismissAll(failedRows),
+                      }
+                    : group.slot === "ready"
+                      ? {
+                            label: t(
+                                "web.sessions.session-group.button.mark-all-read",
+                                "Mark all read",
+                            ),
+                            run: () => markRead(group.rows.map((row) => row.session)),
+                        }
+                      : undefined;
+            // A folded group hides its rows' marks: say when one waits for you or its run failed.
+            const trouble = folded
+                ? group.hidden
+                      .map((row) => sessionMark(row.session).shape)
+                      .find((shape) => shape === "waiting" || shape === "failed")
+                : undefined;
+
+            const head =
+                group.key !== "flat" || needle
+                    ? html`<${still ? "div" : "button"}
+                          class=${`group-head ${group.slot === "needs" ? "attn" : ""}`}
+                          data-part="session-group-head"
+                          onClick=${toggle}
+                          aria-expanded=${still ? undefined : !folded}
+                      >
+                          <span class="group-name" data-part="session-group-name">
+                              ${
+                                  typeof group.label === "string"
+                                      ? html`<b>${group.label}</b>`
+                                      : group.label
+                              }
+                          </span>
+                          ${
+                              trouble &&
+                              html`<span
+                                  class=${`group-trouble ${trouble}`}
+                                  role="img"
+                                  aria-label=${trouble === "waiting" ? t("web.sessions.session-group.aria-label.session-needs-you", "A session needs you") : t("web.sessions.session-group.aria-label.session-failed", "A session failed")}
+                                  title=${trouble === "waiting" ? t("web.sessions.session-group.title.session-here-needs-you", "A session here needs you") : t("web.sessions.session-group.title.session-here-failed", "A session here failed")}
+                              ></span>`
+                          }
+                          <span class="group-count" data-part="session-group-count">
+                              ${group.total}
+                          </span>
+                          ${foldable && html`<${Icon} name="down" size=${11} />`}
+                      <//>`
+                    : null;
+
+            return html`<section
+                class=${`session-group ${folded ? "closed" : ""} ${view === "base" && searching ? "kept" : ""}`}
+                data-part="session-group"
+                data-group=${group.slot}
+                key=${`${view}:${tab}:${group.renderKey ?? group.key}`}
+            >
+                ${
+                    action
+                        ? html`<div class="group-bar" data-part="session-group-bar">
+                            ${head}
+                            <button
+                                class="group-action"
+                                data-part="session-group-action"
+                                onClick=${action.run}
+                            >
+                                ${action.label}
+                            </button>
+                        </div>`
+                        : head
+                }
+                <div class="group-body" inert=${folded}>
+                    <div>
+                        ${rows
+                            .slice(0, Math.max(0, fill.rows - first))
+                            .map((row, at) => rowOf(row, first + at, group, needle, view))}
+                        ${
+                            rows.length < group.rows.length &&
+                            html`<button
+                                class="more-needs"
+                                data-part="session-more"
+                                onClick=${() => setAllNeeds(true)}
+                            >
+                                ${t("web.sessions.session-group.button.show-more", "Show {count} more", { count: group.rows.length - rows.length })}
+                            </button>`
+                        }
+                    </div>
+                </div>
+            </section>`;
+        });
+    };
+
+    const baseSections = frozen ? null : sectionsOf(base.groups, "", fills.current.base, "base");
+
+    wasSearching.current = searching;
 
     return html`<div
         class=${`sessions ${compact ? "compact" : ""} ${tapping ? "tap-selecting" : ""}`}
@@ -2375,13 +2804,23 @@ function AllSessions({ compact = false }) {
                     }
                 </button>`,
             )}
-            <${Slide} box=${tabBar} axis="x" />
+            <${TabMarker} tabs=${tabs} at=${`${tab}:${needCount}:${localeRevision}`} />
         </div>
         <div
             class="session-items"
             ref=${list}
             tabindex="-1"
-            onScroll=${(event) => !compact && (listKept.scroll = event.currentTarget.scrollTop)}
+            onScroll=${(event) => {
+                if (searching) {
+                    return;
+                }
+
+                fullScroll.current = event.currentTarget.scrollTop;
+
+                if (!compact) {
+                    listKept.scroll = fullScroll.current;
+                }
+            }}
         >
             ${!sessionsLoaded && html`<${LoadingSessions} />`}
             ${
@@ -2413,144 +2852,8 @@ function AllSessions({ compact = false }) {
                     )}</span>
                 </div>`
             }
-            ${groups.map((group) => {
-                const folded = isClosed(group.key);
-                // Needs you does not fold: what waits there must show.
-                const still = group.slot === "needs";
-                const foldable = group.key !== "flat" && !still;
-                const toggle = still ? undefined : () => foldable && toggleGroup(group.key);
-                const rows = visibleRows(group, asking, allNeeds);
-                const failedRows =
-                    group.slot === "needs"
-                        ? group.rows.filter((row) => {
-                              const need = needOf(row.session);
-
-                              return (
-                                  need === "failed" ||
-                                  (need === "agents" &&
-                                      steers &&
-                                      (row.session.failedAgents ?? []).length > 0)
-                              );
-                          })
-                        : [];
-                const action =
-                    group.slot === "needs" && failedRows.length > 1
-                        ? {
-                              label: t(
-                                  "web.sessions.session-group.button.dismiss-failed",
-                                  "Dismiss {count} failed",
-                                  { count: failedRows.length },
-                              ),
-                              run: () => dismissAll(failedRows),
-                          }
-                        : group.slot === "ready"
-                          ? {
-                                label: t(
-                                    "web.sessions.session-group.button.mark-all-read",
-                                    "Mark all read",
-                                ),
-                                run: () => markRead(group.rows.map((row) => row.session)),
-                            }
-                          : undefined;
-                // A folded group hides its rows' marks: say when one waits for you or its run failed.
-                const trouble = folded
-                    ? group.hidden
-                          .map((row) => sessionMark(row.session).shape)
-                          .find((shape) => shape === "waiting" || shape === "failed")
-                    : undefined;
-
-                const head =
-                    group.key !== "flat" || needle
-                        ? html`<${still ? "div" : "button"}
-                              class=${`group-head ${group.slot === "needs" ? "attn" : ""}`}
-                              data-part="session-group-head"
-                              onClick=${toggle}
-                              aria-expanded=${still ? undefined : !folded}
-                          >
-                              <span class="group-name" data-part="session-group-name">
-                                  ${
-                                      typeof group.label === "string"
-                                          ? html`<b>${group.label}</b>`
-                                          : group.label
-                                  }
-                              </span>
-                              ${
-                                  trouble &&
-                                  html`<span
-                                      class=${`group-trouble ${trouble}`}
-                                      role="img"
-                                      aria-label=${
-                                          trouble === "waiting"
-                                              ? t(
-                                                    "web.sessions.session-group.aria-label.session-needs-you",
-                                                    "A session needs you",
-                                                )
-                                              : t(
-                                                    "web.sessions.session-group.aria-label.session-failed",
-                                                    "A session failed",
-                                                )
-                                      }
-                                      title=${
-                                          trouble === "waiting"
-                                              ? t(
-                                                    "web.sessions.session-group.title.session-here-needs-you",
-                                                    "A session here needs you",
-                                                )
-                                              : t(
-                                                    "web.sessions.session-group.title.session-here-failed",
-                                                    "A session here failed",
-                                                )
-                                      }
-                                  ></span>`
-                              }
-                              <span class="group-count" data-part="session-group-count">
-                                  ${group.total}
-                              </span>
-                              ${foldable && html`<${Icon} name="down" size=${11} />`}
-                          <//>`
-                        : null;
-
-                return html`<section
-                    class=${`session-group ${folded ? "closed" : ""}`}
-                    data-part="session-group"
-                    data-group=${group.slot}
-                    key=${`${tab}:${group.key}`}
-                >
-                    ${
-                        action
-                            ? html`<div class="group-bar" data-part="session-group-bar">
-                                ${head}
-                                <button
-                                    class="group-action"
-                                    data-part="session-group-action"
-                                    onClick=${action.run}
-                                >
-                                    ${action.label}
-                                </button>
-                            </div>`
-                            : head
-                    }
-                    <div class="group-body" inert=${folded}>
-                        <div>
-                            ${rows.map((row) => rowOf(row, index++, group))}
-                            ${
-                                rows.length < group.rows.length &&
-                                html`<button
-                                    class="more-needs"
-                                    data-part="session-more"
-                                    onClick=${() => setAllNeeds(true)}
-                                >
-                                    ${t(
-                                        "web.sessions.session-group.button.show-more",
-                                        "Show {count} more",
-                                        { count: group.rows.length - rows.length },
-                                    )}
-                                </button>`
-                            }
-                        </div>
-                    </div>
-                </section>`;
-            })}
+            ${searching && sectionsOf(groups, needle, fills.current.matches, "matches")}
+            <${Kept} hidden=${searching} localeRevision=${localeRevision}>${baseSections}<//>
         </div>
         ${
             chosen.length > 0 &&
@@ -3017,36 +3320,25 @@ export function ResizeHandle() {
         }
 
         event.preventDefault();
-        const root = document.documentElement;
         const sidebar = event.currentTarget.parentElement;
         const box = sidebar.getBoundingClientRect();
         // The rail and the borders, which keep their width.
         const rest = sidebar.offsetWidth - (sidebar.querySelector(".sessions")?.offsetWidth ?? 0);
-        let width = prefs().sidebarWidth;
-
-        root.classList.add("resizing");
-
         // No wider than the stylesheet lets it be: 40% of the screen.
         const max = Math.min(LIST_MAX + rest, Math.max(SIDEBAR_WIDTH, innerWidth * 0.4));
 
-        const move = (each) => {
-            const across = side === "right" ? box.right - each.clientX : each.clientX - box.left;
+        // The sidebar's own width as it moves; then `--sidebar-w` on the page's root (theme.js), once.
+        dragWidth(event, {
+            element: sidebar,
+            property: "width",
+            widthAt: (each) => {
+                const across =
+                    side === "right" ? box.right - each.clientX : each.clientX - box.left;
 
-            width = Math.round(Math.min(max, Math.max(LIST_MIN + rest, across)));
-            root.style.setProperty("--sidebar-w", `${width}px`);
-        };
-
-        const stop = () => {
-            root.classList.remove("resizing");
-            removeEventListener("pointermove", move);
-            removeEventListener("pointerup", stop);
-            removeEventListener("pointercancel", stop);
-            setPrefs({ sidebarWidth: width });
-        };
-
-        addEventListener("pointermove", move);
-        addEventListener("pointerup", stop);
-        addEventListener("pointercancel", stop);
+                return Math.round(Math.min(max, Math.max(LIST_MIN + rest, across)));
+            },
+            done: (width) => setPrefs({ sidebarWidth: width }),
+        });
     };
 
     return html`<div
