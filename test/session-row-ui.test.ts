@@ -585,3 +585,42 @@ test(
         await until(async () => (await shown()).kids === 2, "unfolded");
     },
 );
+
+test(
+    "dragging the sidebar's edge changes nothing on the page's root until it ends",
+    real,
+    async () => {
+        await fresh();
+        const edge = await inPage<{ x: number; y: number; to: number; width: number }>(`
+        const box = document.querySelector(".sidebar .resize-handle").getBoundingClientRect();
+        const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+        window.rootChanges = 0;
+        new MutationObserver((records) => (window.rootChanges += records.length)).observe(
+            document.documentElement, { attributeFilter: ["style", "class"] });
+        return JSON.stringify({ x: box.left + 4, y: box.top + box.height / 2,
+            to: Math.round(box.left + 64 - sidebar.left), width: Math.round(sidebar.width) });
+    `);
+        const at = (dx: number) => ({ x: edge.x + dx, y: edge.y });
+        const sidebar = () =>
+            inPage<{ changes: number; width: number; root: string }>(`return JSON.stringify({
+            changes: window.rootChanges,
+            width: Math.round(document.querySelector(".sidebar").getBoundingClientRect().width),
+            root: document.documentElement.style.getPropertyValue("--sidebar-w"),
+        })`);
+
+        // A variable or class on the root would restyle every element, every row, at each move.
+        await page.input([
+            { type: "mouse", action: "down", ...at(0) },
+            ...[20, 40, 60].map((dx) => ({
+                type: "mouse",
+                action: "move",
+                ...at(dx),
+                pressed: true,
+            })),
+        ]);
+        assert.deepEqual(await sidebar(), { changes: 0, width: edge.to, root: `${edge.width}px` });
+        await page.input([{ type: "mouse", action: "up", ...at(60) }]);
+        assert.equal((await sidebar()).root, `${edge.to}px`, "the root takes the width once");
+        await inPage(`(await import("/theme.js")).setPrefs({ sidebarWidth: 312 }); return "null"`);
+    },
+);

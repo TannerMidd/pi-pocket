@@ -42,6 +42,7 @@ import { finishedUnseen, fromServer, markSeen, restoreSeen, seenSnapshot } from 
 import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
 import {
     APPLE,
+    dragWidth,
     drawnFor,
     formatWhen,
     html,
@@ -645,6 +646,12 @@ const ROW_STATES = {
  */
 const shownRows = new Set();
 
+/**
+ * Rows past this place show at once. They are out of sight as the list first draws, and each row that rose in was styled
+ * again at every frame of its animation: hundreds of them, in a long list.
+ */
+const RISING_ROWS = 30;
+
 /** A session's square, as its row in the list draws it (the home screen's Jump back in too). */
 export function sessionMark(session) {
     const counts = session.subagents ?? {};
@@ -673,7 +680,8 @@ function teamOf(sessions) {
  * One session on one line: its folder's color in the shape of its state, its title, and on the right what goes on there (its working subagents,
  * who else is in it, Pi working, a call waiting for you), unread chat, and how long ago. Its folder and model are in
  * its tooltip. Memoized (`memo`): it reads nothing of the store as it draws, only its props, which `AllSessions` works
- * out for it. `minute` and `extensionsRev` draw it again as time passes and as extensions' chips and words change.
+ * out for it. `ago` draws it again as its time ago changes, `minute` as the minute turns (only for a row that shows a
+ * call's age or a limit's time), and `extensionsRev` as extensions' chips and words change.
  */
 function SessionRow({
     session,
@@ -685,9 +693,9 @@ function SessionRow({
     onFold,
     index,
     number,
+    ago,
     needle,
     selected,
-    pressing,
     folders,
     onPick,
     onSelect,
@@ -717,7 +725,11 @@ function SessionRow({
     onRead,
 }) {
     // Where it rises in, in turn, when it is new to this page; null when it shows as it was.
-    const [arrival] = useState(() => (shownRows.has(session.id) ? null : index));
+    const [arrival] = useState(() =>
+        shownRows.has(session.id) || index >= RISING_ROWS ? null : index,
+    );
+    // A finger held on it, before its actions open: the list's press sets it, and only this row draws again.
+    const [pressing, setPressing] = useState(false);
 
     useLayoutEffect(() => {
         shownRows.add(session.id);
@@ -810,7 +822,7 @@ function SessionRow({
             class=${`session ${unread ? "unread" : ""}`}
             data-part="session-button"
             aria-current=${open ? "page" : undefined}
-            onPointerDown=${(event) => onSelect(event, session.id)}
+            onPointerDown=${(event) => onSelect(event, session.id, setPressing)}
             onClick=${(event) => onPick(event, session.id)}
             onContextMenu=${(event) => onMenu(event, session.id)}
             title=${tip}
@@ -899,11 +911,7 @@ function SessionRow({
                         <${Icon} name="clock" size=${10} />${limit}
                     </span>`
                 }
-                ${
-                    slot !== "needs" &&
-                    !limit &&
-                    html`<span class="session-time">${timeAgo(session.updatedAt)}</span>`
-                }
+                ${slot !== "needs" && !limit && html`<span class="session-time">${ago}</span>`}
                 ${
                     number !== undefined &&
                     number < 9 &&
@@ -1211,6 +1219,14 @@ function groupsOf(shown, { tab, needle, home, pinned, today }) {
     return [...groups, ...byKey.values()];
 }
 
+/**
+ * The marker under the open tab, measured again when `at` changes and as the tabs resize: in a component of its own, so
+ * that a resize, a sidebar's drag at every frame, draws only the marker and not the whole list.
+ */
+function TabMarker({ tabs, at }) {
+    return html`<${Slide} box=${useSlide(tabs, "button.on", "x", at)} axis="x" />`;
+}
+
 const TABS = [
     ["priority", "Priority"],
     ["recent", "Recent"],
@@ -1264,8 +1280,6 @@ function AllSessions({ compact = false }) {
     const [selected, setSelectedState] = useState(() => new Set());
     // Taps select rows instead of opening them: a selection started from a long press's sheet, on a touch screen.
     const [tapSelects, setTapSelects] = useState(false);
-    // The row a finger holds down, before its actions open.
-    const [pressing, setPressing] = useState(null);
     // The selection as drags and clicks see it between renders; the row a Shift+click extends from; the row a Ctrl/⌘ press
     // already selected, whose click then does nothing; the rows in view, in order.
     const picked = useRef(selected);
@@ -1520,7 +1534,7 @@ function AllSessions({ compact = false }) {
      * the page can be selected: the sheet rises under the finger, and Android's own long press would otherwise select
      * the word there and raise its Copy bar over the sheet.
      */
-    const press = (event, id) => {
+    const press = (event, id, setPressing) => {
         const session = sessions.find((each) => each.id === id);
 
         // Nothing to offer: an archived session, for someone who cannot bring it back.
@@ -1532,7 +1546,7 @@ function AllSessions({ compact = false }) {
         let fired = false;
         let after = 0;
         const root = document.documentElement;
-        const shows = setTimeout(() => setPressing(id), PRESS_SHOWS_MS);
+        const shows = setTimeout(() => setPressing(true), PRESS_SHOWS_MS);
 
         const open = setTimeout(() => {
             // Gone meanwhile (someone deleted it): nothing to open.
@@ -1541,7 +1555,7 @@ function AllSessions({ compact = false }) {
             }
 
             fired = true;
-            setPressing(null);
+            setPressing(false);
             pressedIn = startSelect;
             // Over the drawer, which stays: Select goes on there.
             store.set({ sheet: { type: "session", id } });
@@ -1597,7 +1611,7 @@ function AllSessions({ compact = false }) {
             clearTimeout(shows);
             clearTimeout(open);
             clearTimeout(after);
-            setPressing((now) => (now === id ? null : now));
+            setPressing(false);
             root.classList.remove("holding");
             removeEventListener("pointermove", move, true);
             removeEventListener("pointerup", lift, true);
@@ -1644,7 +1658,7 @@ function AllSessions({ compact = false }) {
      * between it and the pointer. Once the pointer moves, the list scrolls along near its top or bottom edge. A finger
      * held on a row opens its actions instead.
      */
-    const select = (event, id) => {
+    const select = (event, id, setPressing) => {
         held.current = null;
 
         if (event.button !== 0) {
@@ -1652,7 +1666,7 @@ function AllSessions({ compact = false }) {
         }
 
         if (event.pointerType !== "mouse") {
-            press(event, id);
+            press(event, id, setPressing);
 
             return;
         }
@@ -1758,6 +1772,9 @@ function AllSessions({ compact = false }) {
             under();
         };
 
+        // No text selection meanwhile, on the rows or past them.
+        const noText = (each) => each.preventDefault();
+
         const stop = () => {
             cancelAnimationFrame(frame);
             root.classList.remove("selecting");
@@ -1765,6 +1782,7 @@ function AllSessions({ compact = false }) {
             removeEventListener("pointerup", stop);
             removeEventListener("pointercancel", stop);
             removeEventListener("blur", stop);
+            removeEventListener("selectstart", noText, true);
         };
 
         root.classList.add("selecting");
@@ -1773,6 +1791,7 @@ function AllSessions({ compact = false }) {
         addEventListener("pointerup", stop);
         addEventListener("pointercancel", stop);
         addEventListener("blur", stop);
+        addEventListener("selectstart", noText, true);
     };
 
     const archiveChosen = () => {
@@ -1952,7 +1971,6 @@ function AllSessions({ compact = false }) {
         () => needsYouCount(sessions),
         [sessions, unread, peekSeen, store.state.server],
     );
-    const tabBar = useSlide(tabs, "button.on", "x", `${tab}:${needCount}`);
     const count = useMemo(() => sessions.filter((session) => !session.archived).length, [sessions]);
     const filters = sessionFilters();
     const steers = canSteer();
@@ -1965,7 +1983,9 @@ function AllSessions({ compact = false }) {
 
     handlers.current = { pick, select, menu, toggleFold, review, answer, dismissOne, readOne };
     const [onPick] = useState(() => (event, id) => handlers.current.pick(event, id));
-    const [onSelect] = useState(() => (event, id) => handlers.current.select(event, id));
+    const [onSelect] = useState(
+        () => (event, id, setPressing) => handlers.current.select(event, id, setPressing),
+    );
     const [onMenu] = useState(() => (event, id) => handlers.current.menu(event, id));
     const [onFold] = useState(() => (id) => handlers.current.toggleFold(id));
     const [onReview] = useState(() => (id) => handlers.current.review(id));
@@ -1987,6 +2007,9 @@ function AllSessions({ compact = false }) {
         // Linked sessions fold under the one that started them; a search shows them all, with nothing to fold.
         const kids = needle === "" ? descendants : 0;
         const isFolded = kids > 0 && folded.has(session.id);
+        const expanded = asking === session.id && group.slot === "needs";
+        // Only the first nine show their number: a session moving up renumbers the rows it passes.
+        const number = numbers.get(session.id);
 
         return html`<${MemoRow}
             key=${session.id}
@@ -1998,10 +2021,10 @@ function AllSessions({ compact = false }) {
             foldTrouble=${isFolded ? hiddenTrouble(group, session.id) : undefined}
             onFold=${onFold}
             index=${index}
-            number=${numbers.get(session.id)}
+            number=${number < 9 ? number : undefined}
+            ago=${timeAgo(session.updatedAt)}
             needle=${needle}
             selected=${selected.has(session.id)}
-            pressing=${pressing === session.id}
             folders=${tab === "folders" && needle === ""}
             onPick=${onPick}
             onSelect=${onSelect}
@@ -2018,12 +2041,12 @@ function AllSessions({ compact = false }) {
             collabs=${collabs}
             steers=${steers}
             hovers=${hovers}
-            minute=${minute}
+            minute=${expanded || session.limited !== undefined ? minute : undefined}
             extensionsRev=${extensionsRev}
             slot=${group.slot}
             team=${team.has(session.id)}
             need=${group.slot === "needs" ? needOf(session) : null}
-            expanded=${asking === session.id && group.slot === "needs"}
+            expanded=${expanded}
             answering=${session.approval !== undefined && answered.has(session.approval.id)}
             glow=${moved === session.id && group.slot !== "needs"}
             ownCall=${
@@ -2162,7 +2185,7 @@ function AllSessions({ compact = false }) {
                     }
                 </button>`,
             )}
-            <${Slide} box=${tabBar} axis="x" />
+            <${TabMarker} tabs=${tabs} at=${`${tab}:${needCount}`} />
         </div>
         <div
             class="session-items"
@@ -2683,36 +2706,25 @@ export function ResizeHandle() {
         }
 
         event.preventDefault();
-        const root = document.documentElement;
         const sidebar = event.currentTarget.parentElement;
         const box = sidebar.getBoundingClientRect();
         // The rail and the borders, which keep their width.
         const rest = sidebar.offsetWidth - (sidebar.querySelector(".sessions")?.offsetWidth ?? 0);
-        let width = prefs().sidebarWidth;
-
-        root.classList.add("resizing");
-
         // No wider than the stylesheet lets it be: 40% of the screen.
         const max = Math.min(LIST_MAX + rest, Math.max(SIDEBAR_WIDTH, innerWidth * 0.4));
 
-        const move = (each) => {
-            const across = side === "right" ? box.right - each.clientX : each.clientX - box.left;
+        // The sidebar's own width as it moves; then `--sidebar-w` on the page's root (theme.js), once.
+        dragWidth(event, {
+            element: sidebar,
+            property: "width",
+            widthAt: (each) => {
+                const across =
+                    side === "right" ? box.right - each.clientX : each.clientX - box.left;
 
-            width = Math.round(Math.min(max, Math.max(LIST_MIN + rest, across)));
-            root.style.setProperty("--sidebar-w", `${width}px`);
-        };
-
-        const stop = () => {
-            root.classList.remove("resizing");
-            removeEventListener("pointermove", move);
-            removeEventListener("pointerup", stop);
-            removeEventListener("pointercancel", stop);
-            setPrefs({ sidebarWidth: width });
-        };
-
-        addEventListener("pointermove", move);
-        addEventListener("pointerup", stop);
-        addEventListener("pointercancel", stop);
+                return Math.round(Math.min(max, Math.max(LIST_MIN + rest, across)));
+            },
+            done: (width) => setPrefs({ sidebarWidth: width }),
+        });
     };
 
     return html`<div

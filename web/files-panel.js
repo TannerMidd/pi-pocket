@@ -10,6 +10,7 @@ import { loadFiles, suggestFiles } from "./files.js";
 import { FileView } from "./sheets/file.js";
 import { actions, canSteer, closePeople, panelsBeside, store } from "./store.js";
 import {
+    dragWidth,
     html,
     Icon,
     Loader,
@@ -246,31 +247,19 @@ function ResizeEdge() {
         }
 
         event.preventDefault();
-        const root = document.documentElement;
-        const right = event.currentTarget.parentElement.getBoundingClientRect().right;
-        let width = 0;
+        const tile = event.currentTarget.parentElement;
+        const right = tile.getBoundingClientRect().right;
 
-        root.classList.add("resizing");
-
-        const move = (each) => {
-            width = Math.round(Math.min(innerWidth - 420, Math.max(320, right - each.clientX)));
-            root.style.setProperty("--files-w", `${width}px`);
-        };
-
-        const stop = () => {
-            root.classList.remove("resizing");
-            removeEventListener("pointermove", move);
-            removeEventListener("pointerup", stop);
-            removeEventListener("pointercancel", stop);
-
-            if (width > 0) {
+        dragWidth(event, {
+            element: tile,
+            property: "flex-basis",
+            widthAt: (each) =>
+                Math.round(Math.min(innerWidth - 420, Math.max(320, right - each.clientX))),
+            done: (width) => {
+                document.documentElement.style.setProperty("--files-w", `${width}px`);
                 localStorage.setItem(WIDTH_KEY, String(width));
-            }
-        };
-
-        addEventListener("pointermove", move);
-        addEventListener("pointerup", stop);
-        addEventListener("pointercancel", stop);
+            },
+        });
     };
 
     const reset = () => {
