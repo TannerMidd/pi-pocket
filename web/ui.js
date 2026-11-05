@@ -1646,11 +1646,22 @@ const DRAG_SLOP = 3;
  * lets go, `done(width)` keeps the width, and the window's own value goes.
  */
 export function dragWidth(event, { element, property, widthAt, done }) {
-    const { clientX: x, clientY: y } = event;
+    const { clientX: x, clientY: y, pointerId } = event;
     let veil = null;
     let width = null;
 
     const move = (each) => {
+        if (each.pointerId !== pointerId) {
+            return;
+        }
+
+        // Let go where the page did not hear it (another window, outside the page): the drag ends.
+        if (each.buttons === 0) {
+            stop();
+
+            return;
+        }
+
         if (veil === null) {
             if (Math.hypot(each.clientX - x, each.clientY - y) < DRAG_SLOP) {
                 return;
@@ -1671,6 +1682,7 @@ export function dragWidth(event, { element, property, widthAt, done }) {
         removeEventListener("pointermove", move);
         removeEventListener("pointerup", stop);
         removeEventListener("pointercancel", stop);
+        removeEventListener("blur", stop);
 
         if (veil === null) {
             return;
@@ -1685,6 +1697,7 @@ export function dragWidth(event, { element, property, widthAt, done }) {
     addEventListener("pointermove", move);
     addEventListener("pointerup", stop);
     addEventListener("pointercancel", stop);
+    addEventListener("blur", stop);
 }
 
 /**
