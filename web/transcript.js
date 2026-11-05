@@ -2079,8 +2079,14 @@ function AskCard({ approval }) {
     const change = (next) => {
         setValues(next);
 
+        // A secret is typed again after a switch or a reload: it never goes to the browser's storage.
         if (mine) {
-            personStorage.set(askKey(approval.id), JSON.stringify(next));
+            const kept = form.fields.map((field) => [
+                field.name,
+                field.secret ? "" : next[field.name],
+            ]);
+
+            personStorage.set(askKey(approval.id), JSON.stringify(Object.fromEntries(kept)));
         }
     };
 

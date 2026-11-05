@@ -3427,8 +3427,11 @@ pre.diff .del {
     font-size: 14px;
 }
 
-.ask-other::placeholder {
-    color: var(--muted);
+/* A finger's box stays 44 px high, as every touch target. */
+@media (pointer: coarse) {
+    .ask-other {
+        height: 44px;
+    }
 }
 
 /* The answers end above a hairline; Decline and Send sit apart below it. */
