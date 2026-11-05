@@ -2702,7 +2702,7 @@ export const actions = {
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
     /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
     move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
-    editQueued: (submissionId) => api(`c/${current()}/edit-queued`, { submissionId }),
+    editQueued: (submissionId, id = current()) => api(`c/${id}/edit-queued`, { submissionId }),
     configure: (change) => api(`c/${current()}/configure`, change),
     /** The owner's model and thinking level for new sessions, `{ provider, modelId, thinkingLevel }`; null clears it. */
     setDefaultModel: (choice) => api("settings", { defaultModel: choice }),
