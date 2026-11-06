@@ -10817,7 +10817,14 @@ textarea.notes {
     pointer-events: none;
 }
 
+/* The track scrolls to now: the line stays in view at the scroller's left, over the now line. */
 .rb-tl-empty {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: max-content;
+    border-radius: 3px;
+    background: var(--card);
     padding: 10px 14px;
     font-size: 12px;
     color: var(--muted);
