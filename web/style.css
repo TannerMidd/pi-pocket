@@ -17896,7 +17896,7 @@ textarea.notes {
     left: calc(8px + var(--inset-l));
     right: calc(8px + var(--inset-r));
     bottom: 8px;
-    z-index: 3;
+    z-index: 5;
     display: flex;
     flex-direction: column;
     gap: 8px;
