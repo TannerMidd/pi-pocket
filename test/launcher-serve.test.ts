@@ -561,6 +561,12 @@ withFake(
     },
 );
 
+withFake("with nothing mounted, a stale cleanup runs no off and drops the receipt", {}, (run) => {
+    assert.equal(removeStaleServe(run.fake.binary, [LOCAL_PORT], run.events), false);
+    assert.deepEqual(run.fake.offs(), []);
+    assert.deepEqual(run.lifecycle, ["removed"]);
+});
+
 withFake(
     "a failed cleanup keeps ownership for a later retry",
     { serve: mounted(), fail: { command: "off", error: "serve config denied" } },
