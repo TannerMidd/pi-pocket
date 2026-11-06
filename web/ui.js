@@ -11,7 +11,13 @@ import { blockMath, inlineMath } from "./math.js";
 import { fenceFor, markdownRevision, mathOn, mountMath } from "./markdown-ext.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
 
-export const html = htm.bind(h);
+// `this[0] = 3` stops htm from keeping the elements a template makes: a kept element keeps the app's tree it was first
+// drawn in, and through the rows of the session list, every tree after it. Templates stay parsed once.
+export const html = htm.bind(function () {
+    this[0] = 3;
+
+    return h.apply(null, arguments);
+});
 
 // ─── Images ──────────────────────────────────────────────────────────────────────
 
