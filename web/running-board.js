@@ -883,7 +883,7 @@ function Timeline({
                             class="rb-pin-label"
                             style=${`left:${left}px`}
                         >
-                            ${clock(t, schedule.zone, now)}
+                            ${clock(t, HERE, now)}
                         </span>`);
                         labelled = true;
                     }
