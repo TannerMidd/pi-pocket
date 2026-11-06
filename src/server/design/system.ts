@@ -521,10 +521,18 @@ export function designSystemTool(): ToolRegistration {
                     }
 
                     const scan = await scanProject(scanRoot(cwd, args.path));
+                    const path = scanPathLabel(args.path);
+
+                    // A scan of the wrong folder would stamp provenance over a system it cannot see.
+                    if (scan.files.length === 0) {
+                        throw new Error(
+                            `The scan found no style files in ${path}, so resync cannot see the code's tokens. Point path at the folder with the project's styles.`,
+                        );
+                    }
+
                     // The scan runs between the two loads, and the folder can change while it does: resyncPlan reads
                     // the system again, so an edit made in that time is in the plan and the write keeps it.
                     const { system: current, plan } = resyncPlan(cwd, scan.draft);
-                    const path = scanPathLabel(args.path);
                     const report = resyncReport({
                         name: current.name,
                         path,
@@ -543,13 +551,6 @@ export function designSystemTool(): ToolRegistration {
 
                         return text(
                             `${report}\n\nNothing was saved. ${plan.added.length === 0 ? `There is nothing to add; call design_system ${call} to record the scan's source in tokens.json.` : `Call design_system ${call} to add ${plan.added.length} token${plan.added.length === 1 ? "" : "s"}; nothing else changes.`}`,
-                        );
-                    }
-
-                    // A scan of the wrong folder would stamp provenance over a system it cannot see.
-                    if (scan.files.length === 0) {
-                        throw new Error(
-                            `The scan found no style files in ${path}, so resync cannot see the code's tokens. Point path at the folder with the project's styles.`,
                         );
                     }
 
