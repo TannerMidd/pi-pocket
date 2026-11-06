@@ -19,6 +19,7 @@ import {
     GalleryUpdateSheet,
 } from "./sheets/gallery.js";
 import { CwdSheet } from "./sheets/folder.js";
+import { KeepWarmSheet } from "./sheets/keep-warm.js";
 import { MemorySheet } from "./sheets/memory.js";
 import { MenuSheet, PlacesSheet } from "./sheets/menu.js";
 import { MessageSheet } from "./sheets/message.js";
@@ -219,6 +220,9 @@ function sheetBody(sheet) {
             break;
         case "providers":
             body = html`<${ProvidersSheet} />`;
+            break;
+        case "keep-warm":
+            body = html`<${KeepWarmSheet} />`;
             break;
         case "extensions":
         case "gallery":

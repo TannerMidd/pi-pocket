@@ -30,6 +30,7 @@ import {
     promptBefore,
     resendable,
 } from "../entry-presentation.js";
+import { KeepWarmCard } from "./keep-warm.js";
 import { memoryAvailable } from "./memory.js";
 
 /** What each mode is called where a person chooses it. */
@@ -280,6 +281,7 @@ export function MessageSheet({ entryId }) {
                 )
             }
             ${!filesAlone && !waiting && item("Copy text", copy)}
+            ${!toPi && html`<${KeepWarmCard} />`}
         </div>
     <//>`;
 }
