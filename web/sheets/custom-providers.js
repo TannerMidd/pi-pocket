@@ -1,10 +1,132 @@
 // OpenAI-compatible endpoints in the Providers sheet: the "OpenAI Compatible" row adds one with a
 // URL and a key, its models picked from what the endpoint lists (GET /models) or typed by hand;
-// each endpoint's own row edits or removes it. The server keeps each in Pi's models.json, and its
-// key in Pi's sign-ins.
+// each endpoint's own row edits or removes it. Each chosen model says whether it sees images and
+// the thinking levels it has. The server keeps each in Pi's models.json, and its key in Pi's
+// sign-ins.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, notify, store } from "../store.js";
 import { html, Icon, MODEL_SEARCH_AT } from "../ui.js";
+
+/** Pi's thinking levels, in order, with their names in the app. */
+const LEVELS = [
+    ["off", "Off"],
+    ["minimal", "Minimal"],
+    ["low", "Low"],
+    ["medium", "Medium"],
+    ["high", "High"],
+    ["xhigh", "Extra high"],
+    ["max", "Max"],
+];
+const LEVEL_NAMES = new Map(LEVELS);
+/** The levels a model gets when thinking is turned on, each sending its own name. */
+const DEFAULT_TIERS = ["low", "medium", "high", "xhigh", "max"].map((level) => ({
+    level,
+    value: level,
+}));
+const order = (tiers) => LEVELS.flatMap(([level]) => tiers.filter((tier) => tier.level === level));
+
+/** What a model's Thinking button says: off, or its levels from first to last. */
+function tierSummary(thinking) {
+    if (!Array.isArray(thinking) || thinking.length === 0) {
+        return "No thinking";
+    }
+
+    const first = LEVEL_NAMES.get(thinking[0]?.level);
+    const last = LEVEL_NAMES.get(thinking.at(-1)?.level);
+
+    return thinking.length === 1 ? `Thinking: ${first}` : `Thinking: ${first} to ${last}`;
+}
+
+/**
+ * A model's thinking levels: each is one of Pi's levels and the value sent to the endpoint for it (its
+ * `reasoning_effort`), which a model may name its own way. Levels can be added, removed, and changed.
+ */
+function ThinkingLevels({ id, thinking, onChange }) {
+    const used = new Set((thinking ?? []).map((tier) => tier.level));
+    const free = LEVELS.filter(([level]) => !used.has(level));
+    const set = (index, patch) =>
+        onChange(order(thinking.map((tier, at) => (at === index ? { ...tier, ...patch } : tier))));
+
+    return html`<div class="model-thinking" role="group" aria-label=${`Thinking levels of ${id}`}>
+        <label class="check model-thinking-on">
+            <input
+                type="checkbox"
+                checked=${thinking !== null}
+                onChange=${(event) => onChange(event.currentTarget.checked ? DEFAULT_TIERS : null)}
+            />
+            It thinks (reasoning)
+        </label>
+        ${
+            thinking !== null &&
+            html`<p class="muted small">
+                    Each level in the model menu, and the value it sends the endpoint as its
+                    reasoning effort.
+                </p>
+                <div class="model-tiers">
+                    ${thinking.map(
+                        (tier, index) => html`<div class="model-tier" key=${tier.level}>
+                            <select
+                                aria-label="Level"
+                                value=${tier.level}
+                                onChange=${(event) =>
+                                    set(index, { level: event.currentTarget.value })}
+                            >
+                                ${LEVELS.filter(
+                                    ([level]) => level === tier.level || !used.has(level),
+                                ).map(
+                                    ([level, name]) =>
+                                        html`<option value=${level}>${name}</option>`,
+                                )}
+                            </select>
+                            <input
+                                class="mono"
+                                aria-label=${`Value sent for ${LEVEL_NAMES.get(tier.level)}`}
+                                value=${tier.value}
+                                maxlength="64"
+                                autocomplete="off"
+                                placeholder=${tier.level === "off" ? "Nothing" : tier.level}
+                                onInput=${(event) => set(index, { value: event.currentTarget.value })}
+                            />
+                            <button
+                                class="icon-button"
+                                aria-label=${`Remove ${LEVEL_NAMES.get(tier.level)}`}
+                                disabled=${thinking.length === 1}
+                                onClick=${() => onChange(thinking.filter((_, at) => at !== index))}
+                            >
+                                <${Icon} name="close" size=${14} />
+                            </button>
+                        </div>`,
+                    )}
+                </div>
+                <div class="row model-tier-buttons">
+                    <button
+                        class="button small"
+                        disabled=${free.length === 0}
+                        onClick=${() =>
+                            onChange(
+                                order([
+                                    ...thinking,
+                                    {
+                                        level: free[0][0],
+                                        value: free[0][0] === "off" ? "" : free[0][0],
+                                    },
+                                ]),
+                            )}
+                    >
+                        <${Icon} name="plus" size=${14} />
+                        Add level
+                    </button>
+                    <button class="button small ghost" onClick=${() => onChange(DEFAULT_TIERS)}>
+                        Defaults
+                    </button>
+                </div>`
+        }
+    </div>`;
+}
+
+/** A model's tiers are ready to save: each level but off sends something. */
+const tiersReady = (thinking) =>
+    thinking === null || thinking.every((tier) => tier.level === "off" || tier.value.trim() !== "");
 
 /** The form that adds an endpoint (`editing` undefined) or changes one. */
 export function EndpointForm({ editing, onDone, onCancel }) {
@@ -12,8 +134,25 @@ export function EndpointForm({ editing, onDone, onCancel }) {
     const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "");
     const [apiKey, setApiKey] = useState("");
     const [noKey, setNoKey] = useState(editing?.key === "none");
-    // The models chosen, in order, and what the endpoint listed (with context windows, when it said them).
-    const [chosen, setChosen] = useState(editing?.models ?? []);
+    // The models chosen, in order, and what the endpoint listed (with context windows, and what the
+    // model can do, when it said them).
+    const [chosen, setChosen] = useState((editing?.models ?? []).map((model) => model.id));
+    // What each model can do, by id: it sees images, and its thinking levels (null: it does not think).
+    const [caps, setCaps] = useState(
+        () =>
+            new Map(
+                (editing?.models ?? []).map((model) => [
+                    model.id,
+                    // A server from before these fields sends neither: no images, no thinking.
+                    {
+                        images: model.images === true,
+                        thinking: Array.isArray(model.thinking) ? model.thinking : null,
+                    },
+                ]),
+            ),
+    );
+    // The model whose thinking levels are open.
+    const [open, setOpen] = useState(null);
     const [listed, setListed] = useState(null);
     const [typed, setTyped] = useState("");
     const [query, setQuery] = useState("");
@@ -30,6 +169,21 @@ export function EndpointForm({ editing, onDone, onCancel }) {
     }, []);
 
     const windows = new Map((listed ?? []).map((model) => [model.id, model.contextWindow]));
+
+    // A model the endpoint said can see images or think starts with them on.
+    const capsOf = (id) => {
+        const said = (listed ?? []).find((model) => model.id === id);
+
+        return (
+            caps.get(id) ?? {
+                images: said?.images === true,
+                thinking: said?.reasoning === true ? DEFAULT_TIERS : null,
+            }
+        );
+    };
+
+    const setCap = (id, patch) =>
+        setCaps((was) => new Map(was).set(id, { ...capsOf(id), ...patch }));
     const toggle = (id, on) =>
         setChosen((was) =>
             on ? [...was.filter((each) => each !== id), id] : was.filter((each) => each !== id),
@@ -75,9 +229,19 @@ export function EndpointForm({ editing, onDone, onCancel }) {
         setBusy("save");
         setProblem("");
 
-        const models = chosen.map((id) =>
-            windows.get(id) === undefined ? { id } : { id, contextWindow: windows.get(id) },
-        );
+        const models = chosen.map((id) => {
+            const { images, thinking } = capsOf(id);
+
+            return {
+                id,
+                ...(windows.get(id) === undefined ? {} : { contextWindow: windows.get(id) }),
+                images,
+                thinking:
+                    thinking === null
+                        ? null
+                        : thinking.map((tier) => ({ ...tier, value: tier.value.trim() })),
+            };
+        });
         const body = {
             name,
             baseUrl,
@@ -112,6 +276,7 @@ export function EndpointForm({ editing, onDone, onCancel }) {
         name.trim() !== "" &&
         baseUrl.trim() !== "" &&
         (noKey || apiKey.trim() !== "" || editing !== undefined) &&
+        chosen.every((id) => tiersReady(capsOf(id).thinking)) &&
         busy === "";
     const keepsKey = editing && editing.key !== "none" && editing.key !== "missing";
     const findLabel =
@@ -201,16 +366,63 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                         role="group"
                         aria-label="Models to add"
                     >
-                        ${shown.map(
-                            (id) => html`<label class="check custom-endpoint-model" key=${id}>
-                                <input
-                                    type="checkbox"
-                                    checked=${chosen.includes(id)}
-                                    onChange=${(event) => toggle(id, event.currentTarget.checked)}
-                                />
-                                <span class="mono">${id}</span>
-                            </label>`,
-                        )}
+                        ${shown.map((id) => {
+                            const on = chosen.includes(id);
+                            const { images, thinking } = capsOf(id);
+
+                            return html`<div
+                                class=${`custom-endpoint-model ${on ? "chosen" : ""}`}
+                                key=${id}
+                            >
+                                <div class="custom-endpoint-model-row">
+                                    <label class="check custom-endpoint-model-name">
+                                        <input
+                                            type="checkbox"
+                                            checked=${on}
+                                            onChange=${(event) =>
+                                                toggle(id, event.currentTarget.checked)}
+                                        />
+                                        <span class="mono">${id}</span>
+                                    </label>
+                                    ${
+                                        on &&
+                                        html`<div class="custom-endpoint-model-caps">
+                                            <label class="check">
+                                                <input
+                                                    type="checkbox"
+                                                    checked=${images}
+                                                    onChange=${(event) =>
+                                                        setCap(id, {
+                                                            images: event.currentTarget.checked,
+                                                        })}
+                                                />
+                                                Images
+                                            </label>
+                                            <button
+                                                class=${`button small model-thinking-button ${thinking === null ? "" : "on"}`}
+                                                aria-expanded=${open === id ? "true" : "false"}
+                                                onClick=${() => setOpen(open === id ? null : id)}
+                                            >
+                                                ${tierSummary(thinking)}
+                                                <${Icon}
+                                                    name=${open === id ? "up" : "down"}
+                                                    size=${14}
+                                                />
+                                            </button>
+                                        </div>`
+                                    }
+                                </div>
+                                ${
+                                    on &&
+                                    open === id &&
+                                    html`<${ThinkingLevels}
+                                        id=${id}
+                                        thinking=${thinking}
+                                        onChange=${(next) => setCap(id, { thinking: next })}
+                                    />`
+                                }
+                            </div>`;
+                        })}
                         ${shown.length === 0 && html`<p class="muted small">No model matches.</p>`}
                     </div>`
                 }

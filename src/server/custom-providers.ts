@@ -6,7 +6,8 @@
  *
  * Pi Pocket rewrites `models.json` only when it is plain JSON that Pi accepts: a file with comments or trailing commas
  * (which Pi reads) or one that Pi refuses is left alone, with a message, so a hand-made file never loses anything.
- * Fields it does not manage (headers, compat, a model's metadata) are kept as they are.
+ * Fields it does not manage (headers, compat, a model's other metadata) are kept as they are. Of a model's metadata, the
+ * form sets only image input (`input`) and thinking (`reasoning` and `thinkingLevelMap`).
  */
 import {
     chmodSync,
@@ -38,16 +39,53 @@ const MAX_KEY = 4000;
 const DISCOVER_MS = 10_000;
 const DISCOVER_BYTES = 5_000_000;
 
+/** Pi's thinking levels, in order: a model's `thinkingLevelMap` names what each one sends. */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+/** One level a model thinks at, and what it sends the endpoint for it; `off` may send nothing (`""`). */
+export interface ThinkingTier {
+    level: ThinkingLevel;
+    value: string;
+}
+
+/** The levels a model gets when thinking is turned on: low to max, each sending its own name. */
+export const DEFAULT_TIERS: ThinkingTier[] = (
+    ["low", "medium", "high", "xhigh", "max"] as const
+).map((level) => ({ level, value: level }));
+
+const MAX_TIER_VALUE = 64;
+
 export interface CustomModel {
     id: string;
     contextWindow?: number;
+    /** It sees images (`input` has `"image"`). Left out of a change: as it was. */
+    images?: boolean;
+    /** The levels it thinks at, or null when it does not think. Left out of a change: as it was. */
+    thinking?: ThinkingTier[] | null;
+}
+
+/** A model as the form sees it: what the endpoint says it can do, read back from `models.json`. */
+export interface CustomModelInfo {
+    id: string;
+    images: boolean;
+    thinking: ThinkingTier[] | null;
+}
+
+/** What discovery found out about a model, when the endpoint says it. */
+export interface ListedModel {
+    id: string;
+    contextWindow?: number;
+    images?: boolean;
+    reasoning?: boolean;
 }
 
 export interface CustomProvider {
     id: string;
     name: string;
     baseUrl: string;
-    models: string[];
+    models: CustomModelInfo[];
     /** Where its key is: Pi's sign-ins, `models.json` (a hand-made entry), none (the placeholder), or nowhere. */
     key: "stored" | "file" | "none" | "missing";
 }
@@ -125,16 +163,129 @@ function modelsOf(value: unknown): CustomModel[] {
         }
 
         const window = entry?.contextWindow;
+        const images = entry?.images;
+
+        if (images !== undefined && typeof images !== "boolean") {
+            throw new HttpError(400, `${id}: images must be true or false.`);
+        }
 
         seen.set(id, {
             id,
             ...(typeof window === "number" && Number.isFinite(window) && window > 0
                 ? { contextWindow: Math.floor(window) }
                 : {}),
+            ...(images === undefined ? {} : { images }),
+            ...(entry?.thinking === undefined ? {} : { thinking: tiersOf(id, entry.thinking) }),
         });
     }
 
     return [...seen.values()];
+}
+
+/** A model's thinking levels as asked for: null (it does not think), or each of Pi's levels at most once. */
+export function tiersOf(id: string, value: unknown): ThinkingTier[] | null {
+    if (value === null) {
+        return null;
+    }
+
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new HttpError(400, `${id}: give its thinking levels, or turn thinking off.`);
+    }
+
+    const tiers = new Map<ThinkingLevel, string>();
+
+    for (const each of value as (Json | null)[]) {
+        const level = each?.level;
+        const sent = typeof each?.value === "string" ? each.value.trim() : undefined;
+
+        if (!THINKING_LEVELS.includes(level as ThinkingLevel)) {
+            throw new HttpError(
+                400,
+                `${id}: a thinking level is one of ${THINKING_LEVELS.join(", ")}.`,
+            );
+        }
+
+        if (tiers.has(level as ThinkingLevel)) {
+            throw new HttpError(400, `${id}: the level ${String(level)} is there twice.`);
+        }
+
+        if (
+            sent === undefined ||
+            sent.length > MAX_TIER_VALUE ||
+            (sent === "" && level !== "off")
+        ) {
+            throw new HttpError(
+                400,
+                `${id}: the level ${String(level)} needs a value of 1 to ${String(MAX_TIER_VALUE)} characters.`,
+            );
+        }
+
+        tiers.set(level as ThinkingLevel, sent);
+    }
+
+    return THINKING_LEVELS.filter((level) => tiers.has(level)).map((level) => ({
+        level,
+        value: tiers.get(level)!,
+    }));
+}
+
+/**
+ * A model's thinking levels as Pi reads its entry: none without `reasoning`; else each level the map does not mark
+ * null, sending what the map says. A level the map leaves out sends its own name, as Pi does, except xhigh and max,
+ * which Pi then leaves out; and off, which sends nothing.
+ */
+export function tiersOfEntry(model: Json): ThinkingTier[] | null {
+    if (model.reasoning !== true) {
+        return null;
+    }
+
+    const map = (
+        typeof model.thinkingLevelMap === "object" && model.thinkingLevelMap !== null
+            ? model.thinkingLevelMap
+            : {}
+    ) as Record<string, unknown>;
+
+    return THINKING_LEVELS.flatMap((level): ThinkingTier[] => {
+        const sent = map[level];
+
+        if (sent === null || (sent === undefined && (level === "xhigh" || level === "max"))) {
+            return [];
+        }
+
+        if (typeof sent === "string") {
+            return [{ level, value: sent }];
+        }
+
+        return [{ level, value: level === "off" ? "" : level }];
+    });
+}
+
+/** Sets what the form changes in a model's entry: image input and thinking. Other fields stay as they are. */
+function applyCapabilities(entry: Json, model: CustomModel): Json {
+    if (model.images === true) {
+        entry.input = ["text", "image"];
+    } else if (model.images === false) {
+        delete entry.input;
+    }
+
+    if (model.thinking === null) {
+        delete entry.reasoning;
+        delete entry.thinkingLevelMap;
+    } else if (model.thinking !== undefined) {
+        const sent = new Map(model.thinking.map((tier) => [tier.level, tier.value]));
+
+        entry.reasoning = true;
+        // Every level named: null where it is not one of the model's. Off without a value sends nothing.
+        entry.thinkingLevelMap = Object.fromEntries(
+            THINKING_LEVELS.flatMap((level) => {
+                const value = sent.get(level);
+
+                return value === "" ? [] : [[level, value ?? null]];
+            }),
+        );
+    }
+
+    return entry;
 }
 
 /** The text of models.json as it is now; undefined when there is none. */
@@ -164,26 +315,46 @@ export function idFor(name: string, taken: (id: string) => boolean): string {
     return id;
 }
 
-/** The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows. */
-export function parseModelList(body: unknown): CustomModel[] {
+/**
+ * The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows, and what the model can
+ * do where the list says it: OpenRouter's `architecture.input_modalities` and `supported_parameters`, or a
+ * `capabilities` list (`vision`, `thinking`).
+ */
+export function parseModelList(body: unknown): ListedModel[] {
     const list = (body as Json | null)?.data;
 
     if (!Array.isArray(list)) {
         throw new Error("The answer has no list of models.");
     }
 
-    const models = new Map<string, CustomModel>();
+    const models = new Map<string, ListedModel>();
 
     for (const entry of list as (Json | null)[]) {
         const id = entry?.id;
         const window = entry?.max_model_len;
 
         if (typeof id === "string" && id !== "" && id.length <= MAX_ID) {
+            const said = (value: unknown): string[] =>
+                Array.isArray(value)
+                    ? value.filter((each): each is string => typeof each === "string")
+                    : [];
+            const modalities = said((entry?.architecture as Json | null)?.input_modalities);
+            const parameters = said(entry?.supported_parameters);
+            const capabilities = said(entry?.capabilities);
+            const images = modalities.includes("image") || capabilities.includes("vision");
+            const reasoning =
+                parameters.includes("reasoning") ||
+                parameters.includes("reasoning_effort") ||
+                capabilities.includes("thinking") ||
+                capabilities.includes("reasoning");
+
             models.set(id, {
                 id,
                 ...(typeof window === "number" && window >= 1
                     ? { contextWindow: Math.floor(window) }
                     : {}),
+                ...(images ? { images } : {}),
+                ...(reasoning ? { reasoning } : {}),
             });
         }
     }
@@ -221,9 +392,13 @@ export class CustomProviders {
                 id,
                 name: typeof entry.name === "string" ? entry.name : id,
                 baseUrl: entry.baseUrl as string,
-                models: (Array.isArray(entry.models) ? (entry.models as Json[]) : [])
-                    .map((model) => model?.id)
-                    .filter((model): model is string => typeof model === "string"),
+                models: (Array.isArray(entry.models) ? (entry.models as (Json | null)[]) : [])
+                    .filter((model): model is Json => typeof model?.id === "string")
+                    .map((model) => ({
+                        id: model.id as string,
+                        images: Array.isArray(model.input) && model.input.includes("image"),
+                        thinking: tiersOfEntry(model),
+                    })),
                 key: this.#keyOf(id, entry),
             }))
             .sort((a, b) => a.name.localeCompare(b.name));
@@ -316,9 +491,13 @@ export class CustomProviders {
                     ]),
                 );
 
-                entry.models = modelsOf(input.models).map(
-                    (model) => before.get(model.id) ?? entryOf(model),
-                );
+                entry.models = modelsOf(input.models).map((model) => {
+                    const kept = before.get(model.id);
+
+                    return kept === undefined
+                        ? entryOf(model)
+                        : applyCapabilities({ ...kept }, model);
+                });
             }
 
             if (key === NO_KEY) {
@@ -380,7 +559,7 @@ export class CustomProviders {
      * Ask an endpoint for its models (`GET <baseUrl>/models`), with the key given, or else the saved endpoint's own.
      * The owner's to ask, so a local or private address is allowed: that is where such servers often are.
      */
-    discover(input: { baseUrl?: unknown; apiKey?: unknown; id?: unknown }): Promise<CustomModel[]> {
+    discover(input: { baseUrl?: unknown; apiKey?: unknown; id?: unknown }): Promise<ListedModel[]> {
         // After any save in progress: a saved key is read with the address it belongs to.
         return this.#serial(() => this.#discover(input));
     }
@@ -389,7 +568,7 @@ export class CustomProviders {
         baseUrl?: unknown;
         apiKey?: unknown;
         id?: unknown;
-    }): Promise<CustomModel[]> {
+    }): Promise<ListedModel[]> {
         const baseUrl = baseUrlOf(input.baseUrl);
         const headers = new Headers({ accept: "application/json" });
         let key =
@@ -682,10 +861,13 @@ async function refusal(path: string): Promise<string | undefined> {
 }
 
 function entryOf(model: CustomModel): Json {
-    return {
-        id: model.id,
-        ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-    };
+    return applyCapabilities(
+        {
+            id: model.id,
+            ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+        },
+        model,
+    );
 }
 
 /** A response's text, refused past `max` bytes. */
