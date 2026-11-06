@@ -294,7 +294,7 @@ test("resync names what is missing: a system, its tokens, style files, or a read
         /tokens\.json cannot be read.*nothing to keep/,
     );
 
-    // A folder with no style files cannot show resync the code: a dry run refuses too, so it never offers an apply.
+    // A folder with no style files cannot show resync the code: an apply refuses, and a dry run does not offer one.
     const empty = project({ "docs/notes.md": "nothing to scan here" });
 
     await say(
@@ -304,7 +304,11 @@ test("resync names what is missing: a system, its tokens, style files, or a read
         }),
     );
     assert.match(
-        await failure(run(empty, { action: "resync", path: "docs" })),
+        await say(run(empty, { action: "resync", path: "docs" })),
+        /read no style files in docs, so an apply would be refused/,
+    );
+    assert.match(
+        await failure(run(empty, { action: "resync", apply: true, path: "docs" })),
         /found no style files in docs/,
     );
 });
