@@ -1,8 +1,5 @@
 // What this person sent from this browser in one session, oldest first: ↑ recalls it and Ctrl+R searches it.
-import { personStorage } from "./person-storage.js";
-
-const KEY = "history";
-const MAX = 200;
+import { HISTORY as KEY, HISTORY_MAX as MAX, personStorage } from "./person-storage.js";
 
 /** All of this person's scoped records, bounded together across sessions. */
 function readHistory(person) {
