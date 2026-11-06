@@ -424,7 +424,7 @@ Since 0.16.0 · Stable
 ### `HumanLinkedSession`
 
 ```ts
-interface HumanLinkedSession extends LinkedSession {
+interface HumanLinkedSession extends Omit<LinkedSession, "failed"> {
     conversationId: ConversationId;
 }
 ```
