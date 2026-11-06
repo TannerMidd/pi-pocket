@@ -5,6 +5,7 @@ import { section, type PromptSection } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
 import { defang } from "../fence.ts";
+import { workspaceScheme } from "../paths.ts";
 import { MAX_BYTES, SYSTEM_FILE, readDesignSystemText } from "./system.ts";
 import { loadDesignSystem, systemSummary } from "./tokens.ts";
 
@@ -24,6 +25,11 @@ export function designGuide(host: PocketHost): PromptSection {
 
         if (cwd === undefined) {
             return WITHOUT;
+        }
+
+        // A remote workspace's files are not on this machine: `env.cwd` is a path there.
+        if (workspaceScheme(input.agent.cwd ?? "") !== undefined) {
+            return `${GUIDE}\n\nThis session works in a remote workspace: design_system and design_export are not available, so designs here use no design system.`;
         }
 
         const fail = (what: string, error: unknown) =>

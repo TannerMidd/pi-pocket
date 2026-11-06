@@ -447,6 +447,16 @@ h1 { font-family: 'Playfair Display', serif; font-size: 42px; color:#1b1b1b }
     );
 });
 
+test("a dark value follows its token when a group renames the token", () => {
+    const css =
+        ":root{--bg:#ffffff;--ink:#111111;--blue:#0000ff;--blue-brand:#0000aa}" +
+        "@media (prefers-color-scheme: dark){:root{--blue:#000088}}" +
+        "a{color:var(--blue);border-color:var(--blue-brand)}";
+    const system = load(scanTokens(project({ "theme.css": css })));
+
+    assert.equal(hex(system, "color.blue.default", "dark"), "#000088");
+});
+
 test("the draft always loads: a token the engine refuses is dropped, not saved", () => {
     const scan = scanTokens(
         project({

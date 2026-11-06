@@ -1,18 +1,15 @@
 /**
  * Ask: Pi asks you up to 4 questions on a card in the session, each with 2 to 4 answers to tap or one of your own.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { AskField, PocketHost } from "../host.ts";
 
 const DESCRIPTION =
-    "Ask the person you work for 1 to 4 questions on a card, each with 2 to 4 answers to tap; they can also type their own. " +
-    "It waits for their answer, which can take hours, and gives you one line per question: `header: answer`.";
+    "Ask the person questions on a card, with answers to tap; they can also type their own. " +
+    "It waits, maybe for hours, and returns one line per question: `header: answer`.";
 
-const GUIDE = `Use the ask tool when a decision changes the work and only the person can make it: the scope, a behavior choice, or a trade-off.
-Put all your questions in one call. Put the option you recommend first, with "(Recommended)" at the end of its label.
-Do not use it for a yes or no that a plain sentence covers, or for permission to run tools: the guard asks for that.
-Never ask the same thing twice.`;
+const GUIDE = `Use the ask tool when a decision changes the work and only the person can make it: the scope, a behavior choice, or a trade-off. Put all your questions in one call, and the option you recommend first, with "(Recommended)" at the end of its label. Not for a yes or no that a plain sentence covers, or for permission to run tools (the guard asks for that). Never ask the same thing twice.`;
 
 const DECLINED =
     "The person declined to answer. Do not ask again at once; go on with your best judgment, or ask in plain text.";
@@ -21,37 +18,42 @@ type Reply = { text: string; answers?: { header: string; question: string; answe
 
 const flat = (text: string) => text.replace(/\s+/g, " ").trim();
 
-const Choice = Type.Object({
-    label: Type.String({ minLength: 1, maxLength: 60, description: "The answer, 1 to 5 words" }),
-    description: Type.Optional(
-        Type.String({ maxLength: 160, description: "What it means or costs, in one line" }),
-    ),
-});
+const Choice = obj(
+    {
+        label: str({ minLength: 1, maxLength: 60, description: "1 to 5 words" }),
+        description: opt(str({ maxLength: 160, description: "What it means or costs" })),
+    },
+    { open: true },
+);
 
-const Question = Type.Object({
-    question: Type.String({
-        minLength: 1,
-        maxLength: 300,
-        description: "The whole question, ending with a question mark",
-    }),
-    header: Type.String({
-        minLength: 1,
-        maxLength: 12,
-        description: "A short tag for it, such as Database or Scope",
-    }),
-    options: Type.Array(Choice, { minItems: 2, maxItems: 4 }),
-    multiSelect: Type.Optional(
-        Type.Boolean({ description: "Whether the person can choose more than one" }),
-    ),
-});
+const Question = obj(
+    {
+        question: str({
+            minLength: 1,
+            maxLength: 300,
+            description: "Ends with ?",
+        }),
+        header: str({
+            minLength: 1,
+            maxLength: 12,
+            description: "A short tag, such as Scope",
+        }),
+        options: arr(Choice, { minItems: 2, maxItems: 4 }),
+        multiSelect: opt(bool({ description: "Allow more than one answer" })),
+    },
+    { open: true },
+);
 
 export default function createAsk(host: PocketHost) {
     const ask = defineTool({
         name: "ask",
         description: DESCRIPTION,
-        parameters: Type.Object({
-            questions: Type.Array(Question, { minItems: 1, maxItems: 4 }),
-        }),
+        parameters: obj(
+            {
+                questions: arr(Question, { minItems: 1, maxItems: 4 }),
+            },
+            { open: true },
+        ),
         // The card's id comes from the call: after a restart, the same card asks again unless the memo has the answer.
         replay: "safe",
         execute: async (args, api, context) => {

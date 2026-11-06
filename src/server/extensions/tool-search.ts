@@ -1,12 +1,13 @@
 /** Tool search keeps tools that few conversations use out of every request until Pi asks for them. */
 import type { Context } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
+import { num, obj, opt, str } from "@earendil-works/pi-schema";
 import { DESIGN_GUIDE } from "../design/guide.ts";
 import {
     createToolSearchExtension,
     TOOL_SEARCH_TOOL_NAME,
 } from "@earendil-works/pi-durable/tool-search";
 import {
+    type Agent,
     defineExtension,
     type PromptSection,
     section,
@@ -15,13 +16,18 @@ import {
     wrapSection,
     wrapTool,
 } from "@earendil-works/pi-durable";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 
 const SEARCH_LIMIT = 2;
 
 /** What the design guide's section would say, for the codemode route, where the section never shows. */
 const DESIGN_NOTE = `Before you make or change a design, read ${DESIGN_GUIDE}. Check each design with design_preview at mobile and desktop sizes before you reply. design_system read gives a summary of the project's design system.`;
 
-const DEFERRED: Record<string, { use: string; section?: string; note?: string }> = {
+/**
+ * The tools that wait. `section`: the prompt section that waits with them. `note`: what that section would say, for
+ * the codemode route, where it never shows; `guide`: the module that provides it (`web.provide({ guide })`) instead.
+ */
+const DEFERRED: Record<string, { use: string; section?: string; note?: string; guide?: string }> = {
     browser: {
         use: "open and test web pages in a real browser",
         section: "browser",
@@ -35,18 +41,25 @@ const DEFERRED: Record<string, { use: string; section?: string; note?: string }>
     schedule: { use: "send yourself a message later" },
     watch_pr: { use: "watch a pull request's checks" },
     design_preview: {
-        use: "make, change, or check a design (read its guide first)",
+        use: "make, change, or check a design",
         section: "design_mode",
         note: DESIGN_NOTE,
     },
     design_export: { use: "export a design", section: "design_mode", note: DESIGN_NOTE },
     design_system: {
-        use: "read or write the project's design system",
+        use: "read or write the design system",
         section: "design_mode",
         note: DESIGN_NOTE,
     },
     ask_someone: { use: "draft a question for someone outside this chat" },
+    subagent: {
+        use: "hand work to background helpers",
+        section: "subagents",
+        guide: "subagents",
+    },
 };
+
+type Guide = { guide?: (model: Agent["model"]) => Promise<string> };
 
 const sections = new Map<string, string[]>();
 
@@ -56,12 +69,32 @@ for (const [name, { section: key }] of Object.entries(DEFERRED)) {
     }
 }
 
-export default function createToolSearch() {
+type Lists = "tools" | "callable" | "deferred";
+
+/** Tools that wait for a search. Codemode's Only mode leaves them for scripts alone, and they still wait. */
+function waitingOf(
+    agent: Record<Lists, readonly ToolRegistration[]>,
+    only: boolean,
+): ToolRegistration[] {
+    const searched = only && agent.tools.some((tool) => tool.name === TOOL_SEARCH_TOOL_NAME);
+
+    return [
+        ...agent.deferred,
+        ...agent.callable.filter(
+            (tool) =>
+                searched && tool.deferred === true && tool.callers?.includes("model") === false,
+        ),
+    ];
+}
+
+export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) {
     const base = createToolSearchExtension();
     const search = base.tools![0]!;
+    const only = () =>
+        (web?.use("codemode") as { only?: () => boolean } | undefined)?.only?.() === true;
 
     // For a model without mid-conversation tool changes, a new tool would rewrite the prompt cache: Pi calls it
-    // through codemode instead, so the tool list never changes.
+    // through codemode instead, so the tool list never changes. In codemode's Only mode, every tool goes that way.
     const throughCodemode = async (api: ToolExecutionApi<never>, context: Context) => {
         const agent = await api.agent(context);
         const ref = agent.model;
@@ -76,22 +109,33 @@ export default function createToolSearch() {
                       | undefined);
 
         return (
-            (compat?.supportsMidConvoSystemMessages !== true ||
+            (only() ||
+                compat?.supportsMidConvoSystemMessages !== true ||
                 compat?.supportsMidConvoToolChanges !== true) &&
             agent.tools.some((tool) => tool.name === "codemode")
         );
     };
 
     const explain = async (names: string[], api: ToolExecutionApi<never>, context: Context) => {
-        const waiting = (await api.agent(context)).deferred;
+        const agent = await api.agent(context);
+        const waiting = waitingOf(agent, only());
 
-        return names
-            .map((name) => {
+        const noteOf = async (name: string) => {
+            const { note, guide } = DEFERRED[name] ?? {};
+            const from = guide === undefined ? undefined : (web?.use(guide) as Guide | undefined);
+
+            return (await from?.guide?.(agent.model)) ?? note ?? "";
+        };
+
+        const parts = await Promise.all(
+            names.map(async (name) => {
                 const tool = waiting.find((each) => each.name === name)!;
 
-                return `## ${name}\nCall it from a codemode script: await tools.${name}({ ...args })\n${tool.description}\n${DEFERRED[name]?.note ?? ""}\nParameters (JSON Schema): ${JSON.stringify(tool.parameters)}`;
-            })
-            .join("\n\n");
+                return `## ${name}\nCall it from a codemode script: await tools.${name}({ ...args })\n${tool.description}\n${await noteOf(name)}\nParameters (JSON Schema): ${JSON.stringify(tool.parameters)}`;
+            }),
+        );
+
+        return parts.join("\n\n");
     };
 
     // A query that is only names of waiting tools loads exactly those: a BM25 search for "browser" also matches every
@@ -99,20 +143,24 @@ export default function createToolSearch() {
     const exact: ToolRegistration = {
         ...search,
         description:
-            "Load tools that wait (deferred_tools lists them) before you use them. The query is their names (`browser`, or `browser, background`) or words to search for.",
-        parameters: Type.Object({
-            query: Type.String({ description: "Names of waiting tools, or words to search for." }),
-            limit: Type.Optional(
-                Type.Number({
-                    description: `Matches a text search loads (default ${SEARCH_LIMIT}).`,
-                }),
-            ),
-        }),
+            "Loads waiting tools (deferred_tools lists them). The query: their names (`browser, background`) or words to search for.",
+        parameters: obj(
+            {
+                query: str({ description: "Names of waiting tools, or words to search for." }),
+                limit: opt(
+                    num({
+                        description: `Matches a text search loads (default ${SEARCH_LIMIT}).`,
+                    }),
+                ),
+            },
+            { open: true },
+        ),
         async execute(args: { query: string; limit?: number }, api, context) {
             const names = String(args.query)
                 .split(/[\s,]+/)
                 .filter(Boolean);
-            const waiting = (await api.agent(context)).deferred.map((tool) => tool.name);
+            const agent = await api.agent(context);
+            const waiting = waitingOf(agent, only()).map((tool) => tool.name);
             const result =
                 names.length > 0 && names.every((name) => waiting.includes(name))
                     ? ({
@@ -127,7 +175,10 @@ export default function createToolSearch() {
                       } as Awaited<ReturnType<typeof search.execute>>)
                     : await search.execute(
                           { ...args, limit: args.limit ?? SEARCH_LIMIT } as never,
-                          api,
+                          {
+                              ...api,
+                              agent: async () => ({ ...agent, deferred: waitingOf(agent, only()) }),
+                          },
                           context,
                       );
             const loaded = (result.details as { loaded?: string[] } | undefined)?.loaded ?? [];
@@ -152,16 +203,18 @@ export default function createToolSearch() {
         name: "pocket-tool-search",
         tools: [exact],
         sections: [
-            section("deferred_tools", ({ agent }) =>
-                agent.deferred.length === 0
+            section("deferred_tools", ({ agent }) => {
+                const waiting = waitingOf(agent, only());
+
+                return waiting.length === 0
                     ? undefined
-                    : `Load a tool before you use it: ${TOOL_SEARCH_TOOL_NAME} with its name as the query. Waiting:\n${agent.deferred
+                    : `Load a tool before you use it: ${TOOL_SEARCH_TOOL_NAME} with its name as the query. Waiting:\n${waiting
                           .map(
                               (tool) =>
                                   `- ${tool.name}: ${DEFERRED[tool.name]?.use ?? tool.description.split(".")[0]}`,
                           )
-                          .join("\n")}`,
-            ),
+                          .join("\n")}`;
+            }),
         ],
         wraps: [
             ...Object.keys(DEFERRED).map((name) =>

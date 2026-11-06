@@ -35,6 +35,7 @@ function parseArgs(argv: string[]) {
         cwd: process.cwd(),
         data: dataDir(),
         rotateToken: false,
+        keepAliveSeconds: Number(process.env.PI_POCKET_KEEPALIVE_SECONDS?.trim() || 5),
     };
 
     for (let index = 0; index < argv.length; index++) {
@@ -72,6 +73,16 @@ function parseArgs(argv: string[]) {
 
     if (!Number.isInteger(options.port) || options.port <= 0) {
         throw new Error("--port must be a number");
+    }
+
+    if (
+        !Number.isInteger(options.keepAliveSeconds) ||
+        options.keepAliveSeconds < 1 ||
+        options.keepAliveSeconds > 3600
+    ) {
+        throw new Error(
+            "PI_POCKET_KEEPALIVE_SECONDS must be a whole number of seconds from 1 to 3600",
+        );
     }
 
     return options;
@@ -163,6 +174,10 @@ const server = createServer((request, response) => {
 // and long polls are GET requests without a body, so their time on the connection does not count.
 server.requestTimeout = 15 * 60_000;
 server.headersTimeout = 60_000;
+// How long an idle connection stays open for its next request: Node's 5 seconds by default. A reverse proxy
+// that keeps idle connections longer can send a request on one as it closes here, and answers with a 502.
+// The timeouts above count from a request's first byte, not from the idle time before it.
+server.keepAliveTimeout = options.keepAliveSeconds * 1000;
 
 // Take the port before opening the database: opening resumes interrupted work, which must not start in a process
 // that then exits because it cannot serve.

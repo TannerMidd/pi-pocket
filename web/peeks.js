@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { AgentTile } from "./agent-tile.js";
 import { folderColor } from "./avatar.js";
 import { describeCall } from "./calls.js";
+import { onPageVisibility, pageVisible } from "./host.js";
 import { finishedUnseen, markSeen, seenSince } from "./seen.js";
 import {
     actions,
@@ -19,6 +20,7 @@ import {
     canSteer,
     navigate,
     notify,
+    openId,
     store,
     workspaceOrder,
 } from "./store.js";
@@ -42,7 +44,7 @@ const RETRY_MS = [1000, 3000, 10_000];
 
 PEEK_WIDE.addEventListener("change", () => store.set({}));
 
-const hidden = () => document.visibilityState === "hidden";
+const hidden = () => !pageVisible();
 
 store.set({ peeks: {} });
 
@@ -52,15 +54,18 @@ store.set({ peeks: {} });
 let slots = [];
 /** The session open before this one: it stays a tile, in the place of the one that was opened. */
 let lastLeft = null;
-let previous = store.state.conversationId;
+let previous = openId();
 
-// The session left stays a tile, in the place of the one opened. `seen.js` marks both seen.
+// The session left stays a tile, in the place of the one opened; one with a board opened over it (PiP's) is not left.
+// `seen.js` marks both seen.
 store.subscribe((state) => {
-    if (state.conversationId !== previous) {
-        const left = previous;
-        const at = slots.indexOf(state.conversationId);
+    const open = openId(state);
 
-        previous = state.conversationId;
+    if (open !== previous) {
+        const left = previous;
+        const at = slots.indexOf(open);
+
+        previous = open;
 
         if (left !== null) {
             lastLeft = left;
@@ -95,14 +100,8 @@ let chosen = { from: [], tiles: [] };
 
 /** The sessions shown as tiles now, in tile order. */
 export function peekTiles(state = store.state) {
-    const from = [
-        state.sessions,
-        state.conversationId,
-        state.pinned,
-        state.peekSeen,
-        lastLeft,
-        seenSince(),
-    ];
+    const open = openId(state);
+    const from = [state.sessions, open, state.pinned, state.peekSeen, lastLeft, seenSince()];
 
     if (from.every((value, index) => value === chosen.from[index])) {
         return chosen.tiles;
@@ -112,7 +111,7 @@ export function peekTiles(state = store.state) {
     const shown = state.sessions.filter(
         (session) =>
             !session.archived &&
-            session.id !== state.conversationId &&
+            session.id !== open &&
             (session.busy ||
                 session.waiting ||
                 busyAgents(session) > 0 ||
@@ -282,8 +281,8 @@ function sendScreen() {
     );
 }
 
-// Each connection to the server starts without tiles (a session switch reconnects, as does a restart): say again
-// which are on screen.
+// Each connection to the server starts without tiles (a reconnect or a restart; a session switch keeps the connection):
+// say again which are on screen.
 store.subscribe((state) => {
     if (state.streamId !== lastStream) {
         lastStream = state.streamId;
@@ -291,7 +290,7 @@ store.subscribe((state) => {
     }
 });
 
-document.addEventListener("visibilitychange", () => {
+onPageVisibility(() => {
     settle(hidden() ? 0 : SETTLE_MS);
 });
 
@@ -456,6 +455,14 @@ function PeekLine({ line }) {
             return html`<div class="peek-line cmd">
                 <span class="peek-mark">${">_"}</span>
                 <span class="peek-text">${line.command}${" "}<${Status} status=${line.status} /></span>
+            </div>`;
+        case "presented":
+            // An input an extension presents: its label and summary, as the transcript's folded line.
+            return html`<div class="peek-line presented">
+                <span class="peek-mark">›</span>
+                <span class="peek-text">
+                    <b>${line.label}</b>${line.summary && html` · ${line.summary}`}
+                </span>
             </div>`;
         case "note":
             return html`<div class="peek-line faint">
@@ -630,7 +637,7 @@ function AgentRows({ agents, compact }) {
                 title="See them all on the subagents board"
                 onClick=${() =>
                     store.set({
-                        board: true,
+                        board: "subagents",
                         drawer: false,
                         page: null,
                         boardFocus: more[0].conversationId,

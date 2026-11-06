@@ -14,6 +14,8 @@ The version goes up only when a change breaks something that modules use. Additi
 
 Since 0.21.0, document definitions should name `checkpointWhen` in every `defineDoc` or `defineDocFamily` call. When it is missing, Pi Pocket supplies `checkpointWhen: () => false` for older drop-ins, and logs the module and the document kind. Explicit policies stay as they are. Since 0.21.0 (Pi Durable 1.4), a task must not use `TaskRuntime.sleep()`: it must wait with durable `sleepUntil()` checkpoints.
 
+Since 0.28.0 (Pi 1.5), the main entry of `@earendil-works/pi-ai` does not export TypeBox's `Type`. A drop-in that imports `Type` from it still gets it: Pi Pocket gives drop-ins pi-ai with TypeBox's `Type` added, so their tool schemas stay as they were. New code builds its schemas with `@earendil-works/pi-schema` ([Tools](../tools.md#define-a-tool)). Since then, a watch listener (`api.watchDoc`) gets one call: `watch.start(async (call, context) => …)`, with `call.value`, `call.ops`, and `call.retired` when `call.kind` is `"value"`. A document that is retired does not end its watch with a `null` value any more: the next call has `retired: true`.
+
 ## `pocketApi`
 
 A module can export `pocketApi`: the server module, the browser module, or both.
@@ -75,6 +77,7 @@ Each member in the reference has its own Since line. These parts came together:
 | `pocket.panel` and `pocket.status` (experimental)                                                                                                                 | 0.19.0 |
 | Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental)                                                                   | 0.19.0 |
 | `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                                                                                   | 0.19.0 |
+| `stop` and `archive` on `host.linkedSessions` (experimental)                                                                                                      | 0.28.0 |
 | The session list: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, `sessionSearch`, and `WebRequest.sessions` (experimental)                              | 0.20.0 |
 | `host.registerModelProvider` (experimental)                                                                                                                       | 0.20.0 |
 | `host.fetchPublic` (experimental)                                                                                                                                 | 0.20.0 |
@@ -88,3 +91,10 @@ Each member in the reference has its own Since line. These parts came together:
 | A person's role: `host.roleOf` (experimental)                                                                                                                     | 0.27.0 |
 | The page's scroll position: `scroll` in the `host.browser` snapshot (experimental)                                                                                | 0.27.0 |
 | Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0 |
+| Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0 |
+| How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0 |
+| `host.sessions.start` (experimental)                                                                                                                              | 0.28.0 |
+| Workspace providers: `host.registerWorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0 |
+| Presented inputs: `web.presentEntry` and `pocket.entryPresentation` (experimental)                                                                                | 0.28.0 |
+| Fenced blocks and inline math: `pocket.fence` and `pocket.mathInline` (experimental)                                                                              | 0.28.0 |
+| `answers` from `linkedSessions.send` (experimental)                                                                                                               | 0.28.0 |

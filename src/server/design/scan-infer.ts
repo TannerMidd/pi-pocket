@@ -43,6 +43,8 @@ export function infer(facts: Facts, folder: string): Inferred {
     };
     const { imported } = facts;
 
+    result.sources.push(...facts.figs);
+
     finishImports(imported);
 
     if (imported.count >= 8 || (imported.certain && imported.count > 0)) {
@@ -143,7 +145,14 @@ export function infer(facts: Facts, folder: string): Inferred {
 
     const renamed = new Map<string, string>();
     const tokens = assemble([...book.tokens.values()], renamed);
-    const darkTree = assemble([...book.dark.values()], renamed);
+    // A dark value goes where its token went (`color.blue` beside `color.blue.600` moves down).
+    const darkTree = assemble(
+        [...book.dark.values()].map((entry) => ({
+            ...entry,
+            path: (renamed.get(entry.path.join(".")) ?? entry.path.join(".")).split("."),
+        })),
+        renamed,
+    );
 
     pair(tokens, ["color", "text", "primary"], "{color.bg.page}");
     pair(tokens, ["color", "text", "muted"], "{color.bg.page}");

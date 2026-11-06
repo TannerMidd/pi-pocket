@@ -328,6 +328,14 @@ export class Watches {
             throw new HttpError(400, "Only sessions can watch a pull request.");
         }
 
+        // gh finds the PR through the session's folder: a workspace URI is not a folder here.
+        if (app.workspaceScheme(app.cwdOf(asking)) !== undefined) {
+            throw new HttpError(
+                400,
+                "Pull request watches are not available for remote workspaces.",
+            );
+        }
+
         const person = app.config.userById(personId ?? meta.createdBy ?? "");
 
         if (person === undefined || person.role === "viewer") {

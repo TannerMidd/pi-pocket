@@ -7,6 +7,7 @@ import { useBack } from "./back.js";
 import { jumpToEntry } from "./chat.js";
 import { fingerprint, firstLine, hunkRows, markRanges, parseDiff } from "./diff-parse.js";
 import { highlight, highlightLines, langOf } from "./highlight.js";
+import { personStorage } from "./person-storage.js";
 import { branchAvailable } from "./sheets/branch.js";
 import { actions, attempt, canSteer, notify, openSheet, store } from "./store.js";
 import { html, Icon, Loader, openFile, shortPath } from "./ui.js";
@@ -770,18 +771,18 @@ function WrapToggle() {
 
 // ─── Review: every change in the folder ───────────────────────────────────────────────
 
-const VIEWED_KEY = "pocket.viewed";
+const VIEWED_KEY = "viewed";
 
 function readViewed(id) {
     try {
-        return JSON.parse(localStorage.getItem(`${VIEWED_KEY}.${id}`)) ?? {};
+        return JSON.parse(personStorage.get(`${VIEWED_KEY}.${id}`)) ?? {};
     } catch {
         return {};
     }
 }
 
 function writeViewed(id, viewed) {
-    localStorage.setItem(`${VIEWED_KEY}.${id}`, JSON.stringify(viewed));
+    personStorage.set(`${VIEWED_KEY}.${id}`, JSON.stringify(viewed));
 }
 
 /** How long after the conversation moves on the changes are read again: soon when quiet, less often while Pi works. */

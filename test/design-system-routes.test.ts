@@ -8,6 +8,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { CheckReport } from "../src/server/design/system-types.ts";
 import { ArtifactAssetDoc, ArtifactBodyDoc, ArtifactsDoc } from "../src/server/docs.ts";
+import { findBrowser } from "../src/server/browser/discovery.ts";
 import { createHandler } from "../src/server/http.ts";
 import {
     cleanChange,
@@ -441,7 +442,11 @@ test("what a browser sends is cut to a change before it goes to the engine", () 
     );
 });
 
-test("a check of a design answers with a report that has a fixed shape, for those who steer", async () => {
+test("a check of a design answers with a report that has a fixed shape, for those who steer", async (t) => {
+    if (findBrowser() === undefined) {
+        return t.skip("no Chromium-based browser on this machine");
+    }
+
     const checked = await call("owner", "system/check", {
         id: "ferry",
         colorScheme: "light",
@@ -496,7 +501,11 @@ test("a check of a design answers with a report that has a fixed shape, for thos
     assert.equal((await call("owner", "system/check", { id: "../ferry" })).status, 400);
 });
 
-test("one tap fixes the exact matches: a new version with var() for each literal that is a token's, once for each key", async () => {
+test("one tap fixes the exact matches: a new version with var() for each literal that is a token's, once for each key", async (t) => {
+    if (findBrowser() === undefined) {
+        return t.skip("no Chromium-based browser on this machine");
+    }
+
     const system = loadDesignSystem(folder)!;
     const hexOf = (name: string) =>
         system.tokens.find((each) => each.name === name)!.modes.light!.hex as string;
@@ -572,7 +581,11 @@ body { margin: 0; padding: 24px; background: ${hexOf("color.bg.canvas")}; font: 
     assert.equal((await call("Vic", "system/fix", { ...body, key: "fix-key-0005" })).status, 404);
 });
 
-test("a fix gives the new version the system's ds/ files as they are now, not the snapshot it was published with", async () => {
+test("a fix gives the new version the system's ds/ files as they are now, not the snapshot it was published with", async (t) => {
+    if (findBrowser() === undefined) {
+        return t.skip("no Chromium-based browser on this machine");
+    }
+
     const system = loadDesignSystem(folder)!;
     const hex = system.tokens.find((each) => each.name === "color.text.primary")!.modes.light!.hex;
     const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Stale</title><link rel="stylesheet" href="ds/tokens.css"><style>h1 { color: ${hex}; }</style></head><body><main data-pid="m"><h1 data-pid="t">Stale</h1></main></body></html>`;
@@ -752,7 +765,11 @@ test("a system with an error is not published or exported, and a revision is a s
     assert.match(revisionOf(system), /^[0-9a-f]{16}$/);
 });
 
-test("the check marks a finding as fixable only when the fix would change it", async () => {
+test("the check marks a finding as fixable only when the fix would change it", async (t) => {
+    if (findBrowser() === undefined) {
+        return t.skip("no Chromium-based browser on this machine");
+    }
+
     // Two rules set the color for one element: no place is certain to be its own, so the fix skips it.
     const content = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Two</title><style>.a p, .b p { color: #1c1e26; } .b p { color: #1c1e26; }</style></head><body><main><div class="a"><p>One</p></div></main></body></html>`;
 

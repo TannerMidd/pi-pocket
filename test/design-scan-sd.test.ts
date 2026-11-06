@@ -242,6 +242,9 @@ test("references that double a token's text at each level stop at a limit (the h
     const chain = Array.from({ length: 24 }, (_, i) => [`c${i + 1}`, { $value: `{c${i}}{c${i}}` }]);
     const entries = new Map<string, Entry>();
 
-    flatten(Object.fromEntries([["c0", { $value: "ab" }], ...chain]), entries, { left: 100 });
+    flatten(Object.fromEntries([["c0", { $value: "ab" }], ...chain]), entries, {
+        left: 100,
+        over: false,
+    });
     assert.equal(new Mode(entries).valueOf("c24"), undefined);
 });

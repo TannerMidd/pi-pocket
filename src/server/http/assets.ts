@@ -24,7 +24,18 @@ export const VENDOR: Record<string, string> = {
     "htm.mjs": vendor("htm", "dist", "htm.module.js"),
     "marked.mjs": vendor("marked", "lib", "marked.esm.js"),
     "purify.mjs": vendor("dompurify", "dist", "purify.es.mjs"),
+    // Loaded on demand by the diagrams extension (`extensions/diagrams/`), not by the app.
+    "pele.mjs": vendor("pele", "dist", "pele.js"),
+    "katex.mjs": vendor("katex", "dist", "katex.mjs"),
 };
+
+/**
+ * KaTeX's stylesheet, and its fonts: its rules name them as `fonts/KaTeX_*.woff2`, which resolves
+ * to `/vendor/fonts/`.
+ */
+export const KATEX_CSS = vendor("katex", "dist", "katex.min.css");
+export const KATEX_FONT = /^KaTeX_[A-Za-z0-9-]+\.woff2$/;
+export const katexFont = (name: string) => vendor("katex", "dist", "fonts", name);
 
 export const TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
@@ -39,6 +50,8 @@ export const TYPES: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
     ".woff2": "font/woff2",
     ".pdf": "application/pdf",
     ".txt": "text/plain; charset=utf-8",
@@ -239,7 +252,7 @@ function preloads(imports: Record<string, string>): string[] {
 }
 
 /** The app page, with its content security policy, and the modules it loads listed for the browser to fetch at once. */
-export function serveApp(response: ServerResponse): void {
+export function serveApp(response: ServerResponse, icon: string | null = null): void {
     let body: string;
 
     try {
@@ -248,6 +261,14 @@ export function serveApp(response: ServerResponse): void {
         send(response, 404, "Not found");
 
         return;
+    }
+
+    // The home-screen icon in the colors this browser chose, in the page as it is served (`http/icon-route.ts`).
+    if (icon !== null) {
+        body = body.replace(
+            '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />',
+            () => `<link rel="apple-touch-icon" href="${icon}" />`,
+        );
     }
 
     // The policy is of the page as it is stored: links are not scripts, and add nothing to it.

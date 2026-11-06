@@ -37,6 +37,7 @@ const SHORTCUTS = [
             ["@", "Mention a file or folder"],
             ["!", "Run a command (!! keeps it from Pi)"],
             ["↑", "In an empty box: what you sent before"],
+            ["Mod Enter", "Send the other way: queue when Steer is chosen, steer when Queue is"],
             ["Ctrl R", "Search what you sent before"],
             ["Alt V", "Dictate into the message box, or stop (where the browser can)"],
             ["Esc Esc", "Stop Pi while it works"],

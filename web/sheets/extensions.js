@@ -390,6 +390,13 @@ export function ExtensionsSheet() {
     <//>`;
 }
 
+/** Claude subscription billing: what the owner must know before it is on, and a line while it is. */
+const CLAUDE_BILLING = "anthropic-subscription.ts";
+const CLAUDE_RISK =
+    "Anthropic's terms forbid using Claude through scripts or other automated means, except with an API key or where Anthropic explicitly allows it. Its help pages say third-party apps can use your subscription limits, but its servers often bill such requests as extra usage. This makes Pi Pocket's requests look like Claude Code's. Anthropic could refuse them, bill them, or act on your account. Turn it on only if you accept that risk.";
+const CLAUDE_ON =
+    "On at your own risk: Anthropic's terms and its help pages disagree on using a subscription in third-party apps.";
+
 /** Built-in modules' marks, by file; drop-ins show their first letter. */
 const ICONS = {
     "prompt.ts": "chat",
@@ -426,7 +433,6 @@ export function ExtensionsContent({
     before = null,
     beforeCount = 0,
     between = null,
-    show = null,
 }) {
     const { me } = store.state;
     const owner = me?.role === "owner";
@@ -438,7 +444,6 @@ export function ExtensionsContent({
     const [confirmOn, setConfirmOn] = useState(null);
     // The rows opened to show their settings and details, by file.
     const [open, setOpen] = useState(new Set());
-    const [builtInOpen, setBuiltInOpen] = useState(show === "built-in");
     const guardCancel = useRef(null);
     const guardSwitch = useRef(null);
     // What the gallery installed, by module file: read after the list, and never in the way of it.
@@ -510,8 +515,9 @@ export function ExtensionsContent({
             return;
         }
 
-        // A drop-in runs with the owner's rights: it asks first, in its own row, not in a dialog over the app.
-        if (module.source === "drop-in" && !module.enabled) {
+        // A drop-in runs with the owner's rights, and Claude subscription billing has risks of its own: each asks first,
+        // in its own row, not in a dialog over the app.
+        if ((module.source === "drop-in" || module.file === CLAUDE_BILLING) && !module.enabled) {
             setConfirmOn(confirmOn === module.file ? null : module.file);
 
             return;
@@ -580,7 +586,7 @@ export function ExtensionsContent({
                     ${module.source === "drop-in" && html`<span class="ext-row-by mono">${module.file}</span>`}
                     <${Icon} name="down" size=${14} class="ext-row-chevron" />
                 </span>
-                ${module.summary && html`<span class="ext-row-desc">${summaryOf(module)}</span>`}
+                ${module.summary && html`<span class="ext-row-desc" title=${summaryOf(module)}>${summaryOf(module)}</span>`}
                 ${module.error && html`<span class="ext-row-meta warn">Did not load</span>`}
                 ${installed?.revoked && html`<span class="ext-row-meta warn">The gallery revoked this version</span>`}
                 ${installed?.update && html`<span class="ext-row-meta accent">An update is ready</span>`}
@@ -598,6 +604,11 @@ export function ExtensionsContent({
                 }
             </div>
             ${note?.warn && html`<div class="ext-row-under small warn">${note.text}</div>`}
+            ${
+                module.file === CLAUDE_BILLING &&
+                module.enabled &&
+                html`<div class="ext-row-under small warn">${CLAUDE_ON}</div>`
+            }
             ${
                 guard &&
                 html`<div class="ext-row-under">
@@ -651,7 +662,13 @@ export function ExtensionsContent({
                 confirmOn === module.file &&
                 !module.enabled &&
                 html`<div class="ext-confirm ext-row-under" role="group" aria-label=${`Turn on ${module.title}?`}>
-                    <span>It runs inside the server with your rights, in every session. Turn it on only if you trust its code.</span>
+                    <span>
+                        ${
+                            module.file === CLAUDE_BILLING
+                                ? CLAUDE_RISK
+                                : "It runs inside the server with your rights, in every session. Turn it on only if you trust its code."
+                        }
+                    </span>
                     <div class="sheet-actions">
                         <button class="button small" onClick=${() => setConfirmOn(null)}>Not now</button>
                         <button
@@ -717,6 +734,17 @@ export function ExtensionsContent({
         return html`<div class="extension-management hub">
             <${SafeMode} />
             ${problem && html`<div class="error-box">${problem}</div>`}
+            ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
+            ${
+                builtIn.length > 0 &&
+                html`<section class="ext-section ext-builtins">
+                    <div class="ext-section-head">
+                        <h3 class="ext-section-title">Built in <span>${builtIn.length}</span></h3>
+                        <span class="muted small">${on} on, ${builtIn.length - on} off</span>
+                    </div>
+                    <div class="ext-list">${builtIn.map(row)}</div>
+                </section>`
+            }
             ${
                 (beforeCount > 0 || yours.length > 0) &&
                 html`<section class="ext-section">
@@ -726,22 +754,6 @@ export function ExtensionsContent({
                 </section>`
             }
             ${between}
-            ${!data && !problem && html`<${Loader} label="Loading extensions" />`}
-            ${
-                builtIn.length > 0 &&
-                html`<details
-                    class="ext-section ext-builtins"
-                    open=${builtInOpen || needle !== "" || builtIn.some((module) => module.error)}
-                    onToggle=${(event) => setBuiltInOpen(event.currentTarget.open)}
-                >
-                    <summary>
-                        <h3 class="ext-section-title">Built in <span>${builtIn.length}</span></h3>
-                        <span class="muted small">${on} on, ${builtIn.length - on} off</span>
-                        <${Icon} name="down" size=${14} />
-                    </summary>
-                    <div class="ext-list">${builtIn.map(row)}</div>
-                </details>`
-            }
             ${
                 data &&
                 needle &&

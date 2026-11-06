@@ -35,6 +35,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Sessions that one session starts:** no limit, since 0.19.0. Before 0.19.0, 10 at most. A linked session cannot start sessions.
 - **Messages between the sessions of a team:** no limit, since 0.19.0. Before 0.19.0, 20 at most since a person last wrote in one of them. The spend limit of the session that started the team still applies.
 - **A message:** 20,000 characters at most.
+- **A final answer's report** to the session that started it: the first 6,000 characters, and how much more is in the session. Since 0.28.0.
 - **A title:** one line of 120 characters at most.
 - **A call's key:** Pi Pocket keeps the record of a `key` for 30 days, and the records of the last 1,000 calls of each session.
 
@@ -143,7 +144,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **A toast's message:** cut to 500 characters.
 - **A card:** Pi Pocket keeps the last 30,000 characters.
 - **Runs of one person:** 4 at the same time, in all sessions together. Pi Pocket refuses a fifth run until one ends.
-- **Kept requests:** Pi Pocket keeps the request ids of the last 100 finished runs of each person in each session. The same text sent again from the same tab finds the first run only while its id is kept.
+- **Kept requests:** Pi Pocket keeps the request ids of the last 100 finished runs of each person in each session. The same text sent again from the same browser finds the first run only while its id is kept.
 
 ## Cleanups
 
@@ -170,6 +171,17 @@ All the numbers that limit a module, in one place. Each group links to the guide
 - **Each list in `declares`:** 100 names at most. An extension, tool, hook, or section name is 64 characters at most. A route's path is 200 characters at most. A command, with its scope, is 80 characters at most.
 - **`revoked`:** 50 commits at most, each with a reason of 300 characters at most.
 - **Looks for revoked versions:** two times a day, while extensions from the index are installed.
+
+## Presentations
+
+[Adding to the app](../app.md)
+
+- **Presentations of one module:** 32 at most.
+- **A kind:** `x.<module>.<name>`. `<name>` is 1 to 64 characters: a letter or a digit, then letters, digits, `_`, and `-`.
+- **A label:** one line of 80 characters at most, with no control characters.
+- **A `userPrefix`:** up to 200 characters, at least 3 of them not spaces, and not starting with `[` (the app's own inputs nobody typed do). It cannot start another module's `userPrefix`, or start with one, nor another of the same module's.
+- **`entry.data.summary`:** whitespace collapsed to one line, and past 200 characters cut to 199 and "…".
+- **Modes this browser remembers:** 256 kinds; past that, the one chosen longest ago is forgotten. Each is `open`, `folded`, or `hidden`.
 
 ## Themes
 

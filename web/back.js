@@ -161,8 +161,9 @@ addEventListener("popstate", (event) => {
         setTimeout(() => delete document.documentElement.dataset.backShown, 500);
     }
 
-    // The person went back or forward: the route first, then the layers above the entry it landed on. Forward goes
-    // further from the session list; anything else counts as back.
+    // The person went back or forward: the layers above the entry it landed on close first, on the route they were
+    // opened over, then the route changes (a panel it shows again stays open). Forward goes further from the session
+    // list; anything else counts as back.
     const back = event.state?.pocket?.back;
 
     if (location.pathname !== shown) {
@@ -178,7 +179,6 @@ addEventListener("popstate", (event) => {
 
     shownBack = back;
 
-    routeListener();
     const at = event.state?.pocket?.layers ?? 0;
 
     while (layers.length > at) {
@@ -187,6 +187,8 @@ addEventListener("popstate", (event) => {
         layer.gone = true;
         layer.close();
     }
+
+    routeListener();
 
     // Forward onto layers that are gone: back down to the ones open.
     if (at > layers.length) {
@@ -323,6 +325,9 @@ export const canGoBack = () =>
 /** Back, as the system's back does it: for gestures of the app's own. */
 export const goBack = () => history.back();
 
+/** What `pushRoute` kept on the route's entry under `key`, or undefined. */
+export const routeState = (key) => history.state?.pocket?.[key];
+
 // ─── Routes ───────────────────────────────────────────────────────────────────────
 
 /** The session list's route. */
@@ -391,9 +396,10 @@ export const routeSliding = () => routeWindow !== null && matchMedia("(max-width
 
 /**
  * Show a route: its own entry, after the layers above this one, so back from it comes back here. With `replace`, it
- * takes this route's place instead. The history entry follows the app a moment later while open layers come off.
+ * takes this route's place instead. `state` is kept on the entry (and its layers' entries) for the route's owner to read
+ * with `routeState`. The history entry follows the app a moment later while open layers come off.
  */
-export function pushRoute(path, { replace = false } = {}) {
+export function pushRoute(path, { replace = false, state: kept = {} } = {}) {
     // There already, or on the way (history lags while layers come off): nothing more to write.
     if (path === shown && !replace) {
         return;
@@ -411,7 +417,7 @@ export function pushRoute(path, { replace = false } = {}) {
         const here = history.state?.pocket?.back;
         const back =
             path === HOME ? 0 : replace ? here : typeof here === "number" ? here + 1 : undefined;
-        const state = { pocket: { layers: 0, back } };
+        const state = { pocket: { ...kept, layers: 0, back } };
 
         shownBack = back;
 
@@ -422,6 +428,23 @@ export function pushRoute(path, { replace = false } = {}) {
         }
     });
     // Layers still open (a panel that stays) get their entries again, above the new route.
+    settle();
+}
+
+/**
+ * Back to the route under this one (the one a route was opened over), which the app shows already: as `pushRoute` goes
+ * to a new route, but back, so that no entry of the route left stays to come back to. The layers still open (a sheet
+ * that stays) get their entries again over it. Should history not land there, the app follows the address.
+ */
+export function popRoute(path) {
+    homeRequest++;
+    heading("back");
+    moved();
+    shown = path;
+    queue(async () => {
+        await traverse(-(depth() + 1), { follow: true });
+        shownBack = history.state?.pocket?.back;
+    });
     settle();
 }
 

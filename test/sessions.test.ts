@@ -3,6 +3,7 @@ import {
     type App,
     cleanUp,
     context,
+    fakeTab,
     lastText,
     modelTexts,
     newSession,
@@ -373,6 +374,45 @@ test("a new context hides earlier messages from Pi but keeps them for people, wi
     assert.doesNotMatch(said, /apricot/);
     assert.match(said, /We were talking about fruit\./);
     assert.equal((await ofKind(id, "pi.user")).length, 2, "the transcript keeps everything");
+});
+
+test("an open session's view starts again at a new context, as Pi's context does", async () => {
+    const id = await newSession(app);
+    const tab = fakeTab(id, owner(app));
+    const order = () => (tab.field("order") as number[] | undefined) ?? [];
+
+    await app.attach(tab.client);
+
+    try {
+        await say(app, id, "remember the word apricot");
+        await until(() => order().length === 2, "the first exchange in the view");
+        const earlier = order();
+
+        await app.commands.reset(id, owner(app), "We were talking about fruit.");
+        await say(app, id, "what now");
+        const conversation = (await app.harness.conversation(id, context))!;
+        const active = (await conversation.context(context)).entries.map((entry) => entry.id);
+        const room = await app.room(id);
+
+        try {
+            // Pi Durable's view holds the whole history: the room reads the active context again at the reset.
+            await until(
+                () =>
+                    JSON.stringify(room.value!.entries.map((entry) => entry.id)) ===
+                    JSON.stringify(active),
+                "the room to hold the new context",
+            );
+            assert.equal(room.value!.entries[0]!.kind, "pi.reset");
+            await until(
+                () => order().length > 0 && !order().some((each) => earlier.includes(each)),
+                "the tab's order to start at the new context",
+            );
+        } finally {
+            app.releaseRoom(room);
+        }
+    } finally {
+        app.detach(tab.client);
+    }
 });
 
 test("instructions for Pi go into every request of a session and can be cleared", async () => {

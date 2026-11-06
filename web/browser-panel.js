@@ -14,7 +14,7 @@ import {
     toggleBrowser,
 } from "./browser.js";
 import { api, attempt, canSteer, notify, panelsBeside, store } from "./store.js";
-import { APPLE, html, Icon, Spinner } from "./ui.js";
+import { APPLE, dragWidth, html, Icon, Spinner } from "./ui.js";
 
 const WIDTH_KEY = "pocket.browserWidth";
 
@@ -660,31 +660,19 @@ function ResizeEdge() {
         }
 
         event.preventDefault();
-        const root = document.documentElement;
-        const right = event.currentTarget.parentElement.getBoundingClientRect().right;
-        let width = 0;
+        const panel = event.currentTarget.parentElement;
+        const right = panel.getBoundingClientRect().right;
 
-        root.classList.add("resizing");
-
-        const move = (each) => {
-            width = Math.round(Math.min(innerWidth - 420, Math.max(360, right - each.clientX)));
-            root.style.setProperty("--browser-w", `${width}px`);
-        };
-
-        const stop = () => {
-            root.classList.remove("resizing");
-            removeEventListener("pointermove", move);
-            removeEventListener("pointerup", stop);
-            removeEventListener("pointercancel", stop);
-
-            if (width > 0) {
+        dragWidth(event, {
+            element: panel,
+            property: "flex-basis",
+            widthAt: (each) =>
+                Math.round(Math.min(innerWidth - 420, Math.max(360, right - each.clientX))),
+            done: (width) => {
+                document.documentElement.style.setProperty("--browser-w", `${width}px`);
                 localStorage.setItem(WIDTH_KEY, String(width));
-            }
-        };
-
-        addEventListener("pointermove", move);
-        addEventListener("pointerup", stop);
-        addEventListener("pointercancel", stop);
+            },
+        });
     };
 
     const reset = () => {

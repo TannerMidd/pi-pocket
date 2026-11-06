@@ -14,20 +14,31 @@ import {
     writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { arr, bool, obj, opt, str, union, unknown } from "@earendil-works/pi-schema";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
 import { TOKEN_TYPES, boundedText } from "./tokens-base.ts";
 import { checkTokensBlock, scanProject, scanReport, scanRoot } from "./scan.ts";
+import type { Draft } from "./scan-scales.ts";
 import type { DesignSystem, SystemChange } from "./system-types.ts";
 import { readDesignFile } from "./tokens-io.ts";
+import { localFolder, REMOTE_DESIGN } from "./files.ts";
+import {
+    planResync,
+    resyncChange,
+    resyncReport,
+    scanPathLabel,
+    type ResyncPlan,
+} from "./tokens-resync.ts";
 import {
     defaultModeName,
     loadDesignSystem,
+    loadDesignSystemWithRaw,
     problemLine,
     systemSummary,
     writeDesignSystem,
 } from "./tokens.ts";
+import { literal, record } from "../tool-schema.ts";
 
 export { boundedText, utf8Cut } from "./tokens-base.ts";
 
@@ -199,6 +210,7 @@ const ACTIONS = [
     "read",
     "scan",
     "init",
+    "resync",
     "set",
     "component",
     "guidelines",
@@ -208,13 +220,14 @@ const ACTIONS = [
 
 const PARAMETER_ACTIONS: Record<string, readonly string[]> = {
     file: ["read"],
-    path: ["scan", "init"],
+    path: ["scan", "init", "resync"],
     fromScan: ["init"],
     tokens: ["init"],
     modes: ["init"],
     name: ["init"],
     description: ["init"],
     replace: ["init"],
+    apply: ["resync"],
     changes: ["set", "init"],
     remove: ["set"],
     slug: ["component"],
@@ -264,99 +277,119 @@ function checkParameters(action: string, args: Record<string, unknown>): void {
     }
 }
 
+/**
+ * The plan of a resync for a scan's draft, and the system as the folder has it now. It reads `.pi/design/` again because
+ * the scan runs in between and the folder can change while it does: an edit made in that time is in the plan, so a write
+ * keeps it instead of writing the scan's token over it.
+ */
+export function resyncPlan(cwd: string, draft: Draft): { system: DesignSystem; plan: ResyncPlan } {
+    const loaded = loadDesignSystemWithRaw(cwd);
+
+    if (loaded === undefined || loaded.system.tokens.length === 0) {
+        throw new Error(
+            "The design system changed while the scan ran: .pi/design/ is gone or has no tokens now, so resync has nothing to keep. Run resync again.",
+        );
+    }
+
+    return { system: loaded.system, plan: planResync(loaded.system, draft, loaded.raw) };
+}
+
 export function designSystemTool(): ToolRegistration {
     return defineTool({
         name: "design_system",
         description: [
-            'The project\'s design system in .pi/design/: DTCG tokens (tokens.json), one file for each other mode (tokens.dark.json), component specimens (components/<slug>.html), and guidelines.md. It compiles to dist/ (tokens.css, tailwind.css, components.css, resolved JSON). A design links <link rel="stylesheet" href="ds/tokens.css"> and uses only var(--…) values. Every change is checked first; nothing is written when it adds an error.',
+            'The project\'s design system in .pi/design/: DTCG tokens (tokens.json), a file for each other mode (tokens.dark.json), component specimens (components/<slug>.html), and guidelines.md. It compiles to dist/ (tokens.css, tailwind.css, components.css, resolved JSON). A design links <link rel="stylesheet" href="ds/tokens.css"> and uses only var(--…) values. Every change is checked first; nothing is written when it adds an error; a disk error partway through saving can leave the files before it saved.',
             "Examples:",
             '- read: {"action":"read"} or {"action":"read","file":"dist/tokens.css"}',
             '- scan: {"action":"scan","path":"src"} (a draft from the style files; saves nothing)',
             '- init: {"action":"init","fromScan":true} or {"action":"init","tokens":{…},"modes":{"dark":{…}}}',
+            '- resync: {"action":"resync"} (a dry run; apply true writes it)',
             '- set: {"action":"set","changes":[{"token":"color.accent.default","value":"#7aa2f7"}]}',
             '- component: {"action":"component","slug":"button","content":"…"}',
             '- guidelines: {"action":"guidelines","content":"# Voice…"}',
             '- validate: {"action":"validate"}',
             '- compile: {"action":"compile"}',
-            'Tokens: groups nest; a token is {"$value":…,"$type":…}; $type is inherited from the group; a reference is "{color.gray.900}". A mode file holds only the tokens that change. --color-bg-surface is color.bg.surface. A text color can declare "$extensions":{"com.pi-pocket":{"contrast":{"on":"{color.bg.surface}","min":4.5}}}.',
+            'Tokens: groups nest; a token is {"$value":…,"$type":…}; $type is inherited from the group; a reference is "{color.gray.900}". A mode file holds only what changes. --color-bg-surface is color.bg.surface. A text color can declare "$extensions":{"com.pi-pocket":{"contrast":{"on":"{color.bg.surface}","min":4.5}}}.',
         ].join("\n"),
-        parameters: Type.Object({
-            action: Type.Union(
-                [
-                    Type.Literal("read"),
-                    Type.Literal("write"),
-                    Type.Literal("scan"),
-                    Type.Literal("init"),
-                    Type.Literal("set"),
-                    Type.Literal("validate"),
-                    Type.Literal("compile"),
-                    Type.Literal("component"),
-                    Type.Literal("guidelines"),
-                ],
-                { description: "What to do." },
-            ),
-            file: Type.Optional(Type.String({ description: used("file", "A file to show.") })),
-            path: Type.Optional(
-                Type.String({ description: used("path", "A folder to scan, inside the session.") }),
-            ),
-            fromScan: Type.Optional(
-                Type.Boolean({ description: used("fromScan", "Save the scan's draft.") }),
-            ),
-            tokens: Type.Optional(
-                Type.Record(Type.String(), Type.Unknown(), {
-                    description: used("tokens", "The whole tokens.json."),
-                }),
-            ),
-            modes: Type.Optional(
-                Type.Record(Type.String(), Type.Unknown(), {
-                    description: used("modes", "Mode files by name: {dark:{…}}."),
-                }),
-            ),
-            name: Type.Optional(Type.String({ description: used("name", "The system's name.") })),
-            description: Type.Optional(
-                Type.String({ description: used("description", "What the system is for.") }),
-            ),
-            replace: Type.Optional(
-                Type.Boolean({ description: used("replace", "Replace a system that exists.") }),
-            ),
-            changes: Type.Optional(
-                Type.Array(
-                    Type.Object({
-                        token: Type.String({ description: "A path: color.bg.surface." }),
-                        value: Type.Unknown({
-                            description:
-                                'A $value ("#7aa2f7", "16px", "{color.blue.500}", 600, or a DTCG object: { colorSpace, components } for a color, { value, unit } for a dimension) or a whole token.',
-                        }),
-                        mode: Type.Optional(Type.String({ description: "Default: tokens.json." })),
-                        type: Type.Optional(
-                            Type.String({
-                                description: `The $type, if new: ${TOKEN_TYPES.join(", ")}.`,
-                            }),
-                        ),
-                        description: Type.Optional(Type.String()),
+        parameters: obj(
+            {
+                action: union(
+                    [
+                        literal("read"),
+                        literal("write"),
+                        literal("scan"),
+                        literal("init"),
+                        literal("resync"),
+                        literal("set"),
+                        literal("validate"),
+                        literal("compile"),
+                        literal("component"),
+                        literal("guidelines"),
+                    ],
+                    { description: "What to do." },
+                ),
+                file: opt(str({ description: used("file", "A file to show.") })),
+                path: opt(str({ description: used("path", "A folder to scan.") })),
+                fromScan: opt(bool({ description: used("fromScan", "Save the scan's draft.") })),
+                tokens: opt(
+                    record(unknown(), {
+                        description: used("tokens", "The whole tokens.json."),
                     }),
-                    { maxItems: 200, description: used("changes", "Tokens to add or change.") },
                 ),
-            ),
-            remove: Type.Optional(
-                Type.Array(
-                    Type.Object({ token: Type.String(), mode: Type.Optional(Type.String()) }),
-                    { maxItems: 200, description: used("remove", "Tokens to delete.") },
+                modes: opt(
+                    record(unknown(), {
+                        description: used("modes", "Mode files by name: {dark:{…}}."),
+                    }),
                 ),
-            ),
-            slug: Type.Optional(Type.String({ description: used("slug", "A component: button.") })),
-            drop: Type.Optional(
-                Type.Boolean({ description: used("drop", "Delete the component.") }),
-            ),
-            content: Type.Optional(
-                Type.String({
-                    description: used(
-                        "content",
-                        'Markdown, or a specimen: <script type="application/json" id="pocket-component">{"name","states"}</script>, a <style> of var(--…) rules, and a <template data-state="default"> for each state.',
+                name: opt(str({ description: used("name", "The system's name.") })),
+                description: opt(
+                    str({ description: used("description", "What the system is for.") }),
+                ),
+                replace: opt(
+                    bool({ description: used("replace", "Replace a system that exists.") }),
+                ),
+                apply: opt(bool({ description: used("apply", "Write it.") })),
+                changes: opt(
+                    arr(
+                        obj(
+                            {
+                                token: str({ description: "A path: color.bg.surface." }),
+                                value: unknown({
+                                    description:
+                                        'A $value ("#7aa2f7", "16px", "{color.blue.500}", 600, a DTCG color object, { value, unit }) or a whole token.',
+                                }),
+                                mode: opt(str({ description: "Default: tokens.json." })),
+                                type: opt(
+                                    str({
+                                        description: `The $type, if new: ${TOKEN_TYPES.join(", ")}.`,
+                                    }),
+                                ),
+                                description: opt(str()),
+                            },
+                            { open: true },
+                        ),
+                        { maxItems: 200, description: used("changes", "Tokens to add or change.") },
                     ),
-                }),
-            ),
-        }),
+                ),
+                remove: opt(
+                    arr(obj({ token: str(), mode: opt(str()) }, { open: true }), {
+                        maxItems: 200,
+                        description: used("remove", "Tokens to delete."),
+                    }),
+                ),
+                slug: opt(str({ description: used("slug", "A component: button.") })),
+                drop: opt(bool({ description: used("drop", "Delete the component.") })),
+                content: opt(
+                    str({
+                        description: used(
+                            "content",
+                            'Markdown, or a specimen: <script type="application/json" id="pocket-component">{"name","states"}</script>, a <style> of var(--…) rules, and a <template data-state="default"> for each state.',
+                        ),
+                    }),
+                ),
+            },
+            { open: true },
+        ),
         // Not read-only: most actions change the session's files. Not replay-safe either, on purpose: a call that a
         // restart stopped comes back interrupted instead of running and writing twice.
         execute: async (args, api, context) => {
@@ -368,6 +401,10 @@ export function designSystemTool(): ToolRegistration {
                 throw new Error(
                     "This session has no working directory, so the design system has no place.",
                 );
+            }
+
+            if (localFolder(cwd) === undefined) {
+                throw new Error(REMOTE_DESIGN);
             }
 
             const change = (value: SystemChange, headline: string) =>
@@ -415,7 +452,7 @@ export function designSystemTool(): ToolRegistration {
 
                     if (existing && args.replace !== true) {
                         throw new Error(
-                            "A design system already exists in .pi/design/. Change it with set, component, or guidelines; or pass replace: true to start over (the old tokens are overwritten).",
+                            "A design system already exists in .pi/design/. Change it with set, component, or guidelines, or with resync when the code changed; or pass replace: true to start over (the old tokens are overwritten).",
                         );
                     }
 
@@ -459,6 +496,82 @@ export function designSystemTool(): ToolRegistration {
                     });
 
                     return text(afterWrite(system, "Saved the design system."));
+                }
+
+                case "resync": {
+                    const system = loadDesignSystem(cwd);
+
+                    if (system === undefined) {
+                        throw new Error(
+                            "There is no design system to resync (.pi/design/ is absent). Make one with scan, then init with fromScan: true; resync updates a system that exists.",
+                        );
+                    }
+
+                    if (system.tokens.length === 0) {
+                        const broken = system.problems.find(
+                            (problem) =>
+                                problem.level === "error" && problem.file === "tokens.json",
+                        );
+
+                        throw new Error(
+                            broken === undefined
+                                ? "The design system has no tokens yet, so resync has nothing to keep. Save one with init (fromScan: true saves what the code defines now); after that, resync keeps it up to date."
+                                : `tokens.json cannot be read (${problemLine(broken)}), so resync has nothing to keep. Fix the file, or save a new system with init.`,
+                        );
+                    }
+
+                    const scan = await scanProject(scanRoot(cwd, args.path));
+                    // The scan runs between the two loads, and the folder can change while it does: resyncPlan reads
+                    // the system again, so an edit made in that time is in the plan and the write keeps it.
+                    const { system: current, plan } = resyncPlan(cwd, scan.draft);
+                    const path = scanPathLabel(args.path);
+                    const report = resyncReport({
+                        name: current.name,
+                        path,
+                        files: scan.files.length,
+                        partial: scan.partial,
+                        saved: args.apply === true,
+                        plan,
+                    });
+
+                    if (args.apply !== true) {
+                        // An apply of a scan with no style files is refused below: do not offer one.
+                        if (scan.files.length === 0) {
+                            return text(
+                                `${report}\n\nNothing was saved. The scan read no style files in ${path}, so an apply would be refused: point path at the folder with the project's styles.`,
+                            );
+                        }
+
+                        const call = JSON.stringify({
+                            action: "resync",
+                            apply: true,
+                            ...(args.path === undefined ? {} : { path: args.path }),
+                        });
+
+                        return text(
+                            `${report}\n\nNothing was saved. ${plan.added.length === 0 ? `There is nothing to add; call design_system ${call} to record the scan's source in tokens.json.` : `Call design_system ${call} to add ${plan.added.length} token${plan.added.length === 1 ? "" : "s"}; nothing else changes.`}`,
+                        );
+                    }
+
+                    // A scan of the wrong folder would stamp provenance over a system it cannot see.
+                    if (scan.files.length === 0) {
+                        throw new Error(
+                            `The scan found no style files in ${path}, so resync cannot see the code's tokens. Point path at the folder with the project's styles.`,
+                        );
+                    }
+
+                    const written = writeDesignSystem(
+                        cwd,
+                        resyncChange(plan, {
+                            path,
+                            scannedAt: new Date().toISOString(),
+                            tokens: plan.scanned,
+                        }),
+                    );
+
+                    return text(
+                        `${report}\n\n${afterWrite(written, plan.added.length === 0 ? "Saved the design system: no token was added; the scan's source is recorded in tokens.json." : `Saved the design system: added ${plan.added.length} token${plan.added.length === 1 ? "" : "s"}, and nothing else changed.`)}`,
+                    );
                 }
 
                 case "set": {

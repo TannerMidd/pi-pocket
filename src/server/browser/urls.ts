@@ -130,6 +130,9 @@ export function normalizeUrl(
     }
 }
 
+/** Why a file URL is refused in a session on a workspace URI: the browser runs on this machine, its files elsewhere. */
+export const REMOTE_FILES = "A remote session's files are not on this machine: open a web address.";
+
 /** An address as the address bar shows it: without `http://` and a lone trailing slash. */
 export function displayUrl(url: string): string {
     if (url === "" || url === "about:blank") {

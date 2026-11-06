@@ -2,7 +2,7 @@
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { BrowserError } from "../browser/cdp.ts";
 import { localServers } from "../browser/local-servers.ts";
-import { displayUrl, normalizeUrl } from "../browser/urls.ts";
+import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
 import { viewportFrom } from "../browser/viewport.ts";
 import { HttpError } from "../errors.ts";
 import { type ApiRequest, json, readJson } from "./io.ts";
@@ -161,6 +161,10 @@ export async function browserRoutes(
                 ? "That is not an address: try localhost:5173, example.com, or a file path."
                 : "That is not a web address: try localhost:5173 or example.com.",
         );
+    }
+
+    if (target?.startsWith("file:") && app.workspaceScheme(app.cwdOf(id)) !== undefined) {
+        throw new HttpError(400, REMOTE_FILES);
     }
 
     if (action === "viewport" && viewport === undefined) {
