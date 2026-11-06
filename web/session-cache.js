@@ -11,7 +11,7 @@
 
 const NAME = "pocket-sessions";
 
-/** How long an open may take before the cache counts as nothing kept: some browsers never answer (old WebKit, storage being deleted). */
+/** How long an open may take before the cache counts as nothing kept: some browsers never answer. */
 const OPEN_MS = 1000;
 
 let opening;
