@@ -931,6 +931,21 @@ export interface LinkedSessions {
         key: string,
     ): Promise<{ archived: boolean; repeating: number }>;
     /**
+     * Sets whether `source`, as a lead, takes the final answers of the sessions it started when their runs end.
+     * `take: false` turns them off for every one: old, new, archived. Then `send` from `source` returns
+     * `answers: false`, and its message asks the target to send the answer. `take: true` turns them back on, the
+     * default. `take` says the state now. It needs the same access as `archive`, on `source` itself. A repeat with
+     * the same `key` changes nothing again. A `take` that is not a boolean throws a `TypeError`. An older Pi Pocket
+     * has no `reports`: check for it.
+     * @since 0.29.0
+     * @experimental
+     */
+    reports(
+        source: ConversationId,
+        request: { take: boolean },
+        key: string,
+    ): Promise<{ take: boolean }>;
+    /**
      * The sessions linked to `source`, at any distance, that the person Pi works for there can see.
      * @since 0.14.0
      * @experimental

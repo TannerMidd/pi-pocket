@@ -37,6 +37,11 @@ export type SessionMeta = {
     forkedFrom?: { id: number; entryId?: number };
     /** The session that started this one (`linked-sessions.ts`): a link only, which gives no access and owns nothing. */
     linkedFrom?: { id: number };
+    /**
+     * False: this session, as a lead, takes no run-end answers from the sessions it started (`linked-sessions.ts`,
+     * `reports`), and a message from it asks the target to send its answer. Absent: it takes them.
+     */
+    linkedReports?: false;
     /** The most Pi may spend here, in dollars, subagents included. */
     budget?: number;
     /** The git worktree the session works in, when it has one of its own. */
@@ -110,11 +115,13 @@ export const LinkedSessionCallsDoc = defineDoc<{
             by?: string;
             at: number;
             /**
-             * What a stop or an archive returned, so a repeat gives that and changes nothing again. `stopping`: the stop
-             * has not finished.
+             * What a stop, an archive or a reports switch returned, so a repeat gives that and changes nothing again.
+             * `stopping`: the stop has not finished. A reports switch names its own session in `conversationId`.
              */
             result?:
-                { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
+                | { busy: boolean; stopping?: boolean }
+                | { archived: boolean; repeating: number }
+                | { take: boolean };
         }
     >;
 }>({

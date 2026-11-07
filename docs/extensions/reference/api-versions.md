@@ -98,3 +98,4 @@ Each member in the reference has its own Since line. These parts came together:
 | Presented inputs: `web.presentEntry` and `pocket.entryPresentation` (experimental)                                                                                | 0.28.0 |
 | Fenced blocks and inline math: `pocket.fence` and `pocket.mathInline` (experimental)                                                                              | 0.28.0 |
 | `answers` from `linkedSessions.send` (experimental)                                                                                                               | 0.28.0 |
+| `linkedSessions.reports`: a lead turns off run-end answers (experimental)                                                                                         | 0.29.0 |

@@ -516,6 +516,20 @@ Since 0.28.0 · Experimental
 
 Archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives. `archived` in the result says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them. It needs the same access as `send`. An older Pi Pocket has no `archive`.
 
+#### `linkedSessions.reports`
+
+```ts
+reports(
+    source: ConversationId,
+    request: { take: boolean },
+    key: string,
+): Promise<{ take: boolean }>;
+```
+
+Since 0.29.0 · Experimental
+
+Sets whether `source`, as a lead, takes the final answers of the sessions it started when their runs end. By default it takes them. With `take: false`, no run end of a session it started reaches it: old ones, new ones, archived ones, from any start path. `send` from `source` then returns `answers: false`, and its message asks the target to send the answer. With `take: true`, the answers come back. `take` in the result says the state now. The switch is stored on the session `source`. It needs the same access as `archive`, but on `source` itself: the turn, no plan mode, and room under the spend limit. A repeat with the same `key` changes nothing again and returns the first result, even with other arguments. A `take` that is not a boolean throws a `TypeError`, and nothing is stored. An older Pi Pocket has no `reports`: check for it.
+
 #### `linkedSessions.list`
 
 ```ts
