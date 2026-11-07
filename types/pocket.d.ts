@@ -94,6 +94,18 @@ export interface Module {
     pocketApi?: number;
 }
 
+/**
+ * Pi Pocket's options on a tool definition, beside Pi Durable's own. See the Tools guide.
+ * @since 0.29.0
+ */
+export interface ToolOptions {
+    /**
+     * Give this tool to every subagent, even one started with a tool list, while its extension runs there.
+     * @since 0.29.0
+     */
+    readonly subagents?: "always";
+}
+
 // ─── The host ────────────────────────────────────────────────────────────────
 
 /**

@@ -120,7 +120,7 @@ export const PAGES = {
         "SwitchProps",
     ],
     "command-context.md": ["Command", "CommandContext", "CommandResult"],
-    "types.md": ["Module", "Person", "Role", "NoticeLevel"],
+    "types.md": ["Module", "ToolOptions", "Person", "Role", "NoticeLevel"],
 };
 
 function meta(node) {
