@@ -870,8 +870,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
         ),
         tools: opt(
             arr(str(), {
-                description:
-                    "spawn only: tool names, plus tools marked for every subagent. Default: yours.",
+                description: "spawn only: the tool names it may use. Default: yours.",
             }),
         ),
     };

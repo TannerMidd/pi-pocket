@@ -142,6 +142,37 @@ test("an explicit list also gets tools marked for every subagent, but not other 
     assert.ok(!offered.includes("test_optional"));
 });
 
+test("the model is not told about marked tools in the tool prompt or spawn result", async () => {
+    const parent = await newSession(app);
+    const parentAgent = await (await app.conversation(parent)).agent(context);
+    const subagent = parentAgent.tools.find((tool) => tool.name === "subagent")!;
+    const parameters = subagent.parameters as {
+        properties: { tools: { description: string } };
+    };
+
+    assert.equal(
+        parameters.properties.tools.description,
+        "spawn only: the tool names it may use. Default: yours.",
+    );
+    assert.doesNotMatch(subagent.description, /marked|always/i);
+    const { agent } = await spawn(["read", "write"], parent);
+    const messages = (await (await app.conversation(parent)).context(context)).messages;
+    const results = JSON.stringify(messages.filter((message) => message.role === "toolResult"));
+    const sections = messages
+        .filter((message) => message.role === "system")
+        .map((message) => (message as { sections?: Record<string, string> }).sections?.subagents)
+        .filter((section) => section !== undefined)
+        .join("\n");
+
+    assert.match(sections, /The subagent tool hands work/);
+    assert.doesNotMatch(sections, /marked|always|test_waiting|test_script/i);
+    assert.match(results, /Started helper on/);
+    assert.doesNotMatch(results, /marked|always|test_waiting|test_script/i);
+    assert.ok(agent.tools.some((tool) => tool.name === "read"));
+    assert.ok(agent.tools.some((tool) => tool.name === "write"));
+    assert.ok(agent.tools.some((tool) => tool.name === "test_always"));
+});
+
 test("a marked tool that waits for search is offered at once", async () => {
     const { child, agent, state } = await spawn([], undefined, "Call the waiting tool.");
     const messages = (await (await app.conversation(child)).context(context)).messages;
