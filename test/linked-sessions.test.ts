@@ -23,7 +23,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { LinkedSessionCallsDoc, TurnsDoc } from "../src/server/docs.ts";
+import { LinkedSessionCallsDoc, type SessionMeta, TurnsDoc } from "../src/server/docs.ts";
+import { LinkedSessions } from "../src/server/linked-sessions.ts";
 
 let app: App;
 
@@ -1035,4 +1036,59 @@ test("a key that switched reports cannot archive or stop, and an archive's key c
         archived: true,
         repeating: 0,
     });
+});
+
+test("watch decides at the run's end, with nothing in flight: a lead with its answers off, or archived, gets no report", async () => {
+    // A controlled watch, its listener called directly: it returns the report's work when one goes, and nothing when
+    // the lead takes none. No timing: what goes is decided before any wait.
+    const metas: Record<number, Partial<SessionMeta>> = { 1: {}, 2: { linkedFrom: { id: 1 } } };
+    let listener: ((run: unknown) => unknown) | undefined;
+    const notices: string[] = [];
+    const fake = {
+        events: {
+            on: (event: string, each: (run: unknown) => unknown) => {
+                assert.equal(event, "run.ended");
+                listener = each;
+
+                return () => {};
+            },
+        },
+        sessionMeta: (id: ConversationId) => metas[Number(id)],
+        harness: {
+            commit: () => Promise.reject(new Error("no store in this test")),
+        },
+        notice: (_level: string, text: string) => notices.push(text),
+    };
+
+    new LinkedSessions(fake as never).watch();
+    const end = (outcome: string) =>
+        listener!({ conversationId: 2, session: 2, outcome, failure: undefined });
+
+    for (const outcome of ["done", "failed", "aborted"]) {
+        const report = end(outcome);
+
+        assert.ok(report instanceof Promise, `the lead takes it by default (${outcome})`);
+        await report;
+    }
+
+    metas[1] = { linkedReports: false };
+
+    for (const outcome of ["done", "failed", "aborted"]) {
+        assert.equal(end(outcome), undefined, `no report with answers off (${outcome})`);
+    }
+
+    metas[1] = { archived: true };
+    assert.equal(end("done"), undefined, "an archived lead takes none");
+    // A child's own archive changes nothing: the switch on the lead decides.
+    metas[1] = { linkedReports: false };
+    metas[2] = { linkedFrom: { id: 1 }, archived: true };
+    assert.equal(end("done"), undefined);
+    metas[1] = {};
+    const back = end("done");
+
+    assert.ok(back instanceof Promise, "turned back on, the lead takes it");
+    await back;
+    // A subagent's run in the child is never a report.
+    assert.equal(listener!({ conversationId: 2, session: 3, outcome: "done" }), undefined);
+    assert.equal(notices.length, 4, "each report that went tried the store, and said so");
 });
