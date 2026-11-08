@@ -507,8 +507,8 @@ export class RunnerLink {
         }
 
         if (this.#socket !== undefined && this.#socket !== socket) {
-            // The same computer connected again before the old link was noticed gone: the new one wins.
-            this.#socket.removeAllListeners("close");
+            // The same computer connected again before the old link was noticed gone: the new one wins. The old one's
+            // close handler still runs, to stop its pings; it changes nothing else once this is no longer its socket.
             this.#socket.close(CLOSE.replaced, "Replaced by a newer connection");
         }
 
@@ -808,9 +808,9 @@ export class RunnerLink {
     /**
      * Ask the computer whether a session may start there: its runner asks its person, or answers at once as its
      * settings say. Throws 403 with the computer's reason when it says no, and 409 when it is offline or does not
-     * answer in time (the person was away). A runner older than asking is not asked.
+     * answer in time (the person was away). `asker`: the id of the person whose start waits, who may see and answer
+     * its question (`Runners.mayAnswer`).
      */
-    /** `asker`: the id of the person whose start waits, who may see and answer its question (`Runners.mayAnswer`). */
     async confirm(
         question: Omit<Confirm, "type" | "id">,
         signal?: AbortSignal,
@@ -1562,6 +1562,13 @@ export class Runners {
 
         this.#links.get(id)?.remove();
         this.#links.delete(id);
+
+        for (const key of this.#envs.keys()) {
+            if (key.startsWith(`${id}\0`)) {
+                this.#envs.delete(key);
+            }
+        }
+
         this.#config.removeRunner(id);
         this.log(`${runner.name} was removed.`);
         this.changed();

@@ -544,4 +544,51 @@ describe("people granted a computer", () => {
             (error: unknown) => error instanceof HttpError && error.status === 403,
         );
     });
+    it("keeps the server up when a computer is removed while its session is open, and still archives it", async () => {
+        const linked = app.runners.redeem(app.runners.makeCode("Spare", owner(app).id).code);
+        const spare = new Runner({
+            link: { server: address, ...linked },
+            version: "test",
+            cwd: there,
+            log: () => {},
+            retryMs: [50, 100],
+            settings: () => ({ confirm: false, folders: [there] }),
+            ask: () => Promise.resolve({ allow: true }),
+        });
+        const thrown: unknown[] = [];
+        const record = (error: unknown) => thrown.push(error);
+
+        process.on("uncaughtException", record);
+        spare.start();
+        spare.finished.catch(() => {});
+
+        try {
+            await until(() => app.runners.link(linked.id).online, "the spare computer online");
+
+            const { id: spareSession } = await app.commands.createSession(owner(app), {
+                cwd: there,
+                runner: linked.id,
+            });
+            const open = fakeTab(spareSession, owner(app));
+
+            await app.attach(open.client);
+            await until(() => open.events.some((event) => event.event === "view"), "the view");
+            app.runners.remove(linked.id);
+            // The view is pushed again on a timer (\`room.ts\`): give it time to run.
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            await app.commands.updateSession(spareSession, owner(app), { archived: true });
+            assert.deepEqual(thrown, []);
+            await assert.rejects(
+                Promise.resolve().then(() => app.runnerScope(spareSession)),
+                (error: unknown) =>
+                    error instanceof HttpError &&
+                    error.status === 403 &&
+                    /was removed/.test(error.message),
+            );
+        } finally {
+            process.off("uncaughtException", record);
+            // It ended itself when the server removed it: stopping it again says so.
+            await spare.stop().catch(() => {});
+        }
+    });
 });

@@ -719,13 +719,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             const body = await readJson<{ request?: unknown }>(request);
             const action = body.request as Record<string, unknown> | undefined;
 
-            if (
-                action?.action === "settings" &&
-                app.runners.require(second).createdBy !== user.id
-            ) {
+            // Its settings, saved folders, and approved sessions: the linker's alone (`docs/runners.md`, Sharing).
+            if (app.runners.require(second).createdBy !== user.id) {
                 throw new HttpError(
                     403,
-                    "Only the person who linked this computer can change its settings.",
+                    "Only the person who linked this computer can change its settings and approvals.",
                 );
             }
 

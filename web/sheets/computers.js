@@ -354,6 +354,8 @@ function Approvals({ runner }) {
 
     const action = (request) =>
         attempt(() => api(`runners/${encodeURIComponent(runner.id)}/permissions`, { request }));
+    // Only the person who linked it changes its approvals (`docs/runners.md`, Sharing); others see them.
+    const mine = runner.createdBy === store.state.me?.id;
 
     return html`<div class="runner-pane">
         <div class="group-title">Saved folders</div>
@@ -365,9 +367,15 @@ function Approvals({ runner }) {
             ${state.folders.map(
                 (folder) => html`<div class="runner-permission-row" key=${folder}>
                     <code>${folder}</code>
-                    <button class="button small ghost" onClick=${() => action({ action: "remove-folder", folder })}>
-                        Remove
-                    </button>
+                    ${
+                        mine &&
+                        html`<button
+                            class="button small ghost"
+                            onClick=${() => action({ action: "remove-folder", folder })}
+                        >
+                            Remove
+                        </button>`
+                    }
                 </div>`,
             )}
         </div>
@@ -382,13 +390,20 @@ function Approvals({ runner }) {
                             ${session.person} · ${APPROVED_BY[session.approvedBy] ?? session.approvedBy} · ${expiry(session)}
                         </div>
                     </div>
-                    <button class="button small ghost" onClick=${() => action({ action: "revoke", session: session.id })}>
-                        Revoke
-                    </button>
+                    ${
+                        mine &&
+                        html`<button
+                            class="button small ghost"
+                            onClick=${() => action({ action: "revoke", session: session.id })}
+                        >
+                            Revoke
+                        </button>`
+                    }
                 </div>`,
             )}
         </div>
         ${
+            mine &&
             state.sessions.length > 0 &&
             html`<div>
                 <button

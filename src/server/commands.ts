@@ -996,14 +996,18 @@ export class Commands {
             );
         }
 
-        // Archived on another computer: its attached files are removed from that computer's temporary folder.
+        // Archived on another computer: its attached files are removed from that computer's temporary folder. A
+        // computer that was removed, or a person who may no longer use it, leaves them: the archive is done either way.
         const runner = patch.archived === true ? app.runnerOf(id) : undefined;
 
         if (runner !== undefined) {
-            void clearUploads(
-                app.runners.env(runner, app.cwdOf(id), app.runnerScope(id)),
-                app.runnerScope(id).id,
-            );
+            try {
+                const scope = app.runnerScope(id);
+
+                void clearUploads(app.runners.env(runner, app.cwdOf(id), scope), scope.id);
+            } catch {
+                // Nothing to clear there.
+            }
         }
 
         // Archiving leaves its repeating schedules running: the person is told how many.

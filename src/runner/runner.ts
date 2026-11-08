@@ -692,7 +692,7 @@ export class Runner {
         ws.on("unexpected-response", (_request, response) => {
             if (response.statusCode === 401) {
                 this.#fail(
-                    `${link.server} no longer accepts this computer's key. Run pi-pocket runner serve. Type n to replace the saved link.`,
+                    `${link.server} no longer accepts this computer's key. To link again, run pi-pocket runner and choose Link again.`,
                 );
             } else {
                 this.#log(
@@ -793,7 +793,7 @@ export class Runner {
 
             if (code === CLOSE.removed) {
                 this.#fail(
-                    `${link.server} removed this computer. To link again, run pi-pocket runner serve. Type n to replace the saved link.`,
+                    `${link.server} removed this computer. To link again, run pi-pocket runner and choose Link again.`,
                 );
 
                 return;

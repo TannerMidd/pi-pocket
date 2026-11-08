@@ -1715,6 +1715,16 @@ export class PocketApp {
      * All subagents use their root session permission. A worktree keeps its source folder's permission: the worktree
      * is in that permission's own runner folder. `cwd` checks a move before it is saved. Old sessions ask once.
      */
+    /**
+     * A session's permission id on its computer (`runnerScope`), without the access check: for what shows or cleans up,
+     * never for what runs there.
+     */
+    runnerPermission(id: ConversationId): string {
+        const root = this.rootOf(id);
+
+        return this.#sessions[String(root)]?.runnerPermission ?? String(root);
+    }
+
     runnerScope(id: ConversationId, cwd?: string) {
         const root = this.rootOf(id);
         const meta = this.#sessions[String(root)];
@@ -1813,22 +1823,6 @@ export class PocketApp {
         }, context);
     }
 
-    /** Refuse what works on this machine's disk for a conversation whose tools run on another computer. */
-    requireLocal(id: ConversationId, what: string): void {
-        const runner = this.runnerOf(id);
-
-        if (runner !== undefined) {
-            throw new HttpError(
-                409,
-                `This session runs on ${this.runners.name(runner)}. ${what} is not available for sessions on another computer yet.`,
-            );
-        }
-    }
-
-    /**
-     * A folder's environment, with what extensions add to each command and hide from its output in this session. A
-     * session on another computer gets that computer's, never this machine's: when it is offline, what uses it waits.
-     */
     /**
      * Note that files a message brought are being copied to session `id`'s computer (`commands.ts`): its turns and
      * tool calls wait for the copy (the Harness's `env`). Copies of one session run one after another.
@@ -1845,6 +1839,10 @@ export class PocketApp {
         });
     }
 
+    /**
+     * A folder's environment, with what extensions add to each command and hide from its output in this session. A
+     * session on another computer gets that computer's, never this machine's: when it is offline, what uses it waits.
+     */
     #wrapped(id: ConversationId, cwd: string): ExecutionEnv {
         const runner = this.runnerOf(id);
         const base =
@@ -2597,10 +2595,6 @@ export class PocketApp {
     }
 
     /**
-     * People invited to one session see only that session and its subagents. A PiP is its own person's alone: its tools
-     * act as them, so anyone else who could write to it would act as them too.
-     */
-    /**
      * Whether `user` may have session `meta` as far as its computer goes: not on one, theirs, or shared by the owner
      * (`sharedRunnerSessions`). Then the usual rules decide, as for any session.
      */
@@ -2623,6 +2617,13 @@ export class PocketApp {
             return;
         }
 
+        if (this.config.runnerById(runner) === undefined) {
+            throw new HttpError(
+                403,
+                "The computer this session ran on was removed from this server, so it cannot run there.",
+            );
+        }
+
         const starter =
             meta.createdBy === undefined ? undefined : this.config.userById(meta.createdBy);
 
@@ -2636,6 +2637,10 @@ export class PocketApp {
         );
     }
 
+    /**
+     * People invited to one session see only that session and its subagents. A PiP is its own person's alone: its tools
+     * act as them, so anyone else who could write to it would act as them too.
+     */
     canSee(user: User, id: ConversationId): boolean {
         const root = this.rootOf(id);
         const meta = this.#sessions[String(root)];
@@ -3413,7 +3418,8 @@ export class PocketApp {
                 : {
                       runner: this.runnerOf(room.id)!,
                       runnerName: this.runners.name(this.runnerOf(room.id)!),
-                      runnerPermission: this.runnerScope(room.id).id,
+                      // Read, not checked: a view that throws would end the room's push (`room.ts`).
+                      runnerPermission: this.runnerPermission(room.id),
                       // Offline is offline: the view says so, and what is sent waits for it.
                       runnerOnline: this.runners.link(this.runnerOf(room.id)!).online,
                   }),
@@ -4699,7 +4705,7 @@ export class PocketApp {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
-            // Runners reconnect to the next server; their daemons keep running for the grace period.
+            // Runners reconnect to the next server; their daemons keep running meanwhile (offline is offline).
             this.runners.close();
             this.alerts.close();
             this.themes.close();
