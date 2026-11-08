@@ -406,6 +406,8 @@ export class Schedules {
             next?: number;
             every?: Repeat;
             zone?: string;
+            /** The version the change was made from (its `taskId`): one changed since is refused. */
+            version?: string;
             by: { id: string; name: string };
         },
     ): Promise<Schedule> {
@@ -438,6 +440,10 @@ export class Schedules {
 
             if (item === undefined) {
                 throw new HttpError(404, "No such scheduled message");
+            }
+
+            if (change.version !== undefined && change.version !== String(item.taskId)) {
+                throw new HttpError(409, "Someone changed this schedule while you edited it.");
             }
 
             const zone = change.zone ?? item.zone;

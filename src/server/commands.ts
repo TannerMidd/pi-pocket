@@ -1937,13 +1937,20 @@ export class Commands {
         id: ConversationId,
         user: User,
         scheduleId: string,
-        request: { text?: unknown; next?: unknown; every?: unknown; zone?: unknown },
+        request: {
+            text?: unknown;
+            next?: unknown;
+            every?: unknown;
+            zone?: unknown;
+            version?: unknown;
+        },
     ): Promise<Schedule> {
         const app = this.#app;
 
         app.requireSee(user, id);
         await app.requireDriver(id, user);
         const zone = optionalText(request.zone, "zone");
+        const version = optionalText(request.version, "version");
 
         if (zone !== undefined && !knownZone(zone)) {
             throw new HttpError(400, `Unknown time zone ${zone}`);
@@ -1956,6 +1963,7 @@ export class Commands {
             text: optionalText(request.text, "text") ?? "",
             ...at,
             ...(zone === undefined ? {} : { zone }),
+            ...(version === undefined ? {} : { version }),
             by: user,
         });
         const when =

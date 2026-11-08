@@ -485,6 +485,25 @@ test("a schedule can be changed: its text and time, from once to a repeat and ba
     });
 
     assert.equal(soon.every, undefined);
+    // A save made from an older copy (another person changed it since) is refused, not written over theirs.
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, {
+            text: "stale",
+            next: app.now() + 60_000,
+            version: String(repeat.taskId),
+        }),
+        { status: 409, message: /changed this schedule/ },
+    );
+    assert.equal(
+        (
+            await app.commands.updateSchedule(id, owner(app), once.id, {
+                text: "new text",
+                next: soon.next,
+                version: String(soon.taskId),
+            })
+        ).text,
+        "new text",
+    );
     assert.equal(soon.zone, "UTC", "the zone stays when none is given");
     await restartLater(11);
     await until(

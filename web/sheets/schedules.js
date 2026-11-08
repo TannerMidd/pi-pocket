@@ -130,8 +130,17 @@ function problem(draft, next, now) {
         return Number.isNaN(next) ? "Pick a date and a time." : "That time has passed.";
     }
 
-    if (draft.kind === "interval" && !(Number(draft.amount) > 0)) {
-        return "Say how often.";
+    if (draft.kind === "interval") {
+        const minutes = Math.round(Number(draft.amount) * UNITS[draft.unit]);
+        const shortest = store.state.server?.scheduleRepeatMinutes ?? 1;
+
+        if (!(minutes >= 1)) {
+            return "Say how often.";
+        }
+
+        if (minutes < shortest) {
+            return `It can repeat at most every ${shortest} ${shortest === 1 ? "minute" : "minutes"}.`;
+        }
     }
 
     if (draft.kind === "days" && (draft.at === "" || draft.days.length === 0)) {
@@ -144,7 +153,10 @@ function problem(draft, next, now) {
 /** One schedule set up, or changed: its message, and when it goes out, once or on repeat. */
 function ScheduleEditor({ schedule, onDone }) {
     const [draft, setDraft] = useState(() => draftOf(schedule));
+    // The version the draft started from: one changed since (by someone else) is not overwritten.
+    const [version] = useState(schedule?.version);
     const [saving, setSaving] = useState(false);
+    const changed = schedule !== undefined && version !== schedule.version;
     const now = useSecond(true);
     const set = (change) => setDraft((old) => ({ ...old, ...change }));
     const { next, send } = timing(draft, schedule, now);
@@ -158,7 +170,11 @@ function ScheduleEditor({ schedule, onDone }) {
             setSaving(true);
 
             try {
-                const body = { text: draft.text.trim(), ...send };
+                const body = {
+                    text: draft.text.trim(),
+                    ...send,
+                    ...(version === undefined ? {} : { version }),
+                };
 
                 await (schedule === undefined
                     ? actions.addSchedule(body)
@@ -204,15 +220,14 @@ function ScheduleEditor({ schedule, onDone }) {
         </label>
         <div class="field">
             <span class="label">When</span>
-            <div class="segmented sched-kinds" role="tablist">
+            <div class="segmented sched-kinds" role="group" aria-label="When">
                 ${[
                     ["once", "Once"],
                     ["days", "On days"],
                     ["interval", "Every…"],
                 ].map(
                     ([kind, label]) => html`<button
-                        role="tab"
-                        aria-selected=${draft.kind === kind}
+                        aria-pressed=${draft.kind === kind}
                         class=${draft.kind === kind ? "on" : ""}
                         onClick=${() => set({ kind })}
                     >
@@ -330,6 +345,13 @@ function ScheduleEditor({ schedule, onDone }) {
                 Set in ${schedule.zone}. Saving uses this device's time zone, ${deviceZone()}.
             </p>`
         }
+        ${
+            changed &&
+            html`<p class="sched-changed" role="alert">
+                <${Icon} name="reload" size=${13} />
+                <span>This schedule was changed while you edited it. Cancel and open it again to see it.</span>
+            </p>`
+        }
         <div class="sched-actions">
             ${
                 schedule !== undefined &&
@@ -339,7 +361,7 @@ function ScheduleEditor({ schedule, onDone }) {
             <button class="button ghost" onClick=${onDone}>Cancel</button>
             <button
                 class="button primary"
-                disabled=${wrong !== undefined || saving}
+                disabled=${wrong !== undefined || saving || changed}
                 onClick=${save}
             >
                 ${schedule === undefined ? "Schedule" : "Save"}
@@ -463,8 +485,7 @@ export function SchedulesSheet() {
                 <${Icon} name="clock" size=${22} />
                 <p>Nothing is scheduled.</p>
                 <p class="muted small">
-                    Pi gets a scheduled message at its time, also when nobody is here, and the people
-                    in this session get a notification when it is done.
+                    ${"Pi gets a scheduled message at its time, also when nobody is here, and the people in this session get a notification when it is done."}
                 </p>
             </div>`
         }

@@ -2022,7 +2022,17 @@ function fitStatus(line, again = false) {
         return;
     }
 
-    const key = line.textContent;
+    // A tip shown above an item (the schedules' countdown) changes every second, but not the line's width.
+    const key = [...line.childNodes]
+        .map((node) =>
+            node instanceof Element
+                ? [...node.querySelectorAll("[role=tooltip]")].reduce(
+                      (text, tip) => text.replace(tip.textContent, ""),
+                      node.textContent,
+                  )
+                : node.textContent,
+        )
+        .join("");
 
     // Hidden, it has no width to fit: the observer hears it show.
     if ((!again && fitted.get(line) === key) || line.clientWidth === 0) {
@@ -2324,11 +2334,14 @@ function SchedulesPill({ schedules }) {
         class="schedules-now"
         data-part="schedules-now"
         aria-label=${schedulesTitle(schedules)}
-        onMouseEnter=${() => setHover(true)}
-        onMouseLeave=${() => setHover(false)}
-        onFocus=${() => setHover(true)}
+        onPointerEnter=${(event) => event.pointerType === "mouse" && setHover(true)}
+        onPointerLeave=${() => setHover(false)}
+        onFocus=${(event) => event.currentTarget.matches(":focus-visible") && setHover(true)}
         onBlur=${() => setHover(false)}
-        onClick=${() => openSheet({ type: "schedules" })}
+        onClick=${() => {
+            setHover(false);
+            openSheet({ type: "schedules" });
+        }}
     >
         <${Icon} name="clock" size=${11} />
         <span class="num">${schedules.length}</span>

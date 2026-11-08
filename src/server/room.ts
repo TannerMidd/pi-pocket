@@ -846,9 +846,11 @@ export class Room {
             plan: this.plan,
             schedules: Object.values(this.schedules)
                 .sort((a, b) => a.next - b.next)
-                // `every` and `zone` as data too, for the Schedules sheet's editor.
-                .map(({ id, text, next, every, zone, by, runs, createdAt }) => ({
+                // `every` and `zone` as data too, for the Schedules sheet's editor, and `version`, which each edit
+                // changes (its task), so a save made from an older copy is refused instead of undoing that edit.
+                .map(({ id, text, next, every, zone, by, runs, createdAt, taskId }) => ({
                     id,
+                    version: String(taskId),
                     text,
                     next,
                     ...(every === undefined ? {} : { repeat: describeRepeat(every), every }),

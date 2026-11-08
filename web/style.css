@@ -2038,8 +2038,12 @@ kbd {
 }
 
 /* Light themes' magenta can be faint as text on their ground: toward the foreground, as a thought's mark is. */
-:root[data-mode="light"] :is(.linked-mark, .linked-tag) {
+:root[data-mode="light"] :is(.linked-mark, .linked-tag, .status-line .schedules-now) {
     color: color-mix(in oklab, var(--spark) 60%, var(--body));
+}
+
+:root[data-mode="light"] .sched-sheet {
+    --sched: color-mix(in oklab, var(--spark) 60%, var(--body));
 }
 
 .linked-name {
@@ -10686,6 +10690,23 @@ textarea.notes {
     color: var(--warn);
 }
 
+.sched-changed {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--r-row);
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 12.5px;
+}
+
+.sched-changed > .icon {
+    flex: none;
+    margin-top: 2px;
+}
+
 .sched-actions {
     display: flex;
     align-items: center;
@@ -16881,11 +16902,13 @@ textarea.notes {
     /* The guard and the review's branch keep their small pills; an invisible layer past each takes a thumb's tap. */
     .status-line .guard,
     .status-line .background-now,
+    .status-line .schedules-now,
     .dr-branch {
         position: relative;
     }
     .status-line .guard::after,
     .status-line .background-now::after,
+    .status-line .schedules-now::after,
     .dr-branch::after {
         content: "";
         position: absolute;
