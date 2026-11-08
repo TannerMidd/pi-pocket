@@ -608,10 +608,14 @@ function ConsolePane({ conversationId, logs, steer, onClose }) {
     </section>`;
 }
 
-/** What shows on a blank page: where to go, with the web servers running on this machine. */
+/**
+ * What shows on a blank page: where to go, with the web servers running on this machine, or, for a session on another
+ * computer (its pages load there), the ports that computer listens on.
+ */
 function StartScreen({ steer }) {
     const [servers, setServers] = useState(null);
     const owner = store.state.me?.role === "owner";
+    const computer = store.state.view.conversation?.runnerName;
 
     useEffect(() => {
         if (!owner) {
@@ -633,7 +637,9 @@ function StartScreen({ steer }) {
         ${
             servers?.length > 0 &&
             html`<div class="browser-servers">
-                <div class="browser-servers-label">Running on this machine</div>
+                <div class="browser-servers-label">
+                    ${computer ? `Listening on ${computer}` : "Running on this machine"}
+                </div>
                 <div class="browser-server-list">
                     ${servers.slice(0, 8).map(
                         (server) => html`<button

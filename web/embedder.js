@@ -3,7 +3,17 @@
 import { callHost, host, hostCan, onHost } from "./host.js";
 import { openPip } from "./pip.js";
 import { sessionMark } from "./sessions.js";
-import { actions, attempt, navigate, notify, onEmbedderNotify, store } from "./store.js";
+import {
+    actions,
+    attempt,
+    canSteer,
+    navigate,
+    notify,
+    onEmbedderNotify,
+    openSheet,
+    scoped,
+    store,
+} from "./store.js";
 
 /** The longest list of pinned sessions the embedder gets: a tray menu shows a few. */
 const MAX_PINNED = 20;
@@ -32,7 +42,35 @@ export function openAddress(address) {
     navigate(match ? Number(match[1]) : null);
 }
 
+/**
+ * New session, as Alt+N starts one: the folder sheet, for someone signed in who may start sessions. The app asks for
+ * it from its menu, dock, tray, or a `pi-pocket://new` link, and shows its window first.
+ */
+export function openNewSession() {
+    // A page the app just opened may not know yet who is signed in: wait for that.
+    if (store.state.me === undefined) {
+        const stop = store.subscribe((state) => {
+            if (state.me !== undefined) {
+                stop();
+                openNewSession();
+            }
+        });
+
+        return;
+    }
+
+    if (!store.state.me || !canSteer() || scoped()) {
+        return;
+    }
+
+    openSheet({ type: "cwd", mode: "new" });
+}
+
 if (host !== null) {
+    if (hostCan("newSession")) {
+        onHost("newSession", () => openNewSession());
+    }
+
     if (hostCan("notify")) {
         onEmbedderNotify((message) => callHost("notify", message));
         onHost("open", (event) => openAddress(event.url));

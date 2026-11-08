@@ -410,7 +410,7 @@ test(
             "Open in new tab",
             "Copy link",
             "Rename",
-            "Fork",
+            "Fork…",
             "Share",
             "Select",
             "Archive",
@@ -585,6 +585,172 @@ test(
         await until(async () => (await shown()).kids === 2, "unfolded");
     },
 );
+
+test("runner marks keep each state and the computer's folder color", real, async () => {
+    await fresh();
+
+    const [other] = folderSessions as [ConversationId];
+    const cases = [
+        { shape: "seen", state: "idle" },
+        { shape: "fresh", state: "done", unread: true },
+        { shape: "working", state: "working", busy: true },
+        { shape: "waiting", state: "waiting", waiting: true },
+        { shape: "limited", state: "limited", limited: Date.now() + 60_000 },
+        { shape: "failed", state: "failed", failed: true, unread: true },
+        { shape: "failed seen", state: "failed", failed: true },
+    ];
+
+    for (const each of cases) {
+        await page.evaluate(`
+            const { store } = await import("/store.js");
+            const ids = [${Number(active)}, ${Number(other)}];
+            const each = ${JSON.stringify(each)};
+            store.set({
+                unread: each.unread ? ids : [],
+                sessions: store.state.sessions.map((session) => ids.includes(session.id) ? {
+                    ...session,
+                    cwd: "/project/shared",
+                    runner: session.id === ${Number(active)} ? "test-computer" : undefined,
+                    busy: false,
+                    waiting: false,
+                    limited: undefined,
+                    failed: false,
+                    finishedAt: undefined,
+                    subagents: {},
+                    ...each,
+                } : session),
+            });
+        `);
+        await until(
+            async () =>
+                (await inPage<string>(`
+                    return JSON.stringify(document.querySelector(${JSON.stringify(`${row(active)} .state-mark`)})?.className);
+                `)) === `state-mark remote ${each.shape}`,
+            `the runner's ${each.shape} triangle`,
+        );
+        const shown = await inPage<{
+            state: string;
+            local: string;
+            remoteColor: string;
+            localColor: string;
+            dimensions: string[];
+            box: number[];
+            clip: string;
+            shadow: string;
+        }>(`
+            const { folderColor } = await import("/avatar.js");
+            const row = document.querySelector(${JSON.stringify(row(active))});
+            const mark = row.querySelector(".state-mark");
+            const style = getComputedStyle(mark);
+            const local = document.querySelector(${JSON.stringify(`${row(other)} .state-mark`)});
+            return JSON.stringify({
+                state: row.dataset.state,
+                local: local.className,
+                remoteColor: mark.style.getPropertyValue("--folder"),
+                localColor: local.style.getPropertyValue("--folder"),
+                dimensions: [style.width, style.height],
+                // What it takes in the row: the square's 8px, so names line up.
+                box: [
+                    parseFloat(style.width) + parseFloat(style.marginLeft) + parseFloat(style.marginRight),
+                    parseFloat(style.height) + parseFloat(style.marginTop) + parseFloat(style.marginBottom),
+                ],
+                clip: style.clipPath,
+                shadow: style.boxShadow,
+            });
+        `);
+
+        assert.equal(shown.state, each.state, "data-state does not depend on the computer");
+        assert.equal(shown.local, `state-mark ${each.shape}`, "the server keeps its square");
+        // Larger than the square, which it would look smaller than, in the square's room.
+        assert.deepEqual(shown.dimensions, ["11px", "10px"]);
+        assert.deepEqual(shown.box, [8, 8]);
+        assert.equal(shown.clip, "polygon(50% 0px, 100% 100%, 0px 100%)");
+        assert.equal(shown.shadow, "none", "an inset shadow cannot follow the triangle");
+        assert.notEqual(shown.remoteColor, shown.localColor);
+    }
+
+    const colors = await inPage<{ actual: string[]; expected: string[] }>(`
+        const { folderColor } = await import("/avatar.js");
+        const palette = ["blue", "green", "magenta", "cyan", "orange", "fg-bright"];
+        const inputs = [
+            ["/one/shared", undefined], ["/two/shared/", undefined],
+            ["/one/shared", "test-computer"], ["/two/shared/", "test-computer"],
+            ["/one/shared", "another-computer"], ["/one/shared", undefined],
+            [undefined, undefined], [undefined, "test-computer"],
+        ];
+        const expected = inputs.map(([path, runner]) => {
+            const name = (path ?? "").replace(/\\/+$/, "").split("/").pop();
+            let hash = 0;
+            for (const char of runner ? runner + ":" + name : name) {
+                hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+            }
+            return "var(--o-" + palette[hash % palette.length] + ")";
+        });
+        return JSON.stringify({ actual: inputs.map(([path, runner]) => folderColor(path, runner)), expected });
+    `);
+
+    assert.deepEqual(colors.actual, colors.expected, "the cache keeps computers separate");
+
+    const tile = await inPage<{
+        shape: string;
+        dimensions: string[];
+        animation: string[];
+        corners: string[];
+        reduced: string;
+    }>(`
+        const { h, render } = await import("preact");
+        const { AgentTile } = await import("/agent-tile.js");
+        const host = document.body.appendChild(document.createElement("div"));
+        const motion = document.documentElement.dataset.motion;
+        document.documentElement.dataset.motion = "full";
+        try {
+            render(h(AgentTile, {
+                agent: { conversationId: 99999, name: "Runner agent", state: "working" },
+                runner: "test-computer", folder: "var(--o-blue)", onActivate: () => {},
+            }), host);
+            const mark = host.querySelector(".state-mark");
+            const style = getComputedStyle(mark);
+            const animation = mark.getAnimations({ subtree: true })[0];
+            animation.pause();
+            const corners = [0, 500, 900].map((time) => {
+                animation.currentTime = time;
+                return getComputedStyle(mark, "::before").transform;
+            });
+            const result = {
+                shape: mark.className,
+                dimensions: [style.width, style.height],
+                animation: [
+                    getComputedStyle(mark, "::before").animationName,
+                    getComputedStyle(mark, "::before").animationDuration,
+                    getComputedStyle(mark, "::before").animationTimingFunction,
+                ],
+                corners,
+            };
+            document.documentElement.dataset.motion = "reduced";
+            return JSON.stringify({ ...result, reduced: getComputedStyle(mark, "::before").animationName });
+        } finally {
+            render(null, host);
+            host.remove();
+            if (motion === undefined) {
+                delete document.documentElement.dataset.motion;
+            } else {
+                document.documentElement.dataset.motion = motion;
+            }
+        }
+    `);
+
+    assert.equal(tile.shape, "state-mark remote working");
+    assert.deepEqual(tile.dimensions, ["12px", "11px"]);
+    assert.deepEqual(tile.animation, ["state-corner", "1.2s", "steps(1)"]);
+    // The lit corner moves from the top to the bottom right and bottom left corners of the 12 × 11 triangle.
+    assert.deepEqual(tile.corners, [
+        "matrix(1, 0, 0, 1, 0, 0)",
+        "matrix(1, 0, 0, 1, 3.3, 6.16)",
+        "matrix(1, 0, 0, 1, -3.3, 6.16)",
+    ]);
+    assert.equal(tile.reduced, "none", "reduced motion holds the top corner lit");
+    await fresh();
+});
 
 test(
     "dragging the sidebar's edge changes nothing on the page's root until it ends",

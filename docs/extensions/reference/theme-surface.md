@@ -219,6 +219,8 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 ## States
 
+A session on a linked computer has the class `remote` on its mark and a triangle shape; `data-state` stays the same.
+
 | Where                                              | Attribute                                        | Values                                                                                                                                         |
 | -------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rail-button`                                      | `data-state`                                     | `open` while what it opens shows, `busy` while work it counts goes on; both, or none. Select with `~=`                                         |
