@@ -20,7 +20,7 @@ import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
 import { markdownRevision } from "./markdown-ext.js";
 import { personStorage } from "./person-storage.js";
-import { splitQuote } from "./quote-text.js";
+import { quoteParts } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
 import { Highlighted, InlineArtifact } from "./rich.js";
@@ -865,15 +865,19 @@ function UserMessage({ entry, view, users }) {
     </div>`;
 }
 
+/** A person's message with its quotes (Reply's, or typed as "> …") shown as quotes, each where it was written. */
 function QuotedText({ text }) {
-    const quote = splitQuote(text);
+    const parts = quoteParts(text);
 
-    if (!quote) {
+    if (!parts) {
         return html`<${CodedText} text=${text} />`;
     }
 
-    return html`<blockquote class="reply-quote" data-part="reply-quote">${quote.passage}</blockquote>
-        ${quote.rest && html`<${CodedText} text=${quote.rest} />`}`;
+    return parts.map((part) =>
+        part.quote === undefined
+            ? html`<${CodedText} text=${part.text} />`
+            : html`<blockquote class="reply-quote" data-part="reply-quote">${part.quote}</blockquote>`,
+    );
 }
 
 function Collapsible({ text, limit = 600 }) {

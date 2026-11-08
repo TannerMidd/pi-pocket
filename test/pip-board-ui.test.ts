@@ -299,18 +299,29 @@ test("Board: the session under it stays marked open, and is where it closes to",
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session it was first opened over");
 
-    // Its Reply quote waits under PiP's board, whose box has PiP's own: a Reply there is PiP's, also before PiP's id
-    // comes (after a reload).
-    const STRIP = "document.querySelector('.pane .quote-strip-text')?.textContent ?? null";
-
+    // Its Reply quote, in its box, waits under PiP's board, whose box has PiP's own: a Reply there is PiP's, also before
+    // PiP's id comes (after a reload).
+    await see(`document.querySelector('${BOX}') !== null`, "its box");
+    await type(BOX, "");
     await page.evaluate(`${STORE}.quoteReply('under the board')`);
+    await see(
+        `document.querySelector('${BOX}')?.value === '> under the board\\n\\n'`,
+        "in its box",
+    );
     await page.evaluate(`${PIP}.openPip()`);
     await boarded("PiP over a Reply quote");
-    assert.equal(await inPage(STRIP), null, "not over PiP's box");
+    assert.equal(
+        await inPage(`document.querySelector('.pane .quote-strip-text')`),
+        null,
+        "not over PiP's box",
+    );
     await page.evaluate(`${STORE}.store.set({ pip: null }); ${STORE}.quoteReply('on the board')`);
     assert.equal(await inPage(`${STORE}.store.state.pipQuote?.text ?? null`), "on the board");
     await page.evaluate(`${PIP}.closePip()`);
-    await see(`${STRIP} === 'under the board'`, "the session's quote again");
+    await see(
+        `document.querySelector('${BOX}')?.value === '> under the board\\n\\n'`,
+        "the session's quote again",
+    );
 });
 
 test("Phones: × closes past the Files tile, and PiP opens again without it", real, async () => {
@@ -443,6 +454,7 @@ test("PiP's one box: its words, file, quote, and send on its way move with it", 
             document.querySelector('${where} .pip-attachment-remove')?.disabled ?? null]`);
 
     await fresh("floating");
+    await type(BOX, "");
     await page.evaluate(`${PIP}.quotePip('still red', ${Number(background)})`);
     await floating("in the corner");
     await type(".pip-composer textarea", "half a thought");
@@ -464,7 +476,10 @@ test("PiP's one box: its words, file, quote, and send on its way move with it", 
     await until(async () => lastAsked.includes("still red"), "PiP asked");
     await see(`document.querySelector('.pip-attachment') === null`, "sent with its file");
     assert.equal(await inPage(`window.sends`), 1, "once");
-    assert.equal(await inPage(`${STORE}.store.state.replyQuote?.text`), "still red", "Reply's");
+    await see(
+        `document.querySelector('.composer textarea')?.value === '> still red\\n\\n'`,
+        "Reply's, in the session's box",
+    );
     await page.evaluate(`${PIP}.closePip()`);
 });
 
@@ -549,10 +564,10 @@ test("PiP turned off in Extensions closes the board", real, async () => {
 test("A session's send on its way, its box shown again: once, or all back", real, async () => {
     // Its words, the quote and file with their ×, Dictate, and Send: what is on its way is locked.
     const LOCKS =
-        ".pane .quote-strip button, .pane .files button, .pane .composer-mic, .pane .send-button";
+        ".pane .quote-remove, .pane .files button, .pane .composer-mic, .pane .send-button";
     const held = () =>
         inPage(`[document.querySelector('${BOX}').value,
-            document.querySelector('.pane .quote-strip-text')?.textContent ?? null,
+            document.querySelector('.pane .quote-line-text')?.textContent ?? null,
             [...document.querySelectorAll(${JSON.stringify(LOCKS)})]
                 .map((button) => button.disabled)]`);
 
@@ -566,9 +581,11 @@ test("A session's send on its way, its box shown again: once, or all back", real
     };
 
     await fresh("board");
+    await type(BOX, "");
     await page.evaluate(`${STORE}.quoteReply('this part')`);
+    await see(`document.querySelector('${BOX}').value === '> this part\\n\\n'`, "the quote");
     // With a space at the end, as a phone's keyboard leaves it.
-    await type(BOX, "only once ");
+    await type(BOX, "> this part\n\nonly once ");
     await attach(".pane .composer input[type=file]");
     await see(
         `document.querySelector('.pane .files .chip:not(:has(.spinner))')`,
@@ -578,11 +595,19 @@ test("A session's send on its way, its box shown again: once, or all back", real
         await page.press("Enter");
         await see(`window.sends === 1`, "on its way");
         await awayAndBack();
-        assert.deepEqual(await held(), ["only once ", "this part", [true, true, true, true]]);
+        assert.deepEqual(await held(), [
+            "> this part\n\nonly once ",
+            "this part",
+            [true, true, true, true],
+        ]);
         await type(BOX, "changed");
     }, true);
     await see(`!document.querySelector('.pane .send-button').disabled`, "failed");
-    assert.deepEqual(await held(), ["only once ", "this part", [false, false, false, false]]);
+    assert.deepEqual(await held(), [
+        "> this part\n\nonly once ",
+        "this part",
+        [false, false, false, false],
+    ]);
     // Sent at last, with words put in the box meanwhile: they stay.
     await holdingSends(async () => {
         await page.press("Enter");
@@ -794,9 +819,8 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
     await type(BOX, "keep me");
     await page.press("Enter");
     await until(async () => (await sent()) === 4, "typed again");
-    await page.evaluate(`${STORE}.quoteReply('one part')`);
-    await lost("/submit", "keep me");
-    await page.evaluate(`${STORE}.quoteReply('another part')`);
+    await lost("/submit", "> one part\n\nkeep me");
+    await type(BOX, "> another part\n\nkeep me");
     await page.press("Enter");
     await until(async () => (await sent()) === 6, "another quote");
 });

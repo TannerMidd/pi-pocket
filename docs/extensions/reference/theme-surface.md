@@ -173,7 +173,8 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `dock`                                    | What sits above the message box: the queue and the bars                                                                 |
 | `subagents-bar`                           | The subagents' bar                                                                                                      |
 | `message-box`                             | The box you type in, with its buttons                                                                                   |
-| `quote-strip`                             | Above the box: the passage a reply quotes, with a button to remove it (since 0.27.0)                                    |
+| `quote-strip`                             | Above PiP's box: the passage Ask PiP quotes, with a button to remove it (since 0.27.0)                                  |
+| `quote-count`                             | Above the session's box: how many quotes Reply put in it, with Clear quotes (since 0.29.0)                              |
 | `composer-tools`                          | The row of buttons in it                                                                                                |
 | `composer-button`                         | Each of its own buttons: Places, Attach, Plan, the mic, Steer and Queue, Stop, and an extension's button (since 0.19.0) |
 | `plan-chip`, `mode-switch`, `stop-button` | Plan, Steer and Queue, and Stop, each also a `composer-button`                                                          |

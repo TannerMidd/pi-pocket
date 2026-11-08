@@ -90,6 +90,8 @@ const DEFAULTS = {
     quoteReply: true,
     /** PiP's orb by those words, beside Reply if it shows, which asks PiP about them instead. On by default. */
     askPipQuote: true,
+    /** How a quote Reply put in the message box looks there: "fade", "tint", or "ghost" (`quote-box.js`). */
+    quoteStyle: "fade",
     /**
      * Going back to a session that changed while this tab was away: wait behind the loading screen until its updates
      * come, then show it whole. Off, the tab's copy of it shows at once and the updates slide in (`holdsFor` in store.js).

@@ -241,6 +241,7 @@ export const PARTS = [
     "subagents-bar",
     "message-box",
     "quote-strip",
+    "quote-count",
     "composer-tools",
     "composer-button",
     "plan-chip",
