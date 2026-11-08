@@ -10577,7 +10577,7 @@ textarea.notes {
 
 .sched-editor textarea {
     resize: vertical;
-    min-height: 64px;
+    min-height: 140px;
     font-size: 14px;
     line-height: 1.45;
 }

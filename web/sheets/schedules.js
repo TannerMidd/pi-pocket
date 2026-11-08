@@ -195,7 +195,7 @@ function ScheduleEditor({ schedule, onDone }) {
         <label class="field">
             <span class="label">Message to Pi</span>
             <textarea
-                rows="3"
+                rows="6"
                 placeholder="Check the deploy and tell me if anything failed"
                 value=${draft.text}
                 autofocus
