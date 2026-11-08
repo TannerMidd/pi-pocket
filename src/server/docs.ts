@@ -59,6 +59,17 @@ export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
     initial: () => ({ items: {} }),
 });
 
+/** Interrupt handoffs not yet admitted as messages: retries find the same durable task, even after a restart. */
+export const InterruptsDoc = defineDoc<{ pending: Record<string, number> }>({
+    kind: "pocket.interrupts",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ pending: {} }),
+});
+
 /** Favorite working folders in shortcut order, private to each person and shared by their devices. */
 export const FolderFavoritesDoc = defineDoc<{ users: Record<string, string[]> }>({
     kind: "pocket.folder-favorites",
