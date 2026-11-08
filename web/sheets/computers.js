@@ -52,8 +52,8 @@ function LinkSteps({ made, onDone }) {
     const server = location.origin;
     const minutes = Math.max(1, Math.round((made.expiresAt - Date.now()) / 60000));
 
-    return html`<div class="runner-link">
-        <div class="group-title">Link ${made.name}</div>
+    return html`<div class="runner-page runner-link">
+        <h3 class="runner-page-title">Link ${made.name}</h3>
         <${TrustNote} />
         <p class="muted small">Give the runner on ${made.name} this address and code:</p>
         <${Copyable} label="Address" text=${server} />
@@ -90,16 +90,22 @@ export function TrustNote() {
  * Linking paused, for one address or the whole server, and the addresses banned for guessing codes, which the owner can
  * lift (`link-limits.ts`). Only the owner opens Runners.
  */
-function LinkLocks() {
-    const [locks, setLocks] = useState(null);
-    const load = () => attempt(async () => setLocks(await api("runners/locks")));
+function LinkLocks({ locks, reload }) {
+    const intro = html`<h3 class="runner-page-title">Linking limits</h3>
+        <p class="muted small">
+            Redeeming a link code is the one thing anyone can try without signing in. Wrong codes are limited for each
+            address, and in total; an address locked out 3 times in a week is banned.
+        </p>`;
 
-    useEffect(() => {
-        load();
-    }, [store.state.runners]);
+    if (!locks) {
+        return html`<div class="runner-page">${intro}<${Loader} /></div>`;
+    }
 
-    if (!locks || (!locks.server && locks.addresses.length === 0 && locks.bans.length === 0)) {
-        return null;
+    if (!locks.server && locks.addresses.length === 0 && locks.bans.length === 0) {
+        return html`<div class="runner-page">
+            ${intro}
+            <p class="muted small">Nothing is locked or banned.</p>
+        </div>`;
     }
 
     const until = (time) =>
@@ -116,10 +122,11 @@ function LinkLocks() {
             await api(`runners/bans?address=${encodeURIComponent(address)}`, undefined, {
                 method: "DELETE",
             });
-            load();
+            reload();
         });
 
-    return html`<div class="runner-locks">
+    return html`<div class="runner-page runner-locks">
+        ${intro}
         ${
             (locks.server || locks.addresses.length > 0) &&
             html`<div class="runner-trust small" role="status">
@@ -181,8 +188,8 @@ function LinkComputer({ onDone }) {
         return html`<${LinkSteps} made=${made} onDone=${onDone} />`;
     }
 
-    return html`<div class="runner-link">
-        <div class="group-title">Link a computer</div>
+    return html`<div class="runner-page runner-link">
+        <h3 class="runner-page-title">Link a computer</h3>
         <${TrustNote} />
         <label class="field">
             <span class="label">Name</span>
@@ -200,7 +207,6 @@ function LinkComputer({ onDone }) {
             <button class="button primary" disabled=${busy || !clean} onClick=${make}>
                 Get a link code
             </button>
-            <button class="button ghost" onClick=${onDone}>Cancel</button>
         </div>
     </div>`;
 }
@@ -301,111 +307,204 @@ function expiry(session) {
         : `expires ${new Date(session.expiresAt).toLocaleString()}`;
 }
 
-/** Settings, saved folders, and approved sessions, from this runner only. */
-function Permissions({ runner }) {
+/** Whether this person may change `runner`'s settings now: an authenticator there, their computer, and online. */
+function canChange(runner) {
+    const state = runner.approvals;
+
+    return Boolean(state?.totp && runner.createdBy === store.state.me?.id && runner.online);
+}
+
+/** The runner is too old to report approvals, or offline: the panes that need its state say so. */
+function NoApprovals({ runner }) {
+    return runner.online
+        ? html`<div class="runner-note warning">
+              <div>
+                  Update the runner on ${runner.name} to manage approvals here:
+                  <code>npm install -g pi-pocket@latest</code>, then start <code>pi-pocket runner</code> again.
+              </div>
+          </div>`
+        : html`<p class="muted small">Approvals show again when ${runner.name} reconnects.</p>`;
+}
+
+/** Whether an authenticator is set up there, and how to set one up: the settings change only with its codes. */
+function Authenticator({ runner }) {
+    const state = runner.approvals;
+
+    if (!state) {
+        return null;
+    }
+
+    return state.totp
+        ? html`<p class="muted small">Authenticator set up. Settings change with a code from it.</p>`
+        : html`<div class="runner-note warning">
+              <div>
+                  No authenticator on ${runner.name}. Its settings change only with a code from one. Set it up there:${" "}
+                  <code>pi-pocket runner totp setup</code>
+              </div>
+          </div>`;
+}
+
+/** Saved folders and approved sessions, from this runner only. */
+function Approvals({ runner }) {
+    const state = runner.approvals;
+
+    if (!state) {
+        return html`<${NoApprovals} runner=${runner} />`;
+    }
+
+    const action = (request) =>
+        attempt(() => api(`runners/${encodeURIComponent(runner.id)}/permissions`, { request }));
+
+    return html`<div class="runner-pane">
+        <div class="group-title">Saved folders</div>
+        <p class="muted small">
+            New sessions in these folders, and in their subfolders, start without the folder question.
+        </p>
+        ${state.folders.length === 0 && html`<p class="muted small">No saved folders.</p>`}
+        <div class="runner-rows">
+            ${state.folders.map(
+                (folder) => html`<div class="runner-permission-row" key=${folder}>
+                    <code>${folder}</code>
+                    <button class="button small ghost" onClick=${() => action({ action: "remove-folder", folder })}>
+                        Remove
+                    </button>
+                </div>`,
+            )}
+        </div>
+        <div class="group-title">Approved sessions</div>
+        ${state.sessions.length === 0 && html`<p class="muted small">No approved sessions.</p>`}
+        <div class="runner-rows">
+            ${state.sessions.map(
+                (session) => html`<div class="runner-permission-row" key=${session.id}>
+                    <div class="grow">
+                        <code>${session.folder}</code>
+                        <div class="muted small">
+                            ${session.person} · ${APPROVED_BY[session.approvedBy] ?? session.approvedBy} · ${expiry(session)}
+                        </div>
+                    </div>
+                    <button class="button small ghost" onClick=${() => action({ action: "revoke", session: session.id })}>
+                        Revoke
+                    </button>
+                </div>`,
+            )}
+        </div>
+        ${
+            state.sessions.length > 0 &&
+            html`<div>
+                <button
+                    class="button small ghost danger"
+                    onClick=${() =>
+                        confirm(`Revoke all sessions on ${runner.name}?`) &&
+                        action({ action: "revoke", session: "all" })}
+                >
+                    Revoke all
+                </button>
+            </div>`
+        }
+    </div>`;
+}
+
+/** The runner's own settings: each change asks for a code from its authenticator (`CodeModal`). */
+function Settings({ runner }) {
     const [change, setChange] = useState(null);
     const state = runner.approvals;
 
     if (!state) {
-        return runner.online
-            ? html`<p class="muted small">Update the runner on ${runner.name} to manage approvals here.</p>`
-            : null;
+        return html`<${NoApprovals} runner=${runner} />`;
     }
 
-    const mine = runner.createdBy === store.state.me?.id;
-    const active = state.totp && mine && runner.online;
+    const active = canChange(runner);
     const ask = (next) => active && setChange(next);
-    const action = (request) =>
-        attempt(() => api(`runners/${encodeURIComponent(runner.id)}/permissions`, { request }));
     const settings = state.settings;
-    const toggle = (
-        key,
+    const row = (
         label,
-        on,
+        detail,
+        control,
     ) => html`<div class=${`setting wrap ${active ? "" : "disabled"}`}>
-        <div class="grow small">${label}</div>
-        <${Switch}
-            on=${on}
-            disabled=${!active}
-            label=${`${label}: ${on ? "on" : "off"}`}
-            onChange=${() => ask({ [key]: !on })}
-        />
+        <div class="grow">
+            <div class="small">${label}</div>
+            ${detail && html`<div class="muted small">${detail}</div>`}
+        </div>
+        ${control}
     </div>`;
-
-    return html`<div class="runner-permissions">
-        <div class="muted small">
-            ${
-                state.totp
-                    ? "Authenticator set up"
-                    : html`No authenticator set up. Set it up on this computer: <code>pi-pocket runner totp setup</code>`
-            }
-        </div>
-        ${!state.totp && html`<div class="muted small">Set up an authenticator for this runner to change its settings.</div>`}
-        ${toggle("stopAsking", "Stop asking on new sessions", settings.stopAsking)}
-        <label class=${`setting wrap ${active ? "" : "disabled"}`}>
-            <span class="grow small">Session expiry with a code</span>
-            <select
+    const toggle = (key, label, detail, on) =>
+        row(
+            label,
+            detail,
+            html`<${Switch}
+                on=${on}
                 disabled=${!active}
-                value=${settings.totpDays === null ? "never" : String(settings.totpDays)}
-                onChange=${(event) => {
-                    const value = event.currentTarget.value;
+                label=${`${label}: ${on ? "on" : "off"}`}
+                onChange=${() => ask({ [key]: !on })}
+            />`,
+        );
 
-                    event.currentTarget.value =
-                        settings.totpDays === null ? "never" : String(settings.totpDays);
-                    ask({ totpDays: value === "never" ? null : Number(value) });
-                }}
-            >
-                <option value="1">1 day</option>
-                <option value="7">7 days</option>
-                <option value="14">14 days</option>
-                <option value="30">30 days</option>
-                <option value="never">No expiry</option>
-            </select>
-        </label>
-        ${toggle("allowHttp", "Allow plain HTTP", settings.allowHttp)}
-        ${toggle("network", "Share the network with browsers", settings.network)}
-        <div class=${`setting wrap ${active ? "" : "disabled"}`}>
-            <div class="grow small">Downloads: <code>${settings.downloads ?? "temporary folder"}</code></div>
-            <button
-                class="button small ghost"
-                disabled=${!active}
-                onClick=${() => {
-                    const typed = prompt(
-                        "Downloads folder, absolute; empty for the temporary folder",
-                        settings.downloads ?? "",
-                    );
+    return html`<div class="runner-pane">
+        <${Authenticator} runner=${runner} />
+        ${state.totp && !active && runner.createdBy !== store.state.me?.id && html`<p class="muted small">Only the person who linked ${runner.name} can change its settings.</p>`}
+        <div class="runner-rows">
+            ${toggle(
+                "stopAsking",
+                "Stop asking on new sessions",
+                settings.stopAsking ? null : `${runner.name} asks before each new session.`,
+                settings.stopAsking,
+            )}
+            ${row(
+                "Session expiry with a code",
+                null,
+                html`<select
+                    disabled=${!active}
+                    aria-label="Session expiry with a code"
+                    value=${settings.totpDays === null ? "never" : String(settings.totpDays)}
+                    onChange=${(event) => {
+                        const value = event.currentTarget.value;
 
-                    if (typed !== null) {
-                        ask({ downloads: typed.trim() === "" ? null : typed.trim() });
-                    }
-                }}
-            >
-                Change
-            </button>
+                        event.currentTarget.value =
+                            settings.totpDays === null ? "never" : String(settings.totpDays);
+                        ask({ totpDays: value === "never" ? null : Number(value) });
+                    }}
+                >
+                    <option value="1">1 day</option>
+                    <option value="7">7 days</option>
+                    <option value="14">14 days</option>
+                    <option value="30">30 days</option>
+                    <option value="never">No expiry</option>
+                </select>`,
+            )}
+            ${toggle(
+                "allowHttp",
+                "Allow plain HTTP",
+                "Off: plain http:// only to this computer itself or a tailnet device.",
+                settings.allowHttp,
+            )}
+            ${toggle(
+                "network",
+                "Share the network with browsers",
+                `The browser can reach ${runner.name}'s localhost and home network.`,
+                settings.network,
+            )}
+            ${row(
+                "Downloads",
+                settings.downloads ??
+                    "Temporary folder, which can be cleared when the computer restarts",
+                html`<button
+                    class="button small ghost"
+                    disabled=${!active}
+                    onClick=${() => {
+                        const typed = prompt(
+                            "Downloads folder, absolute; empty for the temporary folder",
+                            settings.downloads ?? "",
+                        );
+
+                        if (typed !== null) {
+                            ask({ downloads: typed.trim() === "" ? null : typed.trim() });
+                        }
+                    }}
+                >
+                    Change
+                </button>`,
+            )}
         </div>
-        <div class="group-title">Saved folders</div>
-        ${state.folders.length === 0 && html`<div class="muted small">No saved folders.</div>`}
-        ${state.folders.map(
-            (folder) => html`<div class="runner-permission-row">
-                <code>${folder}</code>
-                <button class="button small ghost" onClick=${() => action({ action: "remove-folder", folder })}>Remove</button>
-            </div>`,
-        )}
-        <div class="group-title">Approved sessions</div>
-        ${state.sessions.length === 0 && html`<div class="muted small">No approved sessions.</div>`}
-        ${state.sessions.map(
-            (session) => html`<div class="runner-permission-row">
-                <div class="small">
-                    <code>${session.folder}</code><br />
-                    ${session.person}, ${APPROVED_BY[session.approvedBy] ?? session.approvedBy}; ${expiry(session)}
-                </div>
-                <button class="button small ghost" onClick=${() => action({ action: "revoke", session: session.id })}>Revoke</button>
-            </div>`,
-        )}
-        ${
-            state.sessions.length > 0 &&
-            html`<button class="button small ghost" onClick=${() => confirm(`Revoke all sessions on ${runner.name}?`) && action({ action: "revoke", session: "all" })}>Revoke all</button>`
-        }
         ${change && html`<${CodeModal} runner=${runner} change=${change} onDone=${() => setChange(null)} />`}
     </div>`;
 }
@@ -437,11 +536,14 @@ function RunnerPeople({ runner }) {
             }
         });
 
-    return html`<div class="group">
-        <div class="group-title">People</div>
+    return html`<div class="runner-pane">
+        <p class="muted small">
+            They can start sessions on this computer. Their sessions run as this computer's user, like yours. Only
+            people who can steer are listed.
+        </p>
         <div class="row wrap">
-            <span class="small">
-                ${runner.users?.map((person) => person.name).join(", ") || "No people chosen"}
+            <span class="grow small">
+                ${runner.users?.map((person) => person.name).join(", ") || html`<span class="muted">No people chosen</span>`}
             </span>
             ${
                 mine &&
@@ -485,14 +587,70 @@ function RunnerPeople({ runner }) {
                 </div>
             </div>`
         }
-        <p class="muted small">
-            They can start sessions on this computer. Their sessions run as this computer's user, like yours.
-        </p>
     </div>`;
 }
 
-/** One linked computer: its state, and what can be done with it. */
-function ComputerRow({ runner }) {
+/** Its version, and its architecture, as a short line under its name. */
+function details(runner) {
+    return [
+        status(runner),
+        [system(runner), runner.arch].filter(Boolean).join(" "),
+        runner.version && `runner ${runner.version}`,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+}
+
+/** Counts for the Overview: what is saved and approved there, and who else may use it. */
+function Overview({ runner }) {
+    const state = runner.approvals;
+    const people = runner.users?.length ?? 0;
+    const rows = [
+        state && ["Saved folders", String(state.folders.length)],
+        state && ["Approved sessions", String(state.sessions.length)],
+        ["People who can start sessions", people === 0 ? "none" : String(people)],
+        ["Asks before new sessions", runner.asks ? "yes" : "no"],
+    ].filter(Boolean);
+
+    return html`<div class="runner-pane">
+        ${
+            !runner.online &&
+            html`<div class="runner-note">
+                <div>
+                    ${
+                        runner.away
+                            ? `${runner.name} is offline. Its sessions wait, and continue when it is back.`
+                            : `${runner.name} is not connected. Start its runner: pi-pocket runner.`
+                    }
+                </div>
+            </div>`
+        }
+        <div class="group-title">Tools on this computer</div>
+        <${Tools} runner=${runner} />
+        ${runner.online && runner.approvals && html`<div class="group-title">Authenticator</div>`}
+        <${Authenticator} runner=${runner} />
+        <div class="group-title">At a glance</div>
+        <div class="runner-rows">
+            ${rows.map(
+                ([label, value]) => html`<div class="runner-glance" key=${label}>
+                    <span class="grow">${label}</span>
+                    <span class="muted">${value}</span>
+                </div>`,
+            )}
+        </div>
+    </div>`;
+}
+
+const TABS = [
+    ["overview", "Overview"],
+    ["people", "People"],
+    ["approvals", "Approvals"],
+    ["settings", "Settings"],
+];
+
+/** One linked computer: its state and actions, then its parts in tabs. */
+function ComputerPage({ runner }) {
+    const [tab, setTab] = useState("overview");
     const remove = () =>
         confirm(
             `Remove ${runner.name}? Its runner disconnects and its sessions stop working. You can link it again later.`,
@@ -500,32 +658,47 @@ function ComputerRow({ runner }) {
         attempt(() =>
             api(`runners/${encodeURIComponent(runner.id)}`, undefined, { method: "DELETE" }),
         );
+    const count = runner.approvals
+        ? runner.approvals.folders.length + runner.approvals.sessions.length
+        : 0;
 
-    return html`<div class="person-row runner-row">
-        <span
-            class=${`runner-dot ${runner.online ? "on" : runner.away ? "away" : ""}`}
-            aria-hidden="true"
-        ></span>
-        <div class="person-main">
-            <div class="runner-title">${runner.name}</div>
-            <div class="muted small">
-                ${[status(runner), system(runner)].filter(Boolean).join(" · ")}
+    return html`<div class="runner-page">
+        <div class="runner-page-head">
+            <span
+                class=${`runner-dot ${runner.online ? "on" : runner.away ? "away" : ""}`}
+                aria-hidden="true"
+            ></span>
+            <h3 class="runner-page-title">${runner.name}</h3>
+            <div class="runner-page-actions">
+                <button
+                    class="button small primary"
+                    disabled=${!runner.online}
+                    title=${runner.online ? "Pick a folder there" : `${runner.name} is not connected`}
+                    onClick=${() => openSheet({ type: "cwd", mode: "new", runner: runner.id })}
+                >
+                    New session
+                </button>
+                <button class="button small ghost danger" onClick=${remove}>Remove</button>
             </div>
-            <${Tools} runner=${runner} />
-            <${RunnerPeople} runner=${runner} />
-            <${Permissions} runner=${runner} />
         </div>
-        <div class="person-actions">
-            <button
-                class="button small"
-                disabled=${!runner.online}
-                title=${runner.online ? "Pick a folder there" : `${runner.name} is not connected`}
-                onClick=${() => openSheet({ type: "cwd", mode: "new", runner: runner.id })}
-            >
-                New session
-            </button>
-            <button class="button small ghost" onClick=${remove}>Remove</button>
+        <div class="muted small">${details(runner)}</div>
+        <div class="segmented runner-tabs" role="tablist" aria-label=${`${runner.name}: parts`}>
+            ${TABS.map(
+                ([id, label]) => html`<button
+                    key=${id}
+                    role="tab"
+                    class=${tab === id ? "on" : ""}
+                    aria-selected=${tab === id}
+                    onClick=${() => setTab(id)}
+                >
+                    ${label}${id === "approvals" && count > 0 ? html` <span class="muted">${count}</span>` : ""}
+                </button>`,
+            )}
         </div>
+        ${tab === "overview" && html`<${Overview} runner=${runner} />`}
+        ${tab === "people" && html`<${RunnerPeople} runner=${runner} />`}
+        ${tab === "approvals" && html`<${Approvals} runner=${runner} />`}
+        ${tab === "settings" && html`<${Settings} runner=${runner} />`}
     </div>`;
 }
 
@@ -537,15 +710,15 @@ function SharedSessions() {
     const shared = store.state.server?.sharedRunnerSessions === true;
     const change = () => attempt(() => api("settings", { sharedRunnerSessions: !shared }));
 
-    return html`<div class="group">
-        <div class="group-title">Sharing</div>
+    return html`<div class="runner-page">
+        <h3 class="runner-page-title">Sharing</h3>
         <div class="setting wrap">
             <div class="grow">
                 <div class="small">Let others use these sessions</div>
                 <div class="muted small">
-                    Off: only the person who started a session can see or prompt it. On: sessions on linked
-                    computers are shared like any other, and their commands run on that computer for whoever
-                    prompts them.
+                    Off: only the person who started a session on a computer can see or prompt it. On: sessions on
+                    linked computers are shared like any other, and their commands run on that computer for
+                    whoever prompts them.
                 </div>
             </div>
             <${Switch}
@@ -554,6 +727,21 @@ function SharedSessions() {
                 onChange=${change}
             />
         </div>
+    </div>`;
+}
+
+/** What runners are, for the About page. */
+function AboutRunners() {
+    return html`<div class="runner-page">
+        <h3 class="runner-page-title">About runners</h3>
+        <p>
+            Run a session's tools on another of your computers: its files and commands are used there, while Pi,
+            your models, and the history stay on this server.
+        </p>
+        <p class="muted">
+            The computer connects out to this server, so it needs no open port. You and the people you choose can
+            start sessions on computers you link. See <code>docs/runners.md</code> for everything else.
+        </p>
     </div>`;
 }
 
@@ -570,10 +758,27 @@ export function runnersHint() {
     return `${online} of ${runners.length} online`;
 }
 
+/** A row in the list on the left: a computer, or a page about this server. */
+function ListItem({ selected, onSelect, lead, title, detail, badge }) {
+    return html`<button
+        class=${`runner-item ${selected ? "on" : ""}`}
+        aria-current=${selected ? "page" : undefined}
+        onClick=${onSelect}
+    >
+        ${lead}
+        <span class="runner-item-text">
+            <span class="runner-item-title">${title}</span>
+            ${detail && html`<span class="muted small">${detail}</span>`}
+        </span>
+        ${badge && html`<span class="runner-badge">${badge}</span>`}
+    </button>`;
+}
+
 export function ComputersSheet() {
     const { runners } = store.state;
     const [loaded, setLoaded] = useState(false);
-    const [linking, setLinking] = useState(false);
+    const [view, setView] = useState(null);
+    const [locks, setLocks] = useState(null);
 
     useEffect(() => {
         attempt(async () => {
@@ -581,34 +786,88 @@ export function ComputersSheet() {
             setLoaded(true);
         });
     }, []);
+    useEffect(() => {
+        attempt(async () => setLocks(await api("runners/locks")));
+    }, [store.state.runners, view]);
 
-    return html`<${Sheet} title="Runners" onClose=${closeSheet}>
-        <p class="muted small">
-            Run a session's tools on another of your computers: its files and commands are used there, while Pi,
-            your models, and the history stay on this server. The computer connects out to this server, so it
-            needs no open port. You and the people you choose can start sessions on computers you link.
-        </p>
-        ${
-            runners.length > 0 &&
-            html`<div class="sheet-list">
-                ${runners.map((runner) => html`<${ComputerRow} key=${runner.id} runner=${runner} />`)}
-            </div>`
-        }
-        ${!loaded && runners.length === 0 && html`<${Loader} />`}
-        ${
-            loaded &&
-            runners.length === 0 &&
-            !linking &&
-            html`<p class="muted small runner-none">No computers linked yet.</p>`
-        }
-        ${
-            linking
-                ? html`<${LinkComputer} onDone=${() => setLinking(false)} />`
-                : html`<button class="button primary wide" onClick=${() => setLinking(true)}>
-                      <${Icon} name="plus" size=${16} /> Link a computer
-                  </button>`
-        }
-        <${LinkLocks} />
-        <${SharedSessions} />
+    // The first computer, or linking when there is none; a removed computer's page falls back the same way.
+    const shown =
+        view &&
+        (view.startsWith("computer:")
+            ? runners.some((runner) => `computer:${runner.id}` === view)
+            : true)
+            ? view
+            : runners.length > 0
+              ? `computer:${runners[0].id}`
+              : loaded
+                ? "link"
+                : null;
+    const lockCount = locks
+        ? locks.addresses.length + locks.bans.length + (locks.server ? 1 : 0)
+        : 0;
+    const current = shown?.startsWith("computer:")
+        ? runners.find((runner) => `computer:${runner.id}` === shown)
+        : undefined;
+
+    return html`<${Sheet} title="Runners" onClose=${closeSheet} className="runners-sheet">
+        <div class="runners-split">
+            <nav class="runners-list" aria-label="Runners">
+                <div class="group-title">Computers</div>
+                ${!loaded && runners.length === 0 && html`<${Loader} />`}
+                ${loaded && runners.length === 0 && html`<p class="muted small runner-none">No computers linked yet.</p>`}
+                ${runners.map(
+                    (runner) => html`<${ListItem}
+                        key=${runner.id}
+                        selected=${shown === `computer:${runner.id}`}
+                        onSelect=${() => setView(`computer:${runner.id}`)}
+                        lead=${html`<span
+                            class=${`runner-dot ${runner.online ? "on" : runner.away ? "away" : ""}`}
+                            aria-hidden="true"
+                        ></span>`}
+                        title=${runner.name}
+                        detail=${[
+                            runner.online ? "Online" : runner.away ? "Offline" : "Not connected",
+                            system(runner),
+                        ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        badge=${runner.online && !runner.approvals ? "update" : null}
+                    />`,
+                )}
+                <div class="group-title">This server</div>
+                <${ListItem}
+                    selected=${shown === "link"}
+                    onSelect=${() => setView("link")}
+                    lead=${html`<${Icon} name="plus" size=${16} />`}
+                    title="Link a computer"
+                />
+                <${ListItem}
+                    selected=${shown === "limits"}
+                    onSelect=${() => setView("limits")}
+                    lead=${html`<${Icon} name="shield" size=${16} />`}
+                    title="Linking limits"
+                    badge=${lockCount > 0 ? String(lockCount) : null}
+                />
+                <${ListItem}
+                    selected=${shown === "sharing"}
+                    onSelect=${() => setView("sharing")}
+                    lead=${html`<${Icon} name="users" size=${16} />`}
+                    title="Sharing"
+                />
+                <${ListItem}
+                    selected=${shown === "about"}
+                    onSelect=${() => setView("about")}
+                    lead=${html`<${Icon} name="monitor" size=${16} />`}
+                    title="About runners"
+                />
+            </nav>
+            <div class="runners-detail">
+                ${current && html`<${ComputerPage} key=${current.id} runner=${current} />`}
+                ${shown === "link" && html`<${LinkComputer} onDone=${() => setView(null)} />`}
+                ${shown === "limits" && html`<${LinkLocks} locks=${locks} reload=${() => attempt(async () => setLocks(await api("runners/locks")))} />`}
+                ${shown === "sharing" && html`<${SharedSessions} />`}
+                ${shown === "about" && html`<${AboutRunners} />`}
+            </div>
+        </div>
     <//>`;
 }

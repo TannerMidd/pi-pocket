@@ -7320,12 +7320,187 @@ div.group-head {
 }
 
 /* The row grows with the computer's settings: its status dot stays beside the computer's name. */
-.person-row.runner-row {
-    align-items: flex-start;
+/*
+ * Runners: a wide sheet with the computers and this server's pages on the left, and the chosen one on the right. On a
+ * phone the two stack: the list first, then the page.
+ */
+.sheet.runners-sheet {
+    max-width: min(960px, calc(100vw - 32px));
 }
 
-.runner-row > .runner-dot {
-    margin-top: 0.45rem;
+.runners-sheet .sheet-body {
+    padding: 0;
+    gap: 0;
+}
+
+.runners-split {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    min-height: min(560px, 70dvh);
+}
+
+.runners-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px;
+    border-right: 1px solid var(--hair);
+}
+
+.runners-list > .group-title {
+    margin: 10px 8px 4px;
+}
+
+.runners-list > .group-title:first-child {
+    margin-top: 2px;
+}
+
+.runner-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
+    background: none;
+    color: var(--text);
+    text-align: left;
+}
+
+@media (hover: hover) {
+    .runner-item:hover {
+        background: var(--hover);
+    }
+}
+
+.runner-item.on {
+    background: var(--raised);
+    border-color: var(--hair);
+}
+
+.runner-item > svg {
+    flex: none;
+    color: var(--muted);
+}
+
+.runner-item-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.runner-item-title {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.runner-badge {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 11px;
+}
+
+.runners-detail {
+    min-width: 0;
+    padding: calc(16px * var(--space-y)) calc(20px * var(--space-x)) calc(20px * var(--space-y));
+}
+
+/* A still note in the Runners sheet: not a toast, so no timer bar and no dismissing. */
+.runner-note {
+    border: var(--border) solid color-mix(in srgb, var(--accent) 30%, transparent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    border-radius: var(--radius-sm, 8px);
+    padding: 9px 11px;
+    font-size: 0.9em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.runner-note.warning {
+    border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+    background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.runner-page,
+.runner-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.runner-page p,
+.runner-pane p {
+    margin: 0;
+}
+
+.runner-page > .group-title,
+.runner-pane > .group-title {
+    margin: 8px 2px 0;
+}
+
+.runner-page-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.runner-page-title {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.runner-page-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.runner-tabs {
+    margin: 4px 0 2px;
+}
+
+.runner-rows {
+    display: flex;
+    flex-direction: column;
+}
+
+.runner-rows > * {
+    padding: 9px 0;
+    border-top: 1px solid var(--hair);
+}
+
+.runner-rows > *:first-child {
+    border-top: 0;
+}
+
+.runner-rows > .setting {
+    margin-top: 0;
+}
+
+.runner-glance {
+    display: flex;
+    gap: 12px;
+}
+
+@media (max-width: 719px) {
+    .runners-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .runners-list {
+        border-right: 0;
+        border-bottom: 1px solid var(--hair);
+    }
 }
 
 .runner-permission-row {
@@ -21514,17 +21689,11 @@ pre.gallery-code {
 
 /* Linking: the name, then (for another computer) the steps with what to copy. */
 .runner-link {
-    display: flex;
-    flex-direction: column;
     gap: 0.75rem;
-    padding: 0.9rem 1rem 1rem;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-card);
-    background: var(--bg);
 }
 
 .runner-link > .group-title {
-    margin: 0;
+    margin: 4px 2px 0;
 }
 
 /* What linking trusts, and linking paused: a warning, plainly, where people link. */
