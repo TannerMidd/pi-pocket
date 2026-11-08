@@ -145,6 +145,41 @@ test(
     },
 );
 
+test(
+    "Separate: Reply stacks strips over the box, a reload keeps them, and they go first",
+    real,
+    async () => {
+        await page.evaluate(`(await import('/theme.js')).setPrefs({ quoteStyle: 'separate' })`);
+        await page.evaluate(`${STORE}.quoteReply('strip one')`);
+        await page.evaluate(`${STORE}.quoteReply('strip two')`);
+        await see(`document.querySelectorAll('.quote-strip').length === 2`, "two strips");
+        assert.equal(await boxText(), "", "the box keeps only its words");
+        await page.click({ selector: ".quote-strip button" });
+        await see(`document.querySelectorAll('.quote-strip').length === 1`, "one removed");
+        await page.evaluate(`${STORE}.quoteReply('strip three')`);
+
+        await page.navigate(`${base}/s/${session}`);
+        await see(
+            `[...document.querySelectorAll('.quote-strip-text')].map((each) => each.textContent).join() === 'strip two,strip three'`,
+            "the strips after a reload",
+        );
+        await caretAt(0);
+        await page.type(undefined, "both", { append: true });
+        await page.press("Enter");
+        await see(`document.querySelector('.quote-strip') === null`, "sent");
+        await until(
+            async () =>
+                (await app.transcripts.allEntries(session, true)).some(
+                    (entry) =>
+                        entry.kind === "user" &&
+                        entry.text.includes("> strip two\n\n> strip three\n\nboth"),
+                ),
+            "Pi got the strips first",
+        );
+        await page.evaluate(`(await import('/theme.js')).setPrefs({ quoteStyle: 'fade' })`);
+    },
+);
+
 test("its × removes one quote; one typed by hand is plain text", real, async () => {
     await reply("drop me");
     await page.type(undefined, "keep", { append: true });

@@ -19,6 +19,7 @@ const {
     quoteStep,
     splitQuote,
     withQuote,
+    withQuotes,
     withoutQuote,
 } = (await import(new URL("../web/quote-text.js", import.meta.url).href)) as {
     QUOTE_MAX: number;
@@ -41,6 +42,7 @@ const {
     ) => Step;
     splitQuote: (text: string) => { passage: string; rest: string } | null;
     withQuote: (passage: string | null, reply: string) => string;
+    withQuotes: (passages: string[], reply: string) => string;
     withoutQuote: (text: string, block: Block) => { text: string; at: number };
 };
 
@@ -70,6 +72,19 @@ test("with no passage the reply goes out as it is, and a plain message shows no 
     assert.equal(withQuote(null, "hello"), "hello");
     assert.equal(splitQuote("hello > not a quote"), null);
     assert.equal(quoteParts("hello > not a quote"), null);
+});
+
+test("strips' passages go first, each a quote of its own, in order", () => {
+    const sent = withQuotes(["one", "two\nlines"], "why?");
+
+    assert.equal(sent, "> one\n\n> two\n> lines\n\nwhy?");
+    assert.deepEqual(quoteParts(sent), [
+        { quote: "one" },
+        { quote: "two\nlines" },
+        { text: "why?" },
+    ]);
+    assert.equal(withQuotes(["only"], ""), "> only");
+    assert.equal(withQuotes([], "plain"), "plain");
 });
 
 test("a long passage is cut", () => {

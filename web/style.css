@@ -20891,6 +20891,28 @@ pre.gallery-code {
     font-size: 12px;
 }
 
+/* Reply's quotes in Separate (Appearance): a strip each over the session's box, in order; many scroll. */
+.quote-strips {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 40vh;
+    padding: calc(8px * var(--space-y)) calc(8px * var(--space-x)) 0;
+    overflow: hidden auto;
+}
+
+.quote-strips .quote-strip {
+    flex: none;
+    min-width: 0;
+    margin: 0;
+}
+
+.quote-strips-clear {
+    align-self: flex-end;
+    padding: 0 4px;
+    font-size: 12px;
+}
+
 .quote-strip-text {
     flex: 1;
     min-width: 0;

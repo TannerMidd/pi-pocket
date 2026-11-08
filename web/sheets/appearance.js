@@ -856,7 +856,7 @@ export function AppearanceSheet() {
                 p.quoteReply &&
                 html`<${SettingRow}
                     title="Quotes in the message box"
-                    detail="How a passage you reply to looks in the box. Fade: a tint that fades out to the right. Tint: a soft block. Ghost: faded words only"
+                    detail="How a passage you reply to shows. In the box, with your words: Fade, a tint that fades out to the right; Tint, a soft block; Ghost, faded words only. Separate: each in a strip over the box, sent first"
                 >
                     <div class="segmented">
                         ${QUOTE_STYLES.map(

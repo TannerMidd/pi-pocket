@@ -5,11 +5,15 @@ import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { quoteBlocks } from "./quote-text.js";
 import { html, Icon } from "./ui.js";
 
-/** How quotes look in the box (Appearance → Quotes in the message box). */
+/**
+ * How Reply's quotes show (Appearance → Quotes in the message box): in the box's text, drawn as Fade, Tint, or Ghost;
+ * or Separate, each in a strip over the box, apart from its words (composer.js).
+ */
 export const QUOTE_STYLES = [
     ["fade", "Fade"],
     ["tint", "Tint"],
     ["ghost", "Ghost"],
+    ["separate", "Separate"],
 ];
 
 /**

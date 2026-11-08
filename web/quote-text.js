@@ -19,7 +19,14 @@ function quoteLines(passage) {
 }
 
 export function withQuote(passage, reply) {
-    return passage ? `${quoteLines(passage)}\n\n${reply}`.trimEnd() : reply;
+    return passage ? withQuotes([passage], reply) : reply;
+}
+
+/** `reply` with `passages` quoted first, in order, each a quote of its own (Reply's strips, Appearance → Separate). */
+export function withQuotes(passages, reply) {
+    return passages.length === 0
+        ? reply
+        : [...passages.map(quoteLines), reply].join("\n\n").trimEnd();
 }
 
 /** A message that starts with a quote (Ask PiP): its passage and the words after it. Null when it does not. */

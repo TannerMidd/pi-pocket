@@ -90,7 +90,7 @@ const DEFAULTS = {
     quoteReply: true,
     /** PiP's orb by those words, beside Reply if it shows, which asks PiP about them instead. On by default. */
     askPipQuote: true,
-    /** How a quote Reply put in the message box looks there: "fade", "tint", or "ghost" (`quote-box.js`). */
+    /** How Reply's quotes show: in the box as "fade", "tint", or "ghost", or "separate" strips over it (quote-box.js). */
     quoteStyle: "fade",
     /**
      * Going back to a session that changed while this tab was away: wait behind the loading screen until its updates
