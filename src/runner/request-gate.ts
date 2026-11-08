@@ -7,13 +7,13 @@
  * session it names, and each path it carries must be in that permission's folder or below it, or in the runner's own
  * folders for attached files and browser downloads. Pi's context files above the folder and its skills there and in
  * the home folder can also be read (`piReads`). An expired permission makes the request wait while the computer
- * asks again. An older server names no session: its requests use the permissions it got with `confirm`.
+ * asks again.
  */
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { folderContains, realFolder } from "./folders.ts";
-import type { Approvals, SessionPermission, SessionScope } from "./approvals.ts";
+import type { Approvals, SessionScope } from "./approvals.ts";
 import { FRAME, frame, readFrame, SESSION_FIELD } from "./protocol.ts";
 
 type Request = {
@@ -159,10 +159,6 @@ export class RequestGate {
     readonly #waiting = new Map<string, Waiting>();
     /** The folders `mkdtemp` made for each session: codemode's work folders and temporary files. */
     readonly #temporary = new Map<string, Set<string>>();
-    /** The server names each request's session (`welcome.approvals`). */
-    scoped = false;
-    /** An older server's sessions, approved with `confirm`: its requests name none. */
-    readonly legacy: SessionScope[] = [];
 
     constructor(options: GateOptions) {
         this.#options = options;
@@ -237,7 +233,7 @@ export class RequestGate {
         const named = sessionScope(json[SESSION_FIELD]);
         const op = String(json.op);
         const request: Request = {
-            ...(this.scoped && named !== undefined ? { scope: named } : {}),
+            ...(named === undefined ? {} : { scope: named }),
             op,
             directory: op === "opendir",
             stop: new AbortController(),
@@ -320,45 +316,24 @@ export class RequestGate {
         }
 
         const paths = await this.#paths(json, handle);
-        let permission: SessionPermission | undefined;
+        const scope = request.scope;
 
-        if (this.scoped) {
-            const scope = request.scope;
+        if (scope === undefined) {
+            throw new Error(`A session permission on ${this.#options.name()} is required`);
+        }
 
-            if (scope === undefined) {
-                throw new Error(`A session permission on ${this.#options.name()} is required`);
-            }
+        let permission = await this.#options.approvals.valid(scope);
 
-            permission = await this.#options.approvals.valid(scope);
-
-            if (permission === undefined && !request.stop.signal.aborted) {
-                // Expired, revoked, or never approved (a session from before this update): ask again, and wait.
-                if (await this.#options.ask(scope, whileWaiting(waiting))) {
-                    permission = await this.#options.approvals.valid(scope);
-                }
-            }
-
-            if (permission === undefined) {
-                throw new Error(`Session not approved on ${this.#options.name()}`);
-            }
-        } else {
-            // An older server: a session it confirmed whose folder holds every path of the request.
-            for (const scope of this.legacy) {
-                const valid = await this.#options.approvals.valid(scope);
-
-                if (valid !== undefined && (await this.#inside(scope.id, valid.folder, paths))) {
-                    permission = valid;
-                    request.scope = scope;
-                    break;
-                }
-            }
-
-            if (permission === undefined) {
-                throw new Error(`Session not approved on ${this.#options.name()}`);
+        if (permission === undefined && !request.stop.signal.aborted) {
+            // Expired, revoked, or never approved: ask again, and wait.
+            if (await this.#options.ask(scope, whileWaiting(waiting))) {
+                permission = await this.#options.approvals.valid(scope);
             }
         }
 
-        const scope = request.scope!;
+        if (permission === undefined) {
+            throw new Error(`Session not approved on ${this.#options.name()}`);
+        }
 
         if (
             typeof json.handle === "number" &&

@@ -12,8 +12,8 @@
  * (offline is offline, `docs/runners.md`); after it restarts, or when the runner quit, the runner starts a new daemon and
  * the old work ends.
  *
- * Beside them, a runner that says `network` in its hello carries network streams (`tunnels.ts`): TCP connections that
- * the server asks the runner to open on its computer, for the browser of a session there. They do not survive a drop.
+ * Beside them, the link carries network streams (`tunnels.ts`): TCP connections that the server asks the runner to
+ * open on its computer, for the browser of a session there. They do not survive a drop.
  *
  * Messages:
  * - Text: JSON control messages (`ControlMessage`).
@@ -44,13 +44,6 @@ export const CLOSE = {
     protocol: 4002,
 } as const;
 
-/**
- * What the server says in `welcome.graceMs`. It keeps a dropped runner's work for as long as it runs, so this is only for
- * runners from before that, which stop their daemon this long after a drop: about 23 days, under the 2^31 - 1 ms that a
- * Node timer takes (a larger one fires at once).
- */
-export const LEGACY_GRACE_MS = 2_000_000_000;
-
 /** The largest WebSocket message either side accepts: one pi-env frame (16 MiB) and some room. */
 export const MAX_MESSAGE = 17 * 1024 * 1024;
 
@@ -60,13 +53,13 @@ export const FRAME = { request: 1, result: 2, error: 3, event: 4, cancel: 5, pin
 /** pi-env's largest frame. */
 export const MAX_FRAME = 16 * 1024 * 1024;
 
-/** Programs ready on the runner, checked at each connection; older runners do not send this. */
+/** Programs ready on the runner, checked at each connection. */
 export type RunnerTools = { git: boolean; gh: boolean; github: boolean };
 
 import type { ApprovalState, RunnerAction, SessionScope } from "./approvals.ts";
 export type { ApprovalState, RunnerAction, SessionScope } from "./approvals.ts";
 
-/** Removed by the runner before a request reaches pi-env. Negotiated with hello/welcome.approvals. */
+/** Each request's session scope, removed by the runner before the request reaches pi-env. */
 export const SESSION_FIELD = "_pocketSession";
 export type ApprovalNeeded = {
     type: "approval-needed";
@@ -124,20 +117,7 @@ export type Hello = {
     received: number;
     /** The runner's Pi Pocket version, for the computers list. */
     version: string;
-    /**
-     * The runner answers `Confirm`: it decides on its computer whether a new session may start there. Absent (a runner
-     * older than this): the server does not ask, and sessions start as before.
-     */
-    asks?: boolean;
-    /** Enforces and reports per-session grants, TOTP, and settings. */
-    approvals?: boolean;
-    /** The runner understands `Withdraw`: a session question can be cancelled by the server. */
-    withdraws?: boolean;
-    /** Background tasks belong to this runner process, not its tool daemon. */
-    tasks?: true;
-    tools?: RunnerTools;
-    /** The runner opens network streams (`net-open`). Absent (an older runner): the server asks it for none. */
-    network?: boolean;
+    tools: RunnerTools;
     /** The folder for its browser downloads, absolute (`settings downloads`). Absent: its temporary folder. */
     downloads?: string;
 };
@@ -151,14 +131,12 @@ export type Confirm = {
     id: string;
     /** A new session, a fork (a copy), or a change of working folder. */
     kind: "new" | "fork" | "move";
-    /** Moves travel as kind new + move so older runners still ask rather than reject the message. */
-    move?: true;
     /** Who asked, by their name on the server. */
     person: string;
     /** The folder on this computer. */
     folder: string;
-    /** Root session permission, absent on older servers. */
-    session?: string;
+    /** Root session permission. */
+    session: string;
 };
 
 /** Runner to server: the answer to `Confirm`; `reason` says why not, in words for the person who asked. */
@@ -175,10 +153,6 @@ export type Welcome = {
     resume: boolean;
     /** Bytes of the runner's stream the server received in that session. */
     received: number;
-    /** Unused since the server keeps the session while it runs (`LEGACY_GRACE_MS`); older runners read it. */
-    graceMs: number;
-    /** Requests carry SESSION_FIELD, and net-open carries its session scope. */
-    approvals?: boolean;
 };
 
 /** Either side: bytes of the other side's stream received so far, so the other side can drop them. */
@@ -397,21 +371,17 @@ export function parseControl(text: string): ControlMessage | undefined {
                 (message.session === null || typeof message.session === "string") &&
                 count("received") &&
                 typeof message.version === "string" &&
-                (message.tools === undefined ||
-                    (typeof message.tools === "object" &&
-                        message.tools !== null &&
-                        ["git", "gh", "github"].every(
-                            (name) =>
-                                typeof (message.tools as Record<string, unknown>)[name] ===
-                                "boolean",
-                        )))
+                typeof message.tools === "object" &&
+                message.tools !== null &&
+                ["git", "gh", "github"].every(
+                    (name) => typeof (message.tools as Record<string, unknown>)[name] === "boolean",
+                )
                 ? (message as Hello)
                 : undefined;
         case "welcome":
             return typeof message.session === "string" &&
                 typeof message.resume === "boolean" &&
-                count("received") &&
-                count("graceMs")
+                count("received")
                 ? (message as Welcome)
                 : undefined;
         case "ack":
@@ -422,7 +392,8 @@ export function parseControl(text: string): ControlMessage | undefined {
             return typeof message.id === "string" &&
                 (message.kind === "new" || message.kind === "fork" || message.kind === "move") &&
                 typeof message.person === "string" &&
-                typeof message.folder === "string"
+                typeof message.folder === "string" &&
+                typeof message.session === "string"
                 ? (message as Confirm)
                 : undefined;
         case "withdraw":

@@ -1,4 +1,4 @@
-// A session waits for the person at its computer. Cancel ends the request, so the server withdraws its question.
+// A session waits for the person at its computer. Cancel ends the request and the question on the computer.
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { addLayer, removeLayer } from "./back.js";
@@ -170,12 +170,6 @@ function waiting(runnerId, folder, since, cancel) {
 
 /** Run `start(signal)` and show where to answer after 400 ms. A person's Cancel returns no session and no error. */
 export async function waitOnComputer(runnerId, folder, kind, start) {
-    const computer = store.state.runners.find((each) => each.id === runnerId);
-
-    if (!computer?.asks) {
-        return start(undefined);
-    }
-
     const controller = new AbortController();
     const since = Date.now();
     let close;

@@ -108,7 +108,7 @@ In a terminal, run pi-pocket runner for a menu. For scripts:
       totp-days 1|7|14|30|never
                            How long a session approved with an authenticator
                            code lasts after its last use (default: 7)
-      confirm on|off       Older name: confirm off is stop-asking on
+      confirm on|off       The same as stop-asking off|on
       http allow|refuse    Plain HTTP to a server that is not this computer or
                            on your tailnet (default: refuse)
       network allow|refuse Sessions' browsers use this computer's network
@@ -1100,7 +1100,6 @@ function stdioAsker(): (question: SessionQuestion) => Promise<SessionAnswer> {
                     folder: question.folder,
                     kind: question.kind,
                     broad: question.broad,
-                    // Added with session permissions: older programs ignore them.
                     permission: question.permission,
                     expired: question.expired,
                     session: question.session,
@@ -1733,7 +1732,6 @@ export async function main(argv: string[]): Promise<void> {
         case "service":
             return service(file, rest);
         case "serve":
-            // Before the menu, `serve` walked through linking; it now opens the menu.
             return interactive ? menu(file) : serve(file, via ?? "none");
         case "link":
             return link(file, rest);

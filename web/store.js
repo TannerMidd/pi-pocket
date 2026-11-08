@@ -1869,10 +1869,9 @@ const handlers = {
             me: kept(state.me, data.user),
             users: keptEach(state.users, data.users),
             folderFavorites: kept(state.folderFavorites, data.folderFavorites ?? []),
-            // An older server keeps none on other computers.
-            runnerFavorites: kept(state.runnerFavorites, data.runnerFavorites ?? {}),
-            // Linked computers: the owner's; an older server sends none.
-            runners: kept(state.runners, Array.isArray(data.runners) ? data.runners : []),
+            runnerFavorites: kept(state.runnerFavorites, data.runnerFavorites),
+            // Linked computers are omitted for people who have access to none.
+            runners: kept(state.runners, data.runners ?? []),
             models: kept(state.models, data.models),
             guard: kept(state.guard, data.guard),
             server: keptServer(state.server, data.server, asked),

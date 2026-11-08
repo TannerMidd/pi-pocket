@@ -1622,13 +1622,7 @@ export class BackgroundTasks {
             const spawned =
                 remote === undefined
                     ? this.#spawn(conversationId, item, added)
-                    : await remote.spawn(
-                          item,
-                          this.#marker(conversationId, item.id),
-                          WRAPPER,
-                          added,
-                          SEGMENT_BYTES,
-                      );
+                    : await remote.spawn(item, added, SEGMENT_BYTES);
 
             pid = spawned;
             await this.beforeRecord?.();
@@ -1662,7 +1656,7 @@ export class BackgroundTasks {
 
             return (await this.#stored(conversationId, item.id)) ?? item;
         } catch (error) {
-            // The detached launch may have reached an old daemon: keep its reservation for marker recovery.
+            // The runner may have started the task: keep its reservation for recovery.
             if (
                 remote !== undefined &&
                 (isConnectionLost(error) ||

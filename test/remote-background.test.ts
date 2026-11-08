@@ -13,7 +13,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -68,7 +68,6 @@ before(async () => {
     );
 
     computer = linked.id;
-    legacyRunner();
     options = {
         link: { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, ...linked },
         version: "test",
@@ -134,17 +133,6 @@ async function userTexts(id: ConversationId): Promise<string> {
         .join("\n");
 }
 
-/** Exercise the unchanged bash implementation with a hello from before runner-owned tasks. */
-function legacyRunner(): void {
-    const link = app.runners.link(computer);
-    const attach = link.attach.bind(link);
-
-    link.attach = (socket, hello) => {
-        delete hello.tasks;
-        attach(socket, hello);
-    };
-}
-
 test("the server no longer refuses Windows background tasks", async () => {
     const env = {
         connection: { info: () => Promise.resolve({ os: "windows" }) },
@@ -154,17 +142,9 @@ test("the server no longer refuses Windows background tasks", async () => {
     await new RemoteBackground(env, "permission").supported();
 });
 
-test("the no-setsid fallback detaches with nohup and perl, and command env is kept", async () => {
+test("keeps the command environment on the computer", async () => {
     const id = await session();
-    const bin = join(there, "fallback-bin");
-
-    mkdirSync(bin);
-
-    for (const name of ["bash", "split", "nohup", "perl", "sleep"]) {
-        symlinkSync(`/usr/bin/${name}`, join(bin, name));
-    }
-
-    const remove = app.commandEnvs.add(() => ({ PATH: bin, BACKGROUND_TEST: "from provider" }));
+    const remove = app.commandEnvs.add(() => ({ BACKGROUND_TEST: "from provider" }));
 
     try {
         const item = await app.background.start(id, {
@@ -174,7 +154,7 @@ test("the no-setsid fallback detaches with nohup and perl, and command env is ke
 
         await until(
             async () => (await app.background.output(id, item.id))!.text.includes("from provider"),
-            "fallback output",
+            "command environment output",
         );
         assert.equal(await app.background.alive(id, item), true);
         await app.background.stop(id, item.id);
@@ -257,28 +237,6 @@ test("Running now's Stop forces a long task that ignores the polite signal", asy
     await until(async () => !(await app.background.alive(id, item)), "process group stopped");
 });
 
-test("the task survives a runner and daemon restart, and offline never means ended", async () => {
-    const id = await session();
-    const item = await app.background.start(id, {
-        command: "printf 'before reconnect\\n'; sleep 5; printf 'after reconnect\\n'; exit 3",
-    });
-
-    await runner.stop();
-    await until(() => app.runners.list()[0]?.online === false, "runner offline");
-    await new Promise((resolve) => setTimeout(resolve, 6500));
-    assert.equal((await one(id)).status, "running");
-    assert.equal((await one(id)).toldAt, undefined);
-    runner = new Runner(options);
-    runner.start();
-    await until(() => app.runners.list()[0]?.online === true, "runner reconnect");
-    await until(async () => (await one(id)).toldAt !== undefined, "end after reconnect", 15_000);
-    assert.equal((await one(id)).code, 3);
-    assert.match(
-        (await app.background.output(id, item.id))!.text,
-        /before reconnect\nafter reconnect/,
-    );
-});
-
 test("a server reopen resumes the watch without stopping or starting the task again", async () => {
     // Finish the previous task's Pi turn before closing its loaded model environment.
     await app.harness.waitForIdle(context);
@@ -290,7 +248,6 @@ test("a server reopen resumes the watch without stopping or starting the task ag
 
     await app.close();
     app = await openApp(model);
-    legacyRunner();
     app.background.timing.grace = 300;
     app.background.timing.starting = 300;
     server.removeAllListeners("request");

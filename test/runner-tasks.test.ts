@@ -104,7 +104,6 @@ async function startRunner(): Promise<void> {
     runner = new Runner(options);
     runner.start();
     await app.runners.link(computer).whenOnline();
-    assert.equal(app.runners.link(computer).tasks, true);
 }
 
 async function session() {

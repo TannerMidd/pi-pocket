@@ -711,14 +711,7 @@ export class Runner {
                     session: this.#session.id,
                     received: this.#session.inbox.received,
                     version: this.#options.version,
-                    // This runner answers `confirm`: the server asks it before a session starts here.
-                    asks: true,
-                    approvals: true,
-                    withdraws: true,
-                    tasks: true,
                     tools,
-                    // And opens network streams (`net-open`), or refuses them as its settings say.
-                    network: true,
                     ...(this.#settings().downloads === undefined
                         ? {}
                         : { downloads: this.#settings().downloads }),
@@ -834,7 +827,6 @@ export class Runner {
 
         if (message?.type === "welcome" && !welcomed) {
             this.#attempt = 0;
-            session.gate.scoped = message.approvals === true;
             // Runners shows this computer's settings, folders, and sessions as soon as it is welcomed.
             this.#lastState = "";
             queueMicrotask(() => void this.#state());
@@ -881,7 +873,6 @@ export class Runner {
                 current = this.#session;
             }
 
-            current.gate.scoped = message.approvals === true;
             current.id = message.session;
 
             // Output the daemon gave before this session was welcomed (none, normally).
@@ -953,7 +944,7 @@ export class Runner {
 
     /** Public state never contains the authenticator secret, failures, or accepted counter. */
     async #state(): Promise<void> {
-        if (!this.connected || !this.#session.gate.scoped) {
+        if (!this.connected) {
             return;
         }
 
@@ -994,10 +985,8 @@ export class Runner {
     #welcomeApprovals(ws: WebSocket): void {
         this.#welcomed = ws;
 
-        if (this.#session.gate.scoped) {
-            for (const notice of this.#notices.values()) {
-                this.#control(notice);
-            }
+        for (const notice of this.#notices.values()) {
+            this.#control(notice);
         }
 
         this.#sendAnswers();
@@ -1017,21 +1006,14 @@ export class Runner {
     /** The server's question before a session starts, moves, or is copied here. */
     async #answer(question: Confirm): Promise<void> {
         const scope: SessionScope = {
-            // An older server names no session: its sessions are approved one question at a time.
-            id: question.session ?? `server-${question.id}`,
+            id: question.session,
             folder: question.folder,
             person: question.person,
         };
-        // Older runners reject an unknown kind. The server sends moves as new + move for those runners.
-        const kind = question.move === true ? "move" : question.kind;
-        const answer = await this.#approve(question.id, scope, kind, false);
+        const answer = await this.#approve(question.id, scope, question.kind, false);
 
         if (answer.withdrawn) {
             return;
-        }
-
-        if (answer.allow && question.session === undefined) {
-            this.#session.gate.legacy.push({ ...scope, folder: await realFolder(scope.folder) });
         }
 
         this.#answers.set(question.id, {
@@ -1169,9 +1151,7 @@ export class Runner {
 
                     this.#notices.set(id, notice);
 
-                    if (this.#session.gate.scoped) {
-                        this.#control(notice);
-                    }
+                    this.#control(notice);
 
                     answer = await new Promise<Approval>((resolve) => {
                         resolveAnswer = resolve;
@@ -1251,7 +1231,7 @@ export class Runner {
                 this.#pending.delete(id);
                 this.#questions.delete(id);
 
-                if (this.#session.gate.scoped && this.connected) {
+                if (this.connected) {
                     this.#control({ type: "approval-ended", id });
                 }
 
@@ -1275,9 +1255,7 @@ export class Runner {
 
     /** A network stream for a session's browser: only for a session with a valid permission. */
     async #authorizedStream(ws: WebSocket, open: NetOpen): Promise<void> {
-        const scope = this.#session.gate.scoped
-            ? sessionScope(open.session)
-            : this.#session.gate.legacy.at(-1);
+        const scope = sessionScope(open.session);
         const stop = new AbortController();
 
         this.#questions.set(`net-${open.id}`, stop);
@@ -1286,9 +1264,8 @@ export class Runner {
             const allowed =
                 scope !== undefined &&
                 ((await this.#approvals.valid(scope)) !== undefined ||
-                    (this.#session.gate.scoped &&
-                        (await this.#approve(`resume-${scope.id}`, scope, "new", true, stop.signal))
-                            .allow));
+                    (await this.#approve(`resume-${scope.id}`, scope, "new", true, stop.signal))
+                        .allow);
 
             if (allowed && ws.readyState === WebSocket.OPEN && !stop.signal.aborted) {
                 this.#openStream(ws, open, this.#approvals.begin(scope.id));

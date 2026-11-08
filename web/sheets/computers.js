@@ -314,16 +314,13 @@ function canChange(runner) {
     return Boolean(state?.totp && runner.createdBy === store.state.me?.id && runner.online);
 }
 
-/** The runner is too old to report approvals, or offline: the panes that need its state say so. */
+/** The panes wait for the computer to report its approvals after connecting. */
 function NoApprovals({ runner }) {
-    return runner.online
-        ? html`<div class="runner-note warning">
-              <div>
-                  Update the runner on ${runner.name} to manage approvals here:
-                  <code>npm install -g pi-pocket@latest</code>, then start <code>pi-pocket runner</code> again.
-              </div>
-          </div>`
-        : html`<p class="muted small">Approvals show again when ${runner.name} reconnects.</p>`;
+    return html`<p class="muted small">${
+        runner.online
+            ? `Loading approvals from ${runner.name}…`
+            : `Approvals show again when ${runner.name} reconnects.`
+    }</p>`;
 }
 
 /** Whether an authenticator is set up there, and how to set one up: the settings change only with its codes. */
@@ -624,7 +621,6 @@ function Overview({ runner }) {
         state && ["Saved folders", String(state.folders.length)],
         state && ["Approved sessions", String(state.sessions.length)],
         ["People who can start sessions", people === 0 ? "none" : String(people)],
-        // The runner's own setting; `runner.asks` only says that it can ask (`protocol.ts`).
         state && ["Asks before new sessions", state.settings.stopAsking ? "no" : "yes"],
     ].filter(Boolean);
 
@@ -847,7 +843,6 @@ export function ComputersSheet() {
                         ]
                             .filter(Boolean)
                             .join(" · ")}
-                        badge=${runner.online && !runner.approvals ? "update" : null}
                     />`,
                 )}
                 <div class="group-title">This server</div>

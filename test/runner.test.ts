@@ -24,13 +24,7 @@ import {
     realFolder,
     sameFolder,
 } from "../src/runner/folders.ts";
-import WebSocket from "ws";
-import {
-    LINK_PATH,
-    LINK_PROTOCOL,
-    LINK_SUBPROTOCOL,
-    parseControl,
-} from "../src/runner/protocol.ts";
+import { parseControl } from "../src/runner/protocol.ts";
 import {
     Runner,
     type RunnerOptions,
@@ -626,41 +620,6 @@ describe("runner link", () => {
         }
     });
 
-    it("an older runner, without network streams, is told to update", async () => {
-        const setup = await serve();
-
-        try {
-            const { code } = setup.runners.makeCode("Old", "owner");
-            const linked = setup.runners.redeem(code);
-            const old = new WebSocket(
-                `${setup.address.replace("http", "ws")}${LINK_PATH}`,
-                LINK_SUBPROTOCOL,
-                {
-                    headers: { authorization: `Bearer ${linked.key}` },
-                },
-            );
-
-            await new Promise((resolve) => old.once("open", resolve));
-            old.send(
-                JSON.stringify({
-                    type: "hello",
-                    protocol: LINK_PROTOCOL,
-                    session: null,
-                    received: 0,
-                    version: "0.27.0",
-                }),
-            );
-            await until(() => setup.runners.list()[0]?.online === true, "the old runner to link");
-            await assert.rejects(
-                setup.runners.link(linked.id).openNetwork("localhost", 80, socketPair()[1]),
-                /Old runs an older Pi Pocket runner.*update its runner/,
-            );
-            old.terminate();
-        } finally {
-            await close(setup);
-        }
-    });
-
     it("codes work once; wrong keys and removed computers are refused", async () => {
         const setup = await serve();
 
@@ -847,18 +806,23 @@ describe("allowed folders", () => {
             const link = setup.runners.link(id);
 
             await Promise.all(
-                [first, second].map((folder) =>
-                    link.confirm({ kind: "new", person: "Owner", folder }),
+                [first, second].map((folder, index) =>
+                    link.confirm({ kind: "new", person: "Owner", folder, session: `new-${index}` }),
                 ),
             );
             assert.deepEqual([...(settings.folders ?? [])].sort(), [first, second].sort());
-            await link.confirm({ kind: "fork", person: "Owner", folder: first });
+            await link.confirm({ kind: "fork", person: "Owner", folder: first, session: "fork" });
             assert.equal(asked.length, 3, "a saved folder asks for session permission");
             assert.equal(asked[2]!.permission, "session");
             assert.equal(settings.folders!.length, 2, "and does not duplicate the entry");
 
             for (const folder of [homedir(), parse(homedir()).root]) {
-                await link.confirm({ kind: "new", person: "Owner", folder });
+                await link.confirm({
+                    kind: "new",
+                    person: "Owner",
+                    folder,
+                    session: `broad-${asked.length}`,
+                });
                 assert.equal(asked.at(-1)!.broad, true);
             }
 
@@ -870,6 +834,7 @@ describe("allowed folders", () => {
                 kind: "new",
                 person: "Owner",
                 folder: join(homedir(), "x-missing"),
+                session: "missing",
             });
             assert.equal(asked.at(-1)!.permission, "folder");
             settings.folders = settings.folders.filter((folder) => folder !== homedir());
@@ -877,7 +842,7 @@ describe("allowed folders", () => {
             paused = true;
             const controller = new AbortController();
             const pending = link.confirm(
-                { kind: "move", person: "Owner", folder: first },
+                { kind: "move", person: "Owner", folder: first, session: "move" },
                 controller.signal,
             );
             const rejected = assert.rejects(pending, /Cancelled/);
@@ -896,60 +861,18 @@ describe("allowed folders", () => {
         }
     });
 
-    it("parses kind move and asks older runners with a compatible new-session message", async () => {
-        const setup = await serve();
-        const { code } = setup.runners.makeCode("Old", "owner");
-        const linked = setup.runners.redeem(code);
-        const old = new WebSocket(
-            `${setup.address.replace("http", "ws")}${LINK_PATH}`,
-            LINK_SUBPROTOCOL,
-            {
-                headers: { authorization: `Bearer ${linked.key}` },
-            },
-        );
+    it("parses kind move with its session permission", () => {
         const question = {
             type: "confirm",
             id: "question",
             kind: "move",
             person: "Owner",
             folder: root,
+            session: "moving",
         };
 
         assert.deepEqual(parseControl(JSON.stringify(question)), question);
-        old.on("message", (data, binary) => {
-            if (binary) {
-                return;
-            }
-
-            const message = JSON.parse(data.toString());
-
-            if (message.type === "confirm") {
-                // The older parser accepts only new and fork. Extra fields are ignored.
-                assert.equal(message.kind, "new");
-                assert.equal(message.move, true);
-                old.send(JSON.stringify({ type: "confirmed", id: message.id, allow: true }));
-            }
-        });
-
-        try {
-            await new Promise((resolve) => old.once("open", resolve));
-            old.send(
-                JSON.stringify({
-                    type: "hello",
-                    protocol: LINK_PROTOCOL,
-                    session: null,
-                    received: 0,
-                    version: "0.27.0",
-                }),
-            );
-            await until(() => setup.runners.list()[0]?.online === true, "the old runner to link");
-            await setup.runners
-                .link(linked.id)
-                .confirm({ kind: "move", person: "Owner", folder: root });
-        } finally {
-            old.terminate();
-            await close(setup);
-        }
+        assert.equal(parseControl(JSON.stringify({ ...question, session: undefined })), undefined);
     });
 
     it("the terminal runner saves stdio Allow before ending a question, and sees CLI removals without restarting", async () => {
@@ -1002,7 +925,7 @@ describe("allowed folders", () => {
                 `the CLI runner to connect (${errors})`,
             );
             const link = setup.runners.link(linked.id);
-            const move = link.confirm({ kind: "move", person: "Owner", folder });
+            const move = link.confirm({ kind: "move", person: "Owner", folder, session: "move" });
 
             await until(() => questions.length === 1, "the move question on stdout");
             assert.partialDeepStrictEqual(questions[0], {
@@ -1015,7 +938,12 @@ describe("allowed folders", () => {
             await move;
             await until(() => savedAtEnd.length === 1, "the question end after saving");
             assert.deepEqual(savedAtEnd[0], [await realFolder(folder)]);
-            const session = link.confirm({ kind: "new", person: "Owner", folder: childFolder });
+            const session = link.confirm({
+                kind: "new",
+                person: "Owner",
+                folder: childFolder,
+                session: "child",
+            });
 
             await until(() => questions.length === 2, "the session question for a saved folder");
             assert.partialDeepStrictEqual(questions[1], {
@@ -1036,7 +964,12 @@ describe("allowed folders", () => {
                 file,
             ]);
             const denied = assert.rejects(
-                link.confirm({ kind: "new", person: "Owner", folder: childFolder }),
+                link.confirm({
+                    kind: "new",
+                    person: "Owner",
+                    folder: childFolder,
+                    session: "removed",
+                }),
                 /denied/,
             );
 
@@ -1048,6 +981,7 @@ describe("allowed folders", () => {
                 kind: "new",
                 person: "Owner",
                 folder: parse(homedir()).root,
+                session: "broad",
             });
 
             await until(() => questions.length === 4, "the broad question");

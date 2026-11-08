@@ -13,19 +13,8 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { after, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT as context, withAbortSignal } from "@earendil-works/chord/context";
-import WebSocket, { WebSocketServer } from "ws";
 import { realFolder } from "../src/runner/folders.ts";
-import {
-    dataMessage,
-    FRAME,
-    frame,
-    FrameSplitter,
-    LINK_PROTOCOL,
-    parseControl,
-    readData,
-    readFrame,
-    type ControlMessage,
-} from "../src/runner/protocol.ts";
+import { LINK_PROTOCOL } from "../src/runner/protocol.ts";
 import {
     Runner,
     type RunnerOptions,
@@ -843,144 +832,6 @@ describe("authenticator codes from Pi Pocket", () => {
     });
 });
 
-// ─── Older servers ─────────────────────────────────────────────────────
-
-describe("an older server", () => {
-    it("asks at start only, and its requests work while that session permission is valid", async () => {
-        const server = createServer();
-        const sockets = new WebSocketServer({ server });
-        const work = folder("old-server");
-        const got: ControlMessage[] = [];
-        const results = new Map<number, { type: number; json: Record<string, unknown> }>();
-        const asked: SessionQuestion[] = [];
-        let peer: WebSocket | undefined;
-        let sent = 0;
-        const splitter = new FrameSplitter();
-
-        sockets.on("connection", (ws) => {
-            peer = ws;
-            ws.on("message", (data, binary) => {
-                const bytes = data as Buffer;
-
-                if (!binary) {
-                    const message = parseControl(bytes.toString());
-
-                    if (message?.type === "hello") {
-                        // An older server: no `approvals` in its welcome.
-                        ws.send(
-                            JSON.stringify({
-                                type: "welcome",
-                                session: "old",
-                                resume: false,
-                                received: 0,
-                                graceMs: 1000,
-                            }),
-                        );
-                    }
-
-                    if (message !== undefined) {
-                        got.push(message);
-                    }
-
-                    return;
-                }
-
-                for (const whole of splitter.push(readData(bytes)!.bytes)) {
-                    const { type, id, json } = readFrame(whole);
-
-                    results.set(id, { type, json });
-                }
-            });
-        });
-        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-
-        const request = async (id: number, json: Record<string, unknown>) => {
-            const bytes = frame(FRAME.request, id, json);
-
-            peer!.send(dataMessage(sent, bytes));
-            sent += bytes.length;
-            await until(() => results.has(id), `the result of request ${id}`);
-
-            return results.get(id)!;
-        };
-
-        const settings: RunnerSettings = {};
-        const runner = new Runner({
-            link: {
-                server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-                id: "old",
-                name: "Laptop",
-                key: "key",
-            },
-            version: "test",
-            cwd: root,
-            approvalMs: 800,
-            settings: () => settings,
-            saveSettings: (change) => {
-                Object.assign(settings, change);
-            },
-            ask: async (question) => {
-                asked.push(question);
-
-                return { allow: true };
-            },
-        });
-
-        try {
-            runner.start();
-            await until(() => runner.connected, "the runner to connect");
-            assert.ok(got.some((each) => each.type === "hello" && each.approvals === true));
-            assert.equal((await request(1, { op: "hello", protocol: 1 })).type, FRAME.result);
-
-            // Before any session: refused, as no session permission covers it.
-            const before = await request(2, { op: "mkdir", path: join(work, "before") });
-
-            assert.equal(before.type, FRAME.error);
-
-            // The older server asks at start, with no session id: folder and session approval.
-            peer!.send(
-                JSON.stringify({
-                    type: "confirm",
-                    id: "q1",
-                    kind: "new",
-                    person: "Owner",
-                    folder: work,
-                }),
-            );
-            await until(
-                () => got.some((each) => each.type === "confirmed" && each.id === "q1"),
-                "the answer",
-            );
-            assert.equal(asked[0]!.permission, "folder");
-            assert.equal(
-                (await request(3, { op: "mkdir", path: join(work, "inside") })).type,
-                FRAME.result,
-            );
-            // Outside the approved folder: refused.
-            assert.equal(
-                (await request(4, { op: "mkdir", path: join(root, "elsewhere") })).type,
-                FRAME.error,
-            );
-            assert.ok(
-                !got.some((each) => each.type === "approval-needed"),
-                "nothing new is sent to it",
-            );
-
-            // Expired: an older server cannot show a new question, so its requests fail until it asks again.
-            await sleep(1000);
-            assert.equal(
-                (await request(5, { op: "mkdir", path: join(work, "late") })).type,
-                FRAME.error,
-            );
-        } finally {
-            await runner.stop();
-            peer?.terminate();
-            sockets.close();
-            await new Promise<void>((resolve) => server.close(() => resolve()));
-        }
-    });
-});
-
 // ─── The command line ──────────────────────────────────────────────────
 
 describe("pi-pocket runner totp, sessions, and unlink", () => {
@@ -1013,6 +864,29 @@ describe("pi-pocket runner totp, sessions, and unlink", () => {
 
         return file;
     }
+
+    it("settings confirm on|off is the same as stop-asking off|on", async () => {
+        const file = linkFile();
+
+        for (const [name, value, confirm] of [
+            ["confirm", "off", false],
+            ["confirm", "on", true],
+            ["stop-asking", "on", false],
+            ["stop-asking", "off", true],
+        ] as const) {
+            const result = await run(file, ["settings", name, value, "--json"]);
+            const changed = JSON.parse(result.stdout);
+
+            assert.equal(result.code, 0, result.stderr);
+            assert.equal(changed.ok, true);
+            assert.equal(changed.settings.stopAsking, !confirm);
+            assert.equal(JSON.parse(readFileSync(file, "utf8")).settings.confirm, confirm);
+        }
+
+        const help = await run(file, ["--help"]);
+
+        assert.match(help.stdout, /confirm on\|off +The same as stop-asking off\|on/);
+    });
 
     it("sets up only after one correct code, turns off only with a code, and unlink removes it", async () => {
         const file = linkFile();

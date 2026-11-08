@@ -290,7 +290,7 @@ describe("people granted a computer", () => {
         assert.deepEqual((await app.folderFavorites.runners(guest))[runnerId], [there]);
     });
 
-    it("approves a waiting session with a code and withdraws another waiting session", async () => {
+    it("approves a waiting session with a code and cancels another waiting session", async () => {
         const secret = base32(Buffer.from("12345678901234567890"));
         const folder = join(root, "needs-code");
         const next = join(root, "withdrawn");

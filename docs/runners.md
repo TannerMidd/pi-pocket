@@ -90,7 +90,7 @@ Use **Saved folders** in the terminal menu, a program that runs the runner, or P
 
 A new session in a saved folder asks for **session permission**. **Allow** approves this session. A session's permission also covers its subagents and the linked sessions it starts in the same folder.
 
-The setting **Stop asking on new sessions** (off by default) approves new sessions in saved folders without a question. A folder without permission still asks. The older setting `confirm off` means the same.
+The setting **Stop asking on new sessions** (off by default) approves new sessions in saved folders without a question. A folder without permission still asks. The command `settings confirm on|off` is the same as `settings stop-asking off|on`.
 
 A session's permission expires when the session is idle for a time:
 
@@ -99,7 +99,7 @@ A session's permission expires when the session is idle for a time:
 
 The clock starts when the session's last request on the computer finishes. A command that still runs keeps the session in use; a watch on files does not. The runner measures this itself.
 
-When a session's permission expired, its next request waits, and the computer asks again. Pi Pocket shows the question in the session. **Deny** fails the request; **Cancel** in Pi Pocket withdraws the question. Sessions from before this update ask once, at their next request.
+When a session's permission expired, its next request waits, and the computer asks again. Pi Pocket shows the question in the session. **Deny** fails the request; **Cancel** in Pi Pocket cancels the question.
 
 Use **Approved sessions** in the terminal menu, `pi-pocket runner sessions`, or Pi Pocket's **Runners** to see the approved sessions and when each expires. **Revoke** and **Revoke all** need no code. A revoked session's next request asks again.
 
@@ -111,7 +111,7 @@ This is not a sandbox. A command still runs as you, and it can read and change f
 
 ### Waiting for an answer
 
-If nobody answers within 2 minutes (5 minutes with an authenticator), the session does not start, or the waiting request fails. While the computer asks, the page shows a waiting dialog with the computer, folder, and time left. A quick answer skips the dialog. **Cancel** stops the request and withdraws the question on a runner that supports cancellation; no session starts. Older runners can keep their question open, but their late answer does not start the cancelled session.
+If nobody answers within 2 minutes (5 minutes with an authenticator), the session does not start, or the waiting request fails. While the computer asks, the page shows a waiting dialog with the computer, folder, and time left. A quick answer skips the dialog. **Cancel** stops the request and cancels the question on the computer; no session starts, even if an answer comes later.
 
 A network drop does not deny or approve a question. The question stays open in the computer's terminal or desktop app, with its original time limit, and requests waiting for approval keep waiting. When the link returns, Pi Pocket shows the open questions again, and an authenticator code can answer them. An answer to a new-session question made on the computer while offline is kept and sent after reconnecting.
 
@@ -152,7 +152,7 @@ The runner also says when sessions work on the computer, for a tray icon, keepin
 
 A file or command request of an approved session counts from when the runner sends it to the computer's tool process until its result, so a long command counts all the time it runs. Folder listings for the folder picker, file watches, and the browser's network connections do not count. The line says nothing about the commands, tools, or sessions themselves.
 
-The state is smoothed, so short requests do not make it flicker. A folder shows after its work lasted 0.5 s, and stays 5 s after its last request ended, so the requests of one turn show as one stretch of work. When the runner stops, it writes a last line with `working` false if it was working. Runners from before Pi Pocket 0.28.0 write no `PI-POCKET-ACTIVITY` lines.
+The state is smoothed, so short requests do not make it flicker. A folder shows after its work lasted 0.5 s, and stays 5 s after its last request ended, so the requests of one turn show as one stretch of work. When the runner stops, it writes a last line with `working` false if it was working.
 
 `settings`, `folders`, `sessions`, `totp`, and `unlink` take `--json`, for programs. A command that fails with `--json` prints `{ "ok": false, "error": "..." }` and exits with code 1.
 
@@ -199,8 +199,6 @@ The shell's exit code is final when the shell ends, even if a descendant redirec
 
 Their logs and exit codes stay in `<temp>/pi-pocket-tasks/<permission id>/` on that computer, reachable only by their session. Running now and the log view read them there, with the same output limits as local tasks. While the computer is offline, its watch waits, then checks again when it reconnects. Completed output and exit codes reach the session when it is back. The runner checks a live session permission and the command's folder before it starts a task. On Linux and macOS, commands use Bash, or `sh` if Bash is absent. On Windows, they use an installed Bash (not the Windows WSL launcher), or `cmd.exe` if Bash is absent. Temporary files can disappear when the computer restarts.
 
-Older runners that do not advertise task support keep the earlier Bash implementation on Linux and macOS. Those tasks run independently of the runner and tool process, and Stop finds them by their environment marker. Update the runner to get runner-owned task lifetimes and Windows support.
-
 A project's own `.pi/settings.json` and prompt templates on that computer are not read.
 
 ### Extensions
@@ -224,7 +222,7 @@ The browser tool and the **Browser** panel work in a session on another computer
 - Pi's model calls do not change: they go out from the server.
 - File paths and `file://` addresses do not open, because the browser would read the server's disk. Serve the files instead, for example with `python3 -m http.server`.
 
-How it works: these pages use a second Chromium on the server, with a proxy built into Pi Pocket. Each session's pages have their own proxy credentials, which name the computer. The proxy sends each connection to the runner over its link, and the runner opens the TCP connection on the computer. Chromium's own background traffic and anything without valid credentials go to a proxy that refuses everything. WebRTC sends no UDP outside the proxy, and QUIC is off. If the computer is offline, the page fails with "<name> is offline". Nothing goes out from the server. A runner older than this feature gets the message "update its runner".
+How it works: these pages use a second Chromium on the server, with a proxy built into Pi Pocket. Each session's pages have their own proxy credentials, which name the computer. The proxy sends each connection to the runner over its link, and the runner opens the TCP connection on the computer. Chromium's own background traffic and anything without valid credentials go to a proxy that refuses everything. WebRTC sends no UDP outside the proxy, and QUIC is off. If the computer is offline, the page fails with "<name> is offline". Nothing goes out from the server.
 
 To stop sharing the network, choose **Settings** → **Share the network with browsers** in the `pi-pocket runner` menu, or run `pi-pocket runner settings network refuse`. The runner then refuses every connection, and pages show "<name> does not share its network". The change takes effect without a restart.
 

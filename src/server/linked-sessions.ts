@@ -803,7 +803,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const cwd = approved?.cwd ?? (await this.#directory(source, user, agent, request.cwd));
 
         const sameFolder = cwd === (agent.cwd ?? app.cwdOf(source));
-        // A linked session in the same folder shares its source's permission, as before it started without a question.
+        // A linked session in the same folder shares its source's permission and starts without a question.
         const runnerPermission =
             runner === undefined
                 ? undefined
@@ -817,7 +817,7 @@ export class LinkedSessions implements LinkedSessionsApi {
                     kind: "new",
                     person: user.name,
                     folder: cwd,
-                    session: runnerPermission,
+                    session: runnerPermission!,
                 },
                 undefined,
                 user.id,

@@ -23,7 +23,6 @@ import {
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import {
     type ControlMessage,
-    LEGACY_GRACE_MS,
     FRAME,
     FrameSplitter,
     Inbox,
@@ -129,8 +128,6 @@ export type RunnerView = {
     id: string;
     name: string;
     online: boolean;
-    /** The runner asks before starting a session. */
-    asks: boolean;
     /** Offline, with its work waiting for it (its daemon session is kept until it is back). */
     away: boolean;
     lastSeen?: number;
@@ -210,11 +207,6 @@ export class RunnerLink {
     #nextId = 1;
     #ackTimer: NodeJS.Timeout | undefined;
     #closed = false;
-    /** Whether its runner answers `confirm` (it said so in `hello`): older runners do not. */
-    #asks = false;
-    /** Whether the runner understands `withdraw`. */
-    #withdraws = false;
-    #scoped = false;
     state: ApprovalState | undefined;
     readonly questions = new Map<string, ApprovalNeeded>();
     readonly #results = new Map<string, (message: ControlMessage) => void>();
@@ -227,11 +219,9 @@ export class RunnerLink {
             reject: (error: Error) => void;
         }
     >();
-    /** The runner owns background tasks; absent on older runners. */
-    tasks = false;
     /** Questions sent to its runner, waiting for `confirmed`. */
     readonly #questions = new Map<string, (answer: Confirmed) => void>();
-    /** The network streams of the current connection, when its runner opens them (`hello.network`). */
+    /** The network streams of the current connection. */
     #network: LinkNetwork | undefined;
     /** The folder its runner keeps browser downloads in (`hello.downloads`); undefined: its temporary folder. */
     downloads: string | undefined;
@@ -252,10 +242,6 @@ export class RunnerLink {
         const platform = this.#runners.stored(this.id)?.platform;
 
         return platform === undefined ? {} : { os: platform.os, arch: platform.arch };
-    }
-
-    get asks(): boolean {
-        return this.#asks;
     }
 
     get online(): boolean {
@@ -373,7 +359,7 @@ export class RunnerLink {
         options: RequestOptions = {},
         scope?: SessionScope,
     ): Promise<Reply> {
-        if (this.#scoped && scope !== undefined) {
+        if (scope !== undefined) {
             json = { ...json, [SESSION_FIELD]: scope };
         }
 
@@ -513,14 +499,10 @@ export class RunnerLink {
         }
 
         this.#socket = socket;
-        this.#asks = hello.asks === true;
-        this.#withdraws = hello.withdraws === true;
-        this.#scoped = hello.approvals === true;
-        this.tasks = hello.tasks === true;
         this.#runners.toolsSeen(this.id, hello.tools);
 
         this.#network?.drop();
-        this.#network = hello.network === true ? this.#networkOf(socket) : undefined;
+        this.#network = this.#networkOf(socket);
         this.downloads =
             typeof hello.downloads === "string" && hello.downloads !== ""
                 ? hello.downloads
@@ -542,8 +524,6 @@ export class RunnerLink {
                 session: session.id,
                 resume: true,
                 received: session.inbox.received,
-                graceMs: LEGACY_GRACE_MS,
-                ...(this.#scoped ? { approvals: true } : {}),
             });
 
             for (const message of resent) {
@@ -566,8 +546,6 @@ export class RunnerLink {
                 session: session.id,
                 resume: false,
                 received: 0,
-                graceMs: LEGACY_GRACE_MS,
-                ...(this.#scoped ? { approvals: true } : {}),
             });
             session.ready = this.#send(session, "hello", { protocol: 1 }, {}).then((reply) => {
                 if (reply.json.protocol !== 1) {
@@ -595,16 +573,7 @@ export class RunnerLink {
             .then(() => {
                 if (this.#socket === socket) {
                     for (const pending of this.#taskRequests.values()) {
-                        if (this.tasks) {
-                            this.#control(pending.message);
-                        } else {
-                            pending.reject(
-                                new HttpError(
-                                    409,
-                                    "Connect an updated runner on this computer first.",
-                                ),
-                            );
-                        }
+                        this.#control(pending.message);
                     }
                 }
             })
@@ -639,17 +608,17 @@ export class RunnerLink {
                 const bytes = toBuffer(data);
                 const stream = bytes[0] === STREAM_DATA ? readStreamData(bytes) : undefined;
 
-                if (stream !== undefined && network !== undefined) {
+                if (stream !== undefined) {
                     network.data(stream.id, stream.bytes);
                 } else if (bytes[0] === STREAM_DATA) {
-                    this.#drop(1002, "Stream data without network streams");
+                    this.#drop(1002, "Invalid network stream data");
                 } else {
                     this.#data(session, bytes);
                 }
             } else {
                 const message = parseControl(toBuffer(data).toString("utf8"));
 
-                if (message?.type.startsWith("net-") === true && network !== undefined) {
+                if (message?.type.startsWith("net-") === true) {
                     network.message(message as Parameters<LinkNetwork["message"]>[0]);
                 } else {
                     this.#onControl(session, message);
@@ -658,7 +627,7 @@ export class RunnerLink {
         });
         socket.on("close", () => {
             clearInterval(pinger);
-            network?.drop();
+            network.drop();
 
             if (this.#socket !== socket) {
                 return;
@@ -837,10 +806,6 @@ export class RunnerLink {
             );
         }
 
-        if (!this.#asks) {
-            return;
-        }
-
         const id = randomUUID();
         let timer: NodeJS.Timeout | undefined;
         let cancelled: (() => void) | undefined;
@@ -853,22 +818,14 @@ export class RunnerLink {
             cancelled = () => {
                 this.#questions.delete(id);
 
-                if (this.#withdraws) {
-                    this.#control({ type: "withdraw", id });
-                }
+                this.#control({ type: "withdraw", id });
 
                 reject(new HttpError(409, "Cancelled."));
             };
 
             signal?.addEventListener("abort", cancelled, { once: true });
             this.#questions.set(id, resolve);
-            // Older runners close the link for an unknown kind. They can still ask a generic session question.
-            this.#control({
-                type: "confirm",
-                id,
-                ...question,
-                ...(question.kind === "move" ? ({ kind: "new", move: true } as const) : {}),
-            });
+            this.#control({ type: "confirm", id, ...question });
         }).finally(() => {
             clearTimeout(timer);
             this.#questions.delete(id);
@@ -920,8 +877,8 @@ export class RunnerLink {
     }
 
     async #result(id: string, message: ControlMessage): Promise<ControlMessage> {
-        if (!this.online || !this.#scoped) {
-            throw new HttpError(409, "Connect an updated runner on this computer first.");
+        if (!this.online) {
+            throw new HttpError(409, "Connect the runner on this computer first.");
         }
 
         if (this.#results.has(id)) {
@@ -988,10 +945,6 @@ export class RunnerLink {
     async #taskRequest(message: TaskRequest): Promise<TaskResult> {
         await this.whenOnline();
 
-        if (!this.tasks) {
-            throw new HttpError(409, "Connect an updated runner on this computer first.");
-        }
-
         const result = await new Promise<TaskResult>((resolve, reject) => {
             this.#taskRequests.set(message.id, { message, resolve, reject });
             this.#control(message);
@@ -1013,7 +966,7 @@ export class RunnerLink {
 
     /**
      * Open a TCP connection to `host`:`port` from the computer, and relay `socket` to it (`runner-network.ts`). Rejects
-     * with a `NetError` that names the computer when it is offline, its runner is too old, or it refused or failed.
+     * with a `NetError` that names the computer when it is offline, or it refused or failed.
      */
     openNetwork(host: string, port: number, socket: Duplex, options?: OpenOptions): Promise<void> {
         if (this.#closed || this.#socket === undefined) {
@@ -1025,16 +978,7 @@ export class RunnerLink {
             );
         }
 
-        if (this.#network === undefined) {
-            return Promise.reject(
-                new NetError(
-                    "unsupported",
-                    `${this.name} runs an older Pi Pocket runner, which cannot open pages for the browser: update its runner (npm install -g ${runnerPackage()}), then try again.`,
-                ),
-            );
-        }
-
-        return this.#network.open(host, port, socket, options);
+        return this.#network!.open(host, port, socket, options);
     }
 
     /** Network streams over `socket`: their data waits behind pi-env's (`tunnels.ts`). */
@@ -1197,8 +1141,8 @@ export class Runners {
     }
 
     /** While `confirm` waits, who asked about session permission `permission` (`mayAnswer`). */
-    asking(permission: string | undefined, asker: string | undefined): () => void {
-        if (permission === undefined || asker === undefined) {
+    asking(permission: string, asker: string | undefined): () => void {
+        if (asker === undefined) {
             return () => {};
         }
 
@@ -1233,7 +1177,7 @@ export class Runners {
 
     /**
      * The system of computer `id` as it last said (`hello`), also while it is offline: its OS and temporary folder.
-     * Undefined before a runner that tells its temporary folder first connected.
+     * Undefined before its runner first connected.
      */
     system(id: string): { os: string; tmpdir: string } | undefined {
         const platform = this.stored(id)?.platform;
@@ -1470,7 +1414,6 @@ export class Runners {
                               ),
                           }),
                     online: link?.online === true,
-                    asks: link?.asks === true,
                     away: link?.away === true,
                     ...(runner.lastSeen === undefined ? {} : { lastSeen: runner.lastSeen }),
                     ...(runner.platform ?? {}),

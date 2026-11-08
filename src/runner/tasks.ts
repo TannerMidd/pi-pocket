@@ -280,7 +280,7 @@ export class Tasks {
 
     /**
      * What an ended task left running, as its host finds it: the processes themselves, not the shell that started them
-     * and is gone. Undefined when the host cannot say (an older one, or no way to list them), within 4 seconds.
+     * and is gone. Undefined when the host cannot list them or does not answer within 4 seconds.
      */
     #left(host: Host): Promise<number[] | undefined> {
         if (!host.child.connected) {

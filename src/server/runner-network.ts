@@ -8,7 +8,7 @@ import type { NetFailure, NetMessage } from "../runner/protocol.ts";
 import { CONNECT_MS, MAX_STREAMS, StreamLink } from "../runner/tunnels.ts";
 
 /** Why a connection through a computer did not open: its runner's reason, or the link's. */
-export type NetProblem = NetFailure | "offline" | "unsupported";
+export type NetProblem = NetFailure | "offline";
 
 export class NetError extends Error {
     readonly code: NetProblem;

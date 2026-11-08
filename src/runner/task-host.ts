@@ -281,7 +281,7 @@ function stop(): void {
 /**
  * The processes of the task that still run after its shell ended: what it left behind, which the session names. Its
  * group on Linux and macOS (`pgrep -g`), its Job Object's processes but this host on Windows. Undefined when they
- * cannot be listed (no `pgrep`, no job): the runner then names the task's shell, as before.
+ * cannot be listed (no `pgrep`, no job): the runner then names the task's shell.
  */
 async function left(): Promise<number[] | undefined> {
     if (child?.pid === undefined) {

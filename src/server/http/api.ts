@@ -665,7 +665,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 throw new HttpError(400, "id is required");
             }
 
-            // Only the person whose session waits (or the linker, or the owner) answers or withdraws its question.
+            // Only the person whose session waits (or the linker, or the owner) answers or cancels its question.
             const question = app.runners.link(second).questions.get(body.id);
 
             if (!app.runners.mayAnswer(second, question, user)) {
