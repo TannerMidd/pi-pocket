@@ -496,3 +496,66 @@ test("a schedule can be changed: its text and time, from once to a repeat and ba
 
     assert.equal(sent.length, 1, "sent once, with the new text only");
 });
+
+test("a cancel stops the task an edit gave a schedule, and an edited repeat sends only its new text", async () => {
+    const id = await newSession(app);
+    const schedule = await app.commands.schedule(id, owner(app), {
+        when: "every 10m first text",
+        zone: "UTC",
+    });
+
+    // A cancel after an edit stops the task the edit started, not only the one it replaced.
+    const edited = await app.commands.updateSchedule(id, owner(app), schedule.id, {
+        text: "edited",
+        every: { minutes: 30 },
+    });
+
+    await app.commands.cancelSchedule(id, owner(app), schedule.id);
+    await until(
+        async () =>
+            (await app.harness.getTask(edited.taskId, context))?.state.status === "terminal",
+        "the edit's task to end",
+    );
+    assert.deepEqual(await items(id), []);
+
+    // The edit's message goes out in its place, and the cancelled first text never does.
+    const kept = await app.commands.schedule(id, owner(app), {
+        when: "every 10m first",
+        zone: "UTC",
+    });
+
+    await app.commands.updateSchedule(id, owner(app), kept.id, {
+        text: "second",
+        every: { minutes: 10 },
+    });
+    await restartLater(11);
+    await until(
+        async () => (await userTexts(id)).some((text) => text.includes("[scheduled] second")),
+        "the edited repeat to go out",
+    );
+    const sent = (await userTexts(id)).filter((text) => text.includes("[scheduled]"));
+
+    assert.equal(sent.length, 1, `only the edited text, once: ${sent.join(", ")}`);
+});
+
+test("a schedule id is only ever one of the session's own", async () => {
+    const id = await newSession(app);
+
+    for (const name of ["__proto__", "constructor", "toString"]) {
+        await assert.rejects(
+            app.commands.updateSchedule(id, owner(app), name, {
+                text: "x",
+                next: app.now() + 60_000,
+            }),
+            { status: 404 },
+        );
+        assert.equal(await app.schedules.cancel(id, name), undefined);
+    }
+
+    assert.equal(
+        ({} as Record<string, unknown>).taskId,
+        undefined,
+        "nothing reached Object.prototype",
+    );
+    assert.equal(({} as Record<string, unknown>).text, undefined);
+});

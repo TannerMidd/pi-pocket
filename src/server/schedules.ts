@@ -74,6 +74,10 @@ async function stored(
 const ownedBy = (schedule: Schedule | undefined, runtime: Runtime): schedule is Schedule =>
     schedule !== undefined && String(schedule.taskId) === String(runtime.taskId);
 
+/** A schedule by the id someone gave: only one of its own, never an object's built-in (`__proto__`, `constructor`). */
+const own = (items: Record<string, Schedule>, id: string): Schedule | undefined =>
+    Object.hasOwn(items, id) ? items[id] : undefined;
+
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 export type ScheduleRequest = {
@@ -174,13 +178,8 @@ export class Schedules {
                   : `schedule:${sending}`;
         const stopped = this.#stopped(conversationId, schedule);
 
-        if (stopped === undefined) {
-            await conversation.submit(
-                { type: "input", content: schedule.content, whenBusy: "followUp", requestId },
-                context,
-            );
-        }
-
+        // Sent in the commit that reads the schedule again, so an edit or cancel either comes first, and nothing goes
+        // out, or after, and the message went out as it was. The request id makes a run again after a crash send once.
         await runtime.commit(async (tx) => {
             const doc = await tx.doc(ScheduleDoc, conversationId);
             const item = doc.items[id];
@@ -189,12 +188,14 @@ export class Schedules {
                 return finished;
             }
 
-            // Run again after a crash, this phase may find a limit that the message it sent already crossed: the message
-            // went out all the same, and the schedule goes on to its next time, where it is checked again.
-            if (
-                stopped !== undefined &&
-                (await tx.submissionByRequest(conversationId, requestId)) === undefined
-            ) {
+            if (stopped === undefined) {
+                await conversation.submit(tx, {
+                    type: "input",
+                    content: item.content,
+                    whenBusy: "followUp",
+                    requestId,
+                });
+            } else {
                 delete doc.items[id];
                 addActivity(
                     await tx.doc(ChatDoc, conversationId),
@@ -433,7 +434,7 @@ export class Schedules {
 
         const updated = await app.harness.commit(async (tx) => {
             const doc = await tx.doc(ScheduleDoc, conversationId);
-            const item = doc.items[scheduleId];
+            const item = own(doc.items, scheduleId);
 
             if (item === undefined) {
                 throw new HttpError(404, "No such scheduled message");
@@ -470,6 +471,7 @@ export class Schedules {
             return JSON.parse(JSON.stringify(item)) as Schedule;
         }, context);
 
+        // The old task finds the schedule no longer its own and ends.
         if (replaced !== undefined) {
             await app.harness.abortTask(replaced, context).catch(() => undefined);
         }
@@ -502,17 +504,24 @@ export class Schedules {
         conversationId: ConversationId,
         scheduleId: string,
     ): Promise<Schedule | undefined> {
-        const schedule = (await this.list(conversationId)).find((item) => item.id === scheduleId);
+        // Removed and read in one commit, so an edit that hands it to a new task in between cannot leave that task
+        // behind: the task stopped is the one it had when it was removed. The task, finding it gone, sends nothing more.
+        const schedule = await this.#app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ScheduleDoc, conversationId);
+            const item = own(doc.items, scheduleId);
 
-        if (schedule === undefined) {
-            return undefined;
-        }
+            if (item === undefined) {
+                return undefined;
+            }
 
-        // The task's abort removes the schedule; one already gone (or never run) is removed here.
-        await this.#app.harness.abortTask(schedule.taskId, context).catch(() => undefined);
-        await this.#app.harness.commit(async (tx) => {
-            delete (await tx.doc(ScheduleDoc, conversationId)).items[scheduleId];
+            delete doc.items[scheduleId];
+
+            return JSON.parse(JSON.stringify(item)) as Schedule;
         }, context);
+
+        if (schedule !== undefined) {
+            await this.#app.harness.abortTask(schedule.taskId, context).catch(() => undefined);
+        }
 
         return schedule;
     }
