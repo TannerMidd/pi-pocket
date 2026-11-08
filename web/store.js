@@ -2736,6 +2736,18 @@ export const actions = {
             when,
             zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
+    /** From the Schedules sheet's editor: `{ text, next?, every? }`, when as data. Clock times are this device's. */
+    addSchedule: (schedule) =>
+        api(`c/${current()}/schedules`, {
+            ...schedule,
+            zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+    updateSchedule: (id, schedule) =>
+        api(
+            `c/${current()}/schedules/${encodeURIComponent(id)}`,
+            { ...schedule, zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+            { method: "PUT" },
+        ),
     cancelSchedule: (id) => api(`c/${current()}/schedules/${encodeURIComponent(id)}/cancel`, {}),
     setGoal: (command) => api(`c/${current()}/goal`, { command }),
     removeWorktree: (force) => api(`c/${current()}/worktree`, { remove: true, force }),

@@ -78,14 +78,14 @@ test("a schedule of an archived session is marked in the Schedules sheet", real,
                 }
 
                 openSheet({ type: "schedules" });
-                return JSON.stringify(document.querySelector(".schedule") !== null);
+                return JSON.stringify(document.querySelector(".sched-card") !== null);
             `),
         "the sheet",
         20_000,
     );
     assert.match(
         await inPage<string>(
-            `return JSON.stringify(document.querySelector(".schedule").textContent)`,
+            `return JSON.stringify(document.querySelector(".sched-card").textContent)`,
         ),
         /session archived/,
     );
@@ -146,16 +146,107 @@ test(
         await until(
             async () =>
                 await inPage<boolean>(
-                    `return JSON.stringify(document.querySelectorAll(".schedule").length === 2)`,
+                    `return JSON.stringify(document.querySelectorAll(".sched-card").length === 2)`,
                 ),
             "the Schedules sheet",
             10_000,
         );
         assert.match(
             await inPage<string>(
-                `return JSON.stringify(document.querySelector(".schedule .schedule-countdown").textContent)`,
+                `return JSON.stringify(document.querySelector(".sched-card .sched-countdown").textContent)`,
             ),
             /in (29:\d\d|30:00)/,
         );
+    },
+);
+
+test(
+    "the Schedules sheet edits a schedule: from once to weekdays at a time, and deletes one",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await app.commands.schedule(id, owner(app), { when: "in 40m first one", zone: "UTC" });
+        await app.commands.schedule(id, owner(app), { when: "in 50m second one", zone: "UTC" });
+        await page.setViewport(VIEWPORTS.mobile);
+        await page.navigate(`${base}/s/${id}`);
+        await until(
+            async () =>
+                await inPage<boolean>(`
+                const { store, openSheet } = await import("/store.js");
+                if ((store.state.view.schedules ?? []).length < 2) {
+                    return JSON.stringify(false);
+                }
+
+                openSheet({ type: "schedules" });
+                return JSON.stringify(document.querySelectorAll(".sched-card").length === 2);
+            `),
+            "the sheet with both",
+            20_000,
+        );
+
+        // Open the first in the editor, change its text, and make it weekdays at 07:45.
+        // A real tap, once the sheet has slid up: during its slide the card is not yet where it ends.
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sheet").getAnimations().length === 0)`,
+                ),
+            "the sheet to settle",
+        );
+        await page.click({ selector: ".sched-card" });
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sched-editor textarea")?.value === "first one")`,
+                ),
+            "the editor",
+        );
+        await page.fill({ selector: ".sched-editor textarea" }, "changed one");
+        await page.click({ label: "On days" });
+        await inPage(`
+        const field = document.querySelector('.sched-editor input[type="time"]');
+        field.value = "07:45";
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        return "null";
+    `);
+        await page.click({ selector: ".sched-chips .chip:nth-child(2)" });
+        assert.match(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".sched-preview").textContent)`,
+            ),
+            /Weekdays at 07:45/,
+        );
+        await page.click({ label: "Save" });
+
+        const ours = async () =>
+            (await app.schedules.list(id)).find((each) => each.text === "changed one");
+
+        await until(async () => (await ours()) !== undefined, "the change on the server");
+        const changed = (await ours())!;
+
+        assert.deepEqual(changed.every, { at: "07:45", days: [1, 2, 3, 4, 5] });
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sched-editor") === null && [...document.querySelectorAll(".sched-card")].some((card) => /weekdays at 07:45/.test(card.textContent)))`,
+                ),
+            "the list to show the repeat",
+        );
+
+        // Delete the other one from its editor.
+        await inPage(`
+        [...document.querySelectorAll(".sched-card")].find((card) => card.textContent.includes("second one")).click();
+        return "null";
+    `);
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sched-editor textarea")?.value === "second one")`,
+                ),
+            "its editor",
+        );
+        await page.click({ label: "Delete" });
+        await until(async () => (await app.schedules.list(id)).length === 1, "it to be deleted");
     },
 );

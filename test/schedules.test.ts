@@ -423,3 +423,76 @@ test("archiving a session says how many repeating schedules keep running there",
     });
     assert.equal((await items(id)).length, 2, "archiving cancels nothing");
 });
+
+test("a schedule can be changed: its text and time, from once to a repeat and back, and the old time sends nothing", async () => {
+    const id = await newSession(app);
+    const once = await app.commands.schedule(id, owner(app), {
+        when: "in 10m old text",
+        zone: "UTC",
+    });
+    const now = app.now();
+
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, { text: "x", next: now - 1 }),
+        { status: 400, message: /passed/ },
+    );
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, {
+            text: "x",
+            every: { minutes: 5 },
+            next: now + 60_000,
+        }),
+        { status: 400, message: /at most every 10 minutes/ },
+    );
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, { text: "x", every: { at: "25:00" } }),
+        { status: 400, message: /time of day/ },
+    );
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), "nope", { text: "x", next: now + 60_000 }),
+        { status: 404 },
+    );
+    const viewer = app.config.addUser("Vic", "viewer").user;
+
+    await assert.rejects(
+        app.commands.updateSchedule(id, viewer, once.id, { text: "x", next: now + 60_000 }),
+        { status: 403 },
+    );
+
+    // To a weekday repeat: a new task takes it over, and the old one ends without sending.
+    const repeat = await app.commands.updateSchedule(id, owner(app), once.id, {
+        text: "weekday text",
+        every: { at: "09:30", days: [1, 2, 3, 4, 5] },
+        zone: "UTC",
+    });
+
+    assert.equal(repeat.id, once.id);
+    assert.notEqual(String(repeat.taskId), String(once.taskId));
+    assert.deepEqual(repeat.every, { at: "09:30", days: [1, 2, 3, 4, 5] });
+    assert.equal(repeat.text, "weekday text");
+    assert.match(repeat.content, /\[scheduled\] weekday text$/);
+    assert.equal(new Date(repeat.next).toISOString().slice(11, 16), "09:30");
+    await until(
+        async () => (await app.harness.getTask(once.taskId, context))?.state.status === "terminal",
+        "the old task to end",
+    );
+    assert.equal((await items(id)).length, 1, "the schedule stays");
+
+    // Back to once, two minutes from now; then the old time passes and only the new text goes out, once.
+    const soon = await app.commands.updateSchedule(id, owner(app), once.id, {
+        text: "new text",
+        next: app.now() + 2 * 60_000,
+    });
+
+    assert.equal(soon.every, undefined);
+    assert.equal(soon.zone, "UTC", "the zone stays when none is given");
+    await restartLater(11);
+    await until(
+        async () => (await userTexts(id)).some((text) => text.includes("[scheduled] new text")),
+        "the changed message to go out",
+    );
+    await until(async () => (await items(id)).length === 0, "it to be done");
+    const sent = (await userTexts(id)).filter((text) => text.includes("[scheduled]"));
+
+    assert.equal(sent.length, 1, "sent once, with the new text only");
+});

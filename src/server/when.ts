@@ -368,6 +368,77 @@ export function parseWhen(
     return { next: nextClockTime(now, at, undefined, zone), rest: rest(1) };
 }
 
+/**
+ * A repeat given as data (the Schedules sheet's editor), checked: whole minutes no shorter than the shortest repeat, or
+ * a clock time (`HH:MM`) on some days of the week. Throws with a short explanation otherwise.
+ */
+export function checkRepeat(given: unknown, limits: WhenLimits = {}): Repeat {
+    const repeatMinutes = limits.repeatMinutes ?? MIN_INTERVAL_MINUTES;
+    const value = (typeof given === "object" && given !== null ? given : {}) as Record<
+        string,
+        unknown
+    >;
+
+    if ("minutes" in value) {
+        const minutes = value.minutes;
+
+        if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes < 1) {
+            throw new Error("A repeat needs a whole number of minutes.");
+        }
+
+        if (minutes < repeatMinutes) {
+            throw new Error(
+                `A schedule can repeat at most every ${repeatMinutes} ${repeatMinutes === 1 ? "minute" : "minutes"}.`,
+            );
+        }
+
+        return { minutes };
+    }
+
+    const at = typeof value.at === "string" ? clockTime(value.at) : undefined;
+
+    if (at === undefined || !/^\d{1,2}:\d{2}$/.test(String(value.at))) {
+        throw new Error("A repeat needs a time of day, such as 08:00.");
+    }
+
+    if (value.days === undefined) {
+        return { at };
+    }
+
+    const days = value.days;
+
+    if (
+        !Array.isArray(days) ||
+        days.length === 0 ||
+        !days.every((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    ) {
+        throw new Error("Pick at least one day for the repeat.");
+    }
+
+    const sorted = [...new Set(days as number[])].sort((a, b) => a - b);
+
+    return sorted.length === 7 ? { at } : { at, days: sorted };
+}
+
+/** A one-time moment given as data, checked: in the future, and no further ahead than allowed. */
+export function checkMoment(given: unknown, now: number, limits: WhenLimits = {}): number {
+    const aheadMs = limits.aheadMs ?? MAX_AHEAD_MS;
+
+    if (typeof given !== "number" || !Number.isFinite(given)) {
+        throw new Error("Say when it goes out.");
+    }
+
+    if (given <= now) {
+        throw new Error("That time has passed.");
+    }
+
+    if (given - now > aheadMs) {
+        throw new Error(`A message can be scheduled up to ${aheadText(aheadMs)} ahead.`);
+    }
+
+    return Math.round(given);
+}
+
 /** A repeat in words, as the schedule list shows it: "every 2 hours", "weekdays at 08:00". */
 export function describeRepeat(repeat: Repeat): string {
     if ("minutes" in repeat) {

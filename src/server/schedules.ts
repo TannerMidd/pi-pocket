@@ -24,7 +24,7 @@ import { describe, HttpError } from "./errors.ts";
 import { FROM_PREFIX } from "./entry-format.ts";
 import { snippet } from "./projection.ts";
 import { ownRequest, requestFor } from "./requests.ts";
-import { nextRepeat, parseWhen } from "./when.ts";
+import { checkMoment, nextRepeat, parseWhen, type Repeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -62,16 +62,28 @@ async function stored(
     scheduleId: string,
     context: Context,
 ): Promise<Schedule | undefined> {
-    return (await runtime.snapshot(ScheduleDoc, runtime.conversationId, context))?.items[
+    const schedule = (await runtime.snapshot(ScheduleDoc, runtime.conversationId, context))?.items[
         scheduleId
     ];
+
+    // An edit gives the schedule a new task: the one it replaced finds it no longer its own, and ends.
+    return ownedBy(schedule, runtime) ? schedule : undefined;
 }
+
+/** Whether `runtime`'s task is the one that sends `schedule` now: an edit hands it to a new task. */
+const ownedBy = (schedule: Schedule | undefined, runtime: Runtime): schedule is Schedule =>
+    schedule !== undefined && String(schedule.taskId) === String(runtime.taskId);
 
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 export type ScheduleRequest = {
     /** When it goes out (`in 30m`, `every weekday 8:00`, …), followed by the message unless `text` is given. */
     when: string;
+    /**
+     * When it goes out, as data instead of `when` (the Schedules sheet's editor): `next` for one that goes out once,
+     * `every` for a repeat, with `next` as its first time for one every so many minutes. Needs `text`.
+     */
+    at?: { next?: number; every?: Repeat };
     text?: string;
     /** The time zone its clock times mean; the server's when absent. */
     zone?: string;
@@ -113,9 +125,12 @@ export class Schedules {
             },
             abort: (task, runtime, context) =>
                 runtime.commit(async (tx) => {
-                    delete (await tx.doc(ScheduleDoc, runtime.conversationId)).items[
-                        task.input.scheduleId
-                    ];
+                    const doc = await tx.doc(ScheduleDoc, runtime.conversationId);
+
+                    // Replaced by an edit: the schedule is the new task's, and stays.
+                    if (ownedBy(doc.items[task.input.scheduleId], runtime)) {
+                        delete doc.items[task.input.scheduleId];
+                    }
 
                     return { status: "terminal", outcome: { status: "aborted" } };
                 }, context),
@@ -138,7 +153,7 @@ export class Schedules {
             return runtime.commit(async (tx) => {
                 const item = (await tx.doc(ScheduleDoc, conversationId)).items[id];
 
-                if (item === undefined) {
+                if (!ownedBy(item, runtime)) {
                     return finished;
                 }
 
@@ -170,7 +185,7 @@ export class Schedules {
             const doc = await tx.doc(ScheduleDoc, conversationId);
             const item = doc.items[id];
 
-            if (item === undefined) {
+            if (!ownedBy(item, runtime)) {
                 return finished;
             }
 
@@ -288,10 +303,13 @@ export class Schedules {
         let parsed: ReturnType<typeof parseWhen>;
 
         try {
-            parsed = parseWhen(request.when, app.now(), zone, {
-                repeatMinutes: limits.repeatMinutes,
-                aheadMs: limits.aheadDays * 24 * 60 * 60_000,
-            });
+            parsed =
+                request.at === undefined
+                    ? parseWhen(request.when, app.now(), zone, {
+                          repeatMinutes: limits.repeatMinutes,
+                          aheadMs: limits.aheadDays * 24 * 60 * 60_000,
+                      })
+                    : { ...this.#timeOf(request.at, zone), rest: "" };
         } catch (error) {
             throw new HttpError(400, describe(error));
         }
@@ -372,6 +390,111 @@ export class Schedules {
 
             return schedule;
         }, context);
+    }
+
+    /**
+     * Change a schedule: what Pi gets, and when (a moment for one that goes out once, a repeat, or a repeat with its first
+     * time). It goes out as the work of `by`, who changed it last. Its task sleeps until the old time, so a new task takes
+     * it over, and the old one, aborted, finds the schedule no longer its own. Throws an HttpError a person can act on.
+     */
+    async update(
+        conversationId: ConversationId,
+        scheduleId: string,
+        change: {
+            text: string;
+            next?: number;
+            every?: Repeat;
+            zone?: string;
+            by: { id: string; name: string };
+        },
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        if (!this.running) {
+            throw new HttpError(409, "Schedules are turned off in Extensions.");
+        }
+
+        const limits = this.limits;
+        const text = change.text.trim();
+
+        if (text === "") {
+            throw new HttpError(400, "Say what Pi should get.");
+        }
+
+        if (text.length > limits.chars) {
+            throw new HttpError(
+                413,
+                `Scheduled messages are limited to ${limits.chars} characters.`,
+            );
+        }
+
+        const content = app.commands.messageText(change.by, `${SCHEDULED_PREFIX}${text}`);
+        let replaced: Schedule["taskId"] | undefined;
+
+        const updated = await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ScheduleDoc, conversationId);
+            const item = doc.items[scheduleId];
+
+            if (item === undefined) {
+                throw new HttpError(404, "No such scheduled message");
+            }
+
+            const zone = change.zone ?? item.zone;
+            let next: number;
+
+            try {
+                next = this.#timeOf(change, zone).next;
+            } catch (error) {
+                throw new HttpError(400, describe(error));
+            }
+
+            replaced = item.taskId;
+            item.taskId = await tx.createTask(
+                this.task,
+                { scheduleId },
+                { ownership: { kind: "conversation" }, background: true, conversationId },
+            );
+            item.text = text;
+            item.content = content;
+            item.next = next;
+            item.zone = zone;
+            item.by = change.by.id;
+            delete item.requestedBy;
+
+            if (change.every === undefined) {
+                delete item.every;
+            } else {
+                item.every = change.every;
+            }
+
+            return JSON.parse(JSON.stringify(item)) as Schedule;
+        }, context);
+
+        if (replaced !== undefined) {
+            await app.harness.abortTask(replaced, context).catch(() => undefined);
+        }
+
+        return updated;
+    }
+
+    /**
+     * When a schedule given as data goes out first: `next` for one that goes out once, or for a repeat every so many
+     * minutes when given; else the repeat's next time. Throws with a short explanation when `next` will not do.
+     */
+    #timeOf(at: { next?: number; every?: Repeat }, zone: string): { next: number; every?: Repeat } {
+        const now = this.#app.now();
+        const aheadMs = this.limits.aheadDays * 24 * 60 * 60_000;
+
+        if (at.every === undefined) {
+            return { next: checkMoment(at.next, now, { aheadMs }) };
+        }
+
+        const next =
+            at.next !== undefined && "minutes" in at.every
+                ? checkMoment(at.next, now, { aheadMs })
+                : nextRepeat(at.every, now, zone);
+
+        return { next, every: at.every };
     }
 
     /** Stop a schedule: it sends nothing more. Returns it; undefined when there is no such schedule. */

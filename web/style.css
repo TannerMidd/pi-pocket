@@ -10388,28 +10388,332 @@ textarea.notes {
     flex: 1 1 14rem;
 }
 
-/* A scheduled message in its sheet: what Pi gets, when, and who set it. */
-.schedule {
+/* The Schedules sheet: a summary with the next countdown, New schedule and quick add, then a card per schedule; a tap
+ * on one opens the editor in its place. Its color is the status line pill's: the theme's second one. */
+.sched-sheet {
+    --sched: var(--spark);
+    --sched-soft: color-mix(in srgb, var(--spark) 14%, transparent);
+    --sched-line: color-mix(in srgb, var(--spark) 45%, transparent);
+}
+
+.sched-sheet .sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.sched-summary {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    padding: 11px 14px;
+    padding: 12px 14px;
+    border-radius: var(--r-card);
+    background: var(--sched-soft);
+    color: var(--text);
     font-size: 13.5px;
 }
 
-.schedule-countdown {
-    font-family: var(--mono);
-    font-variant-numeric: tabular-nums;
-    color: var(--spark);
+.sched-summary b {
+    font: 600 15px var(--mono);
 }
 
-.schedule > .icon {
+.sched-next {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.sched-big {
+    font: 600 20px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--sched);
+}
+
+.sched-add {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.sched-add .button {
     flex: none;
-    box-sizing: content-box;
-    padding: 8px;
+}
+
+.sched-quick {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+}
+
+.sched-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 22px 12px;
+    color: var(--muted);
+    text-align: center;
+}
+
+.sched-empty > .icon {
+    color: var(--sched);
+    margin-bottom: 4px;
+}
+
+.sched-empty p {
+    margin: 0;
+    max-width: 34ch;
+}
+
+.sched-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sched-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--text);
+    text-align: left;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+.sched-card:disabled {
+    cursor: default;
+}
+
+@media (hover: hover) {
+    .sched-card:not(:disabled):hover {
+        border-color: var(--sched-line);
+        background: var(--card-2);
+    }
+
+    .sched-card:not(:disabled):hover .sched-edit {
+        opacity: 1;
+    }
+}
+
+.sched-card:focus-visible {
+    outline: 2px solid var(--sched-line);
+    outline-offset: 1px;
+}
+
+.sched-mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
     border-radius: var(--r-row);
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.sched-text {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 13.5px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.sched-meta {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.sched-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex: none;
+}
+
+.sched-countdown {
+    font: 12px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--sched);
+    white-space: nowrap;
+}
+
+.sched-edit {
+    font-size: 11.5px;
+    color: var(--muted);
+    opacity: 0.7;
+}
+
+/* The editor, in a schedule's place or above the list for a new one. */
+.sched-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--sched-line);
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.sched-editor textarea {
+    resize: vertical;
+    min-height: 64px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.sched-kinds {
+    align-self: stretch;
+}
+
+.sched-kinds button {
+    flex: 1;
+}
+
+.sched-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sched-row input[type="date"],
+.sched-row input[type="time"] {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    color-scheme: inherit;
+}
+
+.sched-row select {
+    width: auto;
+    flex: 1;
+}
+
+.sched-amount {
+    width: 5.5em;
+    flex: none;
+    font-family: var(--mono);
+}
+
+.sched-word {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.sched-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.sched-chips .chip {
+    color: var(--muted);
+}
+
+.sched-chips .chip.toggle.on {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-days {
+    display: flex;
+    gap: 6px;
+}
+
+.sched-day {
+    flex: 1;
+    max-width: 42px;
+    aspect-ratio: 1;
+    border: 1px solid var(--hair-2);
+    border-radius: 50%;
+    font: 600 12.5px var(--mono);
+    color: var(--muted);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sched-day.on {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--r-row);
+    background: var(--sched-soft);
+    color: var(--text);
+    font-size: 12.5px;
+}
+
+.sched-preview > .icon {
+    color: var(--sched);
+    flex: none;
+}
+
+.sched-preview .sched-countdown {
+    margin-left: auto;
+}
+
+.sched-preview.wrong {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.sched-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sched-actions .grow {
+    flex: 1;
+}
+
+.sched-actions .button.danger {
+    color: var(--err);
+}
+
+.sched-board {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .sched-board:hover {
+        color: var(--text);
+    }
 }
 
 /* A change to a lesson that waits for the owner, under the lesson it would change. */
