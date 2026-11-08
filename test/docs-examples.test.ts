@@ -54,6 +54,10 @@ const route: FauxResponseStep = async (context) => {
         return fauxAssistantMessage([fauxText(`tool said: ${text}`)]);
     }
 
+    if (text.includes("show approval waits")) {
+        return call("approval_status", {});
+    }
+
     if (text.includes("what time")) {
         return call("clock", { zone: "UTC" });
     }
@@ -118,6 +122,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
     assert.deepEqual(
         listed.map((module) => [module.file, module.enabled]),
         [
+            ["approval-monitor.ts", false],
             ["clock.ts", false],
             ["my-words.ts", false],
             ["no-force-push.ts", false],
@@ -128,6 +133,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
     );
 
     for (const file of [
+        "approval-monitor.ts",
         "clock.ts",
         "my-words.ts",
         "no-force-push.ts",
@@ -143,6 +149,25 @@ test("the example extensions load as drop-ins, off until the owner turns them on
     await say(app, id, "what time is it in UTC?");
     assert.match(await answer(id), /tool said: .*\d{4}.*\(UTC\)/);
     assert.match(prompt, /Do not force-push with git/);
+
+    const wait = app.approvals.request(
+        {
+            id: "example-approval",
+            conversationId: id,
+            taskId: 999 as never,
+            tool: "bash",
+            subject: "a private command",
+            reason: "a private reason",
+            createdAt: Date.now(),
+        },
+        context,
+    );
+
+    await say(app, id, "show approval waits");
+    assert.match(await answer(id), /example-approval/);
+    assert.doesNotMatch(await answer(id), /a private command|a private reason/);
+    await app.answerApproval("example-approval", false, owner(app));
+    await wait;
 
     // The tutorial's module (docs/extensions/first-extension.md).
     await say(app, id, "count the words");
