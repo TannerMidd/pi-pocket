@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix } from "node:path";
 import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
+import { type FolderAccess, Unreachable } from "../folder-access.ts";
 import {
     accepted,
     compressFile,
@@ -70,7 +71,11 @@ const IMAGE_EXTENSIONS = new Set([
     ".ico",
     ".svg",
 ]);
-const MAX_IMAGE_FILE = 25 * 1024 * 1024;
+
+export const MAX_IMAGE_FILE = 25 * 1024 * 1024;
+
+export const isImagePath = (file: string): boolean =>
+    IMAGE_EXTENSIONS.has(extname(file).toLowerCase());
 /** Opened on its own, an SVG could run script: give it an opaque origin and nothing to load. */
 const IMAGE_CSP =
     "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:";
@@ -369,6 +374,64 @@ export async function serveFile(
     response.end(body);
 }
 
+type ImagePeek = { kind: "file"; size: number; mtimeMs: number; bytes: Buffer };
+
+/** A bounded image read through the session's permission gate, never through this server's disk. */
+export async function peekRemoteImage(
+    file: string,
+    access: FolderAccess,
+    maxBytes = 1024,
+): Promise<ImagePeek> {
+    const peek = await access.peek(file, maxBytes).catch((error: unknown) => {
+        throw new HttpError(
+            error instanceof Unreachable ? 409 : 404,
+            error instanceof Unreachable ? error.message : "Image not found",
+        );
+    });
+
+    if (peek.kind !== "file") {
+        throw new HttpError(404, "Image not found");
+    }
+
+    if (sniffImage(peek.bytes) === undefined) {
+        throw new HttpError(415, "That file is not an image");
+    }
+
+    if (peek.size > MAX_IMAGE_FILE || peek.bytes.length > MAX_IMAGE_FILE) {
+        throw new HttpError(413, "Image too large to show");
+    }
+
+    return peek;
+}
+
+/** The former remote image response, now copied to uploads before the local image route serves it. */
+export async function readRemoteImage(
+    file: string,
+    access: FolderAccess,
+    head: ImagePeek,
+): Promise<ImagePeek> {
+    // Recheck the bytes and size after a second read: the file can change between the 2 requests.
+    const whole =
+        head.bytes.length === head.size
+            ? head
+            : await peekRemoteImage(file, access, MAX_IMAGE_FILE + 1);
+
+    if (whole.bytes.length !== whole.size) {
+        throw new HttpError(409, "Image changed while it was read. Try again.");
+    }
+
+    return whole;
+}
+
+/** The headers of an image either route sends: its version, from its size and time, and its sandbox. */
+function imageHeaders(size: number, mtime: number) {
+    return {
+        etag: `"${size.toString(36)}-${Math.floor(mtime).toString(36)}"`,
+        "cache-control": "private, no-cache",
+        "content-security-policy": IMAGE_CSP,
+    };
+}
+
 /** An image file from this machine, for `![alt](path)` in replies and for uploaded attachments. */
 export function serveImage(request: IncomingMessage, response: ServerResponse, file: string): void {
     if (!IMAGE_EXTENSIONS.has(extname(file).toLowerCase())) {
@@ -408,14 +471,9 @@ export function serveImage(request: IncomingMessage, response: ServerResponse, f
         throw new HttpError(413, "Image too large to show");
     }
 
-    const etag = `"${size.toString(36)}-${Math.floor(mtime).toString(36)}"`;
-    const headers = {
-        etag,
-        "cache-control": "private, no-cache",
-        "content-security-policy": IMAGE_CSP,
-    };
+    const headers = imageHeaders(size, mtime);
 
-    if (request.headers["if-none-match"] === etag) {
+    if (request.headers["if-none-match"] === headers.etag) {
         response.writeHead(304, headers);
         response.end();
 

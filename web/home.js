@@ -162,9 +162,9 @@ export function Splash() {
                     >
                         <span class="splash-key" data-part="home-recent-key">${index + 1}</span>
                         <span
-                            class=${`state-mark ${sessionMark(session).shape}`}
+                            class=${`state-mark ${session.runner ? "remote " : ""}${sessionMark(session).shape}`}
                             data-part="session-mark"
-                            style=${`--folder:${folderColor(session.cwd)}`}
+                            style=${`--folder:${folderColor(session.cwd, session.runner)}`}
                             aria-hidden="true"
                         ></span>
                         <span class="splash-title">${session.title ?? "New session"}</span>

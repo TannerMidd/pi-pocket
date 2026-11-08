@@ -355,6 +355,7 @@ export function RunningBoard() {
 
     const now = Date.now() + offset.current;
     const cwds = useMemo(() => new Map(listed.map((each) => [each.id, each.cwd])), [listed]);
+    const runners = useMemo(() => new Map(listed.map((each) => [each.id, each.runner])), [listed]);
 
     const rows = useMemo(() => {
         if (!board) {
@@ -414,6 +415,7 @@ export function RunningBoard() {
             board?.sessions.find((s) => s.id === id)?.cwd ??
                 schedules.find((s) => s.session === id && s.sessionCwd)?.sessionCwd ??
                 cwds.get(id),
+            runners.get(id),
         );
 
     const open = (id) => {

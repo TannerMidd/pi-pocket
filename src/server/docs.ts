@@ -48,6 +48,21 @@ export type SessionMeta = {
      * kept out of the session list; an older Pi Pocket, which does not know this field, lists it as a session.
      */
     pip?: string;
+    /**
+     * The computer the session's tools run on (`runners.ts`): a linked runner's id. Absent: this server. Set when the
+     * session is made and never changed; linked sessions keep it, and forks unless the person sends the copy to another
+     * computer (`commands.ts` `#destination`). An older Pi Pocket, which does not know this
+     * field, would run the session here: such a session never goes back to one.
+     */
+    runner?: string;
+    /** Stable runner permission key, chosen before approval so a refused start creates no conversation. */
+    runnerPermission?: string;
+    /**
+     * The repository its folder is a checkout of: the `origin` remote, normalized (`repo.ts` `normalizeRemote`: lower-case
+     * host, no `.git`, no user name or token). Noted after the session is made or moved, when git answers in time; absent:
+     * none known. A copy to another computer looks for the same repository there by it.
+     */
+    repo?: string;
 };
 
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */
@@ -97,8 +112,17 @@ export const HeldDoc = defineDoc<{ items: HeldMessage[] }>({
     initial: () => ({ items: [] }),
 });
 
-/** Favorite working folders in shortcut order, private to each person and shared by their devices. */
-export const FolderFavoritesDoc = defineDoc<{ users: Record<string, string[]> }>({
+/**
+ * Favorite working folders in shortcut order, private to each person and shared by their devices, for each computer:
+ * `users`, this server's, by person (as before computers had favorites, so those stay this server's); `runners`, by
+ * person, then by linked computer's id (`folder-favorites.ts`).
+ */
+export type FolderFavorites = {
+    users: Record<string, string[]>;
+    runners?: Record<string, Record<string, string[]>>;
+};
+
+export const FolderFavoritesDoc = defineDoc<FolderFavorites>({
     kind: "pocket.folder-favorites",
     version: 1,
     ...rebased,
@@ -687,7 +711,11 @@ export type Lesson = {
  * Memory: short lessons Pi keeps across sessions, by id, for one project or everywhere. Pi gets those that apply in
  * its system prompt (`extensions/memory.ts`).
  */
-export const MemoryDoc = defineDoc<{ items: Record<string, Lesson> }>({
+export const MemoryDoc = defineDoc<{
+    items: Record<string, Lesson>;
+    /** Known copies of repositories, for people to choose lessons from without applying them automatically. */
+    projects?: Record<string, { name: string; repo?: string; runner?: string }>;
+}>({
     kind: "pocket.memory",
     version: 1,
     ...rebased,

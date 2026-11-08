@@ -1138,7 +1138,8 @@ export class Pip {
         const folders = new Set<string>();
 
         for (const meta of Object.values(app.sessionCatalogue())) {
-            if (meta.pip === undefined && meta.createdBy === user.id) {
+            // A session on another computer has its folder there.
+            if (meta.pip === undefined && meta.runner === undefined && meta.createdBy === user.id) {
                 folders.add(meta.worktree?.source ?? meta.cwd);
             }
         }

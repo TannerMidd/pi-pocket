@@ -25,24 +25,6 @@ const copy = (text, what) =>
         () => notify("error", `Could not copy the ${what}.`),
     );
 
-let forking = false;
-
-function fork(id) {
-    if (forking) {
-        return;
-    }
-
-    forking = true;
-    attempt(async () => {
-        const created = await actions.forkSession(id);
-
-        navigate(created.id);
-        notify("info", "Opened the fork. The original is unchanged.");
-    }).finally(() => {
-        forking = false;
-    });
-}
-
 const newIn = (cwd) =>
     attempt(async () => {
         const created = await actions.createSession(cwd);
@@ -72,7 +54,12 @@ function sessionItems(session) {
                 opens: true,
                 run: () => store.set({ sheet: { type: "rename", id } }),
             },
-            starts && { label: "Fork", hint: "up to the last reply", run: () => fork(id) },
+            starts && {
+                label: "Fork…",
+                hint: "choose where it runs",
+                opens: true,
+                run: () => store.set({ sheet: { type: "fork", id } }),
+            },
             starts && { label: "New session in this folder", run: () => newIn(session.cwd) },
             starts &&
                 collab() && {

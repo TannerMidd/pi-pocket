@@ -5,7 +5,7 @@
 import { readdirSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir, networkInterfaces } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import QRCode from "qrcode";
 import { MAX_PEEKS } from "../app.ts";
 import {
@@ -22,6 +22,8 @@ import {
 import type { User } from "../config.ts";
 import { MAX_AVATAR, readAvatar } from "../avatars.ts";
 import { HttpError } from "../errors.ts";
+import { isLocalRequest, withReveal } from "../local-browser.ts";
+import { machineRoots, parentFolder } from "../paths.ts";
 import { desktopTheme, wallpaperFile } from "../omarchy.ts";
 import { runningBoard, runningNow } from "../running.ts";
 import { serveImage } from "./assets.ts";
@@ -158,7 +160,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "me" && method === "GET") {
-            return json(response, 200, await app.hello(user));
+            return json(
+                response,
+                200,
+                withReveal(await app.hello(user), user, isLocalRequest(request)),
+            );
         }
 
         if (first === "me" && second === undefined && method === "POST") {
@@ -584,12 +590,210 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, await app.commands.continuePiSession(user, body.path));
         }
 
-        if (first === "sessions" && second === undefined && method === "POST") {
-            const body = await readJson<{ cwd?: string; title?: string; worktree?: unknown }>(
+        // Owners see every computer; other people see only the computers they may use.
+        if (first === "runners" && second === undefined && method === "GET") {
+            const runners = app.runners.list(user);
+
+            if (runners.length === 0) {
+                requireOwner(user);
+            }
+
+            return json(response, 200, runners);
+        }
+
+        if (first === "runners" && second === "locks" && third === undefined && method === "GET") {
+            requireOwner(user);
+
+            return json(response, 200, app.runners.linkLocks());
+        }
+
+        // Lift a ban on an address that guessed link codes (`link-limits.ts`).
+        if (
+            first === "runners" &&
+            second === "bans" &&
+            third === undefined &&
+            method === "DELETE"
+        ) {
+            requireOwner(user);
+
+            const address = url.searchParams.get("address") ?? "";
+
+            app.runners.liftLinkBan(address);
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (first === "runners" && second === "code" && method === "POST") {
+            requireOwner(user);
+
+            const body = await readJson<{ name?: unknown }>(request);
+
+            return json(
+                response,
+                200,
+                app.runners.makeCode(typeof body.name === "string" ? body.name : "", user.id),
+            );
+        }
+
+        if (
+            first === "runners" &&
+            second !== undefined &&
+            third === undefined &&
+            method === "DELETE"
+        ) {
+            requireOwner(user);
+            app.runners.remove(second);
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (
+            first === "runners" &&
+            second !== undefined &&
+            third === "approval" &&
+            method === "POST"
+        ) {
+            if (!app.runners.mayUse(second, user)) {
+                throw new HttpError(403, "You cannot use this computer.");
+            }
+
+            const body = await readJson<{ id?: unknown; code?: unknown; withdraw?: unknown }>(
                 request,
             );
 
-            return json(response, 200, await app.commands.createSession(user, body));
+            if (typeof body.id !== "string") {
+                throw new HttpError(400, "id is required");
+            }
+
+            // Only the person whose session waits (or the linker, or the owner) answers or withdraws its question.
+            const question = app.runners.link(second).questions.get(body.id);
+
+            if (!app.runners.mayAnswer(second, question, user)) {
+                throw new HttpError(404, "No such question.");
+            }
+
+            if (body.withdraw === true) {
+                app.runners.link(second).withdraw(body.id);
+            } else if (typeof body.code === "string" && /^\d{6}$/.test(body.code)) {
+                await app.runners.link(second).approveCode(body.id, body.code);
+            } else {
+                throw new HttpError(400, "Enter the 6-digit code from your authenticator.");
+            }
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (first === "runners" && second !== undefined && third === "users" && method === "POST") {
+            requireOwner(user);
+
+            if (app.runners.require(second).createdBy !== user.id) {
+                throw new HttpError(
+                    403,
+                    "Only the person who linked this computer can choose who may use it.",
+                );
+            }
+
+            const body = await readJson<{ users?: unknown } | null>(request);
+
+            if (!Array.isArray(body?.users) || !body.users.every((id) => typeof id === "string")) {
+                throw new HttpError(400, "users must be a list of person ids.");
+            }
+
+            app.config.setRunnerUsers(second, body.users);
+            app.runners.changed();
+
+            return json(
+                response,
+                200,
+                app.runners.list(user).find((runner) => runner.id === second),
+            );
+        }
+
+        if (
+            first === "runners" &&
+            second !== undefined &&
+            third === "permissions" &&
+            method === "POST"
+        ) {
+            requireOwner(user);
+            const body = await readJson<{ request?: unknown }>(request);
+            const action = body.request as Record<string, unknown> | undefined;
+
+            if (
+                action?.action === "settings" &&
+                app.runners.require(second).createdBy !== user.id
+            ) {
+                throw new HttpError(
+                    403,
+                    "Only the person who linked this computer can change its settings.",
+                );
+            }
+
+            if (
+                !(action?.action === "revoke" && typeof action.session === "string") &&
+                !(action?.action === "remove-folder" && typeof action.folder === "string") &&
+                !(
+                    action?.action === "settings" &&
+                    typeof action.code === "string" &&
+                    /^\d{6}$/.test(action.code) &&
+                    typeof action.change === "object" &&
+                    action.change !== null &&
+                    !Array.isArray(action.change)
+                )
+            ) {
+                throw new HttpError(400, "Invalid runner request.");
+            }
+
+            app.runners.require(second);
+            await app.runners.link(second).action(action as never);
+
+            return json(
+                response,
+                200,
+                app.runners.list(user).find((runner) => runner.id === second),
+            );
+        }
+
+        // The folders on another computer, for the folder picker of a new session there.
+        if (first === "runners" && second !== undefined && third === "fs" && method === "GET") {
+            if (!app.runners.mayUse(second, user)) {
+                throw new HttpError(403, "You cannot use this computer.");
+            }
+
+            return json(response, 200, {
+                ...(await app.runners.folders(
+                    second,
+                    url.searchParams.get("path") ?? "~",
+                    url.searchParams.get("hidden") === "1",
+                )),
+                // The folders of this person's newest sessions on that computer.
+                recent: app.recentFolders(user, second),
+            });
+        }
+
+        if (first === "sessions" && second === undefined && method === "POST") {
+            const controller = new AbortController();
+
+            response.on("close", () => {
+                if (!response.writableEnded) {
+                    controller.abort();
+                }
+            });
+
+            const body = await readJson<{
+                cwd?: string;
+                title?: string;
+                worktree?: unknown;
+                runner?: unknown;
+            }>(request);
+
+            return json(
+                response,
+                200,
+                await app.commands.createSession(user, body, {
+                    signal: controller.signal,
+                }),
+            );
         }
 
         if (first === "sessions" && second !== undefined && method === "POST") {
@@ -681,17 +885,15 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             dirs.sort((a, b) => a.name.localeCompare(b.name));
-            // A workspace URI is not a folder the picker can open: its provider's module starts sessions there.
-            const local = app
-                .sessions(user)
-                .map((session) => session.cwd)
-                .filter((cwd) => app.workspaceScheme(cwd) === undefined);
-            const recent = [...new Set(local)].slice(0, 8);
+            // The folders of this person's newest sessions here: another computer's folders are not on this one.
+            const recent = app.recentFolders(user, undefined);
 
             return json(response, 200, {
                 path,
-                parent: dirname(path) === path ? null : dirname(path),
+                parent: parentFolder(path),
                 home: homedir(),
+                // This machine's top folders: `/`, or each Windows drive, as places to start from.
+                roots: await machineRoots(),
                 dirs: dirs.slice(0, 1000),
                 recent,
             });
@@ -711,6 +913,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
         if (first === "settings" && method === "POST") {
             const body = await readJson<{
                 approvalRule?: unknown;
+                sharedRunnerSessions?: unknown;
                 defaultModel?: unknown;
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
@@ -721,6 +924,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
             if (
                 [
                     body.approvalRule,
+                    body.sharedRunnerSessions,
                     body.defaultModel,
                     body.pipCompactAt,
                     body.subagentModels,
@@ -746,6 +950,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
             if (body.approvalRule !== undefined) {
                 await app.setApprovalRule(user, body.approvalRule);
+            }
+
+            // Sessions on linked computers shared like any other, or their creators' alone: the owner's.
+            if (body.sharedRunnerSessions !== undefined) {
+                await app.setSharedRunnerSessions(user, body.sharedRunnerSessions);
             }
 
             // Null clears it: new sessions start with the last model picked again.

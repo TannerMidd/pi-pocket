@@ -62,6 +62,7 @@ Each member has `@since`, and `@experimental` when it applies. [API versions](ap
 interface Module {
     default(host: Host, web: Web): Extension | readonly Extension[] | void | Promise<…>;
     pocketApi?: number;
+    remoteSessions?: boolean;
 }
 ```
 
@@ -88,6 +89,16 @@ pocketApi?: number;
 Since 0.14.0 · Stable
 
 The version of the extension API that the module needs. A Pi Pocket with an older version does not set up the module. See [API versions](api-versions.md#pocketapi).
+
+### `remoteSessions`
+
+```ts
+remoteSessions?: boolean;
+```
+
+Since 0.28.0 · Stable
+
+`true`: the module's extensions also load in sessions on another computer. Without it, a drop-in loads only in sessions on the server. Its tools must reach the session's files and commands through `api.env`, which is that computer's. What the module itself does with Node (`node:fs`, `node:child_process`) runs on the server. See [Sessions on another computer](../../runners.md#extensions).
 
 ## Shared types
 

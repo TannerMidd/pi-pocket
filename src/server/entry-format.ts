@@ -19,15 +19,30 @@ export const FROM_PREFIX = /^\[from: ([^\]\n]{1,60})\] /;
 /** What separates a message from the list of files attached to it. The web app splits messages on it too. */
 export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n";
 
-/**
- * A message shown to people (its speaker taken off) in two: what they wrote, and the list of attached files if any. One
- * of files alone sent before 0.14.0 has the heading without the blank line before it.
- */
-export function splitAttachments(text: string): [written: string, files: string | undefined] {
-    const whole = text.startsWith(ATTACHMENTS_HEADING.trimStart()) ? `\n\n${text}` : text;
-    const [written = "", files] = whole.split(ATTACHMENTS_HEADING);
+/** The heading for files copied to the computer a session runs on (`runners.ts`): their paths are there. */
+export function attachmentsHeading(computer?: string): string {
+    return computer === undefined
+        ? ATTACHMENTS_HEADING
+        : `\n\nAttached files (copied to ${computer.replace(/[()\n]/g, "")}):\n`;
+}
 
-    return [written, files];
+/** Either heading; the web app's `splitAttachments` has the same. */
+const HEADING = /\n\nAttached files \((?:saved on the server|copied to [^()\n]*)\):\n/;
+
+/**
+ * A message shown to people (its speaker taken off) in two: what they wrote, and the list of attached files if any, and
+ * the heading between them. One of files alone sent before 0.14.0 has the heading without the blank line before it.
+ */
+export function splitAttachments(
+    text: string,
+): [written: string, files: string | undefined, heading: string | undefined] {
+    const whole =
+        HEADING.test(`\n\n${text}`) && /^Attached files \(/.test(text) ? `\n\n${text}` : text;
+    const match = HEADING.exec(whole);
+
+    return match === null
+        ? [whole, undefined, undefined]
+        : [whole.slice(0, match.index), whole.slice(match.index + match[0].length), match[0]];
 }
 
 /** The entry kind of a command someone ran. */

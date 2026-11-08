@@ -1,7 +1,7 @@
 // Favorite folders are each person's own: read, changed, and sent only to them, with no star lost to another one.
 import { type App, cleanUp, fakeTab, openApp, owner, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 
 let app: App;
@@ -58,4 +58,33 @@ test("only someone who may start sessions stars, and only a whole path", async (
     await assert.rejects(app.folderFavorites.set(owner(app), { path: "relative", starred: true }), {
         status: 400,
     });
+});
+
+test("the folder list names this machine's top folders, and the root has no parent", async () => {
+    const { createServer } = await import("node:http");
+    const { createHandler } = await import("../src/server/http.ts");
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const list = async (path: string) =>
+        (await (
+            await fetch(`http://127.0.0.1:${port}/api/fs?path=${encodeURIComponent(path)}`, {
+                headers: { authorization: `Bearer ${app.config.ownerToken}` },
+            })
+        ).json()) as { path: string; parent: string | null; roots: string[] };
+
+    try {
+        const top = await list("/");
+
+        assert.deepEqual(top.roots, process.platform === "win32" ? top.roots : ["/"]);
+        assert.ok(top.roots.length > 0);
+        assert.equal((await list(top.roots[0]!)).parent, null);
+        assert.equal((await list(root)).parent, dirname(root));
+    } finally {
+        server.closeAllConnections();
+        server.close();
+    }
 });

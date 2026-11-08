@@ -244,6 +244,14 @@ export class Shell {
 
         app.requireSee(user, id);
         await app.requireDriver(id, user);
+
+        // On another computer, only while its starter may still use it: say so now, not after queuing the command.
+        const meta = app.sessionMeta(app.rootOf(id));
+
+        if (meta !== undefined) {
+            app.requireRunnerAccess(meta);
+        }
+
         await app.conversation(id);
         const command = typeof request.command === "string" ? request.command.trim() : "";
 

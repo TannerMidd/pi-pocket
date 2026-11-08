@@ -6,12 +6,13 @@
  * Edit freely: saving this file reloads it into the running server.
  */
 import { statSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, type posix, resolve, sep } from "node:path";
 import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
+import { contextText, latestScan, projectThere, type RemoteEnv } from "../remote-context.ts";
 
 const PREAMBLE = `You are Pi, a coding agent in Pi Pocket, a durable, multiplayer web app. People talk to you from a browser, often a phone, and several can share one conversation. When more than one person uses this server, each message starts with [from: Name].
 
@@ -21,7 +22,7 @@ const GUIDELINES = `- Keep replies short and easy to read on a small screen. Lea
 - Look at files with read, not cat or sed. Use edit for precise changes and write for new files or full rewrites.
 - Show file paths clearly.
 - Before you say work is done, check it: run its tests, build, or app, and read the result. Say plainly what you did not check; never claim a check you did not run.
-- To show an image file from this machine, embed it: ![short description](/absolute/or/relative/path.png). Files the user attaches are saved on the server; the message lists their paths.
+- To show an image file from this machine, embed it: ![short description](/absolute/or/relative/path.png). The message lists the paths of the files the user attaches.
 - Before something destructive or irreversible, say what it will do. A guard may ask a human to approve risky commands; if a call is blocked, do not try to get around the block.
 - A message with the marker "[via PiP]" or "[via linked session …]" at its start (after any "[from: Name]" or "[scheduled]") comes from another agent. Write your answer to it, and what you send back to that agent, in the language that agent wrote in (for a linked session, the text between the <linked-session-message> tags), not the language of the marker or the notes around it. In English, use ASD-STE100 (Simplified Technical English) at about 80% adherence: short sentences (25 words or fewer), one idea each, main point first, active voice, simple tenses, articles kept, no contractions or idioms, "must" for a rule and "can" for an ability, numerals, one word for one thing, names of commands, files, and identifiers exact in backticks, every fact kept. In another language, keep the same short, plain style. Answer messages without the marker as usual, also later in the same session.`;
 
@@ -39,7 +40,10 @@ function docs(dataDir: string): string {
 }
 
 /** Pi's own format (XML, a location per skill) costs about 150 characters more for each skill. */
-export function formatSkills(skills: readonly Skill[]): string {
+export function formatSkills(
+    skills: readonly Skill[],
+    paths: Pick<typeof posix, "basename" | "dirname" | "join"> = { basename, dirname, join },
+): string {
     const visible = skills.filter((skill) => !skill.disableModelInvocation);
 
     if (visible.length === 0) {
@@ -53,10 +57,10 @@ export function formatSkills(skills: readonly Skill[]): string {
     const others: string[] = [];
 
     for (const skill of visible) {
-        const folder = dirname(dirname(skill.filePath));
+        const folder = paths.dirname(paths.dirname(skill.filePath));
         const usual =
-            basename(skill.filePath) === "SKILL.md" &&
-            basename(dirname(skill.filePath)) === skill.name;
+            paths.basename(skill.filePath) === "SKILL.md" &&
+            paths.basename(paths.dirname(skill.filePath)) === skill.name;
 
         if (usual) {
             groups.set(folder, [
@@ -69,7 +73,7 @@ export function formatSkills(skills: readonly Skill[]): string {
     }
 
     const blocks = [...groups].map(
-        ([folder, lines]) => `In ${join(folder, "<name>", "SKILL.md")}:\n${lines.join("\n")}`,
+        ([folder, lines]) => `In ${paths.join(folder, "<name>", "SKILL.md")}:\n${lines.join("\n")}`,
     );
 
     if (others.length > 0) {
@@ -145,20 +149,79 @@ export default function createPrompt(host: PocketHost) {
     // A workspace URI (`ssh://…`): this machine's AGENTS.md files and skills are not the remote's.
     const local = (input: PromptInput) => workspaceScheme(input.agent.cwd ?? "") === undefined;
 
+    /**
+     * The environment of a session on another computer (a `RunnerEnv`, `runners.ts`), with the computer's id. Its project
+     * files and skills are there: they are read there (`remote-context.ts`), never on this server.
+     */
+    const remoteOf = (input: PromptInput): { env: RemoteEnv; runner: string } | undefined => {
+        const env = input.env as (RemoteEnv & { runner?: unknown }) | undefined;
+
+        return typeof env?.runner === "string" && computerOf(input) !== undefined
+            ? { env, runner: env.runner }
+            : undefined;
+    };
+
+    /**
+     * The context files and skills of a session on another computer, read there (one scan a turn at most, kept 30
+     * seconds), with this server's global context file first. When the computer cannot be reached, what was read last;
+     * nothing before the first reading. A section never fails the turn for it.
+     */
+    const there = async (input: PromptInput) => {
+        const remote = remoteOf(input)!;
+        const scan = await latestScan(remote.env, cwdOf(input));
+
+        if (scan === undefined) {
+            return undefined;
+        }
+
+        const { skills } = projectThere(scan, remote.runner, host);
+        const text = formatSkills(skills, scan.paths);
+
+        return {
+            context: contextText(host.agentDir, scan),
+            skills: text === "" ? undefined : text,
+        };
+    };
+
+    /** The computer a session on another one runs on, as its environment names it. */
+    const computerOf = (
+        input: PromptInput,
+    ): { name: string; os?: string; arch?: string } | undefined => {
+        const env = input.env as
+            { computer?: () => { name: string; os?: string; arch?: string } } | undefined;
+
+        return typeof env?.computer === "function" ? env.computer() : undefined;
+    };
+
     return defineExtension({
         name: "pocket-prompt",
         sections: [
             section("preamble", () => PREAMBLE, { tag: false }),
             section("guidelines", () => GUIDELINES),
             section("pocket_docs", () => docs(host.dataDir)),
-            section("project_context", (input) =>
-                local(input) ? load(cwdOf(input)).context : undefined,
+            section("project_context", async (input) =>
+                remoteOf(input) !== undefined
+                    ? (await there(input))?.context
+                    : local(input)
+                      ? load(cwdOf(input)).context
+                      : undefined,
             ),
-            section("skills", (input) => (local(input) ? load(cwdOf(input)).skills : undefined), {
-                tag: false,
-            }),
+            section(
+                "skills",
+                async (input) =>
+                    remoteOf(input) !== undefined
+                        ? (await there(input))?.skills
+                        : local(input)
+                          ? load(cwdOf(input)).skills
+                          : undefined,
+                { tag: false },
+            ),
             section("environment", (input) => {
-                const base = `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`;
+                const computer = computerOf(input);
+                const base =
+                    computer === undefined
+                        ? `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`
+                        : `Working directory: ${cwdOf(input)}, on the computer "${computer.name}"\nPlatform: ${computer.os ?? "unknown"}${computer.arch === undefined ? "" : ` (${computer.arch})`}\nYour tools (read, write, edit, bash) run on that computer, not on the Pi Pocket server. Files people attach are copied to that computer: the message lists their paths there.`;
 
                 // Off by default: a date in the system prompt changes once a day and rewrites the whole prompt cache.
                 // PI_POCKET_PROMPT_DATE=1 adds the local date back.

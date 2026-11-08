@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { PocketApp } from "../app.ts";
 import type { User } from "../config.ts";
+import { isLocalRequest } from "../local-browser.ts";
 import type { Client } from "../room.ts";
 import { accepted, streamCompressor } from "./compress.ts";
 import { conversationId, json } from "./io.ts";
@@ -52,7 +53,7 @@ interface Poller {
     expiry: NodeJS.Timeout | undefined;
 }
 
-function newClient(url: URL, user: User, send: Client["send"]): Client {
+function newClient(request: IncomingMessage, url: URL, user: User, send: Client["send"]): Client {
     const raw = url.searchParams.get("c");
     const have = keptPart(url.searchParams.get("have"));
 
@@ -68,6 +69,7 @@ function newClient(url: URL, user: User, send: Client["send"]): Client {
             : url.searchParams.get("host") === "notify"
               ? { embedder: "desktop-notify" as const }
               : {}),
+        ...(isLocalRequest(request) ? { local: true } : {}),
         sentEntries: new Set(),
         orderKey: "",
         ...(have === undefined ? {} : { have }),
@@ -159,7 +161,7 @@ export function createEventStreams(app: PocketApp) {
             return true;
         };
 
-        const client = newClient(url, user, (event, data) => {
+        const client = newClient(request, url, user, (event, data) => {
             if (keepsUp()) {
                 write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
             }
@@ -323,7 +325,7 @@ export function createEventStreams(app: PocketApp) {
                 expiry: undefined,
             };
 
-            created.client = newClient(url, user, (event, data) => {
+            created.client = newClient(request, url, user, (event, data) => {
                 let size = 0;
 
                 try {

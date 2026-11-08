@@ -1,5 +1,7 @@
 /** `/api/c/:id`: one conversation's routes, for people the API has checked may see it. */
 import { randomUUID } from "node:crypto";
+import type { ServerResponse } from "node:http";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { constants, createWriteStream, rmSync } from "node:fs";
 import { type FileHandle, open } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -7,11 +9,12 @@ import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { readState, writeState } from "../artifact-state.ts";
 import { outcome } from "../background.ts";
+import { withDesignMirror } from "../design/mirror.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
+import { requireLocalBrowser } from "../local-browser.ts";
 import { prepareModelImage } from "../model-images.ts";
-import { reveal } from "../reveal.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
 
@@ -31,6 +34,41 @@ function safeName(name: string): string {
         .trim();
 
     return base === "" || base.startsWith(".") ? `upload${base}` : base.slice(0, 120);
+}
+
+/** A local file, including a remote design's bounded server mirror. Never receives a computer's path. */
+async function download(response: ServerResponse, file: string): Promise<void> {
+    let handle: FileHandle;
+
+    try {
+        handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch {
+        throw new HttpError(404, "File not found");
+    }
+
+    try {
+        const stats = await handle.stat();
+
+        if (!stats.isFile()) {
+            throw new HttpError(404, "File not found");
+        }
+
+        // An ASCII fallback, then the whole name (RFC 6266): no quote or line break gets into the header.
+        const name = basename(file);
+        const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+
+        response.writeHead(200, {
+            "content-type": "application/octet-stream",
+            "content-length": stats.size,
+            "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+            "cache-control": "private, no-store",
+            "x-content-type-options": "nosniff",
+        });
+
+        await pipeline(handle.createReadStream({ autoClose: false }), response);
+    } finally {
+        await handle.close();
+    }
 }
 
 /**
@@ -393,11 +431,62 @@ export async function conversationRoutes(
     }
 
     if (third === "fork" && method === "POST") {
-        return json(response, 200, await app.commands.fork(id, user, await readJson(request)));
+        const controller = new AbortController();
+
+        response.on("close", () => {
+            if (!response.writableEnded) {
+                controller.abort();
+            }
+        });
+
+        return json(
+            response,
+            200,
+            await app.commands.fork(id, user, await readJson(request), controller.signal),
+        );
+    }
+
+    // What the copy sheet starts from: the folder it suggests on a computer (`runner`: a computer's id, empty: this
+    // server, absent: the session's own), or `cwd`, the one the person picked; whether a folder here is a git
+    // repository (for a worktree); and the session's own computer, folder, model, and thinking level.
+    if (third === "copy-place" && method === "GET") {
+        const source = app.sessionMeta(id)?.runner ?? null;
+        const asked = url.searchParams.get("runner");
+        const runner = asked === null ? source : asked || null;
+        const suggested = app.commands.copySuggestion(id, user, runner);
+        const picked = url.searchParams.get("cwd");
+        const place = picked ? { cwd: picked, reason: "picked" } : suggested;
+        const agent = await app.agentState(id);
+
+        return json(response, 200, {
+            ...place,
+            runner,
+            ...(runner === null ? { inRepository: app.workspace.inRepository(place.cwd) } : {}),
+            from: {
+                runner: source,
+                cwd: app.cwdOf(id),
+                ...(agent?.model === undefined ? {} : { model: agent.model }),
+                ...(agent?.thinkingLevel === undefined
+                    ? {}
+                    : { thinkingLevel: agent.thinkingLevel }),
+            },
+        });
     }
 
     if (third === "resend" && method === "POST") {
-        return json(response, 200, await app.commands.resend(id, user, await readJson(request)));
+        const controller = new AbortController();
+
+        response.on("close", () => {
+            if (!response.writableEnded) {
+                controller.abort();
+            }
+        });
+
+        return json(
+            response,
+            200,
+            await app.commands.resend(id, user, await readJson(request), controller.signal),
+        );
     }
 
     if (third === "compact" && method === "POST") {
@@ -433,12 +522,17 @@ export async function conversationRoutes(
         });
     }
 
-    // Show a path in the file manager of the machine the server runs on: the owner's, at that machine (`reveal.ts`).
+    // Show a path in a file manager: this machine's, or a session's other computer's (`Workspace.reveal`).
     if (third === "reveal" && method === "POST") {
         app.requireSee(user, id);
 
         if (user.role !== "owner") {
-            throw new HttpError(403, "Only the owner opens the server's file manager");
+            throw new HttpError(403, "Only the owner opens a file manager");
+        }
+
+        // This machine's file manager is for a browser on it; a session on another computer shows it there.
+        if (app.runnerOf(id) === undefined) {
+            requireLocalBrowser(request);
         }
 
         const body = await readJson<{ path?: unknown }>(request);
@@ -447,7 +541,7 @@ export async function conversationRoutes(
             throw new HttpError(400, "path is required");
         }
 
-        await reveal(app.workspace.conversationPath(id, body.path));
+        await app.workspace.reveal(user, id, body.path);
 
         return json(response, 200, { ok: true });
     }
@@ -459,7 +553,10 @@ export async function conversationRoutes(
             throw new HttpError(400, "path is required");
         }
 
-        return serveImage(request, response, app.workspace.conversationFile(user, id, requested));
+        // Images from another computer are kept in uploads first, so the same URL also works offline.
+        const { file } = await app.workspace.imageFile(user, id, requested);
+
+        return serveImage(request, response, file);
     }
 
     // A file of the session's folder as a download (a design's export): whom the file viewer lets read it, as it is.
@@ -470,40 +567,30 @@ export async function conversationRoutes(
             throw new HttpError(400, "path is required");
         }
 
-        const file = app.workspace.readableFile(user, id, requested);
-        let handle: FileHandle;
+        if (app.runnerOf(id) !== undefined) {
+            // Design's exports are rendered here, copied back, and downloaded from the bounded mirror. The copy uses
+            // this session's existing runner permission; the requested path can never leave its folder.
+            return withDesignMirror(
+                app,
+                id,
+                app.cwdOf(id),
+                BACKGROUND_CONTEXT,
+                async (_cwd, path) => download(response, path(requested)),
+                undefined,
+                [requested],
+            ).catch((error: unknown) => {
+                if (error instanceof HttpError) {
+                    throw error;
+                }
 
-        try {
-            handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-        } catch {
-            throw new HttpError(404, "File not found");
-        }
-
-        try {
-            const stats = await handle.stat();
-
-            if (!stats.isFile()) {
-                throw new HttpError(404, "File not found");
-            }
-
-            // An ASCII fallback, then the whole name (RFC 6266): no quote or line break gets into the header.
-            const name = basename(file);
-            const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
-
-            response.writeHead(200, {
-                "content-type": "application/octet-stream",
-                "content-length": stats.size,
-                "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
-                "cache-control": "private, no-store",
-                "x-content-type-options": "nosniff",
+                throw new HttpError(
+                    400,
+                    error instanceof Error ? error.message : "The design download failed.",
+                );
             });
-
-            await pipeline(handle.createReadStream({ autoClose: false }), response);
-        } finally {
-            await handle.close();
         }
 
-        return;
+        return download(response, app.workspace.readableFile(user, id, requested));
     }
 
     if (third === "entry" && fourth !== undefined && method === "GET") {

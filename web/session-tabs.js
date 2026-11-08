@@ -43,7 +43,7 @@ function Tabs() {
                 aria-current=${open ? "page" : undefined}
                 aria-label=${`${title}${STATE_WORDS[state]}`}
                 title=${`${title}${number <= TAB_MAX ? ` (Alt+${number})` : ""}`}
-                style=${`--folder:${folderColor(session.cwd)}`}
+                style=${`--folder:${folderColor(session.cwd, session.runner)}`}
                 onClick=${() => navigate(session.id)}
             >
                 <span class="tabstrip-bar" aria-hidden="true"></span>

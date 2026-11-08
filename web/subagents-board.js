@@ -455,6 +455,7 @@ export function SubagentsBoard() {
     const agents = boardAgents ?? [];
     const titles = new Map(sessions.map((session) => [session.id, session.title ?? "New session"]));
     const cwds = new Map(sessions.map((session) => [session.id, session.cwd]));
+    const runners = new Map(sessions.map((session) => [session.id, session.runner]));
     const known = new Map(sessions.map((session) => [session.id, session.subagents]));
     const needle = query.trim().toLowerCase();
     const matches = (agent) =>
@@ -687,7 +688,8 @@ export function SubagentsBoard() {
         const tone = top === undefined || top === "done" || top === "stopped" ? "quiet" : top;
         const title = titles.get(id) ?? `Session ${id}`;
 
-        const folder = folderColor(cwds.get(id));
+        const runner = runners.get(id);
+        const folder = folderColor(cwds.get(id), runner);
         // The ones at work now, as sub-tiles: what each does, without opening any of them. The filter and search apply.
         const active = list.filter((agent) => live(boardState(agent)) && matches(agent));
         // The first few, and the selected one wherever it is; the rest a click away.
@@ -757,6 +759,7 @@ export function SubagentsBoard() {
                             key=${agent.conversationId}
                             agent=${agent}
                             folder=${folder}
+                            runner=${runner}
                             selected=${agent.conversationId === selected}
                             onActivate=${() => pick(agent.conversationId)}
                             onOpen=${() => open(agent)}

@@ -11,6 +11,7 @@
  * `_expandSkillCommand` in `dist/core/agent-session.js` writes them.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { expandHome } from "./paths.ts";
@@ -225,11 +226,15 @@ export function expandPromptTemplate(
 /** A skill Pi has in a session's folder (`skills.ts` finds them), to run as `/skill:name`. */
 export type SkillCommand = { name: string; description: string; path: string; baseDir: string };
 
-/** `/skill:name request` with the skill's instructions, as Pi sends it; undefined when the text is not one. */
-export function expandSkillCommand(
+/**
+ * `/skill:name request` with the skill's instructions, as Pi sends it; undefined when the text is not one. `read` reads
+ * the skill's file: on this server, or for a session on another computer, there.
+ */
+export async function expandSkillCommand(
     text: string,
     skills: readonly SkillCommand[],
-): string | undefined {
+    read: (path: string) => Promise<string> = (path) => readFile(path, "utf8"),
+): Promise<string | undefined> {
     const match = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/.exec(text);
     const skill = match === null ? undefined : skills.find((each) => each.name === match[1]);
 
@@ -240,7 +245,7 @@ export function expandSkillCommand(
     let body: string;
 
     try {
-        body = (parseFrontmatter(readFileSync(skill.path, "utf8")) as { body: string }).body.trim();
+        body = (parseFrontmatter(await read(skill.path)) as { body: string }).body.trim();
     } catch {
         return undefined;
     }

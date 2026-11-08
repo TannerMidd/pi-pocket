@@ -1,35 +1,27 @@
-// What a message's menu does: copy, fork from here, and send again (with this model or another).
-import { useEffect, useRef, useState } from "preact/hooks";
+// What tapping a message opens, in the copy sheet's layout (`copy.js`). Pi's reply: fork from it, to a computer, folder,
+// and model of your choice; remember it; copy it. Your message: edit it at once and send it again in a new session,
+// placed the same way; copy it. Each sheet offers only the action of what was tapped.
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { updateDraft } from "../copy-draft.js";
 import {
     actions,
     attempt,
     canSteer,
     closeSheet,
-    navigate,
     notify,
     openSheet,
     scoped,
     store,
 } from "../store.js";
-import {
-    copyText,
-    html,
-    Icon,
-    item,
-    modelLabel,
-    replyText,
-    Sheet,
-    Switch,
-    writtenText,
-} from "../ui.js";
+import { copyText, html, replyText, Sheet, writtenText } from "../ui.js";
 import {
     choosePresentationMode,
     onPresentationMode,
     PRESENTATION_MODES,
     presentationMode,
-    promptBefore,
     resendable,
 } from "../entry-presentation.js";
+import { PlaceRows, placeOf, startCopy, useMainKey, usePlace } from "./copy.js";
 import { memoryAvailable } from "./memory.js";
 
 /** What each mode is called where a person chooses it. */
@@ -82,100 +74,35 @@ function lessonFrom(text) {
     return flat.length > 300 ? `${flat.slice(0, 299)}…` : flat;
 }
 
-/** A fork or a send again on its way: a second tap waits for it. */
-let branching = false;
+/** A small action under the main button: a link-like button with an optional hint. */
+const Minor = ({ label, hint, run }) => html`<button
+    type="button"
+    class="copy-minor"
+    title=${hint}
+    onClick=${run}
+>
+    <span>${label}</span>
+    ${hint && html`<span class="copy-minor-hint">${hint}</span>`}
+</button>`;
 
-/** Make a new session from this one and open it. A second tap while the first is on its way does nothing. */
-const openBranch = (run) => {
-    if (branching) {
-        return;
-    }
-
-    branching = true;
-    attempt(async () => {
-        const created = await run();
-
-        navigate(created.id);
-        notify("info", "Opened the new session. The original is unchanged.");
-    }).finally(() => {
-        branching = false;
-    });
+/** Copy `text` and close the sheet. */
+const copyAndClose = (text) => {
+    closeSheet();
+    copyText(text).then(
+        () => notify("info", "Copied."),
+        () => notify("error", "Could not copy."),
+    );
 };
 
-/**
- * A field that shows in a sheet already open takes the keys, where a keyboard is at hand: the sheet focused its field
- * marked autofocus only when it opened.
- */
-function useFocus(ref, shown) {
-    useEffect(() => {
-        if (shown && !matchMedia("(pointer: coarse)").matches) {
-            ref.current?.focus({ preventScroll: true });
-        }
-    }, [shown]);
-}
-
-/** Send a message to Pi again in a fork: with this session's model, or another one. */
-function SendAgain({ prompt, worktree }) {
-    const { models, view } = store.state;
-    const [choosing, setChoosing] = useState(false);
-    const [query, setQuery] = useState("");
-    const search = useRef(null);
-
-    useFocus(search, choosing);
-    const current = view.agent?.model;
-    const needle = query.trim().toLowerCase();
-    const others = models.filter(
-        (model) =>
-            !(model.provider === current?.provider && model.id === current?.modelId) &&
-            (needle === "" ||
-                `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle)),
-    );
-
-    return html`<div class="group-title">Send again in a new session</div>
-    ${item(`With ${modelLabel(view.agent)}`, () => openBranch(() => actions.resend(prompt.id, { worktree })), "same model")}
-    ${
-        choosing
-            ? html`<div class="message-model-search">
-                <label class="search">
-                    <${Icon} name="search" size=${16} />
-                    <input
-                        ref=${search}
-                        placeholder="Search models"
-                        value=${query}
-                        onInput=${(event) => setQuery(event.currentTarget.value)}
-                    />
-                </label>
-            </div>
-            ${others.map((model) =>
-                item(
-                    model.name,
-                    () =>
-                        openBranch(() =>
-                            actions.resend(prompt.id, {
-                                model: { provider: model.provider, modelId: model.id },
-                                worktree,
-                            }),
-                        ),
-                    html`<span class="mono">${model.provider}</span>`,
-                ),
-            )}`
-            : item("With another model…", () => setChoosing(true))
-    }`;
-}
-
-/** What can be done with one message: fork from it, edit it, send it again, or copy it. */
+/** What can be done with one message: Pi's reply (`ReplySheet`), or a message to Pi (`OwnMessageSheet`). */
 export function MessageSheet({ entryId }) {
     const { view } = store.state;
     const entry =
         view.entries.get(entryId) ?? store.state.history?.find((each) => each.id === entryId);
-    const [draft, setDraft] = useState(null);
-    const [worktree, setWorktree] = useState(false);
-    // A presented input the view clipped: its whole text, for Copy and Remember.
+    // A presented input the view clipped: its whole text, for Copy, Remember, and sending again.
     const [whole, setWhole] = useState(undefined);
-    const field = useRef(null);
     const clipped = entry?.kind === "user" && entry.presentation?.clipped !== undefined;
 
-    useFocus(field, draft !== null);
     useEffect(() => {
         if (!clipped) {
             return;
@@ -203,83 +130,155 @@ export function MessageSheet({ entryId }) {
         <//>`;
     }
 
-    // Forks are new sessions: who may start one may fork.
+    // Copies are new sessions: who may start one may make one.
     const canBranch = canSteer() && !scoped() && view.conversation?.kind === "session";
-    // A message to Pi (from anyone), or one of its replies.
-    const toPi = entry.kind === "user";
-    // An input a module stored as its own kind is shown, copied, and remembered, never sent again.
-    const again = !toPi || resendable(entry);
-    const text = toPi ? (whole ?? writtenText(entry)) : replyText(entry);
-    // Until its whole text is here, a clipped input has nothing to copy or remember.
-    const waiting = clipped && whole === undefined;
-    // A message of files alone has no words: its preview says so, and there is nothing to copy or remember.
-    const filesAlone = toPi && text.trim() === "";
-    const prompt = toPi ? entry : promptBefore(entryId, view);
 
-    const copy = () => {
-        closeSheet();
-        copyText(text).then(
-            () => notify("info", "Copied."),
-            () => notify("error", "Could not copy."),
-        );
-    };
-
-    if (draft !== null) {
-        return html`<${Sheet} title="Edit and send again" onClose=${closeSheet}>
-            <p class="muted small">
-                Pi gets the edited message in a new session that forks just before the original. The original stays as it is.
-            </p>
-            <textarea
-                ref=${field}
-                rows="6"
-                value=${draft}
-                onInput=${(event) => setDraft(event.currentTarget.value)}
-            ></textarea>
-            <div class="row">
-                <button class="button" onClick=${() => setDraft(null)}>Back</button>
-                <button
-                    class="button primary grow"
-                    onClick=${() => openBranch(() => actions.resend(entry.id, { text: draft, worktree }))}
-                >
-                    Send in a new session
-                </button>
-            </div>
-        <//>`;
+    if (entry.kind === "assistant") {
+        return html`<${ReplySheet} entry=${entry} canBranch=${canBranch} />`;
     }
 
-    return html`<${Sheet} title=${toPi ? "Message" : "Reply"} onClose=${closeSheet}>
-        <div class="message-preview">${filesAlone ? "(attachments)" : text}</div>
-        ${toPi && entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
+    return html`<${OwnMessageSheet}
+        entry=${entry}
+        canBranch=${canBranch}
+        text=${whole ?? writtenText(entry)}
+        waiting=${clipped && whole === undefined}
+    />`;
+}
+
+/** Pi's reply: a short preview, fork from here with its place rows, then Remember and Copy. */
+function ReplySheet({ entry, canBranch }) {
+    const { view } = store.state;
+    const sessionId = view.conversation.id;
+    const text = replyText(entry);
+    const empty = text.trim() === "";
+    const draft = usePlace(sessionId, `reply:${sessionId}:${entry.id}`);
+    const [busy, setBusy] = useState(false);
+    const go = useCallback(() => {
+        if (!canBranch || busy) {
+            return;
+        }
+
+        setBusy(true);
+        startCopy(
+            (signal) => actions.fork(entry.id, { place: placeOf(draft) }, signal),
+            "Opened the fork. The original is unchanged.",
+            draft,
+        ).finally(() => setBusy(false));
+    }, [canBranch, busy, draft, entry.id]);
+
+    useMainKey("message", go);
+
+    return html`<${Sheet} title="Reply" onClose=${closeSheet} className="copy-sheet">
+        <div class="copy-what copy-preview">${empty ? "(no text)" : text}</div>
         ${
             canBranch &&
-            view.conversation.inRepository &&
-            html`<div class="sheet-list">
-                <div class="extension message-worktree">
-                    <div class="extension-main">New sessions get a git worktree of their own</div>
-                    <${Switch}
-                        on=${worktree}
-                        label="New sessions get a git worktree of their own"
-                        onChange=${() => setWorktree(!worktree)}
-                    />
-                </div>
-            </div>`
+            html`<${PlaceRows} sessionId=${sessionId} draft=${draft} verb="Fork" />
+                <div class="copy-go">
+                    <button
+                        type="button"
+                        class="button primary wide"
+                        disabled=${busy}
+                        onClick=${go}
+                    >
+                        Fork from here
+                    </button>
+                    <p class="muted small">
+                        A new session with everything up to this reply. The original stays as it is.
+                    </p>
+                </div>`
         }
-        <div class="sheet-list message-actions">
-            ${canBranch && !toPi && item("Fork from here", () => openBranch(() => actions.fork(entry.id, { worktree })), "everything up to this reply")}
-            ${canBranch && toPi && again && !waiting && item("Edit and send again…", () => setDraft(text))}
-            ${canBranch && again && prompt && html`<${SendAgain} prompt=${prompt} worktree=${worktree} />`}
+        <div class="copy-minors">
             ${
                 memoryAvailable() &&
                 canSteer() &&
-                !filesAlone &&
-                !waiting &&
-                item(
-                    "Remember…",
-                    () => openSheet({ type: "memory", draft: lessonFrom(text) }),
-                    "keep it as a lesson for Pi",
-                )
+                !empty &&
+                html`<${Minor}
+                    label="Remember…"
+                    hint="Opens Memory with this reply as a draft lesson"
+                    run=${() => openSheet({ type: "memory", draft: lessonFrom(text) })}
+                />`
             }
-            ${!filesAlone && !waiting && item("Copy text", copy)}
+            ${!empty && html`<${Minor} label="Copy text" hint="As Markdown" run=${() => copyAndClose(text)} />`}
+        </div>
+    <//>`;
+}
+
+/**
+ * A message to Pi: its text, editable at once, send it again in a new session with its place rows, then Copy. An input
+ * a module stored as its own kind is shown and copied, never sent again.
+ */
+function OwnMessageSheet({ entry, canBranch, text, waiting }) {
+    const { view } = store.state;
+    const sessionId = view.conversation.id;
+    const again = canBranch && resendable(entry) && !waiting;
+    // A message of files alone has no words: there is nothing to copy.
+    const filesAlone = text.trim() === "";
+    const draft = usePlace(sessionId, `message:${sessionId}:${entry.id}`, () => ({ text: null }));
+    // The text as the person has it now: the original until they type (or until its whole text comes).
+    const written = draft.text ?? text;
+    const edited = draft.text !== null && draft.text !== text;
+    const [busy, setBusy] = useState(false);
+    const field = useRef(null);
+    const go = useCallback(() => {
+        if (!again || busy || (filesAlone && !edited)) {
+            return;
+        }
+
+        setBusy(true);
+        startCopy(
+            (signal) =>
+                actions.resend(
+                    entry.id,
+                    {
+                        ...(edited ? { text: written } : {}),
+                        place: placeOf(draft),
+                    },
+                    signal,
+                ),
+            "Opened the new session. The original is unchanged.",
+            draft,
+        ).finally(() => setBusy(false));
+    }, [again, busy, draft, edited, written, entry.id, filesAlone]);
+
+    useMainKey("message", go);
+
+    return html`<${Sheet} title="Your message" onClose=${closeSheet} className="copy-sheet">
+        ${
+            again
+                ? html`<textarea
+                      ref=${field}
+                      class="copy-text"
+                      rows="5"
+                      aria-label="Your message"
+                      placeholder=${filesAlone ? "(attachments only)" : ""}
+                      value=${written}
+                      onInput=${(event) => updateDraft({ text: event.currentTarget.value })}
+                  ></textarea>`
+                : html`<div class="copy-what copy-preview">
+                      ${filesAlone ? "(attachments)" : waiting ? "…" : text}
+                  </div>`
+        }
+        ${entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
+        ${
+            again &&
+            html`<${PlaceRows} sessionId=${sessionId} draft=${draft} verb="Send again" />
+                <div class="copy-go">
+                    <button
+                        type="button"
+                        class="button primary wide"
+                        disabled=${busy || written.trim() === ""}
+                        onClick=${go}
+                    >
+                        ${edited ? "Send edited in a new session" : "Send again in a new session"}
+                    </button>
+                    <p class="muted small">
+                        Pi gets ${edited ? "the edited" : "this"} message in a new session that forks just before the
+                        original. The original stays as it is.
+                    </p>
+                </div>`
+        }
+        <div class="copy-minors">
+            ${!filesAlone && !waiting && html`<${Minor} label="Copy text" hint="As written" run=${() => copyAndClose(text)} />`}
         </div>
     <//>`;
 }

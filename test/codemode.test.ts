@@ -1,5 +1,6 @@
 // Codemode: scripts call the conversation's tools through the same steps as direct calls, hooks included.
 import assert from "node:assert/strict";
+import { readFile, unlink } from "node:fs/promises";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { obj, str } from "@earendil-works/pi-schema";
@@ -81,7 +82,10 @@ function fakeApi(tools: ToolRegistration[], extensions: ReturnType<typeof define
     };
 }
 
-const host = { approvals: new Approvals(() => undefined) } as unknown as PocketHost;
+const host = {
+    approvals: new Approvals(() => undefined),
+    runnerOf: () => undefined,
+} as unknown as PocketHost;
 const codemodeTool = createCodemode(host).tools![0]!;
 
 const run = async (fake: Fake, code: string) => {
@@ -103,6 +107,24 @@ test("a script calls tools, gets their text, and returns a value", async () => {
     assert.equal(result.isError, undefined);
     assert.match(result.text, /echo,bash/, "codemode cannot call itself");
     assert.match(result.text, /\["echo:hi","ran ls ✓"\]/);
+});
+
+test("a local session still saves its full truncated output in a readable server file", async () => {
+    const result = await run(
+        fakeApi([]),
+        '// @options: {"max_output_tokens": 8}\ntext("x".repeat(500));',
+    );
+    const path = /\[Full output: (.+) \(read it with offset and limit\)\]/.exec(result.text)?.[1];
+
+    assert.ok(path, "local truncation still offers the saved output path");
+
+    try {
+        assert.match(result.text, /Warning: output truncated/);
+        assert.ok((await readFile(path, "utf8")).endsWith("x".repeat(500)));
+        assert.doesNotMatch(result.text, /Full output not saved/);
+    } finally {
+        await unlink(path);
+    }
 });
 
 test("nested calls are checked like direct ones: hooks that rewrite or block, and hooks that fail", async () => {
