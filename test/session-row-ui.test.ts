@@ -585,3 +585,77 @@ test(
         await until(async () => (await shown()).kids === 2, "unfolded");
     },
 );
+
+test(
+    "dragging the sidebar's edge changes nothing on the page's root until it ends",
+    real,
+    async () => {
+        await fresh();
+        const edge = await inPage<{ x: number; y: number; to: number; width: number }>(`
+        const box = document.querySelector(".sidebar .resize-handle").getBoundingClientRect();
+        const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+        window.rootChanges = 0;
+        new MutationObserver((records) => (window.rootChanges += records.length)).observe(
+            document.documentElement, { attributeFilter: ["style", "class"] });
+        return JSON.stringify({ x: box.left + 4, y: box.top + box.height / 2,
+            to: Math.round(box.left + 64 - sidebar.left), width: Math.round(sidebar.width) });
+    `);
+        const at = (dx: number) => ({ x: edge.x + dx, y: edge.y });
+        const sidebar = () =>
+            inPage<{ changes: number; width: number; root: string }>(`return JSON.stringify({
+            changes: window.rootChanges,
+            width: Math.round(document.querySelector(".sidebar").getBoundingClientRect().width),
+            root: document.documentElement.style.getPropertyValue("--sidebar-w"),
+        })`);
+
+        // A variable or class on the root would restyle every element, every row, at each move.
+        await page.input([
+            { type: "mouse", action: "down", ...at(0) },
+            ...[20, 40, 60].map((dx) => ({
+                type: "mouse",
+                action: "move",
+                ...at(dx),
+                pressed: true,
+            })),
+        ]);
+        assert.deepEqual(await sidebar(), { changes: 0, width: edge.to, root: `${edge.width}px` });
+        await page.input([{ type: "mouse", action: "up", ...at(60) }]);
+        assert.equal((await sidebar()).root, `${edge.to}px`, "the root takes the width once");
+        // Let go outside the page: the next move, with no button down, ends the drag.
+        const now = await inPage<{ x: number; y: number }>(`
+            const box = document.querySelector(".sidebar .resize-handle").getBoundingClientRect();
+            return JSON.stringify({ x: box.left + 4, y: box.top + box.height / 2 });
+        `);
+        const veiled = () =>
+            inPage<boolean>(`return String(!!document.querySelector(".resize-veil"))`);
+
+        await page.input([
+            { type: "mouse", action: "down", ...now },
+            { type: "mouse", action: "move", x: now.x - 30, y: now.y, pressed: true },
+        ]);
+        assert.equal(await veiled(), true, "dragging");
+        await page.input([{ type: "mouse", action: "move", x: now.x - 40, y: now.y }]);
+        assert.equal(await veiled(), false, "the drag ended");
+        await inPage(`(await import("/theme.js")).setPrefs({ sidebarWidth: 312 }); return "null"`);
+    },
+);
+
+test("another tab opens where the list was scrolled", real, async () => {
+    for (let count = 0; count < 30; count++) {
+        await newSession(app);
+    }
+
+    await fresh();
+    // A short window: a screenful is a few rows, and the list scrolls past them.
+    await page.setViewport({ ...DESKTOP, height: 420 });
+    const scrolled = (to = "") =>
+        inPage<number>(
+            `const list = document.querySelector(".sidebar .session-items"); ${to} return JSON.stringify(list.scrollTop)`,
+        );
+
+    await until(async () => (await scrolled("list.scrollTop = 600;")) === 600, "the list scrolled");
+    await selectTab("Folders");
+    assert.equal(await scrolled(), 600, "Folders");
+    await selectTab("Recent");
+    assert.equal(await scrolled(), 600, "Recent");
+});

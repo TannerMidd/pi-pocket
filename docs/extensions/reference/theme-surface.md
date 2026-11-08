@@ -88,7 +88,7 @@ Read them; a theme cannot change them, as they are each person's choice in Appea
 | Token                                    | What                                                                                |
 | ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | `--text-size`                            | The conversation's text size, 10 to 32 px (13 to 17 before 0.20.0)                  |
-| `--sidebar-w`                            | The open sidebar's width, as dragged                                                |
+| `--sidebar-w`                            | The open sidebar's width, as dragged (set as the drag ends)                         |
 | `--transcript-width`, `--composer-width` | Only with Width set to Wide or Full: then they are inline, and win over the theme's |
 
 ## Parts

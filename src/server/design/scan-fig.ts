@@ -73,6 +73,9 @@ function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
     const collectionOf = new Map<string, string>();
     const baseOf = new Map<string, string>();
     const byId = new Map<string, { name: string; collection: string }>();
+    // A collection's modes by the name they take: an alias across collections reads the target's
+    // mode of the same name.
+    const named = new Map<string, Map<string, string>>();
     const home = darkFirst ? "dark" : "light";
 
     for (const collection of collections.values()) {
@@ -89,6 +92,7 @@ function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
             : (others.find((mode) => modeNameOf(mode.name) === "dark") ??
               others.find((mode) => isDarkMode(mode.name)));
         const taken = new Set([home, "dark"]);
+        const names = new Map<string, string>();
 
         collectionOf.set(collection.id, collection.id);
 
@@ -108,24 +112,32 @@ function modesOf(collections: Map<string, Collection>, darkFirst: boolean) {
             }
 
             taken.add(name);
+            names.set(name, mode.id);
             byId.set(mode.id, { name, collection: collection.id });
         }
+
+        named.set(collection.id, names);
     }
 
-    return { collectionOf, baseOf, byId };
+    return { collectionOf, baseOf, byId, named };
 }
 
 interface Lookup {
     named: Map<string, Shaped>;
     byKey: Map<string, string>;
     byId: Map<string, FigVariable>;
-    /** The mode of a variable that a value in `mode` reads: that mode, or its default mode. */
-    modeIn: (variable: FigVariable, mode: string) => string;
+    /** The name a mode takes in the tokens; none for a collection's default mode. */
+    nameOf: (mode: string) => string | undefined;
+    /** The mode of a variable that the tokens' mode `name` reads: that mode, or its default. */
+    modeIn: (variable: FigVariable, name: string | undefined) => string;
 }
 
+// A copy reads each variable on the way in the tokens' mode `name`, as the engine reads a
+// reference: a collection without that mode, on the way or at the start, reads its default.
 function literalOf(
     variable: FigVariable,
     mode: string,
+    name: string | undefined,
     look: Lookup,
     depth = 0,
 ): FigValue | undefined {
@@ -139,10 +151,15 @@ function literalOf(
 
     return target === undefined || depth >= 8
         ? undefined
-        : literalOf(target, look.modeIn(target, mode), look, depth + 1);
+        : literalOf(target, look.modeIn(target, name), name, look, depth + 1);
 }
 
-function valueOf(variable: FigVariable, mode: string, look: Lookup): Obj | undefined {
+function valueOf(
+    variable: FigVariable,
+    mode: string,
+    look: Lookup,
+    name = look.nameOf(mode),
+): Obj | undefined {
     let found = variable.values.get(mode);
     const shape = look.named.get(variable.id);
 
@@ -164,7 +181,7 @@ function valueOf(variable: FigVariable, mode: string, look: Lookup): Obj | undef
         }
 
         // The engine refuses an alias to another type (a spacing to a number): copy the value.
-        found = literalOf(variable, mode, look);
+        found = literalOf(variable, mode, name, look);
     }
 
     if (found === undefined) {
@@ -263,10 +280,18 @@ export function figTokens(
         named,
         byKey,
         byId: new Map(list.map((each) => [each.id, each])),
-        modeIn: (variable, mode) => (variable.values.has(mode) ? mode : baseIn(variable)),
+        nameOf: (mode) => modes.byId.get(mode)?.name,
+        modeIn: (variable, name) => {
+            const collection = modes.collectionOf.get(variable.collection) ?? variable.collection;
+            const same = name === undefined ? undefined : modes.named.get(collection)?.get(name);
+
+            return same !== undefined && variable.values.has(same) ? same : baseIn(variable);
+        },
     };
     const entries: { path: string[]; node: Obj }[] = [];
     const changes = new Map<string, Map<string, Obj>>();
+    // The values that read another variable, which can change in a mode their collection has not.
+    const reads: { variable: FigVariable; path: string; value: Obj }[] = [];
 
     for (const variable of list) {
         const shape = named.get(variable.id);
@@ -284,6 +309,10 @@ export function figTokens(
         }
 
         entries.push({ path: shape.path, node: value });
+
+        if (variable.values.get(base)?.kind === "alias") {
+            reads.push({ variable, path: shape.path.join("."), value });
+        }
 
         for (const modeId of variable.values.keys()) {
             const mode = modeId === base ? undefined : modes.byId.get(modeId);
@@ -339,6 +368,19 @@ export function figTokens(
     const kept = [...changes]
         .sort(([a], [b]) => Number(b === "dark") - Number(a === "dark"))
         .slice(0, SYSTEM.modes);
+
+    // A reference changes in each mode of what it reads, and so does a copy (`literalOf`).
+    for (const { variable, path, value } of reads) {
+        for (const [mode, tree] of kept) {
+            const changed = tree.has(path)
+                ? undefined
+                : valueOf(variable, look.modeIn(variable, mode), look, mode);
+
+            if (changed !== undefined && JSON.stringify(changed) !== JSON.stringify(value)) {
+                tree.set(path, changed);
+            }
+        }
+    }
 
     for (const [mode, tree] of kept) {
         if (mode !== "dark") {

@@ -40,6 +40,8 @@ let pip: ConversationId;
 let background: ConversationId;
 /** The newest request the model got, as JSON: what PiP was told. */
 let lastAsked = "";
+/** What the model waits for before it answers: a test keeps Pi working with it. */
+let thinking = Promise.resolve();
 const project = join(work, "project-board");
 
 const inPage = async <T>(script: string): Promise<T> =>
@@ -176,6 +178,7 @@ before(async () => {
     mkdirSync(project);
     app = await openApp(
         scriptedModel(async (request) => {
+            await thinking;
             lastAsked = JSON.stringify((request as { messages: unknown[] }).messages);
 
             return fauxAssistantMessage([
@@ -589,6 +592,130 @@ test("A session's send on its way, its box shown again: once, or all back", real
     });
     await see(`document.querySelector('${BOX}').value === 'and then'`, "sent");
     assert.equal(await inPage(`window.sends`), 1, "once");
+});
+
+test("Text put in the box during a send waits for its own session, all of it", real, async () => {
+    const other = await newSession(app, work);
+    const words = (value: string, what: string) =>
+        see(`document.querySelector('${BOX}')?.value === ${JSON.stringify(value)}`, what);
+
+    await fresh("floating");
+    await holdingSends(async () => {
+        await type(BOX, "going");
+        await page.press("Enter");
+        await see(`window.sends === 1`, "on its way");
+        await page.evaluate(
+            `${STORE}.insertIntoComposer('first'); ${STORE}.insertIntoComposer('second')`,
+        );
+        await page.evaluate(`${STORE}.navigate(${Number(other)})`);
+        await backTo(other, "another session");
+        await words("", "another session's box, empty");
+        await settle();
+        await words("", "still empty");
+        await page.evaluate(`${STORE}.navigate(${Number(background)}); window.release()`);
+    });
+    await backTo(background, "its own session");
+    await words("first\n\nsecond", "both, in order, in its own box");
+    await type(BOX, "");
+});
+
+test("A queued message's Edit during a send: kept through a reload or a move", real, async () => {
+    const queued = `[...document.querySelectorAll('.pane .queued-text')]
+        .find((each) => each.textContent.includes('tell him'))`;
+    const EDIT = "document.querySelector('.pane .queued-actions .button')";
+    const back = (words: string, what: string) =>
+        see(`document.querySelector('${BOX}').value === '${words}'`, what);
+
+    const edit = async (twice = false) => {
+        await page.evaluate(`${queued}.click()`);
+        await see(EDIT, "its Edit");
+        await page.evaluate(`${EDIT}.click()${twice ? `; ${EDIT}.click()` : ""}`);
+        await see(`!${queued}`, "taken back");
+    };
+
+    let answer = () => {};
+
+    thinking = new Promise((resolve) => (answer = resolve));
+    await fresh("board");
+
+    try {
+        for (const words of ["start", "tell him hello from me"]) {
+            await type(BOX, words);
+            await page.press("Enter");
+            await back("", `"${words}" went`);
+        }
+
+        // Edit while "hello" reaches the server, its answer lost; then a reload. The message waits
+        // until "hello", sent again, is known to have gone: it goes once.
+        await type(BOX, "hello");
+        await page.evaluate(`const real = window.fetch;
+            window.fetch = async (url, init) => {
+                if (!String(url).includes('/submit')) {
+                    return real(url, init);
+                }
+
+                window.fetch = real;
+                await real(url, init);
+                window.reached = true;
+
+                return new Promise(() => {});
+            };`);
+        await page.press("Enter");
+        await see(`window.reached`, "on the server, its answer lost");
+        await edit(true);
+        await see(`Object.keys(localStorage).some((key) => key.includes(':takenBack.'))`, "kept");
+        await page.evaluate(`location.reload()`);
+        await see(`${STORE}.store.state.streamId`, "loaded again");
+        await back("hello", "only the words of the send");
+        await page.press("Enter");
+        await back("tell him hello from me", "taken back after a reload");
+        assert.deepEqual(await inPage(`${STORE}.store.state.view.inbox.map((i) => i.text)`), [
+            "hello",
+        ]);
+        await page.press("Enter");
+        await see(queued, "queued again");
+
+        // Edit, tapped twice, while "hello" goes and fails; the box shown again meanwhile.
+        await type(BOX, "hello");
+        await holdingSends(async () => {
+            await page.press("Enter");
+            await see(`window.sends === 1`, "on its way");
+            await edit(true);
+            await page.press("Alt+a");
+            await boarded("PiP's board over the session");
+            await page.press("Alt+a");
+            await backTo(background, "the session again");
+            await page.evaluate(`window.release()`);
+        }, true);
+        await back("tell him hello from me\\nhello", "taken back after a move");
+        await page.press("Enter");
+        await see(queued, "queued again");
+
+        // With no send on its way, also when one begins in the frame it comes back in.
+        await type(BOX, "x");
+        await page.evaluate(`const storage = (await import('/person-storage.js')).personStorage;
+            const set = storage.set;
+            storage.set = (key, value) => {
+                if (key.startsWith('takenBack.') && value !== null) {
+                    storage.set = set;
+                    setTimeout(() => document.querySelector('.pane .send-button').click());
+                }
+
+                return set(key, value);
+            };`);
+        await edit();
+        await see(`${STORE}.store.state.view.inbox.some((item) => item.text === 'x')`, "x went");
+        await back("tell him hello from me\\nhello", "taken back, without x");
+        assert.deepEqual(
+            await inPage(`${STORE}.store.state.notices.map((n) => n.message)`),
+            ["HTTP 400"],
+            "only the failed send's",
+        );
+    } finally {
+        answer();
+    }
+
+    await see(`!${STORE}.store.state.view.live.busy`, "Pi done");
 });
 
 test("A `!` command with its answer lost runs once when sent again", real, async () => {

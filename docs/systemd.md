@@ -24,6 +24,8 @@ The access mode also needs its own tools:
 - `tailscale`: Tailscale connected (`tailscale up`). Listens on the Tailscale address only.
 - `tailscale-serve`: Tailscale 1.52 or newer, `tailscaled` running, HTTPS certificates enabled in the tailnet, and the service user as its operator (`sudo tailscale set --operator=pi-pocket`, unless the service runs as root). The launcher adds the mapping and removes one it made. It also removes one that a crashed run made, which it knows by its receipt (`serve-mount.json` in the data folder). When it cannot, a start in another mode on that port stops and says how to free it, as the mapping would keep the app on the tailnet. A mapping with no receipt, such as one you made yourself, is left where it is: free it by hand with `tailscale serve --https=443 --set-path=/ off` if you need to.
 
+The unit starts after `tailscaled` but does not start it, as the other modes do not need it: for `tailscale` and `tailscale-serve`, keep `tailscaled` enabled.
+
 Provider sign-in does not need a terminal: sign in from the app's Providers sheet after the first start.
 
 ## Install

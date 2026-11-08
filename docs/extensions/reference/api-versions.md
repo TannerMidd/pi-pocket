@@ -95,3 +95,7 @@ Each member in the reference has its own Since line. These parts came together:
 | Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0 |
 | How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0 |
 | `host.sessions.start` (experimental)                                                                                                                              | 0.28.0 |
+| Workspace providers: `host.registerWorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0 |
+| Presented inputs: `web.presentEntry` and `pocket.entryPresentation` (experimental)                                                                                | 0.28.0 |
+| Fenced blocks and inline math: `pocket.fence` and `pocket.mathInline` (experimental)                                                                              | 0.28.0 |
+| `answers` from `linkedSessions.send` (experimental)                                                                                                               | 0.28.0 |

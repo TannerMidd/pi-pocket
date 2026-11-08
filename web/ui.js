@@ -11,7 +11,13 @@ import { blockMath, inlineMath } from "./math.js";
 import { fenceFor, markdownRevision, mathOn, mountMath } from "./markdown-ext.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
 
-export const html = htm.bind(h);
+// `this[0] = 3` stops htm from keeping the elements a template makes: a kept element keeps the app's tree it was first
+// drawn in, and through the rows of the session list, every tree after it. Templates stay parsed once.
+export const html = htm.bind(function () {
+    this[0] = 3;
+
+    return h.apply(null, arguments);
+});
 
 // ─── Images ──────────────────────────────────────────────────────────────────────
 
@@ -1635,6 +1641,71 @@ export function useSide(ref, of = (element) => element) {
     return side;
 }
 
+/** How far the pointer goes before a press on an edge is a drag: a double click on it stays a double click. */
+const DRAG_SLOP = 3;
+
+/**
+ * Drag an edge to resize a window (the sidebar, the Files tile, the Browser panel), from the edge's `pointerdown`. As the
+ * pointer moves, `widthAt(event)` gives the width, set as the window's own `property` (`width`, `flex-basis`) and nothing
+ * else: a variable on the page's root restyled every element at each move, the session list's hundreds of rows too. A
+ * layer over the page shows the cursor and keeps what is under the pointer from hovering or selecting. Once the pointer
+ * lets go, `done(width)` keeps the width, and the window's own value goes.
+ */
+export function dragWidth(event, { element, property, widthAt, done }) {
+    const { clientX: x, clientY: y, pointerId } = event;
+    let veil = null;
+    let width = null;
+
+    const move = (each) => {
+        if (each.pointerId !== pointerId) {
+            return;
+        }
+
+        // Let go where the page did not hear it (another window, outside the page): the drag ends.
+        if (each.buttons === 0) {
+            stop();
+
+            return;
+        }
+
+        if (veil === null) {
+            if (Math.hypot(each.clientX - x, each.clientY - y) < DRAG_SLOP) {
+                return;
+            }
+
+            veil = document.createElement("div");
+            veil.className = "resize-veil";
+            document.body.append(veil);
+            element.classList.add("resizing");
+            getSelection()?.removeAllRanges();
+        }
+
+        width = widthAt(each);
+        element.style.setProperty(property, `${width}px`);
+    };
+
+    const stop = () => {
+        removeEventListener("pointermove", move);
+        removeEventListener("pointerup", stop);
+        removeEventListener("pointercancel", stop);
+        removeEventListener("blur", stop);
+
+        if (veil === null) {
+            return;
+        }
+
+        veil.remove();
+        element.classList.remove("resizing");
+        done(width);
+        element.style.removeProperty(property);
+    };
+
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", stop);
+    addEventListener("pointercancel", stop);
+    addEventListener("blur", stop);
+}
+
 /**
  * A rail button's state for themes (`data-state`): `open` while what it opens shows, `busy` while it counts work that
  * goes on; both, or neither (undefined).
@@ -1739,36 +1810,41 @@ export function drawnFor(keys, component) {
     return Wrapped;
 }
 
-class Memo extends Component {
-    shouldComponentUpdate(next) {
-        const { ignored } = next;
-        const before = this.props.props;
-        const after = next.props;
-        const keys = Object.keys(after).filter((key) => !ignored.includes(key));
-
-        return (
-            next.component !== this.props.component ||
-            Object.keys(before).length !== Object.keys(after).length ||
-            keys.some((key) => !Object.is(before[key], after[key]))
-        );
-    }
-
-    render({ component, props }) {
-        return h(component, props);
-    }
-}
-
 /**
  * `component`, drawn again only when its props change (each compared with `Object.is`) or its own state does. It must
  * read nothing else as it draws, such as `store.state`: what it needs comes as props. `ignored` names props it reads
- * only as it mounts, whose change alone does not draw it again.
+ * only as it mounts, whose change alone does not draw it again. One component around it, not two: the session list
+ * makes one for each of its hundreds of rows.
  */
 export function memo(component, ignored = []) {
-    const Wrapped = (props) => h(Memo, { component, props, ignored });
+    class Memo extends Component {
+        // Without making arrays: the session list asks this of each of its rows at every draw.
+        shouldComponentUpdate(next) {
+            let count = 0;
 
-    Wrapped.displayName = component.name;
+            for (const key in next) {
+                count++;
 
-    return Wrapped;
+                if (!Object.is(this.props[key], next[key]) && !ignored.includes(key)) {
+                    return true;
+                }
+            }
+
+            for (const key in this.props) {
+                count--;
+            }
+
+            return count !== 0;
+        }
+
+        render(props) {
+            return h(component, props);
+        }
+    }
+
+    Memo.displayName = component.name;
+
+    return Memo;
 }
 
 /** Phones: sheets from the bottom edge, which drag back down to close, and menus that a swipe closes. */

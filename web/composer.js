@@ -123,20 +123,21 @@ function loadAttached(id) {
     try {
         const list = JSON.parse(personStorage.get(attachedKey(id)) ?? "[]");
 
-        return list.map((attachment) => ({
-            key: uid(),
-            name: attachment.name,
-            size: attachment.size,
-            state: "done",
-            preview: /^image\/(?!heic|heif)/.test(attachment.mime ?? "")
-                ? fileUrl(attachment.path)
-                : null,
-            attachment,
-        }));
+        return list.map(chipOf);
     } catch {
         return [];
     }
 }
+
+/** The box's chip of a file uploaded before. */
+const chipOf = (attachment) => ({
+    key: uid(),
+    name: attachment.name,
+    size: attachment.size,
+    state: "done",
+    preview: /^image\/(?!heic|heif)/.test(attachment.mime ?? "") ? fileUrl(attachment.path) : null,
+    attachment,
+});
 
 function saveAttached(id, files) {
     if (attachmentsStopped || !store.state.me?.id) {
@@ -165,13 +166,49 @@ const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes
 /**
  * Each conversation's message (or command) on its way, by its id: `{ text, quote, files }`, the box's words, its quote,
  * and the paths of the files that go. It lives here, not in the box: a box shown again meanwhile (another route, Alt+A
- * twice) holds it as on its way, and cannot send it twice. Its words and files stay in the draft until it went.
+ * twice) holds it as on its way, and cannot send it twice. Its words and files stay in the draft until it went, and
+ * meanwhile its words are all the draft holds: what comes for the box (an insert, a queued message taken back) waits
+ * until it ended, so what leaves the draft once it went is only what went.
  */
 const onTheWay = new Map();
 /** The boxes shown, each told when a message from its conversation went. */
 const sentListeners = new Set();
+/** The queued messages whose Edit is under way: a second tap meanwhile does nothing. */
+const takingBack = new Set();
+/** How many queued messages were taken back (`keepBack`): a box looks for one when it grows. */
+let takenBack = 0;
+/** The request ids of the sends that ended in this page (`endSend`). */
+const ended = new Set();
 
 const requestKey = (id) => `sendRequest.${id}`;
+const backKey = (id) => `takenBack.${id}`;
+
+/** The queued messages of conversation `id` taken back that no box took yet, oldest first. */
+function keptBack(id) {
+    try {
+        const list = JSON.parse(personStorage.get(backKey(id)) ?? "[]");
+
+        return Array.isArray(list) ? list : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Keep `back`, a queued message of conversation `id` taken back (`{ text, attachments }`), in the
+ * person's storage until a box of `id` with no send on its way takes it: the box that asked can
+ * go meanwhile (another route, a session switch), or the page reload. Taken back during a send
+ * (`after`, its request id), it waits until that send ended: in this page, or elsewhere (another
+ * tab, before a reload) once its request id is gone. Before, the words of the box may go again.
+ */
+function keepBack(id, back) {
+    const after = onTheWay.get(id)?.requestId ?? null;
+    const kept = { text: back.text, attachments: back.attachments, after };
+
+    personStorage.set(backKey(id), JSON.stringify([...keptBack(id), kept]));
+    takenBack += 1;
+    store.set({});
+}
 
 /** The request id kept for conversation `id`, `{ what, requestId }`, or null. */
 function keptRequest(id) {
@@ -231,6 +268,7 @@ function beginSend(id, record, message) {
  */
 function endSend(id, record, went) {
     onTheWay.delete(id);
+    ended.add(record.requestId);
 
     // It went: its request id is done with.
     if (went && keptRequest(id)?.requestId === record.requestId) {
@@ -238,12 +276,9 @@ function endSend(id, record, went) {
     }
 
     if (went) {
-        // Words put in meanwhile (`takeInsert`) follow the sent ones without their end spaces.
-        const left = drafts.get(id).replace(record.text.trimEnd(), "").trim();
-
-        drafts.set(id, left);
-
-        if (left === "") {
+        // The draft held only what went, unless another tab wrote it since: that stays.
+        if (drafts.get(id) === record.text) {
+            drafts.set(id, "");
             savePastes(id, {});
         }
 
@@ -640,6 +675,46 @@ export function Composer() {
 
         return () => sentListeners.delete(went);
     }, [conversationId]);
+    // The request id kept for the box's words: a change ends the wait of what was taken back.
+    const request = keptRequest(conversationId)?.requestId;
+
+    // The queued messages of this conversation taken back (`keepBack`) go before the box's words,
+    // once no send is on its way.
+    useEffect(() => {
+        // Read now, not at the render: a send can begin between the two.
+        const all = onTheWay.has(conversationId) ? [] : keptBack(conversationId);
+        const now = keptRequest(conversationId)?.requestId;
+        const ready = (back) => !back.after || back.after !== now || ended.has(back.after);
+        const list = all.filter(ready);
+
+        if (list.length === 0) {
+            return;
+        }
+
+        const waiting = all.filter((back) => !ready(back));
+
+        personStorage.set(
+            backKey(conversationId),
+            waiting.length === 0 ? null : JSON.stringify(waiting),
+        );
+        let words = drafts.get(conversationId);
+        let chips = [];
+
+        for (const back of list) {
+            words = words.trim() === "" ? back.text : `${back.text}\n${words}`;
+            chips = [...back.attachments.map(chipOf), ...chips];
+        }
+
+        const at = list.at(-1).text.length;
+
+        setReading(null);
+        update(words, at);
+        setFiles((current) => [...chips, ...current]);
+        requestAnimationFrame(() => {
+            box.current?.focus();
+            box.current?.setSelectionRange(at, at);
+        });
+    }, [conversationId, sending, takenBack, request]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -673,7 +748,9 @@ export function Composer() {
     const insert = store.state.composerInsert;
 
     useEffect(() => {
-        const taken = insert && takeInsert(drafts.get(conversationId));
+        // It waits while a send is on its way: the box then holds only what goes.
+        const taken =
+            insert && !sending ? takeInsert(drafts.get(conversationId), conversationId) : null;
 
         if (taken?.files.length > 0) {
             addFiles(taken.files);
@@ -694,7 +771,7 @@ export function Composer() {
             element.focus();
             element.setSelectionRange(element.value.length, element.value.length);
         });
-    }, [insert?.n]);
+    }, [insert?.n, sending, conversationId]);
     useEffect(() => {
         const fit = () => fitBox(box.current);
 
@@ -731,7 +808,8 @@ export function Composer() {
 
     /**
      * The box's own change of its words (typing, dictation, history, a suggestion, a module's key): none while they are
-     * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in.
+     * on their way (`onItsWay`). What comes from elsewhere (`insertIntoComposer`, Edit on a queued message) goes in, once
+     * they went or did not.
      */
     const edit = (value, at) => {
         if (onTheWay.has(conversationId)) {
@@ -995,35 +1073,21 @@ export function Composer() {
         }
     };
 
+    // Edit on a queued message: it comes back for this conversation, also when another shows by
+    // then (another session, PiP's board), and waits there (`keepBack`).
     const editQueued = async (item) => {
-        const back = await attempt(() => actions.editQueued(item.id));
-
-        if (!back) {
+        if (takingBack.has(item.id)) {
             return;
         }
 
-        const current = drafts.get(conversationId);
-        const at = back.text.length;
+        takingBack.add(item.id);
+        const back = await attempt(() => actions.editQueued(item.id, conversationId));
 
-        setReading(null);
-        update(current.trim() === "" ? back.text : `${back.text}\n${current}`, at);
-        setFiles((list) => [
-            ...back.attachments.map((attachment) => ({
-                key: uid(),
-                name: attachment.name,
-                size: attachment.size,
-                state: "done",
-                preview: /^image\/(?!heic|heif)/.test(attachment.mime)
-                    ? fileUrl(attachment.path)
-                    : null,
-                attachment,
-            })),
-            ...list,
-        ]);
-        requestAnimationFrame(() => {
-            box.current?.focus();
-            box.current?.setSelectionRange(at, at);
-        });
+        takingBack.delete(item.id);
+
+        if (back) {
+            keepBack(conversationId, back);
+        }
     };
 
     /** Put a message sent before into the box, to send again or change. */

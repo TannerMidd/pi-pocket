@@ -19,6 +19,7 @@ import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
 import { markdownRevision } from "./markdown-ext.js";
+import { personStorage } from "./person-storage.js";
 import { splitQuote } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
@@ -37,6 +38,7 @@ import {
     openSheet,
     store,
     TRANSCRIPT_ROWS,
+    viewSynced,
 } from "./store.js";
 import { openSubagent, stateOf } from "./subagents.js";
 import { motionLevel, prefs } from "./theme.js";
@@ -1990,21 +1992,121 @@ function choiceValue(field, { picked, other }) {
         .join("\n");
 }
 
+// Unsent answers belong to this approval, and to the person who may answer it. Another approval, or a
+// form that changed, starts empty rather than showing answers that no longer fit. They are kept by
+// session, each under its approval's id and its call (or the time it asked, with no call): an id is
+// unique only while it waits, so a later ask with the same id is another, but its call asking again,
+// as after a restart, is the same ask.
+const askKey = (conversationId) => `ask.${conversationId}`;
+const askEntry = (approval) => `${approval.id}@${approval.callId ?? approval.createdAt}`;
+
+/**
+ * The approvals waiting in `conversationId` as the server last sent them, or undefined while the tab shows a view it
+ * kept, or another session: a kept view may be old, and list asks that ended or miss one asked meanwhile.
+ */
+const waitingIn = (conversationId) =>
+    viewSynced(conversationId) ? (store.state.view.approvals ?? []) : undefined;
+
+/**
+ * The unsent answers kept for the session of `approval`, with `change` made to its own (`undefined` leaves it, `null`
+ * drops it). With the session's approvals as the server sent them, what belongs to an approval no longer waiting goes,
+ * also one that ended while another session showed; with none, nothing else goes.
+ */
+function keptAsks(approval, change) {
+    let all = {};
+
+    try {
+        const saved = JSON.parse(personStorage.get(askKey(approval.conversationId)) ?? "null");
+
+        all = typeof saved === "object" && saved !== null && !Array.isArray(saved) ? saved : {};
+    } catch {
+        all = {};
+    }
+
+    const waiting = waitingIn(approval.conversationId);
+    const live = waiting && new Set(waiting.map(askEntry));
+    const kept = Object.fromEntries(
+        Object.entries(all).filter(([entry]) => live === undefined || live.has(entry)),
+    );
+
+    if (change === null) {
+        delete kept[askEntry(approval)];
+    } else if (change !== undefined) {
+        kept[askEntry(approval)] = change;
+    }
+
+    if (JSON.stringify(kept) !== JSON.stringify(all)) {
+        const empty = Object.keys(kept).length === 0;
+
+        personStorage.set(askKey(approval.conversationId), empty ? null : JSON.stringify(kept));
+    }
+
+    return kept;
+}
+
+function emptyAsk(field) {
+    return field.choices ? { picked: [], other: "" } : "";
+}
+
+function keptAsk(form, saved) {
+    if (typeof saved !== "object" || saved === null || Array.isArray(saved)) {
+        return null;
+    }
+
+    const values = {};
+
+    for (const field of form.fields) {
+        const value = saved[field.name];
+
+        if (field.choices) {
+            const picked = Array.isArray(value?.picked) ? value.picked : null;
+            const other = typeof value?.other === "string" ? value.other : null;
+            const labels = new Set(field.choices.map((choice) => choice.label));
+
+            if (
+                picked === null ||
+                other === null ||
+                picked.some((label) => typeof label !== "string" || !labels.has(label)) ||
+                (!field.multiple && picked.length > 1) ||
+                (!field.other && other !== "")
+            ) {
+                return null;
+            }
+
+            values[field.name] = { picked, other };
+        } else if (typeof value === "string") {
+            values[field.name] = value;
+        } else {
+            return null;
+        }
+    }
+
+    return values;
+}
+
+function savedAsk(form, approval) {
+    return keptAsk(form, keptAsks(approval)[askEntry(approval)] ?? null) ?? null;
+}
+
 /** Sent only by that person, and declined by anyone who can steer. Only the `ask` tool passes what is typed on to Pi. */
 function AskCard({ approval }) {
     const { me, users } = store.state;
     const form = approval.form;
-    const [values, setValues] = useState(() =>
-        Object.fromEntries(
-            form.fields.map((field) => [
-                field.name,
-                field.choices ? { picked: [], other: "" } : "",
-            ]),
-        ),
-    );
-    const [busy, setBusy] = useState(false);
     const owner = users?.find?.((each) => each.role === "owner")?.id;
     const mine = (approval.requestedBy ?? owner) === me?.id;
+    const [values, setValues] = useState(() => {
+        const saved = mine ? savedAsk(form, approval) : null;
+
+        // One that does not fit goes, or it would come back if the form fit it again.
+        if (mine && saved === null) {
+            keptAsks(approval, null);
+        }
+
+        return (
+            saved ?? Object.fromEntries(form.fields.map((field) => [field.name, emptyAsk(field)]))
+        );
+    });
+    const [busy, setBusy] = useState(false);
     const who =
         users?.find?.((each) => each.id === approval.requestedBy)?.name ??
         "the person Pi works for";
@@ -2018,11 +2120,51 @@ function AskCard({ approval }) {
     // Only a card of plain fields hides what is typed from Pi: the `ask` tool's answers are for Pi.
     const plain = form.fields.some((field) => !field.choices);
 
+    const change = (next) => {
+        setValues(next);
+
+        // A secret is typed again after a switch or a reload: it never goes to the browser's storage.
+        if (mine) {
+            const kept = form.fields.map((field) => [
+                field.name,
+                field.secret ? "" : next[field.name],
+            ]);
+
+            keptAsks(approval, Object.fromEntries(kept));
+        }
+    };
+
+    // As the server's view of its session comes (also after one this tab kept), asks that ended there go.
+    const synced = viewSynced(approval.conversationId);
+
+    useEffect(() => {
+        if (mine && synced) {
+            keptAsks(approval);
+        }
+    }, [mine, synced]);
+    // The card is shown only while its approval waits. It leaving the server's view of its session (answered elsewhere,
+    // cancelled, or the run stopped) drops what was typed. A switch to another session keeps it.
+    useEffect(
+        () => () => {
+            const waiting = waitingIn(approval.conversationId);
+
+            if (
+                mine &&
+                waiting !== undefined &&
+                !waiting.some((each) => askEntry(each) === askEntry(approval))
+            ) {
+                keptAsks(approval, null);
+            }
+        },
+        [approval.id, mine],
+    );
+
     const answer = (allow) => {
         setBusy(true);
-        attempt(() => actions.approve(approval.id, allow, allow ? typed : undefined)).finally(() =>
-            setBusy(false),
-        );
+        attempt(() => actions.approve(approval.id, allow, allow ? typed : undefined))
+            // `attempt` gives undefined when the server turned the answer down: what was typed stays, to try again.
+            .then((done) => done !== undefined && keptAsks(approval, null))
+            .finally(() => setBusy(false));
     };
 
     return html`<form
@@ -2052,7 +2194,7 @@ function AskCard({ approval }) {
                                 field=${field}
                                 chosen=${values[field.name]}
                                 busy=${busy}
-                                onChange=${(chosen) => setValues({ ...values, [field.name]: chosen })}
+                                onChange=${(chosen) => change({ ...values, [field.name]: chosen })}
                             />`
                           : html`<label class="ask-field" key=${field.name}>
                                 <span>${field.label}</span>
@@ -2066,7 +2208,7 @@ function AskCard({ approval }) {
                                     spellcheck="false"
                                     disabled=${busy}
                                     onInput=${(event) =>
-                                        setValues({
+                                        change({
                                             ...values,
                                             [field.name]: event.currentTarget.value,
                                         })}
@@ -2123,7 +2265,8 @@ function decided(decision) {
 
 function ApprovalCard({ approval }) {
     if (approval.form) {
-        return html`<${AskCard} approval=${approval} />`;
+        // One card for each ask: a later one with the same id starts anew.
+        return html`<${AskCard} key=${askEntry(approval)} approval=${approval} />`;
     }
 
     const { me, server } = store.state;

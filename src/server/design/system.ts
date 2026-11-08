@@ -535,6 +535,13 @@ export function designSystemTool(): ToolRegistration {
                     });
 
                     if (args.apply !== true) {
+                        // An apply of a scan with no style files is refused below: do not offer one.
+                        if (scan.files.length === 0) {
+                            return text(
+                                `${report}\n\nNothing was saved. The scan read no style files in ${path}, so an apply would be refused: point path at the folder with the project's styles.`,
+                            );
+                        }
+
                         const call = JSON.stringify({
                             action: "resync",
                             apply: true,

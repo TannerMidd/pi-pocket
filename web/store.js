@@ -882,6 +882,7 @@ function reloadAccount(to) {
     changingAccount = true;
     personStorage.identify(null);
     notesDrafts.clear();
+    waitingInserts = [];
     source?.close();
     store.set({ me: null, composerInsert: null, auth: null, pip: null, pipOpen: false });
 
@@ -1055,6 +1056,9 @@ function keptRecord(view) {
         seen: synced === id ? seenOf(id) : shownSeen,
     };
 }
+
+/** Whether the session `id` shows with a view the server sent since: not one this tab kept, which may be old. */
+export const viewSynced = (id) => synced === id && store.state.view.conversation?.id === id;
 
 /** Keep the view of the session this tab leaves, to show it again at once (`keptView`), here and on the device. */
 function keepView(view) {
@@ -2702,7 +2706,7 @@ export const actions = {
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
     /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
     move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
-    editQueued: (submissionId) => api(`c/${current()}/edit-queued`, { submissionId }),
+    editQueued: (submissionId, id = current()) => api(`c/${id}/edit-queued`, { submissionId }),
     configure: (change) => api(`c/${current()}/configure`, change),
     /** The owner's model and thinking level for new sessions, `{ provider, modelId, thinkingLevel }`; null clears it. */
     setDefaultModel: (choice) => api("settings", { defaultModel: choice }),
@@ -2992,35 +2996,53 @@ export function openSheet(sheet) {
 
 /**
  * Put text into the message box in the session's place (after what is there: on a new paragraph, or with `inline`,
- * after a space), and files to attach, and close any sheet so it shows. The box that shows takes it (`takeInsert`).
+ * after a space), and files to attach, and close any sheet so it shows. The box of the conversation in that place
+ * then takes it (`takeInsert`), also when it waits for a send.
  */
 export function insertIntoComposer(text, files = [], { inline = false } = {}) {
+    waitingInserts.push({ text, files, inline, for: store.state.conversationId });
     store.set((state) => ({
         sheet: null,
-        composerInsert: { text, files, inline, n: (state.composerInsert?.n ?? 0) + 1 },
+        composerInsert: { n: (state.composerInsert?.n ?? 0) + 1 },
     }));
 }
 
-/** The newest `insertIntoComposer` a box took: each goes into one box, once. */
-let insertedUpTo = 0;
+/**
+ * What `insertIntoComposer` put that no box took yet, in order, each for the conversation it was put in (null: put with
+ * none open, for the next box that shows).
+ */
+let waitingInserts = [];
 
 /**
- * Take what `insertIntoComposer` put that no box took yet: its files, and its text after `current` (the box's words),
- * or null for none. Null when nothing waits.
+ * Take, once, what `insertIntoComposer` put for `conversationId` that no box took yet: its files, and its text after
+ * `current` (the box's words), or null for none. Null when nothing waits for it.
  */
-export function takeInsert(current) {
-    const insert = store.state.composerInsert;
+export function takeInsert(current, conversationId) {
+    const forThis = (insert) => insert.for === conversationId || insert.for === null;
+    const mine = waitingInserts.filter(forThis);
 
-    if (!insert || insert.n <= insertedUpTo) {
+    if (mine.length === 0) {
         return null;
     }
 
-    insertedUpTo = insert.n;
-    const gap = insert.inline ? " " : "\n\n";
-    const text =
-        current.trim() === "" ? insert.text : `${current.replace(/\s+$/, "")}${gap}${insert.text}`;
+    waitingInserts = waitingInserts.filter((insert) => !forThis(insert));
+    let text = current;
 
-    return { files: insert.files ?? [], text: insert.text === "" ? null : text };
+    for (const insert of mine) {
+        if (insert.text !== "") {
+            const gap = insert.inline ? " " : "\n\n";
+
+            text =
+                text.trim() === ""
+                    ? insert.text
+                    : `${text.replace(/\s+$/, "")}${gap}${insert.text}`;
+        }
+    }
+
+    return {
+        files: mine.flatMap((insert) => insert.files ?? []),
+        text: mine.some((insert) => insert.text !== "") ? text : null,
+    };
 }
 
 /**

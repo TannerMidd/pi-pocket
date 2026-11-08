@@ -727,20 +727,56 @@ test("modes past the engine's 16 are left out with a note, and the rest load", (
     assert.match(scanReport(scan), /cannot hold them: 1 mode\./);
 });
 
-test("a spacing alias to a plain number keeps its value", () => {
+test("a spacing alias to a number keeps its value in each mode, through other collections", () => {
+    const numbers = guid(1, 4);
     const four = guid(1, 2);
-    const scan = scanTokens(
-        project({
-            "alias.fig": oneMode(
-                variable(four, "Primitives/4", "FLOAT", [[LIGHT, { floatValue: 4 }]]),
-                variable(guid(1, 3), "Spacing/Small", "FLOAT", [
-                    [LIGHT, { alias: { guid: four } }],
-                ]),
+    const [one, scale, gap] = [guid(12, 1), guid(12, 2), guid(1, 6)];
+    const file = figFile({
+        nodeChanges: [
+            modeSet(COLORS, [
+                [LIGHT, "Light"],
+                [DARK, "Dark"],
+            ]),
+            modeSet(numbers, [
+                [CONTRAST, "Light"],
+                [HIGH, "Dark"],
+            ]),
+            modeSet(scale, [[one, "Value"]]),
+            variable(
+                four,
+                "Primitives/4",
+                "FLOAT",
+                [
+                    [CONTRAST, { floatValue: 4 }],
+                    [HIGH, { floatValue: 8 }],
+                ],
+                numbers,
             ),
-        }),
-    );
+            variable(guid(1, 3), "Spacing/Small", "FLOAT", [
+                [LIGHT, { alias: { guid: four } }],
+                [DARK, { alias: { guid: four } }],
+            ]),
+            // Through a collection of one mode, and from one: the dark mode of what they read.
+            variable(gap, "Scale/Gap", "FLOAT", [[one, { alias: { guid: four } }]], scale),
+            variable(guid(1, 7), "Spacing/Gap", "FLOAT", [
+                [LIGHT, { alias: { guid: gap } }],
+                [DARK, { alias: { guid: gap } }],
+            ]),
+            variable(
+                guid(1, 8),
+                "Radius/Small",
+                "FLOAT",
+                [[one, { alias: { guid: four } }]],
+                scale,
+            ),
+        ],
+    });
+    const system = load(scanTokens(project({ "alias.fig": file })));
 
-    assert.equal(token(load(scan), "space.small")?.modes.light?.literal, "4px");
+    for (const name of ["space.small", "space.gap", "radius.small"]) {
+        assert.equal(token(system, name)?.modes.light?.literal, "4px", name);
+        assert.equal(token(system, name)?.modes.dark?.literal, "8px", name);
+    }
 });
 
 test("a text variable, a switch, and an alias of a variable outside the file are left out", () => {

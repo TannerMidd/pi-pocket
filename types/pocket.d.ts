@@ -1082,7 +1082,7 @@ export interface LinkedSession {
  * A human-facing linked session that the authenticated person can see.
  * @since 0.16.0
  */
-export interface HumanLinkedSession extends LinkedSession {
+export interface HumanLinkedSession extends Omit<LinkedSession, "failed"> {
     /**
      * Its id, for pocket.openConversation. Other metadata keeps LinkedSession's audience rules.
      * @since 0.16.0
