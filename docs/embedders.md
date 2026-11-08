@@ -24,7 +24,7 @@ The embedder (in Electron, its preload script) puts one object in the top page o
 window.pocketHost = {
     kind: "my-app", // which embedder; for logs only
     apiVersion: 1,
-    capabilities: ["menu", "badge", "notify", "visibility", "pinned", "open", "newSession", "saveFile"],
+    capabilities: ["menu", "badge", "notify", "visibility", "pinned", "open", "newSession"],
 
     menuTitle(), // the heading of the embedder's group in the menu, such as its name; optional
     menuItems(), // [{ id, label, hint? }]: the items of that group, at the menu's end
@@ -33,7 +33,6 @@ window.pocketHost = {
     notify(message), // a notification for the embedder to show (below)
     visible(), // whether the embedder's window shows: false while hidden in a tray or minimized
     setPinned(list), // [{ id, title, state, label, url }]: the pinned sessions, in order
-    saveFile({ url, name }), // save a file of a server session to this computer (below)
     subscribe(listener, events), // the embedder's events (below), and the ones this page handles
 };
 ```
@@ -50,18 +49,15 @@ window.pocketHost = {
 | `visibility` | Reads `visible()` with the page's own visibility: the page counts as hidden while either says so. It tells the server (`POST /api/visibility`), so the server knows the person is away and lets notifications through, and seen marks and peek tiles wait as they do in a hidden tab.                                                            |
 | `pinned`     | Calls `setPinned(list)` when a pinned session's title or state changes, for a tray menu. `state` is the square's shape from `sessionMark`: `waiting`, `limited`, `working`, `failed`, `fresh` (finished, not read), or `seen`. The session list's theme states `done` and `idle` do not change these app bridge names. `label` says it in words. |
 | `open`       | Opens what the embedder asks for (an `open` event), also without `notify`.                                                                                                                                                                                                                                                                       |
-| `saveFile`   | Calls `saveFile({ url, name })` for the viewer's Download button or Cmd+click (Ctrl+click) on a server file's path, to save it to this computer.                                                                                                                                                                                                 |
 | `newSession` | Opens the **New session** sheet when the embedder asks for it (a `newSession` event), as Alt+N does.                                                                                                                                                                                                                                             |
 
 A page from before 0.28.0-beta.7, still open after the server updates, asks with `host=notify` and listens for `desktop-notify`: the server still sends it those, until the page reloads.
 
 A page in an Electron window keeps running at full speed while the window hides in the tray, so `document.visibilityState` stays `visible` there. That is why `visible()` exists: without it, the server would think the person is looking, and hold every notification back.
 
-### Saving files
+### Downloads
 
-With `saveFile`, the viewer's **Download** button saves a file of a session on the server to this computer's Downloads folder and shows it in the file manager. Cmd+click (Ctrl+click) on its path in a reply does the same, unless the click already offers **Show in the file manager**. Sessions on runners keep their existing file-manager action. Without this capability, Download uses a normal browser download.
-
-`saveFile({ url, name })` takes a same-origin path, `/api/c/<id>/download?path=...`, and the file's last path part as `name`. It returns a promise of `{ ok: true, path }`, where `path` is where the file was saved, or `{ ok: false, error }`, with an error in words for a person. The app uses the person's sign-in for the request and must not save downloads from other origins through this call.
+The viewer's **Download** button is a plain download of `/api/c/<id>/download?path=...`, with the file's name. The page asks nothing of the embedder for it. An embedder can save these downloads itself, for example straight to the Downloads folder: in Electron, in its session's `will-download` handler. It must check that the download's first address (before redirects) is the server's own origin and this route, and that it comes from the page it shows; everything else keeps its usual save dialog.
 
 ### Notifications
 
