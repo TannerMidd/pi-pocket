@@ -609,7 +609,8 @@ function Overview({ runner }) {
         state && ["Saved folders", String(state.folders.length)],
         state && ["Approved sessions", String(state.sessions.length)],
         ["People who can start sessions", people === 0 ? "none" : String(people)],
-        ["Asks before new sessions", runner.asks ? "yes" : "no"],
+        // The runner's own setting; `runner.asks` only says that it can ask (`protocol.ts`).
+        state && ["Asks before new sessions", state.settings.stopAsking ? "no" : "yes"],
     ].filter(Boolean);
 
     return html`<div class="runner-pane">
