@@ -49,6 +49,8 @@ The native extension loader registers one scoped resolve hook for drop-in import
 
 Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose functions call into the app lazily, and `web`, through which they add routes and a browser module to the app. `ExtensionWebs` (`extension-web.ts`) keeps what each module's version added, which the loader commits once the module installed and removes with it, running its cleanups. The HTTP layer parses a request, checks it, calls a part, and writes the answer; it holds no state of its own beyond invites and the event streams' pollers.
 
+`host.pendingApprovals` (`pending-approvals.ts`) observes the internal approval service in `host.ts`. It filters waits for the source session's requester and everyone who can see the source. It does not pass on commands, arguments, reasons, or answers. The guard hook keeps a wait's first creation time in its Durable call memo, so a resumed run can show the same wait. Approval decisions still use the app's existing paths.
+
 ## Workspace execution providers
 
 `PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Only the owner can use a workspace URI. The provider's module, a drop-in outside the core package, owns host-key trust, connections, remote project context, and cleanup. Files/Git actions and managed worktrees remain local-only.

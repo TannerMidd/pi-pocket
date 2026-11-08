@@ -29,6 +29,7 @@ import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
+import type { ApprovalTransition, PendingApprovalsApi } from "./pending-approvals.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
 
@@ -353,6 +354,7 @@ export class Approvals {
         { request: ApprovalRequest; resolve: (answer: ApprovalAnswer) => void }
     >();
     readonly #listeners = new Set<(conversationId: ConversationId) => void>();
+    readonly #observers = new Set<(change: ApprovalTransition) => void>();
     readonly #requesterOf: (conversationId: ConversationId) => string | undefined;
 
     /** `requesterOf`: who Pi works for in a conversation right now. */
@@ -370,6 +372,7 @@ export class Approvals {
 
         if (existing !== undefined) {
             existing.resolve({ allow: false, by: "superseded" });
+            this.#changed({ event: "resolved", request: existing.request, outcome: "superseded" });
         }
 
         const answered = new Promise<ApprovalAnswer>((resolve) => {
@@ -377,11 +380,13 @@ export class Approvals {
         });
 
         this.#emit(request.conversationId);
+        this.#changed({ event: "created", request });
 
         return awaitWithContext(answered, context).finally(() => {
             if (this.#pending.get(request.id)?.request === request) {
                 this.#pending.delete(request.id);
                 this.#emit(request.conversationId);
+                this.#changed({ event: "resolved", request, outcome: "cancelled" });
             }
         });
     }
@@ -396,6 +401,11 @@ export class Approvals {
         this.#pending.delete(id);
         pending.resolve(answer);
         this.#emit(pending.request.conversationId);
+        this.#changed({
+            event: "resolved",
+            request: pending.request,
+            outcome: answer.allow ? "allowed" : "denied",
+        });
 
         return true;
     }
@@ -414,6 +424,19 @@ export class Approvals {
         this.#listeners.add(listener);
 
         return () => this.#listeners.delete(listener);
+    }
+
+    /** Internal: the public facade filters and redacts these transitions before delivery. */
+    observe(listener: (change: ApprovalTransition) => void): () => void {
+        this.#observers.add(listener);
+
+        return () => this.#observers.delete(listener);
+    }
+
+    #changed(change: ApprovalTransition): void {
+        for (const observer of this.#observers) {
+            observer(change);
+        }
     }
 
     #emit(conversationId: ConversationId): void {
@@ -471,6 +494,8 @@ export interface WorkspaceProvider {
 export interface PocketHost {
     readonly guard: LancetGuard;
     readonly approvals: Approvals;
+    /** Read-only approval snapshots and events, with source audience checks. @experimental @since 0.30.0 */
+    readonly pendingApprovals: PendingApprovalsApi;
     readonly agentDir: string;
     readonly dataDir: string;
     /** The running server's Pi Pocket package version, not the extension API level. */

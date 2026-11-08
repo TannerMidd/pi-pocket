@@ -49,6 +49,14 @@ if (!answer.answered) {
 - **Do not keep the values** in `api.memo` or a document: a restart would find them there. A tool that asks is not safe to replay (the default), so a call that a restart cut off comes back as interrupted, and Pi asks again.
 - Tell Pi what happened, never the values: "Signed in as the person".
 
+## Observe an approval wait
+
+An orchestration or status extension can observe waits through [`host.pendingApprovals`](reference/host.md#pendingapprovals), since 0.30.0 (experimental). It provides a pending snapshot and `created` and `resolved` events. It cannot allow, deny, or answer a card. Only the usual human interface can do that.
+
+Give it a source session where Pi works for a known person. Core returns only approvals visible to that person and to everyone who can see the source. PiP waits are excluded. Tool arguments, free-text reasons, question contents, and answer values never leave this API; summaries are fixed text for the action.
+
+Subscribe before listing, reconcile by id, and list again after a restart or an access change. As durable runs resume after a restart, the guard reconstructs a pending wait with the same id and original creation time. Events are not a stored history. See [the reference](reference/host.md#pendingapprovals) for cancellation and replay.
+
 ## Hide a value
 
 `host.hide` keeps a value out of what Pi and people read, from now until you call the function that it returns. It becomes `[label]`:

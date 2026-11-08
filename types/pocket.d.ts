@@ -215,6 +215,13 @@ export interface Host {
      */
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
+     * Read-only, redacted approval snapshots and events, filtered for a source session's requester and whole audience.
+     * No approval or denial methods. Check for this member on older servers.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly pendingApprovals: PendingApprovals;
+    /**
      * The conversation's current working folder or workspace URI.
      * @since 0.28.0
      * @experimental
@@ -315,6 +322,73 @@ export interface Host {
      * @since 0.14.0
      */
     readonly thinkingLevels: readonly ModelThinkingLevel[];
+}
+
+/**
+ * A tool approval or question waiting for a person. Arguments, reasons, fields, and answers are withheld.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface PendingApproval {
+    /** Stable across a replay of the same guard wait. */
+    readonly id: string;
+    /** The conversation that waits, including a subagent's. */
+    readonly conversationId: ConversationId;
+    /** The top-level session it belongs to. */
+    readonly session: ConversationId;
+    /** Unix time in milliseconds. A guard wait keeps its original time across a restart. */
+    readonly createdAt: number;
+    /** Unknown tool names are withheld, too. */
+    readonly tool: "bash" | "write" | "edit" | "ask" | "tool";
+    /** Short fixed text for the action, never copied from arguments or a question. */
+    readonly summary: string;
+    readonly state: "pending";
+}
+
+/**
+ * A wait that ended. It does not say who answered or include an answer's values.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface ResolvedApproval extends Omit<PendingApproval, "state"> {
+    readonly state: "resolved";
+    readonly outcome: "allowed" | "denied" | "cancelled" | "superseded";
+}
+
+/**
+ * The events of `host.pendingApprovals.on`.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface ApprovalEvents {
+    readonly created: PendingApproval;
+    readonly resolved: ResolvedApproval;
+}
+
+/**
+ * Approval observations for a source session, never a way to answer one. PiP approvals are not exposed.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface PendingApprovals {
+    /**
+     * Pending waits visible to the person Pi works for in `source`, and to everyone who can see that session.
+     * Throws for an unknown source, a PiP, or a source with no known requester. The returned values are frozen copies.
+     * @since 0.30.0
+     * @experimental
+     */
+    list(source: ConversationId): readonly PendingApproval[];
+    /**
+     * Listen as the current requester of `source`, with access checked again on delivery. Subscribe before listing,
+     * then reconcile by id. Returns how to stop; pass it to `web.onDispose`. Listeners cannot delay an approval.
+     * @since 0.30.0
+     * @experimental
+     */
+    on<E extends keyof ApprovalEvents>(
+        source: ConversationId,
+        event: E,
+        listener: (approval: ApprovalEvents[E]) => unknown,
+    ): () => void;
 }
 
 /**
