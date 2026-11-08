@@ -21,7 +21,7 @@ import {
     canSteer,
     collab,
     drafts,
-    navigate,
+    navigateUp,
     notify,
     openSheet,
     dropQuote,
@@ -54,7 +54,10 @@ import {
     Spinner,
 } from "./ui.js";
 
-/** The explicit route to the parent on every layout, outside the dock and the scrolling conversation. */
+/**
+ * The explicit route to the parent on every layout, outside the dock and the scrolling conversation. Up, not forward:
+ * back from the parent does not open the subagent again.
+ */
 function ParentSessionButton() {
     const parent = store.state.view.conversation?.parent;
 
@@ -66,7 +69,7 @@ function ParentSessionButton() {
         class="parent-session"
         aria-label=${`Back to main session: ${parent.title}`}
         title=${`Return to ${parent.title}`}
-        onClick=${() => navigate(parent.id)}
+        onClick=${() => navigateUp(parent.id)}
     >
         <${Icon} name="back" size=${16} />
         <span>Back to main session</span>
