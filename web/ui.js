@@ -1046,6 +1046,51 @@ export function formatWhen(ms) {
     return `${day} ${time}`;
 }
 
+/**
+ * How long until a time ahead, as a countdown: "12:04" under an hour (minutes and seconds), "2h 15m" under a day,
+ * "1d 3h" after; "now" once it is due.
+ */
+export function countdown(ms, now = Date.now()) {
+    const seconds = Math.max(0, Math.floor((ms - now) / 1000));
+
+    if (seconds === 0) {
+        return "now";
+    }
+
+    if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }
+
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3600);
+
+    return days > 0 ? `${days}d ${hours}h` : `${hours}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+/** The time now, which draws the component again each second while `on`: for a countdown that shows. */
+export function useSecond(on = true) {
+    const [now, setNow] = useState(Date.now);
+
+    useEffect(() => {
+        if (!on) {
+            return undefined;
+        }
+
+        let timer = 0;
+
+        const tick = () => {
+            setNow(Date.now());
+            timer = setTimeout(tick, 1000 - (Date.now() % 1000));
+        };
+
+        tick();
+
+        return () => clearTimeout(timer);
+    }, [on]);
+
+    return now;
+}
+
 /** The minute now, for what shows a time ago: a memo that keys on it draws again as the minute turns (`useMinute`). */
 const minuteNow = () => Math.floor(Date.now() / 60_000);
 

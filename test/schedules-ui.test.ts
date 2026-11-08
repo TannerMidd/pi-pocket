@@ -1,4 +1,4 @@
-// The Schedules sheet marks the schedules of an archived session.
+// The Schedules sheet marks the schedules of an archived session; the status line shows a session's schedules.
 import {
     type App,
     cleanUp,
@@ -90,3 +90,72 @@ test("a schedule of an archived session is marked in the Schedules sheet", real,
         /session archived/,
     );
 });
+
+test(
+    "the status line shows a session's schedules, counts down on hover, and opens the sheet",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await page.setViewport(VIEWPORTS.desktop);
+        await page.navigate(`${base}/s/${id}`);
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".status-line") !== null)`,
+                ),
+            "the status line",
+            20_000,
+        );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".status-line .schedules-now") !== null)`,
+            ),
+            false,
+            "no pill without schedules",
+        );
+
+        await app.commands.schedule(id, owner(app), {
+            when: "in 30m check the deploy",
+            zone: "UTC",
+        });
+        await app.commands.schedule(id, owner(app), { when: "every 2h ping", zone: "UTC" });
+        await until(
+            async () =>
+                (await inPage<string>(
+                    `return JSON.stringify(document.querySelector(".status-line .schedules-now")?.textContent ?? "")`,
+                )) === "2 scheduled",
+            "the pill",
+            20_000,
+        );
+
+        await page.hover({ selector: ".status-line .schedules-now" });
+        const readTip = () =>
+            inPage<string>(
+                `return JSON.stringify(document.querySelector(".schedules-tip")?.textContent ?? "")`,
+            );
+
+        await until(async () => (await readTip()) !== "", "the countdown", 10_000);
+        const tip = await readTip();
+
+        assert.match(tip, /Next in\s*(29:\d\d|30:00)/);
+        assert.match(tip, /check the deploy/);
+        assert.match(tip, /2 scheduled · 1 repeating/);
+
+        await page.click({ selector: ".status-line .schedules-now" });
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelectorAll(".schedule").length === 2)`,
+                ),
+            "the Schedules sheet",
+            10_000,
+        );
+        assert.match(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".schedule .schedule-countdown").textContent)`,
+            ),
+            /in (29:\d\d|30:00)/,
+        );
+    },
+);

@@ -1,12 +1,13 @@
 // Scheduled messages of this session.
 import { useState } from "preact/hooks";
-import { actions, attempt, canSteer, closeSheet, store } from "../store.js";
-import { formatWhen, html, Icon, Sheet } from "../ui.js";
+import { actions, attempt, canSteer, closeSheet, openSheet, store } from "../store.js";
+import { countdown, formatWhen, html, Icon, Sheet, useSecond } from "../ui.js";
 
 /** Messages that go to Pi later or on repeat: set one up, see what is coming, cancel one. */
 export function SchedulesSheet() {
     const { view, users, me } = store.state;
     const [when, setWhen] = useState("");
+    const now = useSecond(view.schedules.length > 0);
     const steer = canSteer();
     const archived = store.state.sessions.some(
         (session) => session.id === store.state.conversationId && session.archived,
@@ -54,7 +55,12 @@ export function SchedulesSheet() {
                         <div class="grow">
                             <div>${schedule.text}</div>
                             <div class="muted small">
-                                ${schedule.repeat ? `${schedule.repeat} · next ${formatWhen(schedule.next)}` : formatWhen(schedule.next)} · set by ${setBy(schedule.by)}${archived ? " · session archived" : ""}
+                                ${schedule.repeat ? `${schedule.repeat} · next ${formatWhen(schedule.next)}` : formatWhen(schedule.next)}
+                                ${" · "}
+                                <span class="schedule-countdown">
+                                    ${schedule.next <= now ? "due now" : `in ${countdown(schedule.next, now)}`}
+                                </span>
+                                ${` · set by ${setBy(schedule.by)}${archived ? " · session archived" : ""}`}
                             </div>
                         </div>
                         ${
@@ -70,5 +76,8 @@ export function SchedulesSheet() {
                 )}
             </div>`
         }
+        <button class="button ghost" onClick=${() => openSheet({ type: "running" })}>
+            See every session's on Running now
+        </button>
     <//>`;
 }

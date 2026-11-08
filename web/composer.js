@@ -9,6 +9,7 @@ import {
     parseCommand,
     parseTemplate,
     planAvailable,
+    schedulesAvailable,
     suggestCommands,
 } from "./commands.js";
 import { withQuote } from "./quote-text.js";
@@ -43,15 +44,18 @@ import { MicButton, useDictation } from "./voice.js";
 import {
     APPLE,
     contextLevel,
+    countdown,
     fileUrl,
     formatBytes,
     formatTokens,
+    formatWhen,
     html,
     Icon,
     Marked,
     modelLabel,
     shortModelName,
     Spinner,
+    useSecond,
 } from "./ui.js";
 
 /** The explicit route to the parent on every layout, outside the dock and the scrolling conversation. */
@@ -2295,6 +2299,69 @@ defineItem("status", {
         const count = backgroundNow();
 
         return count > 0 && backgroundTitle(count);
+    },
+});
+
+/** The open session's scheduled messages, soonest first (the server sends them with the conversation). */
+function schedulesNow() {
+    return schedulesAvailable() ? (store.state.view.schedules ?? []) : [];
+}
+
+const schedulesTitle = (schedules) =>
+    `${schedules.length} scheduled: the next goes out at ${formatWhen(schedules[0].next)}. Open the schedules`;
+
+/**
+ * The session's scheduled messages: a pill on the left of the status line, across from the background one. Hovered, it
+ * counts down to the next; clicked, it opens the Schedules sheet.
+ */
+function SchedulesPill({ schedules }) {
+    const [hover, setHover] = useState(false);
+    const now = useSecond(hover);
+    const next = schedules[0];
+    const repeats = schedules.filter((each) => each.repeat !== undefined).length;
+
+    return html`<button
+        class="schedules-now"
+        data-part="schedules-now"
+        aria-label=${schedulesTitle(schedules)}
+        onMouseEnter=${() => setHover(true)}
+        onMouseLeave=${() => setHover(false)}
+        onFocus=${() => setHover(true)}
+        onBlur=${() => setHover(false)}
+        onClick=${() => openSheet({ type: "schedules" })}
+    >
+        <${Icon} name="clock" size=${11} />
+        <span class="num">${schedules.length}</span>
+        <span class="word">${" "}scheduled</span>
+        ${
+            hover &&
+            html`<span class="schedules-tip" role="tooltip">
+                <span class="row">
+                    <span>Next in</span>
+                    <span class="countdown">${countdown(next.next, now)}</span>
+                </span>
+                <span class="what">${next.text}</span>
+                <span class="muted">
+                    ${formatWhen(next.next)} · ${schedules.length} scheduled${repeats > 0 ? ` · ${repeats} repeating` : ""}
+                </span>
+            </span>`
+        }
+    </button>`;
+}
+
+defineItem("status", {
+    id: "core:schedules",
+    label: "Scheduled messages",
+    order: 50,
+    render() {
+        const schedules = schedulesNow();
+
+        return schedules.length > 0 && html`<${SchedulesPill} schedules=${schedules} />`;
+    },
+    detail() {
+        const schedules = schedulesNow();
+
+        return schedules.length > 0 && schedulesTitle(schedules);
     },
 });
 defineItem("status", {

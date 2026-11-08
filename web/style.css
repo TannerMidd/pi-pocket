@@ -4727,6 +4727,67 @@ pre.diff .del {
     animation: pulse 1.4s infinite;
 }
 
+/* The session's scheduled messages: a pill on the left, across from the background one, in the theme's second color.
+ * It does not pulse: nothing runs yet. Hovered, it shows a countdown to the next one above it. */
+.status-line .schedules-now {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--spark) 14%, transparent);
+    color: var(--spark);
+    font: inherit;
+}
+
+.status-line .schedules-tip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 210px;
+    max-width: min(300px, calc(100vw - 24px));
+    padding: 8px 10px;
+    border-radius: var(--r-card);
+    background: var(--raised);
+    box-shadow: var(--pop);
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text);
+    text-align: left;
+    white-space: normal;
+    pointer-events: none;
+}
+
+.status-line .schedules-tip .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+}
+
+.status-line .schedules-tip .countdown {
+    font: 600 15px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--spark);
+}
+
+.status-line .schedules-tip .what {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.status-line .schedules-tip .muted {
+    font-size: 11px;
+}
+
 /* How fast the last answer came, once Appearance turns it on: its two halves spaced like the line's items. */
 .status-line .speed {
     display: inline-flex;
@@ -4751,6 +4812,7 @@ pre.diff .del {
 .status-line[data-short~="here"] .here.alone,
 .status-line[data-short~="guard"] .guard .word,
 .status-line[data-short~="guard"] .background-now .word,
+.status-line[data-short~="guard"] .schedules-now .word,
 .status-line[data-short~="cache"] .cache,
 .status-line[data-short~="wait"] .speed .wait,
 .status-line[data-short~="wait"] .speed.wait-only {
@@ -10333,6 +10395,12 @@ textarea.notes {
     gap: 12px;
     padding: 11px 14px;
     font-size: 13.5px;
+}
+
+.schedule-countdown {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--spark);
 }
 
 .schedule > .icon {
