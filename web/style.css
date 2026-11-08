@@ -8802,7 +8802,7 @@ div.group-head {
     border-top: 1px solid var(--hair);
 }
 
-/* A model: its checkbox and id, then, once chosen, Images and its thinking levels on the right. */
+/* A model: its checkbox and id, then, once chosen, Images, its thinking levels, and its context and price on the right. */
 .custom-endpoint-model-row {
     display: flex;
     flex-wrap: wrap;
@@ -8823,8 +8823,10 @@ div.group-head {
 
 .custom-endpoint-model-caps {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
-    gap: 12px;
+    gap: 6px 12px;
     margin-left: auto;
 }
 
@@ -8842,8 +8844,14 @@ div.group-head {
     border-color: var(--accent-line);
 }
 
-/* A model's thinking levels, opened under its row. */
-.model-thinking {
+.model-thinking-button.bad {
+    color: var(--warn);
+    border-color: var(--warn-line);
+}
+
+/* A model's thinking levels, or its context and price, opened under its row. */
+.model-thinking,
+.model-limits {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -8854,8 +8862,19 @@ div.group-head {
     background: var(--card);
 }
 
-.model-thinking p {
+.model-thinking p,
+.model-limits p {
     margin: 0;
+}
+
+.model-limits-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 8px;
+}
+
+.model-limits input {
+    min-width: 0;
 }
 
 .model-thinking-on.check {
