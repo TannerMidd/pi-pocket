@@ -19,8 +19,10 @@ function seenAt(id) {
 }
 
 /** The computer's question for a new session in `folder`, or its newest question when the path changed there. */
-function questionFor(runner, folder) {
-    const questions = runner?.questions ?? [];
+function questionFor(runner, folder, kind) {
+    const questions = (runner?.questions ?? []).filter((question) =>
+        kind === "pi-preview" ? question.kind === "pi-preview" : question.kind !== "pi-preview",
+    );
 
     return questions.findLast((question) => question.folder === folder) ?? questions.at(-1);
 }
@@ -90,11 +92,11 @@ function Approval({ computer, folder, question, since, cancel }) {
         aria-labelledby="runner-wait-title"
         aria-describedby="runner-wait-help"
     >
-        <h2 id="runner-wait-title">Waiting for ${computer.name}</h2>
+        <h2 id="runner-wait-title">${question?.kind === "pi-preview" ? `Waiting for ${computer.name} to allow seeing the Pi session "${question.title}"` : `Waiting for ${computer.name}`}</h2>
         <p id="runner-wait-help">
             ${`${computer.name} needs your approval: approve it there${question?.totp ? ", or enter the code from your authenticator" : ""}.`}
         </p>
-        <p class="runner-wait-folder">Folder: <bdi dir="ltr">${folder}</bdi></p>
+        <p class="runner-wait-folder">Folder: <bdi dir="ltr">${question?.folder ?? folder}</bdi></p>
         <${ApprovalCode} runner=${computer} question=${question} />
         <p class="runner-wait-countdown">
             <${Spinner} label="Waiting for the computer" />
@@ -105,7 +107,7 @@ function Approval({ computer, folder, question, since, cancel }) {
 }
 
 /** A small modal over the folder or copy sheet; it must not replace that sheet. */
-function waiting(runnerId, folder, since, cancel) {
+function waiting(runnerId, folder, kind, since, cancel) {
     const host = document.createElement("div");
     const app = document.getElementById("app");
     const focused = document.activeElement;
@@ -126,7 +128,7 @@ function waiting(runnerId, folder, since, cancel) {
                 <${Approval}
                     computer=${computer}
                     folder=${folder}
-                    question=${questionFor(computer, folder)}
+                    question=${questionFor(computer, folder, kind)}
                     since=${since}
                     cancel=${cancel}
                 />
@@ -169,12 +171,20 @@ function waiting(runnerId, folder, since, cancel) {
 }
 
 /** Run `start(signal)` and show where to answer after 400 ms. A person's Cancel returns no session and no error. */
-export async function waitOnComputer(runnerId, folder, kind, start) {
+export async function waitOnComputer(runnerId, folder, kind, start, signal) {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+
+    signal?.addEventListener("abort", abort, { once: true });
+
+    if (signal?.aborted) {
+        controller.abort();
+    }
+
     const since = Date.now();
     let close;
     const timer = setTimeout(() => {
-        close = waiting(runnerId, folder, since, () => controller.abort());
+        close = waiting(runnerId, folder, kind, since, () => controller.abort());
     }, 400);
 
     try {
@@ -190,6 +200,7 @@ export async function waitOnComputer(runnerId, folder, kind, start) {
     } finally {
         clearTimeout(timer);
         close?.();
+        signal?.removeEventListener("abort", abort);
     }
 }
 

@@ -975,6 +975,10 @@ async function sessionsMenu(file: string): Promise<void> {
 
 /** In words: what would start, by whom, where. */
 function describe(question: SessionQuestion): string {
+    if (question.kind === "pi-preview") {
+        return `${question.person} wants to see your Pi session "${question.title}" (its last messages and model).\n  Server: ${question.server}\n  Folder: ${question.folder}`;
+    }
+
     const action = question.expired
         ? `continue a session whose approval expired`
         : question.kind === "move"
@@ -1013,14 +1017,23 @@ function terminalAsker(): (question: SessionQuestion) => Promise<SessionAnswer> 
             const picked = await choose(
                 "Allow it?",
                 [
-                    { label: "Deny", detail: "the session does not start" },
+                    {
+                        label: "Deny",
+                        detail:
+                            question.kind === "pi-preview"
+                                ? "the session stays private"
+                                : "the session does not start",
+                    },
                     {
                         label: question.broad ? "Allow this session only" : "Allow",
-                        detail: question.broad
-                            ? "this folder holds everything in it; nothing is saved"
-                            : question.permission === "folder"
-                              ? "save this folder and approve this session"
-                              : "approve this session",
+                        detail:
+                            question.kind === "pi-preview"
+                                ? "show its last messages and model; nothing is changed"
+                                : question.broad
+                                  ? "this folder holds everything in it; nothing is saved"
+                                  : question.permission === "folder"
+                                    ? "save this folder and approve this session"
+                                    : "approve this session",
                     },
                 ],
                 0,
@@ -1099,6 +1112,7 @@ function stdioAsker(): (question: SessionQuestion) => Promise<SessionAnswer> {
                     person: question.person,
                     folder: question.folder,
                     kind: question.kind,
+                    ...(question.title === undefined ? {} : { title: question.title }),
                     broad: question.broad,
                     permission: question.permission,
                     expired: question.expired,

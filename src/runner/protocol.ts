@@ -63,6 +63,8 @@ export type { ApprovalState, RunnerAction, SessionScope } from "./approvals.ts";
 export const SESSION_FIELD = "_pocketSession";
 export type ApprovalNeeded = {
     type: "approval-needed";
+    kind: "session" | "pi-preview";
+    title?: string;
     id: string;
     session: string;
     folder: string;
@@ -82,6 +84,29 @@ export type ActionResult = {
     ok: boolean;
     reason?: string;
     state?: ApprovalState;
+};
+
+/** Metadata only: no message body travels with a Pi session list. */
+export type RunnerPiSession = {
+    path: string;
+    id: string;
+    title: string;
+    cwd: string;
+    modified: number;
+    messages: number;
+};
+export type PiSessionsRequest = { type: "pi-sessions"; id: string } & PiSessionsQuery;
+export type PiSessionsQuery = { person: string } & (
+    { op: "list" } | { op: "preview"; path: string } | { op: "open"; path: string; session: string }
+);
+export type PiSessionsResult = {
+    type: "pi-sessions-result";
+    id: string;
+    ok: boolean;
+    reason?: string;
+    sessions?: RunnerPiSession[];
+    preview?: { model: string | null; last: { role: "user" | "assistant"; text: string }[] };
+    path?: string;
 };
 
 /** Runner-owned background tasks, independent of the pi-env daemon session. */
@@ -210,12 +235,35 @@ export type ControlMessage =
     | ActionMessage
     | ActionResult
     | TaskRequest
-    | TaskResult;
+    | TaskResult
+    | PiSessionsRequest
+    | PiSessionsResult;
 
 /** The first byte of a network stream's binary message. */
 export const STREAM_DATA = 1;
 
 const NET_FAILURES = new Set(["refused", "unreachable", "timeout", "limit"]);
+const bounded = (value: unknown, max = 32_768): value is string =>
+    typeof value === "string" && value.length <= max;
+const nonnegative = (value: unknown): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+function piSession(value: unknown): value is RunnerPiSession {
+    if (typeof value !== "object" || value === null) {
+        return false;
+    }
+
+    const item = value as Record<string, unknown>;
+
+    return (
+        bounded(item.path) &&
+        bounded(item.id, 256) &&
+        bounded(item.title, 80) &&
+        bounded(item.cwd) &&
+        nonnegative(item.modified) &&
+        nonnegative(item.messages)
+    );
+}
 
 /** Parse a text message; undefined for anything that is not a control message. */
 export function parseControl(text: string): ControlMessage | undefined {
@@ -237,6 +285,45 @@ export function parseControl(text: string): ControlMessage | undefined {
     const stream = count("id") && (message.id as number) <= 0xffffffff;
 
     switch (message.type) {
+        case "pi-sessions":
+            return bounded(message.id, 256) &&
+                bounded(message.person, 256) &&
+                (message.op === "list" ||
+                    (message.op === "preview" && bounded(message.path)) ||
+                    (message.op === "open" &&
+                        bounded(message.path) &&
+                        bounded(message.session, 256)))
+                ? (message as PiSessionsRequest)
+                : undefined;
+
+        case "pi-sessions-result": {
+            const preview = message.preview as PiSessionsResult["preview"];
+
+            return bounded(message.id, 256) &&
+                typeof message.ok === "boolean" &&
+                (message.reason === undefined || bounded(message.reason, 4096)) &&
+                (message.path === undefined || bounded(message.path)) &&
+                (message.sessions === undefined ||
+                    (Array.isArray(message.sessions) &&
+                        message.sessions.length <= 300 &&
+                        message.sessions.every(piSession))) &&
+                (preview === undefined ||
+                    (preview !== null &&
+                        typeof preview === "object" &&
+                        (preview.model === null || bounded(preview.model, 1024)) &&
+                        Array.isArray(preview.last) &&
+                        preview.last.length <= 6 &&
+                        preview.last.every(
+                            (line) =>
+                                line !== null &&
+                                typeof line === "object" &&
+                                ["user", "assistant"].includes(line.role) &&
+                                bounded(line.text, 600),
+                        )))
+                ? (message as PiSessionsResult)
+                : undefined;
+        }
+
         case "approval-needed":
             return typeof message.id === "string" &&
                 typeof message.session === "string" &&
@@ -244,7 +331,9 @@ export function parseControl(text: string): ControlMessage | undefined {
                 ["folder", "session"].includes(message.permission as string) &&
                 typeof message.expired === "boolean" &&
                 typeof message.broad === "boolean" &&
-                typeof message.totp === "boolean"
+                typeof message.totp === "boolean" &&
+                ["session", "pi-preview"].includes(message.kind as string) &&
+                (message.title === undefined || bounded(message.title, 80))
                 ? (message as ApprovalNeeded)
                 : undefined;
         case "approval-ended":

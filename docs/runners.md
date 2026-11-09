@@ -115,6 +115,21 @@ If nobody answers within 2 minutes (5 minutes with an authenticator), the sessio
 
 A network drop does not deny or approve a question. The question stays open in the computer's terminal or desktop app, with its original time limit, and requests waiting for approval keep waiting. When the link returns, Pi Pocket shows the open questions again, and an authenticator code can answer them. An answer to a new-session question made on the computer while offline is kept and sent after reconnecting.
 
+## Continue a Pi session
+
+Choose a computer in **New session**, then **Continue a Pi session…**. This lists Pi's terminal sessions on that computer. A continued session is a new Pocket session that runs on the same computer; Pi's original file is never changed.
+
+| Step     | The server gets                                                                 | The computer asks?                                  |
+| -------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
+| List     | For each Pi session: path, Pi's session id, title, cwd, modified, message count | No                                                  |
+| Search   | A filter on title and cwd only, done on the server over the list                | No                                                  |
+| Preview  | That one session's model and last messages, as in a local preview               | Yes                                                 |
+| Continue | That one session file                                                           | Yes: the normal new-session question for its folder |
+
+The title is Pi's name for the session, or the first line of its first message, up to 80 characters. No other message text leaves the computer before approval. **Allow seeing a Pi session?** can be answered on the computer or with an authenticator code in Pocket. It saves no folder or session permission. The runner remembers a preview answer for that exact file for 10 minutes, only in memory. Cancel withdraws the question.
+
+The runner looks in `PI_CODING_AGENT_SESSION_DIR`, then Pi's `sessionDir` setting, then Pi's default session folder. The list has at most 300 sessions, newest first, and is cached for 5 seconds. Preview and continue check Pi's list afresh. Continue first approves a new session in the Pi session's folder, then allows only that session to read that one Pi file for at most 5 minutes, never to write it. Revoking or expiring the session permission removes that access.
+
 ## Authenticator codes
 
 With an authenticator app (TOTP), you can approve sessions and folders, and change runner settings, from Pi Pocket without going to the computer. It is off by default. Each computer has its own.
@@ -135,15 +150,15 @@ Turning the authenticator off needs a code too: `pi-pocket runner totp off <code
 
 ## Programs that run the runner
 
-A program that runs the runner, such as the desktop app, starts it with `pi-pocket runner start --confirm-via stdio`. Each question is a line on stdout: `PI-POCKET-CONFIRM` and a JSON object with `id`, `server`, `computer`, `person`, `folder`, `kind` (`new`, `fork`, or `move`), and `broad`, and also:
+A program that runs the runner, such as the desktop app, starts it with `pi-pocket runner start --confirm-via stdio`. Each question is a line on stdout: `PI-POCKET-CONFIRM` and a JSON object with `id`, `server`, `computer`, `person`, `folder`, `kind` (`new`, `fork`, `move`, or `pi-preview`), and `broad`, and also:
 
-- `permission`: `folder` (Allow saves the folder) or `session` (Allow approves this session).
+- `permission`: `folder` (Allow saves the folder) or `session` (Allow approves this session). For `pi-preview`, it is `session`, but Allow permits only the preview and saves no folder or session permission; `title` names the Pi session.
 - `expired`: true when an approved session's permission expired and it wants to continue.
 - `session`: the id of the session's permission, as `pi-pocket runner sessions` lists it.
 - `totp`: true when an authenticator is set up, so the question can also be answered in Pi Pocket.
 - `expiresInMs`: how long the question waits for an answer.
 
-The program answers with a JSON line on stdin: `{ "id": <id>, "allow": true }`. A `PI-POCKET-CONFIRM-END {"id":<id>}` line says the question no longer stands: it was answered (here or with a code in Pi Pocket), withdrawn, or timed out. The runner saves the folder and the session before that line.
+The program answers with a JSON line on stdin: `{ "id": <id>, "allow": true }`. A `PI-POCKET-CONFIRM-END {"id":<id>}` line says the question no longer stands: it was answered (here or with a code in Pi Pocket), withdrawn, or timed out. For an ordinary session question, the runner saves the folder and the session before that line. A preview answer saves neither.
 
 The runner also says when sessions work on the computer, for a tray icon, keeping the computer awake, or a warning on quit. It writes a line `PI-POCKET-ACTIVITY` and a JSON object, `{ "working": true, "folders": ["/Users/me/project"] }`, each time the state changes. The first line comes when work starts, so a program that saw none can take the runner as idle.
 

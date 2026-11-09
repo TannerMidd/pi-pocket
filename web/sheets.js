@@ -324,11 +324,13 @@ function sheetBody(sheet) {
             body = view.conversation ? html`<${TrustSheet} />` : null;
             break;
         case "pi-sessions":
-            body = piSessionsAvailable() ? html`<${PiSessionsSheet} />` : null;
+            body = piSessionsAvailable(sheet.runner)
+                ? html`<${PiSessionsSheet} runner=${sheet.runner} />`
+                : null;
             break;
         case "pi-session":
-            body = piSessionsAvailable()
-                ? html`<${PiSessionSheet} key=${sheet.id} path=${sheet.id} />`
+            body = piSessionsAvailable(sheet.runner)
+                ? html`<${PiSessionSheet} key=${`${sheet.runner ?? ""}:${sheet.id}`} path=${sheet.id} runner=${sheet.runner} />`
                 : null;
             break;
         case "file":

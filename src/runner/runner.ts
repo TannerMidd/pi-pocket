@@ -9,6 +9,15 @@
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+    FOUND_FOR_MS,
+    MAX_LISTED,
+    SESSION_DIR_VARIABLE,
+    readPiTail,
+    titleOf,
+} from "../server/pi-session-files.ts";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +25,7 @@ import { localDaemon } from "@earendil-works/pi-env";
 import WebSocket from "ws";
 import { checkTransport, refusal, type Transport } from "./transport.ts";
 import { checkTools } from "./tools.ts";
-import { broadFolder, coveredFolder, realFolder } from "./folders.ts";
+import { broadFolder, coveredFolder, folderContains, realFolder } from "./folders.ts";
 import {
     Approvals,
     type SessionPermission,
@@ -27,7 +36,14 @@ import type { TotpState } from "./totp.ts";
 import { Activity, type ActivityOptions, type ActivityState } from "./activity.ts";
 import { RequestGate, sessionScope } from "./request-gate.ts";
 import { Tasks } from "./tasks.ts";
-import type { RunnerTools, TaskRequest, TaskResult } from "./protocol.ts";
+import type {
+    RunnerTools,
+    TaskRequest,
+    TaskResult,
+    PiSessionsRequest,
+    PiSessionsResult,
+    RunnerPiSession,
+} from "./protocol.ts";
 import {
     CLOSE,
     type Confirm,
@@ -100,7 +116,8 @@ export type RunnerSettings = {
 
 /** A question the server asked this computer: a session would start here. */
 export type SessionQuestion = {
-    kind: "new" | "fork" | "move";
+    kind: "new" | "fork" | "move" | "pi-preview";
+    title?: string;
     /** A root, home folder, or ancestor of home: allow this session only. */
     broad: boolean;
     permission: "folder" | "session";
@@ -124,6 +141,8 @@ export type RunnerOptions = {
     version: string;
     /** The pi-env daemon to start; default the one packaged for this computer. */
     daemon?: string;
+    /** Pi's session folder; tests keep it separate from the person's own sessions. */
+    piSessionDir?: string;
     /** The folder the daemon starts in; default the home folder. */
     cwd?: string;
     log?: (line: string) => void;
@@ -297,7 +316,9 @@ export class Runner {
     /** Questions belong to this computer, not its WebSocket; announce them again after a drop. */
     readonly #notices = new Map<string, ApprovalNeeded>();
     /** A local answer made offline must still reach the server's waiting confirm. */
-    readonly #answers = new Map<string, Confirmed>();
+    readonly #answers = new Map<string, Confirmed | PiSessionsResult>();
+    #piFound: { at: number; list: Promise<RunnerPiSession[]> } | undefined;
+    readonly #piPreviews = new Map<string, number>();
     readonly #approvals: Approvals;
     readonly #tasks: Tasks;
     /** Starts are replayed after reconnects, once per id for this runner's lifetime. */
@@ -895,6 +916,8 @@ export class Runner {
             }
         } else if (message?.type === "confirm") {
             void this.#answer(message);
+        } else if (message?.type === "pi-sessions" && welcomed) {
+            void this.#piSessions(message);
         } else if (message?.type === "withdraw") {
             this.#questions.get(message.id)?.abort(WITHDRAWN);
         } else if (message?.type === "approval-code") {
@@ -904,6 +927,10 @@ export class Runner {
         } else if (message?.type === "runner-action") {
             void this.#approvals.action(message.request).then(
                 async () => {
+                    if (message.request.action === "revoke") {
+                        this.#session.gate.revokeReads(message.request.session);
+                    }
+
                     this.#control({
                         type: "runner-result",
                         id: message.id,
@@ -1030,17 +1057,91 @@ export class Runner {
         this.#sendAnswers();
     }
 
-    /**
-     * Approve session `scope` here: at once when its permission is valid, without a question when its folder is saved
-     * and asking is off, else by the person here or a code from Pi Pocket. Questions for one session are shared. A
-     * withdrawn or timed-out question saves nothing, even when a late answer comes.
-     */
+    /** Session approvals can save a folder. Preview questions use only the shared question plumbing. */
     async #approve(
         id: string,
         scope: SessionScope,
-        kind: SessionQuestion["kind"],
+        kind: "new" | "fork" | "move",
         expired: boolean,
         signal?: AbortSignal,
+    ): Promise<Approval> {
+        return this.#question(id, scope, signal, async (stop, totp, ask) => {
+            if ((await this.#approvals.valid(scope)) !== undefined) {
+                return { allow: true };
+            }
+
+            const folder = await realFolder(scope.folder);
+            const real = { ...scope, folder };
+            const broad = broadFolder(folder, await realFolder(homedir()));
+            const saved = await coveredFolder(folder, this.#settings().folders ?? []);
+            const what = expired
+                ? "a session to continue"
+                : kind === "move"
+                  ? "a session move"
+                  : kind === "fork"
+                    ? "a copy of a session"
+                    : "a session";
+            const answer =
+                saved && this.#settings().confirm === false
+                    ? { allow: true, method: "automatic" as const }
+                    : await ask({
+                          kind,
+                          broad,
+                          permission: saved ? "session" : "folder",
+                          expired,
+                          session: scope.id,
+                          totp,
+                          expiresInMs: totp ? ASK_TOTP_MS : ASK_MS,
+                          person: scope.person,
+                          folder,
+                          server: this.#options.link.server,
+                          computer: this.#options.link.name,
+                          signal: stop.signal,
+                      });
+
+            if (stop.signal.reason === WITHDRAWN) {
+                this.#log(`${scope.person} cancelled ${what} in ${scope.folder}.`);
+
+                return { allow: false, withdrawn: true };
+            }
+
+            if (!answer.allow || answer.method === undefined || stop.signal.aborted) {
+                this.#log(`Denied ${what} for ${scope.person} in ${folder}.`);
+
+                return answer.allow
+                    ? {
+                          allow: false,
+                          reason: `Nobody answered on ${this.#options.link.name} in time.`,
+                      }
+                    : answer;
+            }
+
+            if (!saved) {
+                await this.#approvals.saveFolder(folder);
+            }
+
+            await this.#approvals.approve(real, answer.method);
+
+            this.#log(
+                answer.method === "automatic"
+                    ? `${scope.person} started ${what} in ${folder} (asking is off).`
+                    : `Allowed ${what} for ${scope.person} in ${folder}${answer.method === "totp" ? " (with a code from the authenticator)" : ""}.`,
+            );
+
+            return { allow: true };
+        });
+    }
+
+    /** A question's lifetime, cancellation, local dialog, and code answer are identical for both kinds. */
+    async #question(
+        id: string,
+        scope: SessionScope,
+        signal: AbortSignal | undefined,
+        decide: (
+            stop: AbortController,
+            totp: boolean,
+            ask: (question: SessionQuestion) => Promise<Approval>,
+        ) => Promise<Approval>,
     ): Promise<Approval> {
         const existing = [...this.#pending.values()].find((each) => each.scope.id === scope.id);
 
@@ -1051,13 +1152,6 @@ export class Runner {
         }
 
         const link = this.#options.link;
-        const what = expired
-            ? "a session to continue"
-            : kind === "move"
-              ? "a session move"
-              : kind === "fork"
-                ? "a copy of a session"
-                : "a session";
         const stop = new AbortController();
         const abort = () => stop.abort();
         const totp = this.#settings().totp !== undefined;
@@ -1065,8 +1159,6 @@ export class Runner {
 
         let resolveAnswer: (answer: Approval) => void = () => {};
 
-        // The requests of one session share its question: it ends when the last of them is cancelled. A caller
-        // without a signal (the server's own question) keeps it until it is answered, withdrawn, or times out.
         let holders = 0;
         let kept = false;
         const released: (() => void)[] = [];
@@ -1080,7 +1172,7 @@ export class Runner {
 
             if (more.aborted) {
                 if (!kept && holders === 0) {
-                    abort();
+                    stop.abort(more.reason);
                 }
 
                 return;
@@ -1090,7 +1182,7 @@ export class Runner {
                 holders--;
 
                 if (!kept && holders === 0) {
-                    abort();
+                    stop.abort(more.reason);
                 }
             };
 
@@ -1101,120 +1193,53 @@ export class Runner {
 
         hold(signal);
 
-        const promise = (async (): Promise<Approval> => {
+        const ask = async (question: SessionQuestion): Promise<Approval> => {
+            if (this.#options.ask === undefined && !totp) {
+                return {
+                    allow: false,
+                    reason: `${link.name} asks before new sessions, but nobody can answer there: its runner runs without a terminal. Run it in a terminal or a program that runs the runner, such as the desktop app, or set up an authenticator there.`,
+                };
+            }
+
+            const notice: ApprovalNeeded = {
+                type: "approval-needed",
+                id,
+                kind: question.kind === "pi-preview" ? "pi-preview" : "session",
+                ...(question.title === undefined ? {} : { title: question.title }),
+                session: scope.id,
+                folder: question.folder,
+                permission: question.permission,
+                expired: question.expired,
+                broad: question.broad,
+                totp,
+            };
+
+            this.#notices.set(id, notice);
+            this.#control(notice);
+
+            return new Promise<Approval>((resolve) => {
+                resolveAnswer = resolve;
+                const ended = () =>
+                    resolve({ allow: false, reason: `Nobody answered on ${link.name} in time.` });
+
+                if (stop.signal.aborted) {
+                    ended();
+
+                    return;
+                }
+
+                stop.signal.addEventListener("abort", ended, { once: true });
+                void this.#options.ask?.(question).then(
+                    (got) => resolve(got.allow ? { allow: true, method: "computer" } : got),
+                    () => resolve({ allow: false }),
+                );
+            });
+        };
+
+        // Defer `decide` until its pending record exists, even for a question with no preliminary I/O.
+        const promise = Promise.resolve().then(async (): Promise<Approval> => {
             try {
-                if ((await this.#approvals.valid(scope)) !== undefined) {
-                    return { allow: true };
-                }
-
-                // A permission keeps the real folder: a symlink changed later cannot widen it.
-                const folder = await realFolder(scope.folder);
-                const real = { ...scope, folder };
-                const broad = broadFolder(folder, await realFolder(homedir()));
-                const saved = await coveredFolder(folder, this.#settings().folders ?? []);
-                let answer: Approval;
-
-                if (saved && this.#settings().confirm === false) {
-                    answer = { allow: true, method: "automatic" };
-                    this.#log(`${scope.person} started ${what} in ${folder} (asking is off).`);
-                } else if (this.#options.ask === undefined && !totp) {
-                    answer = {
-                        allow: false,
-                        reason: `${link.name} asks before new sessions, but nobody can answer there: its runner runs without a terminal. Run it in a terminal or a program that runs the runner, such as the desktop app, or set up an authenticator there.`,
-                    };
-                } else {
-                    const question: SessionQuestion = {
-                        kind,
-                        broad,
-                        permission: saved ? "session" : "folder",
-                        expired,
-                        session: scope.id,
-                        totp,
-                        expiresInMs: totp ? ASK_TOTP_MS : ASK_MS,
-                        person: scope.person,
-                        folder,
-                        server: link.server,
-                        computer: link.name,
-                        signal: stop.signal,
-                    };
-
-                    const notice: ApprovalNeeded = {
-                        type: "approval-needed",
-                        id,
-                        session: scope.id,
-                        folder,
-                        permission: question.permission,
-                        expired,
-                        broad,
-                        totp,
-                    };
-
-                    this.#notices.set(id, notice);
-
-                    this.#control(notice);
-
-                    answer = await new Promise<Approval>((resolve) => {
-                        resolveAnswer = resolve;
-
-                        const ended = () =>
-                            resolve({
-                                allow: false,
-                                reason: `Nobody answered on ${link.name} in time.`,
-                            });
-
-                        if (stop.signal.aborted) {
-                            ended();
-
-                            return;
-                        }
-
-                        stop.signal.addEventListener("abort", ended, { once: true });
-                        void this.#options.ask?.(question).then(
-                            (got) =>
-                                resolve(
-                                    got.allow
-                                        ? { allow: true, method: "computer" }
-                                        : {
-                                              allow: false,
-                                              ...(got.reason === undefined
-                                                  ? {}
-                                                  : { reason: got.reason }),
-                                          },
-                                ),
-                            () => resolve({ allow: false }),
-                        );
-                    });
-                }
-
-                if (stop.signal.reason === WITHDRAWN) {
-                    this.#log(`${scope.person} cancelled ${what} in ${scope.folder}.`);
-
-                    return { allow: false, withdrawn: true };
-                }
-
-                if (!answer.allow || answer.method === undefined || stop.signal.aborted) {
-                    if (answer.method !== "automatic") {
-                        this.#log(`Denied ${what} for ${scope.person} in ${folder}.`);
-                    }
-
-                    return answer.allow
-                        ? { allow: false, reason: `Nobody answered on ${link.name} in time.` }
-                        : answer;
-                }
-
-                if (!saved) {
-                    await this.#approvals.saveFolder(folder);
-                }
-
-                await this.#approvals.approve(real, answer.method);
-
-                if (answer.method !== "automatic") {
-                    this.#log(
-                        `Allowed ${what} for ${scope.person} in ${folder}${answer.method === "totp" ? " (with a code from the authenticator)" : ""}.`,
-                    );
-                }
-
-                return { allow: true };
+                return await decide(stop, totp, ask);
             } catch (error) {
                 return {
                     allow: false,
@@ -1235,11 +1260,11 @@ export class Runner {
                     this.#control({ type: "approval-ended", id });
                 }
 
-                // Ends the question here (and a program's `PI-POCKET-CONFIRM-END`) after the answer is saved.
+                // End the desktop question only after saving the answer.
                 stop.abort();
                 void this.#state();
             }
-        })();
+        });
 
         this.#questions.set(id, stop);
         this.#pending.set(id, {
@@ -1251,6 +1276,200 @@ export class Runner {
         });
 
         return promise;
+    }
+
+    /** Pi's list is read here. Only these metadata fields leave the computer without a question. */
+    #findPi(fresh = false): Promise<RunnerPiSession[]> {
+        if (!fresh && this.#piFound !== undefined && Date.now() - this.#piFound.at < FOUND_FOR_MS) {
+            return this.#piFound.list;
+        }
+
+        let configured: string | undefined;
+
+        try {
+            configured = SettingsManager.create(homedir()).getSessionDir();
+        } catch {
+            // Pi's default when its settings cannot be read.
+        }
+
+        const folder =
+            this.#options.piSessionDir ?? (process.env[SESSION_DIR_VARIABLE] || configured);
+        const list = (folder ? SessionManager.listAll(folder) : SessionManager.listAll()).then(
+            (infos) =>
+                infos
+                    .sort((a, b) => b.modified.getTime() - a.modified.getTime())
+                    .slice(0, MAX_LISTED)
+                    .map((info) => ({
+                        path: info.path,
+                        id: info.id,
+                        title: titleOf(info).slice(0, 80),
+                        cwd: info.cwd,
+                        modified: info.modified.getTime(),
+                        messages: info.messageCount,
+                    })),
+        );
+        const found = { at: Date.now(), list };
+
+        this.#piFound = found;
+        setTimeout(() => {
+            if (this.#piFound === found) {
+                this.#piFound = undefined;
+            }
+        }, FOUND_FOR_MS).unref();
+        list.catch(() => {
+            if (this.#piFound === found) {
+                this.#piFound = undefined;
+            }
+        });
+
+        return list;
+    }
+
+    async #piSessions(request: PiSessionsRequest): Promise<void> {
+        const stop = new AbortController();
+
+        this.#questions.set(request.id, stop);
+        let result: PiSessionsResult;
+
+        try {
+            if (request.op === "list") {
+                result = {
+                    type: "pi-sessions-result",
+                    id: request.id,
+                    ok: true,
+                    sessions: await this.#findPi(),
+                };
+            } else {
+                const info = (await this.#findPi(true)).find((each) => each.path === request.path);
+
+                if (info === undefined) {
+                    throw new Error(`Pi has no such session on ${this.#options.link.name}.`);
+                }
+
+                stop.signal.throwIfAborted();
+
+                if (request.op === "open") {
+                    const permission = await this.#approvals.valid(request.session);
+
+                    if (permission === undefined) {
+                        throw new Error(
+                            `The session has no valid permission on ${this.#options.link.name}.`,
+                        );
+                    }
+
+                    if (!folderContains(permission.folder, await realFolder(info.cwd))) {
+                        throw new Error(
+                            `The Pi session's folder is outside the session's approved folder on ${this.#options.link.name}.`,
+                        );
+                    }
+
+                    const path = await realpath(info.path);
+
+                    await this.#session.gate.allowRead(request.session, path);
+                    result = { type: "pi-sessions-result", id: request.id, ok: true, path };
+                } else {
+                    const at = this.#piPreviews.get(info.path);
+
+                    if (at === undefined || Date.now() - at >= 10 * 60_000) {
+                        const scope = {
+                            id: "pi-preview:" + request.id,
+                            folder: info.cwd,
+                            person: request.person,
+                        };
+                        const answer = await this.#question(
+                            request.id,
+                            scope,
+                            stop.signal,
+                            async (questionStop, totp, ask) => {
+                                const answer = await ask({
+                                    kind: "pi-preview",
+                                    title: info.title,
+                                    folder: info.cwd,
+                                    permission: "session",
+                                    broad: false,
+                                    expired: false,
+                                    session: scope.id,
+                                    person: request.person,
+                                    server: this.#options.link.server,
+                                    computer: this.#options.link.name,
+                                    totp,
+                                    expiresInMs: totp ? ASK_TOTP_MS : ASK_MS,
+                                    signal: questionStop.signal,
+                                });
+                                const allow = answer.allow && !questionStop.signal.aborted;
+
+                                this.#log(
+                                    `${allow ? "Allowed" : "Denied"} ${request.person} to see the Pi session "${info.title}".`,
+                                );
+
+                                if (allow) {
+                                    const at = Date.now();
+
+                                    this.#piPreviews.set(info.path, at);
+                                    setTimeout(() => {
+                                        if (this.#piPreviews.get(info.path) === at) {
+                                            this.#piPreviews.delete(info.path);
+                                        }
+                                    }, 10 * 60_000).unref();
+
+                                    return { allow: true };
+                                }
+
+                                return {
+                                    allow: false,
+                                    reason:
+                                        answer.reason ??
+                                        `${this.#options.link.name} did not allow seeing the Pi session.`,
+                                    ...(questionStop.signal.reason === WITHDRAWN
+                                        ? { withdrawn: true }
+                                        : {}),
+                                };
+                            },
+                        );
+
+                        if (answer.withdrawn) {
+                            return;
+                        }
+
+                        if (!answer.allow) {
+                            throw new Error(answer.reason);
+                        }
+                    }
+
+                    stop.signal.throwIfAborted();
+                    const tail = await readPiTail(info.path);
+
+                    result = {
+                        type: "pi-sessions-result",
+                        id: request.id,
+                        ok: true,
+                        preview: {
+                            model:
+                                tail.model === null
+                                    ? null
+                                    : `${tail.model.provider}/${tail.model.modelId}`,
+                            last: tail.last,
+                        },
+                    };
+                }
+            }
+        } catch (error) {
+            result = {
+                type: "pi-sessions-result",
+                id: request.id,
+                ok: false,
+                reason: (error as Error).message,
+            };
+        } finally {
+            if (this.#questions.get(request.id) === stop) {
+                this.#questions.delete(request.id);
+            }
+        }
+
+        if (!stop.signal.aborted) {
+            this.#answers.set(request.id, result);
+            this.#sendAnswers();
+        }
     }
 
     /** A network stream for a session's browser: only for a session with a valid permission. */

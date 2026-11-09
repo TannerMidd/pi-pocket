@@ -458,6 +458,7 @@ describe("people granted a computer", () => {
         const ownSession = app.runnerScope(id).id;
         const question = (session: string, id: string) => ({
             type: "approval-needed" as const,
+            kind: "session" as const,
             id,
             session,
             folder: there,

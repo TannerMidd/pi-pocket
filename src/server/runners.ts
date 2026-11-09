@@ -44,6 +44,8 @@ import {
     type RunnerAction,
     type TaskRequest,
     type TaskResult,
+    type PiSessionsQuery,
+    type PiSessionsResult,
     SESSION_FIELD,
     readStreamData,
     STREAM_DATA,
@@ -210,6 +212,7 @@ export class RunnerLink {
     state: ApprovalState | undefined;
     readonly questions = new Map<string, ApprovalNeeded>();
     readonly #results = new Map<string, (message: ControlMessage) => void>();
+    readonly #piResults = new Map<string, (message: PiSessionsResult) => void>();
     /** Unlike daemon requests, these survive a reset of the daemon session. */
     readonly #taskRequests = new Map<
         string,
@@ -665,6 +668,8 @@ export class RunnerLink {
             this.state = message.state;
             this.downloads = message.state.settings.downloads ?? undefined;
             this.#runners.changed();
+        } else if (message?.type === "pi-sessions-result") {
+            this.#piResults.get(message.id)?.(message);
         } else if (message?.type === "task-result") {
             this.#taskRequests.get(message.id)?.resolve(message);
         } else if (message?.type === "code-result" || message?.type === "runner-result") {
@@ -850,6 +855,67 @@ export class RunnerLink {
 
         if (!answer.allow) {
             throw new HttpError(403, answer.reason ?? `${this.name} did not allow the session.`);
+        }
+    }
+
+    /** Metadata, an approved preview, or the one file a new session may read. Offline fails immediately. */
+    async piSessions(
+        request: PiSessionsQuery,
+        signal?: AbortSignal,
+        asker?: string,
+    ): Promise<PiSessionsResult> {
+        await this.infoNow();
+
+        if (signal?.aborted) {
+            throw new HttpError(409, "Cancelled.");
+        }
+
+        const id = randomUUID();
+        const asked = this.#runners.asking("pi-preview:" + id, asker);
+        let timer: NodeJS.Timeout | undefined;
+        let cancelled: (() => void) | undefined;
+
+        try {
+            const answer = await new Promise<PiSessionsResult>((resolve, reject) => {
+                cancelled = () => {
+                    this.#control({ type: "withdraw", id });
+                    reject(new HttpError(409, "Cancelled."));
+                };
+
+                timer = setTimeout(
+                    () => {
+                        this.#control({ type: "withdraw", id });
+                        reject(new HttpError(409, `The computer ${this.name} did not answer.`));
+                    },
+                    (this.state?.totp ? 300_000 : CONFIRM_MS) + 10_000,
+                );
+                signal?.addEventListener("abort", cancelled, { once: true });
+                this.#piResults.set(id, resolve);
+                this.#control({ type: "pi-sessions", id, ...request });
+            });
+
+            if (signal?.aborted) {
+                throw new HttpError(409, "Cancelled.");
+            }
+
+            if (!answer.ok) {
+                throw new HttpError(
+                    403,
+                    answer.reason ?? `${this.name} refused the Pi session request.`,
+                );
+            }
+
+            return answer;
+        } finally {
+            clearTimeout(timer);
+            this.#piResults.delete(id);
+            this.questions.delete(id);
+            asked();
+            this.#runners.changed();
+
+            if (cancelled !== undefined) {
+                signal?.removeEventListener("abort", cancelled);
+            }
         }
     }
 

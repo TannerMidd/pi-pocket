@@ -21,7 +21,7 @@ import {
 } from "../auth.ts";
 import type { User } from "../config.ts";
 import { MAX_AVATAR, readAvatar } from "../avatars.ts";
-import { HttpError } from "../errors.ts";
+import { HttpError, optionalText } from "../errors.ts";
 import { isLocalRequest, withReveal } from "../local-browser.ts";
 import { machineRoots, parentFolder } from "../paths.ts";
 import { desktopTheme, wallpaperFile } from "../omarchy.ts";
@@ -568,26 +568,58 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(
                 response,
                 200,
-                await app.piSessions.list(user, url.searchParams.get("q") ?? ""),
+                await app.piSessions.list(
+                    user,
+                    url.searchParams.get("q") ?? "",
+                    url.searchParams.get("runner") ?? undefined,
+                ),
             );
         }
 
         if (first === "pi-sessions" && second === "preview" && method === "GET") {
+            const controller = new AbortController();
+
+            response.on("close", () => {
+                if (!response.writableEnded) {
+                    controller.abort();
+                }
+            });
+
             return json(
                 response,
                 200,
-                await app.piSessions.preview(user, url.searchParams.get("path") ?? ""),
+                await app.piSessions.preview(
+                    user,
+                    url.searchParams.get("path") ?? "",
+                    url.searchParams.get("runner") ?? undefined,
+                    controller.signal,
+                ),
             );
         }
 
         if (first === "pi-sessions" && second === "continue" && method === "POST") {
-            const body = await readJson<{ path?: unknown }>(request);
+            const controller = new AbortController();
+
+            response.on("close", () => {
+                if (!response.writableEnded) {
+                    controller.abort();
+                }
+            });
+
+            const body = await readJson<{ path?: unknown; runner?: unknown }>(request);
 
             if (typeof body.path !== "string") {
                 throw new HttpError(400, "path is required");
             }
 
-            return json(response, 200, await app.commands.continuePiSession(user, body.path));
+            return json(
+                response,
+                200,
+                await app.commands.continuePiSession(user, body.path, {
+                    runner: optionalText(body.runner, "runner"),
+                    signal: controller.signal,
+                }),
+            );
         }
 
         // Owners see every computer; other people see only the computers they may use.

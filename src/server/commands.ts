@@ -9,7 +9,7 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, sep } from "node:path";
 import { type Context, copyJson, type JsonValue } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import {
     clampThinkingLevel,
     type ImageContent,
@@ -73,6 +73,7 @@ import { clearUploads, copyUploads, uploadedThere, uploadsFolder } from "./remot
 import { type FileView, mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
+import { readPiSession, PiSessionError, type PiSession } from "./pi-session-files.ts";
 import { snippet } from "./projection.ts";
 import { globalModelSettings, projectModelDefault } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
@@ -693,20 +694,111 @@ export class Commands {
 
     /**
      * Continue one of Pi's sessions from the terminal here: a new session with its history, in its folder, with its model
-     * when that one is signed in here (`pi-sessions.ts`). The owner's, as Pi's own files are.
+     * when that one is signed in here (`pi-sessions.ts`). Local files are the owner's; a runner's files need its grant.
      */
-    async continuePiSession(user: User, path: string): Promise<{ id: ConversationId }> {
+    async continuePiSession(
+        user: User,
+        path: string,
+        { runner, signal }: { runner?: string; signal?: AbortSignal } = {},
+    ): Promise<{ id: ConversationId }> {
         const app = this.#app;
-        const session = await app.piSessions.read(user, path);
+        let session: PiSession;
         let cwd: string;
+        let runnerPermission: string | undefined;
 
-        try {
-            cwd = app.workspace.checkDirectory(session.cwd);
-        } catch {
-            throw new HttpError(
-                400,
-                `The folder this Pi session worked in is not there anymore: ${session.cwd}`,
+        if (runner !== undefined) {
+            app.requireSteer(user);
+
+            if (user.sessions !== undefined) {
+                throw new HttpError(
+                    403,
+                    "You were invited to one session and cannot start new ones.",
+                );
+            }
+
+            app.runners.require(runner);
+
+            if (!app.runners.mayUse(runner, user)) {
+                throw new HttpError(
+                    403,
+                    "Only the person who linked this computer or the people they chose can start sessions on it.",
+                );
+            }
+
+            const info = (await app.piSessions.list(user, "", runner)).sessions.find(
+                (each) => each.path === path,
             );
+
+            if (info === undefined) {
+                throw new HttpError(404, `Pi has no such session on ${app.runners.name(runner)}.`);
+            }
+
+            try {
+                cwd = await app.runners.checkFolder(runner, info.cwd);
+            } catch (error) {
+                if (error instanceof HttpError && error.status === 409) {
+                    throw error;
+                }
+
+                throw new HttpError(
+                    400,
+                    `The folder this Pi session worked in is not there anymore on ${app.runners.name(runner)}: ${info.cwd}`,
+                );
+            }
+
+            runnerPermission = randomUUID();
+            const link = app.runners.link(runner);
+
+            await link.confirm(
+                { kind: "new", person: user.name, folder: cwd, session: runnerPermission },
+                signal,
+                user.id,
+            );
+            const opened = await link.piSessions(
+                { op: "open", path, session: runnerPermission, person: user.name },
+                signal,
+            );
+
+            if (opened.path === undefined) {
+                throw new HttpError(409, "The computer did not return the Pi session file.");
+            }
+
+            const env = app.runners.env(runner, cwd, {
+                id: runnerPermission,
+                folder: cwd,
+                person: user.name,
+            });
+            const text = await env.readTextFile(
+                opened.path,
+                signal === undefined ? context : withAbortSignal(signal, context),
+            );
+
+            if (!text.ok) {
+                throw new HttpError(400, text.error.message);
+            }
+
+            try {
+                session = readPiSession(text.value);
+            } catch (error) {
+                if (error instanceof PiSessionError) {
+                    throw new HttpError(400, error.message);
+                }
+
+                throw error;
+            }
+
+            signal?.throwIfAborted();
+        } else {
+            session = await app.piSessions.read(user, path);
+
+            try {
+                cwd = app.workspace.checkDirectory(session.cwd);
+            } catch {
+                throw new HttpError(
+                    400,
+                    `The folder this Pi session worked in is not there anymore: ${session.cwd}`,
+                );
+            }
         }
 
         const start = this.#defaultModel(session);
@@ -723,6 +815,10 @@ export class Commands {
                         : { thinkingLevel: start.thinkingLevel }),
                 },
                 init: async (tx, id) => {
+                    if (runner !== undefined) {
+                        (await tx.doc(AgentDoc, id)).extensions = app.remoteExtensions();
+                    }
+
                     (await tx.doc(SessionsDoc)).items[String(id)] = {
                         cwd,
                         title,
@@ -730,6 +826,7 @@ export class Commands {
                         updatedAt: now,
                         createdBy: user.id,
                         fromPi: { session: session.id, count: session.count },
+                        ...(runner === undefined ? {} : { runner, runnerPermission }),
                     };
                     await writePiSession(tx, id, session, {
                         session: session.id,

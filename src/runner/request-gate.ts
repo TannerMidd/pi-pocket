@@ -159,9 +159,48 @@ export class RequestGate {
     readonly #waiting = new Map<string, Waiting>();
     /** The folders `mkdtemp` made for each session: codemode's work folders and temporary files. */
     readonly #temporary = new Map<string, Set<string>>();
+    /** Exact real files, never folders, bound to this generation of a session's permission. */
+    readonly #extraReads = new Map<string, { approvedAt: number; files: Map<string, number> }>();
 
     constructor(options: GateOptions) {
         this.#options = options;
+    }
+
+    /** Allow one listed Pi file for at most 5 minutes, only with the still-valid session permission. */
+    async allowRead(session: string, path: string): Promise<void> {
+        const permission = await this.#options.approvals.valid(session);
+
+        if (permission === undefined) {
+            throw new Error(`Session not approved on ${this.#options.name()}`);
+        }
+
+        const real = await realpath(path);
+        const previous = this.#extraReads.get(session);
+        const grant =
+            previous?.approvedAt === permission.approvedAt
+                ? previous
+                : { approvedAt: permission.approvedAt, files: new Map<string, number>() };
+        const until = Date.now() + 5 * 60_000;
+
+        grant.files.set(real, until);
+        this.#extraReads.set(session, grant);
+        setTimeout(() => {
+            if (grant.files.get(real) === until) {
+                grant.files.delete(real);
+            }
+
+            if (grant.files.size === 0 && this.#extraReads.get(session) === grant) {
+                this.#extraReads.delete(session);
+            }
+        }, 5 * 60_000).unref();
+    }
+
+    revokeReads(session: string): void {
+        if (session === "all") {
+            this.#extraReads.clear();
+        } else {
+            this.#extraReads.delete(session);
+        }
     }
 
     /** A control request uses the same live permission and canonical path check as an exec request, without asking. */
@@ -199,6 +238,7 @@ export class RequestGate {
         this.#requests.clear();
         this.#handles.clear();
         this.#temporary.clear();
+        this.#extraReads.clear();
     }
 
     /** A whole frame from the server. Throws for a frame the protocol does not allow. */
@@ -325,6 +365,8 @@ export class RequestGate {
         let permission = await this.#options.approvals.valid(scope);
 
         if (permission === undefined && !request.stop.signal.aborted) {
+            this.revokeReads(scope.id);
+
             // Expired, revoked, or never approved: ask again, and wait.
             if (await this.#options.ask(scope, whileWaiting(waiting))) {
                 permission = await this.#options.approvals.valid(scope);
@@ -360,11 +402,23 @@ export class RequestGate {
         const reading =
             request.op === "open" || (handle?.readOnly === true && READING.has(request.op));
         const home = reading ? await realFolder(homedir()) : "";
+        const extra = this.#extraReads.get(scope.id);
+
+        if (extra !== undefined && extra.approvedAt !== permission.approvedAt) {
+            this.revokeReads(scope.id);
+        }
+
+        const extraReading =
+            reading &&
+            extra?.approvedAt === permission.approvedAt &&
+            paths.length > 0 &&
+            paths.every((path) => (extra.files.get(path) ?? 0) > Date.now());
 
         if (
             !temporary &&
             !(await this.#inside(scope.id, permission.folder, paths)) &&
-            !(reading && paths.every((path) => piReads(permission.folder, home, path)))
+            !(reading && paths.every((path) => piReads(permission.folder, home, path))) &&
+            !extraReading
         ) {
             throw new Error(
                 `The path is outside the session's approved folder on ${this.#options.name()}`,

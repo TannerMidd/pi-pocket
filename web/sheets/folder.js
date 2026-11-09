@@ -711,12 +711,11 @@ export function CwdSheet({
                 ${
                     !changing &&
                     !picking &&
-                    !runner &&
-                    piSessionsAvailable() &&
+                    piSessionsAvailable(runner) &&
                     html`<button
                         type="button"
                         class="link small fp-pi"
-                        onClick=${() => openSheet({ type: "pi-sessions" })}
+                        onClick=${() => openSheet({ type: "pi-sessions", runner })}
                     >
                         Continue a Pi session…
                     </button>`
