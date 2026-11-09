@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect, createServer as createNetServer } from "node:net";
 import type { AddressInfo } from "node:net";
@@ -373,6 +373,40 @@ describe("the link under load and after a failed save", () => {
 });
 
 describe("session permission on the runner", () => {
+    it("runs a command sent with no folder in the session's approved folder", async () => {
+        const setup = await serve();
+        const computer = await start(setup);
+        const work = folder("nocwd");
+
+        try {
+            const scope = { id: "nocwd", folder: work, person: "Owner" };
+            const link = setup.runners.link(computer.id);
+            let output = "";
+
+            // As a server that leaves the folder out: pi-env's client never does.
+            await link.request(
+                "exec",
+                { argv: ["pwd"], env: {}, inheritEnv: true },
+                {
+                    onEvent: (json, payload) => {
+                        output +=
+                            payload !== undefined && payload.length > 0
+                                ? Buffer.from(payload).toString("utf8")
+                                : typeof json.text === "string"
+                                  ? json.text
+                                  : "";
+                    },
+                },
+                scope,
+            );
+
+            assert.equal(output.trim(), realpathSync(work));
+        } finally {
+            await computer.runner.stop();
+            await close(setup);
+        }
+    });
+
     it("refuses a request without session permission before the daemon, but lists folders", async () => {
         const setup = await serve();
         const computer = await start(setup);

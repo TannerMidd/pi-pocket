@@ -377,6 +377,12 @@ export class RequestGate {
             throw new Error(`Session not approved on ${this.#options.name()}`);
         }
 
+        // A command runs in a folder of its session: with none named, its approved folder (inside by definition),
+        // never the runner's own.
+        if ((request.op === "exec" || request.op === "pty") && typeof json.cwd !== "string") {
+            json.cwd = permission.folder;
+        }
+
         if (
             typeof json.handle === "number" &&
             (handle === undefined || handle.scope?.id !== scope.id)
