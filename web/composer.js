@@ -15,9 +15,12 @@ import { QuoteLayer } from "./quote-box.js";
 import {
     changedRange,
     insertQuote,
+    isPiece,
     lineUnder,
+    messageText,
+    movePieces,
+    outsideQuotes,
     piecesIn,
-    prunePieces,
     quoteStep,
     withoutQuote,
     withQuotes,
@@ -129,11 +132,31 @@ function saveList(key, list) {
 }
 
 /**
- * Each conversation's quotes that Reply put in its box, as written: kept with its draft, so that a reload still draws
- * them and keeps each one a piece. A quote typed by hand is plain text.
+ * Each conversation's quotes that Reply put in its box, where each one is in the draft (`{ start, end, text }`): kept
+ * with it, so that a reload still draws them and keeps each one a piece. A quote typed by hand is plain text.
  */
-const loadPieces = (id) => loadList(`quotes.${id ?? "home"}`);
-const savePieces = (id, pieces) => saveList(`quotes.${id ?? "home"}`, pieces);
+function loadPieces(id) {
+    try {
+        const list = JSON.parse(personStorage.get(`quotes.${id ?? "home"}`) ?? "[]");
+
+        return Array.isArray(list)
+            ? list.filter(
+                  (each) =>
+                      Number.isInteger(each?.start) &&
+                      Number.isInteger(each?.end) &&
+                      typeof each?.text === "string",
+              )
+            : [];
+    } catch {
+        return [];
+    }
+}
+
+const savePieces = (id, pieces) =>
+    personStorage.set(
+        `quotes.${id ?? "home"}`,
+        pieces.length === 0 ? null : JSON.stringify(pieces),
+    );
 /**
  * Each conversation's passages that Reply put in strips over its box (Appearance → Quotes in the message box →
  * Separate), in order: kept with its draft, so that a reload keeps them. They go first in the next message.
@@ -625,6 +648,10 @@ export function Composer() {
     const [pastes, setPastes] = useState(() => loadPastes(conversationId));
     // The quotes Reply put in the box (`loadPieces`), and the one a first Backspace under it marked, by its start.
     const [pieces, setPieces] = useState(() => loadPieces(conversationId));
+    // The pieces as the last edit left them, before a render shows them; and those an edit of the box took out, which
+    // its undo puts back as they were.
+    const piecesNow = useRef(pieces);
+    const removed = useRef([]);
     const [marked, setMarked] = useState(null);
     // The passages Reply put in strips over the box instead (`loadStrips`).
     const [strips, setStrips] = useState(() => loadStrips(conversationId));
@@ -774,7 +801,8 @@ export function Composer() {
         setText(draft);
         setCaret(draft.length);
         setPastes(loadPastes(conversationId));
-        setPieces(loadPieces(conversationId));
+        keepPieces(loadPieces(conversationId), conversationId, draft);
+        removed.current = [];
         setMarked(null);
         setStrips(loadStrips(conversationId));
         setBrowsing(null);
@@ -853,15 +881,16 @@ export function Composer() {
         const added = [];
 
         for (const each of replying) {
-            const quoted = insertQuote(words, words.length, each.text);
+            const quoted = insertQuote(words, each.text);
 
             words = quoted.text;
             at = quoted.at;
-            added.push(quoted.block);
+            added.push({ start: quoted.start, end: quoted.end, text: quoted.block });
         }
 
+        // The pieces there move with the edit (`update`), and the new ones join them.
         recall(words, at);
-        keepPieces([...loadPieces(conversationId), ...added], conversationId, words);
+        keepPieces([...piecesNow.current, ...added], conversationId, words);
         requestAnimationFrame(() => {
             const element = box.current;
 
@@ -889,13 +918,21 @@ export function Composer() {
 
     /** The quotes that are pieces, saved with the draft of `id` (this box's own by default), each still in `words`. */
     const keepPieces = (next, id = conversationId, words = drafts.get(id)) => {
-        const kept = prunePieces(words, next);
+        const kept = piecesIn(words, next);
 
+        piecesNow.current = kept;
         setPieces(kept);
         savePieces(id, kept);
     };
 
     const update = (value, at = value.length) => {
+        const before = drafts.get(conversationId);
+
+        // Each piece moves with the edit, by where it was; one the edit changed is plain text from now on.
+        if (piecesNow.current.length > 0) {
+            keepPieces(movePieces(before, value, at, piecesNow.current), conversationId, value);
+        }
+
         setText(value);
         setMarked(null);
         setCaret(at);
@@ -944,7 +981,8 @@ export function Composer() {
     const shell = text.startsWith("!")
         ? { context: !text.startsWith("!!"), command: text.replace(/^!!?/, "").trim() }
         : null;
-    const mentionsFiles = !shell && !parsed && MENTIONS_FILE.test(text);
+    // A file named in a quote is the passage's: only one in the person's own words goes along.
+    const mentionsFiles = !shell && !parsed && MENTIONS_FILE.test(outsideQuotes(text));
     const pasted = PASTED.test(text);
 
     PASTED.lastIndex = 0;
@@ -1122,7 +1160,8 @@ export function Composer() {
 
         // What shows is what goes: words still coming would land in the emptied box.
         dictation.stop(true);
-        const full = expandPastes(text, pastes);
+        // Each quote goes as a paragraph of its own, as written: a placeholder in one is the passage's words.
+        const full = messageText(text, quoted, (words) => expandPastes(words, pastes));
 
         if (parsed) {
             if (full.length <= REMEMBER_CHARS) {
@@ -1504,7 +1543,7 @@ export function Composer() {
         const element = box.current;
 
         if (element && document.activeElement === element) {
-            const change = changedRange(element.value, value);
+            const change = changedRange(element.value, value, at);
 
             element.setSelectionRange(change.from, change.to);
             rewriting.current = true;
@@ -1531,19 +1570,42 @@ export function Composer() {
         recall(value, at);
     };
 
-    /** Take quote `block` out of the box, with the blank lines after it. */
+    /** Take quote `block` out of the box, with its line; undo puts it back, a piece again. */
     const removeQuote = (block) => {
         const without = withoutQuote(text, block);
 
+        removed.current = [...removed.current.slice(-19), block];
         rewrite(without.text, without.at);
-        keepPieces(pieces, conversationId, without.text);
+    };
+
+    /**
+     * Undo or redo in the box (`input` of a `history` type) brought back text: a piece it took out, where it was, is one
+     * again, and the caret goes to the end of what came back rather than selecting it (a key would type over it).
+     */
+    const afterHistory = (element) => {
+        const back = removed.current.filter(
+            (piece) =>
+                isPiece(element.value, piece) &&
+                !piecesNow.current.some((each) => each.start === piece.start),
+        );
+
+        if (back.length > 0) {
+            keepPieces([...piecesNow.current, ...back], conversationId, element.value);
+        }
+
+        if (element.selectionStart !== element.selectionEnd) {
+            const end = element.selectionEnd;
+
+            element.setSelectionRange(end, end);
+            setCaret(end);
+        }
     };
 
     /** Where text written over `start`..`end` of `value` goes so that no quote changes: there, under a quote, or nowhere. */
     const writeAt = (value, start, end, written) => {
         const step = quoteStep(
             value,
-            piecesIn(value, pieces),
+            piecesIn(value, piecesNow.current),
             start,
             end,
             "insertFromPaste",
@@ -1574,7 +1636,7 @@ export function Composer() {
         const value = element.value;
         const step = quoteStep(
             value,
-            piecesIn(value, pieces),
+            piecesIn(value, piecesNow.current),
             element.selectionStart,
             element.selectionEnd,
             event.inputType,
@@ -2082,6 +2144,10 @@ export function Composer() {
                         onInput=${(event) => {
                             setBrowsing(null);
                             edit(event.currentTarget.value, event.currentTarget.selectionStart);
+
+                            if (event.inputType?.startsWith("history")) {
+                                afterHistory(event.currentTarget);
+                            }
                         }}
                         onBeforeInput=${onBeforeInput}
                         onKeyDown=${onKey}

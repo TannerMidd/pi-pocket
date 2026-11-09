@@ -40,23 +40,35 @@ export function splitQuote(text) {
     return { passage: passageOf(match[1].replace(/\n$/, "")), rest: match[2] };
 }
 
+const FENCE_OPEN = /^```[\w+#.-]*[ \t]*$/;
+const FENCE_CLOSE = /^```[ \t]*$/;
+
 /**
  * Each quote in `text`: a run of lines that start with ">", outside code fences, as `{ start, end, text }`. `start` is
- * its first character, `end` the end of its last line (before that line's break), `text` its lines as written.
+ * its first character, `end` the end of its last line (before that line's break), `text` its lines as written. A fence
+ * is code only once it is closed, as a person's message shows it (transcript.js): one left open is text.
  */
 export function quoteBlocks(text) {
     const blocks = [];
+    const lines = text.split("\n");
     let at = 0;
-    let fenced = false;
+    let closes = -1;
     let open = null;
 
-    for (const line of text.split("\n")) {
+    for (const [index, line] of lines.entries()) {
         const end = at + line.length;
 
-        if (line.startsWith("```")) {
-            fenced = !fenced;
+        if (closes === -1 && FENCE_OPEN.test(line)) {
+            closes = lines.findIndex((each, later) => later > index && FENCE_CLOSE.test(each));
+        }
+
+        if (closes !== -1) {
             open = null;
-        } else if (!fenced && line.startsWith(">")) {
+
+            if (index === closes) {
+                closes = -1;
+            }
+        } else if (line.startsWith(">")) {
             if (open) {
                 open.end = end;
             } else {
@@ -107,34 +119,88 @@ export function quoteParts(text) {
 }
 
 /**
- * `text` with `passage` quoted at `at` (Reply): on lines of its own with a blank line around it, after the quote `at`
- * is in, never inside one. Gives the new text, where the caret goes (the line under it), and the quote as written.
+ * `text` with `passage` quoted after it (Reply), on lines of its own: right under the words, or a blank line under a
+ * quote (two quotes on lines in a row would be one). The box keeps it tight; the message gets a blank line around each
+ * quote as it goes (`messageText`). Gives the new text, where the caret goes (the line right under the quote), and the
+ * quote as written, at `start`..`end`.
  */
-export function insertQuote(text, at, passage) {
+export function insertQuote(text, passage) {
     const block = quoteLines(passage);
-    const inside = quoteBlocks(text).find((each) => at >= each.start && at <= each.end);
-    const where = inside ? inside.end : Math.max(0, Math.min(at, text.length));
-    const before = text.slice(0, where).replace(/\s+$/, "");
-    const after = text.slice(where).replace(/^\s+/, "");
-    const head = before === "" ? "" : `${before}\n\n`;
-    // Words after it stay a paragraph apart from the line the caret is on.
-    const value = `${head}${block}\n\n${after === "" ? "" : `\n\n${after}`}`;
+    const before = text.replace(/\s+$/, "");
+    const last = before.slice(before.lastIndexOf("\n") + 1);
+    const head = before === "" ? "" : `${before}${last.startsWith(">") ? "\n\n" : "\n"}`;
+    const value = `${head}${block}\n`;
 
-    return { text: value, at: head.length + block.length + 2, block };
+    return {
+        text: value,
+        at: value.length,
+        block,
+        start: head.length,
+        end: head.length + block.length,
+    };
 }
 
 /**
- * Where the caret goes out of quote `block`: the empty line under it, after a blank line, made when it is not there.
- * Gives the text, changed or not, and the caret.
+ * Where the caret goes out of quote `block`: the line right under it, made when it is not there. Gives the text,
+ * changed or not, and the caret.
  */
 export function lineUnder(text, block) {
-    const after = text.slice(block.end);
+    return {
+        text: block.end === text.length ? `${text}\n` : text,
+        at: block.end + 1,
+    };
+}
 
-    if (after === "" || after === "\n") {
-        return { text: `${text.slice(0, block.end)}\n\n`, at: block.end + 2 };
+/**
+ * Whether `piece` (`{ start, end, text }`, a quote Reply put in the box) is still in `text` as it was put there: its
+ * text at its place, on whole lines. What is around it does not matter (a quote line typed right under it, a code
+ * fence): the message sets each piece apart as it goes (`messageText`).
+ */
+export function isPiece(text, piece) {
+    return (
+        piece.start >= 0 &&
+        piece.end <= text.length &&
+        text.slice(piece.start, piece.end) === piece.text &&
+        (piece.start === 0 || text[piece.start - 1] === "\n") &&
+        (piece.end === text.length || text[piece.end] === "\n")
+    );
+}
+
+/** The pieces of `pieces` still in `text` (`isPiece`), in the order they are there. */
+export function piecesIn(text, pieces) {
+    return pieces.filter((piece) => isPiece(text, piece)).sort((a, b) => a.start - b.start);
+}
+
+/**
+ * The message the box sends: its words, each paste placeholder in them expanded (`expand`), and its quotes `blocks`
+ * (Reply's) as written, each a paragraph of its own, a blank line around it, as Markdown needs (a line right under a
+ * quote would be part of it). A passage's words are never expanded: a placeholder in one is the passage's own text.
+ */
+export function messageText(text, blocks, expand = (words) => words) {
+    if (blocks.length === 0) {
+        return expand(text);
     }
 
-    return { text, at: after.startsWith("\n\n") ? block.end + 2 : block.end + 1 };
+    const parts = [];
+    let last = 0;
+
+    const words = (until) => {
+        const between = expand(text.slice(last, until).replace(/^\n+|\n+$/g, ""));
+
+        if (between.trim() !== "") {
+            parts.push(between);
+        }
+    };
+
+    for (const block of blocks) {
+        words(block.start);
+        parts.push(block.text);
+        last = block.end;
+    }
+
+    words(text.length);
+
+    return parts.join("\n\n");
 }
 
 const LINE_BREAKS = new Set(["insertLineBreak", "insertParagraph"]);
@@ -177,38 +243,36 @@ function deleted(text, at, type) {
     return [at, at + Math.max(1, reach)];
 }
 
-/** Whether words follow quote `block` of `text` on the very next line, which Markdown reads as part of the quote. */
-const glued = (text, block) => /^\n[^\n]/.test(text.slice(block.end, block.end + 2));
+/** `block` moved by `delta`. */
+const shift = (block, delta) => ({ ...block, start: block.start + delta, end: block.end + delta });
 
 /**
- * Whether `next`, `text` after an edit over `from`..`to`, keeps the quotes `blocks` (of `text`) that the edit did not
- * take whole: each one still there, in order, as it was, and with no words newly on the line right after it.
+ * The first quote of `blocks` (pieces of `text`) that `next`, `text` after an edit over `from`..`to`, breaks: one the
+ * edit changed, or that no longer stands on lines of its own (`isPiece`). One the edit takes whole is not broken: it
+ * goes. Undefined when the edit keeps them all.
  */
-export function keepsQuotes(text, blocks, next, from, to) {
-    const kept = blocks.filter((block) => !(from <= block.start && to >= block.end));
-    let i = 0;
+export function brokenPiece(text, blocks, next, from, to) {
+    const delta = next.length - text.length;
 
-    for (const block of quoteBlocks(next)) {
-        if (i < kept.length && block.text === kept[i].text) {
-            if (glued(next, block) && !glued(text, kept[i])) {
-                return false;
-            }
-
-            i += 1;
+    return blocks.find((block) => {
+        if (from <= block.start && to >= block.end) {
+            return false;
         }
-    }
 
-    return i === kept.length;
+        const moved = block.end <= from ? block : block.start >= to ? shift(block, delta) : null;
+
+        return moved === null || !isPiece(next, moved);
+    });
 }
 
 /**
  * What the message box does with an edit, `beforeinput`'s `type` (and its `data`) over `start`..`end`, so that each
- * quote stays one piece: null to let it happen; `{ mark }`, a first Backspace on the line under a quote (the quote's
- * start), which shows it is about to go; `{ remove }`, the second, which takes that quote away; `{ open }`, a new line
- * at the start of a quote, which goes above it with the caret on it; `{ stop, under? }`, an edit that would change a
- * quote's words or join a line to it, which does not happen (typing moves the caret under the quote, `lineUnder`). A
- * whole quote selected can be typed over or deleted. `blocks` are the quotes of `text` kept as pieces (`quoteBlocks`,
- * those Reply put there); `marked` is the start of the quote marked, or null.
+ * quote stays one piece: null to let it happen; `{ mark }`, a first Backspace on the line right under a quote (the
+ * quote's start), which shows it is about to go; `{ remove }`, the second, which takes that quote away; `{ open }`, a
+ * new line at a quote's start, which goes above it with the caret on it; `{ stop, under? }`,
+ * an edit that would change a quote's words or join a line to it, which does not happen (what it writes goes on the
+ * line under that quote, `lineUnder`). A whole quote selected can be typed over or deleted. `blocks` are the pieces of
+ * `text` (`piecesIn`); `marked` is the start of the quote marked, or null.
  */
 export function quoteStep(text, blocks, start, end, type, data, marked) {
     // A keyboard's word being composed, and undo, are the browser's own: a quote they change is no longer a piece.
@@ -217,20 +281,18 @@ export function quoteStep(text, blocks, start, end, type, data, marked) {
     }
 
     if (type === "deleteContentBackward" && start === end) {
-        const above = blocks.find((block) => /^\n{1,2}$/.test(text.slice(block.end, start)));
+        const above = blocks.find((block) => start === block.end + 1);
 
         if (above) {
             return marked === above.start ? { remove: above } : { mark: above.start };
         }
     }
 
-    const near = (from, to) =>
-        blocks.find((block) => from <= block.end + 1 && to >= block.start - 1);
-
     if (type.startsWith("insert")) {
         const lineBreak = LINE_BREAKS.has(type);
         const at = start === end && lineBreak && blocks.find((block) => block.start === start);
 
+        // A new line at a quote's start: a line above it, with the caret on it.
         if (at) {
             return { open: at.start };
         }
@@ -239,28 +301,32 @@ export function quoteStep(text, blocks, start, end, type, data, marked) {
 
         // What a drop or a paste writes is not always told: it may not touch a quote at all.
         if (typeof written !== "string") {
-            const touched = blocks.some(
+            const touched = blocks.find(
                 (block) =>
                     start <= block.end &&
                     end >= block.start &&
                     !(start <= block.start && end >= block.end),
             );
 
-            return touched ? { stop: true, under: near(start, end) } : null;
+            return touched ? { stop: true, under: touched } : null;
         }
 
-        const next = `${text.slice(0, start)}${written}${text.slice(end)}`;
+        const broken = brokenPiece(
+            text,
+            blocks,
+            `${text.slice(0, start)}${written}${text.slice(end)}`,
+            start,
+            end,
+        );
 
-        return keepsQuotes(text, blocks, next, start, end)
-            ? null
-            : { stop: true, under: near(start, end) };
+        return broken ? { stop: true, under: broken } : null;
     }
 
     if (type.startsWith("delete")) {
         if (start !== end) {
             const next = `${text.slice(0, start)}${text.slice(end)}`;
 
-            return keepsQuotes(text, blocks, next, start, end) ? null : { stop: true };
+            return brokenPiece(text, blocks, next, start, end) ? { stop: true } : null;
         }
 
         // How far a word or line delete reaches is the browser's to say: every reach up to the guess must be safe.
@@ -270,7 +336,7 @@ export function quoteStep(text, blocks, start, end, type, data, marked) {
         for (let reach = 1; reach <= to - from; reach += 1) {
             const [a, b] = backward ? [to - reach, to] : [from, from + reach];
 
-            if (!keepsQuotes(text, blocks, `${text.slice(0, a)}${text.slice(b)}`, a, b)) {
+            if (brokenPiece(text, blocks, `${text.slice(0, a)}${text.slice(b)}`, a, b)) {
                 return { stop: true };
             }
         }
@@ -282,39 +348,55 @@ export function quoteStep(text, blocks, start, end, type, data, marked) {
 }
 
 /**
- * The quotes of `text` that are pieces (Reply put them there), as `quoteBlocks` gives them: as many of each text as
- * `pieces` holds, the first ones, so a quote typed by hand with the same words stays plain text.
+ * Where the pieces `pieces` of `before` are in `after`, the box's text after an edit with the caret at `caret`: each
+ * one the edit did not change, where it was (the edit after it) or moved by what the edit added or took (before it),
+ * if it still stands on lines of its own there (`isPiece`). One the edit changed is a piece no longer: plain text.
  */
-export function piecesIn(text, pieces) {
-    if (pieces.length === 0) {
-        return [];
+export function movePieces(before, after, caret, pieces) {
+    if (pieces.length === 0 || before === after) {
+        return piecesIn(after, pieces);
     }
 
-    const left = new Map();
+    const change = changedRange(before, after, caret);
+    const delta = after.length - before.length;
 
-    for (const piece of pieces) {
-        left.set(piece, (left.get(piece) ?? 0) + 1);
-    }
-
-    return quoteBlocks(text).filter((block) => {
-        const n = left.get(block.text) ?? 0;
-
-        left.set(block.text, n - 1);
-
-        return n > 0;
-    });
-}
-
-/** `pieces` without those `text` no longer has. */
-export function prunePieces(text, pieces) {
-    return piecesIn(text, pieces).map((block) => block.text);
+    return piecesIn(
+        after,
+        pieces.flatMap((piece) =>
+            piece.end <= change.from
+                ? [piece]
+                : piece.start >= change.to
+                  ? [shift(piece, delta)]
+                  : [],
+        ),
+    );
 }
 
 /**
  * Where `before` and `after` differ, as one replacement: `from`..`to` of `before` becomes `insert`. An edit made this way
- * goes through the browser's own editing, which keeps it in the box's undo history.
+ * goes through the browser's own editing, which keeps it in the box's undo history. `caret`, where the caret is in
+ * `after` once the edit is made (the end of what it wrote, or where it took text away), says which of two places the
+ * same text could be the edit was at: what follows the caret stayed as it was.
  */
-export function changedRange(before, after) {
+export function changedRange(before, after, caret) {
+    if (caret !== undefined) {
+        const most = Math.max(0, Math.min(before.length, after.length - caret));
+        let tail = 0;
+
+        while (tail < most && before[before.length - 1 - tail] === after[after.length - 1 - tail]) {
+            tail += 1;
+        }
+
+        const limit = Math.min(before.length, after.length) - tail;
+        let from = 0;
+
+        while (from < limit && before[from] === after[from]) {
+            from += 1;
+        }
+
+        return { from, to: before.length - tail, insert: after.slice(from, after.length - tail) };
+    }
+
     let from = 0;
 
     while (from < before.length && from < after.length && before[from] === after[from]) {
@@ -334,24 +416,44 @@ export function changedRange(before, after) {
     return { from, to: before.length - tail, insert: after.slice(from, after.length - tail) };
 }
 
-/** `text` without the quote `block` and the blank lines after it; the caret goes where it was. */
-export function withoutQuote(text, block) {
-    let end = block.end;
+/**
+ * `text` without its quote lines ("> …"), for what a message mentions: a file named in a quote is a passage's, not a
+ * file this person asks to send along. The server reads mentions the same way (`mentionedPaths`, files.ts).
+ */
+export function outsideQuotes(text) {
+    return text
+        .split("\n")
+        .filter((line) => !/^ {0,3}>/.test(line))
+        .join("\n");
+}
 
-    while (text[end] === "\n") {
-        end += 1;
+/**
+ * `text` without the quote `block` and its line break, with no more than one blank line left where it was; the caret
+ * goes there. Taken from the end, the caret stays on the line under the quote above, if one is there.
+ */
+export function withoutQuote(text, block) {
+    let before = text.slice(0, block.start);
+    let after = text.slice(block.end).replace(/^\n/, "");
+
+    if (after.trim() === "") {
+        before = before.replace(/\n+$/, "");
+
+        const last = before.slice(before.lastIndexOf("\n") + 1);
+
+        return before === ""
+            ? { text: "", at: 0 }
+            : {
+                  text: last.startsWith(">") ? `${before}\n` : before,
+                  at: before.length + (last.startsWith(">") ? 1 : 0),
+              };
     }
 
-    const before = text.slice(0, block.start).replace(/\n+$/, "");
-    const after = text.slice(end);
-    const value =
-        before !== "" && after !== ""
-            ? `${before}\n\n${after}`
-            : before !== ""
-              ? `${before}\n\n`
-              : after;
+    // A blank line above it and one under it make one.
+    if (before.endsWith("\n\n") || before === "") {
+        after = after.replace(/^\n+/, "");
+    }
 
-    return { text: value, at: before === "" ? 0 : before.length + 2 };
+    return { text: `${before}${after}`, at: before.length };
 }
 
 /** The text of a selected range, as it was written: math as its TeX, a diagram as "[diagram]". */

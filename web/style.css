@@ -21008,39 +21008,28 @@ pre.gallery-code {
     color: var(--accent);
 }
 
-[data-quote-style="fade"] .quote-line,
-[data-quote-style="tint"] .quote-line {
+/* Each quote is one block, its lines (empty ones too) inside it. */
+.quote-block {
+    display: block;
+}
+
+[data-quote-style="fade"] .quote-block,
+[data-quote-style="tint"] .quote-block {
     /* Out to the left by as much as it goes in: the words stay where the box has them. */
     margin-left: -6px;
     padding-left: 6px;
     --quote-fill: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-[data-quote-style="fade"] .quote-line {
+[data-quote-style="fade"] .quote-block {
+    border-radius: 4px 0 0 4px;
     background: linear-gradient(90deg, var(--quote-fill), transparent 85%);
 }
 
-[data-quote-style="fade"] .quote-line.first {
-    border-top-left-radius: 4px;
-}
-
-[data-quote-style="fade"] .quote-line.last {
-    border-bottom-left-radius: 4px;
-}
-
-[data-quote-style="tint"] .quote-line {
+[data-quote-style="tint"] .quote-block {
     --quote-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: 6px;
     background: var(--quote-fill);
-}
-
-[data-quote-style="tint"] .quote-line.first {
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-}
-
-[data-quote-style="tint"] .quote-line.last {
-    border-bottom-left-radius: 6px;
-    border-bottom-right-radius: 6px;
 }
 
 [data-quote-style="ghost"] .quote-line {
@@ -21052,16 +21041,16 @@ pre.gallery-code {
 }
 
 /* A first Backspace under a quote: the next one removes it. */
-.quote-line.marked,
-.quote-line.marked .quote-line-mark {
+.quote-block.marked .quote-line,
+.quote-block.marked .quote-line-mark {
     color: var(--err);
 }
 
-.quote-line.marked {
+.quote-block.marked {
     --quote-fill: var(--err-soft);
 }
 
-.quote-line.marked .quote-line-text {
+.quote-block.marked .quote-line-text {
     text-decoration: line-through;
     text-decoration-color: var(--err-line);
 }

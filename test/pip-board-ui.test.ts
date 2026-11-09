@@ -305,7 +305,7 @@ test("Board: the session under it stays marked open, and is where it closes to",
     await type(BOX, "");
     await page.evaluate(`${STORE}.quoteReply('under the board')`);
     await see(
-        `document.querySelector('${BOX}')?.value === '> under the board\\n\\n'`,
+        `document.querySelector('${BOX}')?.value === '> under the board\\n'`,
         "in its box",
     );
     await page.evaluate(`${PIP}.openPip()`);
@@ -319,7 +319,7 @@ test("Board: the session under it stays marked open, and is where it closes to",
     assert.equal(await inPage(`${STORE}.store.state.pipQuote?.text ?? null`), "on the board");
     await page.evaluate(`${PIP}.closePip()`);
     await see(
-        `document.querySelector('${BOX}')?.value === '> under the board\\n\\n'`,
+        `document.querySelector('${BOX}')?.value === '> under the board\\n'`,
         "the session's quote again",
     );
 });
@@ -477,7 +477,7 @@ test("PiP's one box: its words, file, quote, and send on its way move with it", 
     await see(`document.querySelector('.pip-attachment') === null`, "sent with its file");
     assert.equal(await inPage(`window.sends`), 1, "once");
     await see(
-        `document.querySelector('.composer textarea')?.value === '> still red\\n\\n'`,
+        `document.querySelector('.composer textarea')?.value === '> still red\\n'`,
         "Reply's, in the session's box",
     );
     await page.evaluate(`${PIP}.closePip()`);
@@ -583,9 +583,9 @@ test("A session's send on its way, its box shown again: once, or all back", real
     await fresh("board");
     await type(BOX, "");
     await page.evaluate(`${STORE}.quoteReply('this part')`);
-    await see(`document.querySelector('${BOX}').value === '> this part\\n\\n'`, "the quote");
+    await see(`document.querySelector('${BOX}').value === '> this part\\n'`, "the quote");
     // With a space at the end, as a phone's keyboard leaves it.
-    await type(BOX, "> this part\n\nonly once ");
+    await type(BOX, "> this part\nonly once ");
     await attach(".pane .composer input[type=file]");
     await see(
         `document.querySelector('.pane .files .chip:not(:has(.spinner))')`,
@@ -596,7 +596,7 @@ test("A session's send on its way, its box shown again: once, or all back", real
         await see(`window.sends === 1`, "on its way");
         await awayAndBack();
         assert.deepEqual(await held(), [
-            "> this part\n\nonly once ",
+            "> this part\nonly once ",
             "this part",
             [true, true, true, true],
         ]);
@@ -604,7 +604,7 @@ test("A session's send on its way, its box shown again: once, or all back", real
     }, true);
     await see(`!document.querySelector('.pane .send-button').disabled`, "failed");
     assert.deepEqual(await held(), [
-        "> this part\n\nonly once ",
+        "> this part\nonly once ",
         "this part",
         [false, false, false, false],
     ]);

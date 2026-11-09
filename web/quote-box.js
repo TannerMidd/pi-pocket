@@ -44,32 +44,45 @@ const COPIED = [
     "direction",
 ];
 
-/** `text`'s lines as the drawing shows them: a quote's lines with its marks, the rest as they are. */
+/** One line of the box as the drawing shows it; an empty one still takes a line's height, as in the box. */
+const Line = ({ line }) => html`<span class="quote-box-line">${line || "\u200b"}</span>`;
+
+/**
+ * `text` as the drawing shows it: the words as they are, and each quote of `blocks` as one block (its lines, empty
+ * ones too, inside it), its marks drawn.
+ */
 function Lines({ text, blocks, marked }) {
+    const parts = [];
     let at = 0;
 
-    return text.split("\n").map((line) => {
-        const start = at;
-        const block = blocks.find((each) => start >= each.start && start <= each.end);
-
-        at += line.length + 1;
-
-        if (!block) {
-            // An empty line still takes a line's height, as in the box.
-            return html`<span class="quote-box-line">${line || "\u200b"}</span>`;
+    for (const block of blocks) {
+        for (const line of text.slice(at, block.start).replace(/\n$/, "").split("\n")) {
+            if (block.start > at) {
+                parts.push(html`<${Line} line=${line} />`);
+            }
         }
 
-        const first = start === block.start;
-        const last = start + line.length === block.end;
-        const space = line.startsWith("> ") ? " " : "";
+        parts.push(html`<span class=${`quote-block ${block.start === marked ? "marked" : ""}`}
+            >${block.text.split("\n").map((line) => {
+                const space = line.startsWith("> ") ? " " : "";
 
-        return html`<span
-            class=${`quote-box-line quote-line ${first ? "first" : ""} ${last ? "last" : ""} ${block.start === marked ? "marked" : ""}`}
-            ><span class="quote-line-mark">></span>${space}<span class="quote-line-text"
-                >${line.slice(1 + space.length)}</span
-            ></span
-        >`;
-    });
+                return html`<span class="quote-box-line quote-line"
+                    ><span class="quote-line-mark">></span>${space}<span class="quote-line-text"
+                        >${line.slice(1 + space.length)}</span
+                    ></span
+                >`;
+            })}</span
+        >`);
+        at = block.end + 1;
+    }
+
+    if (at <= text.length) {
+        for (const line of text.slice(at).split("\n")) {
+            parts.push(html`<${Line} line=${line} />`);
+        }
+    }
+
+    return parts;
 }
 
 /**
@@ -107,7 +120,7 @@ export function QuoteLayer({ box, text, blocks, marked, locked, onRemove }) {
             scrolled();
             // A line's place is within the text, which starts under the box's top padding.
             const pad = parseFloat(style.paddingTop) || 0;
-            const next = [...drawing.querySelectorAll(".quote-line.first")].map(
+            const next = [...drawing.querySelectorAll(".quote-block")].map(
                 (line) => line.offsetTop + pad,
             );
 
