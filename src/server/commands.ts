@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { basename, extname, join, sep } from "node:path";
-import { type Context, copyJson } from "@earendil-works/chord";
+import { type Context, copyJson, type JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
     clampThinkingLevel,
@@ -40,6 +40,9 @@ import type { User } from "./config.ts";
 import {
     AuthorsDoc,
     ChatDoc,
+    HeldDoc,
+    type HeldMessage,
+    InterruptsDoc,
     NotesDoc,
     PinsDoc,
     PlanDoc,
@@ -67,7 +70,7 @@ import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
 import { globalModelSettings, projectModelDefault } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
-import { clientKey, ownRequest, requestFor } from "./requests.ts";
+import { clientKey, ownRequest, requestFor, requestPerson } from "./requests.ts";
 import {
     type Interrupt,
     interruptTask,
@@ -335,7 +338,7 @@ export class Commands {
      * says who dealt with the failure. A message left in the queue by a run that failed ends it, settling nothing.
      */
     readonly followTask: Task<Followed, { phase: "wait" }, null, object>;
-    /** A queued message moved to Interrupt (`moveQueued`): it stops the run it was made for, by that run's id. */
+    /** An Interrupt (`submit`, `moveQueued`): it stops the run it was made for, by that run's id. */
     readonly interruptTask: Task<Interrupt, { phase: "send" }, null, object>;
 
     constructor(app: PocketApp) {
@@ -900,38 +903,52 @@ export class Commands {
             submitContext.abortSignal?.throwIfAborted();
         }
 
-        // Interrupt: stop the run now, rather than waiting for its tool round or turn to end. Like Stop, this withdraws
-        // what waits in the queue. Only a person's own message interrupts, never one sent for them (`via`).
-        // A retried request finds its first submission: it must not stop the run that the first one started. (Two POSTs
-        // of one request at the same moment can both find none and both stop the run: a rare race, left as it is.)
-        if (
-            request.mode === "interrupt" &&
-            via === undefined &&
-            app.isBusy(id) &&
-            (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) ===
-                undefined
-        ) {
-            await this.#discardReports(id);
-            await conversation.abort(context);
-            await app.collab.activity(id, user, "interrupted the run");
-        }
-
         // A retry of a request finds its first submission: it is no new message, and no event goes out for it again.
         const known =
             app.pip.ownerOf(id) === undefined &&
             (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) !==
                 undefined;
-        const submission = await conversation
-            .submit(
-                {
-                    type: "input",
-                    content,
-                    whenBusy: request.mode === "steer" ? "steer" : "followUp",
-                    requestId,
-                },
-                submitContext,
-            )
-            .finally(() => admission?.afterSubmit());
+        // Only a person's own message interrupts, never one sent for them (`via`). The same durable handoff as a
+        // queued message's Interrupt keeps everything waiting, before it stops the run. Admission releases its lease
+        // once that handoff is stored, not while the task stops the run and puts the messages back.
+        const admitted = await (
+            request.mode === "interrupt" && via === undefined
+                ? this.#interrupt(id, { content, requestId }, submitContext)
+                : conversation
+                      .submit(
+                          {
+                              type: "input",
+                              content,
+                              whenBusy: request.mode === "steer" ? "steer" : "followUp",
+                              requestId,
+                          },
+                          submitContext,
+                      )
+                      .then((submission) => ({ submissionId: submission.id }))
+        ).finally(() => admission?.afterSubmit());
+        let submissionId: SubmissionId;
+
+        if ("task" in admitted) {
+            if (admitted.started) {
+                await app.collab.activity(id, user, "interrupted the run");
+            }
+
+            await app.harness.waitForTask(admitted.task, context);
+            const sent = await app.harness.commit(
+                (tx) => tx.submissionByRequest(id, requestId),
+                context,
+            );
+
+            if (sent === undefined) {
+                throw new HttpError(409, "The Interrupt message could not be sent. Try again.");
+            }
+
+            submissionId = sent.id;
+        } else {
+            submissionId = admitted.submissionId;
+        }
+
+        const submission = (await app.harness.submission(submissionId, context))!;
 
         app.collab.setTyping(id, user, null);
         // The title comes from the message as it was stored: without hidden values.
@@ -1344,15 +1361,251 @@ export class Commands {
         app.requireSteer(user);
         const conversation = await app.conversation(id);
         const busy = app.isBusy(id);
+        // People's waiting messages are held, before the stop can withdraw them: they wait until someone sends them. PiP's
+        // panel has no place to show them, so a Stop there withdraws them, as before.
+        const held = app.pip.ownerOf(id) === undefined ? await this.#hold(id) : 0;
 
-        // Stop withdraws what waits in the queue, subagents' reports too: a person meant them gone.
+        // Subagents' reports go: a person meant the work stopped.
         await this.#discardReports(id);
         void conversation
             .abort(context)
             .catch((error: unknown) => app.notice("error", `Abort failed: ${describe(error)}`, id));
 
-        if (busy) {
-            await app.collab.activity(id, user, "stopped the run");
+        if (busy || held > 0) {
+            await app.collab.activity(
+                id,
+                user,
+                held === 0
+                    ? "stopped the run"
+                    : `stopped the run; ${held} queued ${held === 1 ? "message waits" : "messages wait"} to be sent`,
+            );
+        }
+    }
+
+    /**
+     * Take the queue's messages out of it into `HeldDoc`, in one commit, so the stop that follows cannot withdraw them.
+     * Writes stay queued, and a batch of subagents' reports goes back to its courier. How many were held.
+     */
+    async #hold(id: ConversationId): Promise<number> {
+        const app = this.#app;
+        // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
+        const requests = new Map<number, string | undefined>();
+
+        for (let attempt = 0; ; attempt++) {
+            const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+
+            for (const item of queued) {
+                if (item.mode !== "write" && !requests.has(Number(item.id))) {
+                    const record = await (
+                        await app.harness.submission(item.id, context)
+                    )?.status(context);
+
+                    requests.set(Number(item.id), record?.requestId);
+                }
+            }
+
+            const held = await app.harness.commit(async (tx) => {
+                const items = (await tx.doc(InboxDoc, id)).items;
+                // Every table read comes before the commit's first table write.
+                const subagents = await tx.doc(SubagentsDoc, id);
+                const batch =
+                    subagents.sending === undefined
+                        ? undefined
+                        : await tx.submissionByRequest(id, subagents.sending.request);
+                const now = app.now();
+                const taken = new Set<SubmissionId>();
+                const adding: HeldMessage[] = [];
+
+                for (const item of items) {
+                    if (item.mode === "write" || item.id === batch?.id) {
+                        continue;
+                    }
+
+                    if (!requests.has(Number(item.id))) {
+                        // Queued since the requests were read. Stop must not fail: after a few tries, it goes.
+                        if (attempt < 3) {
+                            return "again";
+                        }
+
+                        continue;
+                    }
+
+                    const first = requests.get(Number(item.id));
+                    const person = requestPerson(first);
+
+                    taken.add(item.id);
+                    adding.push({
+                        key: String(item.id),
+                        content: copyJson(item.content) as JsonValue,
+                        mode: item.mode,
+                        // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
+                        requestId:
+                            first === undefined
+                                ? `held-${String(item.id)}`
+                                : `${first.replace(/(~\d+)+$/, "")}~${String(item.id)}`,
+                        ...(item.entry === undefined
+                            ? {}
+                            : { entry: copyJson(item.entry) as JsonValue }),
+                        ...(person?.wrote === true ? { by: person.userId } : {}),
+                        heldAt: now,
+                    });
+                }
+
+                if (taken.size === 0) {
+                    return 0;
+                }
+
+                for (let at = items.length - 1; at >= 0; at--) {
+                    if (taken.has(items[at]!.id)) {
+                        items.splice(at, 1);
+                    }
+                }
+
+                for (const item of taken) {
+                    tx.settleSubmission(item, { status: "unanswered", reason: "aborted" });
+                }
+
+                (await tx.doc(HeldDoc, id)).items.push(...adding);
+
+                return taken.size;
+            }, context);
+
+            if (held !== "again") {
+                return held;
+            }
+        }
+    }
+
+    /**
+     * Send the messages a Stop held, in their order, each as it was queued: they go to Pi as the people who wrote them.
+     * Sending them is sending to Pi: it takes the wheel and the spend limit, as a message does. Each keeps its request
+     * id, so a retry after a failure sends none twice.
+     */
+    async sendHeld(id: ConversationId, user: User): Promise<number> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+        await app.requireDriver(id, user);
+
+        if (app.pip.ownerOf(id) !== undefined && !app.pip.available(user)) {
+            throw new HttpError(409, "PiP is turned off in Extensions.");
+        }
+
+        app.spend.check(user, id);
+        const conversation = await app.conversation(id);
+        const held = (await app.harness.snapshot(HeldDoc, id, context))?.items ?? [];
+
+        for (const item of held) {
+            await conversation.submit(
+                {
+                    type: "input",
+                    content: item.content as unknown as UserInput,
+                    whenBusy: item.mode,
+                    requestId: item.requestId,
+                    ...(item.entry === undefined
+                        ? {}
+                        : { entry: item.entry as unknown as InputEntry }),
+                },
+                context,
+            );
+        }
+
+        const sent = new Set(held.map((item) => item.key));
+
+        await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(HeldDoc, id);
+
+            doc.items = doc.items.filter((item) => !sent.has(item.key));
+        }, context);
+
+        if (held.length > 0) {
+            await app.collab.activity(
+                id,
+                user,
+                `sent the ${held.length === 1 ? "held message" : `${held.length} held messages`}`,
+            );
+        }
+
+        return held.length;
+    }
+
+    /** Take a held message away for good. Anyone may their own; someone else's needs the right to drive, as in the queue. */
+    async dropHeld(id: ConversationId, user: User, key: string): Promise<void> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+        const item = await this.#heldItem(id, key);
+
+        if (item.by !== user.id) {
+            await app.requireDriver(id, user);
+        }
+
+        await this.#unhold(id, key);
+
+        if (item.by !== undefined && item.by !== user.id) {
+            const author = app.config.userById(item.by)?.name ?? "someone";
+
+            await app.collab.activity(id, user, `withdrew ${author}’s held message`);
+        }
+    }
+
+    /** Take one's own held message back into the message box, as Edit does for a queued one. */
+    async editHeld(
+        id: ConversationId,
+        user: User,
+        key: string,
+    ): Promise<{ text: string; attachments: Attachment[] }> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+        const item = await this.#heldItem(id, key);
+
+        if (item.by !== user.id) {
+            throw new HttpError(403, "Only its sender can edit a held message.");
+        }
+
+        await this.#unhold(id, key);
+        const [written, files] = splitAttachments(
+            userContent({ content: item.content as unknown as UserInput }).text.replace(
+                FROM_PREFIX,
+                "",
+            ),
+        );
+        const uploads = app.workspace.uploadDirectory(id);
+
+        return {
+            text: written,
+            attachments: (files ?? "").split("\n").flatMap((line) => attachedFile(line, uploads)),
+        };
+    }
+
+    async #heldItem(id: ConversationId, key: string): Promise<HeldMessage> {
+        const item = (await this.#app.harness.snapshot(HeldDoc, id, context))?.items.find(
+            (each) => each.key === key,
+        );
+
+        if (item === undefined) {
+            throw new HttpError(409, "That message is no longer held.");
+        }
+
+        return item;
+    }
+
+    async #unhold(id: ConversationId, key: string): Promise<void> {
+        const gone = await this.#app.harness.commit(async (tx) => {
+            const doc = await tx.doc(HeldDoc, id);
+            const before = doc.items.length;
+
+            doc.items = doc.items.filter((item) => item.key !== key);
+
+            return doc.items.length < before;
+        }, context);
+
+        if (!gone) {
+            throw new HttpError(409, "That message is no longer held.");
         }
     }
 
@@ -1494,38 +1747,82 @@ export class Commands {
             await app.requireDriver(id, user);
         }
 
-        // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
-        const requests = new Map<number, string | undefined>();
-        let moved: boolean | "again" = "again";
-
-        for (let attempt = 0; moved === "again"; attempt++) {
-            if (mode === "interrupt") {
-                const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
-
-                for (const item of queued) {
-                    if (item.mode !== "write" && !requests.has(Number(item.id))) {
-                        const record = await (
-                            await app.harness.submission(item.id, context)
-                        )?.status(context);
-
-                        requests.set(Number(item.id), record?.requestId);
-                    }
-                }
-            }
-
-            moved = await app.harness.commit(async (tx) => {
-                const items = (await tx.doc(InboxDoc, id)).items;
-                const index = items.findIndex((entry) => Number(entry.id) === submissionId);
-                const item = items[index];
+        if (mode !== "interrupt") {
+            const moved = await app.harness.commit(async (tx) => {
+                const item = (await tx.doc(InboxDoc, id)).items.find(
+                    (entry) => Number(entry.id) === submissionId,
+                );
 
                 if (item === undefined || item.mode === "write") {
                     return false;
                 }
 
-                if (mode !== "interrupt") {
-                    item.mode = mode;
+                item.mode = mode;
 
-                    return true;
+                return true;
+            }, context);
+
+            if (!moved) {
+                throw new HttpError(409, "That message has already gone to Pi.");
+            }
+
+            return;
+        }
+
+        await this.#interrupt(id, {
+            submissionId,
+            requestId: ownRequest(user.id, `interrupt-${submissionId}`),
+        });
+        await app.collab.activity(id, user, "interrupted the run");
+    }
+
+    /** Store an Interrupt and every waiting input together, before stopping only the run seen in this commit. */
+    async #interrupt(
+        id: ConversationId,
+        input: { requestId: string } & ({ content: UserInput } | { submissionId: number }),
+        admissionContext: Context = context,
+    ): Promise<{ submissionId: SubmissionId } | { task: TaskId; started: boolean }> {
+        const app = this.#app;
+        const conversation = await app.conversation(id);
+        // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
+        const requests = new Map<number, string | undefined>();
+
+        for (let attempt = 0; ; attempt++) {
+            const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+
+            for (const item of queued) {
+                if (item.mode !== "write" && !requests.has(Number(item.id))) {
+                    const record = await (
+                        await app.harness.submission(item.id, context)
+                    )?.status(context);
+
+                    requests.set(Number(item.id), record?.requestId);
+                }
+            }
+
+            const admitted = await app.harness.commit(async (tx) => {
+                const known = await tx.submissionByRequest(id, input.requestId);
+                const interrupts = await tx.doc(InterruptsDoc, id);
+                const pending = interrupts.pending[input.requestId];
+
+                // The task is the receipt until the actual submission exists. Two concurrent POSTs, and a retry after
+                // a restart between stop and send, find that same handoff rather than stopping a newer run.
+                if (known !== undefined) {
+                    return { submissionId: known.id };
+                }
+
+                if (pending !== undefined) {
+                    return { task: pending as unknown as TaskId, started: false };
+                }
+
+                const items = (await tx.doc(InboxDoc, id)).items;
+                const item =
+                    "submissionId" in input
+                        ? items.find((entry) => Number(entry.id) === input.submissionId)
+                        : undefined;
+
+                if (item?.mode === "write" || ("submissionId" in input && item === undefined)) {
+                    throw new HttpError(409, "That message has already gone to Pi.");
                 }
 
                 // Every table read comes before the commit's first table write.
@@ -1535,16 +1832,23 @@ export class Commands {
                         ? undefined
                         : await tx.submissionByRequest(id, subagents.sending.request);
                 const live = await tx.doc(LiveDoc, id);
+
+                if (live.run === undefined && "content" in input) {
+                    return {
+                        submissionId: await conversation.submit(tx, {
+                            type: "input",
+                            content: input.content,
+                            requestId: input.requestId,
+                        }),
+                    };
+                }
+
                 const others: Requeue[] = [];
-                const stay: number[] = [];
+                const stay = new Set<SubmissionId>();
 
                 for (const other of items) {
                     // Writes stay in the queue by themselves; the reports go back to their courier when withdrawn.
-                    if (
-                        Number(other.id) === submissionId ||
-                        other.mode === "write" ||
-                        other.id === batch?.id
-                    ) {
+                    if (other.id === item?.id || other.mode === "write" || other.id === batch?.id) {
                         continue;
                     }
 
@@ -1559,63 +1863,67 @@ export class Commands {
 
                     const first = requests.get(Number(other.id));
 
-                    stay.push(Number(other.id));
+                    stay.add(other.id);
                     others.push({
                         content: copyJson(other.content) as UserInput,
                         mode: other.mode,
                         // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
                         requestId:
                             first === undefined
-                                ? `interrupt-${submissionId}-${others.length}`
-                                : `${first.replace(/(~\d+)+$/, "")}~${submissionId}`,
+                                ? `interrupt-${input.requestId}-${others.length}`
+                                : `${first.replace(/(~\d+)+$/, "")}~${other.id}`,
                         ...(other.entry === undefined
                             ? {}
                             : { entry: copyJson(other.entry) as InputEntry }),
                     });
                 }
 
-                const content = copyJson(item.content) as UserInput;
+                const content =
+                    "content" in input ? input.content : (copyJson(item!.content) as UserInput);
                 const run = live.run === undefined ? undefined : Number(live.run.taskId);
 
                 // Taken out of the queue here, so the stop's withdrawal cannot reach them: the task puts them back.
                 for (let at = items.length - 1; at >= 0; at--) {
-                    const queued = Number(items[at]!.id);
+                    const queued = items[at]!.id;
 
-                    if (queued === submissionId || stay.includes(queued)) {
+                    if (queued === item?.id || stay.has(queued)) {
                         items.splice(at, 1);
                     }
                 }
 
-                tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
+                if (item !== undefined) {
+                    tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
+                }
 
                 for (const taken of stay) {
-                    tx.settleSubmission(taken as unknown as SubmissionId, {
+                    tx.settleSubmission(taken, {
                         status: "unanswered",
                         reason: "aborted",
                     });
                 }
 
-                await tx.createTask(
+                const task = await tx.createTask(
                     this.interruptTask,
                     {
                         content,
-                        requestId: ownRequest(user.id, `interrupt-${submissionId}`),
+                        requestId: input.requestId,
+                        ...(item?.entry === undefined
+                            ? {}
+                            : { entry: copyJson(item.entry) as InputEntry }),
                         ...(run === undefined ? {} : { run }),
                         others,
                     },
                     { ownership: { kind: "conversation" }, background: true, conversationId: id },
                 );
 
-                return true;
-            }, context);
-        }
+                interrupts.pending[input.requestId] = Number(task);
 
-        if (!moved) {
-            throw new HttpError(409, "That message has already gone to Pi.");
-        }
+                return { task, started: true };
+            }, admissionContext);
 
-        if (mode === "interrupt") {
-            await app.collab.activity(id, user, "interrupted the run");
+            if (admitted !== "again") {
+                return admitted;
+            }
         }
     }
 

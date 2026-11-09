@@ -307,14 +307,14 @@ const SEND_MODES = [
     [
         "interrupt",
         "Interrupt",
-        "Stops the run right now (also its tool call) and clears the queue, then sends it",
+        "Stops the run right now (also its tool call), then sends it. The queued messages stay queued",
     ],
 ];
 
 /** What a send mode does, for a queued message's buttons. */
 const modeHint = (mode) => SEND_MODES.find(([value]) => value === mode)[2];
 
-/** What Interrupt does to a message waiting in the queue: the others there stay, unlike the composer's Interrupt. */
+/** What Interrupt does to a message waiting in the queue: the others there stay queued. */
 const QUEUED_INTERRUPT_HINT =
     "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued";
 
@@ -437,6 +437,87 @@ function DriverBar() {
 }
 
 /** Plan mode: Pi proposes and changes nothing until someone here approves its plan. */
+/**
+ * What a Stop held out of the queue: it waits until someone sends it. Send sends them all, in their order; Show lists
+ * them, each with Edit (its sender's) and a × to withdraw it.
+ */
+function HeldBar({ blocked, onEdit }) {
+    const { view, me, users } = store.state;
+    const held = view.held ?? [];
+    const [open, setOpen] = useState(false);
+
+    if (held.length === 0) {
+        return null;
+    }
+
+    const steer = canSteer();
+    const heldBy = (item) =>
+        item.by === undefined
+            ? ""
+            : item.by === me?.id
+              ? " · you"
+              : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`;
+
+    return html`<div class="held-bar" data-part="held">
+        <span class="grow">
+            <strong>${held.length === 1 ? "1 message held." : `${held.length} messages held.`}</strong> Stop kept ${held.length === 1 ? "it" : "them"} from Pi until sent.
+        </span>
+        <button class="link small" aria-expanded=${open} onClick=${() => setOpen(!open)}>
+            ${open ? "Hide" : "Show"}
+        </button>
+        ${
+            steer &&
+            !blocked &&
+            html`<button
+                class="button small primary"
+                title="Send them to Pi, in their order"
+                onClick=${() => attempt(actions.sendHeld)}
+            >
+                Send
+            </button>`
+        }
+        ${
+            open &&
+            html`<div class="held-list">
+                ${held.map(
+                    (item) => html`<div class="queued" key=${item.key}>
+                        <span class="queued-mode">
+                            ${item.mode === "steer" ? "Steer" : "Queue"}
+                            <span class="muted">${heldBy(item)}</span>
+                        </span>
+                        <span class="queued-text">${(item.text ?? "").replace(FROM, "")}</span>
+                        ${
+                            steer &&
+                            !blocked &&
+                            item.by !== undefined &&
+                            item.by === me?.id &&
+                            html`<button
+                                class="link small"
+                                title="Take it back into the message box to change it"
+                                onClick=${() => onEdit(item)}
+                            >
+                                Edit
+                            </button>`
+                        }
+                        ${
+                            steer &&
+                            (!blocked || item.by === me?.id) &&
+                            html`<button
+                                class="icon-button small queued-remove"
+                                aria-label="Withdraw"
+                                title="Withdraw: Pi will not get it"
+                                onClick=${() => attempt(() => actions.dropHeld(item.key))}
+                            >
+                                <${Icon} name="close" size=${13} />
+                            </button>`
+                        }
+                    </div>`,
+                )}
+            </div>`
+        }
+    </div>`;
+}
+
 function PlanBar({ blocked }) {
     const { view } = store.state;
 
@@ -1090,6 +1171,22 @@ export function Composer() {
         }
     };
 
+    // Edit on a held message: the same, for one a Stop held.
+    const editHeld = async (item) => {
+        if (takingBack.has(item.key)) {
+            return;
+        }
+
+        takingBack.add(item.key);
+        const back = await attempt(() => actions.editHeld(item.key, conversationId));
+
+        takingBack.delete(item.key);
+
+        if (back) {
+            keepBack(conversationId, back);
+        }
+    };
+
     /** Put a message sent before into the box, to send again or change. */
     const recall = (value, at = value.length) => {
         edit(value, at);
@@ -1429,6 +1526,7 @@ export function Composer() {
     return html`<footer class="composer-wrap" data-part="composer">
         <div class="dock" data-part="dock" ref=${dock}>
             <${TypingLine} where="pi" />
+            <${HeldBar} blocked=${blocked} onEdit=${editHeld} />
             ${
                 // How many wait: shown when the queue does not show them all (`dock.js`).
                 inbox.length > 0 &&
@@ -1961,7 +2059,7 @@ function StopButton() {
         class="stop-button"
         data-part="composer-button stop-button"
         aria-label="Stop"
-        title="Stop (Esc twice)"
+        title="Stop (Esc twice). Queued messages are held until someone sends them"
         onClick=${() => attempt(actions.abort)}
     >
         <span class="stop-square" aria-hidden="true"></span>

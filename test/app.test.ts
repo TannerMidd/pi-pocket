@@ -38,7 +38,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, InboxDoc, LiveDoc, type Storage } from "@earendil-works/pi-durable";
 import type { Attachment } from "../src/server/commands.ts";
-import { TurnsDoc } from "../src/server/docs.ts";
+import { HeldDoc, InterruptsDoc, TurnsDoc } from "../src/server/docs.ts";
 import type { Interrupt } from "../src/server/resend.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
@@ -1611,7 +1611,7 @@ test("a tab does not get the session list again when it did not change", async (
     }
 });
 
-test("interrupt stops a streaming run and withdraws the queue, then Pi answers the new message", async () => {
+test("interrupt stops a streaming run and keeps the queue, then Pi answers the new message first", async () => {
     const id = await newSession();
     const started = Date.now();
 
@@ -1628,8 +1628,470 @@ test("interrupt stops a streaming run and withdraws the queue, then Pi answers t
     const texts = (await modelTexts(app, id)).join("\n");
 
     assert.match(texts, /echo: never mind/);
-    assert.doesNotMatch(texts, /queued one/);
     assert.ok(Date.now() - started < 4000, "it did not wait for the long answer");
+    await until(
+        async () => (await modelTexts(app, id)).some((text) => text.includes("echo: queued one")),
+        "the answer to the kept message",
+    );
+    const answers = (await modelTexts(app, id)).join("\n");
+
+    assert.ok(answers.indexOf("echo: never mind") < answers.indexOf("echo: queued one"));
+});
+
+test("a composer interrupt preserves a previously queued message", async () => {
+    const id = await newSession();
+    const pending = "keep this queued message after the interrupt";
+
+    await app.commands.submit(id, owner(), {
+        text: "stream a long answer",
+        requestId: "preserve-interrupt-busy",
+    });
+    await until(() => app.isBusy(id), "the run to start");
+    await app.commands.submit(id, owner(), {
+        text: pending,
+        mode: "followUp",
+        requestId: "preserve-interrupt-queued",
+    });
+    assert.equal((await app.harness.snapshot(InboxDoc, id, context))?.items.length, 1);
+
+    const { submissionId } = await app.commands.submit(id, owner(), {
+        text: "answer this now",
+        mode: "interrupt",
+        requestId: "preserve-interrupt-now",
+    });
+
+    await (await app.harness.submission(submissionId, context))!.wait(context);
+
+    const texts = (await modelTexts(app, id)).join("\n");
+    const waiting = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+
+    assert.match(texts, /echo: answer this now/);
+    assert.ok(
+        texts.includes(pending) || JSON.stringify(waiting).includes(pending),
+        "an interrupt must leave the previous message queued or delivered, not erase it",
+    );
+});
+
+test("a composer Interrupt delivers several queued messages after its answer, in order", async () => {
+    const id = await newSession();
+    const messages = ["first waiting", "second waiting", "third waiting"];
+
+    await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "co-1" });
+    await until(() => app.isBusy(id), "the run to start");
+
+    for (const [index, text] of messages.entries()) {
+        await app.commands.submit(id, owner(), { text, requestId: `co-queued-${index}` });
+    }
+
+    await app.commands.submit(id, owner(), {
+        text: "answer first",
+        mode: "interrupt",
+        requestId: "co-now",
+    });
+    await until(
+        async () =>
+            (await modelTexts(app, id)).some((text) => text.includes("echo: third waiting")),
+        "all the queued answers",
+    );
+    const texts = await modelTexts(app, id);
+    const delivered = texts.filter(
+        (text) =>
+            ["answer first", ...messages].some((message) => text.includes(message)) &&
+            !text.includes("echo:"),
+    );
+
+    assert.equal(delivered.length, 4);
+    ["answer first", ...messages].forEach((text, index) => {
+        assert.ok(delivered[index]!.includes(text));
+    });
+    assert.ok(
+        texts.findIndex((text) => text.includes("echo: answer first")) <
+            texts.findIndex((text) => text.includes(messages[0]!)),
+    );
+});
+
+test("a composer Interrupt keeps everyone's queued modes, files, images and entries", async () => {
+    const id = await newSession();
+    const guest = app.config.addUser("Alex", "guest").user;
+    const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "base64",
+    );
+    const path = join(app.workspace.uploadDirectory(id), "kept.png");
+
+    writeFileSync(path, png);
+
+    try {
+        await app.commands.configure(id, owner(), {
+            model: { provider: "faux", modelId: "faux-vision" },
+        });
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "cf-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        const picture = await app.commands.submit(id, owner(), {
+            text: "mine first with a picture",
+            attachments: [{ path, name: "kept.png", mime: "image/png", size: png.length }],
+            requestId: "cf-2",
+        });
+
+        await app.commands.submit(id, guest, {
+            text: "guest steer",
+            mode: "steer",
+            requestId: "cf-3",
+        });
+
+        await app.commands.submit(id, guest, { text: "guest last", requestId: "cf-4" });
+        // An extension may supply an input's application entry. The handoff keeps it as well as the model input.
+        await app.harness.commit(async (tx) => {
+            const item = (await tx.doc(InboxDoc, id)).items.find(
+                (item) => item.id === picture.submissionId,
+            )!;
+
+            item.entry = { kind: "test.kept", data: { kept: true } };
+        }, context);
+        const before = (await app.harness.snapshot(InboxDoc, id, context))!.items;
+
+        assert.ok(
+            JSON.stringify(before).includes(png.toString("base64")),
+            "an actual model image was queued",
+        );
+        await app.commands.submit(id, owner(), {
+            text: "stream a long answer next",
+            mode: "interrupt",
+            requestId: "cf-now",
+        });
+        const after = (await app.harness.snapshot(InboxDoc, id, context))!.items;
+
+        // A steer can already have reached the next step. The durable handoff records all three in order, while
+        // the follow-ups (including the image and custom entry) still wait behind the new streaming response.
+        const tasks = await app.harness.commit(
+            (tx) =>
+                tx.scanTasks(
+                    { conversationId: id, kind: "pocket.interrupt", order: "descending" },
+                    1,
+                ),
+            context,
+        );
+        const kept = (tasks.items[0]!.input as Interrupt).others!;
+
+        assert.deepEqual(
+            kept.map(({ requestId: _requestId, ...item }) => item),
+            before.map(({ id: _id, ...item }) => item),
+        );
+        assert.deepEqual(
+            kept.map((item) => item.mode),
+            ["followUp", "steer", "followUp"],
+        );
+        const by = await Promise.all(
+            kept.map(async (item) => {
+                const record = await app.harness.commit(
+                    (tx) => tx.submissionByRequest(id, item.requestId),
+                    context,
+                );
+
+                assert.ok(
+                    record,
+                    JSON.stringify({ missing: item.requestId, tasks: tasks.items, after }),
+                );
+
+                return app.attribution.submitter(Number(record.id));
+            }),
+        );
+
+        assert.deepEqual(by, [owner().id, guest.id, guest.id]);
+        assert.deepEqual(
+            after.filter((item) => item.mode === "followUp").map(({ id: _id, ...item }) => item),
+            before.filter((item) => item.mode === "followUp").map(({ id: _id, ...item }) => item),
+        );
+        assert.ok(JSON.stringify(after).includes(path), "the file's path stayed attached");
+        assert.ok(
+            JSON.stringify(after).includes("guest steer") ||
+                (await modelTexts(app, id)).some((text) => text.includes("guest steer")),
+        );
+    } finally {
+        await app.commands.abort(id, owner());
+        app.config.removeUser(guest.id);
+    }
+});
+
+test("a composer Interrupt does not attribute an unowned queued input to the person interrupting", async () => {
+    const id = await newSession();
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "ua-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        await (
+            await app.conversation(id)
+        ).submit({ type: "input", content: "unowned queued input", whenBusy: "followUp" }, context);
+        assert.equal((await queued(app, id))[0]!.by, undefined);
+        await app.commands.submit(id, owner(), {
+            text: "stream a long answer next",
+            mode: "interrupt",
+            requestId: "ua-now",
+        });
+        const kept = await queued(app, id);
+
+        assert.equal(kept.length, 1);
+        assert.ok(kept[0]!.text.includes("unowned queued input"));
+        assert.equal(kept[0]!.mode, "followUp");
+        assert.equal(kept[0]!.by, undefined, "the interrupting person did not become its sender");
+    } finally {
+        await app.commands.abort(id, owner());
+    }
+});
+
+test("concurrent composer Interrupt retries share the handoff and keep the queue once", async () => {
+    const id = await newSession();
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "ci-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        await app.commands.submit(id, owner(), { text: "kept once", requestId: "ci-2" });
+        const request = {
+            text: "stream a long answer again",
+            mode: "interrupt" as const,
+            requestId: "ci-now",
+        };
+        const [first, second] = await Promise.all([
+            app.commands.submit(id, owner(), request),
+            app.commands.submit(id, owner(), request),
+        ]);
+        const run = (await app.harness.snapshot(LiveDoc, id, context))!.run!.taskId;
+        const retry = await app.commands.submit(id, owner(), request);
+
+        assert.equal(second.submissionId, first.submissionId);
+        assert.equal(retry.submissionId, first.submissionId);
+        assert.equal((await app.harness.snapshot(LiveDoc, id, context))!.run!.taskId, run);
+        assert.equal((await queued(app, id)).length, 1);
+        assert.ok((await queued(app, id))[0]!.text.includes("kept once"));
+        assert.deepEqual((await app.harness.snapshot(InterruptsDoc, id, context))!.pending, {});
+    } finally {
+        await app.commands.abort(id, owner());
+    }
+});
+
+test("a composer Interrupt that could not be sent leaves no receipt, so its retry is sent", async () => {
+    const id = await newSession();
+    const harness = app.harness;
+    const abortTask = harness.abortTask;
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "cn-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        const request = {
+            text: "stream a long answer again",
+            mode: "interrupt" as const,
+            requestId: "cn-now",
+        };
+
+        harness.abortTask = () => Promise.reject(new Error("the stop failed"));
+        await assert.rejects(app.commands.submit(id, owner(), request), /could not be sent/);
+        harness.abortTask = abortTask;
+        assert.deepEqual((await harness.snapshot(InterruptsDoc, id, context))!.pending, {});
+
+        const retry = await app.commands.submit(id, owner(), request);
+
+        assert.ok((await harness.submission(retry.submissionId, context)) !== undefined);
+    } finally {
+        harness.abortTask = abortTask;
+        await app.commands.abort(id, owner());
+    }
+});
+
+test("a restart between an Interrupt's stop and send keeps the handoff and every queued message", async () => {
+    const dataDir = join(root, "composer-interrupt-restart");
+    let again = await openApp(faux, dataDir);
+    const id = await startSession(again);
+    const request = { text: "after restart", mode: "interrupt" as const, requestId: "cr-now" };
+    let stopped = false;
+
+    try {
+        await again.commands.submit(id, ownerOf(again), {
+            text: "stream a long answer",
+            requestId: "cr-1",
+        });
+        await until(() => again.isBusy(id), "the run to start");
+        await again.commands.submit(id, ownerOf(again), {
+            text: "kept follow-up",
+            requestId: "cr-2",
+        });
+        await again.commands.submit(id, ownerOf(again), {
+            text: "kept steer",
+            mode: "steer",
+            requestId: "cr-3",
+        });
+        const run = (await again.harness.snapshot(LiveDoc, id, context))!.run!.taskId;
+        const wait = again.harness.waitForTask.bind(again.harness);
+        const held = mock.method(
+            again.harness,
+            "waitForTask",
+            async (task: Parameters<typeof wait>[0], context: Parameters<typeof wait>[1]) => {
+                const result = await wait(task, context);
+
+                if (task === run) {
+                    stopped = true;
+                    // Closing cancels this invocation after the old run ended, before the first submit or requeue.
+                    await new Promise<void>((resolve) => {
+                        if (context.abortSignal?.aborted === true) {
+                            resolve();
+                        } else {
+                            context.abortSignal?.addEventListener("abort", () => resolve(), {
+                                once: true,
+                            });
+                        }
+                    });
+                    context.abortSignal?.throwIfAborted();
+                }
+
+                return result;
+            },
+        );
+        const sending = again.commands
+            .submit(id, ownerOf(again), request)
+            .catch((error: unknown) => error);
+
+        await until(() => stopped, "the captured run to stop");
+        assert.equal((await again.harness.snapshot(InboxDoc, id, context))!.items.length, 0);
+        assert.equal(
+            Object.keys((await again.harness.snapshot(InterruptsDoc, id, context))!.pending).length,
+            1,
+        );
+        await again.close();
+        await sending;
+        held.mock.restore();
+        again = await openApp(faux, dataDir);
+        const retried = await again.commands.submit(id, ownerOf(again), request);
+
+        await (await again.harness.submission(retried.submissionId, context))!.wait(context);
+        await until(
+            async () =>
+                (await modelTexts(again, id)).some(
+                    (text) => text.includes("kept follow-up") && !text.includes("echo:"),
+                ),
+            "the preserved follow-up to be delivered",
+        );
+        await until(
+            async () =>
+                (await modelTexts(again, id)).some(
+                    (text) => text.includes("kept steer") && !text.includes("echo:"),
+                ),
+            "the preserved steer to be delivered",
+        );
+        const texts = (await modelTexts(again, id)).filter((text) => !text.includes("echo:"));
+
+        assert.equal(texts.filter((text) => text.includes("after restart")).length, 1);
+        assert.equal(texts.filter((text) => text.includes("kept follow-up")).length, 1);
+        assert.equal(texts.filter((text) => text.includes("kept steer")).length, 1);
+        assert.ok(
+            texts.findIndex((text) => text.includes("after restart")) <
+                texts.findIndex((text) => text.includes("kept steer")),
+            "the Interrupt was delivered first",
+        );
+    } finally {
+        await again.close();
+    }
+});
+
+test("Stop holds queued follow-ups and steers, and sends nothing until someone sends them", async () => {
+    const id = await newSession();
+
+    await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "sc-1" });
+    await until(() => app.isBusy(id), "the run to start");
+    const followUp = await app.commands.submit(id, owner(), {
+        text: "held follow-up",
+        requestId: "sc-2",
+    });
+    const steer = await app.commands.submit(id, owner(), {
+        text: "held steer",
+        mode: "steer",
+        requestId: "sc-3",
+    });
+
+    await app.commands.abort(id, owner());
+    await until(() => !app.isBusy(id), "the run to stop");
+    assert.equal((await app.harness.snapshot(InboxDoc, id, context))!.items.length, 0);
+
+    for (const { submissionId } of [followUp, steer]) {
+        const record = await (await app.harness.submission(submissionId, context))!.status(context);
+
+        assert.equal(record.status, "unanswered");
+        assert.equal("reason" in record ? record.reason : undefined, "aborted");
+    }
+
+    const held = (await app.harness.snapshot(HeldDoc, id, context))!.items;
+
+    assert.deepEqual(
+        held.map((item) => [item.mode, item.by]),
+        [
+            ["followUp", owner().id],
+            ["steer", owner().id],
+        ],
+    );
+    assert.doesNotMatch((await modelTexts(app, id)).join("\n"), /held follow-up|held steer/);
+
+    assert.equal(await app.commands.sendHeld(id, owner()), 2);
+    await until(
+        async () => /held steer/.test((await modelTexts(app, id)).join("\n")),
+        "the held ones",
+    );
+    await until(() => !app.isBusy(id), "their answers");
+    const texts = (await modelTexts(app, id)).join("\n");
+
+    assert.ok(texts.indexOf("held follow-up") < texts.indexOf("held steer"), "in their order");
+    assert.equal(texts.match(/held follow-up/g)?.length, 2, "sent once, and echoed once");
+    assert.deepEqual((await app.harness.snapshot(HeldDoc, id, context))!.items, []);
+    assert.equal(await app.commands.sendHeld(id, owner()), 0, "nothing left to send");
+});
+
+test("a held message is withdrawn by its sender or the driver, and edited by its sender only", async () => {
+    const id = await newSession();
+    const guest = app.config.addUser("Held guest", "guest").user;
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "hd-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        await app.commands.submit(id, owner(), { text: "owner's held", requestId: "hd-2" });
+        await app.commands.submit(id, guest, { text: "guest's held", requestId: "hd-3" });
+        await app.commands.abort(id, guest);
+        await until(() => !app.isBusy(id), "the run to stop");
+        const [mine, theirs] = (await app.harness.snapshot(HeldDoc, id, context))!.items;
+
+        assert.equal(theirs!.by, guest.id);
+        await assert.rejects(app.commands.editHeld(id, owner(), theirs!.key), /Only its sender/);
+        await assert.rejects(app.commands.editHeld(id, guest, mine!.key), /Only its sender/);
+
+        const back = await app.commands.editHeld(id, guest, theirs!.key);
+
+        assert.equal(back.text, "guest's held");
+        await assert.rejects(app.commands.editHeld(id, guest, theirs!.key), /no longer held/);
+        // The owner drives: they withdraw anyone's.
+        await app.commands.dropHeld(id, owner(), mine!.key);
+        assert.deepEqual((await app.harness.snapshot(HeldDoc, id, context))!.items, []);
+        assert.doesNotMatch((await modelTexts(app, id)).join("\n"), /owner's held|guest's held/);
+    } finally {
+        app.config.removeUser(guest.id);
+    }
+});
+
+test("the held messages show in the room, with who wrote them", async () => {
+    const id = await newSession();
+    const tab = fakeTab(id, owner(), 6);
+    const held = () => (tab.field("held") ?? []) as { text: string; by?: string }[];
+
+    await app.attach(tab.client);
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "hr-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        await app.commands.submit(id, owner(), { text: "shown while held", requestId: "hr-2" });
+        await app.commands.abort(id, owner());
+        await until(() => held().length === 1, "the held message in a view");
+        assert.match(held()[0]!.text, /shown while held/);
+        assert.equal(held()[0]!.by, owner().id);
+        await app.commands.sendHeld(id, owner());
+        await until(() => held().length === 0, "an empty held list");
+    } finally {
+        app.detach(tab.client);
+    }
 });
 
 test("a queued message moves between Queue and Steer, by its sender only", async () => {

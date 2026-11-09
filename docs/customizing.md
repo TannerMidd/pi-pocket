@@ -97,7 +97,7 @@ Pi Pocket compacts a session's context with Pi's settings in `~/.pi/agent/settin
 }
 ```
 
-Other models keep the general values. An entry that Pi refuses (not a whole number, or a name with no provider) is left out, and the server log says so. PiP uses its model's values too. An edit of `settings.json` counts once Pi Pocket reads Pi's settings again: soon after the next message, or at once with Menu → **Refresh models**. See Pi's `settings.md` for each setting.
+Other models keep the general values. With no `compaction.reserveTokens` in Pi's settings, Pi Pocket gives each model its own reserve instead of Pi Durable's 16,384: room for the whole summary the model can write, up to 32,768 tokens and a quarter of its context window (since 0.28.1). Pi Durable writes a summary in at most 80% of the reserve, thinking included, so the old 13,107 tokens cut off the cumulative summary of a long session, and from then on every run failed. A model with a 200,000-token window and 32,768 output tokens now compacts from about 167,000 tokens (before, about 184,000). A `reserveTokens` of your own, general or in a model's override, wins. An entry that Pi refuses (not a whole number, or a name with no provider) is left out, and the server log says so. PiP uses its model's values too. An edit of `settings.json` counts once Pi Pocket reads Pi's settings again: soon after the next message, or at once with Menu → **Refresh models**. See Pi's `settings.md` for each setting.
 
 ## Project model defaults for new sessions
 

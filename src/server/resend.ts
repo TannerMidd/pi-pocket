@@ -11,6 +11,7 @@ import {
     type InputEntry,
     type UserInput,
 } from "@earendil-works/pi-durable";
+import { InterruptsDoc } from "./docs.ts";
 import { CONTEXT_BLOCK, FILE_BLOCK } from "./entry-format.ts";
 import { describe } from "./errors.ts";
 import { ownRequest } from "./requests.ts";
@@ -100,13 +101,14 @@ export type Requeue = {
 };
 
 /**
- * A queued message moved to Interrupt: what it says, the request id it goes out with, the run it stops, and the other
- * queued messages, in their order, which the stop would withdraw and which are queued again after it.
+ * An Interrupt: what it says, the request id it goes out with, the run it stops, and the other queued messages, in
+ * their order, which the stop would withdraw and which are queued again after it.
  */
 export type Interrupt = {
     content: UserInput;
     requestId: string;
-    /** The run that was going when the message was moved: only that run is stopped, never one that came after. */
+    entry?: InputEntry;
+    /** The run going at admission: only that run is stopped, never one that came after. */
     run?: number;
     others?: Requeue[];
 };
@@ -115,8 +117,8 @@ export type Interrupt = {
 export type StopRun = (run: number, context: Context) => Promise<void>;
 
 /**
- * Stops the run, then sends a queued message that the commit making this task took out of the queue, so a restart
- * in between cannot lose it, and puts the other messages that were queued back. Every message has a request id, so a
+ * Stops the run, then sends the message stored by the commit making this task, so a restart in between cannot lose
+ * it, and puts the other messages that were queued back. Every message has a request id, so a
  * restart at any point sends each once. Background, so the stop does not stop this task too. It stops the run it was
  * made for by its id (`stopRun`, from the app's harness), never whichever run is going: one that started after it ended
  * goes on.
@@ -128,7 +130,7 @@ export const interruptTask = (stopRun: StopRun) =>
         initial: () => ({ phase: "send" }),
         phases: {
             send: async (task, runtime, context) => {
-                const { content, requestId, run, others } = task.input;
+                const { content, requestId, entry, run, others } = task.input;
                 const id = runtime.conversationId;
                 let sent = false;
 
@@ -148,7 +150,17 @@ export const interruptTask = (stopRun: StopRun) =>
                             await stopRun(run, context);
                         }
 
-                        await conversation?.submit({ type: "input", content, requestId }, context);
+                        await runtime.commit(async (tx) => {
+                            await conversation?.submit(tx, {
+                                type: "input",
+                                content,
+                                requestId,
+                                ...(entry === undefined ? {} : { entry }),
+                            });
+                            const interrupts = await tx.doc(InterruptsDoc, id);
+
+                            delete interrupts.pending[requestId];
+                        }, context);
                     } catch (error) {
                         if (context.abortSignal?.aborted === true) {
                             throw error;
@@ -186,7 +198,12 @@ export const interruptTask = (stopRun: StopRun) =>
                     }
                 }
 
-                await runtime.commit(() => finished, context);
+                // A message that was not sent leaves no receipt: a retry of its request makes a new handoff.
+                await runtime.commit(async (tx) => {
+                    delete (await tx.doc(InterruptsDoc, id)).pending[requestId];
+
+                    return finished;
+                }, context);
             },
         },
         abort: (_task, runtime, context) =>

@@ -10095,6 +10095,7 @@ textarea.notes {
    trust) and for a watch that had to stop. */
 .driver-bar,
 .plan-bar,
+.held-bar,
 .goal-bar,
 .watch-bar,
 .trust-bar,
@@ -10115,6 +10116,7 @@ textarea.notes {
 
 .driver-bar::before,
 .plan-bar::before,
+.held-bar::before,
 .goal-bar::before,
 .watch-bar::before,
 .trust-bar::before,
@@ -10149,6 +10151,41 @@ textarea.notes {
 
 .plan-bar > .link {
     margin-left: auto;
+}
+
+/* Messages a Stop held: their words, then Show and Send; the list under them scrolls past a few rows. */
+.held-bar {
+    --tone: var(--accent);
+}
+
+.held-bar > .grow {
+    flex: 1 1 14rem;
+}
+
+.held-bar > .link {
+    margin-left: auto;
+}
+
+.held-list {
+    flex-basis: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: min(24vh, 10rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* Room for a ×'s larger touch area, which would make the list scroll for 4 px. */
+    padding-block: 4px;
+    margin-block: -4px;
+}
+
+.held-list > .queued > .link {
+    flex: none;
+}
+
+/* Words, not a button as in the queue: on the row's middle line, as its label is. */
+.held-list .queued-text {
+    align-self: center;
 }
 
 /* Trust choices keep the three existing decisions, with a selected radio and soft accent card. */
