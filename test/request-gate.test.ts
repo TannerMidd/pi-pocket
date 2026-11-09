@@ -35,8 +35,8 @@ async function fixture(t: TestContext, options: { approved?: boolean; answer?: b
             settings = { ...settings, ...change };
         },
     );
-    const a: SessionScope = { id: "session-a", folder, person: "Alice" };
-    const b: SessionScope = { id: "session-b", folder, person: "Bob" };
+    const a: SessionScope = { id: "10fc1ade-5001-4e35-8107-d1800dc80a9b", folder, person: "Alice" };
+    const b: SessionScope = { id: "82c9e98d-d891-4e29-8978-76b8dc9304b9", folder, person: "Bob" };
 
     if (options.approved !== false) {
         await approvals.approve(a, "computer");
@@ -249,7 +249,10 @@ describe("runner RequestGate", () => {
     it("refuses a target request owned by another session", async (t) => {
         const { request, b, sent } = await fixture(t);
         const running = await request({ op: "exec", command: "printf ok" });
-        const outcome = await request({ op: "kill", target: running.id }, b);
+        const outcome = await request(
+            { op: "ptyResize", target: running.id, cols: 80, rows: 24 },
+            b,
+        );
 
         refused(outcome, /The request belongs to another session/);
         assert.equal(sent.length, 1);
@@ -258,10 +261,18 @@ describe("runner RequestGate", () => {
     it("allows a target request owned by the same session", async (t) => {
         const { request } = await fixture(t);
         const running = await request({ op: "exec", command: "printf ok" });
-        const outcome = await request({ op: "kill", target: running.id });
+        const outcome = await request({ op: "ptyResize", target: running.id, cols: 80, rows: 24 });
 
         assert.equal(outcome.route, "send");
         assert.equal(outcome.json.target, running.id);
+    });
+
+    it("refuses a request pi-env does not send", async (t) => {
+        const { request, sent } = await fixture(t);
+        const outcome = await request({ op: "chmod", path: "/etc/passwd" });
+
+        refused(outcome, /does not know the request "chmod"/);
+        assert.equal(sent.length, 0);
     });
 
     it("lets only the request's own session cancel it", async (t) => {

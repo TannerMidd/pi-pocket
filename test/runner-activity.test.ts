@@ -171,14 +171,23 @@ describe("a runner's activity", () => {
 
             const link = runners.link(linked.id);
 
-            await link.confirm({ kind: "new", person: "Owner", folder: work, session: "s" });
+            await link.confirm({
+                kind: "new",
+                person: "Owner",
+                folder: work,
+                session: "7053c1d4-4f9f-48b4-81ea-5b3fccc10fb6",
+            });
 
             // The folder picker lists folders without a session: no work.
             await runners.folders(linked.id, work, false);
             await sleep(400);
             assert.equal(seen.length, 0, "a listing is not work");
 
-            const env = runners.env(linked.id, work, { id: "s", folder: work, person: "Owner" });
+            const env = runners.env(linked.id, work, {
+                id: "7053c1d4-4f9f-48b4-81ea-5b3fccc10fb6",
+                folder: work,
+                person: "Owner",
+            });
             const running = env.exec("sleep 0.6; echo done", {}, context);
 
             await until(() => last()?.working === true, "the command to show");

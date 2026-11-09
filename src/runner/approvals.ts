@@ -228,8 +228,12 @@ export class Approvals {
                     settings.totpDays = value as number | null;
                 } else if (
                     key === "downloads" &&
-                    (value === null || (typeof value === "string" && isAbsolute(value)))
+                    (value === null ||
+                        (typeof value === "string" &&
+                            isAbsolute(value) &&
+                            !broadFolder(value, homedir())))
                 ) {
+                    // Each session gets \`<folder>/<id>\`: never the home folder, a root, or a folder that holds home.
                     settings.downloads = value ?? undefined;
                 } else {
                     throw new Error(`Invalid runner setting: ${key}`);

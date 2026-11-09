@@ -67,12 +67,38 @@ type Tracked = {
 
 /** A file name a page suggested, safe to use in any folder: no separators, no `..`, nothing Windows refuses. */
 export function safeName(suggested: string): string {
-    const name = suggested
+    const cleaned = suggested
         .replace(/[\u0000-\u001f\u007f/\\<>:"|?*]/g, "_")
-        .replace(/^[\s.]+|[\s.]+$/g, "")
-        .slice(0, 200);
+        .replace(/^[\s.]+|[\s.]+$/g, "");
+    const name = fitBytes(cleaned, NAME_BYTES).replace(/[\s.]+$/g, "");
 
     return name === "" || /^\.+$/.test(name) ? "download" : name;
+}
+
+/** A file name's limit is in bytes (255 on most file systems): this leaves room for " (99)". */
+const NAME_BYTES = 200;
+
+/** `name` in at most `bytes` UTF-8 bytes, whole characters only, keeping a short extension. */
+function fitBytes(name: string, bytes: number): string {
+    const size = (text: string) => Buffer.byteLength(text, "utf8");
+
+    if (size(name) <= bytes) {
+        return name;
+    }
+
+    const dot = name.lastIndexOf(".");
+    const extension = dot > 0 && size(name.slice(dot)) <= 16 ? name.slice(dot) : "";
+    let stem = "";
+
+    for (const character of name.slice(0, name.length - extension.length)) {
+        if (size(stem + character + extension) > bytes) {
+            break;
+        }
+
+        stem += character;
+    }
+
+    return stem + extension;
 }
 
 /** `name`, then "name (2).ext", "name (3).ext", … */
@@ -242,17 +268,22 @@ async function copyInto(
 
     check(await env.createDir(folder, { recursive: true }, BACKGROUND));
 
-    let target = "";
+    let n = 1;
 
-    for (let n = 1; target === ""; n++) {
-        const candidate = `${folder}${separator}${numbered(name, n)}`;
+    const free = async (): Promise<string> => {
+        for (; ; n++) {
+            const candidate = `${folder}${separator}${numbered(name, n)}`;
 
-        if (!check(await env.exists(candidate, BACKGROUND))) {
-            target = candidate;
+            if (!check(await env.exists(candidate, BACKGROUND))) {
+                return candidate;
+            }
         }
-    }
+    };
 
-    const part = `${folder}${separator}.${numbered(name, 1)}.${randomUUID()}.part`;
+    let target = await free();
+
+    // Short, whatever the name: the name's own bytes plus this would pass the file system's limit.
+    const part = `${folder}${separator}.pi-pocket-${randomUUID()}.part`;
 
     try {
         let first = true;
@@ -268,6 +299,12 @@ async function copyInto(
 
         if (first) {
             check(await env.writeFile(part, "", BACKGROUND));
+        }
+
+        // Another program may have made a file of that name during the copy: rename replaces, so take the next free
+        // one. pi-env has no rename that refuses to replace; this leaves only the moment between check and rename.
+        if (check(await env.exists(target, BACKGROUND))) {
+            target = await free();
         }
 
         check(await env.renameFile(part, target, BACKGROUND));

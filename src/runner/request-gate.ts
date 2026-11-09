@@ -24,9 +24,43 @@ type Request = {
     stop: AbortController;
     sent: boolean;
     finish?: () => void;
+    /** For `close`: the handle it closes. pi-env's answer is `{}`, so it is known only from the request. */
+    handle?: number;
 };
 
 type Handle = { scope?: SessionScope; path: string; directory: boolean; readOnly: boolean };
+
+/**
+ * Every request pi-env 1.5.0's client sends (protocol 1). Anything else is refused, so an op a later pi-env adds, with
+ * a path in a field this gate does not read, cannot pass its folder check unseen.
+ */
+const KNOWN_OPS = new Set([
+    "hello",
+    "lstat",
+    "realpath",
+    "write",
+    "writeChunk",
+    "truncate",
+    "fsync",
+    "rename",
+    "mkdir",
+    "rm",
+    "mkdtemp",
+    "open",
+    "pread",
+    "fstat",
+    "scanLines",
+    "opendir",
+    "readdir",
+    "close",
+    "listFiles",
+    "exec",
+    "watch",
+    "pty",
+    "ptyWrite",
+    "ptyResize",
+    "ptyForeground",
+]);
 
 /** What works without a session permission: the folder picker's listing. */
 const LISTING = new Set(["hello", "lstat", "realpath", "opendir"]);
@@ -116,6 +150,18 @@ function cancelled(waiting: Waiting): void {
     }
 }
 
+/**
+ * A permission id the server makes: a UUID, or a session number for a session from before UUIDs. It names folders on
+ * this computer (`<temp>/pi-pocket-tasks/<id>`, `<downloads>/<id>`), so nothing else is taken: not `.ssh`, not `..`.
+ */
+export function permissionId(id: unknown): id is string {
+    return (
+        typeof id === "string" &&
+        (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+            /^[1-9][0-9]{0,15}$/.test(id))
+    );
+}
+
 export function sessionScope(value: unknown): SessionScope | undefined {
     if (typeof value !== "object" || value === null) {
         return undefined;
@@ -123,8 +169,7 @@ export function sessionScope(value: unknown): SessionScope | undefined {
 
     const scope = value as Record<string, unknown>;
 
-    return typeof scope.id === "string" &&
-        scope.id !== "" &&
+    return permissionId(scope.id) &&
         typeof scope.folder === "string" &&
         isAbsolute(scope.folder) &&
         typeof scope.person === "string"
@@ -282,6 +327,7 @@ export class RequestGate {
             directory: op === "opendir",
             stop: new AbortController(),
             sent: false,
+            ...(op === "close" && typeof json.handle === "number" ? { handle: json.handle } : {}),
         };
 
         delete json[SESSION_FIELD];
@@ -343,6 +389,12 @@ export class RequestGate {
         json: Record<string, unknown>,
         waiting: Waiting,
     ): Promise<void> {
+        if (!KNOWN_OPS.has(request.op)) {
+            throw new Error(
+                `The runner on ${this.#options.name()} does not know the request "${request.op}"`,
+            );
+        }
+
         const handle = typeof json.handle === "number" ? this.#handles.get(json.handle) : undefined;
         const listing =
             LISTING.has(request.op) ||
@@ -521,8 +573,8 @@ export class RequestGate {
             this.#temporary.set(request.scope.id, made);
         }
 
-        if (request.op === "close" && typeof json.handle === "number") {
-            this.#handles.delete(json.handle);
+        if (request.handle !== undefined) {
+            this.#handles.delete(request.handle);
         }
 
         request.finish?.();

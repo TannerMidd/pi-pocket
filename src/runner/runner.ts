@@ -20,6 +20,7 @@ import {
 } from "../server/pi-session-files.ts";
 import { connect as connectTcp, type LookupFunction, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
+import { privateFolders } from "./private-folders.ts";
 import { join } from "node:path";
 import { localDaemon } from "@earendil-works/pi-env";
 import WebSocket from "ws";
@@ -34,7 +35,7 @@ import {
 } from "./approvals.ts";
 import type { TotpState } from "./totp.ts";
 import { Activity, type ActivityOptions, type ActivityState } from "./activity.ts";
-import { RequestGate, sessionScope } from "./request-gate.ts";
+import { permissionId, RequestGate, sessionScope } from "./request-gate.ts";
 import { Tasks } from "./tasks.ts";
 import type {
     RunnerTools,
@@ -75,6 +76,12 @@ const ACK_MS = 1000;
 
 /** Stop reading the daemon's output while this much waits for the server, as a full pipe would (pi-env pauses). */
 const OUTBOX_LIMIT = 32 * 1024 * 1024;
+/** The background starts whose answer is kept, for a start the server sends again after a lost answer. */
+const TASK_RESULTS = 1000;
+/** A preview answer is for the person the question named, and that one Pi file. */
+const previewKey = (person: string, path: string) => `${person}\u0000${path}`;
+/** How often open browser connections are checked against their session's permission. */
+const STREAM_CHECK_MS = 60_000;
 
 /** Reconnect waits, growing from the first to the last. */
 const RETRY_MS = [1000, 2000, 5000, 10_000, 20_000, 30_000];
@@ -352,6 +359,9 @@ export class Runner {
     opened = 0;
     /** Network connections still connecting, by stream id. */
     readonly #connecting = new Map<number, Socket>();
+    /** The session of each open or opening browser connection, to close them when its permission ends. */
+    readonly #streamScopes = new Map<number, SessionScope>();
+    #streamCheck: NodeJS.Timeout | undefined;
     #done!: (error?: Error) => void;
     /** Settles when the runner stops: resolves after `stop()`, rejects with `RunnerStopped` when the server ends it. */
     readonly finished: Promise<void>;
@@ -409,7 +419,11 @@ export class Runner {
         this.#session = this.#fresh();
         this.#stateTimer = setInterval(() => void this.#state(), 2000);
         this.#stateTimer.unref();
-        this.#connect();
+        // Sessions' attachments, tasks, and downloads: private before the first session can use them.
+        void privateFolders(tmpdir()).then(
+            () => this.#connect(),
+            (error: unknown) => this.#fail((error as Error).message),
+        );
     }
 
     /** Stop: tell the server, end the link, and stop the daemon, which stops what it ran. */
@@ -422,6 +436,7 @@ export class Runner {
         clearTimeout(this.#retryTimer);
         clearTimeout(this.#ackTimer);
         clearInterval(this.#stateTimer);
+        clearInterval(this.#streamCheck);
         this.#session.gate.stop();
 
         for (const pending of this.#pending.values()) {
@@ -563,8 +578,8 @@ export class Runner {
      * folder itself.
      */
     async #shared(temporary: string, id: string): Promise<string[]> {
-        // A permission id names one folder: nothing that climbs or splits a path.
-        if (!/^[A-Za-z0-9._-]+$/.test(id) || id === "." || id === "..") {
+        // A permission id names one folder: only the ids the server makes.
+        if (!permissionId(id)) {
             return [];
         }
 
@@ -592,6 +607,15 @@ export class Runner {
 
             if (message.op === "start") {
                 this.#taskResults.set(message.id, result);
+
+                // A replayed start comes soon after its lost answer: the newest starts are enough to remember.
+                for (const old of this.#taskResults.keys()) {
+                    if (this.#taskResults.size <= TASK_RESULTS) {
+                        break;
+                    }
+
+                    this.#taskResults.delete(old);
+                }
             }
         }
 
@@ -799,6 +823,9 @@ export class Runner {
             }
 
             this.#connecting.clear();
+            this.#streamScopes.clear();
+            clearInterval(this.#streamCheck);
+            this.#streamCheck = undefined;
 
             if (this.#streams === streams) {
                 this.#streams = undefined;
@@ -885,6 +912,12 @@ export class Runner {
                     ws.send(each);
                 }
 
+                // The server had what it acknowledges here: with the backlog gone, no later ack would resume output.
+                if (session.paused && session.outbox.unacknowledged < OUTBOX_LIMIT / 2) {
+                    session.paused = false;
+                    session.daemon.resume();
+                }
+
                 this.#log(
                     `Reconnected to ${this.#options.link.server}. Running commands continue.`,
                 );
@@ -938,6 +971,8 @@ export class Runner {
                 async () => {
                     if (message.request.action === "revoke") {
                         this.#session.gate.revokeReads(message.request.session);
+                        // Its browser connections end with it.
+                        await this.#closeStreams(message.request.session);
                     }
 
                     this.#control({
@@ -1393,7 +1428,7 @@ export class Runner {
                     await this.#session.gate.allowRead(request.session, path);
                     result = { type: "pi-sessions-result", id: request.id, ok: true, path };
                 } else {
-                    const at = this.#piPreviews.get(info.path);
+                    const at = this.#piPreviews.get(previewKey(request.person, info.path));
 
                     if (at === undefined || Date.now() - at >= 10 * 60_000) {
                         const scope = {
@@ -1430,10 +1465,16 @@ export class Runner {
                                 if (allow) {
                                     const at = Date.now();
 
-                                    this.#piPreviews.set(info.path, at);
+                                    this.#piPreviews.set(previewKey(request.person, info.path), at);
                                     setTimeout(() => {
-                                        if (this.#piPreviews.get(info.path) === at) {
-                                            this.#piPreviews.delete(info.path);
+                                        if (
+                                            this.#piPreviews.get(
+                                                previewKey(request.person, info.path),
+                                            ) === at
+                                        ) {
+                                            this.#piPreviews.delete(
+                                                previewKey(request.person, info.path),
+                                            );
                                         }
                                     }, 10 * 60_000).unref();
 
@@ -1514,7 +1555,11 @@ export class Runner {
                         (await this.#approvals.valid(scope)) !== undefined));
 
             if (allowed && ws.readyState === WebSocket.OPEN && !stop.signal.aborted) {
-                this.#openStream(ws, open, this.#approvals.begin(scope.id));
+                // Not use of the session: a page can hold a connection for days, and the session still expires when
+                // idle. Its connections close when its permission ends (`#closeStreams`).
+                this.#streamScopes.set(open.id, scope);
+                this.#watchStreams();
+                this.#openStream(ws, open, () => this.#streamScopes.delete(open.id));
             } else if (ws.readyState === WebSocket.OPEN && !stop.signal.aborted) {
                 ws.send(
                     JSON.stringify({
@@ -1527,6 +1572,41 @@ export class Runner {
             }
         } finally {
             this.#questions.delete(`net-${open.id}`);
+        }
+    }
+
+    /**
+     * Close the browser connections of sessions without a valid permission now: `session`, or with `"all"` or none
+     * given, each one whose permission was revoked or expired.
+     */
+    async #closeStreams(session?: string): Promise<void> {
+        for (const [id, scope] of [...this.#streamScopes]) {
+            if (
+                session === "all" ||
+                scope.id === session ||
+                (session === undefined && (await this.#approvals.valid(scope)) === undefined)
+            ) {
+                this.#streamScopes.delete(id);
+                this.#connecting.get(id)?.destroy();
+                this.#connecting.delete(id);
+
+                if (this.#streams?.has(id) === true) {
+                    this.#streams.reset(id, "The session's permission ended");
+                }
+            }
+        }
+
+        if (this.#streamScopes.size === 0) {
+            clearInterval(this.#streamCheck);
+            this.#streamCheck = undefined;
+        }
+    }
+
+    /** While browser connections are open, check now and then that their sessions still have permission. */
+    #watchStreams(): void {
+        if (this.#streamCheck === undefined) {
+            this.#streamCheck = setInterval(() => void this.#closeStreams(), STREAM_CHECK_MS);
+            this.#streamCheck.unref();
         }
     }
 

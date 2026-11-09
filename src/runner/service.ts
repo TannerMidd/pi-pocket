@@ -169,7 +169,8 @@ export function serviceHelp(platform: NodeJS.Platform = process.platform): strin
     Stop and remove the service. Keep the saved link.`;
 }
 
-const quote = (value: string) => `"${value.replace(/(["\\])/g, "\\$1")}"`;
+// systemd expands `%` specifiers even inside quotes: `%%` is a literal `%`.
+const quote = (value: string) => `"${value.replace(/(["\\])/g, "\\$1").replace(/%/g, "%%")}"`;
 
 /**
  * The unit: this Node, this Pi Pocket, this link file, and this PATH (the tools sessions run find what this shell
@@ -392,6 +393,8 @@ export function installService(
         unit,
         serviceUnit({
             ...options,
+            // The service starts in the home folder: a relative path would name another file there.
+            file: resolve(options.file),
             // The server removed this computer or its key is wrong, or no authenticator: starting again would not help.
             noRestart: [STOPPED_BY_SERVER, SERVICE_NEEDS_TOTP],
         }),

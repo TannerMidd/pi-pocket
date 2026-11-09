@@ -169,8 +169,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
         if (first === "me" && second === undefined && method === "POST") {
             const body = await readJson<{ name?: string }>(request);
+            // No control characters: names show in other people's views and in a runner's terminal question.
             const name = String(body.name ?? "")
                 .replace(/\s+/g, " ")
+
+                .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
                 .trim()
                 .slice(0, 40);
 

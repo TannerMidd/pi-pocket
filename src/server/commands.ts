@@ -2518,6 +2518,19 @@ export class Commands {
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
         const runner = app.runnerOf(id);
+
+        // A new folder on a computer is like a new session there: only its linker and the people they chose.
+        if (
+            runner !== undefined &&
+            request.cwd !== undefined &&
+            !app.runners.mayUse(runner, user)
+        ) {
+            throw new HttpError(
+                403,
+                "Only the person who linked this computer or the people they chose can move sessions on it.",
+            );
+        }
+
         const cwd =
             request.cwd === undefined
                 ? undefined

@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical } from "./request-gate.ts";
+import { canonical, permissionId } from "./request-gate.ts";
 import { folderContains } from "./folders.ts";
 import type { TaskRequest, TaskResult } from "./protocol.ts";
 
@@ -112,10 +112,7 @@ export class Tasks {
                 throw new Error("The runner is stopping.");
             }
 
-            if (
-                !/^[A-Za-z0-9._-]+$/.test(request.permission) ||
-                [".", ".."].includes(request.permission)
-            ) {
+            if (!permissionId(request.permission)) {
                 throw new Error("Invalid background task permission id.");
             }
 

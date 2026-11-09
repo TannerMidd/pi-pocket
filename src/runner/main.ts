@@ -572,6 +572,14 @@ function settingsCommand(file: string, args: string[]): void {
         if (name === "downloads" && value !== undefined && value.trim() !== "") {
             const folder = value === "default" ? undefined : downloadsFolder(value);
 
+            if (folder !== undefined && broadFolder(folder, homedir())) {
+                fail(
+                    `${folder} holds your home folder. Choose a folder inside it, such as ${join(homedir(), "Downloads")}: each session gets its own folder there.`,
+                );
+
+                return;
+            }
+
             changeSettings(file, { downloads: folder });
             done(
                 folder === undefined
@@ -984,7 +992,23 @@ async function sessionsMenu(file: string): Promise<void> {
 // ─── Asking before sessions ─────────────────────────────────────────────
 
 /** In words: what would start, by whom, where. */
-function describe(question: SessionQuestion): string {
+/**
+ * Text from the server, safe to print: no control characters (C0, DEL, C1), so a person's name or a title cannot move
+ * the cursor or rewrite the question's "Folder:" line.
+ */
+export function printable(text: string): string {
+    return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "�");
+}
+
+function describe(given: SessionQuestion): string {
+    const question: SessionQuestion = {
+        ...given,
+        person: printable(given.person),
+        server: printable(given.server),
+        folder: printable(given.folder),
+        ...(given.title === undefined ? {} : { title: printable(given.title) }),
+    };
+
     if (question.kind === "pi-preview") {
         return `${question.person} wants to see your Pi session "${question.title}" (its last messages and model).\n  Server: ${question.server}\n  Folder: ${question.folder}`;
     }
