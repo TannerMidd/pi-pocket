@@ -2,6 +2,7 @@
 import {
     type App,
     cleanUp,
+    context,
     newSession,
     openApp,
     owner,
@@ -17,6 +18,7 @@ import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
+import { ScheduleDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -88,5 +90,43 @@ test("a schedule of an archived session is marked in the Schedules sheet", real,
             `return JSON.stringify(document.querySelector(".schedule").textContent)`,
         ),
         /session archived/,
+    );
+});
+
+test("the Schedules sheet says how often a repeat skipped its time", real, async () => {
+    const id = await newSession(app);
+    const repeat = await app.commands.schedule(id, owner(app), {
+        when: "every 20m skipping",
+        zone: "UTC",
+    });
+
+    // As the scheduler leaves it after two times whose last message still waited in the queue.
+    await app.harness.commit(async (tx) => {
+        const item = (await tx.doc(ScheduleDoc, id)).items[repeat.id]!;
+
+        item.skipped = 2;
+        item.skippedAt = Date.now();
+    }, context);
+    await page.setViewport(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${id}`);
+    await until(
+        async () =>
+            await inPage<boolean>(`
+                const { store, openSheet } = await import("/store.js");
+                if (store.state.sessions.length === 0) {
+                    return JSON.stringify(false);
+                }
+
+                openSheet({ type: "schedules" });
+                return JSON.stringify(document.querySelector('[data-part="schedule-skipped"]') !== null);
+            `),
+        "the skips",
+        20_000,
+    );
+    assert.match(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector('[data-part="schedule-skipped"]').textContent)`,
+        ),
+        /Skipped 2 times, last .*: its last message still waits in the queue/,
     );
 });

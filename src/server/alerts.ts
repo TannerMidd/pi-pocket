@@ -86,8 +86,11 @@ export class Alerts {
         });
     }
 
-    /** A run started or ended. "Pi finished" goes out once it has stayed finished for a moment. */
-    runChanged(id: ConversationId, busy: boolean): void {
+    /**
+     * A run started or ended. "Pi finished" goes out once it has stayed finished for a moment. `failure`: the run failed
+     * with this line (`app.ts` `failureText`), also when no answer of Pi's says so, as when its compaction failed.
+     */
+    runChanged(id: ConversationId, busy: boolean, failure?: string): void {
         clearTimeout(this.#doneTimers.get(id));
         this.#doneTimers.delete(id);
 
@@ -97,7 +100,7 @@ export class Alerts {
 
         const timer = setTimeout(() => {
             this.#doneTimers.delete(id);
-            void this.#pushDone(id).catch((error: unknown) =>
+            void this.#pushDone(id, failure).catch((error: unknown) =>
                 this.#app.log(`push failed: ${describe(error)}`),
             );
         }, DONE_DELAY_MS);
@@ -106,7 +109,7 @@ export class Alerts {
         this.#doneTimers.set(id, timer);
     }
 
-    async #pushDone(id: ConversationId): Promise<void> {
+    async #pushDone(id: ConversationId, failure?: string): Promise<void> {
         const app = this.#app;
 
         if (app.isBusy(id)) {
@@ -124,12 +127,18 @@ export class Alerts {
             .map((entry) => projectEntry(entry))
             .find((entry) => entry?.kind === "assistant");
 
-        if (last?.kind !== "assistant" || last.stopReason === "aborted") {
+        // A run that failed before any answer (its compaction failed, its model is gone) leaves the last answer as it
+        // was: the failure says what happened, not that answer.
+        if (
+            failure === undefined &&
+            (last?.kind !== "assistant" || last.stopReason === "aborted")
+        ) {
             return;
         }
 
         const title = await app.conversationTitle(id);
-        const failed = last.stopReason === "error";
+        const failed = failure !== undefined || last?.stopReason === "error";
+        const answer = last?.kind === "assistant" ? last : undefined;
         // PiP's answers open its panel, over whatever the app shows, rather than a session.
         const pip = app.sessionMeta(id)?.pip !== undefined;
         const message: PushMessage = {
@@ -139,7 +148,10 @@ export class Alerts {
                   ? `Pi stopped with an error · ${title}`
                   : `Pi finished · ${title}`,
             body: snippet(
-                failed ? (last.error ?? "The model request failed.") : entryText(last) || "Done.",
+                failure ??
+                    (failed
+                        ? (answer?.error ?? "The model request failed.")
+                        : (answer === undefined ? "" : entryText(answer)) || "Done."),
                 400,
             ),
             url: pip ? "/?pip=1" : `/s/${String(id)}`,
@@ -152,7 +164,8 @@ export class Alerts {
                 continue;
             }
 
-            void this.push(userId, id, "done", message);
+            // A failure waits for a person: it goes out at once, also to a phone that saves its battery.
+            void this.push(userId, id, "done", message, failed ? "high" : "normal");
         }
     }
 

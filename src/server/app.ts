@@ -1319,7 +1319,7 @@ export class PocketApp {
                 }
 
                 sessionsChanged = true;
-                this.alerts.runChanged(id, busy);
+                this.alerts.runChanged(id, busy, failure);
 
                 if (!busy) {
                     this.spend.runEnded(id);
@@ -1449,7 +1449,12 @@ export class PocketApp {
 
         const registry = () => this.#registry;
         const stream = () => this.streamSettings();
-        const compaction = compactionReader(settings, (line) => this.#log(line));
+        // Every model Pi knows, so each gets room for its summary when Pi's settings set no reserve (`compaction.ts`).
+        const compaction = compactionReader(
+            settings,
+            (line) => this.#log(line),
+            () => safe(() => this.models.getModels()) ?? [],
+        );
 
         return {
             // A phase can wait for hours without changing state; repeated process kills must not park it.
