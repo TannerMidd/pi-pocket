@@ -25,6 +25,18 @@ const DEFAULT_TIERS = ["low", "medium", "high", "xhigh", "max"].map((level) => (
 }));
 const order = (tiers) => LEVELS.flatMap(([level]) => tiers.filter((tier) => tier.level === level));
 
+/**
+ * The level Add level adds: the next one above the model's highest, so it goes below the last row; when the highest is
+ * Max, the nearest free one under it. Undefined when every level is used.
+ */
+function nextLevel(thinking) {
+    const used = new Set(thinking.map((tier) => tier.level));
+    const last = LEVELS.findIndex(([level]) => level === thinking.at(-1)?.level);
+    const free = ([level]) => !used.has(level);
+
+    return (LEVELS.slice(last + 1).find(free) ?? LEVELS.slice(0, last).findLast(free))?.[0];
+}
+
 /** What a model's Thinking button says: off, or its levels from first to last. */
 function tierSummary(thinking) {
     if (!Array.isArray(thinking) || thinking.length === 0) {
@@ -43,7 +55,7 @@ function tierSummary(thinking) {
  */
 function ThinkingLevels({ id, thinking, onChange }) {
     const used = new Set((thinking ?? []).map((tier) => tier.level));
-    const free = LEVELS.filter(([level]) => !used.has(level));
+    const next = nextLevel(thinking ?? []);
     const set = (index, patch) =>
         onChange(order(thinking.map((tier, at) => (at === index ? { ...tier, ...patch } : tier))));
 
@@ -101,15 +113,12 @@ function ThinkingLevels({ id, thinking, onChange }) {
                 <div class="row model-tier-buttons">
                     <button
                         class="button small"
-                        disabled=${free.length === 0}
+                        disabled=${next === undefined}
                         onClick=${() =>
                             onChange(
                                 order([
                                     ...thinking,
-                                    {
-                                        level: free[0][0],
-                                        value: free[0][0] === "off" ? "" : free[0][0],
-                                    },
+                                    { level: next, value: next === "off" ? "" : next },
                                 ]),
                             )}
                     >
