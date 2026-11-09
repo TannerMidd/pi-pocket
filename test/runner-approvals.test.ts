@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { connect, createServer as createNetServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -251,6 +252,125 @@ function codeNow(settings: RunnerSettings): string {
 function nextStep(settings: RunnerSettings): void {
     delete settings.totp!.lastStep;
 }
+
+describe("the link under load and after a failed save", () => {
+    it("keeps a large result whole while a refusal is sent, and goes on after a failed settings save", async () => {
+        const setup = await serve();
+        let failSaves = false;
+        const computer = await start(setup, {
+            saveSettings: (change) => {
+                if (failSaves) {
+                    throw new Error("EPERM: the settings file is in use");
+                }
+
+                Object.assign(computer.settings, change);
+            },
+        });
+        const work = folder("load");
+
+        try {
+            // About 8 MiB of output: the daemon writes it in many pieces.
+            writeFileSync(join(work, "big.txt"), "x".repeat(8 * 1024 * 1024));
+
+            const env = setup.runners.env(computer.id, work, {
+                id: "load",
+                folder: work,
+                person: "Owner",
+            });
+            const unscoped = setup.runners.env(computer.id, work);
+
+            assert.equal(
+                (await env.readTextFile(join(work, "big.txt"), context)).ok,
+                true,
+                "approved",
+            );
+
+            // Refusals from the runner while the big read streams: each lands between whole frames.
+            const big = env.readTextFile(join(work, "big.txt"), context);
+            const refusals = await Promise.all(
+                Array.from({ length: 20 }, () =>
+                    unscoped.readTextFile(join(work, "big.txt"), context),
+                ),
+            );
+            const read = await big;
+
+            assert.ok(
+                refusals.every((each) => !each.ok),
+                "no session: refused",
+            );
+            assert.equal(read.ok, true);
+            assert.equal(read.ok ? read.value.length : 0, 8 * 1024 * 1024);
+            assert.equal((await exec(env, "echo still here")).output.trim(), "still here");
+
+            // A save that fails (a request ending updates the permission) must not block later checks.
+            failSaves = true;
+            assert.equal((await exec(env, "echo during")).ok, true);
+            await sleep(50);
+            assert.equal((await exec(env, "echo after")).output.trim(), "after");
+            failSaves = false;
+        } finally {
+            await computer.runner.stop();
+            await close(setup);
+        }
+    });
+
+    it("after a drop, sends new output only once welcomed, and the command finishes", async () => {
+        const setup = await serve();
+        // Between the runner and the server: the server's bytes come 150 ms late, so after a reconnect the
+        // command's output always arrives before the welcome does.
+        const proxy = createNetServer((client) => {
+            const upstream = connect(Number(new URL(setup.address).port), "127.0.0.1");
+
+            client.pipe(upstream);
+            upstream.on("data", (bytes: Buffer) => setTimeout(() => client.write(bytes), 150));
+            upstream.on("close", () => setTimeout(() => client.destroy(), 200));
+            client.on("close", () => upstream.destroy());
+            client.on("error", () => upstream.destroy());
+            upstream.on("error", () => client.destroy());
+        });
+
+        await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+
+        const computer = await start({
+            ...setup,
+            address: `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`,
+        });
+        const work = folder("drop");
+
+        try {
+            const env = setup.runners.env(computer.id, work, {
+                id: "drop",
+                folder: work,
+                person: "Owner",
+            });
+            let output = "";
+            const running = env.exec(
+                "for i in $(seq 1 30); do echo line $i; sleep 0.05; done",
+                { onOutput: (text) => (output += text) },
+                context,
+            );
+
+            await until(() => output.includes("line 3"), "output before the drop");
+            computer.runner.drop();
+
+            const result = await running;
+
+            assert.equal(result.ok, true, result.ok ? "" : result.error.message);
+            assert.equal(output.trim().split("\n").at(-1), "line 30");
+            assert.equal(output.match(/line \d+/g)?.length, 30, "every line once, none lost");
+            assert.ok(
+                !computer.lines.some((line) =>
+                    /gap in the stream|could not resume|lost its place/.test(line),
+                ),
+                computer.lines.join("\n"),
+            );
+        } finally {
+            await computer.runner.stop();
+            proxy.close();
+            await close(setup);
+        }
+    });
+});
 
 describe("session permission on the runner", () => {
     it("refuses a request without session permission before the daemon, but lists folders", async () => {

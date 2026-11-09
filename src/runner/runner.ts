@@ -462,11 +462,12 @@ export class Runner {
             return;
         }
 
+        // Whole frames only: the gate's own replies go into the same stream, and one must never land inside
+        // a frame the daemon has only partly written.
         for (const whole of from.outputFrames.push(bytes)) {
             from.gate.output(whole);
+            this.#relay(from, whole);
         }
-
-        this.#relay(from, bytes);
     }
 
     #relay(from: Session, bytes: Buffer): void {
@@ -476,7 +477,13 @@ export class Runner {
 
         const message = from.outbox.write(bytes);
 
-        if (this.#socket?.readyState === WebSocket.OPEN && from.id !== null) {
+        // Only once the server welcomed this socket: before that, the welcome's resend sends what is kept, from
+        // where the server is. Sent earlier, after a drop, the server would see a gap and drop the link again.
+        if (
+            this.#socket?.readyState === WebSocket.OPEN &&
+            from.id !== null &&
+            this.#welcomed === this.#socket
+        ) {
             this.#socket.send(message);
         }
 
