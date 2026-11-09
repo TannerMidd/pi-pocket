@@ -132,6 +132,7 @@ import {
 } from "./room.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
+import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
@@ -452,6 +453,8 @@ export class PocketApp {
     readonly browsers: Browsers;
     /** What extension modules add to the app: their routes, browser modules, and events (`extension-web.ts`). */
     readonly webs: ExtensionWebs;
+    /** Core's own secrets: hidden in every session, and kept from Pi by Lancet Guard (`secrets.ts`). */
+    readonly secrets: CoreSecrets;
     #websTimer: NodeJS.Timeout | undefined;
     /** Whose tabs the next `hello` for browser modules goes to: those who may use any of these. */
     readonly #websFor = new Set<WebAccess>();
@@ -654,6 +657,15 @@ export class PocketApp {
             links: this.publicLinks,
             settings: (module) => this.config.extensionSettings(module),
         });
+        this.secrets = new CoreSecrets({
+            hidden: this.hidden,
+            config: this.config,
+            dataDir: this.dataDir,
+            agentDir: getAgentDir(),
+            settingsOf: (module) => this.webs.settingsOf(module),
+            log: (line) => this.#log(line),
+        });
+        this.guard.protect = (tool, args, cwd) => this.secrets.blocked(tool, args, cwd);
     }
 
     /**
@@ -855,6 +867,8 @@ export class PocketApp {
                 hooks: [
                     hook(ToolTask, {
                         afterTool: (_call, result, api) => {
+                            // A secret that changed while the tool ran is hidden from its result too.
+                            this.secrets.sync();
                             const cleaned = this.hidden.result(result, api.conversationId);
 
                             return cleaned === result ? undefined : cleaned;
@@ -1057,6 +1071,8 @@ export class PocketApp {
             void this.guard.warm().catch(() => {});
         }
 
+        // Core's secrets are hidden before any work goes on, with the settings the modules that loaded declare.
+        this.secrets.sync();
         await this.pip.tuneAll((line) => this.#log(line));
         // Work a previous process left unfinished continues now.
         this.harness.resume();
@@ -1601,6 +1617,9 @@ export class PocketApp {
 
     /** A folder's environment, with what extensions add to each command and hide from its output in this session. */
     #wrapped(id: ConversationId, cwd: string): ExecutionEnv {
+        // Each command hides core's secrets as they are now.
+        this.secrets.sync();
+
         return wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden);
     }
 
@@ -3656,6 +3675,8 @@ export class PocketApp {
                 `${module.title} is on but failed to load: ${describe(error)}`,
             );
         } finally {
+            // A module that came or went changes which of its stored values are secret.
+            this.secrets.sync();
             await this.#refreshClients();
         }
 
@@ -3827,6 +3848,8 @@ export class PocketApp {
         }
 
         this.config.setExtensionSettings(module, next);
+        // Hidden at once in every session: the new value, and the old one too.
+        this.secrets.sync();
         this.webs.settingsChanged(module);
 
         return shownSettings(fields, next, false);
