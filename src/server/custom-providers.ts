@@ -93,12 +93,10 @@ export interface CustomModelInfo {
     cost: ModelPrice | null;
 }
 
-/** What discovery found out about a model, when the endpoint says it. */
+/** A model an endpoint lists, with its context window when it is a vLLM server (`max_model_len`). */
 export interface ListedModel {
     id: string;
     contextWindow?: number;
-    images?: boolean;
-    reasoning?: boolean;
 }
 
 export interface CustomProvider {
@@ -429,9 +427,8 @@ export function idFor(name: string, taken: (id: string) => boolean): string {
 }
 
 /**
- * The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows, and what the model can
- * do where the list says it: OpenRouter's `architecture.input_modalities` and `supported_parameters`, or a
- * `capabilities` list (`vision`, `thinking`).
+ * The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows (`max_model_len`). Nothing
+ * else is read: model lists have no common way to say what a model can do or costs, so the form leaves that to the owner.
  */
 export function parseModelList(body: unknown): ListedModel[] {
     const list = (body as Json | null)?.data;
@@ -447,27 +444,11 @@ export function parseModelList(body: unknown): ListedModel[] {
         const window = entry?.max_model_len;
 
         if (typeof id === "string" && id !== "" && id.length <= MAX_ID) {
-            const said = (value: unknown): string[] =>
-                Array.isArray(value)
-                    ? value.filter((each): each is string => typeof each === "string")
-                    : [];
-            const modalities = said((entry?.architecture as Json | null)?.input_modalities);
-            const parameters = said(entry?.supported_parameters);
-            const capabilities = said(entry?.capabilities);
-            const images = modalities.includes("image") || capabilities.includes("vision");
-            const reasoning =
-                parameters.includes("reasoning") ||
-                parameters.includes("reasoning_effort") ||
-                capabilities.includes("thinking") ||
-                capabilities.includes("reasoning");
-
             models.set(id, {
                 id,
                 ...(typeof window === "number" && window >= 1 && window <= MAX_TOKENS
                     ? { contextWindow: Math.floor(window) }
                     : {}),
-                ...(images ? { images } : {}),
-                ...(reasoning ? { reasoning } : {}),
             });
         }
     }

@@ -421,27 +421,6 @@ test("Find models sends one Authorization header, also for an endpoint with auth
     assert.equal(seenAuth, "Bearer sk-bearer");
 });
 
-test("discovery reads images and thinking where the list says them", () => {
-    assert.deepEqual(
-        parseModelList({
-            data: [
-                {
-                    id: "router/vision",
-                    architecture: { input_modalities: ["text", "image"] },
-                    supported_parameters: ["tools", "reasoning"],
-                },
-                { id: "ollama/qwen", capabilities: ["completion", "vision", "thinking"] },
-                { id: "plain" },
-            ],
-        }),
-        [
-            { id: "ollama/qwen", images: true, reasoning: true },
-            { id: "plain" },
-            { id: "router/vision", images: true, reasoning: true },
-        ],
-    );
-});
-
 test("thinking levels: each of Pi's levels once, in Pi's order, each sending a value", () => {
     assert.equal(tiersOf("m", null), null);
     assert.deepEqual(
@@ -574,7 +553,7 @@ test("a model's images and thinking levels go into models.json, and Pi offers wh
     await app.customProviders.remove("caps");
 });
 
-test("discovery reads no price, and no context or output beyond vLLM's max_model_len", () => {
+test("discovery reads the model ids and vLLM's max_model_len, nothing a vendor adds", () => {
     assert.deepEqual(
         parseModelList({
             data: [
@@ -585,6 +564,9 @@ test("discovery reads no price, and no context or output beyond vLLM's max_model
                     max_completion_tokens: 64000,
                     top_provider: { context_length: 200000, max_completion_tokens: 64000 },
                     pricing: { prompt: "0.000003", completion: "0.000015" },
+                    architecture: { input_modalities: ["text", "image"] },
+                    supported_parameters: ["tools", "reasoning"],
+                    capabilities: ["completion", "vision", "thinking"],
                 },
                 { id: "vllm/qwen", max_model_len: 32768.7 },
                 { id: "broken", max_model_len: -5 },

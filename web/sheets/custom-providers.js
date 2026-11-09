@@ -282,8 +282,8 @@ export function EndpointForm({ editing, onDone, onCancel }) {
     const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "");
     const [apiKey, setApiKey] = useState("");
     const [noKey, setNoKey] = useState(editing?.key === "none");
-    // The models chosen, in order, and what the endpoint listed (with context windows, and what the
-    // model can do, when it said them).
+    // The models chosen, in order, and what the endpoint listed (with a vLLM server's context
+    // windows).
     const [chosen, setChosen] = useState((editing?.models ?? []).map((model) => model.id));
     // What each model is, by id: it sees images, its thinking levels (null: it does not think), and
     // its context window, maximum output, and price, as their fields' text.
@@ -319,19 +319,14 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             ?.scrollIntoView({ block: "start", behavior: "smooth" });
     }, []);
 
-    // A new model starts with what the endpoint said of it: images, thinking, and a vLLM context
-    // window. Its maximum output and price are typed by hand.
-    const capsOf = (id) => {
-        const said = (listed ?? []).find((model) => model.id === id);
-
-        return (
-            caps.get(id) ?? {
-                images: said?.images === true,
-                thinking: said?.reasoning === true ? DEFAULT_TIERS : null,
-                ...limitsText(said),
-            }
-        );
-    };
+    // A new model starts with no images, no thinking, no price, and Pi's default output; its
+    // context window too, unless a vLLM server listed it. The owner sets the rest.
+    const capsOf = (id) =>
+        caps.get(id) ?? {
+            images: false,
+            thinking: null,
+            ...limitsText((listed ?? []).find((model) => model.id === id)),
+        };
 
     const toggleOpen = (panel) => setOpen(open === panel ? null : panel);
 
