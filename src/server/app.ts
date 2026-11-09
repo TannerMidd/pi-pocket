@@ -1319,7 +1319,7 @@ export class PocketApp {
                 }
 
                 sessionsChanged = true;
-                this.alerts.runChanged(id, busy);
+                this.alerts.runChanged(id, busy, failure);
 
                 if (!busy) {
                     this.spend.runEnded(id);
@@ -1449,7 +1449,12 @@ export class PocketApp {
 
         const registry = () => this.#registry;
         const stream = () => this.streamSettings();
-        const compaction = compactionReader(settings, (line) => this.#log(line));
+        // Every model Pi knows, so each gets room for its summary when Pi's settings set no reserve (`compaction.ts`).
+        const compaction = compactionReader(
+            settings,
+            (line) => this.#log(line),
+            () => safe(() => this.models.getModels()) ?? [],
+        );
 
         return {
             // A phase can wait for hours without changing state; repeated process kills must not park it.
@@ -2869,6 +2874,14 @@ export class PocketApp {
 
     isBusy(id: ConversationId): boolean {
         return this.#busy.has(id);
+    }
+
+    /**
+     * Why the session's last run failed, while it is idle after it: also a failure that left no failed answer, such as
+     * a compaction that could not be written. Undefined once a run starts again.
+     */
+    runFailure(id: ConversationId): string | undefined {
+        return this.#busy.has(id) ? undefined : this.#failed.get(id);
     }
 
     /** The conversations with a run going. */

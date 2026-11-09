@@ -4074,6 +4074,15 @@ export function Transcript() {
     const { sessions, sessionsLoaded } = store.state;
     const source =
         conversation.forkedFrom && sessions.find((each) => each.id === conversation.forkedFrom.id);
+    // The last run failed with no answer that says so (its compaction failed, say): the line stays until a run starts.
+    // A failed answer after the newest message says it under itself already.
+    const said =
+        entries.findLast((entry) => entry?.kind === "assistant" || entry?.kind === "user")
+            ?.stopReason === "error";
+    const failure =
+        busy || said
+            ? undefined
+            : sessions.find((each) => each.id === conversation.id && each.failed === true)?.failure;
 
     return html`<main class="scroller" ref=${scroller} onScroll=${onScroll}>
         <div
@@ -4131,6 +4140,12 @@ export function Transcript() {
             ${approvals.map(
                 (approval) => html`<${ApprovalCard} key=${approval.id} approval=${approval} />`,
             )}
+            ${
+                failure &&
+                html`<div class="error-box run-failure" data-part="run-failure" role="alert">
+                    Run failed: ${failure}
+                </div>`
+            }
             ${
                 (busy || compacting) &&
                 html`<${LiveLine}

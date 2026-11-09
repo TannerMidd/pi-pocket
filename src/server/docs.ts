@@ -498,6 +498,10 @@ export type Schedule = {
     createdAt: number;
     /** How many times it went out: each time sends with its own request id, so a restart never sends one twice. */
     runs: number;
+    /** How many of a repeat's times sent nothing because its last message still waited in the queue (`schedules.ts`). */
+    skipped?: number;
+    /** When the newest of those was. */
+    skippedAt?: number;
     /** The durable task that sends it. */
     taskId: TaskId;
     /** Set by the same call already, when a tool call is replayed: its `taskId:callId`. */

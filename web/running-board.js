@@ -1142,6 +1142,7 @@ function Row({
                               <span class="rb-sched-rel">
                                   ${relative(schedule.next, now)}
                                   ${schedule.every ? ` · ${schedule.runs}×` : ""}
+                                  ${schedule.skipped > 0 ? ` · skipped ${schedule.skipped}×` : ""}
                               </span>
                           </button>`,
                       )
