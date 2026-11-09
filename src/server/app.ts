@@ -2876,6 +2876,14 @@ export class PocketApp {
         return this.#busy.has(id);
     }
 
+    /**
+     * Why the session's last run failed, while it is idle after it: also a failure that left no failed answer, such as
+     * a compaction that could not be written. Undefined once a run starts again.
+     */
+    runFailure(id: ConversationId): string | undefined {
+        return this.#busy.has(id) ? undefined : this.#failed.get(id);
+    }
+
     /** The conversations with a run going. */
     busyConversations(): ConversationId[] {
         return [...this.#busy];

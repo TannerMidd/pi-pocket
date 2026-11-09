@@ -3,6 +3,7 @@
 import {
     type App,
     cleanUp,
+    context,
     fakeTab,
     lastText,
     newSession,
@@ -211,6 +212,41 @@ test("a run whose compaction fails says so: on the session, and in a notificatio
 
         assert.match(message.body, /Compaction failed: Summarization hit the token limit/);
         assert.equal(message.urgency, "high");
+
+        // PiP, asked now what came of the session, says the failure, not the answer before it.
+        const pip = await app.pip.ensure(owner(app));
+
+        await app.pip.read(pip, Number(id));
+        const { now } = await app.pip.follow(pip, Number(id), undefined, "follow-failed");
+
+        assert.match(
+            now ?? "",
+            /stopped with an error: .*Compaction failed: Summarization hit the token limit/,
+        );
+        assert.doesNotMatch(now ?? "", /last answer/);
+
+        // Followed while it runs, the next run that fails the same way reports the failure to PiP when it ends.
+        const { submissionId } = await app.commands.submit(id, owner(app), {
+            text: "once more",
+            requestId: crypto.randomUUID(),
+        });
+
+        await until(() => app!.isBusy(id), "the run to start");
+        await app.pip.follow(pip, Number(id), undefined, "follow-running");
+        await (await app.harness.submission(submissionId, context))!.wait(context);
+
+        const report = async () =>
+            (await app!.transcripts.allEntries(pip, true)).findLast(
+                (entry) => entry.kind === "user" && entry.text.startsWith("[report]"),
+            );
+
+        await until(async () => (await report()) !== undefined, "PiP's report", 15_000);
+        const reported = await report();
+
+        assert.match(
+            reported?.kind === "user" ? reported.text : "",
+            /stopped with an error: .*Compaction failed: Summarization hit the token limit/,
+        );
 
         // A run that compacts clears it.
         fail = false;
