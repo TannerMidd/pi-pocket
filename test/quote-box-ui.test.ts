@@ -361,7 +361,7 @@ test(
 );
 
 test(
-    "one quote is one block, its empty lines in it, with no stray line under it",
+    "one quote is one block, its empty lines in it, its mark shown once, with no stray line under it",
     real,
     async () => {
         await reply("first line\n\nthird line");
@@ -370,6 +370,12 @@ test(
         assert.equal(
             await inPage(`document.querySelectorAll('.quote-block .quote-line').length`),
             3,
+        );
+        assert.deepEqual(
+            await inPage(
+                `[...document.querySelectorAll('.quote-line-mark')].map((mark) => getComputedStyle(mark).color === 'rgba(0, 0, 0, 0)')`,
+            ),
+            [false, true, true],
         );
     },
 );

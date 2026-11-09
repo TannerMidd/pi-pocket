@@ -21055,6 +21055,12 @@ pre.gallery-code {
     text-decoration-color: var(--err-line);
 }
 
+/* One mark for a quote: Markdown needs a "> " on each of its lines, the eye only the first. The others keep their room,
+   so the words stay where the box's caret has them. */
+.quote-line + .quote-line .quote-line-mark {
+    color: transparent;
+}
+
 .quote-remove {
     position: absolute;
     right: 6px;
