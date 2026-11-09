@@ -307,14 +307,14 @@ const SEND_MODES = [
     [
         "interrupt",
         "Interrupt",
-        "Stops the run right now (also its tool call) and clears the queue, then sends it",
+        "Stops the run right now (also its tool call), then sends it. The queued messages stay queued",
     ],
 ];
 
 /** What a send mode does, for a queued message's buttons. */
 const modeHint = (mode) => SEND_MODES.find(([value]) => value === mode)[2];
 
-/** What Interrupt does to a message waiting in the queue: the others there stay, unlike the composer's Interrupt. */
+/** What Interrupt does to a message waiting in the queue: the others there stay queued. */
 const QUEUED_INTERRUPT_HINT =
     "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued";
 
