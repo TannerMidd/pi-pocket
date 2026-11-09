@@ -326,3 +326,46 @@ test("a theme installs into the themes folder only as pinned, and only when its 
     await open();
     assert.deepEqual(app.config.themeDefault, { look: "paper", colors: "desktop" });
 });
+
+test("a private index and its files are read with the owner's GitHub token, and none once its source stops", async () => {
+    const commit = "d".repeat(40);
+    const seen: { url: string; authorization: string | null }[] = [];
+    const network = app.gallery.fetch;
+
+    app.gallery.fetch = async (url, init) => {
+        seen.push({ url, authorization: new Headers(init.headers).get("authorization") });
+
+        return network(url, init);
+    };
+
+    const stop = app.gallery.useGithubToken(async () => "ghp_private");
+
+    try {
+        await index(entry("private", { "private.ts": clock }, commit));
+        await app.gallery.install("private", await pin("private"));
+        assert.ok(seen.length >= 2);
+        assert.ok(seen.every((each) => each.authorization === "Bearer ghp_private"));
+
+        // Another source took over since: a stop of the first leaves it.
+        const second = app.gallery.useGithubToken(async () => "ghp_second");
+
+        stop();
+        seen.length = 0;
+        await app.gallery.listing(true);
+        assert.deepEqual(
+            seen.map((each) => each.authorization),
+            ["Bearer ghp_second"],
+        );
+
+        second();
+        seen.length = 0;
+        await app.gallery.listing(true);
+        assert.deepEqual(
+            seen.map((each) => each.authorization),
+            [null],
+        );
+    } finally {
+        stop();
+        app.gallery.fetch = network;
+    }
+});

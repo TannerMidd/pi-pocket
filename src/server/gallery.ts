@@ -206,6 +206,8 @@ const revokedIn = (read: Read, provenance: Provenance | ThemeProvenance) =>
 export class Gallery {
     /** How the gallery reaches other sites: tests and local copies stand in for it. */
     fetch: Fetcher = (url, init) => fetch(url, init);
+    /** Where the owner's GitHub token comes from, for a private index and repositories (`useGithubToken`). */
+    #githubToken: () => Promise<string | undefined> = async () => undefined;
     readonly #app: PocketApp;
     #settings: { index: string } | undefined;
     #read: Read | undefined;
@@ -266,6 +268,21 @@ export class Gallery {
         }
 
         return this.#settings;
+    }
+
+    /**
+     * Read GitHub with the token that `source` gives (the gallery module's setting, or the GitHub CLI's), so a private
+     * index and private repositories can be read. It goes only to GitHub's hosts (`gallery/fetch.ts`). Returns how to
+     * stop; pass that to `web.onDispose`. A stop after another module took over leaves that one's source.
+     */
+    useGithubToken(source: () => Promise<string | undefined>): () => void {
+        this.#githubToken = source;
+
+        return () => {
+            if (this.#githubToken === source) {
+                this.#githubToken = async () => undefined;
+            }
+        };
     }
 
     async settings(): Promise<{ index: string; default: string }> {
@@ -341,7 +358,10 @@ export class Gallery {
 
     async #fetchIndex(address: string): Promise<Read> {
         const url = indexUrl(address);
-        const bytes = await download(this.fetch, url, LIMITS.index, "The index");
+        const token = await this.#githubToken();
+        const bytes = await download(this.fetch, url, LIMITS.index, "The index", {
+            ...(token ? { token } : {}),
+        });
         const text = textOf(bytes);
         let index: Index;
 
@@ -420,6 +440,7 @@ export class Gallery {
         signal?: AbortSignal,
     ): Promise<Fetched[]> {
         const files: Fetched[] = [];
+        const token = await this.#githubToken();
 
         for (const file of entry.files) {
             const mismatch = () =>
@@ -434,6 +455,7 @@ export class Gallery {
                 file.name,
                 {
                     ...(signal === undefined ? {} : { signal }),
+                    ...(token ? { token } : {}),
                     large: mismatch,
                     sameHost: true,
                 },
