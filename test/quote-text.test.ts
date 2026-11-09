@@ -21,6 +21,7 @@ const {
     withQuote,
     withQuotes,
     withoutQuote,
+    changedRange,
 } = (await import(new URL("../web/quote-text.js", import.meta.url).href)) as {
     QUOTE_MAX: number;
     insertQuote: (
@@ -44,6 +45,7 @@ const {
     withQuote: (passage: string | null, reply: string) => string;
     withQuotes: (passages: string[], reply: string) => string;
     withoutQuote: (text: string, block: Block) => { text: string; at: number };
+    changedRange: (before: string, after: string) => { from: number; to: number; insert: string };
 };
 
 /** `text` with "|" where the caret is: the text without it, and the caret. */
@@ -105,10 +107,11 @@ test("Reply stacks quotes in the box: each after what is there, the caret on the
     assert.equal(second.text, "> one\n>\n> two\n\nmy answer\n\n> three\n\n");
     assert.equal(second.at, second.text.length);
     // A caret inside a quote puts the new one after it, never inside it; the words after it stay apart.
-    assert.equal(
-        insertQuote(second.text, 2, "four").text.startsWith("> one\n>\n> two\n\n> four\n\n\n\nmy"),
-        true,
-    );
+    assert.deepEqual(insertQuote(second.text, 2, "four"), {
+        text: "> one\n>\n> two\n\n> four\n\n\n\nmy answer\n\n> three\n\n",
+        at: 23,
+        block: "> four",
+    });
 });
 
 test("a message shows each quote where it was written, and one in a code fence is code", () => {
@@ -170,4 +173,69 @@ test("what does not touch a quote happens as usual, and a whole quote selected c
     );
     // A quote typed by hand is not a piece: it is plain text.
     assert.equal(quoteStep(text, [], 7, 7, "insertText", "x", null), null);
+});
+
+test("a selection next to, across, or around a quote: only one that leaves it whole goes", () => {
+    const text = "hi\n\n> one\n\nok";
+    const blocks = quoteBlocks(text);
+    const at = (start: number, end: number, type: string, data: string | null = null) =>
+        quoteStep(text, blocks, start, end, type, data, null);
+
+    // Across its edge: its words would change.
+    assert.deepEqual(at(0, 6, "deleteByCut"), { stop: true });
+    assert.deepEqual(at(6, 13, "insertText", "x"), { stop: true, under: blocks[0] });
+    assert.deepEqual(at(7, 9, "insertReplacementText", "two"), { stop: true, under: blocks[0] });
+    // A paste or a drop that does not say what it writes, into it or not.
+    assert.deepEqual(at(6, 6, "insertFromDrop"), { stop: true, under: blocks[0] });
+    assert.equal(at(12, 12, "insertFromPaste"), null);
+    // Around it, whole: it goes.
+    assert.equal(at(2, 11, "deleteByCut"), null);
+});
+
+test("a word or line deleted next to a quote never joins a line to it", () => {
+    const step = (marked: string, type: string) => {
+        const [text, at] = caret(marked);
+
+        return quoteStep(text, quoteBlocks(text), at, at, type, null, null);
+    };
+
+    // The words under it, to the blank line: what is left stays apart from it.
+    assert.equal(step("> one\n\nhi there|", "deleteWordBackward"), null);
+    assert.equal(step("> one\n\nhi there|", "deleteSoftLineBackward"), null);
+    assert.equal(step("> one\n\nhi there|", "deleteHardLineBackward"), null);
+    // The blank line itself: words would join it.
+    assert.deepEqual(step("> one\n\n|hi", "deleteWordBackward"), { stop: true });
+    assert.deepEqual(step("> one\n\n|hi", "deleteSoftLineBackward"), { stop: true });
+    assert.deepEqual(step("> one|\n\nhi", "deleteWordForward"), { stop: true });
+    assert.deepEqual(step("> one|\n\nhi", "deleteSoftLineForward"), { stop: true });
+    // Above it: a quote may follow words on the line before; joining them to its line may not.
+    assert.equal(step("hi there|\n\n> one", "deleteWordBackward"), null);
+    assert.deepEqual(step("hi|\n> one", "deleteWordForward"), { stop: true });
+});
+
+test("an edit as one replacement: where two texts differ", () => {
+    assert.deepEqual(changedRange("> one\n\nyes", "> one\n\nxyes"), {
+        from: 7,
+        to: 7,
+        insert: "x",
+    });
+    assert.deepEqual(changedRange("a\n\n> q\n\nb", "a\n\nb"), { from: 3, to: 8, insert: "" });
+    assert.deepEqual(changedRange("same", "same"), { from: 4, to: 4, insert: "" });
+});
+
+test("pieces: as many of a text as Reply put there, the first ones", async () => {
+    const { piecesIn, prunePieces } = (await import(
+        new URL("../web/quote-text.js", import.meta.url).href
+    )) as {
+        piecesIn: (text: string, pieces: string[]) => Block[];
+        prunePieces: (text: string, pieces: string[]) => string[];
+    };
+    const text = "> same\n\nmine\n\n> same\n\n> other";
+
+    assert.deepEqual(
+        piecesIn(text, ["> same"]).map((block) => block.start),
+        [0],
+    );
+    assert.equal(piecesIn(text, ["> same", "> same"]).length, 2);
+    assert.deepEqual(prunePieces("> same", ["> same", "> same", "> gone"]), ["> same"]);
 });

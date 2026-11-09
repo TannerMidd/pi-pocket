@@ -11,8 +11,17 @@ import {
     planAvailable,
     suggestCommands,
 } from "./commands.js";
-import { piecesIn, prunePieces, QuoteLayer } from "./quote-box.js";
-import { insertQuote, lineUnder, quoteStep, withoutQuote, withQuotes } from "./quote-text.js";
+import { QuoteLayer } from "./quote-box.js";
+import {
+    changedRange,
+    insertQuote,
+    lineUnder,
+    piecesIn,
+    prunePieces,
+    quoteStep,
+    withoutQuote,
+    withQuotes,
+} from "./quote-text.js";
 import { loadFiles, mentionAt, mentionText, suggestFiles } from "./files.js";
 import { remember, searchHistory, sentHistory } from "./history.js";
 import { personStorage } from "./person-storage.js";
@@ -104,45 +113,33 @@ function loadPastes(id) {
     }
 }
 
-const piecesKey = (id) => `quotes.${id ?? "home"}`;
+/** A list of strings kept in the person's storage under `key`: none when it is missing or not one. */
+function loadList(key) {
+    try {
+        const list = JSON.parse(personStorage.get(key) ?? "[]");
+
+        return Array.isArray(list) ? list.filter((each) => typeof each === "string") : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveList(key, list) {
+    personStorage.set(key, list.length === 0 ? null : JSON.stringify(list));
+}
 
 /**
  * Each conversation's quotes that Reply put in its box, as written: kept with its draft, so that a reload still draws
  * them and keeps each one a piece. A quote typed by hand is plain text.
  */
-function loadPieces(id) {
-    try {
-        const list = JSON.parse(personStorage.get(piecesKey(id)) ?? "[]");
-
-        return Array.isArray(list) ? list.filter((each) => typeof each === "string") : [];
-    } catch {
-        return [];
-    }
-}
-
-function savePieces(id, pieces) {
-    personStorage.set(piecesKey(id), pieces.length === 0 ? null : JSON.stringify(pieces));
-}
-
-const stripsKey = (id) => `quoteStrips.${id ?? "home"}`;
-
+const loadPieces = (id) => loadList(`quotes.${id ?? "home"}`);
+const savePieces = (id, pieces) => saveList(`quotes.${id ?? "home"}`, pieces);
 /**
  * Each conversation's passages that Reply put in strips over its box (Appearance → Quotes in the message box →
  * Separate), in order: kept with its draft, so that a reload keeps them. They go first in the next message.
  */
-function loadStrips(id) {
-    try {
-        const list = JSON.parse(personStorage.get(stripsKey(id)) ?? "[]");
-
-        return Array.isArray(list) ? list.filter((each) => typeof each === "string") : [];
-    } catch {
-        return [];
-    }
-}
-
-function saveStrips(id, strips) {
-    personStorage.set(stripsKey(id), strips.length === 0 ? null : JSON.stringify(strips));
-}
+const loadStrips = (id) => loadList(`quoteStrips.${id ?? "home"}`);
+const saveStrips = (id, strips) => saveList(`quoteStrips.${id ?? "home"}`, strips);
 
 const attachedKey = (id) => `attached.${id ?? "home"}`;
 let attachmentsStopped = false;
@@ -636,6 +633,8 @@ export function Composer() {
     const [searching, setSearching] = useState(false);
     const [inlineFiles, setInlineFiles] = useState(() => localStorage.getItem(INLINE_KEY) === "1");
     const box = useRef(null);
+    // While the box makes an edit of its own (`rewrite`), its `beforeinput` is not checked again.
+    const rewriting = useRef(false);
     // The box as it comes and goes (taking the wheel shows it, with the draft in it): fitted to its text at once, and
     // again when its width changes, which can come after the window's resize (the Peek column becoming a strip).
     const [setBox] = useState(() => {
@@ -831,29 +830,38 @@ export function Composer() {
     // A passage Reply quoted goes into the box after what is there, as a piece, with the caret on the line under it; or,
     // in Separate, into a strip over the box, after the others. It waits while a send is on its way, and under PiP's
     // board, where this box does not show.
-    const replying = store.state.replyQuote;
+    const replying = store.state.replyQuotes;
 
     useEffect(() => {
-        if (!replying || sending) {
+        if (replying.length === 0 || sending) {
             return;
         }
 
-        if (quoteStyle === "separate") {
-            const next = [...loadStrips(conversationId), replying.text];
+        replying.forEach(dropQuote);
 
-            dropQuote(replying);
+        if (quoteStyle === "separate") {
+            const next = [...loadStrips(conversationId), ...replying.map((each) => each.text)];
+
             setStrips(next);
             saveStrips(conversationId, next);
 
             return;
         }
 
-        const words = drafts.get(conversationId);
-        const quoted = insertQuote(words, words.length, replying.text);
+        let words = drafts.get(conversationId);
+        let at = words.length;
+        const added = [];
 
-        dropQuote(replying);
-        recall(quoted.text, quoted.at);
-        keepPieces([...pieces, quoted.block], conversationId, quoted.text);
+        for (const each of replying) {
+            const quoted = insertQuote(words, words.length, each.text);
+
+            words = quoted.text;
+            at = quoted.at;
+            added.push(quoted.block);
+        }
+
+        recall(words, at);
+        keepPieces([...loadPieces(conversationId), ...added], conversationId, words);
         requestAnimationFrame(() => {
             const element = box.current;
 
@@ -1026,11 +1034,8 @@ export function Composer() {
         if (command.args || command.template) {
             edit(`/${command.name} `);
             focusEnd();
-        } else if (strips.length > 0) {
-            notify(
-                "info",
-                "A quote cannot go with a command. Remove the quotes over the box to run it.",
-            );
+        } else if (strips.length > 0 || quoted.length > 0) {
+            notify("info", "A quote cannot go with a command. Remove the quotes to run it.");
         } else {
             runCommand({ command, arg: "" }, `/${command.name}`);
         }
@@ -1106,15 +1111,13 @@ export function Composer() {
             return;
         }
 
-        // A command runs or expands only when it starts the message: quote strips in front would stop that.
+        // A command runs or expands only as it is: a quote with it, in strips that go first or in its own text, would
+        // stop it or become part of it (a "> …" line is a redirection to a shell).
         if (
-            strips.length > 0 &&
+            (strips.length > 0 || quoted.length > 0) &&
             (parsed || shell || template || text.trimStart().startsWith("/skill:"))
         ) {
-            return notify(
-                "info",
-                "A quote cannot go with a command. Remove the quotes over the box to run it.",
-            );
+            return notify("info", "A quote cannot go with a command. Remove the quotes to run it.");
         }
 
         // What shows is what goes: words still coming would land in the emptied box.
@@ -1474,30 +1477,99 @@ export function Composer() {
         const label = `[Pasted text #${n} · ${lines > 1 ? `${lines} lines` : `${value.length} characters`}]`;
         const next = { ...pastes, [n]: value };
 
+        const element = event.currentTarget;
+        // Like any edit, it does not write inside a quote: it goes on the line under it.
+        const place = writeAt(text, element.selectionStart, element.selectionEnd, label);
+
+        if (!place) {
+            return;
+        }
+
         setPastes(next);
         savePastes(conversationId, next);
-        const element = event.currentTarget;
-        const at = element.selectionStart + label.length;
-
-        recall(
-            `${text.slice(0, element.selectionStart)}${label}${text.slice(element.selectionEnd)}`,
-            at,
+        rewrite(
+            `${place.text.slice(0, place.start)}${label}${place.text.slice(place.end)}`,
+            place.start + label.length,
         );
     };
 
     // The quotes of the box that are pieces: drawn under its text, and each kept whole.
     const quoted = piecesIn(text, pieces);
 
+    /**
+     * Change the box's text to `value`, the caret at `at`, as an edit of its own: through the browser's editing while the
+     * box has the focus, so that undo takes it back like typing; set directly otherwise. Our own edit skips `quoteStep`.
+     */
+    const rewrite = (value, at) => {
+        const element = box.current;
+
+        if (element && document.activeElement === element) {
+            const change = changedRange(element.value, value);
+
+            element.setSelectionRange(change.from, change.to);
+            rewriting.current = true;
+
+            try {
+                const done =
+                    change.insert === ""
+                        ? change.from === change.to || document.execCommand("delete")
+                        : document.execCommand("insertText", false, change.insert);
+
+                if (done && element.value === value) {
+                    element.setSelectionRange(at, at);
+                    // Its input event may come only after this edit's own ends: the box's state follows now, so a
+                    // render meanwhile does not put the old text back.
+                    edit(value, at);
+
+                    return;
+                }
+            } finally {
+                rewriting.current = false;
+            }
+        }
+
+        recall(value, at);
+    };
+
     /** Take quote `block` out of the box, with the blank lines after it. */
     const removeQuote = (block) => {
         const without = withoutQuote(text, block);
 
-        recall(without.text, without.at);
+        rewrite(without.text, without.at);
         keepPieces(pieces, conversationId, without.text);
+    };
+
+    /** Where text written over `start`..`end` of `value` goes so that no quote changes: there, under a quote, or nowhere. */
+    const writeAt = (value, start, end, written) => {
+        const step = quoteStep(
+            value,
+            piecesIn(value, pieces),
+            start,
+            end,
+            "insertFromPaste",
+            written,
+            null,
+        );
+
+        if (!step) {
+            return { text: value, start, end };
+        }
+
+        if (!step.under) {
+            return null;
+        }
+
+        const under = lineUnder(value, step.under);
+
+        return { text: under.text, start: under.at, end: under.at };
     };
 
     /** An edit about to change the box (`beforeinput`): what it does to a quote, as `quoteStep` says. */
     const onBeforeInput = (event) => {
+        if (rewriting.current) {
+            return;
+        }
+
         const element = event.currentTarget;
         const value = element.value;
         const step = quoteStep(
@@ -1521,15 +1593,18 @@ export function Composer() {
         } else if (step.remove) {
             removeQuote(step.remove);
         } else if (step.open !== undefined) {
-            recall(`${value.slice(0, step.open)}\n${value.slice(step.open)}`, step.open);
+            rewrite(`${value.slice(0, step.open)}\n${value.slice(step.open)}`, step.open);
         } else if (step.under) {
-            // What was typed into the quote goes on the line under it instead, so nothing typed is lost.
+            // What was written into the quote (typed, pasted, dropped, a keyboard's correction) goes on the line under it
+            // instead, so nothing is lost. A new line there only moves the caret under it.
             const under = lineUnder(value, step.under);
-            const typed = event.inputType === "insertText" ? (event.data ?? "") : "";
+            const written = /^insert(LineBreak|Paragraph)$/.test(event.inputType)
+                ? ""
+                : (event.data ?? event.dataTransfer?.getData("text/plain") ?? "");
 
-            recall(
-                `${under.text.slice(0, under.at)}${typed}${under.text.slice(under.at)}`,
-                under.at + typed.length,
+            rewrite(
+                `${under.text.slice(0, under.at)}${written}${under.text.slice(under.at)}`,
+                under.at + written.length,
             );
         }
     };
@@ -1854,7 +1929,7 @@ export function Composer() {
                 }
                 <div
                     class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""} ${sending ? "sending" : ""} ${quoted.length > 0 ? "quoting" : ""}`}
-                    data-quote-style=${quoteStyle === "separate" ? "fade" : quoteStyle}
+                    data-quote-style=${quoteStyle === "separate" ? undefined : quoteStyle}
                     data-part="message-box"
                     aria-busy=${sending ? "true" : undefined}
                     onClick=${(event) => {

@@ -151,7 +151,21 @@ function deleted(text, at, type) {
         return [at, Math.min(text.length, at + 1)];
     }
 
-    // A word or a line: its spaces and line breaks too, then the word.
+    // A line: to its start or end, or the line break there when the caret is already at it.
+    if (type.includes("Line")) {
+        if (backward) {
+            const start = text.lastIndexOf("\n", at - 1) + 1;
+
+            return [start === at ? Math.max(0, at - 1) : start, at];
+        }
+
+        const end = text.indexOf("\n", at);
+        const stop = end === -1 ? text.length : end;
+
+        return [at, stop === at ? Math.min(text.length, at + 1) : stop];
+    }
+
+    // A word: its spaces and line breaks too, then the word.
     if (backward) {
         const reach = /\S*\s*$/.exec(text.slice(0, at))[0].length;
 
@@ -243,13 +257,81 @@ export function quoteStep(text, blocks, start, end, type, data, marked) {
     }
 
     if (type.startsWith("delete")) {
-        const [from, to] = start === end ? deleted(text, start, type) : [start, end];
-        const next = `${text.slice(0, from)}${text.slice(to)}`;
+        if (start !== end) {
+            const next = `${text.slice(0, start)}${text.slice(end)}`;
 
-        return keepsQuotes(text, blocks, next, from, to) ? null : { stop: true };
+            return keepsQuotes(text, blocks, next, start, end) ? null : { stop: true };
+        }
+
+        // How far a word or line delete reaches is the browser's to say: every reach up to the guess must be safe.
+        const [from, to] = deleted(text, start, type);
+        const backward = type.includes("Backward");
+
+        for (let reach = 1; reach <= to - from; reach += 1) {
+            const [a, b] = backward ? [to - reach, to] : [from, from + reach];
+
+            if (!keepsQuotes(text, blocks, `${text.slice(0, a)}${text.slice(b)}`, a, b)) {
+                return { stop: true };
+            }
+        }
+
+        return null;
     }
 
     return null;
+}
+
+/**
+ * The quotes of `text` that are pieces (Reply put them there), as `quoteBlocks` gives them: as many of each text as
+ * `pieces` holds, the first ones, so a quote typed by hand with the same words stays plain text.
+ */
+export function piecesIn(text, pieces) {
+    if (pieces.length === 0) {
+        return [];
+    }
+
+    const left = new Map();
+
+    for (const piece of pieces) {
+        left.set(piece, (left.get(piece) ?? 0) + 1);
+    }
+
+    return quoteBlocks(text).filter((block) => {
+        const n = left.get(block.text) ?? 0;
+
+        left.set(block.text, n - 1);
+
+        return n > 0;
+    });
+}
+
+/** `pieces` without those `text` no longer has. */
+export function prunePieces(text, pieces) {
+    return piecesIn(text, pieces).map((block) => block.text);
+}
+
+/**
+ * Where `before` and `after` differ, as one replacement: `from`..`to` of `before` becomes `insert`. An edit made this way
+ * goes through the browser's own editing, which keeps it in the box's undo history.
+ */
+export function changedRange(before, after) {
+    let from = 0;
+
+    while (from < before.length && from < after.length && before[from] === after[from]) {
+        from += 1;
+    }
+
+    let tail = 0;
+
+    while (
+        tail < before.length - from &&
+        tail < after.length - from &&
+        before[before.length - 1 - tail] === after[after.length - 1 - tail]
+    ) {
+        tail += 1;
+    }
+
+    return { from, to: before.length - tail, insert: after.slice(from, after.length - tail) };
 }
 
 /** `text` without the quote `block` and the blank lines after it; the caret goes where it was. */

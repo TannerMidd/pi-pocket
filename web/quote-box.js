@@ -2,7 +2,6 @@
 // clear while there is one, with a × over its first line. The box stays a plain textarea, so typing, dictation, a
 // keyboard's suggestions, and undo work as before; what goes to Pi is the text as written, quotes as Markdown.
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
-import { quoteBlocks } from "./quote-text.js";
 import { html, Icon } from "./ui.js";
 
 /**
@@ -45,20 +44,6 @@ const COPIED = [
     "direction",
 ];
 
-/** The quotes of `text` that are pieces (Reply put them there), as `quoteBlocks` gives them. */
-export function piecesIn(text, pieces) {
-    return pieces.length === 0
-        ? []
-        : quoteBlocks(text).filter((block) => pieces.includes(block.text));
-}
-
-/** `pieces` without those `text` no longer has, each once. */
-export function prunePieces(text, pieces) {
-    const there = new Set(piecesIn(text, pieces).map((block) => block.text));
-
-    return [...new Set(pieces)].filter((piece) => there.has(piece));
-}
-
 /** `text`'s lines as the drawing shows them: a quote's lines with its marks, the rest as they are. */
 function Lines({ text, blocks, marked }) {
     let at = 0;
@@ -95,7 +80,10 @@ export function QuoteLayer({ box, text, blocks, marked, locked, onRemove }) {
     const under = useRef(null);
     const over = useRef(null);
     const [tops, setTops] = useState([]);
+    const measured = useRef(() => {});
 
+    // Measured again after each render too: a file row or a line over the box moves it without resizing it.
+    useLayoutEffect(() => measured.current());
     useLayoutEffect(() => {
         const measure = () => {
             const element = box.current;
@@ -135,19 +123,24 @@ export function QuoteLayer({ box, text, blocks, marked, locked, onRemove }) {
         const element = box.current;
         const sized = new ResizeObserver(measure);
 
+        measured.current = measure;
         measure();
         sized.observe(element);
+        // The message box around it, which grows when something comes in over the text.
+        sized.observe(element.closest(".composer") ?? element);
         element.addEventListener("scroll", scrolled);
         document.addEventListener("pocket:theme", measure);
         document.fonts?.addEventListener("loadingdone", measure);
 
         return () => {
+            measured.current = () => {};
+
             sized.disconnect();
             element.removeEventListener("scroll", scrolled);
             document.removeEventListener("pocket:theme", measure);
             document.fonts?.removeEventListener("loadingdone", measure);
         };
-    }, [text, marked]);
+    }, []);
 
     return html`<div class="quote-box-drawing" ref=${under} aria-hidden="true">
             <div class="quote-box-scroll">

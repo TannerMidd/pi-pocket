@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, beforeEach, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
@@ -75,6 +75,19 @@ before(async () => {
         `document.querySelector('${BOX}') !== null && ${STORE}.store.state.streamId`,
         "the box",
     );
+});
+
+// Each test starts from an empty box in Fade, whatever the one before left.
+beforeEach(async () => {
+    if (real.skip) {
+        return;
+    }
+
+    await page.evaluate(`(await import('/theme.js')).setPrefs({ quoteStyle: 'fade' });
+        const { personStorage } = await import('/person-storage.js');
+        for (const key of ['draft', 'quotes', 'quoteStrips']) personStorage.set(key + '.${session}', null);`);
+    await page.navigate(`${base}/s/${session}`);
+    await see(`document.querySelector('${BOX}')?.value === ''`, "an empty box");
 });
 
 after(async () => {
@@ -176,7 +189,6 @@ test(
                 ),
             "Pi got the strips first",
         );
-        await page.evaluate(`(await import('/theme.js')).setPrefs({ quoteStyle: 'fade' })`);
     },
 );
 
@@ -192,4 +204,102 @@ test("its × removes one quote; one typed by hand is plain text", real, async ()
     await page.type(undefined, "z", { append: true });
     assert.equal(await boxText(), "> mzine\n\nokkeep");
     assert.equal(await inPage(`document.querySelector('.quote-count')`), null);
+});
+
+test("a quote does not go with a command: a shell command stays as typed", real, async () => {
+    await caretAt(0);
+    await page.type(undefined, "!printf safe", { append: true });
+    await reply("marker");
+    await page.press("Enter");
+    await see(
+        `[...document.querySelectorAll('.toast, [role=status]')].some((each) => each.textContent.includes('A quote cannot go with a command'))`,
+        "the notice",
+    );
+    assert.equal(await boxText(), "!printf safe\n\n> marker\n\n", "nothing went");
+    assert.equal(await inPage(`${STORE}.store.state.pendingShells.length`), 0);
+});
+
+test("the drawing follows the box when a file row comes in over it", real, async () => {
+    await reply("over a file");
+    const gap = () =>
+        inPage<number>(`(() => {
+            const box = document.querySelector('${BOX}').getBoundingClientRect();
+            const drawing = document.querySelector('.quote-box-drawing').getBoundingClientRect();
+            return Math.round(Math.abs(drawing.top - box.top));
+        })()`);
+
+    assert.ok((await gap()) <= 1);
+    // A file attached: its row comes in over the text, which moves down without changing size.
+    await page.evaluate(`const input = document.querySelector('.composer input[type=file]');
+        const data = new DataTransfer();
+        data.items.add(new File(['hello'], 'note.txt', { type: 'text/plain' }));
+        input.files = data.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));`);
+    await see(`document.querySelector('.composer .files') !== null`, "the file row");
+    await until(async () => (await gap()) <= 1, "the drawing moved with the box");
+    await page.evaluate(`document.querySelector('.composer .files button')?.click()`);
+});
+
+test("Replies while a send is on its way all come in after it, in order", real, async () => {
+    await page.evaluate(`const store = ${STORE};
+        store.store.set({ replyQuotes: [{ text: 'first waiting' }, { text: 'second waiting' }] });`);
+    await see(
+        `document.querySelector('${BOX}').value === '> first waiting\\n\\n> second waiting\\n\\n'`,
+        "both quotes",
+    );
+    assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 2);
+});
+
+test("a paste inside a quote, short or long, goes under it", real, async () => {
+    await reply("one");
+    await page.type(undefined, "mine", { append: true });
+
+    // The real clipboard and Ctrl+V: what a person does, with its paste and beforeinput events.
+    const paste = async (value: string) => {
+        await page.evaluate(`await navigator.clipboard.writeText(${JSON.stringify(value)})`);
+        await caretAt(3);
+        await page.press("Control+v");
+    };
+
+    await paste("short");
+    assert.equal(await boxText(), "> one\n\nshortmine");
+    await paste("x".repeat(2100));
+    assert.equal(await boxText(), "> one\n\n[Pasted text #1 · 2100 characters]shortmine");
+    assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 1);
+});
+
+test("typing moved under a quote can be undone", real, async () => {
+    await reply("one");
+    await page.type(undefined, "yes", { append: true });
+    await caretAt(3);
+    await page.type(undefined, "x", { append: true });
+    assert.equal(await boxText(), "> one\n\nxyes");
+    await page.press("Control+z");
+    assert.equal(await boxText(), "> one\n\nyes");
+});
+
+test("a quote typed with the same words as Reply's stays plain text", real, async () => {
+    await reply("same");
+    await page.type(undefined, "> same", { append: true });
+    assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 1);
+    await page.click({ selector: ".quote-count .link" });
+    assert.equal(await boxText(), "> same");
+});
+
+test("Appearance picks each look for the quotes in the box", real, async () => {
+    await reply("styled");
+    await page.evaluate(`(await import('/store.js')).openSheet({ type: 'appearance' })`);
+
+    for (const [label, style] of [
+        ["Tint", "tint"],
+        ["Ghost", "ghost"],
+        ["Fade", "fade"],
+    ] as const) {
+        await page.click({ label });
+        await see(`document.querySelector('.composer').dataset.quoteStyle === '${style}'`, style);
+    }
+
+    await page.click({ label: "Separate" });
+    await see(`document.querySelector('.composer').dataset.quoteStyle === undefined`, "separate");
+    await page.press("Escape");
 });
